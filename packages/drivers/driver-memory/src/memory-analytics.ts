@@ -262,9 +262,18 @@ const CUBE_OPERATOR_TO_MONGO_PREDICATE: Readonly<Record<CubeOperator, MongoPredi
   // negation has to wrap a pattern, which is exactly what the live query path
   // builds for `$notContains` (`memory-driver.ts` `normalizeFieldOperators`).
   notContains: ({ raw, substring }) => ({ $not: { $regex: substring(raw[0]) } }),
-  // A presence flag, not a comparand. The `raw.length === 0` arm keeps the old
-  // call site's reading of a valueless `set` ("does it exist" → true).
-  set: ({ raw }) => ({ $exists: raw.length > 0 ? Boolean(raw[0]) : true }),
+  // [#13195] A presence flag, not a comparand — and "present" means HAS A
+  // VALUE (`!= null`), never key presence: #5298 leg 3 / #5369, landed in PR
+  // #5962, ruled onto this face 2026-08-30. It used to emit `{$exists: <bool>}`
+  // and hand it to mingo, which reads key presence, so this exit EXECUTED the
+  // key-presence answer while {@link CUBE_OPERATOR_TO_SQL_PREDICATE} ECHOED
+  // `IS NOT NULL` beside it — the rows a chart was drawn from and the statement
+  // shown next to it answered the same query differently. The two now agree,
+  // and the residue that disagreement left in
+  // `memory-analytics-echo-operator-coverage.test.ts` is gone rather than
+  // documented. The `raw.length === 0` arm keeps the old call site's reading of
+  // a valueless `set` ("does it exist" → true).
+  set: ({ raw }) => ((raw.length === 0 || Boolean(raw[0])) ? { $ne: null } : { $eq: null }),
 });
 
 /**
@@ -381,18 +390,29 @@ function globSubstringPattern(value: unknown): string {
  * the new operator's SQL spelling. The totality is proven rather than defended,
  * so no future operator can silently render as an equality nobody wrote.
  *
- * # The one cell where SQL cannot say what mingo says
+ * # The `set` cell — once the one place SQL could not say what mingo said
  *
  * `set` renders `IS NOT NULL` / `IS NULL` — the spelling this repo's other two
  * SQL lowerings already use (`read-scope-sql.ts`'s `$exists` arm, `driver-sql`'s
- * "a present field is a non-null column in SQL"). It is not an exact
- * translation, and cannot be: mingo's `$exists` tests KEY PRESENCE, which a
- * relational column always has. A row storing an explicit `null` therefore
- * satisfies `$exists: true` on `query()` and fails `IS NOT NULL` in the echo.
- * That residue is inherent to describing a document store in SQL, it is pinned
- * as an explicit inequality in `memory-analytics-echo-operator-coverage.test.ts`
- * so it cannot be "fixed" in silence, and it is a far smaller gap than the
- * `name = 1` it replaces — which matched nothing at all.
+ * "a present field is a non-null column in SQL"). This row is UNCHANGED, and it
+ * is worth saying why it is now an exact translation rather than a documented
+ * residue.
+ *
+ * It used to be inexact in one direction only: the mingo twin emitted
+ * `{$exists: <bool>}`, mingo reads that as KEY PRESENCE, and a relational
+ * column always has a key — so a row storing an explicit `null` satisfied
+ * `$exists: true` on `query()` and failed `IS NOT NULL` in the echo. The chart
+ * and the statement drawn beside it answered the same query differently, and
+ * the gap was pinned as an explicit INEQUALITY in
+ * `memory-analytics-echo-operator-coverage.test.ts` so it could not be closed
+ * in silence.
+ *
+ * [#13195] It was not closed in silence: the maintainer ruled on 2026-08-30
+ * that `$exists` means HAS A VALUE (`!= null`) on every exit — #5298 leg 3 /
+ * #5369, shipped in PR #5962 and until then still unmet here — so the mingo
+ * twin now emits `{$ne: null}` / `{$eq: null}`. SQL's `IS NOT NULL` was already
+ * the ruled answer; it is the OTHER exit that moved to meet it. The inequality
+ * pin is now an equality, and this face no longer contradicts itself.
  */
 const CUBE_OPERATOR_TO_SQL_PREDICATE: Readonly<Record<CubeOperator, SqlPredicateBuilder>> = Object.freeze({
   // [#5373] A null comparand is a NULLNESS test, not a comparison. SQL's
@@ -655,6 +675,11 @@ export class MemoryAnalyticsService implements IAnalyticsService {
     const normalizedFilters = this.normalizeFilters(query);
     if (normalizedFilters.length > 0) {
       const matchStage: Record<string, any> = {};
+      /**
+       * [#13524] Predicates for a member that already has one — see the
+       * promotion below the loop for why they cannot be assigned.
+       */
+      const contested: Record<string, any>[] = [];
       for (const filter of normalizedFilters) {
         const fieldPath = this.resolveFieldPath(cube, filter.member);
         // [#5374] The operator decides the WHOLE predicate, not just its name —
@@ -667,7 +692,7 @@ export class MemoryAnalyticsService implements IAnalyticsService {
         // FROM: a boolean reaches mingo as a boolean and `null` as `null`, so a
         // predicate over `is_active` or `closed_at` selects the same rows
         // `find()` selects instead of none / all of them.
-        matchStage[fieldPath] = this.mongoPredicateBuilder(filter.operator)({
+        const predicate = this.mongoPredicateBuilder(filter.operator)({
           comparands: this.comparandsFor(cube, filter.member, filter.values),
           raw: filter.values,
           substring: (value) => this.driver.filterSubstringPattern(value),
@@ -675,7 +700,33 @@ export class MemoryAnalyticsService implements IAnalyticsService {
           // than from the driver's Unicode-folding `filterSubstringPattern`.
           asciiSubstring: (value) => new RegExp(asciiCaseInsensitiveRegexSource(String(value))),
         });
+        // [#13524] This was `matchStage[fieldPath] = …`, and the assignment was
+        // a WHOLESALE clobber — the widest member of this card's class. The two
+        // document-shaped translators lose a constraint only when two operators
+        // happen to lower onto the SAME key; here the stage is keyed by field
+        // path alone, so the second predicate on a member replaced the first
+        // ENTIRELY, for every operator pair. And `flattenFilterCondition` folds
+        // `$and` into this same flat list, so `{$and: [{name: {$contains:'a'}},
+        // {name: {$ne:'b'}}]}` — two separate nodes, not one operator map —
+        // lost a constraint too. Measured on a three-row fixture:
+        // `{name: {$contains:'a', $ne:'b'}}` aggregated ['1','3'] and its
+        // key-swapped twin ['1'], while the reference matcher said ['1'].
+        //
+        // Same rule as the translators: free member merges inline, a taken one
+        // becomes its own `$and` branch of the SAME `$match`, where both
+        // predicates survive. No ranking is needed here — unlike a contested
+        // operator key, nothing is overwritten, so which predicate sits inline
+        // changes the document's shape but never its answer.
+        if (Object.prototype.hasOwnProperty.call(matchStage, fieldPath)) {
+          contested.push({ [fieldPath]: predicate });
+        } else {
+          matchStage[fieldPath] = predicate;
+        }
       }
+      // A field path can never BE `$and` — `resolveFieldPath` resolves cube
+      // members, and `flattenFilterCondition` refuses `$or` / `$not` and folds
+      // `$and` away before this runs — so this cannot collide with a member.
+      if (contested.length > 0) matchStage.$and = contested;
       if (Object.keys(matchStage).length > 0) {
         pipeline.push({ $match: matchStage });
       }

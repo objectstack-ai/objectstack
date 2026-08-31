@@ -56,7 +56,12 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
+import {
+    ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_STATUS,
+    // [#13279] §8 drives the real loud failure rather than a stand-in, so the
+    // propagation it observes is the one production raises.
+    AuthzStoreUnavailableError, AUTHZ_STORE_UNAVAILABLE_STATUS,
+} from '@objectstack/core';
 import { RestServer } from './rest-server.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -71,11 +76,36 @@ type Handler = (req: any, res: any) => any;
 
 /**
  * Every `this.resolveExecCtx(environmentId, req)` invocation, with the line it
- * sits on and whether it carries its OWN `.catch(() => undefined)`.
+ * sits on and whether it carries its OWN `.catch(…)`.
+ *
+ * [#13279] The catch ARGUMENT changed: a caught site passes
+ * `rethrowAuthzStoreUnavailable` instead of `() => undefined`, so a
+ * permission-store outage is re-raised rather than degraded into a refusal.
+ * The detection below keys on `.catch(` and is deliberately spelling-agnostic,
+ * so this census still measures WHICH sites are caught, which is its subject.
  *
  * ⚠️ The catch may sit on the CONTINUATION line — four of them do. A
  * single-line grep counts 16 and misses those four, which is how the thread's
  * "16 caught / 52 bare" split came to name two numbers that do not add to 72.
+ *
+ * ⛔ THAT WARNING CAUGHT ITS OWN AUTHOR, AND THE RECORD SAYS SO. The first
+ * revision of this block claimed "**every** site now passes
+ * `rethrowAuthzStoreUnavailable`". It was FALSE when written: the conversion
+ * had reached the 16 single-line sites and none of the four continuation ones
+ * (their `.catch` lines were 2747, 4388, 5226, 6759 at that revision; §7 and §8
+ * derive the numbers rather than quoting them) — the exact miss the paragraph
+ * above describes, committed by the person who had just written it down.
+ * Contract review found it. The sentence is now QUANTIFIED and, more to the
+ * point, ENFORCED: §7 below re-derives the argument at every site from source
+ * and fails on any `() => undefined` survivor, so this is a measurement rather
+ * than a claim a reader has to trust.
+ *
+ * ⚠️ Reach of the sibling ledger, so nobody reads its green as covering this:
+ * `authz-store-unavailable.test.ts`'s per-transport check is PRESENCE-based —
+ * it asks whether the file CONTAINS `isAuthzStoreUnavailableError` or
+ * `rethrowAuthzStoreUnavailable` at all. One converted site satisfies it for
+ * the whole file, so it cannot see a PARTIAL conversion and no pin there failed
+ * while those four sites stood. §7 is what closes that gap for this file.
  */
 function siteTable(): { line: number; caught: boolean; nextLine: string }[] {
     const lines = SOURCE.split('\n');
@@ -499,9 +529,183 @@ describe('[#13160] §6 the boundary of this census', () => {
         // `package-door-execctx-fault-reading.test.ts` (PR #13153) —
         // fail-CLOSED, two ablation legs, both rival readings falsified.
         // ⛔ Recorded as DEFERRED to that file, never as "assumed closed".
+        // [#13279] The catch argument is now `rethrowAuthzStoreUnavailable`
+        // (was `() => undefined`): a permission-store OUTAGE must reach the
+        // door as the 503 it is instead of being laundered into a 401/403.
+        // This grep tracks the wrapper's CURRENT spelling — the site is still
+        // deferred to its own file, which is what §6 asserts.
         const wrapper = SOURCE.split('\n').findIndex((l) =>
-            l.includes('return this.resolveExecCtx(environmentId, req).catch(() => undefined);'));
+            l.includes('return this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);'));
         expect(wrapper).toBeGreaterThan(0);
         expect(SITES.some((s) => s.line === wrapper + 1)).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// 7. ⭐ The catch ARGUMENT at every site — the half a presence check cannot see
+//
+//    Added after contract review found this file asserting, in prose, that
+//    "every site now passes `rethrowAuthzStoreUnavailable`" while four sites
+//    still passed `() => undefined`. Prose cannot rot loudly; this can.
+//
+//    Why the sibling ledger did not catch it: that check is PRESENCE-based
+//    (does the file mention the guard at all), so one converted site satisfies
+//    it for the whole file. A partial conversion is exactly what it cannot see,
+//    and a partial conversion on this surface means a live door still launders
+//    a store OUTAGE into an org-unscoped 200.
+// ---------------------------------------------------------------------------
+
+/** The catch argument at each caught site, read from source, both layouts. */
+function catchArguments(): { line: number; arg: string; layout: 'inline' | 'continuation' }[] {
+    const lines = SOURCE.split('\n');
+    const out: { line: number; arg: string; layout: 'inline' | 'continuation' }[] = [];
+    lines.forEach((text, i) => {
+        if (!text.includes('this.resolveExecCtx(environmentId, req)')) return;
+        const inline = /\.catch\(([^)]*(?:\)[^)]*)*)\);?\s*$/.exec(text);
+        if (text.includes('.catch(') && inline) {
+            out.push({ line: i + 1, arg: inline[1].trim(), layout: 'inline' });
+            return;
+        }
+        const next = (lines[i + 1] ?? '').trim();
+        const cont = /^\.catch\((.*)\);$/.exec(next);
+        if (cont) out.push({ line: i + 1, arg: cont[1].trim(), layout: 'continuation' });
+    });
+    return out;
+}
+
+describe('[#13279] §7 every caught resolveExecCtx site re-raises the outage', () => {
+    it('CONTROL: the reader finds sites in BOTH layouts, so neither can pass vacuously', () => {
+        // Without this, a regex that silently stopped matching the continuation
+        // form would report "0 survivors" and read exactly like a clean pass —
+        // which is the precise failure that let the four sites through.
+        const args = catchArguments();
+        expect(args.filter((a) => a.layout === 'inline').length).toBeGreaterThanOrEqual(16);
+        expect(args.filter((a) => a.layout === 'continuation').length).toBeGreaterThanOrEqual(4);
+        expect(args.length).toBe(CAUGHT.length);
+    });
+
+    it('⭐ NO caught site swallows with `() => undefined`', () => {
+        const swallowers = catchArguments().filter((a) => /=>\s*undefined/.test(a.arg));
+        // Named, so a failure says WHICH door is still laundering an outage.
+        expect(swallowers.map((s) => `${s.line} (${s.layout})`)).toEqual([]);
+    });
+
+    it('⭐ every caught site passes the shared guard, not a local re-spelling', () => {
+        // A local `(e) => { if (e?.status === 503) throw e; }` would satisfy the
+        // test above and still be a second, driftable copy of the predicate.
+        for (const a of catchArguments()) {
+            expect({ line: a.line, arg: a.arg }).toEqual({ line: a.line, arg: 'rethrowAuthzStoreUnavailable' });
+        }
+    });
+});
+
+// ---------------------------------------------------------------------------
+// 8. ⭐ BEHAVIOURAL: the four continuation-layout doors PROPAGATE the outage
+//
+//    §7 proves the source says `rethrowAuthzStoreUnavailable` at every site.
+//    That is a claim about text. This section drives the doors and observes
+//    what they ANSWER when the resolver rejects with the real error, because
+//    the defect these four carried was not a spelling: during a store outage
+//    they swallowed the loud failure and served an org-unscoped, env-wide
+//    `200` — a fabricated success, not a refusal.
+//
+//    ⚠️ The site lines are DERIVED from §7, never transcribed. This file's own
+//    history is that hardcoded line numbers in it went stale and hid four
+//    sites; a literal here would be the same mistake in the test that exists
+//    to catch it.
+//
+//    ⛔ REACH OF THIS SECTION, measured by ablation rather than assumed — read
+//    it before trusting §8 as the tripwire for a single site. Reverting ONE of
+//    the four sites to `() => undefined` turns §7 red and leaves §8 GREEN. That
+//    is not a gap in the assertion, it is the shape of the handlers: the
+//    `${metaPath}/:type` handler registered at line 4332 runs to 4794 and
+//    resolves the context THREE times (the continuation site, then two guarded
+//    single-line sites), so under the TOTAL outage this section drives, a later
+//    site still throws and the door still refuses. §8 therefore pins what a
+//    door ANSWERS; §7 pins what each SITE spells. Only §7 fails on one reverted
+//    site, and that is the division of labour to keep.
+//
+//    ⚠️ Which also names what neither section covers: a PARTIAL outage, where
+//    only the first read fails. There the swallow returns `undefined`, the
+//    handler proceeds with no `organizationId`, and the door answers the
+//    org-unscoped env-wide 200 that the conversion exists to prevent. Driving
+//    that needs a per-read fault injector rather than a rejecting resolver;
+//    it is NOT MEASURED here, and is stated so rather than implied away.
+// ---------------------------------------------------------------------------
+
+/** As `instrument`, but the resolver REJECTS — the production outage shape. */
+function instrumentRejecting(err: unknown) {
+    const proto: any = (RestServer as any).prototype;
+    const original = proto.resolveExecCtx;
+    const hits = new Map<string, Set<number>>();
+    const state = { route: '' };
+    proto.resolveExecCtx = async function () {
+        const m = (new Error().stack ?? '').match(/rest-server\.ts:(\d+):\d+/);
+        if (m) {
+            if (!hits.has(state.route)) hits.set(state.route, new Set());
+            hits.get(state.route)!.add(Number(m[1]));
+        }
+        throw err;
+    };
+    return { hits, state, restore: () => { proto.resolveExecCtx = original; } };
+}
+
+async function sweepRejecting(err: unknown, mount: 'FULL' | 'ISOLATED'): Promise<Row[]> {
+    const probe = instrumentRejecting(err);
+    const { rs, table } = makeServer(metaProtocol(OBJECT_DOC));
+    if (mount === 'FULL') rs.registerRoutes(); else rs.registerMetadataEndpointsInner(BASE);
+    const rows: Row[] = [];
+    for (const [key, handler] of table) {
+        probe.state.route = key;
+        const [method, pattern] = key.split(' ');
+        const observed = await call(handler, method, pattern, paramsFor(pattern, 'object', OBJECT_DOC.name));
+        rows.push({ route: key, sites: [...(probe.hits.get(key) ?? [])].sort((a, b) => a - b), ...observed });
+    }
+    probe.restore();
+    return rows;
+}
+
+describe('[#13279] §8 an outage at the four continuation sites is not served as success', () => {
+    const CONTINUATION = catchArguments().filter((a) => a.layout === 'continuation').map((a) => a.line);
+
+    // ISOLATED, and the reason is measured rather than stylistic: under the FULL
+    // mount `registerMetadataEndpoints`'s umbrella guard resolves the context
+    // FIRST and refuses there, so the handler never reaches these four sites and
+    // a sweep observes nothing about them. Isolating the floor is the same move
+    // §6 documents — a counterfactual that reads a site on its OWN behaviour,
+    // never a production posture.
+    const MOUNT = 'ISOLATED' as const;
+
+    it('CONTROL: the four sites are REACHED by real routes, and 200 is their HEALTHY answer', async () => {
+        // Two things at once, and both are needed. Without the reachability half,
+        // "no 200 during an outage" is satisfied by a door that never runs.
+        // Without the 200 half, it is satisfied by a door that never returned 200
+        // in the first place — and the defect being pinned is precisely that
+        // these doors served an org-unscoped 200 while the store was down.
+        expect(CONTINUATION.length).toBeGreaterThanOrEqual(4);
+        const healthy = await sweep(ENTITLED, MOUNT);
+        const touched = healthy.filter((r) => r.sites.some((line) => CONTINUATION.includes(line)));
+        expect(touched.length).toBeGreaterThan(0);
+        expect(touched.filter((r) => r.status === 200).length).toBeGreaterThan(0);
+    });
+
+    it('⭐ no route that touches a continuation site fabricates a 200 during an outage', async () => {
+        const rows = await sweepRejecting(new AuthzStoreUnavailableError('sys_user_permission_set'), MOUNT);
+        const touched = rows.filter((r) => r.sites.some((line) => CONTINUATION.includes(line)));
+        expect(touched.length).toBeGreaterThan(0);
+        // Named, so a regression says WHICH door started inventing an answer.
+        expect(touched.filter((r) => r.status === 200).map((r) => r.route)).toEqual([]);
+    });
+
+    it('⭐ the outage keeps its declared 503 rather than turning into a refusal', async () => {
+        const rows = await sweepRejecting(new AuthzStoreUnavailableError('sys_user_permission_set'), MOUNT);
+        const touched = rows.filter((r) => r.sites.some((line) => CONTINUATION.includes(line)));
+        for (const r of touched) {
+            // Either the declared 503 reached the caller, or it propagated out of
+            // the handler for `handleRouteError` to render. Never a 401/403 —
+            // that disguise is the whole defect the ruling removed.
+            const ok = r.threw !== undefined || r.status === AUTHZ_STORE_UNAVAILABLE_STATUS;
+            expect({ route: r.route, status: r.status, ok }).toEqual({ route: r.route, status: r.status, ok: true });
+        }
     });
 });

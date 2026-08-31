@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { resolveAuthzContext } from '@objectstack/core';
+import { resolveAuthzContext, isAuthzStoreUnavailableError } from '@objectstack/core';
 import type { IHttpServer, IDataEngine, IHttpRequest } from '@objectstack/spec/contracts';
 import type { SettingsContext } from './settings-service.types.js';
 import type { SettingsManifest } from '@objectstack/spec/system';
@@ -285,7 +285,11 @@ export class SettingsServicePlugin implements Plugin {
             permissions: [...(authz.systemPermissions ?? []), ...(authz.permissions ?? [])],
             enforced: true,
           };
-        } catch {
+        } catch (err) {
+          // [#13279] An unreachable permission store is an outage, not a
+          // caller with no permissions — re-raise it rather than returning an
+          // enforced-but-empty context the routes read as a denial.
+          if (isAuthzStoreUnavailableError(err)) throw err;
           return { enforced: true }; // fail closed
         }
       };

@@ -9,10 +9,25 @@
  *   node scripts/pm/dispatch-gates.mjs <path> [<path> ...]   # e.g. packages/spec/src/data/filter.zod.ts
  *   node scripts/pm/dispatch-gates.mjs --residue <path> ...  # + name every family the derivation did not place
  *   node scripts/pm/dispatch-gates.mjs --tier <path> ...     # the tier verdict alone, for the claim comment
+ *   node scripts/pm/dispatch-gates.mjs --commands <path> ... # MACHINE-READABLE: one runnable command per line on stdout, nothing else
+ *   node scripts/pm/dispatch-gates.mjs --json <path> ...     # MACHINE-READABLE: the whole derivation as one JSON document
  *   node scripts/pm/dispatch-gates.mjs                       # NO paths: derive them from git, off the merge base
  *   node scripts/pm/dispatch-gates.mjs --changed             # the same, said out loud
  *   node scripts/pm/dispatch-gates.mjs --repo <owner>/<name> ...  # refuse unless this checkout IS that repo
  *   node scripts/pm/dispatch-gates.mjs --self-test
+ *
+ * ## Harvest the machine-readable modes, never this prose (#13462)
+ *
+ * The matched block renders in TWO spellings — `pnpm check:NAME` and
+ * `node scripts/check-NAME.mjs` — because lint.yml invokes many gates directly
+ * (its GATE INVOCATION IDIOM, which is deliberate, justified, and NOT the
+ * defect). A consumer that greps ONE spelling out of the printed block takes a
+ * third of the list and is told nothing: measured, 8 of 12 on one real card,
+ * with every command in the short list passing. `--commands` and `--json` exist
+ * so no consumer has to pattern-match this prose at all, and the human footer
+ * prints the spelling split so an un-migrated harvest is visibly short against
+ * this tool's own count. See `spellingSplit` for the measurement, and for why
+ * the COUNT alone would have signed off on the wrong list.
  *
  * ## This tool answers about the tree it RUNS IN, and says so on every run
  *
@@ -110,6 +125,42 @@
  *     because it counts a population it computes for itself and so names no
  *     path literal to match. Those are derived from the change's KIND instead
  *     and printed under their own heading — see CHANGE_KIND_GATES.
+ *
+ * ## What no verdict above can reach: the always-runs tail (#13333)
+ *
+ * All five verdicts partition the families this file DISCOVERS. A gate CI runs
+ * that discovery never sees is in none of them — not silent, not undetermined,
+ * not even unreachable — because a family that is never discovered has no entry
+ * to fall into. `runCommandTexts`' header calls that the one output shape this
+ * contract forbids, and it shipped again: a dev derived 29 families, ran all 29
+ * green, and reddened `Lint & Repo Gates` on
+ * `packages/lint/scripts/check-reference-carrier-shape.mjs` — invoked by path
+ * from a package, so keyed by neither the root `check:*` namespace nor the
+ * `scripts/`-rooted path matcher.
+ *
+ * ⛔ The instance fix is REFUSED. #12205, #12850 and #13126 each widened a
+ * matcher for one such gate and closed; the same red shipped again under a
+ * different gate name each time, and #12956 and #13392 are open on it now.
+ * Triage ruled it a class on 2026-08-30. So the tail does not extend discovery
+ * at all — it reads what CI runs and reports what discovery did not reach, so a
+ * gate added tomorrow in any spelling appears with nothing to update here.
+ *
+ * Measured at the time of writing: 189 unconditional steps across the
+ * pull-request workflows CI cannot narrow by path, 162 of them accounted for by
+ * a discovered family and 27 not — and the 27 are invisible for at least three
+ * unrelated reasons (a package-local path, a non-`node` interpreter, a root
+ * script that is not named `check:*`), which is why no widening of the three
+ * matchers was going to be the last one. See `alwaysRunSteps` for what the tail
+ * excludes and why each exclusion is the safe direction, and for why this is
+ * the COMPLEMENT of the "22 leads is the same as none" set rather than a slice
+ * of it.
+ *
+ * ⚠️ It answers ONE branch of that class. The tail says nothing about a
+ * derivation that runs on a stale tree (#13392), that prints fabricated leads
+ * (#13312, #13449), or that is truncated downstream of this file (#13462) — and
+ * a gate whose population is unreachable for the #13126 reason is discovered
+ * here, so the tail does not name it either. ⛔ Do not read a green tail as the
+ * class being closed.
  *
  * ## Why CI's own trigger is read, and what it does NOT answer (#9171)
  *
@@ -994,6 +1045,234 @@ export function extractCheckInvocations(workflowText, workflowFile) {
     }
   }
   return out;
+}
+// ── The "always runs" tail: the steps CI runs whatever your diff is (#13333) ─
+//
+// Everything above discovers CHECK FAMILIES. The four functions below answer
+// the complementary question, and it is the one a dev following the dispatch
+// brief has no way to ask: which steps does CI run on EVERY pull request that
+// this derivation names no family for at all?
+
+/**
+ * Does this workflow declare a `pull_request:` trigger?
+ *
+ * `extractTriggerPaths` returns `[]` for two different workflows — one with a
+ * `pull_request:` trigger and no `paths:` filter, and one with no
+ * `pull_request:` trigger at all — and the always-runs derivation must not
+ * confuse them: the first runs on every PR, the second runs on none. The walk
+ * is the same narrow one, kept beside it so the pair cannot drift.
+ */
+export function declaresPullRequestTrigger(workflowText) {
+  let inOn = false;
+  for (const line of workflowText.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    const indent = /^[ \t]*/.exec(line)[0].length;
+    if (indent === 0) {
+      inOn = /^(?:on|'on'|"on"|true):\s*$/.test(trimmed);
+      continue;
+    }
+    if (inOn && /^pull_request:\s*$/.test(trimmed)) return true;
+  }
+  return false;
+}
+
+/**
+ * A job's steps, each as `{ name, if: <text|null>, text }`, with the original
+ * indentation kept so every extractor above reads a step exactly as it reads a
+ * whole file — the same property `extractJobBlocks` relies on one level up.
+ *
+ * ## Why the step is the unit, when everything else here counts families
+ *
+ * A family is what a dev RUNS; a step is what CI runs. Those are the same thing
+ * only while every step invokes a discoverable family, and the measurement in
+ * `alwaysRunSteps` below is that they are not. Counting families can therefore
+ * never surface a step that contributes none — the step simply is not in the
+ * universe the three verdicts partition, which is the one output shape this
+ * file's header forbids.
+ *
+ * ## The two boundaries, and the direction each fails in
+ *
+ * The steps list is located by its own `steps:` key and the step boundaries are
+ * the SHALLOWEST dash lines inside it, so nothing outside that list can be read
+ * as a step. A block-scalar body cannot be mistaken for one either: a body is
+ * indented deeper than its `run:` key, which is itself deeper than the dash, so
+ * a `- item` line inside a shell heredoc or a `printf` sits below the dash
+ * indent by construction rather than by luck.
+ *
+ * `if:` is read only at the step's own key column. Read anywhere in the step
+ * text it would pick up the condition on a nested `with:` value and mark an
+ * unconditional step conditional; read at the key column it cannot, because a
+ * `run:` body is always deeper than the column its key sits on. A step whose
+ * `if:` this cannot parse is treated as CONDITIONAL — the safe direction here
+ * is the opposite of the one `extractJobBlocks` takes for jobs, because the
+ * output is a claim that CI runs the step NO MATTER WHAT. A missed step costs a
+ * lead; a step wrongly promised as unconditional is a fabricated one.
+ */
+export function extractStepBlocks(jobText) {
+  const lines = jobText.split('\n');
+  let stepsIndent = -1;
+  let regionStart = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    if (/^steps:\s*$/.test(trimmed)) {
+      stepsIndent = /^[ \t]*/.exec(lines[i])[0].length;
+      regionStart = i + 1;
+      break;
+    }
+  }
+  if (regionStart === -1) return [];
+  let regionEnd = lines.length;
+  for (let i = regionStart; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    if (/^[ \t]*/.exec(lines[i])[0].length <= stepsIndent) {
+      regionEnd = i;
+      break;
+    }
+  }
+  let dashIndent = -1;
+  for (let i = regionStart; i < regionEnd; i++) {
+    const m = /^([ \t]*)-[ \t]+\S/.exec(lines[i]);
+    if (!m) continue;
+    if (dashIndent === -1 || m[1].length < dashIndent) dashIndent = m[1].length;
+  }
+  if (dashIndent === -1) return [];
+  const starts = [];
+  for (let i = regionStart; i < regionEnd; i++) {
+    const m = /^([ \t]*)(-[ \t]+)\S/.exec(lines[i]);
+    if (m && m[1].length === dashIndent) starts.push({ line: i, keyColumn: m[1].length + m[2].length });
+  }
+  return starts.map((s, k) => {
+    const to = k + 1 < starts.length ? starts[k + 1].line : regionEnd;
+    const text = lines.slice(s.line, to).join('\n');
+    let name = null;
+    let cond = null;
+    for (let i = s.line; i < to; i++) {
+      const m = /^([ \t]*)(?:-[ \t]+)?([A-Za-z_][\w-]*):[ \t]*(.*)$/.exec(lines[i]);
+      if (!m) continue;
+      const column = i === s.line ? s.keyColumn : m[1].length;
+      if (column !== s.keyColumn) continue;
+      if (m[2] === 'name' && name === null) name = unquoteScalar(m[3]);
+      if (m[2] === 'if' && cond === null) cond = m[3].trim() === '' ? '(block scalar)' : m[3].trim();
+    }
+    return { name: name ?? '(unnamed step)', if: cond, text };
+  });
+}
+
+/**
+ * Every step CI runs on EVERY pull request that the family derivation above
+ * names nothing for — the "always runs" tail.
+ *
+ * Input is the same `[{ file, text }]` the discovery reads, so the tail and the
+ * families come from ONE read of each workflow and cannot describe different
+ * revisions of it.
+ *
+ * ## The measured failure (#13333, and four closed instances before it)
+ *
+ * A dev followed the standing instruction exactly — derive the family with this
+ * tool rather than from a recalled list — got 29 families, ran all 29 green,
+ * and shipped a red on `Lint & Repo Gates`. The gate was
+ * `packages/lint/scripts/check-reference-carrier-shape.mjs`, invoked by path in
+ * an unconditional step. It is not in the residue's `silent` bucket and not in
+ * `undetermined`: it is in NO bucket, because the three matchers in
+ * `extractCheckInvocations` key discovery on a root `check:*` script name or a
+ * `scripts/`-rooted path, and this gate is neither. A family that is never
+ * discovered has no entry to fall into — the shape `runCommandTexts`' header
+ * calls the one output this contract forbids.
+ *
+ * ⛔ The fix REFUSED here is adding that gate, or its shape, to the discovery
+ * matchers. #12205 (`check:exported-any-returns`), #12850
+ * (`check:dispatcher-error-vocabulary`) and #13126 (228 unreached (family,
+ * module) pairs) were each closed that way, and the same red shipped again
+ * under a different gate name each time; #12956 and #13392 are open on the same
+ * mechanism. Triage ruled it a class, not an instance, on 2026-08-30. So the
+ * answer is not a wider matcher — it is to stop deriving the answer from the
+ * matchers alone and read what CI actually runs.
+ *
+ * ## Why this is NOT "22 leads is the same as none"
+ *
+ * The header refuses naming every unfiltered family for every card, and that
+ * refusal stands: on this tree 166 of the 187 discovered families sit outside
+ * both path declarations CI obeys, and printing 166 leads per card would say
+ * nothing. This is the COMPLEMENT of that set, not a slice of it. A step leaves
+ * this list the moment the derivation names any family for it, so the list is
+ * bounded by the derivation's own blind spot and shrinks as discovery improves
+ * — it cannot grow toward the farm. Measured on this tree at the time of
+ * writing: 189 unconditional steps across the unfiltered pull-request
+ * workflows, 162 of them accounted for by a discovered family, 27 not.
+ *
+ * It also carries NO per-card claim and must not be read as one. Every row is
+ * identical for every card, which is the honest shape: these steps run whatever
+ * the diff is, so a per-card verdict on them would be the lie.
+ *
+ * ## What is excluded, and why each exclusion is the safe direction
+ *
+ *   - a workflow with an `on.pull_request.paths` filter: CI can narrow it, so
+ *     its steps are not unconditional and the path derivation above already
+ *     answers for them;
+ *   - a workflow with no `pull_request:` trigger at all: it runs on no PR;
+ *   - a job carrying any `if:`, and a step carrying any `if:`: the claim being
+ *     made is "CI runs this no matter what", and a condition this walk did not
+ *     evaluate could falsify it. Both counts are RETURNED rather than dropped —
+ *     an exclusion nobody can size is one nobody can weigh, the same reason the
+ *     unfiltered-workflow count is printed rather than left as an absence.
+ *
+ * ⛔ Steps are NOT classified into "gate" and "setup". `pnpm install` and
+ * `pnpm lint` are both in this tail on this tree, and only one of them is a
+ * verification — but every rule that separates them is a guess about a step's
+ * intent, and a guess in this position fabricates. What every row DOES share is
+ * exactly what is claimed for it: CI runs it on every PR and this derivation
+ * names no family for it. The reader judges the rest, which is the same
+ * contract `unreachableLines` states for its own listing.
+ */
+export function alwaysRunSteps(entries) {
+  const rows = [];
+  const counts = {
+    unconditional: 0,
+    accounted: 0,
+    unaccounted: 0,
+    conditionalSteps: 0,
+    conditionalJobs: 0,
+    filteredWorkflows: 0,
+    nonPullRequestWorkflows: 0,
+  };
+  for (const { file, text } of entries) {
+    if (!declaresPullRequestTrigger(text)) {
+      counts.nonPullRequestWorkflows += 1;
+      continue;
+    }
+    if (extractTriggerPaths(text).length > 0) {
+      counts.filteredWorkflows += 1;
+      continue;
+    }
+    for (const job of extractJobBlocks(text)) {
+      if (job.if) {
+        counts.conditionalJobs += 1;
+        continue;
+      }
+      for (const step of extractStepBlocks(job.text)) {
+        const commands = runCommandTexts(step.text)
+          .flatMap((c) => c.split('\n'))
+          .map((l) => l.trim())
+          .filter((l) => l !== '');
+        if (commands.length === 0) continue;
+        if (step.if) {
+          counts.conditionalSteps += 1;
+          continue;
+        }
+        counts.unconditional += 1;
+        if (extractCheckInvocations(step.text, file).length > 0) {
+          counts.accounted += 1;
+          continue;
+        }
+        rows.push({ workflow: file, job: job.name, step: step.name, commands });
+      }
+    }
+  }
+  counts.unaccounted = rows.length;
+  return { rows, counts };
 }
 
 /**
@@ -2041,6 +2320,129 @@ export function runnableInvocation({ check, filter, direct }) {
   return `pnpm ${check}`;
 }
 
+// ---------------------------------------------------------------------------
+// The seam between this tool and its caller (#13462)
+// ---------------------------------------------------------------------------
+
+/**
+ * The spelling distribution of a rendered block, counted from the text a
+ * harvest actually sees.
+ *
+ * ## The hazard, measured rather than supposed
+ *
+ * The matched block renders in TWO spellings, because lint.yml invokes many
+ * gates directly rather than through an alias. That idiom is deliberate and
+ * correct and is NOT the defect, and discovery is not lossy across the two
+ * either: measured at 57827b617, all 39 direct-form gate scripts in lint.yml
+ * are discovered by this derivation. The loss happens one step DOWNSTREAM of
+ * discovery, in whatever the consumer does with the printed block:
+ *
+ *     node scripts/pm/dispatch-gates.mjs scripts/measure-durability-swallow-family.mjs
+ *     total rows: 12   ·   pnpm-spelled: 8   ·   direct-node-spelled: 4
+ *
+ * A consumer that greps one spelling out of that block takes 8 of the 12 and is
+ * told nothing. The four it drops are real gates, CI runs them anyway, and
+ * every command in the SHORT list passes — so the contributor reports "all
+ * matched families green" in good faith. One third, silently, in the direction
+ * that looks safe. The tool is right and the idiom is right; the seam between
+ * them is where the list gets truncated.
+ *
+ * ## Why the COUNT is not the control, and the SPLIT is
+ *
+ * Measured on that same run: a consumer greping `pnpm check:` over the WHOLE
+ * output rather than over the block gets 12 rows — the right COUNT and the
+ * wrong twelve. It drops all four direct rows and backfills with three families
+ * from the pending-changeset section (which do not apply yet) and one from the
+ * unreachable section (which is dead). A footer printing `12 families` would
+ * have signed that harvest off. The DISTRIBUTION discriminates where the count
+ * cannot: that harvest is 12 pnpm and 0 direct, and the footer says 8 and 4.
+ *
+ * ## Read from the RENDERED command, not from `entry.direct`
+ *
+ * The hazard is about what a consumer greps out of the output, so the footer
+ * has to describe the printed bytes. Reading the flag instead would let the two
+ * disagree the day the renderer grows a third shape — and `other` below counts
+ * that third shape rather than folding it into either side, because the gate
+ * corpus already runs steps under `bash` and `python3`. A footer that hardcoded
+ * "pnpm or node" would answer a question about a spelling it cannot see with a
+ * confident zero, which is this same failure one class up.
+ */
+export function spellingSplit(commands) {
+  const split = { total: 0, pnpm: 0, node: 0, other: 0, otherCommands: [] };
+  for (const command of commands) {
+    split.total += 1;
+    if (/^pnpm\s/.test(command)) split.pnpm += 1;
+    else if (/^node\s/.test(command)) split.node += 1;
+    else {
+      split.other += 1;
+      split.otherCommands.push(command);
+    }
+  }
+  return split;
+}
+
+/**
+ * The transitional harvest, PUBLISHED — and published only as a transition.
+ *
+ * This is the correct harvest of the human block: it takes the WHOLE matched
+ * block and strips only the trailing annotation, so it cannot drop a spelling.
+ * It was already correct and already in use, as ONE agent's private discipline
+ * — stated once in a PR body, enforced by nothing, and written down nowhere
+ * this repo could reach. A rule that lives only in an operator's head protects
+ * only that operator. It is published here so a consumer holding captured text
+ * has the correct form in the tool's OWN output; `--commands` makes it
+ * unnecessary, and `--commands` is the fix.
+ *
+ * It is also strictly weaker than `--commands`, which is the honest reason not
+ * to stop here: it reads the matched block alone, so it drops the
+ * convention-triggered gates printed under their own heading below it.
+ *
+ * Both lines contain spaces, so `extractWatchHints`' admission test rejects
+ * them whole and this file grows no hint from publishing them — the property
+ * DEFAULT_BASE_REF buys by assembly, bought here by the syntax. The self-test
+ * pins that rather than trusting this reading.
+ */
+export const HARVEST_SNIPPET = [
+  "awk '/^Local gates for this card/{f=1;next} /^$/{if(f)exit} f' gates.txt \\",
+  "  | sed -E 's/^  - (.*)   \\[.*$/\\1/'",
+];
+
+/**
+ * The footer, and the blank line above it is load-bearing.
+ *
+ * The published snippet ends the block at the first EMPTY line after it. A
+ * footer appended with no blank line between would be swallowed INTO that
+ * harvest and read as several more "commands" — the remedy breaking the very
+ * transition it exists to cover. `derive` prints the separator, and the
+ * self-test drives the real snippet over the real rendering and pins that it
+ * still yields exactly the matched commands and nothing else.
+ *
+ * Both terms print at zero, always. The control that answers is whether this
+ * footer HARDCODES "there is always a direct form": on a pure-pnpm card it has
+ * to say `0 direct node` rather than fall silent on the term it cannot see.
+ * The ⛔ line, by contrast, is conditional — on a card with no direct row a
+ * one-spelling grep really does lose nothing, and a warning that fires anyway
+ * would be training the reader on a claim this run just measured as false.
+ */
+export function spellingFooterLines(split) {
+  if (split.total === 0) return [];
+  const parts = [`${split.pnpm} pnpm`, `${split.node} direct node`];
+  if (split.other > 0) parts.push(`${split.other} neither (${split.otherCommands.join(', ')})`);
+  const lines = [`${split.total} families — ${parts.join(', ')}.`];
+  if (split.pnpm < split.total) {
+    lines.push(
+      `  ⛔ Two spellings, deliberately (the GATE INVOCATION IDIOM in lint.yml). A harvest that greps 'pnpm check:' out of` +
+        ` the block above takes ${split.pnpm} of the ${split.total} and reports nothing missing.`,
+    );
+  }
+  lines.push(
+    '  ⇒ Harvest with --commands (one runnable command per line, nothing else on stdout) or --json. Neither can drop a spelling.',
+    '  Holding captured text already? This form takes the whole block and strips only the annotation:',
+    ...HARVEST_SNIPPET.map((line) => `      ${line}`),
+  );
+  return lines;
+}
+
 /**
  * Does a watch hint cover an input path? Containment either way, compared on
  * PATH SEGMENT boundaries, with globs collapsed. A hint that names a bare
@@ -2785,9 +3187,36 @@ export function coveringJobFilter(entry, inputPath) {
  * What the refusal COSTS is a live missing lead, and it is named rather than
  * implied: `scripts/pm/bare-root-worklist.mjs --self-test` statically imports
  * THIS file, and a card editing this file derives 14 families without naming
- * it. That gate gets run by hand. The miss costs one CI round, which is the
- * side this file's header errs on everywhere, and it is a far smaller cost than
- * the 118-lead card the general key prints for the module all 118 import.
+ * it. That gate gets run by hand, but lint.yml runs it on every PR too, so the
+ * miss costs one CI round, which is the side this file's header errs on
+ * everywhere, and it is a far smaller cost than the 118-lead card the general
+ * key prints for the module all 118 import.
+ *
+ * WHERE THAT PRICE DOES NOT HOLD (#13467). "One CI round" is the WITNESS's
+ * price and an AVERAGE over the class, and the next reader will quote it as the
+ * price of every missed lead. For a minority it is wrong. Which minority is a
+ * TREE-fact, re-derived and printed by every `--self-test` run instead of
+ * recorded here, because this class has already been measured at three
+ * different sizes on three different days:
+ *
+ *   - the large majority of novel pairs sit in a family at least one UNFILTERED
+ *     workflow runs. CI opens that module on this PR whatever the derivation
+ *     said, so one round really is the whole price; and
+ *   - the rest sit in families NO every-PR workflow runs — today the
+ *     paths-filtered and scheduled callers (the patrols, `validate-deps.yml`,
+ *     and the release-time ones). No CI round on this PR repays those. The
+ *     family next executes on its own cadence, detached from the change.
+ *
+ * That remainder is a LOWER bound for the same two reasons the novel total is
+ * (below), and it is NOT the claim that a load break in those helpers ships
+ * green: every module carrying a deferred pair is imported by every-PR families
+ * as well, so a module that fails to LOAD reddens this PR through a sibling.
+ * What defers is the narrower break, the one only the deferred consumer would
+ * have seen. Nor do the deferred pairs spread thin — they concentrate on the
+ * shared heads this refusal is refused FOR, i.e. the modules most likely to be
+ * edited into a break. Both halves are asserted in `--self-test`; a red there
+ * says the exception changed shape and this paragraph is due a re-read, not
+ * that the derivation broke.
  *
  * Two shapes make 232 a LOWER bound rather than an exact size, both already
  * refused upstream for their own measured reasons: a dynamic `import()` of a
@@ -5159,17 +5588,42 @@ export const CHANGE_KIND_GATES = [
  * `resolveInvocation` returns a runnable command for a gate the live run
  * discovered, or null for one it did not.
  */
-export function changeKindLines(paths, resolveInvocation, kinds = CHANGE_KIND_GATES) {
-  const lines = [];
+/**
+ * The convention-triggered gates a card's KINDS hit, as DATA.
+ *
+ * Split out from the rendering below for the reason the per-hint sweep is
+ * shared with the residue annotations: the human lines and the machine-readable
+ * modes must not be able to disagree about which gates a card owes. A second
+ * traversal of CHANGE_KIND_GATES for `--json` would be a second answer to a
+ * question this file already answers once, and the whole card is about two
+ * renderings of one derivation drifting apart.
+ *
+ * `command` is null exactly where the rendering prints its STALE warning — a
+ * name no workflow runs any more. Machine consumers get the null rather than a
+ * fabricated command, and the shape of the row says which.
+ */
+export function changeKindGates(paths, resolveInvocation, kinds = CHANGE_KIND_GATES) {
+  const groups = [];
   for (const { kind, matches, gates } of kinds) {
     const hits = paths.filter((p) => matches(p));
     if (hits.length === 0) continue;
+    groups.push({
+      kind,
+      hits,
+      gates: gates.map(({ name, why }) => ({ name, why, command: resolveInvocation(name) })),
+    });
+  }
+  return groups;
+}
+
+export function changeKindLines(paths, resolveInvocation, kinds = CHANGE_KIND_GATES) {
+  const lines = [];
+  for (const { kind, hits, gates } of changeKindGates(paths, resolveInvocation, kinds)) {
     lines.push(`  ${kind}: ${hits.join(', ')}`);
-    for (const { name, why } of gates) {
-      const invocation = resolveInvocation(name);
+    for (const { name, why, command } of gates) {
       lines.push(
-        invocation
-          ? `    - ${invocation}   — ${why}`
+        command
+          ? `    - ${command}   — ${why}`
           : `    - ⚠ ${name}: STALE — no workflow runs a gate under this name. It was renamed or retired; fix CHANGE_KIND_GATES in this script.`,
       );
     }
@@ -5468,6 +5922,92 @@ export function unreachableLines(unreachable, swept) {
         `    - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]   dead: ${unreachableReason(dead)}${schedule}`,
       );
     }
+  }
+  return lines;
+}
+/**
+ * The "always runs" tail, rendered — printed on EVERY run, like the unreachable
+ * listing and for the same reason.
+ *
+ * The disclosure has no value behind a flag nobody is told to pass: the dev who
+ * paid for #13333 ran every family this tool named, and the step that reddened
+ * was one the tool had never mentioned. `unreachableLines`' header records the
+ * identical lesson one bucket over, and the fix there was to print at the
+ * moment of use rather than to write a warning somewhere.
+ *
+ * ## Deduplicated by COMMAND, never by step name
+ *
+ * `Install dependencies` appears once per job and is the same command every
+ * time; `Build workspace packages` and `Build the ledgered packages'
+ * dependencies` are different names for two different turbo filters. Collapsing
+ * by name would merge two real commands and hide one; collapsing by command
+ * text merges only what is literally the same thing to run. The jobs a repeated
+ * command also belongs to are named on its row, so nothing is lost by the
+ * collapse — a reader can still see it is five jobs' worth of setup and not a
+ * gate.
+ *
+ * Refuses rather than prints when the counts do not account for each other, on
+ * the same contract as `residueLines`: a tail that has silently lost rows reads
+ * exactly like a farm with nothing left to disclose (#4690).
+ */
+export const ALWAYS_RUN_COMMAND_CAP = 4;
+
+export function alwaysRunLines(rows, counts) {
+  const { unconditional, accounted, unaccounted, conditionalSteps, conditionalJobs } = counts ?? {};
+  if (!Number.isInteger(unconditional) || unconditional <= 0) {
+    throw new Error(
+      `the always-runs tail found ${String(unconditional)} unconditional CI step(s): a workflow tree with none ` +
+        'is a broken walk, not a clean farm — an unreadable input must never look like an empty answer (#4690)',
+    );
+  }
+  if (!Number.isInteger(accounted) || !Number.isInteger(unaccounted) || accounted + unaccounted !== unconditional) {
+    throw new Error(
+      `the always-runs tail does not account for its own steps: ${String(accounted)} accounted + ` +
+        `${String(unaccounted)} unaccounted != ${unconditional} unconditional`,
+    );
+  }
+  if (unaccounted !== rows.length) {
+    throw new Error(`the always-runs tail counted ${unaccounted} unaccounted step(s) but carries ${rows.length} row(s)`);
+  }
+
+  const byCommand = new Map();
+  for (const row of rows) {
+    const key = row.commands.join('\n');
+    if (!byCommand.has(key)) byCommand.set(key, { ...row, alsoIn: [] });
+    else byCommand.get(key).alsoIn.push(`${row.workflow} · ${row.job}`);
+  }
+
+  const lines = [
+    `Always runs — ${unaccounted} of the ${unconditional} unconditional CI step(s) are ones this derivation names NO family for` +
+      ` (${byCommand.size} distinct command(s), over ${unconditional - unaccounted} it does name one for).`,
+    '  ⛔ NOT a per-card list and NOT narrowable: these steps sit in a workflow with no pull_request path filter, in a job and a',
+    '    step with no `if:`, so CI runs every one of them on EVERY pull request whatever your diff is. Running every family named',
+    '    above therefore does NOT cover them — that is the gap this tail exists to close, and it is identical for every card.',
+    '  ⛔ NOT classified into gates and setup. Some rows are verification and some are `pnpm install`; every rule that tells them',
+    '    apart is a guess about a step\'s intent. What is claimed for each row is only what was measured: CI runs it, and the',
+    '    derivation above names nothing for it.',
+  ];
+  if (conditionalSteps || conditionalJobs) {
+    lines.push(
+      `  Excluded as conditional, and sized rather than dropped: ${conditionalJobs} job(s) and ${conditionalSteps} step(s) carry an` +
+        ' `if:`, so CI may skip them and this tail makes no claim about those.',
+    );
+  }
+  if (byCommand.size === 0) {
+    lines.push('  (none — every unconditional step contributes a family the derivation can name.)');
+    return lines;
+  }
+  for (const row of byCommand.values()) {
+    const also = row.alsoIn.length ? `   (also run by ${row.alsoIn.length} other job(s))` : '';
+    lines.push(`  - [${row.workflow} · ${row.job}] ${row.step}${also}`);
+    // A row is a POINTER to a step, not a transcript of it. One step in this
+    // tree is a 30-line shell program that discovers and runs every hook
+    // self-test, and printed whole it is longer than the other fifteen rows
+    // together — a tail nobody reads discloses nothing. The elision names the
+    // file to read instead, so the disclosure survives the cut.
+    for (const command of row.commands.slice(0, ALWAYS_RUN_COMMAND_CAP)) lines.push(`      ${command}`);
+    const elided = row.commands.length - ALWAYS_RUN_COMMAND_CAP;
+    if (elided > 0) lines.push(`      … ${elided} more line(s) — read the step in ${row.workflow}`);
   }
   return lines;
 }
@@ -5874,8 +6414,15 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   // the reason stated there: one read, three answers, no chance of them
   // describing different revisions of a file.
   const jobPopulationsByCheck = new Map();
+  // The always-runs tail (#13333) reads the SAME text as the three answers
+  // above, for the same reason they read it together: a tail derived from a
+  // second read could describe a different revision of a workflow than the
+  // families it is printed beside, and the whole point of the tail is that it
+  // states what the family list does not cover.
+  const workflowEntries = [];
   for (const wf of workflows) {
     const text = readFileSync(join(wfDir, wf), 'utf8');
+    workflowEntries.push({ file: wf, text });
     invocations.push(...extractCheckInvocations(text, wf));
     triggerPathsByWorkflow.set(wf, extractTriggerPaths(text));
     for (const pop of jobPathPopulations(text, wf)) {
@@ -6039,10 +6586,120 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     // half of the self-test catches, which is the direction that costs.
     entry.noPopulationReason ??= null;
   }
-  return { byCheck, workflows };
+  return { byCheck, workflows, workflowEntries };
 }
 
-function derive(paths, { showResidue = false } = {}) {
+/**
+ * The runnable command list — the whole point of the machine-readable modes.
+ *
+ * Matched families UNION the convention-triggered ones, because both are gates
+ * this card owes and a consumer asking "what do I run" is asking one question,
+ * not two. This is where `--commands` is strictly better than the published
+ * awk snippet rather than merely equal to it: the snippet reads the matched
+ * block alone and silently drops the convention block underneath it.
+ *
+ * Deduplicated, because a family can be both matched by path and named by a
+ * kind, and a list that says the same command twice teaches its reader to skim.
+ * Sorted, so two runs on one tree are byte-identical and a diff of two harvests
+ * means something.
+ *
+ * A convention gate whose name no workflow runs any more contributes NOTHING
+ * here — `command` is null and it is filtered out. That row is a defect in this
+ * script's own table, it is reported as a STALE warning in the human rendering
+ * and as a null in `--json`, and emitting a fabricated command for it would be
+ * exactly the failure this whole file exists to refuse.
+ */
+export function commandsFor({ matchedRows = [], kindGroups = [] } = {}) {
+  const commands = new Set();
+  for (const row of matchedRows) commands.add(row.command);
+  for (const group of kindGroups) {
+    for (const gate of group.gates) if (gate.command) commands.add(gate.command);
+  }
+  return [...commands].sort();
+}
+
+/**
+ * `--json`, as one document. Everything the human rendering places, placed the
+ * same way, so a consumer never has to choose between a machine-readable answer
+ * and a complete one.
+ *
+ * `pendingChangeset` is IN this document and deliberately NOT in `commands`.
+ * Those families are derived against a path that does not exist yet — the
+ * changeset the dev writes after this runs — so listing them as runnable
+ * commands would hand a consumer commands about a file that is not there. They
+ * are disclosed as their own key instead, with the probe path that produced
+ * them, so the omission is a fact the consumer can read rather than a silence.
+ * That distinction is the card's own subject matter: what is left out of a list
+ * must be visible in the list.
+ */
+export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity }) {
+  const commands = commandsFor({ matchedRows, kindGroups });
+  const { otherCommands, ...spelling } = spellingSplit(commands);
+  return {
+    tool: 'dispatch-gates',
+    repo: identity?.slug ?? null,
+    commit: identity?.head ?? null,
+    paths: [...paths],
+    commands,
+    spelling: otherCommands.length ? { ...spelling, otherCommands } : spelling,
+    matched: matchedRows,
+    convention: kindGroups,
+    pendingChangeset: {
+      probePath: CHANGESET_PROBE_PATH,
+      families: pending.map(({ check, entry }) => ({
+        check,
+        command: runnableInvocation(entry),
+        workflows: [...entry.workflows],
+      })),
+    },
+    counts,
+  };
+}
+
+/**
+ * Render a machine-readable mode. stdout carries the ANSWER and nothing else;
+ * every word about the answer goes to stderr, where this tool already puts its
+ * banner and its change-set provenance.
+ *
+ * That split is the mechanism, not a convenience. A consumer redirecting stdout
+ * gets a file it can execute or parse with no filter in front of it, which is
+ * what makes the harvest hazard structurally unreachable rather than merely
+ * documented — there is no prose in the stream to pattern-match, and therefore
+ * no spelling for a pattern to prefer.
+ *
+ * The stderr accounting exists so the two things stdout deliberately omits —
+ * the pending-changeset families and the always-runs tail — are omitted OUT
+ * LOUD. A quiet omission is the defect this mode was added to fix, and adding a
+ * new one inside the fix is how that defect reproduces itself one layer up.
+ */
+function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts }) {
+  const identity = repoIdentity();
+  const commands = commandsFor({ matchedRows, kindGroups });
+  const split = spellingSplit(commands);
+
+  if (mode === 'json') {
+    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity }), null, 2));
+  } else {
+    for (const command of commands) console.log(command);
+  }
+
+  const conventionCount = kindGroups.reduce((n, g) => n + g.gates.filter((x) => x.command).length, 0);
+  console.error(
+    `dispatch-gates --${mode}: ${commands.length} command(s) — ${split.pnpm} pnpm, ${split.node} direct node` +
+      `${split.other ? `, ${split.other} neither` : ''} (${matchedRows.length} matched by path, ${conventionCount} by change KIND).`,
+  );
+  if (pending.length) {
+    console.error(
+      `  + ${pending.length} famil(ies) apply once this card's changeset exists and are ${mode === 'json' ? 'under pendingChangeset, not in commands' : 'NOT above'} — ` +
+        'they are derived against a path that does not exist yet. Write the changeset, then derive again.',
+    );
+  }
+  console.error(
+    '  ⛔ Not a complete account of what CI runs on this PR: the always-runs tail (workflows with no path filter) is NOT here. Run without --commands/--json for it.',
+  );
+}
+
+function derive(paths, { showResidue = false, mode = 'human' } = {}) {
   // The reachability sweep runs BEFORE a line is printed, so its refusals
   // (#4690: an empty corpus, or an all-unreachable answer) come out as a
   // failed derivation rather than as a footnote under an answer that already
@@ -6052,7 +6709,7 @@ function derive(paths, { showResidue = false } = {}) {
   // corpus to judge a single-segment directory literal — one listing, so the
   // hints and the sweep that grades them cannot be taken from different trees.
   const swept = trackedFiles();
-  const { byCheck, workflows } = discoverFamilies({ tree: watchHintTree(swept) });
+  const { byCheck, workflows, workflowEntries } = discoverFamilies({ tree: watchHintTree(swept) });
   // ONE per-hint sweep feeds both readers of dead literals: the unreachable
   // listing (whole-family grain) and the residue annotations (per-hint grain,
   // #13312) — so the two cannot disagree about which literals are dead.
@@ -6075,6 +6732,51 @@ function derive(paths, { showResidue = false } = {}) {
   }
   const rosters = silent.map(([, entry]) => artifactOnlySilence(entry, paths, trackedSet)).filter(Boolean);
 
+  // ONE structured answer, rendered three ways below. The human block, the
+  // `--commands` list and the `--json` document are readings of these same
+  // rows: the card this section answers is about two renderings of one
+  // derivation drifting apart, so a second traversal here would reintroduce it.
+  const resolveInvocation = (name) => {
+    const entry = byCheck.get(name);
+    return entry ? runnableInvocation(entry) : null;
+  };
+  const matchedRows = [...matched].sort().map(([check, { entry, hits }]) => ({
+    check,
+    command: runnableInvocation(entry),
+    workflows: [...entry.workflows],
+    // The provenance travels with every hit: a lead CI's own trigger schedules
+    // and a lead inferred from a string in a script are different claims, and
+    // the column that justifies the lead has to say which.
+    via: hits.map((h) => ({ path: h.path, via: h.via, hint: h.hint })),
+  }));
+  const kindGroups = changeKindGates(paths, resolveInvocation);
+  // The pending-changeset section is derived in BOTH input modes and is gated
+  // on nothing but the answer itself: the PM's paths are a hypothesis with no
+  // changeset in it, and a dev's real diff has none either until the changeset
+  // is written. Where one already exists, the families are in `matched` above
+  // and this comes back empty. See pendingChangesetFamilies for the round of
+  // five dispatches that measured the gap.
+  const pending = pendingChangesetFamilies([...byCheck], new Set(matched.keys()));
+
+  if (mode !== 'human') {
+    machineReadableOutput(mode, {
+      paths,
+      matchedRows,
+      kindGroups,
+      pending,
+      counts: {
+        discovered: byCheck.size,
+        workflows: workflows.length,
+        matched: matched.size,
+        undetermined: undetermined.length,
+        silent: silent.length,
+        unreachable: unreachable.length,
+        swept: swept.length,
+      },
+    });
+    return;
+  }
+
   console.log(`dispatch-gates: ${byCheck.size} check famil(ies) discovered across ${workflows.length} workflow file(s) — derived at runtime, nothing listed in this script.\n`);
   // The tier verdict prints on EVERY run, hit or not. Printing it only on a hit
   // would make its absence mean two things at once — "no mandate" and "this
@@ -6084,32 +6786,26 @@ function derive(paths, { showResidue = false } = {}) {
   console.log('');
   if (matched.size) {
     console.log('Local gates for this card (paste into the dispatch prompt):');
-    for (const [check, { entry, hits }] of [...matched].sort()) {
-      // The provenance travels with every hit: a lead CI's own trigger
-      // schedules and a lead inferred from a string in a script are different
-      // claims, and the column that justifies the lead has to say which.
+    for (const { command, workflows: wfs, via: hits } of matchedRows) {
       const via = hits.map((h) => `${h.path} ⇢ ${h.via} '${h.hint}'`).join('; ');
-      console.log(`  - ${runnableInvocation(entry)}   [${[...entry.workflows].join(', ')}]   matched via ${via}`);
+      console.log(`  - ${command}   [${wfs.join(', ')}]   matched via ${via}`);
+    }
+    // The blank line FIRST, and it is not cosmetic: the published harvest ends
+    // the block at the first empty line, so a footer butted against the rows
+    // would be harvested AS rows. See spellingFooterLines.
+    console.log('');
+    for (const line of spellingFooterLines(spellingSplit(matchedRows.map((r) => r.command)))) {
+      console.log(line);
     }
   } else {
     console.log("No check family names the given paths in its own source, and no workflow's path filter schedules one for them.");
   }
-  const kindLines = changeKindLines(paths, (name) => {
-    const entry = byCheck.get(name);
-    return entry ? runnableInvocation(entry) : null;
-  });
+  const kindLines = changeKindLines(paths, resolveInvocation);
   if (kindLines.length) {
     console.log('\nConvention-triggered gates (this change KIND moves them; no path derivation can name them):');
     for (const line of kindLines) console.log(line);
   }
 
-  // The pending-changeset section prints in BOTH input modes and is gated on
-  // nothing but the answer itself: the PM's paths are a hypothesis with no
-  // changeset in it, and a dev's real diff has none either until the changeset
-  // is written. Where one already exists, the families are in `matched` above
-  // and this comes back empty. See pendingChangesetFamilies for the round of
-  // five dispatches that measured the gap.
-  const pending = pendingChangesetFamilies([...byCheck], new Set(matched.keys()));
   const pendingOut = pendingChangesetLines(pending);
   if (pendingOut.length) {
     console.log('');
@@ -6155,6 +6851,17 @@ function derive(paths, { showResidue = false } = {}) {
   // pass — see `unreachableLines` for the CI failure that made that concrete.
   console.log('');
   for (const line of unreachableLines(unreachable, swept.length)) console.log(line);
+
+  // The always-runs tail prints on every run for the same reason and with the
+  // same standing: it is not about the card's paths either, and the family list
+  // above provably does not cover it (#13333). Above the residue rather than
+  // below it, because the residue's closing line tells the reader the
+  // derivation is complete, and this is the part that is not.
+  console.log('');
+  {
+    const { rows, counts } = alwaysRunSteps(workflowEntries);
+    for (const line of alwaysRunLines(rows, counts)) console.log(line);
+  }
 
   console.log('');
   for (const line of residueLines({
@@ -7142,6 +7849,58 @@ function selfTest() {
     `…and the class is still concentrated: ${importTop5} of ${importNovel.length} novel pair(s) land`
       + ` on ${Math.min(5, importWorst.length)} module(s)`,
     importTop5 * 2 > importNovel.length,
+  );
+  // The PRICE the refusal states is an AVERAGE (#13467). "The miss costs one CI
+  // round" holds for a novel pair whose family some UNFILTERED workflow runs —
+  // CI opens the module on that PR regardless — and does not hold for one whose
+  // family no every-PR workflow runs at all: nothing on the PR repays that
+  // miss. Prose cannot notice the split moving and this one has moved three
+  // times, so the docblock states the SHAPE and these three assertions print
+  // the sizes. A red here re-prices the paragraph; it does not fault the
+  // derivation.
+  const everyPRWorkflow = new Map();
+  for (const wf of readdirSync(join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) {
+    const wfText = readFileSync(join(ROOT, '.github/workflows', wf), 'utf8');
+    // No `paths:` on a workflow that declares `pull_request` is the same
+    // reading `discoverFamilies` makes when it drops such a workflow from
+    // `triggers` — an unfiltered workflow discriminates nothing, which is
+    // exactly why it runs on every PR.
+    everyPRWorkflow.set(wf, declaresPullRequestTrigger(wfText) && extractTriggerPaths(wfText).length === 0);
+  }
+  const runsOnEveryPR = (e) => [...(e?.workflows ?? [])].some((wf) => everyPRWorkflow.get(wf));
+  const importFamilyByCheck = new Map(importClassFamilies);
+  const importDeferred = importNovel.filter(([check]) => !runsOnEveryPR(importFamilyByCheck.get(check)));
+  const importDeferredWorkflows = [...new Set(
+    importDeferred.flatMap(([check]) => [...(importFamilyByCheck.get(check)?.workflows ?? [])]),
+  )].sort();
+  t(
+    `the "one CI round" price is an average, not a uniform one — ${importDeferred.length} of`
+      + ` ${importNovel.length} novel pair(s) sit in families no every-PR workflow runs`
+      + ` (${importDeferredWorkflows.join(', ') || 'none'}), so no CI round on the PR repays that miss`,
+    importDeferred.length > 0 && importDeferred.length * 4 < importNovel.length,
+  );
+  // The half that keeps the exception from being over-read: a deferred pair is
+  // a deferred LEAD, never a silent load break. Every module carrying one is
+  // imported by every-PR families too, so a module that fails to LOAD reddens
+  // the PR through a sibling; what defers is the narrower break.
+  const importLoadBreakSilent = importDeferred.filter(([, mod]) =>
+    !importClassFamilies.some(([c2, e2]) => runsOnEveryPR(e2) && (importClassEdges.get(c2)?.has(mod) ?? false)));
+  t(
+    'a deferred pair defers the LEAD, not the load break — every module carrying one is imported by'
+      + ' an every-PR family as well, so failing to load still reddens the PR'
+      + `${importLoadBreakSilent.length ? ` — SILENT: ${importLoadBreakSilent.map(([c, m]) => `${c} <- ${m}`).join(' · ')}` : ''}`,
+    importLoadBreakSilent.length === 0,
+  );
+  // And they are not spread thin: the deferred pairs land on the shared heads
+  // this key is refused FOR — the modules most likely to be edited into a
+  // break. `fan-in <= 3` is the tail boundary the aggregate paragraph uses.
+  const importFanIn = (mod) => importClassFamilies.filter(([c2]) => importClassEdges.get(c2)?.has(mod)).length;
+  const importDeferredOnHeads = importDeferred.filter(([, mod]) => importFanIn(mod) > 3);
+  t(
+    `…and the deferred pair(s) concentrate on the heads rather than the tail:`
+      + ` ${importDeferredOnHeads.length} of ${importDeferred.length} land on a module more than 3`
+      + ` families import`,
+    importDeferredOnHeads.length * 2 > importDeferred.length,
   );
 
   // #12107, the live half — three claims about THIS tree, each one a thing the
@@ -11640,6 +12399,318 @@ function selfTest() {
     rmSync(entryTmp, { recursive: true, force: true });
   }
 
+  // ── The always-runs tail (#13333) ────────────────────────────────────────
+  //
+  // Two halves, and the SECOND is the one that answers the card. The fixtures
+  // pin the walk; the live pins below assert that the tail reaches the CLASS on
+  // this tree — that it names a second member, invisible for a DIFFERENT reason
+  // than the gate the card was filed about. A fix demonstrated only on
+  // `check-reference-carrier-shape` is the instance fix triage refused, and the
+  // way to keep that from rotting back in is to make the class assertion a
+  // case, derived live, rather than a sentence in a docblock.
+  const tailWf = [
+    'name: Fixture',
+    'on:',
+    '  pull_request:',
+    '    branches:',
+    '      - main',
+    'jobs:',
+    '  gates:',
+    '    steps:',
+    '      - name: Setup',
+    '        uses: actions/checkout@v4',
+    '      - name: A discoverable family',
+    '        run: pnpm check:engine-double-contract',
+    '      - name: A package-local gate invoked by path',
+    '        run: |',
+    '          node packages/lint/scripts/check-fixture-shape.mjs --self-test',
+    '          node packages/lint/scripts/check-fixture-shape.mjs',
+    '      - name: A gate run by another interpreter',
+    '        run: bash scripts/pm/os-fixture-lock.sh --self-test',
+    '      - name: Conditional, so no claim is made about it',
+    '        if: github.event_name == \'push\'',
+    '        run: pnpm exec turbo run build',
+    '      - name: A body carrying a dash line',
+    '        run: |',
+    '          printf \'%s\\n\' "- not a step"',
+    '          pnpm lint',
+    '  conditional-job:',
+    '    if: needs.filter.outputs.console == \'true\'',
+    '    steps:',
+    '      - name: Never claimed as always-run',
+    '        run: pnpm check:console-pin',
+  ].join('\n');
+
+  t('a pull_request trigger is distinguished from no trigger at all', declaresPullRequestTrigger(tailWf));
+  t(
+    'a workflow with no pull_request trigger is not read as unfiltered',
+    !declaresPullRequestTrigger('on:\n  push:\n    branches:\n      - main\njobs:\n  x:\n    steps: []'),
+  );
+
+  const tailJob = extractJobBlocks(tailWf).find((j) => j.id === 'gates');
+  const tailSteps = extractStepBlocks(tailJob.text);
+  t('every step of the job is found, and only the steps', tailSteps.length === 6);
+  t('a step name is read from its own key column', tailSteps[1].name === 'A discoverable family');
+  t('a step `if:` is read', tailSteps[4].if === "github.event_name == 'push'");
+  t('a step without an `if:` is not given one', tailSteps[2].if === null);
+  t(
+    'a dash line INSIDE a block-scalar body is not read as a step',
+    tailSteps[5].name === 'A body carrying a dash line' && tailSteps[5].text.includes('- not a step'),
+  );
+
+  const tail = alwaysRunSteps([{ file: 'fixture.yml', text: tailWf }]);
+  const tailNames = tail.rows.map((r) => r.step);
+  t('a step whose family the derivation names is NOT in the tail', !tailNames.includes('A discoverable family'));
+  t('a package-local gate invoked by path IS in the tail', tailNames.includes('A package-local gate invoked by path'));
+  t('a gate run by another interpreter IS in the tail', tailNames.includes('A gate run by another interpreter'));
+  t('a conditional STEP is excluded and counted', !tailNames.includes('Conditional, so no claim is made about it') && tail.counts.conditionalSteps === 1);
+  t('a conditional JOB is excluded and counted', !tailNames.includes('Never claimed as always-run') && tail.counts.conditionalJobs === 1);
+  t('a `uses:` step with no command is neither counted nor listed', !tailNames.includes('Setup') && tail.counts.unconditional === 4);
+  t('the tail accounts for every unconditional step it counted', tail.counts.accounted + tail.counts.unaccounted === tail.counts.unconditional);
+  t(
+    'a workflow CI can narrow by path is excluded from the tail entirely',
+    alwaysRunSteps([{ file: 'f.yml', text: tailWf.replace('    branches:\n      - main', "    paths:\n      - 'packages/**'") }]).counts
+      .filteredWorkflows === 1,
+  );
+
+  const tailLines = alwaysRunLines(tail.rows, tail.counts);
+  t('the rendered tail sizes itself against the unconditional total', tailLines[0].includes(`${tail.counts.unaccounted} of the ${tail.counts.unconditional}`));
+  t('the rendered tail refuses to be read as a per-card list', tailLines.some((l) => l.includes('EVERY pull request whatever your diff is')));
+  t('the rendered tail refuses to classify its rows into gates and setup', tailLines.some((l) => l.includes('NOT classified into gates and setup')));
+
+  const dedupeRows = [
+    { workflow: 'a.yml', job: 'One', step: 'Install dependencies', commands: ['pnpm install --frozen-lockfile'] },
+    { workflow: 'a.yml', job: 'Two', step: 'Install dependencies', commands: ['pnpm install --frozen-lockfile'] },
+    { workflow: 'a.yml', job: 'Two', step: 'Install dependencies', commands: ['pnpm install --offline'] },
+  ];
+  const dedupeLines = alwaysRunLines(dedupeRows, { unconditional: 4, accounted: 1, unaccounted: 3, conditionalSteps: 0, conditionalJobs: 0 });
+  t('rows are deduplicated by COMMAND, never by step name', dedupeLines.filter((l) => l.startsWith('  - ')).length === 2);
+  t('a repeated command names how many other jobs also run it', dedupeLines.some((l) => l.includes('also run by 1 other job(s)')));
+
+  const longRow = [{ workflow: 'a.yml', job: 'J', step: 'S', commands: Array.from({ length: 30 }, (_, i) => `line ${i}`) }];
+  const longLines = alwaysRunLines(longRow, { unconditional: 2, accounted: 1, unaccounted: 1, conditionalSteps: 0, conditionalJobs: 0 });
+  t('a long step is elided to a pointer rather than transcribed', longLines.some((l) => l.includes(`${30 - ALWAYS_RUN_COMMAND_CAP} more line(s) — read the step in a.yml`)));
+  t('the elision still prints the capped head of the command', longLines.filter((l) => /^ {6}line \d+$/.test(l)).length === ALWAYS_RUN_COMMAND_CAP);
+
+  const refusedTail = (rows, counts) => {
+    try {
+      alwaysRunLines(rows, counts);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  t('a tail that found NO unconditional step refuses rather than reads as a clean farm (#4690)', refusedTail([], { unconditional: 0, accounted: 0, unaccounted: 0 }));
+  t('a tail whose counts do not add up refuses', refusedTail([], { unconditional: 5, accounted: 1, unaccounted: 1 }));
+  t('a tail whose row count contradicts its own total refuses', refusedTail([], { unconditional: 5, accounted: 4, unaccounted: 1 }));
+
+  // ── LIVE, on this tree: does the tail reach the CLASS? ────────────────────
+  //
+  // Re-derived on every run, so these fail when the workflows move rather than
+  // when someone remembers to re-read them. ⛔ No count is pinned: the number
+  // of unconditional steps moves with every workflow edit and a frozen one
+  // would go stale with nothing failing — which is the defect this whole file
+  // is about.
+  const liveTail = alwaysRunSteps(
+    readdirSync(join(ROOT, '.github/workflows'))
+      .filter((f) => /\.ya?ml$/.test(f))
+      .map((f) => ({ file: f, text: readFileSync(join(ROOT, '.github/workflows', f), 'utf8') })),
+  );
+  const liveCommands = liveTail.rows.flatMap((r) => r.commands);
+  t('the live tail is not empty — an empty one would mean the walk broke, not that CI runs nothing', liveTail.rows.length > 0);
+  t(
+    'the live tail names the INSTANCE the card was filed about: a package-local gate invoked by path',
+    liveCommands.some((c) => /^node\s+packages\/\S+\/check-[\w.-]+\.mjs/.test(c)),
+  );
+  // The class assertion. The instance above is invisible because its path is
+  // not under `scripts/`; this one is invisible because its INTERPRETER is not
+  // `node` at all. Two different structural reasons, so a fix that reached only
+  // the first would fail here.
+  const otherInterpreter = liveCommands.filter((c) => /^(?:bash|sh|python3?)\s+\S+/.test(c));
+  t(
+    'the live tail reaches the CLASS: a second member invisible for a DIFFERENT reason (another interpreter)',
+    otherInterpreter.length > 0,
+  );
+  t(
+    'and that second member is not the card\'s own gate wearing a different name',
+    otherInterpreter.some((c) => !c.includes('reference-carrier')),
+  );
+  // The partition. Every row is a step the family derivation names NOTHING for,
+  // so a row that yields an invocation would mean the tail and the family list
+  // are double-counting the same step — the two halves have to be disjoint for
+  // either count to mean anything.
+  t(
+    'no row in the live tail yields a check invocation — the tail and the family list are disjoint',
+    liveTail.rows.every((r) => extractCheckInvocations(r.commands.join('\n'), r.workflow).length === 0),
+  );
+  t(
+    'every live row really sits in a workflow CI cannot narrow by path',
+    liveTail.rows.every((r) => {
+      const text = readFileSync(join(ROOT, '.github/workflows', r.workflow), 'utf8');
+      return declaresPullRequestTrigger(text) && extractTriggerPaths(text).length === 0;
+    }),
+  );
+  t('the live tail renders without refusing', alwaysRunLines(liveTail.rows, liveTail.counts).length > 0);
+
+  // ── The seam between this tool and its caller (#13462) ────────────────────
+  //
+  // Unit half first: the split and the footer are pure, so their edge cases are
+  // cheap to pin here rather than hunted for in a live tree that may not have
+  // one today. The END TO END half below is the part that cannot be faked —
+  // both remedies are about what a real run puts on a real stream.
+  // The filtered fixture names a REAL workspace package on purpose.
+  // `check-pnpm-filter-targets` scans the whole tree for `pnpm --filter TARGET`
+  // and requires the target to be a live package — it does NOT mask self-tests,
+  // so an invented one here reddens that gate from inside this file's fixtures
+  // (measured: `@x` did exactly that). A fixture is still a literal in the tree.
+  const mixedSplit = spellingSplit([
+    'pnpm check:a',
+    'pnpm --filter @objectstack/lint run check:b',
+    'node scripts/check-c.mjs',
+  ]);
+  t('spellingSplit counts both spellings', mixedSplit.total === 3 && mixedSplit.pnpm === 2 && mixedSplit.node === 1);
+  // A third interpreter must be COUNTED, not folded into either side. The gate
+  // corpus already runs steps under bash and python3, and a split that answered
+  // "0 direct node" for one of those would be a confident zero about a spelling
+  // it cannot see — the same failure the footer exists to prevent.
+  const thirdSplit = spellingSplit(['pnpm check:a', 'bash scripts/os-verify-lock.sh --self-test']);
+  t('a third interpreter lands in `other` rather than being miscounted', thirdSplit.other === 1 && thirdSplit.node === 0 && thirdSplit.pnpm === 1);
+  t('and the footer names it rather than dropping it', spellingFooterLines(thirdSplit)[0].includes('1 neither'));
+  // ⭐ CONTROL 3, as a pin: the footer must not hardcode "there is always a
+  // direct form". On an all-pnpm block it has to SAY `0 direct node`.
+  const pureFooter = spellingFooterLines(spellingSplit(['pnpm check:a', 'pnpm check:b', 'pnpm check:c']));
+  t('the footer prints the direct-node term at ZERO on a pure-pnpm block', pureFooter[0] === '3 families — 3 pnpm, 0 direct node.');
+  // ...and the ⛔ warning is the half that must NOT fire there: on a block with
+  // no direct row a one-spelling grep really does lose nothing, and a warning
+  // that fires anyway trains the reader on a claim this run measured as false.
+  t('and it does not warn about a shortfall that this block does not have', !pureFooter.some((l) => l.includes('⛔')));
+  t('while a mixed block DOES warn, with both figures in it', spellingFooterLines(mixedSplit).some((l) => l.includes('⛔') && l.includes('2 of the 3')));
+  t('an empty block gets no footer at all — a zero heading invites a hunt for rows that do not exist', spellingFooterLines(spellingSplit([])).length === 0);
+  // The published snippet must not become a fabricated watch hint in this
+  // file's OWN source. Both lines carry spaces, so the admission test rejects
+  // them whole; this pins the property instead of trusting the reading.
+  t('the published harvest snippet contributes no watch hint to this file', extractWatchHints(HARVEST_SNIPPET.join('\n')).length === 0);
+
+  // commandsFor: matched UNION convention, deduped, sorted, nulls dropped.
+  const cfRows = [{ command: 'pnpm check:b' }, { command: 'node scripts/check-a.mjs' }];
+  const cfKinds = [{ kind: 'k', hits: ['f'], gates: [{ name: 'check:b', why: 'w', command: 'pnpm check:b' }, { name: 'check:gone', why: 'w', command: null }] }];
+  const cfOut = commandsFor({ matchedRows: cfRows, kindGroups: cfKinds });
+  t('commandsFor unions matched with convention-triggered gates', cfOut.length === 2 && cfOut.includes('pnpm check:b'));
+  t('and deduplicates a family reached BOTH ways rather than listing it twice', cfOut.filter((c) => c === 'pnpm check:b').length === 1);
+  t('and emits NOTHING for a STALE kind entry no workflow runs — never a fabricated command', !cfOut.some((c) => c.includes('gone')));
+  t('and sorts, so two harvests of one tree are byte-comparable', cfOut.join('\n') === [...cfOut].sort().join('\n'));
+
+  // changeKindLines must be a RENDERING of changeKindGates, not a second walk.
+  {
+    const kinds = [{ kind: 'a kind', matches: (x) => x.endsWith('.ts'), gates: [{ name: 'check:x', why: 'because' }] }];
+    const resolve = () => 'pnpm check:x';
+    const groups = changeKindGates(['a.ts'], resolve, kinds);
+    const rendered = changeKindLines(['a.ts'], resolve, kinds);
+    t('changeKindGates and changeKindLines agree on the gate rows', groups[0].gates.length === rendered.filter((l) => l.startsWith('    - ')).length);
+    t('and a STALE name still renders its warning through the shared shape', changeKindLines(['a.ts'], () => null, kinds).some((l) => l.includes('STALE')));
+  }
+
+  // ── END TO END, on the real CLI and the real tree ─────────────────────────
+  //
+  // Everything above drives the pure halves, and all of it stays green if the
+  // call site in `derive` is dropped or hidden behind a flag no brief tells
+  // anyone to pass — which is the whole defect. Only a real run can tell them
+  // apart, and only a real run can measure the two REMEDIES against each other.
+  {
+    const seamCard = 'scripts/measure-durability-swallow-family.mjs';
+    const humanRun = runCli([seamCard]);
+    const humanOut = humanRun.stdout ?? '';
+    t('the seam card still derives at all', humanRun.status === 0 && humanOut.trim().length > 0);
+    // 形 2, in the DEFAULT output. No flag: the footer is the control for
+    // consumers who have not migrated, so it is worth nothing behind a flag.
+    const footerLine = humanOut.split('\n').find((l) => /^\d+ families — \d+ pnpm, \d+ direct node\.$/.test(l));
+    t('the DEFAULT run prints the spelling distribution in its own footer', Boolean(footerLine));
+    t('and the distribution is a SPLIT, not a bare count — the count alone signs off on the wrong list', /\d+ pnpm, \d+ direct node/.test(footerLine ?? ''));
+
+    // ⭐ The published snippet must SURVIVE the footer. It ends the block at the
+    // first empty line, so a footer butted against the rows would be harvested
+    // as rows — the remedy breaking the transition it exists to cover. Driven
+    // with the real awk and sed, because a reimplementation in JS would be
+    // pinning this file's idea of the snippet rather than the snippet.
+    // The snippet reads `gates.txt`; feed it the same bytes under that name.
+    const harvestTmp = mkdtempSync(join(tmpdir(), 'dg-harvest-'));
+    try {
+      writeFileSync(join(harvestTmp, 'gates.txt'), humanOut);
+      const real = spawnSync('bash', ['-c', HARVEST_SNIPPET.join('\n')], { encoding: 'utf8', cwd: harvestTmp });
+      const harvestedRows = (real.stdout ?? '').split('\n').filter(Boolean);
+      t('the published snippet still runs against a real rendering', real.status === 0 && harvestedRows.length > 0);
+      t(
+        'and the footer did NOT leak into it — every harvested row is a runnable command',
+        harvestedRows.every((l) => /^(pnpm|node) \S/.test(l)),
+      );
+      // 形 1 vs the transition, measured against each other on one input.
+      const cmdRun = runCli(['--commands', seamCard]);
+      const cmdRows = (cmdRun.stdout ?? '').split('\n').filter(Boolean);
+      t('--commands answers', cmdRun.status === 0 && cmdRows.length > 0);
+      t('and stdout is commands and NOTHING else — no heading, no annotation, no blank-line block to parse', cmdRows.every((l) => /^(pnpm|node) \S/.test(l)));
+      t('and it agrees exactly with the published snippet on this card', [...cmdRows].sort().join('\n') === [...harvestedRows].sort().join('\n'));
+      // ⭐ CONTROL 1 and CONTROL 2 as ONE assertion pair, on ONE input. A new
+      // mode returning the full list proves nothing on its own if the old
+      // harvest would have too — the defect has to still be there for the
+      // bypass to be the thing that fixed it.
+      const blockRows = harvestedRows.length;
+      const oldHarvest = harvestedRows.filter((l) => l.startsWith('pnpm check:')).length;
+      t('CONTROL: the OLD one-spelling harvest is still SHORT on this input — the defect is real and untouched', oldHarvest < blockRows);
+      t('CONTROL: and --commands returns the FULL list on that same input', cmdRows.length === blockRows);
+      t('and the rows the old harvest drops are exactly the ones spelled the other way', blockRows - oldHarvest === harvestedRows.filter((l) => l.startsWith('node ')).length);
+    } finally {
+      rmSync(harvestTmp, { recursive: true, force: true });
+    }
+
+    // ⭐ Where --commands is strictly BETTER than the snippet, not merely equal:
+    // the snippet reads the matched block alone and drops the convention block
+    // printed beneath it. Driven on a card KIND that really hits.
+    const testCard = 'packages/spec/scripts/authorable-defaults.test.ts';
+    const convCmd = (runCli(['--commands', testCard]).stdout ?? '').split('\n').filter(Boolean);
+    const convHuman = runCli([testCard]).stdout ?? '';
+    const convBlock = convHuman
+      .slice(convHuman.indexOf('Local gates for this card'))
+      .split('\n\n')[0]
+      .split('\n')
+      .filter((l) => l.startsWith('  - '))
+      .map((l) => l.replace(/^ {2}- (.*) {3}\[.*$/, '$1'));
+    t('a convention-triggered card is really convention-triggered', /^Convention-triggered gates/m.test(convHuman));
+    t('--commands carries the convention gates the block-only harvest drops', convCmd.length > convBlock.length);
+    t('and every one of the extra rows is runnable', convCmd.every((l) => /^(pnpm|node) \S/.test(l)));
+
+    // --json: one document, and the omission it makes is DISCLOSED rather than
+    // silent — which is the card's own subject matter.
+    const jsonRun = runCli(['--json', seamCard]);
+    let doc = null;
+    try {
+      doc = JSON.parse(jsonRun.stdout ?? '');
+    } catch {
+      doc = null;
+    }
+    t('--json puts a single parseable document on stdout', jsonRun.status === 0 && doc !== null);
+    t('and it carries the runnable list, agreeing with --commands', Boolean(doc) && doc.commands.join('\n') === (runCli(['--commands', seamCard]).stdout ?? '').trim());
+    t('and the spelling split travels with it', Boolean(doc) && doc.spelling.total === doc.commands.length);
+    t('and it names the tree it is about, as the banner does', Boolean(doc) && doc.commit !== null);
+    t(
+      'the pending-changeset families are DISCLOSED under their own key rather than silently missing',
+      Boolean(doc) && Array.isArray(doc.pendingChangeset.families),
+    );
+    t(
+      'and they are kept OUT of commands — they name a path that does not exist yet',
+      Boolean(doc) && doc.pendingChangeset.families.every((f) => !doc.commands.includes(f.command)),
+    );
+    // The machine modes must keep stdout clean in BOTH directions: the banner
+    // and the accounting belong on stderr, or a consumer redirecting stdout
+    // gets prose back and is filtering again — the hazard, reintroduced.
+    const cmdRun2 = runCli(['--commands', seamCard]);
+    t('the banner stays off stdout in --commands', !(cmdRun2.stdout ?? '').includes('gate list derived from the tree of'));
+    t('and the accounting of what was left out is on stderr, where it cannot corrupt the harvest', (cmdRun2.stderr ?? '').includes('always-runs tail'));
+    t('and that accounting names the pending families too, so the omission is out loud', (cmdRun2.stderr ?? '').includes("once this card's changeset exists"));
+    // Two answers to "what shape is stdout" is no answer.
+    const bothRun = runCli(['--commands', '--json', seamCard]);
+    t('passing both stdout spellings refuses instead of silently preferring one', bothRun.status === 2 && (bothRun.stdout ?? '').trim() === '');
+  }
+
   let failed = 0;
   for (const [name, cond] of cases) {
     if (!cond) failed++;
@@ -11702,6 +12773,13 @@ if (invokedDirectly) {
   } else if (argv.malformed) {
     console.error(`dispatch-gates: ${argv.malformed} — the repo this answer must be about, as an owner and a name.`);
     process.exit(2);
+  } else if (process.argv.includes('--commands') && process.argv.includes('--json')) {
+    // Two answers to "what shape is stdout" is no answer. Blending them — or
+    // silently preferring one — is the class of failure this whole file is
+    // about, and it would be a poor place to commit it: these two flags exist
+    // because a consumer could not tell what it was reading.
+    console.error('dispatch-gates: --commands and --json are two spellings of stdout — pass one.');
+    process.exit(2);
   } else if (wantsChanged && argvPaths.length > 0) {
     // The two input modes answer different questions and must never be blended:
     // silently preferring one would make the other's arguments vanish without a
@@ -11713,6 +12791,14 @@ if (invokedDirectly) {
     // change-set provenance, so no run of this tool can be read without reading
     // which repo it is about — the one thing the silent wrong answer never said.
     const identity = repoIdentity();
+    // Resolved once, ABOVE the banner: every line the banner and the
+    // provenance print goes to stderr in all three modes, so choosing the mode
+    // here cannot change what stdout carries later.
+    const mode = process.argv.includes('--json')
+      ? 'json'
+      : process.argv.includes('--commands')
+        ? 'commands'
+        : 'human';
     const declaredPaths = argvPaths.map((p) => p.replace(/^\.\//, ''));
     for (const line of bannerLines({ identity, paths: declaredPaths, drift: baseDrift() })) console.error(line);
     if (argv.assertion !== null) {
@@ -11740,7 +12826,7 @@ if (invokedDirectly) {
         derived = changedPathsFromGit();
       } catch (err) {
         console.error(`dispatch-gates: could not derive the change set — ${err.message}`);
-        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [--repo owner/name] [<path> ...] | --changed | --self-test');
+        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [--commands | --json] [--repo owner/name] [<path> ...] | --changed | --self-test');
         process.exit(2);
       }
       if (derived.paths.length === 0) {
@@ -11764,7 +12850,7 @@ if (invokedDirectly) {
       if (process.argv.includes('--tier')) {
         for (const line of tierLines(deriveTier(paths))) console.log(line);
       } else {
-        derive(paths, { showResidue: process.argv.includes('--residue') });
+        derive(paths, { showResidue: process.argv.includes('--residue'), mode });
       }
     } catch (err) {
       console.error(`dispatch-gates: derivation failed — ${err.message}`);

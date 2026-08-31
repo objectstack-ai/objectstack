@@ -122,11 +122,21 @@ function declaredRuleIds(): RuleId[] {
 describe('rule id constants are reachable from a published barrel (#5648)', () => {
   it('barrel entries match the published exports map', () => {
     const pkg = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf8')) as {
-      exports: Record<string, { import: string }>;
+      exports: Record<string, { import: string | { default?: string } }>;
     };
     // "." -> dist/index.js -> "index";  "./runtime" -> dist/runtime.js -> "runtime"
+    //
+    // [#13112] A condition's value is EITHER the target path itself, or a
+    // nested conditions object carrying it under `default` (the per-condition
+    // `types` shape). Both spellings ship in this repo — packages held at the
+    // sibling-`types` shape keep the flat one — so read through the nesting
+    // rather than assuming either. ⛔ Reading `e.import` blind stringifies an
+    // object to "[object Object]", which matches nothing and silently empties
+    // this census instead of failing loudly.
+    const importTarget = (e: { import: string | { default?: string } }): string =>
+      typeof e.import === 'string' ? e.import : e.import?.default ?? '';
     const published = Object.values(pkg.exports)
-      .map((e) => /^\.\/dist\/(.+)\.js$/.exec(e.import)?.[1])
+      .map((e) => /^\.\/dist\/(.+)\.js$/.exec(importTarget(e))?.[1])
       .filter((n): n is string => !!n)
       .sort();
     expect(published.length).toBe(Object.keys(pkg.exports).length);

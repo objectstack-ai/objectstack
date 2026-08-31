@@ -26,7 +26,10 @@ import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/co
 import type { MetadataLoader } from './loader-interface.js';
 import { calculateChecksum } from '../utils/metadata-history-utils.js';
 import { LRUCache } from '../utils/lru-cache.js';
-import { isMissingTableError, isSchemaAlreadyExistsError } from '../utils/schema-sync-errors.js';
+// [#13279] Both predicates moved to `@objectstack/types` — see its
+// `driver-error-classification.ts` `## Home` section. The verdicts are
+// byte-identical; only the import path changed.
+import { isMissingTableError, isSchemaAlreadyExistsError } from '@objectstack/types';
 import { migrateProjectIdToEnvironmentId } from '../migrations/migrate-project-id-to-environment-id.js';
 
 /**

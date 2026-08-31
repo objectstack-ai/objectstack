@@ -46,7 +46,7 @@
  */
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { resolveAuthzContext } from '@objectstack/core';
+import { resolveAuthzContext, isAuthzStoreUnavailableError } from '@objectstack/core';
 import {
     resolveTenancyPosture,
     collectGlobalUniques,
@@ -1659,7 +1659,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 userId: String(authz.userId),
                 systemPermissions: Array.isArray(authz.systemPermissions) ? authz.systemPermissions : [],
             };
-        } catch {
+        } catch (err) {
+            // [#13279] `null` here means "nobody is authenticated", which is
+            // not what a permission-store outage established. Re-raised.
+            if (isAuthzStoreUnavailableError(err)) throw err;
             return null;
         }
     };

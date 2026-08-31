@@ -764,7 +764,8 @@ export class ExternalDatasourceService implements IExternalDatasourceService {
    * from a successfully read schema in which the table is absent. A throw
    * means the comparison never ran, and per the repo's read-failure
    * classification precedent (`READ_FAILURE_DISCRIMINATORS`,
-   * `packages/metadata/src/utils/schema-sync-errors.ts`: a fact verdict must
+   * `packages/types/src/driver-error-classification.ts` (#13279 moved it there
+   * from `packages/metadata/src/utils/schema-sync-errors.ts`): a fact verdict must
    * be POSITIVELY EARNED, never defaulted to), no signature test on the thrown
    * value can earn a claim about a remote schema nobody read. Deliberately NOT
    * a hand-rolled `err.code` allowlist — an unrecognised connection error

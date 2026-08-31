@@ -7,6 +7,7 @@ import type { PluginContext } from '@objectstack/core';
 // local check would be the wrong shape even if it were written correctly.
 import {
   resolveAuthzContext,
+  isAuthzStoreUnavailableError,
   shouldDenyAnonymous,
   ANONYMOUS_DENY_STATUS,
   ANONYMOUS_DENY_CODE,
@@ -392,9 +393,13 @@ export function registerDatasourceAdminRoutes(
         // resolution rather than a second reading of `sys_*`.
         systemPermissions = Array.isArray(authz.systemPermissions) ? authz.systemPermissions : [];
       }
-    } catch {
-      // Fail closed: an identity that could not be resolved is not an identity,
-      // and grants that could not be read are not grants.
+    } catch (err) {
+      // [#13279] "grants that could not be READ are not grants" was the exact
+      // reasoning the 2026-08-30 ruling reverses: an unreadable store licenses
+      // no verdict at all, so the outage is re-raised instead of being answered
+      // as a denial. Every other fault still fails closed, unchanged.
+      if (isAuthzStoreUnavailableError(err)) throw err;
+      // Fail closed: an identity that could not be resolved is not an identity.
       userId = undefined;
       systemPermissions = [];
     }

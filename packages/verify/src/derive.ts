@@ -98,10 +98,58 @@ function synth(type: string, f: any): { value: unknown; kind: AssertKind } | nul
   }
 }
 
-/** The target object a relational field references (snake_case object name), or null. */
+/**
+ * The spellings `@objectstack/spec` REJECTS for a relationship target.
+ *
+ * `FieldSchema` declares `reference` and only `reference` (#11567 — "one key,
+ * one answer"), answering any of these with `unrecognized_keys` and *"Did you
+ * mean `reference_to` → `reference`?"*. They are listed here so this deriver
+ * can NAME what an app spelled instead of silently deriving nothing from it.
+ */
+const REJECTED_REFERENCE_ALIASES = ['reference_to', 'referenceTo'] as const;
+
+/**
+ * The target object a relational field references (snake_case object name), or
+ * null — read from the CANONICAL `reference` key only.
+ *
+ * This reader used to accept `reference ?? reference_to ?? referenceTo`, and
+ * the alias is genuinely reachable here: `loadConfig()` does not parse, and
+ * both a plain-object config and `defineStack(cfg, { strict: false })` carry an
+ * unparsed shape straight into `deriveCrudCases`. It was narrowed anyway
+ * (maintainer ruling, 2026-08-30), because this consumer's failure mode is a
+ * REPORT LINE rather than a refusal: narrowing costs coverage, not
+ * availability. (The same alias is deliberately still tolerated by
+ * `resolveCbpRelation` in `@objectstack/plugin-security`, where a miss is
+ * fail-closed and narrowing would deny access rather than print something —
+ * that reader documents the asymmetry at its own site.)
+ *
+ * ⛔ The narrowing is only safe WITH {@link rejectedReferenceAlias} beside it.
+ * A verifier that quietly under-verifies is the defect #5262 was about, and
+ * degrading an alias-spelled relation to the generic "has no `reference`
+ * target" would have traded one silent seam for another: the operator would
+ * read "this object could not be derived" and never learn that the cause was a
+ * key the platform refuses. Every call site below therefore asks WHY before it
+ * reports THAT.
+ */
 function relationTarget(f: any): string | null {
-  const ref = f?.reference ?? f?.reference_to ?? f?.referenceTo;
+  const ref = f?.reference;
   return typeof ref === 'string' && ref.length > 0 ? ref : null;
+}
+
+/**
+ * The rejected alias this field spelled instead of `reference`, or null.
+ *
+ * Only ever consulted once {@link relationTarget} has already answered null, so
+ * a field carrying BOTH a canonical `reference` and a stale alias is derived
+ * from the canonical key and reports nothing — the alias is only news when it
+ * is the reason nothing was derived.
+ */
+function rejectedReferenceAlias(f: any): string | null {
+  for (const key of REJECTED_REFERENCE_ALIASES) {
+    const v = f?.[key];
+    if (typeof v === 'string' && v.length > 0) return key;
+  }
+  return null;
 }
 
 interface Draft {
@@ -165,8 +213,24 @@ export function deriveCrudCases(config: any): CrudCase[] {
       if (RELATIONAL.has(type)) {
         const target = relationTarget(f);
         if (!target) {
-          if (isRequired) { d.blocked = `required ${type} field "${name}" has no \`reference\` target`; break; }
-          d.skippedFields.push({ name, type, reason: 'relation-missing-reference' });
+          // NAME the cause. `alias` non-null means the app spelled a key
+          // `@objectstack/spec` refuses, which is a different finding from "no
+          // target was declared at all" and needs a different sentence: one is
+          // a rename, the other is missing metadata.
+          const alias = rejectedReferenceAlias(f);
+          if (isRequired) {
+            d.blocked = alias
+              ? `required ${type} field "${name}" spells the rejected alias \`${alias}\` instead of ` +
+                `\`reference\` — \`reference\` is the only relationship spelling @objectstack/spec ` +
+                `declares, so this app's target "${f[alias]}" was not derived; rename the key`
+              : `required ${type} field "${name}" has no \`reference\` target`;
+            break;
+          }
+          d.skippedFields.push({
+            name,
+            type,
+            reason: alias ? `relation-rejected-reference-alias:${alias}` : 'relation-missing-reference',
+          });
           continue;
         }
         if (!byName.has(target)) {

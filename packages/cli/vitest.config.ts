@@ -3,10 +3,11 @@
 // This package had NO vitest config until #9832, and that is the fact this
 // header exists to keep visible: adding one changes how every test file in
 // `packages/cli` is configured, not just the file that needed it. So the
-// config is deliberately minimal — anchored `resolve.alias` entries and no
-// `test` block at all, because the test files here run on vitest's defaults
-// (`globals: false`, `environment: 'node'`) and a `test` block would silently
-// re-specify them. Sibling configs in this repo do carry
+// config is deliberately minimal — anchored `resolve.alias` entries and a
+// `test` block that only carries keys with a recorded warrant (`server.deps`,
+// and the #10374 console-intercept disarm), because the test files here run on
+// vitest's defaults (`globals: false`, `environment: 'node'`) and re-specifying
+// THOSE keys would silently flip them. Sibling configs in this repo do carry
 // `test: { globals: true, … }`; copying that shape here would have flipped
 // `globals` for every existing file in the package.
 //
@@ -378,6 +379,13 @@ export default defineConfig({
     ],
   },
   test: {
+    // A late console.* must not redden a green suite (#10374): vitest's worker
+    // forwards console output over RPC and discards the promise, and a write
+    // landing after teardown's rpcDone() snapshot is rejected into an unhandled
+    // error — a fully green run that exits 1. Disarming removes the mechanism.
+    // Mechanism + measured costs: examples/app-showcase/vitest.config.ts.
+    // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
+    disableConsoleIntercept: true,
     server: {
       deps: {
         external: [/packages[\/]types[\/]dist/],

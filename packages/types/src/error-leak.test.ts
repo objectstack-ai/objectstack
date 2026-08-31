@@ -137,7 +137,8 @@ describe('looksLikeInternalErrorLeak — shipped-dialect phrasings (#8132)', () 
         ['postgres permission denied for relation', 'permission denied for relation sys_user'],
         // SQLite/libsql message-only errors: the same conditions with NO
         // `SQLITE_` prefix to trip the existing limb. Measured shapes in this
-        // repo — `metadata/src/utils/schema-sync-errors.ts` documents both.
+        // repo — `driver-error-classification.ts` (next door, moved here by
+        // #13279 from `metadata/src/utils/schema-sync-errors.ts`) documents both.
         ['sqlite bare missing table', 'no such table: sys_metadata'],
         ['sqlite bare missing table with a schema prefix', 'no such table: main.sys_metadata_history'],
         ['sqlite bare missing column', 'no such column: bogus'],

@@ -2107,6 +2107,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-auth/src/durability-swallow-repair.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-auth/src/durability-swallow-repair.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-auth/src/first-session-membership-ordering.test.ts",
       "verb": "findOne",
       "pinned": 2
@@ -3254,6 +3264,21 @@
     {
       "file": "packages/services/service-storage/src/sys-upload-session-ttl-sweep.test.ts",
       "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/tenant-audit-update-delete-half-repairs.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/tenant-audit-update-delete-half-repairs.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/tenant-audit-update-delete-half-repairs.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

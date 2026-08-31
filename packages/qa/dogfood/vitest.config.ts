@@ -57,6 +57,11 @@ export default defineConfig({
     projects: [
       {
         test: {
+          // #10374: disarm the late-console teardown race. Set PER PROJECT because
+          // inline projects do not inherit the root-level setting (measured on
+          // vitest 4.1.10). Mechanism: examples/app-showcase/vitest.config.ts.
+          // Enforced by scripts/check-console-intercept-disarm.mjs.
+          disableConsoleIntercept: true,
           name: 'shared-showcase',
           include: SHARED_SHOWCASE,
           isolate: false,
@@ -64,6 +69,11 @@ export default defineConfig({
       },
       {
         test: {
+          // #10374: disarm the late-console teardown race. Set PER PROJECT because
+          // inline projects do not inherit the root-level setting (measured on
+          // vitest 4.1.10). Mechanism: examples/app-showcase/vitest.config.ts.
+          // Enforced by scripts/check-console-intercept-disarm.mjs.
+          disableConsoleIntercept: true,
           name: 'isolated',
           include: ['test/**/*.test.ts'],
           exclude: SHARED_SHOWCASE,

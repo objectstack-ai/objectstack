@@ -27,6 +27,16 @@ export * from './relation-sub-object.js';
 // Four hand-written vocabularies used to answer it and disagreed about MySQL,
 // which is why every MySQL conflict came back 500 instead of 409.
 export * from './unique-violation.js';
+// [#4728/#4825, moved here by #13279] The one "which driver failures may be
+// silenced?" vocabulary — `isMissingTableError` (a READ failed because the
+// table was never provisioned) and `isSchemaAlreadyExistsError` (a DDL failure
+// that was just the table already being there). It was `@objectstack/metadata`'s
+// until `@objectstack/core`'s authorization resolver had to ask it, and core
+// cannot import metadata — metadata depends on core. Same Home rule as
+// `unique-violation.js` above: every consumer already depends on this package,
+// so adopting the predicate adds no edge. `@objectstack/metadata/errors` still
+// re-exports `isMissingTableError` for its published consumers.
+export * from './driver-error-classification.js';
 // [#8567] The OPPOSITE question, kept deliberately separate: "is this the
 // database refusing an ON CONFLICT target that no unique index backs?" One
 // measured limb per dialect that can raise it (SQLite, Postgres); MySQL cannot,

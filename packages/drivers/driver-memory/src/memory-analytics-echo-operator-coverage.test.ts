@@ -74,7 +74,7 @@
  * |:--|:--|:--|:--|
  * | `{name: {$in: [a, b]}}` | both rows | `name = a` — one row | `name IN (a, b)` |
  * | `{name: {$nin: [a]}}` | the other four | `name = a` — the **complement** | `(name IS NULL OR name NOT IN (a))` |
- * | `{name: {$exists: true}}` | four rows | `name = 1` — **no** rows | `name IS NOT NULL` |
+ * | `{name: {$exists: true}}` | five rows | `name = 1` — **no** rows | `name IS NOT NULL` |
  *
  * # Reverse verification
  *
@@ -347,22 +347,41 @@ describe('[#7117] the analytics echo renders the query it describes', () => {
     });
 
     /**
-     * The one cell where SQL cannot say what mingo says, asserted as an
-     * INEQUALITY so it cannot be closed in silence.
+     * [#13195] The one cell where SQL could not say what mingo said — CLOSED,
+     * and closed from the mingo side.
      *
-     * mingo's `$exists` tests KEY PRESENCE; a relational column always has it.
-     * A row storing an explicit `null` therefore satisfies `$exists: true` on
-     * `query()` and fails `IS NOT NULL` in the echo. `IS NOT NULL` is
-     * nonetheless the spelling both of this repo's other SQL lowerings use
-     * (`read-scope-sql.ts`'s `$exists` arm; `driver-sql`'s "a present field is a
-     * non-null column in SQL"), and it is a far smaller gap than the `name = 1`
-     * it replaces, which matched nothing at all.
+     * This assertion used to be an INEQUALITY, kept so the split could not be
+     * repaired in silence. The split was: mingo's `$exists` tests KEY PRESENCE
+     * and a relational column always has a key, so row 6 — which stores an
+     * explicit `null` — satisfied `$exists: true` on `query()` and failed
+     * `IS NOT NULL` in the echo. The chart and the statement drawn beside it
+     * answered the same query differently.
+     *
+     * The maintainer ruled on 2026-08-30 that `$exists` means HAS A VALUE
+     * (`!= null`) on every exit — #5298 leg 3 / #5369, shipped in PR #5962 and
+     * until then unmet on this face. `IS NOT NULL` was already the ruled
+     * answer, so the ECHO half is untouched and the executed half moved to meet
+     * it: `CUBE_OPERATOR_TO_MONGO_PREDICATE`'s `set` row now emits
+     * `{$ne: null}` / `{$eq: null}` instead of `{$exists: <bool>}`.
+     *
+     * ⛔ It was not re-baselined onto whatever the new pipeline printed. The
+     * target is the ECHO's pre-existing row set, which this note named as the
+     * ruled answer before the repair existed, and the `$exists` entry in the
+     * enumeration below is no longer skipped — it is asserted by the same rule
+     * as every other operator.
      */
-    it('documents the one `$exists` cell SQL cannot translate exactly', async () => {
+    it('the `$exists` cell SQL could not translate exactly is now exact', async () => {
       const where = { name: { $exists: true } };
-      // Row 6 stores an explicit `null`: present to mingo, NULL to SQL.
-      expect(await executedIds(where)).toEqual(['1', '2', '3', '4', '5', '6']);
+      // Row 6 stores an explicit `null`: no longer a value to either engine.
+      expect(await executedIds(where)).toEqual(['1', '2', '3', '4', '5']);
       expect(await echoIds(where)).toEqual(['1', '2', '3', '4', '5']);
+      expect(await executedIds(where)).toEqual(await echoIds(where));
+
+      // The other direction, which the old split hid entirely: asking for the
+      // rows with NO value used to return none of them on the executed side.
+      const none = { name: { $exists: false } };
+      expect(await executedIds(none)).toEqual(['6']);
+      expect(await echoIds(none)).toEqual(['6']);
     });
   });
 
@@ -432,11 +451,10 @@ describe('[#7117] the analytics echo renders the query it describes', () => {
       it(`${op}: running the echo returns exactly the rows the query returns`, async () => {
         const executed = await executedIds(where);
         const echoed = await echoIds(where);
-        if (op === '$exists') {
-          // The documented residue above — asserted there, skipped here so this
-          // loop stays a statement about every OTHER operator.
-          return;
-        }
+        // [#13195] `$exists` used to return early here — the documented residue
+        // above was asserted there and skipped in this loop, so the loop was a
+        // statement about every OTHER operator. The residue is gone, the skip
+        // with it, and this loop is now total over the face's vocabulary.
         expect(echoed, `${op}: the echo describes a different row set`).toEqual(executed);
       });
 

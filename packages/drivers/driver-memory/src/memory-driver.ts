@@ -30,6 +30,9 @@ import {
   danglingLikeEscapeError,
   // [#10576] The per-aggregation `filter` refusal — this driver evaluates none.
   refusePerAggregationFilter,
+  // [#13524] The declared authorable field vocabulary, IN DECLARATION ORDER —
+  // the canonical order `FIELD_OPERATOR_RANK` below reads.
+  SUPPORTED_FIELD_OPERATORS,
 } from './filter-refusal.js';
 import {
   coerceTemporalValue,
@@ -46,6 +49,125 @@ import {
   uniqueConstraintsFromFields,
   type MemoryUniqueEnforcement,
 } from './memory-unique-constraint.js';
+
+/**
+ * [#13524] The canonical rank of an authorable field operator — the tie-break
+ * that decides which writer of a CONTESTED lowered key keeps the inline slot.
+ *
+ * Read straight off {@link SUPPORTED_FIELD_OPERATORS}, which is
+ * `[...FILTER_OPERATORS, '$like', '$ilike']` — the spec's declaration order,
+ * not a hand-copy of it. That matters twice: a nineteenth operator is ranked
+ * the day it is declared, and the rank of `$exists` (last in the spec's list)
+ * is what makes this generalisation emit, byte for byte, the documents
+ * #13195's guard already emits for the one operator it moved.
+ *
+ * An operator absent from the vocabulary cannot reach the assembly — the
+ * `default:` arm throws first — so the `?? Number.MAX_SAFE_INTEGER` fallback is
+ * a totality floor, never a live path.
+ */
+const FIELD_OPERATOR_RANK: ReadonlyMap<string, number> = new Map(
+  [...SUPPORTED_FIELD_OPERATORS].map((op, index) => [op, index] as const),
+);
+
+/** One write of one lowered key, tagged with the operator that produced it. */
+interface LoweredWrite {
+  /** The AUTHORABLE operator this write came from — what ranks it. */
+  readonly op: string;
+  /** The key the backend understands, which is NOT always `op`. */
+  readonly key: string;
+  readonly value: any;
+}
+
+/**
+ * [#13524] Assemble lowered writes into one operator document, promoting every
+ * write whose key is already TAKEN into its own condition instead of letting it
+ * overwrite the sitting one.
+ *
+ * ## The defect this closes — a CLASS, not an instance
+ *
+ * Several authorable operators do not lower to a key of their own name. They
+ * write keys an author can ALSO write on the same field constraint, so two
+ * constraints land on one key of one object literal and the second assignment
+ * wins. One constraint disappears with no error, no warning and no trace in the
+ * emitted document — and WHICH one disappears is decided by the author's key
+ * order, because that is the order `Object.keys` walks.
+ *
+ * Enumerated over the whole declared vocabulary (18 operators, probed one at a
+ * time and intersected — not reasoned), the contested keys on this face are:
+ *
+ * | lowered key | written by |
+ * |---|---|
+ * | `$eq`  | `$eq`, `$null: true`,  `$exists: false` |
+ * | `$ne`  | `$ne`, `$null: false`, `$exists: true`  |
+ * | `$gte` | `$gte`, `$between` |
+ * | `$lte` | `$lte`, `$between` |
+ * | `$lt`  | `$lt`, `$lte` (BARE CALENDAR DAY — #4042's half-open rewrite), `$between` (bare-day max) |
+ * | `$regex` | the whole string family — promoted by `_multiRegex`, see below |
+ *
+ * `$lte` → `$lt` is the member no card had named: a bare `YYYY-MM-DD` upper
+ * bound compiles half-open, so `{d: {$lte: '2026-07-28', $lt: '2026-07-02'}}`
+ * and its key-swapped twin answered `['1']` and `['1','2']` on this fixture.
+ * `$not` is written by `$notContains` and by NOTHING else — it is covered here
+ * by construction rather than curatively, which is the point of ranging over
+ * the vocabulary instead of over the three operators that had been noticed.
+ *
+ * ## The rule, and why it is this one
+ *
+ * Free key → merge inline (the overwhelmingly common case: one operator, one
+ * key). Taken key → the write becomes its own `$and` branch on the same field,
+ * where both constraints survive. That is exactly the guard #13195 landed for
+ * `$exists` alone, generalised to every writer rather than restated per
+ * operator — the reference matcher (`memory-matcher.ts`), which loops the
+ * operators and therefore CANNOT express this defect, is the oracle both
+ * agree with.
+ *
+ * ## Why rank, and not author order
+ *
+ * The inline slot goes to the LOWEST-RANKED writer, never to the first one the
+ * author happened to type. Author order would keep the ANSWER correct — `$and`
+ * is commutative — while leaving the emitted DOCUMENT a function of key order,
+ * which is the property this card exists to remove. Ranking makes which
+ * constraint sits inline, and which branches are promoted, a pure function of
+ * the constraint SET: the two key orders of one predicate emit DEEP-EQUAL
+ * documents, and a test asserts exactly that.
+ *
+ * ⚠️ Deep-equal, not byte-identical, and the difference is deliberate. Writes
+ * are COLLECTED in author order and only assembled here, so refusals still fire
+ * in the order the author wrote them and an UNCONTESTED key still lands in its
+ * original insertion position — `{$between: […], $lte: x}` and its twin emit
+ * `{$gte, $lte}` with the two keys in opposite insertion order, carrying the
+ * same constraints. Nothing about a filter with no contested key changes at
+ * all.
+ *
+ * `$and` promotion is expressed as an `_extraAnd` sentinel on the returned
+ * document, lifted by `normalizeFilterCondition()` — the same shape
+ * `_multiRegex` uses beside it, and the shape `_presenceAnd` used before this
+ * subsumed it.
+ */
+function assembleLoweredWrites(writes: readonly LoweredWrite[]): Record<string, any> {
+  const result: Record<string, any> = {};
+  const byKey = new Map<string, LoweredWrite[]>();
+  for (const write of writes) {
+    const group = byKey.get(write.key);
+    if (group) group.push(write);
+    else byKey.set(write.key, [write]);
+  }
+  const extraAnd: Record<string, any>[] = [];
+  for (const [key, group] of byKey) {
+    // Single writer is the common case and must not be perturbed at all.
+    if (group.length > 1) {
+      group.sort(
+        (a, b) =>
+          (FIELD_OPERATOR_RANK.get(a.op) ?? Number.MAX_SAFE_INTEGER) -
+          (FIELD_OPERATOR_RANK.get(b.op) ?? Number.MAX_SAFE_INTEGER),
+      );
+    }
+    result[key] = group[0]!.value;
+    for (let i = 1; i < group.length; i++) extraAnd.push({ [key]: group[i]!.value });
+  }
+  if (extraAnd.length > 0) result._extraAnd = extraAnd;
+  return result;
+}
 
 /**
  * Persistence adapter interface.
@@ -1130,6 +1252,18 @@ export class InMemoryDriver implements IDataDriver {
           continue;
         }
         const normalized = this.normalizeFieldOperators(value, this.temporalKind(object, key), key, here);
+        // [#13524] Lowered writes whose mingo key was already taken by a
+        // sibling operator on the same field. They cannot be merged without one
+        // of the two constraints silently overwriting the other, so each
+        // becomes its own `$and` branch — see `assembleLoweredWrites()`. This
+        // consumed a single `_presenceAnd` when the guard covered `$exists`
+        // alone (#13195); it is a LIST now because the class has several
+        // members and one field constraint can contest more than one key.
+        if (normalized._extraAnd) {
+          const promoted: Record<string, any>[] = normalized._extraAnd;
+          delete normalized._extraAnd;
+          for (const branch of promoted) extraAndConditions.push({ [key]: branch });
+        }
         // Handle multiple regex conditions on the same field (e.g. $startsWith + $endsWith)
         if (normalized._multiRegex) {
           const regexConditions: Record<string, any>[] = normalized._multiRegex;
@@ -1174,11 +1308,24 @@ export class InMemoryDriver implements IDataDriver {
    */
   private normalizeFieldOperators(ops: Record<string, any>, kind?: TemporalFieldKind, field = '<field>', path = 'filter'): Record<string, any> {
     const store = (v: any) => coerceTemporalValue(v, kind);
-    const result: Record<string, any> = {};
     const regexConditions: Record<string, any>[] = [];
+    /**
+     * [#13524] Every lowered write, collected in AUTHOR order and assembled by
+     * {@link assembleLoweredWrites} after the loop. Collected rather than
+     * assigned because an arm cannot know whether the key it wants is already
+     * spoken for by a sibling operator the author wrote LATER — which is the
+     * whole of the defect this replaces. It also subsumes #13195's
+     * single-operator `presence` collection: `$exists` is now one writer among
+     * eighteen, ranked by the same rule as the rest.
+     */
+    const writes: LoweredWrite[] = [];
 
     for (const op of Object.keys(ops)) {
       const val = ops[op];
+      /** Record one lowered write for the operator this iteration is on. */
+      const put = (loweredKey: string, value: any): void => {
+        writes.push({ op, key: loweredKey, value });
+      };
       switch (op) {
         // [#6682] Case-SENSITIVE, the same four arms as the AST spelling one
         // method up (`convertConditionToMongo`) and for the same reason — see
@@ -1188,7 +1335,7 @@ export class InMemoryDriver implements IDataDriver {
           regexConditions.push({ $regex: new RegExp(this.escapeRegex(val)) });
           break;
         case '$notContains':
-          result.$not = { $regex: new RegExp(this.escapeRegex(val)) };
+          put('$not', { $regex: new RegExp(this.escapeRegex(val)) });
           break;
         case '$startsWith':
           regexConditions.push({ $regex: new RegExp(`^${this.escapeRegex(val)}`) });
@@ -1247,20 +1394,23 @@ export class InMemoryDriver implements IDataDriver {
           // range simply vanished, and no one was told. The shape gate refuses
           // it now; this throw is the totality floor.
           if (!Array.isArray(val) || val.length !== 2) throw malformedBetweenError(field, val, `${path}.$between`);
-          result.$gte = store(val[0]);
+          put('$gte', store(val[0]));
           // Bare-day max → half-open, inheriting `$lte`'s whole-day rule (#4042).
           const betweenNextDay = nextUtcCalendarDay(val[1]);
-          if (betweenNextDay != null) result.$lt = store(betweenNextDay);
-          else result.$lte = store(val[1]);
+          if (betweenNextDay != null) put('$lt', store(betweenNextDay));
+          else put('$lte', store(val[1]));
           break;
         }
         case '$lte': {
           // A bare-day upper bound means "through that whole day" (#4042; the
           // driver-sql twin is #3777). Order-equivalent to `<=` for plain
           // `YYYY-MM-DD` values, so it applies without a field-type lookup.
+          // [#13524] `$lt` here is a key an AUTHOR can also write — this arm is
+          // the member of the clobber class no card had named. See
+          // {@link assembleLoweredWrites}.
           const nextDay = nextUtcCalendarDay(val);
-          if (nextDay != null) result.$lt = store(nextDay);
-          else result.$lte = store(val);
+          if (nextDay != null) put('$lt', store(nextDay));
+          else put('$lte', store(val));
           break;
         }
         case '$null':
@@ -1277,20 +1427,38 @@ export class InMemoryDriver implements IDataDriver {
           // keeps beside it.
           if (typeof val !== 'boolean') throw nonBooleanNullComparandError(field, val, `${path}.$null`);
           if (val === true) {
-            result.$eq = null;
+            put('$eq', null);
           } else {
-            result.$ne = null;
+            put('$ne', null);
           }
           break;
         // Value comparisons take the field's storage form (#4047); the null /
         // existence predicates above are value-independent and must not.
         case '$eq': case '$ne': case '$gt': case '$gte': case '$lt':
         case '$in': case '$nin':
-          result[op] = store(val);
+          put(op, store(val));
           break;
-        // Evaluated by mingo under the same name. `$exists` is a presence
-        // predicate, not a comparand, so it does not take the field's storage
-        // form (#4047).
+        // [#13195] `$exists` means "the field HAS A VALUE" (`!= null`), never
+        // key presence — #5298 leg 3 / #5369, landed in PR #5962, and ruled
+        // onto this exit by the maintainer on 2026-08-30.
+        //
+        // It used to be `result[op] = val`: the operator went to mingo under
+        // its own name, and mingo evaluates `$exists` as KEY PRESENCE. So a row
+        // storing an explicit `null` — how a SQL NULL round-trips into a record
+        // — satisfied `$exists: true` here while the reference matcher one file
+        // over said it had no value, and `$exists: false` returned NOTHING at
+        // all where the caller asked for the rows with no value. Silent
+        // absence, not visible surplus, which is the trade
+        // `filter-logic-conformance.ts` calls the worse one.
+        //
+        // The lowering is not an invention: it is the spelling `$null` already
+        // uses fifteen lines up, and mingo answers it has-value on BOTH
+        // readings of "no value" — a stored `null` and an ABSENT KEY — so the
+        // key-absent column, which already agreed with the ruling, is unmoved.
+        //
+        // Value comparisons take the field's storage form (#4047); this one is
+        // a presence predicate, so its `null` is written literally, exactly as
+        // the `$null` arm writes its own.
         //
         // [#5702] `$regex` and `$options` were passed through here too, on the
         // same line, for the same "not a comparand" reason. Both are RETIRED
@@ -1299,7 +1467,11 @@ export class InMemoryDriver implements IDataDriver {
         // evaluation arm for a refused operator is exactly what let this
         // driver's two faces answer one `$regex` differently for so long.
         case '$exists':
-          result[op] = val;
+          // Collected, not assigned: the assembly has to know whether the key
+          // this lowers to is already spoken for. [#13524] Since the class was
+          // generalised this arm is no longer special — it `put`s like every
+          // other writer and the shared rule ranks it.
+          put(val === true ? '$ne' : '$eq', null);
           break;
         default:
           // [#5324] Was `result[op] = val` — a GENERIC passthrough that handed
@@ -1310,6 +1482,19 @@ export class InMemoryDriver implements IDataDriver {
           throw unknownFieldOperatorError(op, field, path);
       }
     }
+
+    // [#13524] Assemble every lowered write, and do NOT let one clobber another.
+    //
+    // #13195 landed this rule for `$exists` alone — free key merges inline, a
+    // taken key becomes its own `$and` branch — and said in this spot that the
+    // identical clobber was reachable through `$null`, `$between` and
+    // `$notContains`. Enumerating the declared vocabulary instead of the noticed
+    // operators found a fourth (`$lte` on a bare calendar day, which lowers onto
+    // `$lt`) and found `$notContains` NOT reachable, since nothing else writes
+    // `$not`. So the guard is no longer per-operator: it ranges over every
+    // writer, and `$exists` is now one of them. See
+    // {@link assembleLoweredWrites} for the enumeration and the ranking rule.
+    const result = assembleLoweredWrites(writes);
 
     // Merge regex conditions: single → inline, multiple → wrap with $and
     if (regexConditions.length === 1) {

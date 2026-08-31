@@ -1,8 +1,55 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Driver-error classification for the metadata storage seams (#4728, #4825;
- * rule from #4632).
+ * Driver-error classification: "which driver failures may be silenced?"
+ * (#4728, #4825; rule from #4632).
+ *
+ * ## Home — `@objectstack/types`, since #13279
+ *
+ * This module was born in `@objectstack/metadata` and lived there through
+ * #4728 / #4825 / #5841. `@objectstack/metadata/errors`' own docblock recorded
+ * the move now made as **option 2** — "sink it into a common dependency
+ * (`@objectstack/types`) … architecturally attractive and explicitly *not*
+ * precluded by this module — but out of scope on the round that needed it" —
+ * and kept its export as "a single, greppable seam to delete if the maintainer
+ * later takes option 2". The maintainer took option 2 on 2026-08-30.
+ *
+ * What forced it: `resolveAuthzContext` (`@objectstack/core`) must ask
+ * {@link isMissingTableError} to tell a permission-store OUTAGE from a
+ * deployment whose `sys_*` tables were never provisioned (#13279). Core cannot
+ * import `@objectstack/metadata` — metadata **depends on** core — so the
+ * predicate had to move to a package both sides already depend on, or be
+ * copied. Copying was measured and rejected: two vocabularies of "which driver
+ * errors are benign", one of them on a security path, is the exact
+ * duplication-drift this module was built to retire.
+ *
+ * `@objectstack/types` is the repo's stated Home rule for a cross-package error
+ * predicate — see `unique-violation.ts`: "because every consumer of the
+ * question already depends on it, so adopting the predicate never adds an
+ * edge", which cites *this* predicate's #5841 move as its own precedent. The
+ * edge was already there in the other direction too: the front-exclusion below
+ * has read {@link isRelationSubObjectPhrase} from this package since #6615, so
+ * the move puts the phrase and the predicate that excludes on it in one place.
+ *
+ * `@objectstack/metadata/errors` — the published subpath — remains, and now
+ * re-exports from here, so no out-of-repo consumer changed. The package's
+ * INTERNAL `utils/schema-sync-errors.ts` is gone rather than left as a
+ * forwarding stub: it carried no promise to anyone, and a file that exists only
+ * to forward is the thing that rots. Its two in-package readers
+ * (`errors.ts`, `loaders/database-loader.ts`) import this module directly.
+ *
+ * ## Both predicates moved, not one
+ *
+ * The ruling names {@link isMissingTableError}. Its sibling
+ * {@link isSchemaAlreadyExistsError} came with it because they are **not two
+ * modules** — they are two signatures over one {@link matchesDriverError}, and
+ * that sharing is the point (see the paragraph below). Leaving the sibling
+ * behind would have meant either exporting the matcher as machinery or
+ * re-rolling it in `metadata`, and the second is the duplication this module
+ * exists to prevent. `@objectstack/types` therefore publishes both; the
+ * "exported symbol nobody imports" objection recorded in
+ * `@objectstack/metadata/errors` does not apply, because after the move
+ * `metadata`'s `DatabaseLoader` **is** an outside consumer of it.
  *
  * Two questions live here, and they share one mechanism on purpose. A second
  * hand-rolled `catch`-and-guess elsewhere in this package would be a second
@@ -83,10 +130,12 @@
  * ```
  */
 
-// [#6615] The Postgres `"x" of relation "y"` phrase, owned once — see the
-// module docblock in `@objectstack/types` for the superstring hole it closes
-// and for why the exclusion's width deliberately differs from the extractor's.
-import { isRelationSubObjectPhrase } from '@objectstack/types';
+// [#6615] The Postgres `"x" of relation "y"` phrase, owned once — see
+// `relation-sub-object.ts` next door for the superstring hole it closes and for
+// why the exclusion's width deliberately differs from the extractor's. That
+// module was already this one's dependency across the package boundary; since
+// #13279 moved this file into `@objectstack/types`, the two are siblings.
+import { isRelationSubObjectPhrase } from './relation-sub-object.js';
 
 /**
  * The relation name each missing-table phrase puts on display, one capture per
@@ -323,7 +372,8 @@ const MISSING_TABLE: DriverErrorSignature = {
          *
          * [#6615] All three now read one home — `@objectstack/types` — instead
          * of three hand-kept copies, so the phrase can no longer be taught to
-         * the repo a fourth time or drift in one package only. The **width**
+         * the repo a fourth time or drift in one package only. [#13279] This
+         * file now lives in that same home, so the read is a sibling import. The **width**
          * difference that used to justify the copy is preserved and is the
          * reason the home exports two functions rather than one: those two
          * *extract* the column name to phrase a better error, so a miss costs a
@@ -462,8 +512,9 @@ export function isSchemaAlreadyExistsError(error: unknown, depth = 0): boolean {
  *
  * Pass `readObject` from every in-repo call site. It is **optional** so that
  * omitting it is exactly the pre-#13324 behaviour rather than a new loud
- * failure — this is a published export (`@objectstack/metadata/errors`), and a
- * required parameter would be a breaking change to it. The cost of the choice
+ * failure — this is a published export (`@objectstack/types`, and still
+ * `@objectstack/metadata/errors` by re-export), and a required parameter would
+ * be a breaking change to it. The cost of the choice
  * is that the narrowing is opt-in per call site: a new caller that forgets it
  * silently gets the old, wider verdict.
  *

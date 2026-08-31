@@ -20,11 +20,31 @@
  * implementation; both entry points are thin adapters that supply `ql` /
  * `getSession` their own way and delegate here.
  *
- * Fail-closed: every read is defensive. Missing services / tables yield a
- * partial context (even `{ positions: [], permissions: [] }`) — enforcement is the
- * SecurityPlugin's job, never this resolver's.
+ * Fail-closed: every read is defensive about a MISSING service — an unwired
+ * `ql` yields a partial context (even `{ positions: [], permissions: [] }`) and
+ * enforcement stays the SecurityPlugin's job, never this resolver's.
+ *
+ * ⚠️ [#13279] A FAILED read is not a missing service, and since the 2026-08-30
+ * ruling the two no longer share an answer. When a permission-store read is
+ * issued and THROWS, this resolver raises {@link AuthzStoreUnavailableError}
+ * instead of reporting an empty grant set: an outage must not be answerable as
+ * a capability denial. See `authz-store-unavailable.ts` for the full reasoning
+ * and for why the failure is a throw rather than a field on the envelope.
+ *
+ * ⚠️ …with ONE positively-identified exception, ruled the same day: a read that
+ * failed because the table was never PROVISIONED is quiet, because there
+ * "zero capabilities" is the true answer rather than an invention. The full
+ * boundary, the ruling's verbatim text and the risk signed off with it are in
+ * `tryFind`'s `catch` — read that before changing anything on this path.
  */
 
+import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
+// [#13279, ruled 2026-08-30] The one "was this READ failure just an
+// unprovisioned table?" predicate. It was `@objectstack/metadata`'s until this
+// resolver needed it; metadata depends on core, so the ruling relocated it to
+// `@objectstack/types` — which core already depends on — rather than let a
+// second copy of a security-relevant classifier exist. See `tryFind`'s catch.
+import { isMissingTableError } from '@objectstack/types';
 import {
   mapMembershipRole,
   BUILTIN_IDENTITY_PLATFORM_ADMIN,
@@ -148,14 +168,86 @@ async function tryFind(
     let rows = await ql.find(object, { where, limit, context } as any);
     if (rows && (rows as any).value) rows = (rows as any).value;
     return Array.isArray(rows) ? rows : [];
-  } catch {
-    return [];
+  } catch (err) {
+    // [#13279] THE loud failure. This `catch` used to `return []`, which made a
+    // FAILED read and an EMPTY one the same answer — so an outage of the
+    // permission store resolved as an authenticated principal holding zero
+    // capabilities, and the door answered a `403` byte-identical to a genuine
+    // capability denial. Ruled 2026-08-30: distinguish the two, and fail LOUD.
+    //
+    // ⚠️ The `!ql` guard ABOVE deliberately still returns `[]`: "no engine is
+    // wired" is not a failed read, and an embedder that never configured a data
+    // plane must keep resolving to an empty-but-valid envelope exactly as
+    // before. Only a read that was ISSUED and THREW reaches here.
+    //
+    // ── The boundary, and the risk signed off with it ──────────────────────
+    //
+    // "The read failed" is NOT one fact, and the first implementation of this
+    // ruling proved it by turning four CI suites red. A read also throws when
+    // the table was never PROVISIONED — a real engine, wired and reachable,
+    // whose `sys_*` tables were never created. That is a supported, deliberately
+    // tested deployment shape; `packages/runtime`'s
+    // `notifications.hono.integration.test.ts` names it `ABSENT_AUTHZ_TABLES`.
+    // There, "zero capabilities" is the TRUE answer rather than a fabrication:
+    // nothing is provisioned, so nothing was withheld. Only an UNREACHABLE
+    // store — the ruling's own word 不可达 — leaves the answer UNKNOWN, and only
+    // an unknown answer may not be reported as a capability denial.
+    //
+    // Maintainer ruling, 2026-08-30, 第 5 场总监席决裁批 #9, verbatim:
+    //
+    //   > 采选项 A —— 把 `isMissingTableError` 从 `@objectstack/metadata` 迁至
+    //   > `@objectstack/types`(core 已依赖);metadata 保留 re-export 兼容;
+    //   > `tryFind` 仅对未被判定为「表未 provision」的读失败抛
+    //   > `AuthzStoreUnavailableError`(SERVICE_UNAVAILABLE / 503)。
+    //
+    // ⚠️⚠️ THE SIGNED-OFF RISK — beside the predicate, as the ruling requires.
+    // Ruling, verbatim:
+    //
+    //   > 签字在案:基于 driver 错误码的表缺失判定获准在安全路径上门控响亮性;
+    //   > 其假阳方向(误判「表缺失」⇒ 静默恢复安静 403)是本裁定接受的已知风险,
+    //   > 须在谓词旁注释写明并以测试钉住两个方向(真 outage ⇒ 响;真未 provision
+    //   > ⇒ 零能力为真答案,不响)。
+    //
+    // Plainly: this predicate now GATES loudness on a security path. Its
+    // false-POSITIVE direction — calling a genuine outage "table not
+    // provisioned" — silently restores the quiet 403 this card exists to
+    // remove, with no thrown error, no log line, and no other failing test to
+    // notice it. That direction is an ACCEPTED, RECORDED risk, not an
+    // oversight. It is acceptable because the predicate keys on driver CODES,
+    // SQLSTATEs and errnos first, excludes the known superstring traps up
+    // front, and returns `false` for anything it does not POSITIVELY
+    // recognise — an unrecognised outage stays loud by default.
+    //
+    // ⛔ Do NOT widen `isMissingTableError` to make a first boot quieter: every
+    // widening moves outages into this quiet branch. ⛔ Do NOT add a second
+    // predicate here to hedge the accepted risk — a hedge makes loudness
+    // conditional on two classifiers agreeing, which is strictly more ways to
+    // fall silent, and the maintainer signed off the single-classifier design.
+    // Both directions are pinned by name in `authz-store-unavailable.test.ts`
+    // ('THE OUTAGE DIRECTION' / 'THE UNPROVISIONED DIRECTION'); keep them.
+    //
+    // `object` is passed as `readObject` so the #13324 narrowing applies: a
+    // phrase that names some OTHER relation is not evidence about the table
+    // this read asked for, and stays loud.
+    if (isMissingTableError(err, object)) return [];
+    throw new AuthzStoreUnavailableError(object, err);
   }
 }
 
 /**
- * Resolve the authorization context for an inbound request. Always resolves —
- * never throws. Anonymous requests yield `{ positions: [], permissions: [], ... }`.
+ * Resolve the authorization context for an inbound request. Anonymous requests
+ * yield `{ positions: [], permissions: [], ... }`.
+ *
+ * ⚠️ [#13279] This function used to document itself as "Always resolves — never
+ * throws", and that total guarantee WAS the defect: the only way to always
+ * resolve across a permission-store outage is to report a capability set the
+ * resolver never actually read. It now throws exactly one error —
+ * {@link AuthzStoreUnavailableError}, when a permission-store read was issued
+ * and failed FOR A REASON THAT IS NOT AN UNPROVISIONED TABLE. Every other path
+ * still resolves, including every MISSING-service path and every
+ * never-provisioned one. A transport that fails closed on unexpected throws should re-raise this
+ * one ({@link isAuthzStoreUnavailableError}) rather than degrade it to a
+ * refusal — degrading it restores the disguise the ruling removed.
  */
 export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<ResolvedAuthzContext> {
   const { ql, headers } = input;
@@ -341,8 +433,14 @@ export interface ResolveUserAuthzGrantsOptions {
  * automation engine calls this to run the flow's data ops exactly as that user
  * — not the bare member/everyone fallback the missing grants used to leave it.
  *
- * Fail-closed like its parent: every read is defensive, a missing engine/table
- * yields an empty-but-valid envelope, and it never throws.
+ * Fail-closed like its parent: a missing engine yields an empty-but-valid
+ * envelope.
+ *
+ * ⚠️ [#13279] "and it never throws" was removed from this sentence deliberately.
+ * A permission-store read that is issued and FAILS now raises
+ * {@link AuthzStoreUnavailableError} rather than contributing an empty grant
+ * set, so a `runAs:'user'` automation cannot silently run with the authority of
+ * a user whose grants were never read.
  */
 export async function resolveUserAuthzGrants(
   ql: any,

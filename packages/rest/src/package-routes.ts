@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { IHttpServer, shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE } from '@objectstack/core';
+import { IHttpServer, shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, rethrowAuthzStoreUnavailable } from '@objectstack/core';
 // [#7020] The read cohort names the READ-ONLY half of the ADR-0106 D4 exemption
 // on purpose: `OBJECT_SCHEMA_MASK_EXEMPT_CAPABILITIES` became the derived union
 // (write gate ∪ read-only exemptions) under the 2026-08-10 ruling, while this
@@ -77,8 +77,13 @@ async function refusePackageRequest(
   res: any,
   kind: 'read' | 'write',
 ): Promise<boolean> {
+  // [#13279] The gate's OWN net. `rethrowAuthzStoreUnavailable` keeps the
+  // fail-closed default for every fault except a permission-store outage, which
+  // must reach `handlePackageRouteError` and be answered as the 503
+  // `SERVICE_UNAVAILABLE` it is — never as a capability denial the caller could
+  // mistake for "you lack `studio.access`".
   const ctx = options.resolveExecutionContext
-    ? await options.resolveExecutionContext(req).catch(() => undefined)
+    ? await options.resolveExecutionContext(req).catch(rethrowAuthzStoreUnavailable)
     : undefined;
   // Anonymous-deny floor. This direct-mount surface DECLARES the wrapped
   // BaseResponseSchema envelope — every other body here goes through

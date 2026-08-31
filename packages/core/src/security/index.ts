@@ -85,6 +85,18 @@ export {
   type TenancyPostureSource,
 } from './api-key.js';
 
+// [#13279] The LOUD failure an unreachable permission store raises, and the
+// brand predicate a fail-closed `catch` uses to re-raise it instead of
+// degrading an outage into a capability denial. Ruled 2026-08-30.
+export {
+  AuthzStoreUnavailableError,
+  isAuthzStoreUnavailableError,
+  rethrowAuthzStoreUnavailable,
+  AUTHZ_STORE_UNAVAILABLE_STATUS,
+  AUTHZ_STORE_UNAVAILABLE_CODE,
+  AUTHZ_STORE_UNAVAILABLE_MESSAGE,
+} from './authz-store-unavailable.js';
+
 export {
   resolveAuthzContext,
   resolveUserAuthzGrants,

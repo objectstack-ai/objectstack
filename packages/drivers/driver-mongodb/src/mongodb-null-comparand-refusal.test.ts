@@ -139,7 +139,10 @@ describe('[#5347] driver-mongodb refuses a non-boolean $null comparand', () => {
     expect(translateFilter({ stage: 'won' })).toEqual({ stage: 'won' });
     expect(translateFilter({ stage: { $in: ['won'] } })).toEqual({ stage: { $in: ['won'] } });
     expect(translateFilter({ score: { $between: [1, 2] } })).toEqual({ score: { $gte: 1, $lte: 2 } });
-    expect(translateFilter({ stage: { $exists: true } })).toEqual({ stage: { $exists: true } });
+    // [#13195, ruled 2026-08-30] `$exists` lowers to the nullness test now —
+    // has-value, not key-presence. The point of this line is unchanged: the
+    // operator is still ACCEPTED here, and only `$null`'s comparand is refused.
+    expect(translateFilter({ stage: { $exists: true } })).toEqual({ stage: { $ne: null } });
     expect(translateFilter({})).toEqual({});
   });
 
