@@ -354,7 +354,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
-import { maskComments } from './js-comment-mask.mjs';
+import { blank, maskComments, scanSource } from './js-comment-mask.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -385,6 +385,7 @@ export const CATEGORIES = [
   'already-registered',
   'no-migration-prescription',
   'runtime-interface-only',
+  'type-surface-only',
 ];
 
 /** The ADR whose disposition vocabulary this gate enforces (#8299). */
@@ -2150,6 +2151,501 @@ export function verifyRuntimeInterfaceOnly(refs, { rev, cwd, packages }) {
 }
 
 // ---------------------------------------------------------------------------
+// The sixth category: `type-surface-only` (#13080)
+//
+// ## The dead end this closes, measured before it was built
+//
+// A PUBLISHED TYPE-SURFACE NARROWING -- a published SDK method whose declared
+// return moves off `any` onto the contract it always answered -- declares
+// `**BREAKING**` truthfully: `any` is assignable to everything and admits every
+// property read, so a consumer's code can stop compiling. It then finds every
+// disposition above closed to it. Measured on the real #12104 shape, driven
+// through the shipping `scan()`:
+//
+//   registered              refused -- no id is new in the diff, and writing one
+//                                      would put a prescription in the ledger that
+//                                      `objectstack migrate meta`, `spec-changes.json`
+//                                      and the upgrade guide cannot project. False
+//                                      data in the one ledger this gate keeps true.
+//   unpublished             refused -- `@objectstack/client` publishes to npm.
+//   already-registered      the gate ADMITS it, and that is the whole problem: it
+//                                      verifies that the id RESOLVES and PRE-DATES the
+//                                      base, never that the entry COVERS this change.
+//                                      The only thing closing it is the author's
+//                                      honesty, which is not a mechanism.
+//   no-migration-prescription
+//                           refused -- the body carries a FROM/TO block. "A changeset
+//                                      that ships instructions for rewriting a
+//                                      consumer's code cannot also claim that no
+//                                      consumer has to rewrite anything."
+//   runtime-interface-only  refused -- it inherits that same refusal (#8299).
+//
+// So the exit the gate names in its own refusal text -- "use a category that can
+// be verified (`unpublished`, `already-registered`)" -- is factually false here,
+// and the move that remains is to DROP the `**BREAKING**` token. Four changesets
+// took it (#8140, #11925, #12034, #12104). That is the erosion #13080 was filed
+// about: a whole recurring class of genuinely compile-breaking change nudged away
+// from this repo's breaking-change marker, purely because the marker routes it
+// into a ledger it does not belong in -- and the erosion is invisible, because
+// every gate stays green.
+//
+// ## What the class is, and why the ledger is the wrong channel
+//
+// The affected party is a TYPESCRIPT CONSUMER and the delivery channel is the
+// COMPILER at their own call site. The ADR-0087 ledger serves METADATA UPGRADERS;
+// `objectstack migrate meta` rewrites stored metadata and has nothing to reach
+// when the only thing that moved is a type annotation. `no-migration-prescription`
+// is not wrong in general -- #6048 is exactly the shape it was built to catch --
+// it simply cannot tell "a prescription for a METADATA upgrader" from "a
+// prescription for a SOURCE-CODE consumer", and only the first is the ledger's
+// business.
+//
+// ## Why this is a NARROWING and not a hole -- predicate 4 carries all of it
+//
+// This category is the only one that is EXEMPT from the `no-migration-prescription`
+// refusal, so it is the only place in this file where something the detector
+// refuses today becomes claimable. That exemption is not free: it is bought
+// entirely by predicate 4, and the maintainer's ruling (2026-08-30) says so in as
+// many words -- 豁免的安全性由谓词④承载,保持豁免是收窄而非洞.
+//
+// The ruling's own worked measurement is why predicate 4 exists at all. Predicates
+// 1-3 alone were measured against the case this gate was FOUNDED on, and they do
+// not separate it: on reconstructed diffs the #12104 shipping half and the #6048
+// shape come out IDENTICAL on all three -- published, no `packages/spec` movement,
+// no metadata surface -- so both would be admitted. And `no-migration-prescription`
+// is the ONLY guard currently holding #6048 out. Exempting a category from it
+// while checking only 1-3 hands #6048 a green exit: a measured regression of the
+// founding case, not a hypothetical.
+//
+// Predicate 4 refuses it on a POSITIVE, RE-RUNNABLE READING rather than on a
+// detector miss -- the same method #8299 used. #6048's symbol
+// (`packages/runtime/src/security/actor-user.ts#ActorUser`) is a concretely typed
+// exported interface at the merge base that LOST a runtime member; the narrowing
+// class this category serves starts from `any` / `unknown` / no annotation at all.
+// Base-side type is the reading that separates them, and it is a reading, not an
+// inference. `verifyRuntimeInterfaceOnly` accepts #6048's symbol without a
+// complaint, so nothing else in this file was going to.
+//
+// ⛔ NEVER weaken predicate 4 to make something else pass. It is not one check of
+// four; it is the reason the other three are allowed to skip the prescription
+// refusal at all.
+//
+// ## What is deliberately NOT checked here
+//
+// **Whether the HEAD type is the RIGHT type.** Whether `AnalyticsResult` is what
+// the route actually answers is a question about a producer, settled by driving
+// it -- which is what the changesets in this class do, and what no diff reader
+// could. This gate asks only whether the surface moved OFF an erased type.
+//
+// **Whether the awaited type resolves to `any` through a chain.** This is a
+// SOURCE-TEXT reading. Its neighbour `check:exported-any-returns` judges the same
+// question against the BUILT dist, precisely because the erasure is invisible in
+// source when a method carries no annotation (`packages/client/exported-any-returns.json`
+// carries that argument). The two are complementary and the division is
+// deliberate: this predicate reads what the author WROTE at two revs, which is
+// what "was it narrowed in this diff" means; the dist-judged census owns "does it
+// still resolve to `any`".
+//
+// **The completeness of the claim.** Like `registered` and `runtime-interface-only`,
+// this judges the claim that was MADE. Inferring the whole touched surface is the
+// cross-package retirement detector the 2026-08-07 ruling routes around.
+//
+// **A member that was unannotated at base but INFERRED a concrete type.** Adding
+// an annotation that drops a member from such a method is a real break predicate 4
+// admits. Stated rather than hidden: predicate 4's subject is the ledger's
+// audience, not every possible break, and 1-3 still hold for it -- the compiler is
+// still the channel, the ledger still has nothing to rewrite. What predicate 4 is
+// specified to refuse is the #6048 shape: a symbol with a CONCRETE NAMED TYPE at
+// base. That case reads as concrete and is refused.
+// ---------------------------------------------------------------------------
+
+/** `packages/spec/**` -- predicate 2's subject, as a path prefix. */
+const SPEC_PACKAGE_DIR = 'packages/spec/';
+
+/**
+ * The four predicates, BY NAME.
+ *
+ * Named rather than counted on purpose. A self-test asserting "4 predicates were
+ * checked" goes green the moment one is silently swapped for another, and this
+ * tree has catalogued instruments with exactly that defect. Every predicate this
+ * category is admitted on appears here, and the self-test pins the SET.
+ */
+export const TYPE_SURFACE_PREDICATES = [
+  'published',
+  'no-spec-diff',
+  'no-metadata-surface-diff',
+  'narrowed-from-erased',
+];
+
+/** Every path this diff touches, for predicates 2 and 3. */
+export function changedPathsBetween(from, head, cwd) {
+  let out;
+  try { out = git(['diff', '--name-only', from, head], cwd); } catch { return null; }
+  return out.split('\n').map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * `Promise< X >` unwrapped to `X`, but ONLY when the wrapper spans the WHOLE type.
+ *
+ * The whole-string condition is the safe direction and it is not decoration: a
+ * greedy `^Promise<(.*)>$` reads `Promise< any > | undefined` as `any> | undefined`
+ * and a lazy one reads `Promise< A > | Promise< B >` as `A`. Both are wrong, and
+ * one of them is wrong in the ADMITTING direction. A bracket walk that must land
+ * exactly on the last character cannot make either mistake.
+ */
+export function unwrapPromise(text) {
+  const m = /^(?:Promise|PromiseLike)\s*</.exec(text);
+  if (!m) return null;
+  let depth = 0;
+  for (let i = m[0].length - 1; i < text.length; i++) {
+    if (text[i] === '<') depth++;
+    else if (text[i] === '>') {
+      depth--;
+      if (depth === 0) return i === text.length - 1 ? text.slice(m[0].length, i).trim() : null;
+    }
+  }
+  return null;
+}
+
+/**
+ * Is this declared type ERASED -- i.e. `any` or `unknown`, awaited?
+ *
+ * The line is "the type IS `any`", never "the type CONTAINS `any`". That is the
+ * same line `packages/client/exported-any-returns.json` and `packages/spec`'s
+ * `check:exported-any` draw, and its header states why: admitting the broader
+ * question costs those gates their zero-false-positive property. Here the cost
+ * would land in the ADMITTING direction as well -- `{ rows: any[] }` at base is a
+ * concrete object type, and a change that alters its members is not this
+ * category's class.
+ */
+export function isErasedType(text) {
+  if (text === null || text === undefined) return true; // no annotation at all
+  let s = String(text).trim().replace(/[;,]$/, '').trim();
+  for (;;) {
+    const inner = unwrapPromise(s);
+    if (inner === null) break;
+    s = inner;
+  }
+  return /^(?:any|unknown)$/.test(s);
+}
+
+/** Comment AND string spans blanked -- offsets preserved. The house scanner, not a private one. */
+function maskCommentsAndLiterals(source) {
+  const { comment, literal } = scanSource(source);
+  const flags = comment.map((c, i) => c || literal[i]);
+  return blank(source, flags);
+}
+
+/**
+ * The type text of a `<symbol>(...)` RETURN ANNOTATION, or a stated absence.
+ *
+ * `exportedTypeDeclaration` reads `export interface|type|class|enum <Symbol>` and
+ * nothing else, and MEASURED AGAINST THE POPULATION THIS CATEGORY SERVES that is
+ * not enough: three of the four live instances narrow a METHOD RETURN, not an
+ * exported type. `b15d260d1` (the #12104 shipping half) is
+ * `queryDataset: async (payload) => {` becoming
+ * `queryDataset: async (payload): Promise< AnalyticsResult > => {`, and there is no
+ * exported type declaration anywhere in that diff. A category that could not read
+ * that shape would be born unable to serve its own population -- the #13080 defect
+ * one layer down.
+ *
+ * ⚠️ This is a SIBLING of `exportedTypeDeclaration`, not a diff reader: it reads
+ * ONE named symbol in ONE file at ONE rev. The 2026-08-30 ruling forbids giving
+ * this gate a TS-aware DIFF reader (predicate A, which would classify every edit
+ * in the diff as a type position or not); it does not forbid reading a declaration.
+ * Nothing here looks at a diff.
+ *
+ * The parameter list is walked with brackets balanced over comment- and
+ * string-masked text, because a `)` inside a default value is otherwise the end of
+ * the list. The return type then runs to the arrow, the body brace or a `;`.
+ *
+ * @returns {{ annotation: string|null }|null} `null` when no such member is found;
+ *   `annotation: null` when it is found and carries NO return annotation.
+ */
+export function memberReturnAnnotation(text, symbol) {
+  const masked = maskCommentsAndLiterals(text);
+  // `[^\w$.]` excludes a leading dot, so `client.analytics.query(` -- a CALL --
+  // is never mistaken for a declaration of `query`.
+  const head = new RegExp(`(?:^|[^\\w$.])${symbol}\\s*(?:[:=]\\s*)?(?:async\\s+)?(?:<[^<>]*>\\s*)?\\(`, 'g');
+  for (const m of masked.matchAll(head)) {
+    const open = m.index + m[0].length - 1;
+    let depth = 0;
+    let close = -1;
+    for (let i = open; i < masked.length; i++) {
+      const c = masked[i];
+      if (c === '(' || c === '[' || c === '{') depth++;
+      else if (c === ')' || c === ']' || c === '}') { depth--; if (depth === 0) { close = i; break; } }
+    }
+    if (close < 0) continue;
+    const tail = masked.slice(close + 1);
+    const colon = /^\s*:/.exec(tail);
+    if (!colon) {
+      // No annotation. It is a DEFINITION only if a body or an arrow follows;
+      // otherwise this was a call expression and the next candidate is scanned.
+      if (/^\s*(?:=>|\{)/.test(tail)) return { annotation: null };
+      continue;
+    }
+    // Walk the type text to the arrow / body / terminator, at bracket depth 0.
+    let d = 0;
+    let acc = '';
+    for (let i = colon[0].length; i < tail.length; i++) {
+      const c = tail[i];
+      if (d === 0 && c === '=' && tail[i + 1] === '>') break;
+      if (d === 0 && (c === ';' || c === ',')) break;
+      if (c === '{' && d === 0 && acc.trim() !== '' && !/[|&<=:]$/.test(acc.trim())) break; // the body brace
+      if (c === '(' || c === '[' || c === '{' || c === '<') d++;
+      else if (c === ')' || c === ']' || c === '}') d--;
+      else if (c === '>' && d > 0) d--;
+      acc += c;
+    }
+    const annotation = acc.trim();
+    // Slicing the RAW text at the same offsets returns the author's own bytes:
+    // masking preserves offsets, and a masked string literal inside a type
+    // (`'a' | 'b'`) would otherwise be reported back as blanks.
+    const rawStart = close + 1 + colon[0].length;
+    const raw = text.slice(rawStart, rawStart + acc.length).trim();
+    return { annotation: raw.length === annotation.length ? raw : annotation };
+  }
+  return null;
+}
+
+/**
+ * What this gate can read about `symbol`'s declared type at one rev, from SOURCE.
+ *
+ * Two shapes, in order: the exported type declaration `exportedTypeDeclaration`
+ * already owns, then the member return annotation above. `null` means the symbol
+ * is not readable here at all -- which predicate 4 treats as a REFUSAL on the base
+ * side, never as "it must have been erased".
+ *
+ * @returns {{ shape: string, type: string|null, erased: boolean }|null}
+ */
+export function readDeclaredTypeSurface(text, symbol) {
+  const masked = maskComments(text);
+  const exported = exportedTypeDeclaration(masked, symbol);
+  if (exported) {
+    if (exported.kind !== 'type') {
+      // An `interface` / `class` / `enum` is a named STRUCTURAL declaration. It is
+      // never `any`, and #6048's symbol is exactly this shape at base.
+      return { shape: `an exported \`${exported.kind} ${symbol}\``, type: symbol, erased: false };
+    }
+    const rhs = /^\s*(?:<[^=]*>)?\s*=\s*([\s\S]*?);/.exec(`${exported.rest}\n${masked.slice(masked.indexOf(exported.rest) + exported.rest.length)}`);
+    const rhsText = rhs ? rhs[1].replace(/\s+/g, ' ').trim() : null;
+    return {
+      shape: `the exported \`type ${symbol}\` alias`,
+      type: rhsText,
+      erased: rhsText === null ? false : isErasedType(rhsText),
+    };
+  }
+  const member = memberReturnAnnotation(text, symbol);
+  if (member) {
+    return member.annotation === null
+      ? { shape: `\`${symbol}\`, which carries NO return annotation`, type: null, erased: true }
+      : { shape: `the return annotation of \`${symbol}\``, type: member.annotation, erased: isErasedType(member.annotation) };
+  }
+  return null;
+}
+
+/**
+ * Verify one `type-surface-only` claim: the four predicates, all four, by name.
+ *
+ * Every failure is reported (rather than the first one only) so an author sees the
+ * whole answer in one run, and every message NAMES the predicate that refused --
+ * which is what makes each red case in the self-test attributable to one predicate.
+ *
+ * @param {string[]} refs the `<path>#<Symbol>` tokens the marker named
+ * @param {{ base: string, head: string, cwd: string, bumps: {pkg: string, bump: string}[],
+ *           packages: () => Map<string, {private: boolean, file: string}>,
+ *           changedPaths: () => string[]|null }} ctx
+ * @returns {{ problems: string[], verified: {ref: string, from: string, to: string}[], checked: string[] }}
+ */
+export function verifyTypeSurfaceOnly(refs, { base, head, cwd, bumps, packages, changedPaths }) {
+  const problems = [];
+  const verified = [];
+  const checked = [];
+  const P = (name) => { checked.push(name); return name; };
+
+  // ---- predicate 1: the package really PUBLISHES ---------------------------
+  // The exact inverse of `unpublished`, on the same reading of the same
+  // manifests. A private package's break reaches no consumer, so the compiler is
+  // not the channel that makes this category honest -- `unpublished` is the
+  // truthful disposition there, and it is already checked.
+  P('published');
+  if (bumps.length === 0) {
+    problems.push(
+      '`not-required (type-surface-only)` [predicate 1: published] is on a changeset that declares\n' +
+      '      no package at all -- there is nothing to verify publishes.',
+    );
+  } else {
+    const pkgs = packages();
+    const unresolved = bumps.filter((b) => !pkgs.has(b.pkg)).map((b) => b.pkg);
+    if (unresolved.length > 0) {
+      problems.push(
+        `\`not-required (type-surface-only)\` [predicate 1: published] names package(s) with no\n` +
+        `      workspace manifest: ${unresolved.join(', ')}\n` +
+        '      The claim cannot be verified, and an unverifiable exemption is refused rather than\n' +
+        '      assumed true (#4690).',
+      );
+    } else {
+      const priv = bumps.filter((b) => pkgs.get(b.pkg).private).map((b) => b.pkg);
+      if (priv.length > 0) {
+        problems.push(
+          `\`not-required (type-surface-only)\` [predicate 1: published] is false: ${priv.join(', ')}\n` +
+          `      ${priv.length === 1 ? 'is' : 'are'} PRIVATE (\`private: true\` in ${priv.map((p) => pkgs.get(p).file).join(', ')}).\n` +
+          '      This category rests on the COMPILER being the channel that reaches consumers. A\n' +
+          '      package that ships to nobody has no such consumers, and the honest disposition that\n' +
+          '      says so is already checked:\n' +
+          '        <!-- adr-0087: not-required (unpublished) why -->',
+        );
+      }
+    }
+  }
+
+  // ---- predicates 2 and 3: nothing metadata-shaped moved in this diff -------
+  const paths = changedPaths();
+  if (paths === null || paths.length === 0) {
+    P('no-spec-diff'); P('no-metadata-surface-diff');
+    problems.push(
+      '`not-required (type-surface-only)` [predicates 2-3] cannot be verified: this diff\'s file\n' +
+      '      list could not be read, or is empty. Both predicates are statements ABOUT that list, so\n' +
+      '      with no list they assert nothing (#4690).',
+    );
+  } else {
+    P('no-spec-diff');
+    const specHits = paths.filter((p) => p.startsWith(SPEC_PACKAGE_DIR));
+    if (specHits.length > 0) {
+      problems.push(
+        `\`not-required (type-surface-only)\` [predicate 2: no-spec-diff] is false: this diff touches\n` +
+        `      ${specHits.length} path(s) under \`${SPEC_PACKAGE_DIR}\`:\n` +
+        specHits.slice(0, 5).map((p) => `        ${p}`).join('\n') +
+        (specHits.length > 5 ? `\n        ... and ${specHits.length - 5} more` : '') +
+        '\n      `packages/spec` IS the contract between metadata producers and the runtime, and both\n' +
+        '      ADR-0087 registries live inside it. A diff that moves it is not a change the compiler\n' +
+        '      alone carries, whatever else it also does.',
+      );
+    }
+    P('no-metadata-surface-diff');
+    const surfaceHits = paths.filter((p) => metadataSurfaceKind(p) !== null);
+    if (surfaceHits.length > 0) {
+      problems.push(
+        `\`not-required (type-surface-only)\` [predicate 3: no-metadata-surface-diff] is false: this\n` +
+        `      diff moves ${surfaceHits.length} ADR-0087 shape surface(s):\n` +
+        surfaceHits.slice(0, 5).map((p) => `        ${p} (${metadataSurfaceKind(p)})`).join('\n') +
+        (surfaceHits.length > 5 ? `\n        ... and ${surfaceHits.length - 5} more` : '') +
+        '\n      A Zod schema, a spec `contracts/**` entry or an object definition is exactly what\n' +
+        '      `objectstack migrate meta` reaches. When one of them moved, the ledger is a channel\n' +
+        '      that CAN carry this change, so "the compiler is the only channel" is false.',
+      );
+    }
+  }
+
+  // ---- predicate 4: the named symbol was ERASED at base, CONCRETE at HEAD ---
+  //
+  // The one that buys the prescription exemption. Read the header above before
+  // touching anything below it.
+  P('narrowed-from-erased');
+  const HOW = (badRef) =>
+    '      fix: name the narrowed symbol as `<repo-relative-path>#<Symbol>`, e.g.\n' +
+    '        <!-- adr-0087: not-required (type-surface-only ' +
+    'packages/client/src/index.ts#queryDataset) why -->\n' +
+    `      The symbol is what predicate 4 reads at BOTH revs${badRef ? ` (got: ${badRef})` : ''}.`;
+
+  if (refs.length === 0) {
+    problems.push(
+      '`not-required (type-surface-only)` [predicate 4: narrowed-from-erased] names no symbol.\n' +
+      '      The whole content of this exemption is WHICH surface moved off `any`, and predicate 4 is\n' +
+      '      what makes the category a narrowing rather than a hole. An unnamed symbol asserts\n' +
+      '      nothing checkable (#4690).\n' +
+      HOW(null),
+    );
+    return { problems, verified, checked };
+  }
+
+  for (const ref of refs) {
+    const parsedRef = parseSymbolRef(ref);
+    if (!parsedRef) {
+      problems.push(
+        `\`type-surface-only\` names "${ref}", which is not a \`<path>#<Symbol>\` reference.\n${HOW(ref)}`,
+      );
+      continue;
+    }
+    const { path, symbol } = parsedRef;
+
+    const headText = showOrNull(head, path, cwd);
+    if (headText === null) {
+      problems.push(
+        `\`type-surface-only ${ref}\` [predicate 4] names a path that does not exist at HEAD: ${path}\n` +
+        '      An exemption whose subject cannot be found is refused, never assumed true (#4690).',
+      );
+      continue;
+    }
+    const baseText = showOrNull(base, path, cwd);
+    if (baseText === null) {
+      problems.push(
+        `\`type-surface-only ${ref}\` [predicate 4] names a path that does not exist at the merge\n` +
+        `      base: ${path}\n` +
+        '      "Narrowed" is a claim about a surface that EXISTED before this diff. A path this diff\n' +
+        '      creates narrowed nothing, so there is no base-side reading to make, and predicate 4 is\n' +
+        '      the only thing holding the prescription exemption open. Refused rather than assumed.',
+      );
+      continue;
+    }
+
+    const at = readDeclaredTypeSurface(headText, symbol);
+    if (!at) {
+      problems.push(
+        `\`type-surface-only ${ref}\` [predicate 4]: ${path} declares no readable \`${symbol}\` at HEAD.\n` +
+        '      Searched for an exported `interface` / `type` / `class` / `enum` of that name, then for\n' +
+        `      a \`${symbol}(...)\` declaration carrying a return annotation.\n` +
+        HOW(null),
+      );
+      continue;
+    }
+    if (at.erased) {
+      problems.push(
+        `\`type-surface-only ${ref}\` [predicate 4: narrowed-from-erased] is false at HEAD:\n` +
+        `      ${at.shape} is still ${at.type === null ? 'UNANNOTATED' : `\`${at.type}\``}.\n` +
+        '      This category is for a surface that MOVED OFF an erased type. One that is still erased\n' +
+        '      narrowed nothing, so nothing about it can be breaking in the way this category\n' +
+        '      describes.',
+      );
+      continue;
+    }
+
+    const before = readDeclaredTypeSurface(baseText, symbol);
+    if (!before) {
+      problems.push(
+        `\`type-surface-only ${ref}\` [predicate 4] cannot be read at the merge base: ${path} exists\n` +
+        `      there, but declares no readable \`${symbol}\`.\n` +
+        '      Predicate 4 is a comparison, and an absent base-side reading is not evidence that the\n' +
+        '      surface was erased -- it is no evidence at all. Refused rather than assumed true\n' +
+        '      (#4690). If the symbol was renamed, name the base-side surface that was actually\n' +
+        '      narrowed, or use a disposition that can be checked.',
+      );
+      continue;
+    }
+    if (!before.erased) {
+      problems.push(
+        `\`type-surface-only ${ref}\` [predicate 4: narrowed-from-erased] is FALSE: at the merge base\n` +
+        `      ${before.shape} was already CONCRETE (\`${before.type}\`), not \`any\` / \`unknown\` /\n` +
+        '      unannotated.\n' +
+        '      ⛔ This is the founding case of this whole gate. PR #6048 removed the `roles` member of\n' +
+        '      a concretely typed exported interface and the ledger got nothing; the ONLY thing\n' +
+        '      holding that shape out is the `no-migration-prescription` refusal, and this category is\n' +
+        '      exempt from it. Predicate 4 is what pays for that exemption: a surface that was already\n' +
+        '      concrete did not move off `any`, and a member removed from it is exactly the class the\n' +
+        '      ledger DOES serve.\n' +
+        '      fix: register the migration.',
+      );
+      continue;
+    }
+
+    verified.push({ ref, from: before.type === null ? 'unannotated' : before.type, to: at.type ?? at.shape });
+  }
+
+  return { problems, verified, checked };
+}
+
+// ---------------------------------------------------------------------------
 // The scan
 // ---------------------------------------------------------------------------
 
@@ -2164,6 +2660,7 @@ const FIXIT = (ids) =>
     '        <!-- adr-0087: not-required (already-registered SOME-MIGRATION-ID) why -->',
     '        <!-- adr-0087: not-required (no-migration-prescription) why -->',
     '        <!-- adr-0087: not-required (runtime-interface-only path/to/file.ts#Symbol) why -->',
+    '        <!-- adr-0087: not-required (type-surface-only path/to/file.ts#Symbol) why -->',
     '',
     '      Each category is described in ADR-0087, addendum of 2026-08-13.',
   ].join('\n');
@@ -2192,6 +2689,15 @@ export function scan({ cwd, base, head = 'HEAD' }) {
   // such claim.
   let pkgsCache = null;
   const packages = () => (pkgsCache ??= workspacePackagesAt(head, cwd));
+  // Same lazy posture, and for the same reason: only a `type-surface-only` claim
+  // needs the diff's file list. A sentinel rather than `??=`, because
+  // `changedPathsBetween` returns null on a failed read and `??=` would re-run it
+  // on every symbol -- turning one refusal into N identical ones.
+  let changedCache;
+  const changedPaths = () => {
+    if (changedCache === undefined) changedCache = changedPathsBetween(from, head, cwd);
+    return changedCache;
+  };
 
   // `AMR`, not `AM`: see "Which diff rows are judged" in the header (#7045). An
   // `R` row is how a declared-breaking changeset used to arrive unseen.
@@ -2381,12 +2887,25 @@ export function scan({ cwd, base, head = 'HEAD' }) {
       continue;
     }
 
-    // The two remaining categories both assert that no consumer has a metadata
-    // rewrite to perform, so BOTH are refused by a body that prescribes one.
-    // `runtime-interface-only` inheriting this refusal is what makes it a NARROWING
-    // of `no-migration-prescription` rather than a fifth way around it (#8299):
-    // nothing the detector refuses today becomes claimable by renaming the category.
-    const prescription = findMigrationPrescription(parsed.body);
+    // `no-migration-prescription` and `runtime-interface-only` both assert that no
+    // consumer has a metadata rewrite to perform, so BOTH are refused by a body
+    // that prescribes one. `runtime-interface-only` inheriting this refusal is what
+    // makes it a NARROWING rather than a fifth way around it (#8299).
+    //
+    // `type-surface-only` is the ONE category exempt from it (#13080, maintainer
+    // ruling 2026-08-30), and the exemption is the whole point of the category: a
+    // published TYPE-surface narrowing genuinely ships a prescription -- rewrite
+    // `(await client.analytics.query(q)).rows` as `.data.rows` -- addressed to a
+    // TYPESCRIPT CONSUMER, delivered by the compiler at their own call site. The
+    // ledger serves METADATA UPGRADERS and cannot reach them. Without the exemption
+    // the gate still refuses the exact class the category was created for; that was
+    // measured on the card before this was built.
+    //
+    // ⛔ The exemption is paid for ENTIRELY by predicate 4 of `verifyTypeSurfaceOnly`
+    // (the base-side type reading), never by this line. Predicates 1-3 were measured
+    // NOT to separate #6048 from #12104. Read that function's header before widening
+    // this condition to a second category.
+    const prescription = d.category === 'type-surface-only' ? null : findMigrationPrescription(parsed.body);
     if (prescription) {
       push(
         `\`not-required (${d.category})\` contradicts the changeset's own body, which carries\n` +
@@ -2399,7 +2918,16 @@ export function scan({ cwd, base, head = 'HEAD' }) {
         '      fix: register the migration, or -- if the prescription is genuinely for someone the\n' +
         '      ledger does not serve -- use a category that can be verified (`unpublished`,\n' +
         '      `already-registered`). `runtime-interface-only` is NOT an escape from this line: it\n' +
-        '      inherits this same refusal (#8299).',
+        '      inherits this same refusal (#8299).\n' +
+        '      One category IS exempt, and only on a positive base-side reading: if this is a\n' +
+        '      PUBLISHED TYPE-SURFACE NARROWING -- a symbol that was `any` / `unknown` / unannotated\n' +
+        '      at the merge base and is concrete at HEAD, in a diff that moves no `packages/spec`\n' +
+        '      path and no ADR-0087 shape surface -- then the prescription is addressed to a\n' +
+        '      TypeScript consumer and the compiler delivers it (#13080):\n' +
+        '        <!-- adr-0087: not-required (type-surface-only path/to/file.ts#Symbol) why -->\n' +
+        '      ⛔ Do NOT reach for it by dropping the `**BREAKING**` token instead. That was the only\n' +
+        '      move this gate used to leave open and four changesets took it; it is what #13080 was\n' +
+        '      filed to stop.',
       );
       continue;
     }
@@ -2413,6 +2941,21 @@ export function scan({ cwd, base, head = 'HEAD' }) {
       judged.push({
         file, verdict: 'not-required', category: d.category, ids: d.ids, why: d.why, signals: decl.signals,
         detail: verified.map((v) => `${v.ref} (${v.kind})`).join(', '),
+      });
+      continue;
+    }
+
+    if (d.category === 'type-surface-only') {
+      const { problems: bad, verified } = verifyTypeSurfaceOnly(d.ids, {
+        base: from, head, cwd, bumps: parsed.bumps, packages, changedPaths,
+      });
+      if (bad.length > 0) {
+        for (const message of bad) push(message);
+        continue;
+      }
+      judged.push({
+        file, verdict: 'not-required', category: d.category, ids: d.ids, why: d.why, signals: decl.signals,
+        detail: verified.map((v) => `${v.ref} (${v.from} -> ${v.to})`).join(', '),
       });
       continue;
     }
@@ -3313,6 +3856,256 @@ function selfTest() {
       ),
     },
   })), [/contradicts the changeset's own body/, /NOT an escape from this line/]);
+
+  // ---- The #13080 category: `type-surface-only` ------------------------------
+  //
+  // The fixture is the REAL #12104 shape in miniature: an `@objectstack/client`
+  // method that carried NO return annotation (so its published type was
+  // `Promise< any >`, inherited from `lib.dom`'s `Response.json()`) and now
+  // declares the contract it always answered. Its changeset carries a genuine
+  // FROM/TO rewrite table, because the class really does prescribe one -- to a
+  // TypeScript consumer, delivered by the compiler.
+  //
+  // Every red below moves exactly ONE predicate off true, so each case is
+  // attributable to the predicate it is named for. The greens and reds share one
+  // fixture family for the reason RIO's do: a case that passed for another reason
+  // would not discriminate.
+  const TSO_BASE_CLIENT =
+    'export class ObjectStackClient {\n' +
+    '  analytics = {\n' +
+    '    queryDataset: async (payload: { selection: { measures: string[] } }) => {\n' +
+    "      const res = await this.fetch('/analytics/dataset/query');\n" +
+    '      return res.json();\n' +
+    '    },\n' +
+    '  };\n' +
+    '}\n';
+  const TSO_HEAD_CLIENT = TSO_BASE_CLIENT.replace(
+    'measures: string[] } }) => {',
+    'measures: string[] } }): Promise<AnalyticsResult> => {',
+  );
+  const TSO_PKGS = {
+    '@objectstack/spec': { dir: 'packages/spec', private: false },
+    '@objectstack/client': { dir: 'packages/client', private: false },
+  };
+  const TSO_WHY =
+    'the only thing that moved is a TypeScript return annotation, so `objectstack migrate meta` ' +
+    'has nothing to rewrite and the compiler reaches every affected consumer';
+  // A REAL migration prescription, in the shape the live changesets carry. Its
+  // presence is the whole point: this is the ONE category exempt from the
+  // prescription refusal, and a fixture without one would prove nothing.
+  const TSO_BODY =
+    'fix(client): bind the in-repo `return res.json()` methods, whose published type was `Promise< any >`\n\n' +
+    '**BREAKING**: `any` is assignable to everything, so a consumer can stop compiling.\n\n' +
+    '## Migration\n\n' +
+    '| you wrote | write instead |\n| --- | --- |\n' +
+    '| `(await client.analytics.query(q)).rows` | `(await client.analytics.query(q)).data.rows` |\n';
+  const TSO_CS = (inParens) =>
+    CS({ bumps: [['@objectstack/client', 'minor']], body: `${TSO_BODY}\n<!-- adr-0087: not-required (${inParens}) ${TSO_WHY} -->\n` });
+  const TSO_REF = 'packages/client/src/index.ts#queryDataset';
+  const TSO_FIXTURE = (over = {}) => ({
+    pkgs: TSO_PKGS,
+    baseFiles: { 'packages/client/src/index.ts': TSO_BASE_CLIENT, ...(over.baseFiles ?? {}) },
+    files: {
+      'packages/client/src/index.ts': TSO_HEAD_CLIENT,
+      '.changeset/x.md': TSO_CS(over.marker ?? `type-surface-only ${TSO_REF}`),
+      ...(over.files ?? {}),
+    },
+    ...(over.pkgs ? { pkgs: over.pkgs } : {}),
+  });
+
+  // TSO-G1: ALL FOUR PREDICATES TRUE -- the case the category exists for.
+  // Note what this green also proves: the body carries a framed rewrite table
+  // (`framed-table`, the #6497 branch) and the claim is admitted anyway. That is
+  // the `no-migration-prescription` EXEMPTION, and it is the only one in the file.
+  green('TSO-G1 the #12104 shape admitted: published, no spec diff, no metadata surface, narrowed off `any`',
+    run(mk(TSO_FIXTURE())));
+
+  // TSO-R1: predicate 1 off. Same everything, private package.
+  red('TSO-R1 predicate 1 (published) false: a private package', run(mk(TSO_FIXTURE({
+    pkgs: {
+      '@objectstack/spec': { dir: 'packages/spec', private: false },
+      '@objectstack/client': { dir: 'packages/client', private: true },
+    },
+  }))), [/predicate 1: published\] is false/, /@objectstack\/client/, /not-required \(unpublished\)/]);
+
+  // TSO-R2: predicate 2 off. The extra path is deliberately NOT a metadata
+  // surface, so predicate 3 stays TRUE and this case is attributable to 2 alone.
+  red('TSO-R2 predicate 2 (no-spec-diff) false: the diff touches packages/spec', run(mk(TSO_FIXTURE({
+    files: { 'packages/spec/src/notes.ts': 'export const note = 1;\n' },
+  }))), [/predicate 2: no-spec-diff\] is false/, /packages\/spec\/src\/notes\.ts/]);
+
+  // TSO-R3: predicate 3 off, and predicate 2 still TRUE -- the metadata surface
+  // is an object definition OUTSIDE `packages/spec`, which is exactly why the two
+  // predicates are separate checks rather than one path test.
+  red('TSO-R3 predicate 3 (no-metadata-surface-diff) false: an object definition moved', run(mk(TSO_FIXTURE({
+    files: { 'examples/app-crm/src/objects/account.object.ts': 'export const account = { name: "account" };\n' },
+  }))), [/predicate 3: no-metadata-surface-diff\] is false/, /account\.object\.ts/, /an object definition/]);
+
+  // TSO-R4: predicate 4 off -- the symbol was ALREADY concrete at the merge base.
+  //
+  // ⭐ This case also pins the exemption in the OTHER direction. The body carries
+  // the same prescription TSO-G1's does, so if the exemption were body-scoped
+  // rather than predicate-scoped this would be refused for CONTRADICTING ITS OWN
+  // BODY. It must be refused for predicate 4 instead, and the negative assertion
+  // below is what says so: the exemption holds, and predicate 4 alone closes it.
+  const TSO_R4 = run(mk(TSO_FIXTURE({
+    baseFiles: {
+      'packages/client/src/index.ts': TSO_BASE_CLIENT.replace(
+        'measures: string[] } }) => {',
+        'measures: string[] } }): Promise<LegacyDatasetRows> => {',
+      ),
+    },
+  })));
+  red('TSO-R4 predicate 4 (narrowed-from-erased) false: concrete at the merge base', TSO_R4,
+    [/predicate 4: narrowed-from-erased\] is FALSE/, /LegacyDatasetRows/, /#6048/]);
+  assert(
+    !/contradicts the changeset's own body/.test(TSO_R4.problems.map((p) => p.message).join('\n')),
+    'TSO-R4b: the prescription exemption is PREDICATE-scoped, not body-scoped -- a `type-surface-only` ' +
+    'claim that fails predicate 4 must be refused BY PREDICATE 4, never by the prescription refusal ' +
+    'it is exempt from',
+  );
+
+  // TSO-R5: the exemption is scoped to this ONE category. The identical body
+  // under `no-migration-prescription` still refuses -- nothing the detector
+  // refuses today became claimable by the existence of a sixth category.
+  red('TSO-R5 the exemption does not leak to `no-migration-prescription`',
+    run(mk(TSO_FIXTURE({ marker: 'no-migration-prescription' }))),
+    [/contradicts the changeset's own body/, /Evidence \(framed-table\)/]);
+
+  // TSO-R6: still erased at HEAD. A surface that did not move off `any` narrowed
+  // nothing, so there is nothing for this category to describe.
+  red('TSO-R6 predicate 4: still unannotated at HEAD', run(mk({
+    pkgs: TSO_PKGS,
+    baseFiles: { 'packages/client/src/index.ts': TSO_BASE_CLIENT },
+    files: { 'packages/client/src/index.ts': TSO_BASE_CLIENT.replace('return res.json();', 'return res.json(); // unchanged shape'), '.changeset/x.md': TSO_CS(`type-surface-only ${TSO_REF}`) },
+  })), [/is false at HEAD/, /still UNANNOTATED/]);
+
+  // TSO-R7: the path is NEW in this diff, so there is no base-side reading at
+  // all. "Narrowed" is a claim about a surface that existed before; an absent
+  // base side is no evidence, not weak evidence (#4690). This is the door a
+  // decoy symbol would otherwise walk through.
+  red('TSO-R7 predicate 4: a path this diff CREATES narrowed nothing', run(mk({
+    pkgs: TSO_PKGS,
+    files: { 'packages/client/src/index.ts': TSO_HEAD_CLIENT, '.changeset/x.md': TSO_CS(`type-surface-only ${TSO_REF}`) },
+  })), [/does not exist at the merge\n      base/, /Refused rather than assumed/]);
+
+  // ---- TSO-6048: THE REGRESSION PIN -- the founding case must never admit -----
+  //
+  // #6048 is what this whole gate was built for: it removed the `roles` member of
+  // `ActorUser` and the ledger got nothing, with every gate green. The ONLY thing
+  // holding that shape out today is the `no-migration-prescription` refusal --
+  // `verifyRuntimeInterfaceOnly` accepts its symbol without a complaint -- and
+  // `type-surface-only` is exempt from that refusal. So predicate 4 is the entire
+  // guard, and this pin is the assertion that it holds.
+  //
+  // Built from the REAL symbol, in two layers, because a fixture that drifts from
+  // the live shape is how this lane has been bitten before:
+  //
+  //   (a) a UNIT pin that reads `packages/runtime/src/security/actor-user.ts` out
+  //       of THIS repo at HEAD and asserts predicate 4's own reader calls the real
+  //       `ActorUser` CONCRETE. It cannot diverge from the tree, because it is the
+  //       tree. If the file ever moves, this is a RED that says to re-anchor the
+  //       pin -- never a silent skip (#4690).
+  //   (b) a SCAN-level pin driving the full shipping `scan()` over a two-commit
+  //       reconstruction of the #6048 diff, claiming this category.
+  const REAL_ACTOR_USER = 'packages/runtime/src/security/actor-user.ts';
+  let realActorUserText = null;
+  try { realActorUserText = readFileSync(join(REPO_ROOT, REAL_ACTOR_USER), 'utf8'); } catch { /* reported below */ }
+  assert(
+    realActorUserText !== null,
+    `TSO-6048a: the founding case's real symbol could not be read at ${REAL_ACTOR_USER}. ` +
+    'Predicate 4 is the only guard holding the #6048 shape out of `type-surface-only`, and this pin ' +
+    'is what proves it still does. A missing subject is a red, never a skip (#4690) -- re-anchor the ' +
+    'pin at the path `ActorUser` moved to, in the PR that moves it.',
+  );
+  if (realActorUserText !== null) {
+    const realRead = readDeclaredTypeSurface(realActorUserText, 'ActorUser');
+    assert(
+      realRead !== null && realRead.erased === false,
+      'TSO-6048b: predicate 4 must read the REAL `ActorUser` as CONCRETE. It is an exported interface, ' +
+      'and #6048 removed a member from it -- exactly the class the ledger DOES serve. Reading it as ' +
+      `erased would hand the founding case a green exit (got: ${JSON.stringify(realRead)}).`,
+    );
+  }
+  // (b) the same fact, through the shipping scan(). The changeset is #6048's own
+  // reconstructed body -- `迁移:FROM → TO` with a worked block -- claiming the one
+  // category that is exempt from the refusal that body would otherwise trigger.
+  const SIX048_TSO = CS({
+    bumps: [['@objectstack/runtime', 'major']],
+    body:
+      '**BREAKING**: `ctx.user.roles` removed\n\n### 迁移:FROM → TO\n\n```js\n// FROM\nctx.user.roles;\n// TO\nctx.user.positions;\n```\n\n' +
+      `<!-- adr-0087: not-required (type-surface-only packages/runtime/src/security/actor-user.ts#ActorUser) ${TSO_WHY} -->\n`,
+  });
+  const ACTOR_BASE =
+    'export interface ActorUser extends EvalUser {\n  id: string;\n  roles: string[];\n  positions: string[];\n}\n';
+  red('TSO-6048c THE FOUNDING CASE: #6048 claiming type-surface-only is refused by predicate 4', run(mk({
+    pkgs: {
+      '@objectstack/spec': { dir: 'packages/spec', private: false },
+      '@objectstack/runtime': { dir: 'packages/runtime', private: false },
+    },
+    baseFiles: { 'packages/runtime/src/security/actor-user.ts': ACTOR_BASE },
+    files: {
+      'packages/runtime/src/security/actor-user.ts': ACTOR_BASE.replace('  roles: string[];\n', ''),
+      '.changeset/tidy-donkeys-yawn.md': SIX048_TSO,
+    },
+  })), [/predicate 4: narrowed-from-erased\] is FALSE/, /exported `interface ActorUser`/, /#6048/, /register the migration/]);
+
+  // ---- TSO-N: the predicate set is pinned BY NAME, never by count ------------
+  //
+  // A pin asserting "4 predicates were checked" goes green the moment one is
+  // silently swapped for another, and this tree has catalogued instruments with
+  // exactly that defect. Both halves are needed: the exported NAMES are the
+  // contract, and the second assertion is what proves the exported list is the
+  // list the shipping function actually evaluates rather than a decorative one.
+  assert(
+    JSON.stringify(TYPE_SURFACE_PREDICATES) ===
+      JSON.stringify(['published', 'no-spec-diff', 'no-metadata-surface-diff', 'narrowed-from-erased']),
+    `TSO-N1: the four predicates are pinned BY NAME. Got: ${JSON.stringify(TYPE_SURFACE_PREDICATES)}. ` +
+    'Adding, removing or renaming one is a change to what the prescription exemption is bought with ' +
+    '(ADR-0087, addendum 2026-08-30) -- change this pin in the same edit, deliberately.',
+  );
+  {
+    const f = mk(TSO_FIXTURE());
+    const seen = verifyTypeSurfaceOnly([TSO_REF], {
+      base: f.base,
+      head: 'HEAD',
+      cwd: f.dir,
+      bumps: [{ pkg: '@objectstack/client', bump: 'minor' }],
+      packages: () => workspacePackagesAt('HEAD', f.dir),
+      changedPaths: () => changedPathsBetween(f.base, 'HEAD', f.dir),
+    });
+    assert(seen.problems.length === 0, `TSO-N2a: the all-four-true fixture must verify clean, got:\n${seen.problems.join('\n')}`);
+    assert(
+      JSON.stringify(seen.checked) === JSON.stringify(TYPE_SURFACE_PREDICATES),
+      'TSO-N2b: the predicates verifyTypeSurfaceOnly ACTUALLY evaluates must be exactly the exported ' +
+      `TYPE_SURFACE_PREDICATES, in order. Got: ${JSON.stringify(seen.checked)}. A name that is exported ` +
+      'but never evaluated is a predicate the ADR promises and the gate does not check.',
+    );
+  }
+
+  // ---- TSO-U: unit pins on predicate 4's readers ------------------------------
+  assert(unwrapPromise('Promise<AnalyticsResult>') === 'AnalyticsResult', 'TSO-U1: a whole-string Promise unwraps');
+  assert(unwrapPromise('Promise< any >') === 'any', 'TSO-U2: spacing does not defeat the unwrap');
+  assert(unwrapPromise('Promise<any> | undefined') === null, 'TSO-U3: a Promise that is only PART of the type does not unwrap -- a greedy match here reads `any> | undefined` and is wrong in the ADMITTING direction');
+  assert(unwrapPromise('AnalyticsResult') === null, 'TSO-U4: a non-Promise type does not unwrap');
+
+  assert(isErasedType('any'), 'TSO-U5: `any` is erased');
+  assert(isErasedType('unknown'), 'TSO-U6: `unknown` is erased');
+  assert(isErasedType('Promise<any>'), 'TSO-U7: an awaited `any` is erased');
+  assert(isErasedType(null), 'TSO-U8: NO annotation at all is the erasure this category is named for');
+  assert(!isErasedType('AnalyticsResult'), 'TSO-U9: a named type is concrete');
+  assert(!isErasedType('{ rows: any[] }'), 'TSO-U10: a type that CONTAINS `any` is not a type that IS `any` -- the same line check:exported-any-returns draws, and here the broader reading would refuse honest claims');
+
+  assert(memberReturnAnnotation(TSO_BASE_CLIENT, 'queryDataset')?.annotation === null, 'TSO-U11: an UNANNOTATED member is found, and reports its missing annotation');
+  assert(memberReturnAnnotation(TSO_HEAD_CLIENT, 'queryDataset')?.annotation === 'Promise<AnalyticsResult>', 'TSO-U12: an annotated arrow member reports its return type');
+  assert(memberReturnAnnotation('export class C {\n  get(id: string): InstalledPackage {\n    return this.x;\n  }\n}\n', 'get')?.annotation === 'InstalledPackage', 'TSO-U13: the method-shorthand spelling is read too');
+  assert(memberReturnAnnotation("const r = await client.analytics.queryDataset({ a: 1 });\n", 'queryDataset') === null, 'TSO-U14: a CALL SITE is not a declaration -- a leading dot is excluded, or every consumer of the method would read as one');
+  assert(memberReturnAnnotation('export const f = async (a: string = ")"): Wrapped => a;\n', 'f')?.annotation === 'Wrapped', 'TSO-U15: a `)` inside a string default does not end the parameter list -- literals are masked before the bracket walk');
+
+  assert(readDeclaredTypeSurface(ACTOR_BASE, 'ActorUser')?.erased === false, 'TSO-U16: an exported interface is CONCRETE -- the #6048 reading');
+  assert(readDeclaredTypeSurface('export type Row = any;\n', 'Row')?.erased === true, 'TSO-U17: an exported `type X = any` alias is erased');
+  assert(readDeclaredTypeSurface('export type Row = { a: string };\n', 'Row')?.erased === false, 'TSO-U18: an exported alias of a real type is concrete');
+  assert(readDeclaredTypeSurface('export interface Other { a: 1 }\n', 'Missing') === null, 'TSO-U19: a symbol that is not there reads as null -- never as "it must have been erased"');
 
   // ---- G6: a changeset that was ALREADY breaking at base is inherited -------
   {
