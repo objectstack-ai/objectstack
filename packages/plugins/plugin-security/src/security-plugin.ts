@@ -4824,8 +4824,12 @@ export class SecurityPlugin implements Plugin {
       if (governed.has(position)) continue;
       if (this.nameFoldWarned.has(position)) continue;
       this.nameFoldWarned.add(position);
+      // ⛔ No tracker id in the STRING — an operator reading this log has no tracker, no
+      // git log and no ADR to resolve `#NNNN` against (`check:doc-authoring`; maintainer
+      // ruling 2026-08-12). The card anchor lives in the docblock above, where the reader
+      // who can resolve it is already looking.
       this.logger.warn?.(
-        `[security/#13419] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' was granted ` +
+        `[security] ${POSITION_NAME_FOLD_EVENT}: permission set '${position}' was granted ` +
           `because a POSITION of the same name resolved by name — there is no ` +
           `sys_position_permission_set row binding them. This grant is in force and ungoverned: ` +
           `it appears in no junction table an operator can inspect. Bind it explicitly ` +

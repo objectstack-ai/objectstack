@@ -40,7 +40,6 @@ import { describe, it, expect, vi } from 'vitest';
 import { SecurityPlugin } from './security-plugin.js';
 import type { PermissionSet } from '@objectstack/spec/security';
 import type { ISecurityService } from '@objectstack/spec/contracts';
-import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 /** The stable event token. Asserted as a LITERAL, never imported: an imported
  *  constant renames itself along with the source and the pin never notices. */
@@ -111,10 +110,6 @@ function boot(universe: PermissionSet[] = UNIVERSE) {
   const ql: any = {
     registerMiddleware: () => {},
     getSchema: () => null,
-    findOne: async (object: string, query?: EngineFindOneQueryInput) => {
-      assertEngineFindOnePredicate(object, query);
-      return null;
-    },
     find: async () => [],
   };
   const metadata: any = { get: async () => null, list: async () => universe };
