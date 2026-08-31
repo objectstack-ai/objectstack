@@ -352,6 +352,13 @@ describe('[#13241] the dispatcher throw-transparent exit carries `userMessage`',
         it('a throw carrying BOTH a demoted `declaredCode` and a mark ships BOTH', async () => {
             const res = await throwFromAnalyticsQuery(
                 declaring(
+                    // The spelling below is deliberately OUTSIDE the closed vocabulary,
+                    // because that is the only input that exercises the demotion path:
+                    // `demotedDeclaredCode` yields a `declaredCode` exactly when the throw
+                    // spelled something the narrowing rejected. A registered SCREAMING code
+                    // here would produce no `declaredCode` at all, and this row would stop
+                    // being the both-fields case and assert nothing.
+                    // adr0112-ok: unregistered PRODUCER spelling, the fixture for the #9106 demotion path — the assertions below require that the closed-vocabulary `code` does NOT capture it, which is D1 holding rather than bending
                     { status: 409, code: 'acme_quota_exceeded', userMessage: 'Your plan is out of report credits this month.' },
                     'tenant acme_prod exceeded cube query quota',
                 ),
@@ -374,6 +381,7 @@ describe('[#13241] the dispatcher throw-transparent exit carries `userMessage`',
             // would fail too, which distinguishes "merge broken" from "extra
             // broken".
             const codeOnly = await throwFromAnalyticsQuery(
+                // adr0112-ok: the same unregistered PRODUCER spelling and the same reason as the row above — this CONTROL shows `declaredCode` travelling without a mark, and only an off-vocabulary spelling produces a `declaredCode` to travel
                 declaring({ status: 409, code: 'acme_quota_exceeded' }, 'quota exceeded'),
             );
             expect(codeOnly.body.error.declaredCode).toBe('acme_quota_exceeded');
