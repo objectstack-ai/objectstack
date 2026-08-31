@@ -89,6 +89,7 @@ import type {
     PublishMetaItemRequest,
     AuditMetaItemRequest,
     HistoryMetaItemRequest,
+    SaveMetaItemRequest,
     DeleteMetaItemRequest,
 } from '@objectstack/spec/api';
 // [#8073] The closed ADR-0112 error vocabulary, so the explain family's single
@@ -5921,7 +5922,22 @@ export class RestServer {
                     const organizationId = organizationIdForMetaWrite(
                         canonicalMetaUrlType(req.params.type), ctx?.tenantId,
                     );
-                    const result = await p.saveMetaItem({
+                    // [#12004] The `as any` cast this call carried came off
+                    // when `SaveMetaItemRequestSchema` caught up with the
+                    // members this door sends. `saveMetaItem` is a REQUIRED
+                    // protocol member, so unlike the publish door's old cast
+                    // (member existence, TS2339) this one was load-bearing on
+                    // REQUEST SHAPE alone: the schema declared only
+                    // `{ type, name, item }`, and removing the cast surfaced
+                    // TS2353 on every other key. The literal is now compiled
+                    // against the spec contract through the #9741
+                    // `TransportScopedMetaRequest` wrapper — `environmentId`
+                    // is the transport-level routing key that wrapper layers
+                    // on, ⛔ never a protocol key; every other key here is
+                    // checked against the declared request, so an undeclared
+                    // member is a compile error instead of a payload member no
+                    // contract has ever seen.
+                    const saveRequest: TransportScopedMetaRequest<SaveMetaItemRequest> = {
                         type: req.params.type,
                         name: req.params.name,
                         item,
@@ -5944,7 +5960,8 @@ export class RestServer {
                         ...((typeof req.query?.mode === 'string'
                             && req.query.mode.toLowerCase() === 'draft')
                             ? { mode: 'draft' } : {}),
-                    } as any);
+                    };
+                    const result = await p.saveMetaItem(saveRequest);
                     res.json(result);
                 } catch (error: any) {
                     handleRouteError(res, error);

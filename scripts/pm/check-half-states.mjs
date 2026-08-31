@@ -7169,6 +7169,18 @@ export const SWEEP_COUNT_KEYS = [
   'mergedPages',
   'mergedWindowTruncated',
   'mergedRateObserved',
+  // The remaining windows, converted the same way (#13606). Each carries the
+  // same pair for the same reason: what the pass COST, and whether it reached
+  // its boundary or ran out of quota. `openListingsTruncated` is a LIST rather
+  // than a flag because `listIssues` runs once per label and a reader needs to
+  // know WHICH inventory is short — a silently capped label page is one whole
+  // state's population missing from the sweep.
+  'closedPages',
+  'closedWindowTruncated',
+  'commitPages',
+  'commitWindowTruncated',
+  'openListingPages',
+  'openListingsTruncated',
 ];
 
 /**
@@ -7286,13 +7298,52 @@ export function summaryLine(counts, findingCount) {
           'the merge rate has outgrown the ceiling and it needs raising'
         : ' (horizon reached: a delivery inside the window was seen, not merely the first N rows)'
     }. ` +
-    `H22 read ${counts.closed ?? 0} recently-closed issue(s) for \`pm:*\` state residue (bounded window; ` +
-    `older closed carriers are outside it by design` +
+    `H22 read ${counts.closed ?? 0} recently-closed issue(s) for \`pm:*\` state residue (older closed ` +
+    `carriers are outside the window by design` +
     `${counts.closedFloor ? `, and only cards closed on/after ${counts.closedFloor} are judged — ` +
       'earlier closures predate the strip-on-close convention and are NOT a reading about them' : ''}). ` +
-    `H23 read ${commits} squash commit message(s) from the default branch's recent window, carrying ` +
-    `${commitBindings} closing-keyword binding(s) across ${commitBindingMessages} message(s) ` +
-    `(bounded window; a message that landed before it is invisible by design). ` +
+    // H22's window disclosure (#13606). The divisor is named here as well as in
+    // the docblock, because the summary is the only half a report reader sees
+    // and "bounded window" said nothing about which quantity bounds it.
+    `${describeWindowBound({
+      name: "H22's closed-card window",
+      horizon: CLOSED_ISSUE_WINDOW_DAYS,
+      pages: counts.closedPages ?? 0,
+      ceiling: CLOSED_ISSUE_WINDOW_PAGE_CEILING,
+      truncated: counts.closedWindowTruncated,
+      drops: 'a card that closed earlier than what those pages reached',
+    })} It is a CLOSURE horizon: rows are selected on \`closed_at\`, while paging is bounded by ` +
+    `\`updated_at\` — the stream is consumed by closed-issue ACTIVITY (~${MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY}/day, ` +
+    `measured ${MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT}), not by closures (~11/day), which is why the ` +
+    'page cap it replaced covered a ragged 2.1 days of update-recency rather than the closure window it read as. ' +
+    `H23 read ${commits} squash commit message(s) from the default branch, carrying ` +
+    `${commitBindings} closing-keyword binding(s) across ${commitBindingMessages} message(s). ` +
+    `${describeWindowBound({
+      name: "H23's commit window",
+      horizon: COMMIT_WINDOW_DAYS,
+      pages: counts.commitPages ?? 0,
+      ceiling: COMMIT_WINDOW_PAGE_CEILING,
+      truncated: counts.commitWindowTruncated,
+      drops: 'a message that landed earlier than what those pages reached',
+    })} ` +
+    // The three OPEN listings (#13606). Not a time horizon — see the block above
+    // `listIssues` for the measurement that rules that shape out — so what is
+    // disclosed is completeness, and the failure it must announce is a
+    // ceiling-bound inventory reading as the whole board.
+    `${describeWindowBound({
+      name: 'The open listings (H1–H18 inventory, H13 unscoped pass, open PRs)',
+      kind: 'exhaustive',
+      pages: counts.openListingPages ?? 0,
+      ceiling: OPEN_LISTING_PAGE_CEILING,
+      truncated: (counts.openListingsTruncated ?? []).length > 0,
+      drops: 'the OLDEST open row of each capped listing — the population these rows most exist for',
+    })}` +
+    `${
+      (counts.openListingsTruncated ?? []).length > 0
+        ? ` ⛔ Ceiling-bound listing(s): ${(counts.openListingsTruncated ?? []).join(', ')} — those ` +
+          'inventories are PREFIXES, not populations, so a quiet finding count over them is a short read.'
+        : ''
+    } ` +
     `Hold comments read on ${held} of ${holdCandidates} H17 candidate(s). ` +
     `\`Blocked-by:\` comment fallback read on ${fbProbed} of ${fbCandidates} candidate(s)` +
     `${fbProbed < fbCandidates ? " — H14's stale direction is SUSPENDED for this sweep (the index is known incomplete)" : ''}. ` +
@@ -8343,15 +8394,94 @@ async function rest(path) {
   return res.json();
 }
 
-async function listIssues(label) {
+// ---------------------------------------------------------------------------
+// The three OPEN listings (#13606) — and the one window this card asked to
+// convert to a time horizon that MUST NOT BE ONE.
+//
+// ## What was actually wrong with the bare `page <= 10`
+//
+// The filing card surveyed three defects here: reach moves with tempo, no
+// coverage stated, no truncation announced. Measured 2026-08-31T03:34Z, only
+// the third is real — and it is real enough to fix:
+//
+//   listIssues(<label>)      largest population 91 open cards (`pm:on-hold`), 1 page
+//   listAllOpenIssues        354 open cards + 21 PRs, 4 pages
+//   listOpenPullRequests     21 open PRs, 1 page
+//
+// None of them binds the cap, and none of them is a recency WINDOW: each pages
+// to EXHAUSTION (`batch.length < 100`) and the 10 is a pure quota backstop that
+// has never been reached. There is no coverage in days to state, because the
+// boundary is the end of the population, not an instant.
+//
+// ## ⛔ Why a TIME horizon here would be a defect, not a repair
+//
+// These streams come back `sort=created&direction=desc` (the endpoints' default),
+// so a created-time horizon truncates the OLDEST open rows — and on this board
+// that is precisely the population every predicate in this file exists for. The
+// damage model is asymmetric toward age in exactly the direction that forbids
+// it: H8's own docblock states it ("the paired write NOBODY noticed correlates
+// with how long nobody noticed it"). Measured, at the same instant:
+//
+//   an 8-day  created horizon drops 104 of 354 open cards (29%)
+//   a 14-day  created horizon drops  72 of 354 open cards (20%)
+//   a 30-day  created horizon drops  12 of 354 open cards ( 3%)
+//
+// The oldest OPEN card on the board is 76.9 days old; `pm:on-hold`'s oldest is
+// 76.9 days and `priority:p0`'s is 52.9. An 8-day horizon — the one H8's window
+// uses, and the obvious number to copy — would make a 52-day-old open P0 card
+// invisible to the entire patrol. A horizon is the right shape for a window over
+// a CLOSED, finished stream (H8, H22, H23, H35, all of which are recency reads
+// over events that already happened); it is the wrong shape for an INVENTORY of
+// what is still open, where completeness is the whole point.
+//
+// ⇒ So these three convert to the OTHER half of the target shape, which is the
+// half they were actually missing: the ceiling becomes a NAMED quota backstop
+// that ANNOUNCES itself, and the summary line states which bound ended the pass.
+// A ceiling-bound listing must never read as a complete inventory — the same
+// #4690 inversion H8's repair removed, in the one form it can take here.
+// ---------------------------------------------------------------------------
+
+/**
+ * The quota backstop on every OPEN listing — a ceiling, never a boundary.
+ *
+ * 10 pages = 1,000 open rows, against a measured 354 open cards and 21 open PRs
+ * (2026-08-31): ~2.8x headroom on the largest of them. Kept at 10 rather than
+ * raised, because the number was never the problem — the silence when it binds
+ * was. `openListingTruncated` is what closes that, and it is what a reader
+ * consults before treating any of these listings as complete.
+ */
+export const OPEN_LISTING_PAGE_CEILING = 10;
+
+/**
+ * Record one open listing's cost and whether the ceiling bound it.
+ *
+ * Aggregated across every open listing in the sweep, because `listIssues` runs
+ * once per label and a reader needs to know that ANY of them truncated — a
+ * single silently-capped label page is a whole state's inventory missing.
+ */
+export function noteOpenListing(stats, name, pages, truncated) {
+  if (!stats) return;
+  stats.openListingPages = (stats.openListingPages ?? 0) + pages;
+  if (truncated) {
+    stats.openListingsTruncated = [...(stats.openListingsTruncated ?? []), name];
+  }
+}
+
+async function listIssues(label, stats = {}) {
   const out = [];
-  for (let page = 1; page <= 10; page++) {
+  let exhausted = false;
+  let page = 1;
+  for (; page <= OPEN_LISTING_PAGE_CEILING; page++) {
     const batch = await rest(
       `/repos/${OWNER_REPO}/issues?state=open&labels=${encodeURIComponent(label)}&per_page=100&page=${page}`,
     );
     out.push(...batch.filter((i) => !i.pull_request));
-    if (batch.length < 100) break;
+    if (batch.length < 100) {
+      exhausted = true;
+      break;
+    }
   }
+  noteOpenListing(stats, `listIssues(${label})`, Math.min(page, OPEN_LISTING_PAGE_CEILING), !exhausted);
   return out;
 }
 
@@ -8410,6 +8540,18 @@ async function sweep(options = {}) {
     mergedPages: 0,
     mergedWindowTruncated: false,
     mergedRateObserved: null,
+    // The other four converted windows (#13606), initialised for H8's reason: a
+    // sweep that throws before one of these passes must still render numbers.
+    // ⚠️ The truncation flags start FALSE, which is the same claim the H8 pair
+    // makes — "this pass was not ceiling-bound" — and it is only honest because
+    // the pages counter starts at 0 beside it: 0 pages read is visibly not a
+    // completed window, so the pair cannot be misread as a clean pass.
+    closedPages: 0,
+    closedWindowTruncated: false,
+    commitPages: 0,
+    commitWindowTruncated: false,
+    openListingPages: 0,
+    openListingsTruncated: [],
   };
   // H17's gathering rides out of the sweep the same way, because it has the
   // same per-row failure mode as H16's detail pass and therefore owes the
@@ -8476,13 +8618,19 @@ async function sweep(options = {}) {
   );
 }
 
-async function listOpenPullRequests() {
+async function listOpenPullRequests(stats = {}) {
   const out = [];
-  for (let page = 1; page <= 10; page++) {
+  let exhausted = false;
+  let page = 1;
+  for (; page <= OPEN_LISTING_PAGE_CEILING; page++) {
     const batch = await rest(`/repos/${OWNER_REPO}/pulls?state=open&per_page=100&page=${page}`);
     out.push(...batch);
-    if (batch.length < 100) break;
+    if (batch.length < 100) {
+      exhausted = true;
+      break;
+    }
   }
+  noteOpenListing(stats, 'listOpenPullRequests', Math.min(page, OPEN_LISTING_PAGE_CEILING), !exhausted);
   return out;
 }
 
@@ -8520,6 +8668,132 @@ export function sweepOverlap(coverageDays, cadenceHours = PATROL_CADENCE_HOURS) 
 
 /** The scheduled patrol's period — `cron: '37 1,7,13,19 * * *'` in the workflow. */
 export const PATROL_CADENCE_HOURS = 6;
+
+// ---------------------------------------------------------------------------
+// The shared window vocabulary (#13606) — what DID fall out of converting the
+// remaining count-shaped windows, and what deliberately did not.
+//
+// ## The abstraction question, re-derived after the conversion
+//
+// PR #13601's report measured, BEFORE converting anything, that a shared window
+// helper "does not fall out naturally" because H22's divisor is a different
+// quantity from H8's. That measurement holds and is confirmed below: the
+// divisors are genuinely different (H8 divides by merges/day, H22 by
+// closed-issue UPDATE events/day, H23 by commits/day) and so are the paging
+// shapes. Forcing one window helper over them would be the failure mode that
+// report rejected.
+//
+// But the conversion makes a DIFFERENT commonality visible, and it is the one
+// this card is actually about. Every bounded pass here ends for exactly one of
+// two reasons — it reached its boundary, or it ran out of quota — and a reader
+// cannot act on any window's output without knowing which. That sentence is the
+// same sentence in every case. Three hand-copies of it is the other failure
+// mode named in the dispatch, and it is the likelier one: hand-copied
+// disclosures drift, and a report where one window says "TRUNCATED" and another
+// silently says nothing is worse than either wording alone.
+//
+// ⇒ So what is factored here is the DISCLOSURE, not the paging. The paging
+// predicates stay per-window because their termination arguments differ; the
+// announcement is one function because a reader's question is one question.
+// ---------------------------------------------------------------------------
+
+/**
+ * May paging STOP after this page? The generic form of the argument H8's window
+ * spelled out (`MERGED_WINDOW_DAYS`): once a page's OLDEST ordering timestamp
+ * predates the horizon, no later page can contain an in-window row.
+ *
+ * `field` is the field the STREAM IS ORDERED BY, which is not always the field
+ * the window SELECTS on — that asymmetry is the whole subtlety. H8 and H22 both
+ * order by `updated_at` while selecting on `merged_at` / `closed_at`, and both
+ * are sound for the same monotonicity reason: merging or closing an issue
+ * updates it, so `updated_at >= merged_at` and `updated_at >= closed_at` for
+ * every row. H23 and H35 order by the very field they select on, so for them
+ * the two coincide.
+ *
+ * ⚠️ A short page also stops paging — the stream is exhausted, so there are no
+ * more rows to be missed — and the caller reports that as reaching the horizon.
+ *
+ * ⚠️ An UNREADABLE ordering stamp never stops paging. Treating it as old would
+ * end the window early on one bad row and silently shorten the pass.
+ *
+ * @param {any[]} batch — one page of rows.
+ * @param {number} horizonMs — the instant the window ends.
+ * @param {string|((row: any) => string|undefined)} field — the ordering stamp.
+ */
+export function pageExhaustsWindow(batch, horizonMs, field = 'updated_at') {
+  const rows = Array.isArray(batch) ? batch : [];
+  if (rows.length < 100) return true;
+  const last = rows[rows.length - 1];
+  const raw = typeof field === 'function' ? field(last) : last?.[field];
+  const oldest = Date.parse(raw ?? '');
+  return Number.isFinite(oldest) && oldest < horizonMs;
+}
+
+/**
+ * The ONE disclosure sentence every bounded pass in this file owes: which of
+ * the two bounds ended it.
+ *
+ * ⛔ The rule this exists to make unbreakable: a ceiling-bound pass must NEVER
+ * read as a completed window. That is the exact inversion #13499's repair
+ * removed from H8, and the reason it is a function rather than a convention is
+ * that a convention is what the other windows were following when they stated
+ * no coverage at all.
+ *
+ * Two kinds, because the file has two honest boundary shapes:
+ *
+ *   `time`        — the boundary IS a horizon (H8, H22, H23, H35). The ceiling
+ *                   is a quota backstop; binding it means the pass silently
+ *                   became a page cap again.
+ *   `exhaustive`  — the boundary is the END OF THE STREAM (the three open
+ *                   listings). There is no horizon to state and inventing one
+ *                   would DROP the oldest rows, which on this board is the
+ *                   population every row here exists for (#13606's measurement:
+ *                   a created-time horizon of 8 days would have discarded 104
+ *                   of 354 open cards, the oldest of them 76.9 days old).
+ *
+ * @param {{ name: string, kind?: 'time'|'exhaustive', horizon?: number,
+ *   unit?: string, pages?: number, ceiling?: number|null, truncated?: boolean,
+ *   drops?: string }} bound
+ * @returns {string} the clause, or '' when there is nothing to disclose.
+ */
+export function describeWindowBound(bound) {
+  if (!bound || !bound.name) return '';
+  const {
+    name,
+    kind = 'time',
+    horizon = null,
+    unit = 'day(s)',
+    pages = 0,
+    ceiling = null,
+    truncated = false,
+    drops = 'a row older than what those pages reached',
+  } = bound;
+  const exhaustive = kind === 'exhaustive';
+  const head = exhaustive
+    ? `${name} is an EXHAUSTIVE listing, read in ${pages} page(s)`
+    : `${name} is a TIME cap of ${horizon} ${unit}, read in ${pages} page(s)`;
+  if (truncated) {
+    return (
+      `${head} — ⛔ TRUNCATED at the ${ceiling}-page quota ceiling` +
+      `${exhaustive ? '' : ' BEFORE reaching that horizon'}, so this pass is a page cap and ` +
+      `${drops} is invisible; the ceiling needs raising.`
+    );
+  }
+  // ⚠️ "boundary reached", NOT H8's "horizon reached", and the difference is
+  // load-bearing rather than stylistic. H8's own disclosure (#13499) is pinned
+  // by a case asserting that a TRUNCATED H8 pass does not contain the phrase
+  // "horizon reached" ANYWHERE in the summary line — a whole-line substring
+  // check, written when H8's was the only window that spoke. Reusing its exact
+  // phrase for the four windows that now share that line would satisfy that
+  // check from a neighbouring clause and quietly retire it, which is the same
+  // "a check that cannot fail" defect this whole family is about. One phrase
+  // per speaker keeps every one of them falsifiable.
+  return `${head} (${
+    exhaustive
+      ? 'complete: paging reached the end of the stream, so this IS the whole population'
+      : 'boundary reached: paging ran past the horizon, not merely the first N rows'
+  }).`;
+}
 
 /**
  * The default-branch merge rate, MEASURED — the divisor every window below
@@ -8773,12 +9047,18 @@ export function prMergedWithinWindow(pr, horizonMs) {
  *
  * ⚠️ An UNREADABLE `updated_at` never stops paging. Treating it as old would
  * end the window early on one bad row and silently shorten the pass.
+ *
+ * ⚠️ #13606: the body is now `pageExhaustsWindow(batch, horizonMs,
+ * 'updated_at')`. This is the ONE line of #13601's landed repair this card
+ * touches, and it is a delegation rather than a rewrite: same name, same
+ * export, same signature, byte-identical behaviour, and #13601's own direction
+ * cases still pin it unchanged. It is here because H22's converted window turned
+ * out to need this predicate EXACTLY — same ordering field, same selecting
+ * field, same monotonicity argument — so leaving H8 on a private copy would
+ * have made the second caller a hand-copy of the first.
  */
 export function mergedPageExhaustsWindow(batch, horizonMs) {
-  const rows = Array.isArray(batch) ? batch : [];
-  if (rows.length < 100) return true;
-  const oldest = Date.parse(rows[rows.length - 1]?.updated_at ?? '');
-  return Number.isFinite(oldest) && oldest < horizonMs;
+  return pageExhaustsWindow(batch, horizonMs, 'updated_at');
 }
 
 async function listRecentlyMergedPullRequests(stats = {}, nowMs = Date.now()) {
@@ -8846,8 +9126,121 @@ async function listRecentlyMergedPullRequests(stats = {}, nowMs = Date.now()) {
  * it turned out to be buying. It does NOT reopen the deep tail: the population
  * that argument refuses is the 500+ historical carriers spanning months, and
  * 1.7 days is not in it. Cost: two extra requests per sweep.
+ *
+ * ## …and why four pages could not hold either (#13606)
+ *
+ * Everything above is still true and still the reason this window is bounded.
+ * What it could not fix is that the boundary was still a ROW count, so the
+ * derivation above had to be redone every time the board's tempo moved — and
+ * the quantity it divides by is not the one a reader assumes.
+ *
+ * ⛔ THE DIVISOR, NAMED HONESTLY: this window's rows are consumed by
+ * closed-issue UPDATE ACTIVITY, not by closures. A closed card is bumped to the
+ * front of `sort=updated` by every later comment, label write and
+ * cross-reference. So the page cap bought a window in a unit nobody wanted a
+ * window in, and the two rates differ by more than an order of magnitude.
+ * Measured 2026-08-31T03:36Z over the live endpoint:
+ *
+ *   update activity   400 rows / 2.13d  = ~188 closed-issue updates/day
+ *   actual closures   226 cards / 21.06d = ~11 closures/day
+ *
+ * The consequence is not a slightly-wrong number, it is a RAGGED frontier: 28
+ * of 225 adjacent card pairs in the window were out of closure order. A card
+ * closed three days ago and untouched since falls out of the window while a card
+ * closed three WEEKS ago that got one comment today sits at the front of it.
+ *
+ * What that cost, measured the same instant — findings this row should have
+ * reported and structurally could not:
+ *
+ *   closed within 2d   70 of 70 residue carriers seen   (the cap was enough)
+ *   closed within 3d   77 of 96                          — 19 missed
+ *   closed within 4d   77 of 117                         — 40 missed
+ *   closed within 7d   77 of 342                         — 265 missed
+ *
+ * ## N = 3 days, and the anti-drowning argument is what FIXES it
+ *
+ * The horizon is bounded on both sides, and both bounds are measured rather
+ * than chosen:
+ *
+ *   FLOOR   — the window must not lose what four pages already delivered. The
+ *             cap covered closures within ~2 days completely (199 of 199), so
+ *             anything under 2 days is a regression.
+ *   CEILING — the anti-drowning argument above, in numbers. Residue density on
+ *             this board measured 28-35% at every horizon, so the finding count
+ *             is roughly linear in the horizon: 3d = 96 rows, 5d = 175, 7d =
+ *             342, 8d = 370. The sibling install's experience is the calibration
+ *             — at ~347 rows H22 exhausted the anchor body budget and trimmed
+ *             every other predicate's findings out of the report, which is why
+ *             that install shipped with this reader switched OFF entirely. A
+ *             horizon that turns this row into the report is not a wider window,
+ *             it is a disabled patrol.
+ *
+ * 3 days is the largest horizon that stays in the same order of magnitude as
+ * what the row already produces (96 rows against today's 77, +25%) while
+ * delivering COMPLETELY what the page cap only sampled: 310 of 310 cards closed
+ * within three days, against 219 of 310 today. At the 6-hourly cadence that is
+ * `sweepOverlap(3)` = 12 consecutive runs.
+ *
+ * ⚠️ THE RESIDUAL, stated rather than papered over: H8's window is 8 days and
+ * this one is 3, so a card that closed between 3 and 8 days ago carrying `pm:*`
+ * residue is visible to NEITHER row (H8's predicate needs the card still open).
+ * That band is real and it is the price of the anti-drowning ceiling — it is not
+ * a gap that widening this horizon could close for free, because widening it is
+ * exactly what disables the report. Naming it is the honest half; closing it
+ * needs a different shape (a residue census like H39's, which counts rather than
+ * lists) and is not this window's job.
+ *
+ * ⚠️ Cost note: 46% of the rows this stream returns are PULL REQUESTS, filtered
+ * out after paging. The horizon is therefore reached in roughly twice the pages
+ * a card-only stream would need — ~6 pages for 3 days at the measured rate.
+ * Constants here are deliberately NOT self-updating (H8's rule): they are
+ * CHECKED against what a sweep observes, never overwritten by it.
  */
-export const CLOSED_ISSUE_WINDOW_PAGES = 4;
+export const CLOSED_ISSUE_WINDOW_DAYS = 3;
+
+/**
+ * The quota backstop behind H22's time cap — see `CLOSED_ISSUE_WINDOW_DAYS`.
+ *
+ * At the measured ~188 closed-issue updates/day the 3-day horizon needs ~6
+ * pages; the ceiling is 12, i.e. it absorbs a board twice as busy before it
+ * binds. If it ever DOES bind, this window is a page cap again and the summary
+ * line says so out loud rather than reporting a short window as a complete one.
+ */
+export const CLOSED_ISSUE_WINDOW_PAGE_CEILING = 12;
+
+/**
+ * The rate H22's window is stated in, MEASURED — and the reason it is carried
+ * as data is H8's: a rate typed into a comment is one no reader and no run can
+ * disagree with.
+ *
+ * ⛔ This is closed-issue UPDATE EVENTS per day, NOT closures per day. The two
+ * differ by ~17x on this board and confusing them is precisely the defect this
+ * window carried (see the docblock above).
+ *
+ *   read    2026-08-31T03:36Z, `GET /repos/{repo}/issues?state=closed&sort=updated`
+ *   window  400 rows spanning 2.125 days
+ *   rate    400 / 2.125 = ~188 closed-issue update events/day
+ *   (re-read at depth: 800 rows / 4.209d = ~190/day, 1200 rows / 5.496d = ~218/day)
+ */
+export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY = 188.3;
+
+/** WHEN `MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY` was measured. */
+export const MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT = '2026-08-31';
+
+/** The instant at which H22's window ends. */
+export function closedWindowHorizonMs(nowMs = Date.now(), days = CLOSED_ISSUE_WINDOW_DAYS) {
+  return nowMs - days * 86_400_000;
+}
+
+/**
+ * Did this issue CLOSE inside the window? Reads `closed_at` — the field the
+ * window is about — while the paging above is bounded by `updated_at`. An
+ * unreadable stamp is not a closure this row can place in time (#4690).
+ */
+export function issueClosedWithinWindow(issue, horizonMs) {
+  const at = Date.parse(issue?.closed_at ?? '');
+  return Number.isFinite(at) && at >= horizonMs;
+}
 
 /**
  * H22's DATED CLOSURE FLOOR — the cutover date at and after which a closed
@@ -8922,15 +9315,25 @@ export function resolveClosureFloor(env = {}) {
 
 const CLOSED_FLOOR = resolveClosureFloor(process.env);
 
-async function listRecentlyClosedIssues() {
+async function listRecentlyClosedIssues(stats = {}, nowMs = Date.now()) {
+  const horizon = closedWindowHorizonMs(nowMs);
   const out = [];
-  for (let page = 1; page <= CLOSED_ISSUE_WINDOW_PAGES; page++) {
+  let reachedHorizon = false;
+  let page = 1;
+  for (; page <= CLOSED_ISSUE_WINDOW_PAGE_CEILING; page++) {
     const batch = await rest(
       `/repos/${OWNER_REPO}/issues?state=closed&sort=updated&direction=desc&per_page=100&page=${page}`,
     );
-    out.push(...batch.filter((i) => !i.pull_request));
-    if (batch.length < 100) break;
+    // Selection reads `closed_at`; paging (below) reads `updated_at`. They are
+    // deliberately different fields — see `pageExhaustsWindow`.
+    out.push(...batch.filter((i) => !i.pull_request && issueClosedWithinWindow(i, horizon)));
+    if (pageExhaustsWindow(batch, horizon, 'updated_at')) {
+      reachedHorizon = true;
+      break;
+    }
   }
+  stats.closedPages = Math.min(page, CLOSED_ISSUE_WINDOW_PAGE_CEILING);
+  stats.closedWindowTruncated = !reachedHorizon;
   return out;
 }
 
@@ -8978,8 +9381,88 @@ async function listRecentlyClosedIssues() {
  * and the squash-message list are the same list. A repo that DOES carry merge
  * commits would simply feed this row a few branch-side messages, which are a
  * surface GitHub's parser reads too — wider, never wrong.
+ *
+ * ## Why the page cap went anyway (#13606)
+ *
+ * This docblock was the one that DERIVED its cap from a measured rate instead
+ * of quoting a remembered one, and it is the only one that survived a
+ * re-measure — so it is the strongest case that a page cap can be kept honest
+ * by hand, and it is still the wrong shape. Re-measured 2026-08-31T03:34Z:
+ *
+ *   2026-08-23   300 commits = 2.18d at ~137.5/day
+ *   2026-08-31   300 commits = 2.73d at ~110/day
+ *
+ * Same three pages, 25% more window, eight days apart, because the commit rate
+ * fell. Nothing was wrong with the derivation; the derivation simply has to be
+ * redone on every tempo change, by a human who remembers to — and the two other
+ * windows in this file are what happens when nobody does. A TIME cap needs no
+ * redoing: the rate below becomes only a COST estimate (how many pages the
+ * horizon takes), never the boundary itself.
+ *
+ * ## N = 3 days, derived from this row's own overlap argument
+ *
+ * The argument above is the measured need, and it is stated in patrol cycles
+ * rather than in days: a message must survive enough consecutive sweeps that one
+ * failed or skipped run cannot lose it, and this row targeted ~9x. At the
+ * 6-hourly cadence 3 days is `sweepOverlap(3)` = 12 consecutive runs,
+ * comfortably past that target — and it is very close to what three pages
+ * delivers at today's rate (2.73d), so the conversion barely moves the window
+ * right now. That is the point: it stays 3 days when the rate moves, where the
+ * cap would silently become ~1.5 days again at 200 commits/day.
+ *
+ * ⚠️ Unlike H8's and H22's windows, this stream is ordered by the very field the
+ * window selects on (commit date), so the paging bound and the row filter
+ * coincide. The ordering/selection asymmetry those two need does not apply here,
+ * and pretending it did would be the forced abstraction #13601's report refused.
  */
-export const COMMIT_WINDOW_PAGES = 3;
+export const COMMIT_WINDOW_DAYS = 3;
+
+/**
+ * The quota backstop behind H23's time cap — see `COMMIT_WINDOW_DAYS`.
+ *
+ * At the measured ~110 commits/day the 3-day horizon needs ~4 pages; the
+ * ceiling is 12, i.e. ~400 commits/day before it binds, 3.6x the fastest this
+ * window has been measured. A run that hits it has a short window and the
+ * summary line says so.
+ */
+export const COMMIT_WINDOW_PAGE_CEILING = 12;
+
+/**
+ * The default-branch commit rate, MEASURED — a COST input (how many pages the
+ * horizon takes), no longer the boundary. Carried as data for H8's reason: a
+ * rate typed into prose is one no reader and no run can disagree with.
+ *
+ *   read    2026-08-31T03:34Z, `GET /repos/{repo}/commits`
+ *   window  300 commits spanning 2.729 days
+ *   rate    300 / 2.729 = ~110 commits/day
+ */
+export const MEASURED_COMMITS_PER_DAY = 109.9;
+
+/** WHEN `MEASURED_COMMITS_PER_DAY` was measured. */
+export const MEASURED_COMMITS_PER_DAY_AT = '2026-08-31';
+
+/**
+ * A commit row's timestamp. `committer.date` is what orders this stream (an old
+ * authored patch committed today is at the front, and it is the COMMIT that just
+ * landed on the branch), with `author.date` as the fallback for a row carrying
+ * only one. `null` when neither is readable — an undateable row must not be
+ * placed in time (#4690).
+ */
+export function commitTimeMs(commit) {
+  const at = Date.parse(commit?.commit?.committer?.date ?? commit?.commit?.author?.date ?? '');
+  return Number.isFinite(at) ? at : null;
+}
+
+/** The instant at which H23's window ends. */
+export function commitWindowHorizonMs(nowMs = Date.now(), days = COMMIT_WINDOW_DAYS) {
+  return nowMs - days * 86_400_000;
+}
+
+/** Did this commit land inside the window? An undateable row is never inside it. */
+export function commitWithinWindow(commit, horizonMs) {
+  const at = commitTimeMs(commit);
+  return at !== null && at >= horizonMs;
+}
 
 /**
  * H39's gathering (#13526) — one fully-paginated pass per residue label, plus
@@ -9023,13 +9506,22 @@ async function censusClosedPmResidue(stats = {}) {
   });
 }
 
-async function listRecentDefaultBranchCommits() {
+async function listRecentDefaultBranchCommits(stats = {}, nowMs = Date.now()) {
+  const horizon = commitWindowHorizonMs(nowMs);
   const out = [];
-  for (let page = 1; page <= COMMIT_WINDOW_PAGES; page++) {
+  let reachedHorizon = false;
+  let page = 1;
+  for (; page <= COMMIT_WINDOW_PAGE_CEILING; page++) {
     const batch = await rest(`/repos/${OWNER_REPO}/commits?per_page=100&page=${page}`);
-    out.push(...batch);
-    if (batch.length < 100) break;
+    out.push(...batch.filter((c) => commitWithinWindow(c, horizon)));
+    // Ordered by the same field it selects on, so one accessor serves both.
+    if (pageExhaustsWindow(batch, horizon, (c) => c?.commit?.committer?.date ?? c?.commit?.author?.date)) {
+      reachedHorizon = true;
+      break;
+    }
   }
+  stats.commitPages = Math.min(page, COMMIT_WINDOW_PAGE_CEILING);
+  stats.commitWindowTruncated = !reachedHorizon;
   return out;
 }
 
@@ -9076,18 +9568,30 @@ async function listRecentIssueEvents(stats = {}, nowMs = Date.now()) {
  * The unscoped listing H13 needs: the domain-without-pm-state shape is
  * DEFINED by the absence of every label the listings below key on, so no
  * label page can ever return it — the very property that hides it from seat
- * queries hides it from a label-scoped sweep too. Ten pages, the same cap as
- * `listIssues`; an open backlog beyond the cap is invisible to H13 (stated
- * boundary, same convention as H8's merged window — the finding clears when
- * the paired write lands, not when the card ages out).
+ * queries hides it from a label-scoped sweep too. The same
+ * `OPEN_LISTING_PAGE_CEILING` quota backstop as `listIssues`, and — since
+ * #13606 — the same announcement when it binds: an open backlog beyond the
+ * ceiling is invisible to H13, and that is now stated on the run rather than
+ * only in this docblock.
+ *
+ * ⚠️ This is the largest of the three open listings (354 open cards over 4 pages,
+ * measured 2026-08-31) and therefore the one nearest the ceiling. It is also the
+ * one a created-time horizon would damage most — see the block above
+ * `listIssues` for the measurement that ruled that shape out.
  */
-async function listAllOpenIssues() {
+async function listAllOpenIssues(stats = {}) {
   const out = [];
-  for (let page = 1; page <= 10; page++) {
+  let exhausted = false;
+  let page = 1;
+  for (; page <= OPEN_LISTING_PAGE_CEILING; page++) {
     const batch = await rest(`/repos/${OWNER_REPO}/issues?state=open&per_page=100&page=${page}`);
     out.push(...batch.filter((i) => !i.pull_request));
-    if (batch.length < 100) break;
+    if (batch.length < 100) {
+      exhausted = true;
+      break;
+    }
   }
+  noteOpenListing(stats, 'listAllOpenIssues', Math.min(page, OPEN_LISTING_PAGE_CEILING), !exhausted);
   return out;
 }
 
@@ -9100,7 +9604,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // the defect this whole family is about. One label page per sweep, four
   // sweeps a day, against a 15,000/h core quota.
   for (const label of ['pm:dispatched', 'pm:queue', 'pm:blocked', 'pm:seat', 'pm:on-hold', AWAITING_MAINTAINER_LABEL, 'priority:p0']) {
-    for (const issue of await listIssues(label)) seen.set(issue.number, issue);
+    for (const issue of await listIssues(label, stats)) seen.set(issue.number, issue);
   }
 
   // At most ONE comment fetch per card, shared by the two items that need the
@@ -9354,7 +9858,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // fix, and both rows are only fixable while the PR is open, because the
   // damage is done by the merge — and excluded by H12's own predicate (drafts
   // are parked deliberately).
-  for (const pr of await listOpenPullRequests()) {
+  for (const pr of await listOpenPullRequests(stats)) {
     seenPrs.set(pr.number, pr);
     const contradiction = h7PartOfWithClosingKeyword(pr);
     if (contradiction) findings.push([pr, 'H7', contradiction]);
@@ -9449,7 +9953,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // collection for the same reason H13's unscoped listing is: the open-only
   // default of every other collector stays exactly as it was, and the summary
   // line can say what this pass covered on its own terms.
-  for (const issue of await listRecentlyClosedIssues()) {
+  for (const issue of await listRecentlyClosedIssues(stats)) {
     seenClosed.set(issue.number, issue);
     const residue = h22ClosedCardPmResidue(issue, CLOSED_FLOOR.floor);
     if (residue) findings.push([issue, 'H22', residue]);
@@ -9468,7 +9972,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // the evidence. When a subject carries no marker (1 of 1,546 measured) the
   // first contradicted card number stands in, so a row is never dropped for
   // want of a number to sort by.
-  for (const commit of await listRecentDefaultBranchCommits()) {
+  for (const commit of await listRecentDefaultBranchCommits(stats)) {
     const message = commit?.commit?.message ?? '';
     stats.commits = (stats.commits ?? 0) + 1;
     const bindings = closingKeywordTargets(message, { markdown: false });
@@ -9492,7 +9996,7 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // inputs and the summary line stays honest about what each pass covered;
   // the overlap with the label listings costs nothing (the predicate is
   // label-gated and pure).
-  const unscoped = await listAllOpenIssues();
+  const unscoped = await listAllOpenIssues(stats);
   for (const issue of unscoped) {
     seenUnscoped.set(issue.number, issue);
     const halfState = h13DomainWithoutPmState(issue);
@@ -10856,7 +11360,11 @@ function selfTest() {
   // read surface from an unread one (#4690).
   t('summary: the H23 clause states what the commit pass read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitBindings: 51, commitBindingMessages: 44 }, 0).includes('H23 read 300 squash commit message(s)'), true);
   t('summary: …and the binding totals a promotion decision would need', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitBindings: 51, commitBindingMessages: 44 }, 0).includes('51 closing-keyword binding(s) across 44 message(s)'), true);
-  t('summary: …and states the window boundary', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300 }, 0).includes('invisible by design'), true);
+  // #13606 — H23's boundary is a TIME cap now, so the phrase this case used to
+  // pin ('invisible by design', which stated a boundary without ever saying what
+  // bounded it) no longer exists. The case keeps its subject — the summary must
+  // state the window boundary — against the disclosure that replaced it.
+  t('summary: …and states the window boundary', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, commits: 300, commitPages: 4 }, 0).includes(`H23's commit window is a TIME cap of ${COMMIT_WINDOW_DAYS} day(s), read in 4 page(s)`), true);
   t('summary: absent H23 counts degrade to 0, never to undefined', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0 }, 0).includes('H23 read 0 squash commit message(s)'), true);
 
   // -- H9: `pm:on-hold` without a machine-fireable `Restart-when:` ------------
@@ -13083,9 +13591,19 @@ function selfTest() {
   t('windows: coverage is rows / rate', windowCoverageDays(400, 100), 4);
   t('windows: the OLD two-page cap was under two days, not the ~11 its prose claimed', Number(windowCoverageDays(200, MEASURED_MERGES_PER_DAY).toFixed(2)), 1.45);
   t('windows: …and the stale ~18/day figure is what produced the ~11-day claim', Number(windowCoverageDays(200, 18).toFixed(1)), 11.1);
-  t('windows: H23 keeps three pages', COMMIT_WINDOW_PAGES, 3);
-  t('windows: …and its re-measured coverage still clears two days', windowCoverageDays(COMMIT_WINDOW_PAGES * 100, MEASURED_MERGES_PER_DAY) > 2, true);
-  t('windows: H22 widened to four pages', CLOSED_ISSUE_WINDOW_PAGES, 4);
+  // #13606 — H22's and H23's caps are gone the same way H8's went, so the
+  // arithmetic that used to justify them is HISTORY here too. What each cap
+  // really bought, in the unit its reader assumed it was buying:
+  t('windows: H23\'s old 3-page cap bought 2.18d at the 2026-08-23 rate', Number(windowCoverageDays(300, MEASURED_MERGES_PER_DAY).toFixed(2)), 2.18);
+  t('windows: …and 2.73d at the rate measured 8 days later — same cap, 25% more window', Number(windowCoverageDays(300, MEASURED_COMMITS_PER_DAY).toFixed(2)), 2.73);
+  t('windows: …which is why H23\'s cap became a TIME cap', COMMIT_WINDOW_DAYS, 3);
+  // ⛔ H22's is the one whose DIVISOR was the surprise: its rows are consumed by
+  // closed-issue UPDATE activity, not by closures, and the two differ ~17x. The
+  // old 4-page cap read as a closure window and was nothing of the kind.
+  t('windows: H22\'s old 4-page cap bought only 2.12d of UPDATE recency', Number(windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY).toFixed(2)), 2.12);
+  t('windows: …and the honest divisor is ~17x the closure rate it read as', Number((MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY / 10.7).toFixed(1)), 17.6);
+  t('windows: …which is why H22\'s cap became a CLOSURE-time cap', CLOSED_ISSUE_WINDOW_DAYS, 3);
+  t('windows: …and its horizon is seen by 12 consecutive runs', sweepOverlap(CLOSED_ISSUE_WINDOW_DAYS), 12);
   // #13499 — H8's window is no longer a page cap at all, so the arithmetic that
   // used to justify one is a HISTORY note here rather than a live derivation.
   // What the four-page cap really bought, at the two rates that were measured
@@ -13194,6 +13712,131 @@ function selfTest() {
   t('H8 summary: a ceiling-bound window says TRUNCATED', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true }).includes('TRUNCATED'), true);
   t('H8 summary: …and does NOT claim the horizon was reached', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true }).includes('horizon reached'), false);
   t('H8 summary: …and says a delivery past it is invisible', h8win({ mergedPages: MERGED_WINDOW_PAGE_CEILING, mergedWindowTruncated: true }).includes('is invisible'), true);
+
+  // -- The remaining count-shaped windows, converted (#13606) ----------------
+  //
+  // Three legs, and each is pinned in BOTH directions, because one direction
+  // alone proves nothing here: a case showing an in-window row is admitted
+  // would have passed against the old page cap too. The case with teeth is the
+  // row the old cap structurally could not reach, plus the ceiling case that
+  // must announce itself rather than read as a completed pass.
+  const NOW13606 = Date.parse('2026-08-31T03:36:00Z');
+  const ago13606 = (d) => new Date(NOW13606 - d * 86_400_000).toISOString();
+
+  // ---- The shared disclosure. This is the piece that DID fall out, so it is
+  // pinned once here and the per-window cases below assert through it.
+  const timeBound = (extra) =>
+    describeWindowBound({ name: 'W', horizon: 3, pages: 6, ceiling: 12, ...extra });
+  t('bound: a completed time window states its horizon', timeBound({}).includes('TIME cap of 3 day(s)'), true);
+  t('bound: …and the pages it cost', timeBound({}).includes('read in 6 page(s)'), true);
+  t('bound: …and says the boundary was reached', timeBound({}).includes('boundary reached'), true);
+  t('bound: …and does NOT cry truncation', timeBound({}).includes('TRUNCATED'), false);
+  // ⛔ The inversion this whole card exists to remove.
+  t('bound: a ceiling-bound pass says TRUNCATED', timeBound({ truncated: true }).includes('⛔ TRUNCATED'), true);
+  t('bound: …and names the ceiling that bound it', timeBound({ truncated: true }).includes('12-page quota ceiling'), true);
+  t('bound: …and does NOT claim the boundary was reached', timeBound({ truncated: true }).includes('boundary reached'), false);
+  t('bound: …and says it became a page cap again', timeBound({ truncated: true }).includes('this pass is a page cap'), true);
+  // The exhaustive kind — no horizon to state, and inventing one is the defect.
+  const exBound = (extra) =>
+    describeWindowBound({ name: 'L', kind: 'exhaustive', pages: 4, ceiling: 10, ...extra });
+  t('bound: an exhaustive listing states no horizon', exBound({}).includes('TIME cap'), false);
+  t('bound: …it states completeness instead', exBound({}).includes('EXHAUSTIVE listing'), true);
+  t('bound: …and says it IS the whole population', exBound({}).includes('the whole population'), true);
+  t('bound: a ceiling-bound listing announces it too', exBound({ truncated: true }).includes('⛔ TRUNCATED'), true);
+  t('bound: …and never claims completeness', exBound({ truncated: true }).includes('the whole population'), false);
+  t('bound: a nameless bound renders nothing', describeWindowBound(null), '');
+  t('bound: …and so does one with no name', describeWindowBound({ kind: 'time' }), '');
+
+  // ---- The generic paging predicate, and the ordering/selection asymmetry.
+  const pg13606 = (n, daysAgo, field = 'updated_at') =>
+    Array.from({ length: n }, (_, i) => ({ number: i, [field]: ago13606(daysAgo) }));
+  const H13606 = NOW13606 - 3 * 86_400_000;
+  t('paging: a full page still inside the horizon keeps paging', pageExhaustsWindow(pg13606(100, 1), H13606), false);
+  t('paging: a full page whose oldest stamp predates the horizon stops', pageExhaustsWindow(pg13606(100, 5), H13606), true);
+  t('paging: a SHORT page stops paging (stream exhausted)', pageExhaustsWindow(pg13606(40, 1), H13606), true);
+  t('paging: an unreadable oldest stamp does NOT stop paging early', pageExhaustsWindow([...pg13606(99, 1), { updated_at: 'nope' }], H13606), false);
+  t('paging: a non-array is an exhausted stream, not an infinite one', pageExhaustsWindow(null, H13606), true);
+  t('paging: the field is selectable (H23 orders by a nested commit date)', pageExhaustsWindow(Array.from({ length: 100 }, () => ({ commit: { committer: { date: ago13606(5) } } })), H13606, (c) => c?.commit?.committer?.date), true);
+  // ⛔ H8's predicate is now this one. Same behaviour, which is the whole point
+  // of the delegation — #13601's own cases still pin it, and so does this.
+  t('paging: H8\'s predicate delegates to the generic, unchanged', mergedPageExhaustsWindow(pg13606(100, 9), H13606), pageExhaustsWindow(pg13606(100, 9), H13606, 'updated_at'));
+
+  // ---- H22: a CLOSURE horizon over a stream ordered by UPDATE.
+  const closed13606 = (number, closedDaysAgo, updatedDaysAgo = closedDaysAgo) => ({
+    number,
+    closed_at: ago13606(closedDaysAgo),
+    updated_at: ago13606(updatedDaysAgo),
+  });
+  const CH = closedWindowHorizonMs(NOW13606);
+  // Direction 1 — the floor case: a recent closure is admitted.
+  t('H22 window: a 1-day-old closure is inside', issueClosedWithinWindow(closed13606(1, 1), CH), true);
+  // Direction 2 — the row the OLD 4-page cap structurally could not reach. The
+  // cap covered ~2.12d of UPDATE recency, so a card closed 2.5 days ago and
+  // untouched since fell out of it: not late, GONE. Measured cost at the time
+  // of the repair: 19 residue carriers closed within 3 days were missed.
+  t('H22 window: the old 4-page cap reached only ~2.1 days of update-recency', windowCoverageDays(400, MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY) < 2.5, true);
+  t('H22 window: …but the 3-day closure horizon admits that card', issueClosedWithinWindow(closed13606(2, 2.5), CH), true);
+  // …and the window still HAS an edge; a boundary that admits everything is none.
+  t('H22 window: a 4-day-old closure is outside', issueClosedWithinWindow(closed13606(3, 4), CH), false);
+  t('H22 window: an unreadable closure stamp is not placed in time', issueClosedWithinWindow({ closed_at: 'not-a-date' }, CH), false);
+  t('H22 window: a card with no closure stamp is never inside', issueClosedWithinWindow({ closed_at: null }, CH), false);
+  // ⛔ THE DIVISOR, pinned: selection and paging read DIFFERENT fields. A card
+  // closed 20 days ago but bumped today is what `sort=updated` puts at the
+  // front — it must NOT be admitted, and it must NOT stop the paging either.
+  t('H22 divisor: a stale closure bumped by today\'s activity is NOT admitted', issueClosedWithinWindow(closed13606(4, 20, 0), CH), false);
+  t('H22 divisor: …and that same row does not end the window early', pageExhaustsWindow(Array.from({ length: 100 }, () => closed13606(4, 20, 0)), CH, 'updated_at'), false);
+  t('H22 divisor: a page whose oldest UPDATE predates the horizon does end it', pageExhaustsWindow(Array.from({ length: 100 }, () => closed13606(5, 9, 9)), CH, 'updated_at'), true);
+  t('H22: the ceiling is a quota backstop, not the boundary', CLOSED_ISSUE_WINDOW_PAGE_CEILING > CLOSED_ISSUE_WINDOW_DAYS, true);
+  t('H22: the pinned divisor carries its own measurement date', /^\d{4}-\d{2}-\d{2}$/.test(MEASURED_CLOSED_ISSUE_UPDATES_PER_DAY_AT), true);
+
+  // ---- H23: horizon and paging on the SAME field.
+  const commit13606 = (daysAgo) => ({ commit: { committer: { date: ago13606(daysAgo) } } });
+  const CMH = commitWindowHorizonMs(NOW13606);
+  t('H23 window: a 1-day-old commit is inside', commitWithinWindow(commit13606(1), CMH), true);
+  t('H23 window: a 4-day-old commit is outside', commitWithinWindow(commit13606(4), CMH), false);
+  t('H23 window: an undateable commit is never inside', commitWithinWindow({ commit: {} }, CMH), false);
+  t('H23 window: author.date is the fallback when there is no committer date', commitTimeMs({ commit: { author: { date: ago13606(1) } } }) !== null, true);
+  t('H23 window: a commit with neither stamp is null, not 0', commitTimeMs({ commit: {} }), null);
+  t('H23: the ceiling is a quota backstop, not the boundary', COMMIT_WINDOW_PAGE_CEILING > COMMIT_WINDOW_DAYS, true);
+  t('H23: the pinned rate carries its own measurement date', /^\d{4}-\d{2}-\d{2}$/.test(MEASURED_COMMITS_PER_DAY_AT), true);
+
+  // ---- The three OPEN listings: exhaustion, announced.
+  const st13606 = {};
+  noteOpenListing(st13606, 'listIssues(pm:queue)', 1, false);
+  noteOpenListing(st13606, 'listAllOpenIssues', 4, false);
+  t('open listings: pages accumulate across listings', st13606.openListingPages, 5);
+  t('open listings: a complete pass records no truncation', st13606.openListingsTruncated, undefined);
+  const stCap = {};
+  noteOpenListing(stCap, 'listIssues(pm:queue)', 1, false);
+  noteOpenListing(stCap, 'listAllOpenIssues', OPEN_LISTING_PAGE_CEILING, true);
+  t('open listings: a ceiling-bound listing is named, not just counted', (stCap.openListingsTruncated ?? []).join(','), 'listAllOpenIssues');
+  t('open listings: …and the pages still accumulate', stCap.openListingPages, 11);
+  t('open listings: noteOpenListing tolerates a missing stats object', noteOpenListing(null, 'x', 1, true), undefined);
+  // ⛔ The measured reason these are NOT time horizons: a created-time cut
+  // discards the OLDEST open rows, which is the population every row here is
+  // for. 104 of 354 open cards were older than 8 days when this was measured.
+  t('open listings: the ceiling is a quota backstop over a measured 4-page population', OPEN_LISTING_PAGE_CEILING > 4, true);
+
+  // ---- The summary line carries all three, both ways. A gathered flag that is
+  // never printed is a measurement nobody can act on.
+  const win13606 = (extra) =>
+    summaryLine({ repo: 'o/r', issues: 1, unscoped: 1, prs: 1, merged: 1, closed: 5, ...extra }, 0);
+  t('H22 summary: the window is stated as a TIME cap', win13606({ closedPages: 6 }).includes(`H22's closed-card window is a TIME cap of ${CLOSED_ISSUE_WINDOW_DAYS} day(s)`), true);
+  t('H22 summary: …and names the divisor honestly as ACTIVITY', win13606({ closedPages: 6 }).includes('consumed by closed-issue ACTIVITY'), true);
+  t('H22 summary: …and contrasts it with the closure rate it read as', win13606({ closedPages: 6 }).includes('not by closures'), true);
+  t('H22 summary: a completed window says the boundary was reached', win13606({ closedPages: 6 }).includes('boundary reached'), true);
+  t('H22 summary: a ceiling-bound window says TRUNCATED', win13606({ closedPages: 12, closedWindowTruncated: true }).includes('⛔ TRUNCATED'), true);
+  t('H23 summary: the commit window is stated as a TIME cap', win13606({ commitPages: 4 }).includes(`H23's commit window is a TIME cap of ${COMMIT_WINDOW_DAYS} day(s)`), true);
+  t('H23 summary: a ceiling-bound commit window says TRUNCATED', win13606({ commitPages: 12, commitWindowTruncated: true }).includes(`${COMMIT_WINDOW_PAGE_CEILING}-page quota ceiling`), true);
+  t('open summary: a complete inventory says so', win13606({ openListingPages: 11 }).includes('EXHAUSTIVE listing'), true);
+  t('open summary: …and claims the whole population', win13606({ openListingPages: 11 }).includes('the whole population'), true);
+  t('open summary: a ceiling-bound listing is NAMED on the line', win13606({ openListingPages: 20, openListingsTruncated: ['listAllOpenIssues'] }).includes('Ceiling-bound listing(s): listAllOpenIssues'), true);
+  t('open summary: …and says the inventory is a PREFIX', win13606({ openListingPages: 20, openListingsTruncated: ['listAllOpenIssues'] }).includes('PREFIXES, not populations'), true);
+  t('open summary: …and a complete pass says none of that', win13606({ openListingPages: 11 }).includes('Ceiling-bound listing(s)'), false);
+  // ⛔ No bare-number rendering of a capped pass: every truncated window must
+  // carry the word, in every medium the summary feeds.
+  t('summary: a capped H22 pass never reads as a plain page count', /H22's closed-card window is a TIME cap of 3 day\(s\), read in 12 page\(s\)\./u.test(win13606({ closedPages: 12, closedWindowTruncated: true })), false);
+  t('summary: all three converted windows ride the enumerated contract', ['closedPages', 'closedWindowTruncated', 'commitPages', 'commitWindowTruncated', 'openListingPages', 'openListingsTruncated'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
 
   // -- H26: a block whose target can never close, + the stale chain (#11219) --
   // The measured cards, by name, and both directions of every leg.

@@ -116,6 +116,24 @@ export interface AdminUserDataEngine {
    * isn't wired, in which case the org bind simply no-ops.
    */
   find?(object: string, query?: unknown, opts?: unknown): Promise<unknown>;
+  /**
+   * [#12981] Optional registry probe — `ObjectQL.getSchema`, which answers
+   * `undefined` for an object no package registered.
+   *
+   * It is here to separate two outcomes the audit `catch` below used to spell
+   * identically: plugin-audit UNINSTALLED (no `sys_audit_log` object, so
+   * nothing was ever claimed and silence is correct) from plugin-audit
+   * INSTALLED AND THE WRITE REFUSED (the admin action landed, its audit row did
+   * not, and the endpoint still answers 200). Reading the driver's error text
+   * would decide the same question by guessing; this asks the registry that
+   * owns the answer.
+   *
+   * Optional because lean mocks and hosts that wire no ObjectQL engine do not
+   * carry it — additive, so nothing that type-checks today stops doing so. When
+   * it is absent the site cannot tell the two apart and therefore REPORTS: an
+   * unmeasurable write must never be a silent one.
+   */
+  getSchema?(objectName: string): unknown;
 }
 
 /** The gated caller, passed by the route after its ADR-0068 check. */
@@ -376,6 +394,12 @@ async function writeAdminAudit(
 ): Promise<void> {
   const engine = deps.getDataEngine();
   if (!engine) return;
+  // plugin-audit is OPTIONAL, and with it uninstalled there is no
+  // `sys_audit_log` object at all. That case is a DECLARED skip, not a
+  // swallow: nothing ever claimed this action would be audited, so there is
+  // nothing to report and the channel stays quiet — which is what keeps the
+  // `warn` below meaningful instead of one more line nobody reads.
+  if (engine.getSchema && !engine.getSchema('sys_audit_log')) return;
   try {
     await engine.insert(
       'sys_audit_log',
@@ -389,9 +413,31 @@ async function writeAdminAudit(
       },
       { context: SYSTEM_CTX },
     );
-  } catch {
-    // plugin-audit may not be installed (no sys_audit_log table) — audit is
-    // best-effort by design here; the operation itself must not fail.
+  } catch (error) {
+    // [#12981] The operation itself must NOT fail over its own audit — control
+    // flow is unchanged and the endpoint still answers 200. But it must not be
+    // SILENT either, and this site is the sharpest case in the family: the
+    // header above records that `sys_account` is in plugin-audit's
+    // `SKIP_OBJECTS`, so for `/admin/set-user-password` the generic writer
+    // emits ZERO rows and the row refused here is the ONLY record that a
+    // password was administratively reset. Nothing retries it and no later
+    // boot reconstructs it — the reset simply has no trail, while the admin
+    // who performed it reads `success: true`. `sys_audit_log` is registered
+    // (checked above), so this is a refused write, not an absent plugin.
+    deps.logger?.warn(
+      `[AuthPlugin] the sys_audit_log row for this administrative '${entry.action}' on sys_user `
+        + `${entry.recordId} was NOT written — the operation itself SUCCEEDED and the endpoint `
+        + 'answers 200, so nothing looks wrong. plugin-audit is installed (sys_audit_log is '
+        + 'registered), so this is a REFUSED write, not an absent plugin. This row carries the '
+        + "admin's decisions (event, passwordGenerated, mustChangePassword, placeholderEmail, "
+        + 'membershipCreated), none of which is derivable from the stored row, and for '
+        + '/admin/set-user-password it is the only audit record that exists at all because '
+        + "sys_account is in plugin-audit's SKIP_OBJECTS. Nothing retries this write, so the "
+        + 'action stays permanently untrailed. Remedy: restore write access to sys_audit_log '
+        + `(permissions, driver connectivity), then treat this line as the audit record. Cause: ${
+          (error as Error)?.message ?? error
+        }`,
+    );
   }
 }
 

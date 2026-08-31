@@ -705,6 +705,86 @@ describe('mongo options passthrough — credential refusal (#9040)', () => {
 });
 
 /**
+ * The nested NAME mirror of the refusal above — the class the nested-position
+ * finding closed. `options.auth.password` was refused while the byte-identical
+ * secret one spelling over (`options.auth.token`) or one level over
+ * (`options.pool.password`) was accepted in silence and sat cleartext in
+ * `sys_metadata`. The walk now judges every credential SPELLING
+ * (`CREDENTIAL_KEY_SPELLINGS` — the same one list the read redactor hides) at
+ * every object depth of the passthrough, so publish-time refusal treats a
+ * nested position identically to the top-level key it mirrors.
+ *
+ * Envelope note (same as the sibling pins): the zod issue's `code` and its
+ * pathed location are the whole envelope at this layer.
+ */
+describe('mongo options passthrough — nested credential-SPELLED keys refused at any depth', () => {
+  const VALID = { database: 'events', host: 'mongo.internal', username: 'svc' } as const;
+  const refusalAt = (options: Record<string, unknown>, dotted: string) => {
+    const result = MongoConfigSchema.safeParse({ ...VALID, options });
+    if (result.success) return undefined;
+    return result.error.issues.find((i) => i.path.join('.') === dotted);
+  };
+
+  it('refuses `auth.token` — the off-table position the read door also served cleartext', () => {
+    const issue = refusalAt({ auth: { username: 'app', token: 'eyJhbGci.x.y' } }, 'options.auth.token');
+    expect(issue, 'refusal must be pathed at `options.auth.token`').toBeDefined();
+    expect(issue!.code).toBe('custom');
+    expect(issue!.message).toContain('`options.auth.token`');
+    expect(issue!.message).toContain('cleartext at rest');
+    expect(issue!.message).toContain('external.credentialsRef');
+    // The "wins over" reassurance is measured for `auth.password` ONLY (#8696)
+    // — this message must not inherit it for a position nothing reads.
+    expect(issue!.message).not.toContain('wins over');
+  });
+
+  it('refuses a credential spelling nested one level deeper than the measured table knows', () => {
+    const issue = refusalAt({ pool: { password: 'hunter2' } }, 'options.pool.password');
+    expect(issue).toBeDefined();
+    expect(issue!.message).toContain('`options.pool.password`');
+  });
+
+  it('refuses a credential spelling at the record top level too — `options.password` mirrors `password`', () => {
+    const issue = refusalAt({ password: 'hunter2' }, 'options.password');
+    expect(issue).toBeDefined();
+  });
+
+  it('reports `auth.password` ONCE, with the measured message — the two walks do not double-report', () => {
+    const result = MongoConfigSchema.safeParse({
+      ...VALID,
+      options: { auth: { username: 'app', password: 'hunter2' } },
+    });
+    expect(result.success).toBe(false);
+    const at = result.error!.issues.filter((i) => i.path.join('.') === 'options.auth.password');
+    expect(at.length).toBe(1);
+    // The measured path keeps its own prescription — including the "wins over"
+    // reassurance that is TRUE for this position (#8696).
+    expect(at[0]!.message).toContain('wins over');
+  });
+
+  it("shares `auth.password`'s value boundaries: empty and non-string are not refused", () => {
+    expect(refusalAt({ auth: { token: '' } }, 'options.auth.token')).toBeUndefined();
+    expect(refusalAt({ auth: { token: 42 } }, 'options.auth.token')).toBeUndefined();
+    // A name-hit OBJECT is a container, not a secret — its interior is walked.
+    const inner = refusalAt({ token: { password: 'x' } }, 'options.token.password');
+    expect(inner).toBeDefined();
+  });
+
+  it('does not refuse benign nested names, and arrays are off the walk (the shared boundary)', () => {
+    for (const options of [
+      { auth: { username: 'app' }, replicaSet: 'rs0' },
+      { authMechanismProperties: { SERVICE_NAME: 'mongodb' } },
+      // An object inside an ARRAY is off every walker on this surface — the
+      // same structural line `valueAtPath`/`withoutPath` draw, which is what
+      // keeps row-shaped data out of a config judgment.
+      { hosts: [{ password: 'this-is-row-shaped-data-not-config' }] },
+    ]) {
+      const result = MongoConfigSchema.safeParse({ ...VALID, options });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+    }
+  });
+});
+
+/**
  * The contradictory pair "`external.credentialsRef` bound + a mongo
  * `config.url` naming no user" is refused at the datasource level (#9041) —
  * the "absence must be loud" half of the #8696 family. The binding is a silent

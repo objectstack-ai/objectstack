@@ -731,23 +731,34 @@ contacts:
 
 <Callout type="warn">
 A relationship field authored with `reference:` gets **no database-level
-`FOREIGN KEY` constraint** and **no MongoDB join index**. Both gaps have one
-root cause: the driver branches that would have built them were gated on
-`reference_to` — a key the spec REFUSES (`FieldSchema` answers
-`unrecognized_keys` for it, on any field type) and one that `reference` never
-populates. `master_detail` / `tree` did not reach either branch at all.
+`FOREIGN KEY` constraint** on any driver. It does get a **MongoDB join index**.
+Both branches were once gated on `reference_to` — a key the spec REFUSES
+(`FieldSchema` answers `unrecognized_keys` for it, on any field type) and one
+that `reference` never populates — so neither fired for authored metadata; the
+two were then settled in opposite directions, on their own merits.
 
 - **SQL:** the `FOREIGN KEY` DDL is retired (#11567). A field that still carries
   `reference_to` when it reaches DDL is refused at the driver's door, in the
   schema's own words (`400 VALIDATION_ERROR`), instead of silently changing the
-  physical schema.
-- **MongoDB:** the field-level join index `idx_FIELD_lookup` is gated on that
-  same refused key, so a canonically-spelled `reference` lookup is **not
-  indexed**. A `user` field still is — that arm needs no relationship key, which
-  is why the feature looked healthy. `reference_to` is refused at this driver's
-  door too, with the same verdict (#13222); whether a canonical `reference`
-  lookup should start building the index is tracked separately, because it
-  changes boot behaviour for deployments that already hold large collections.
+  physical schema. Declare an index in `indexes[]` if you want one on the
+  foreign-key column.
+- **MongoDB:** a `lookup` field declaring `reference:` gets the field-level join
+  index `idx_FIELD_lookup` (#13222). A `user` field gets one too — that arm
+  needs no relationship key. `reference_to` is refused at this driver's door as
+  well, with the same verdict as the spec's.
+
+  ⚠️ **Upgrading an existing MongoDB deployment:** this index is newer than the
+  driver, so the first `syncSchema` after the upgrade BUILDS it across
+  collections that already hold data — a real one-off IO and time cost on large
+  collections, and index storage that persists. The driver's `CHANGELOG.md`
+  entry for the release that added it carries the operational detail. Later
+  boots are no-ops: `createIndex` is idempotent for an index that already
+  exists.
+
+A `lookup` that omits `reference:` gets no join index — there is no declared
+target to join to. `master_detail` and `tree` reach neither branch: they get no
+`FOREIGN KEY` and no join index. Declare an `indexes[]` entry if a
+`master_detail` child is queried by parent often enough to need one.
 
 Referential integrity is enforced by the **engine** instead: `deleteBehavior` is
 applied on delete, which is what produces the `409 DELETE_RESTRICTED` above.

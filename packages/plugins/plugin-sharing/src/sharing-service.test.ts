@@ -1704,3 +1704,85 @@ describe('[#6428] the boolean projection does not drift (compatibility clause)',
     expect(await svc.checkEdit('account', 'a1', { isSystem: true })).toBe('allow');
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+
+describe('[#13551] the record-share `$in` drops nullish `record_id` rows', () => {
+  // The guard standing in front of BOTH `$in` constructions used to read
+  // `.map((g) => String(g.record_id)).filter(Boolean)`, which cannot drop a
+  // nullish `record_id`: `String(null)` is `'null'`, `String(undefined)` is
+  // `'undefined'`, and both are truthy. What follows pins the MECHANISM — a
+  // row with no `record_id` contributes no member — and asserts nothing about
+  // whether such a row exists in the wild.
+  //
+  // The rows are seeded straight into the fake table on purpose: `grant()`
+  // refuses a nullish `recordId` at the front door, so writing the row
+  // directly is the only way to stand up the already-corrupt state the guard
+  // exists for — the shape a bad backfill or an out-of-band
+  // `sys_record_share` write would leave behind.
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: SharingService;
+
+  const shareRow = (record_id: unknown) => ({
+    id: `shr_${String(record_id)}`,
+    object_name: 'account',
+    record_id,
+    recipient_type: 'user',
+    recipient_id: 'alice',
+    access_level: 'edit', // in WRITE_ACCESS_LEVELS, so the write filter reads it too
+  });
+
+  beforeEach(() => {
+    engine = makeFakeEngine({
+      account: ACCOUNT_SCHEMA,
+      sys_record_share: { name: 'sys_record_share' },
+    });
+    svc = new SharingService({ engine });
+  });
+
+  it('read filter: a null / undefined `record_id` contributes NO member, and the real grant survives', async () => {
+    engine._tables.sys_record_share = [shareRow('a1'), shareRow(null), shareRow(undefined)];
+    const f: any = await svc.buildReadFilter('account', { userId: 'alice' });
+    expect(f.$or[1].id.$in).toEqual(['a1']);
+    // Named literally: these are the two members the dead guard used to emit.
+    expect(f.$or[1].id.$in).not.toContain('null');
+    expect(f.$or[1].id.$in).not.toContain('undefined');
+  });
+
+  it('write filter: the same rows, the same outcome — both construction sites are repaired', async () => {
+    engine._tables.sys_record_share = [shareRow('a1'), shareRow(null), shareRow(undefined)];
+    const f: any = await svc.buildWriteFilter('account', { userId: 'alice' }, 'update');
+    expect(f.$or[1].id.$in).toEqual(['a1']);
+    expect(f.$or[1].id.$in).not.toContain('null');
+    expect(f.$or[1].id.$in).not.toContain('undefined');
+  });
+
+  it('when EVERY grant is nullish the share branch disappears, on both filters', async () => {
+    engine._tables.sys_record_share = [shareRow(null), shareRow(undefined)];
+    // Not an `$or` carrying a member that matches nothing: zero usable grants
+    // collapses to the owner match, which is what "no grants" already meant.
+    expect(await svc.buildReadFilter('account', { userId: 'alice' }))
+      .toEqual({ owner_id: 'alice' });
+    expect(await svc.buildWriteFilter('account', { userId: 'alice' }, 'update'))
+      .toEqual({ owner_id: 'alice' });
+  });
+
+  it('over-denial control: an ordinary grant set still produces exactly its ids, on both filters', async () => {
+    engine._tables.sys_record_share = [shareRow('a1'), shareRow('a2'), shareRow('a3')];
+    const read: any = await svc.buildReadFilter('account', { userId: 'alice' });
+    const write: any = await svc.buildWriteFilter('account', { userId: 'alice' }, 'update');
+    expect(read.$or[0]).toEqual({ owner_id: 'alice' });
+    expect(write.$or[0]).toEqual({ owner_id: 'alice' });
+    expect(read.$or[1].id.$in).toEqual(['a1', 'a2', 'a3']);
+    expect(write.$or[1].id.$in).toEqual(['a1', 'a2', 'a3']);
+  });
+
+  it('the non-null path is unchanged: a driver-numeric id still stringifies, an empty string is still dropped', async () => {
+    engine._tables.sys_record_share = [shareRow(42), shareRow(''), shareRow('a1')];
+    const f: any = await svc.buildReadFilter('account', { userId: 'alice' });
+    // `42` becomes `'42'` exactly as `String()` always made it, and `''` — the
+    // one value the old `.filter(Boolean)` could actually drop — is still
+    // dropped. Only the nullish rows are newly excluded.
+    expect(f.$or[1].id.$in).toEqual(['42', 'a1']);
+  });
+});
