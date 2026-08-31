@@ -508,12 +508,15 @@ const RESOLUTION_CONTROLS = [
     resolvesIn: 'collectBundleActions',
     why:
       'DROPPED direction, on the SAME collision as the control above — which is why the pair is worth '
-      + 'more than either half. `collectBundleActions` calls its OWN `const push`, and that hop must '
-      + 'survive: a resolver that answered the refusal control by declining every AMBIGUOUS name would '
-      + 'silently narrow the census, and nothing in the output would show it. One name, one file, one '
-      + 'collision, refused from outside and resolved from inside. ⚠️ Its scope is measured, not '
-      + 'assumed: this control does NOT pin the one-declaration departure — `push` has two bodies here '
-      + '— and an ablation that removes that departure leaves it green. The control below covers it.',
+      + 'more than either half: one name, one file, one collision, REFUSED from outside and RESOLVED '
+      + 'from inside. `collectBundleActions` calls its OWN `const push`, and that hop must survive a '
+      + 'repair aimed at the refusal case.\n\n'
+      + '⚠️ Its sensitivity is MEASURED, not assumed, and it is narrower than it looks. This site is '
+      + 'answered by `resolveSameFileBody`\'s LEXICAL WALK, which binds the local `push` before the '
+      + 'body index is ever consulted — so ablating the index (last-wins, or refusing every ambiguous '
+      + 'name) leaves this control GREEN, and ablating the lexical walk turns it RED. What it pins is '
+      + 'that the #13459 bare-identifier rule still answers an in-scope binding, which is exactly the '
+      + 'half this change reaches past when it replaces what that walk falls back TO.',
   },
   {
     file: 'packages/plugins/plugin-email/src/email-plugin.ts',
