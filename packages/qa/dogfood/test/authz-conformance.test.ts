@@ -862,7 +862,7 @@ describe('the ledger-sourced population and its baseline bite', () => {
     expect(problems.some((p) => p.includes('UNCLASSIFIED surface') && p.includes(fresh))).toBe(true);
   });
 
-  it('a NEW dispatcher domain is UNCLASSIFIED too — the #13376 file-selection layer', () => {
+  it('a NEW dispatcher domain is UNCLASSIFIED too — the file-selection layer', () => {
     // A domain file no probe names used to emit NOTHING: no key, no STALE, no
     // UNCLASSIFIED. Its absence was structurally unobservable. It is not now.
     const fresh = 'dispatcher-domain:route-ledger.ts:/webhooks';

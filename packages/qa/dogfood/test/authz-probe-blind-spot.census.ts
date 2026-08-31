@@ -299,7 +299,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'The dispatcher half. Its machine contract is DOMAIN-level by live registry introspection ' +
       '(domainRegistry.list()), guarded in BOTH directions by route-ledger.conformance.test.ts: every ' +
       'registered domain needs a row, and every ledger domain must be a live prefix or a pinned legacy / ' +
-      'non-dispatch branch. That two-way guard is what settles the #13376 file-selection layer by ' +
+      'non-dispatch branch. That two-way guard is what settles the FILE-SELECTION layer by ' +
       'construction — all 16 DomainRoute prefixes declared across the 15 domain files that declare one are ' +
       'ledger domains today, including the 11 files no probe has ever named. 21 domains; 5 classified ' +
       '(/meta, /actions, /automation, /packages, /mcp), 16 in the shrink-only baseline.',
