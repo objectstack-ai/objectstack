@@ -886,6 +886,32 @@ const commentSwallowPlugin = {
   },
 };
 
+// ───────────────────────────────────────────────────────────────────────────
+// The trees nothing in this repo ever lints: installed dependencies and build
+// output. Named ONCE and spread into the global ignore below AND into every
+// per-object `ignores` beside it, so "no config object can match build output"
+// is a property of this one array instead of seven lists that happen to agree.
+//
+// They did not agree. Four of the seven `files` objects below omitted
+// `**/build/**`, `**/.next/**` and `**/.turbo/**`, so TypeScript under those
+// directories resolved to three ENABLED rules while the same generated file
+// under `dist/` resolved to none — the incidental-neutrality the levelling in
+// #12334 replaced.
+//
+// ⚠️ The global object alone already keeps these paths out of the linted
+// population, so the per-object copies change no behaviour today. They are not
+// redundancy: they are what makes the invariant survive a future edit to the
+// global object by someone who has never read this history — which is exactly
+// how a rule came to be enabled on generated code in the first place.
+// ───────────────────────────────────────────────────────────────────────────
+const NEVER_LINTED = Object.freeze([
+  '**/node_modules/**',
+  '**/dist/**',
+  '**/build/**',
+  '**/.next/**',
+  '**/.turbo/**',
+]);
+
 export default [
   // ───────────────────────────────────────────────────────────────────────────
   // GLOBAL ignore. This is the ONLY object in this array with no `files` key,
@@ -910,34 +936,41 @@ export default [
   // So the accept/reject semantics of `**/dist/**` do not move: nothing there
   // had a rule enabled to lose. The saving is pure enumeration + parse.
   //
-  // ⚠️ SCOPE IS DELIBERATELY NARROWER THAN THE PER-OBJECT LISTS BELOW. Those
-  // also carry `**/build/**`, `**/.next/**` and `**/.turbo/**`, and promoting
-  // those three here would NOT be semantics-neutral. Three of the objects
-  // below (the `packages/**` and `examples/**` ones) list only
-  // `**/node_modules/**` and `**/dist/**` in their `ignores`, so they still
-  // match TypeScript under the other three directories:
+  // ⚠️ THE OTHER THREE PATTERNS ARE A NAMED CORRECTION, NOT A NEUTRAL ONE.
+  // `**/build/**`, `**/.next/**` and `**/.turbo/**` join this object under a
+  // maintainer ruling (2026-08-26, option C on #12334, verbatim 「同意」).
+  // Three rules are enabled on TypeScript under those directories today, and
+  // promoting the patterns DELIBERATELY TURNS THEM OFF on build output:
   //
-  //   packages/core/build/x.ts → LINTED, 3 rules ENABLED
+  //   packages/core/build/x.ts   before → LINTED, 3 rules ENABLED
   //     (slot-lookup/no-any-assignment, no-restricted-syntax,
   //      query-options/no-any-erasure), parser @typescript-eslint/parser
+  //                              after  → no config object matches: not linted
   //
-  // No such path exists in this repo today — nothing emits to `build/`, and the
-  // only Next.js app is `apps/docs`, which is outside `packages/**` — so this
-  // is latent rather than live. It is still a real semantic change, and it is
-  // left out of this object pending a maintainer ruling rather than taken
-  // silently under a "changes nothing" banner. See #12304.
+  // Recorded in those words rather than under a "changes nothing" banner,
+  // because switching a rule off on generated code and switching it off on
+  // source are the same line in a diff. It repairs this config's own stated
+  // intent — never lint build output: nobody authors the code under those
+  // directories, and linting generated code is the defect being removed, not
+  // coverage being cut.
+  //
+  // `**/.next/**` is LIVE, not latent (measured 2026-08-25 on #12334):
+  // `apps/docs/.next` is 3.9 GB after `pnpm --filter @objectstack/docs build`,
+  // and linting it is a hard OOM — `exit 134`, "Ineffective mark-compacts near
+  // heap limit", 66 s, no eslint output — which reads as a crashed gate rather
+  // than as 3.9 GB of chunks being parsed. A tracked-file census cannot see it:
+  // `.next` is untracked output, and `git ls-files` matches 0 files under any
+  // of the five patterns (control: 4,776 under `/src/`). `build/` and
+  // `.turbo/` stay latent on that census; the levelling below is what stops
+  // either of them becoming the next `.next`. See #12334 / #12304.
   // ───────────────────────────────────────────────────────────────────────────
   {
-    ignores: ['**/node_modules/**', '**/dist/**'],
+    ignores: [...NEVER_LINTED],
   },
   {
     files: ['**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}'],
     ignores: [
-      '**/node_modules/**',
-      '**/dist/**',
-      '**/build/**',
-      '**/.next/**',
-      '**/.turbo/**',
+      ...NEVER_LINTED,
       'packages/spec/**',
       // CLI/scaffold templates contain `@objectstack/spec` strings that are
       // emitted to user projects, not actual imports in this repo.
@@ -980,7 +1013,7 @@ export default [
   // reason to suspect it.
   {
     files: ['packages/cli/src/**/*.{ts,tsx,mts,cts}'],
-    ignores: ['**/node_modules/**', '**/dist/**', '**/*.test.ts'],
+    ignores: [...NEVER_LINTED, '**/*.test.ts'],
     languageOptions: {
       parser: tsParser,
       parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
@@ -1019,7 +1052,7 @@ export default [
   // backward-compat fixture (#2089) and are intentional.
   {
     files: ['examples/**/*.{ts,tsx,mts,cts}', 'packages/apps/**/*.{ts,tsx,mts,cts}'],
-    ignores: ['**/node_modules/**', '**/dist/**', 'packages/qa/downstream-contract/**'],
+    ignores: [...NEVER_LINTED, 'packages/qa/downstream-contract/**'],
     languageOptions: {
       parser: tsParser,
       parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
@@ -1068,7 +1101,7 @@ export default [
   // needs type information, so it belongs to a typed-lint pass, not here.
   {
     files: ['packages/**/*.{ts,tsx,mts,cts}'],
-    ignores: ['**/node_modules/**', '**/dist/**', ...SLOT_LOOKUP_UNSWEPT],
+    ignores: [...NEVER_LINTED, ...SLOT_LOOKUP_UNSWEPT],
     languageOptions: {
       parser: tsParser,
       parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
@@ -1138,8 +1171,7 @@ export default [
   {
     files: ['packages/**/*.{ts,tsx,mts,cts}'],
     ignores: [
-      '**/node_modules/**',
-      '**/dist/**',
+      ...NEVER_LINTED,
       // First cut is non-test code (08-03 triage). The ratchet lifts this and
       // holds the test residual to a count instead.
       ...QUERY_OPTIONS_TEST_GLOBS,
@@ -1178,7 +1210,7 @@ export default [
   // fakes — the arm the guard is worth the most on.
   {
     files: ['**/*.{ts,tsx,mts,cts}'],
-    ignores: ['**/node_modules/**', '**/dist/**', '**/build/**', '**/.next/**', '**/.turbo/**'],
+    ignores: [...NEVER_LINTED],
     languageOptions: {
       parser: tsParser,
       parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
@@ -1204,7 +1236,7 @@ export default [
   // stopped being locked.
   {
     files: COMMENT_SWALLOW_FILES,
-    ignores: ['**/node_modules/**', '**/dist/**', '**/build/**', '**/.next/**', '**/.turbo/**'],
+    ignores: [...NEVER_LINTED],
     languageOptions: {
       parser: tsParser,
       parserOptions: { ecmaVersion: 'latest', sourceType: 'module' },
