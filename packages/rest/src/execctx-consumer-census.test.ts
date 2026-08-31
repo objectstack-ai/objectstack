@@ -169,6 +169,15 @@ const ENTITLED = {
     isSystem: false,
     tenantId: 'org_census',
     systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
+    // [#13214] The internal key `computeExecCtx` stamps on every context it
+    // produces, naming the environment whose auth service actually validated
+    // the caller. `enforceEnvironmentOwnership` — the new guard on the UI-view
+    // site this census now counts — compares it against the environment the
+    // request resolved to, which under `makeServer` is `env_census`.
+    // `instrument()` replaces `resolveExecCtx` wholesale, so a synthetic
+    // context has to model the key or it is a caller anchored NOWHERE, which
+    // that seam refuses. Every other site in this census ignores it.
+    __authEnvironmentId: 'env_census',
 };
 const OBJECT_DOC = { name: 'acct', type: 'object', fields: {}, groups: [] };
 
@@ -296,39 +305,57 @@ describe('[#13160] §1 the production supplier fulfils with `undefined` rather t
 // ---------------------------------------------------------------------------
 
 describe('[#13160] §2 the consumer surface, counted from the tree', () => {
-    it('72 invocation sites, 89 mentions — the thread\'s two control numbers hold', () => {
-        expect(SITES.length).toBe(72);
-        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(89);
+    it('73 invocation sites, 92 mentions — the thread\'s two control numbers hold', () => {
+        // [#13214] 72 → 73 sites / 89 → 92 mentions. `registerUiEndpoints` was
+        // the ONE metadata-touching route in the table that resolved no
+        // identity at all — the exception this census surfaced — and the
+        // 2026-08-30 ruling closed it. It joins as a BARE site behind the
+        // shared floor, which is the family the next two cases describe.
+        //
+        // ⚠️ The two numbers moved by DIFFERENT amounts (+1 and +3) and that is
+        // the point of counting both: one is the call site, the other two are
+        // prose mentions in the new doc-comments (the registrar's, recording
+        // that this route used to call `resolveExecCtx` zero times, and the
+        // ownership guard's, recording that adding `resolveExecCtx` +
+        // `enforceAuth` was measured NOT to be the repair). A mention count
+        // that tracked the site count exactly would be measuring one thing
+        // twice.
+        expect(SITES.length).toBe(73);
+        expect(SOURCE.split('resolveExecCtx').length - 1).toBe(92);
     });
 
-    it('the split is 20 locally caught / 52 bare — NOT 16 / 52, which does not add to 72', () => {
+    it('the split is 20 locally caught / 53 bare — NOT 16 / 53, which does not add to 73', () => {
         // 16 sites spell the catch on the invocation line; 4 more spell it on
         // the continuation line. A single-line grep sees 16 and the arithmetic
         // silently loses four sites.
+        //
+        // [#13214] The new site is BARE, and that is a decision the next case
+        // enforces: a locally-caught site sitting behind the shared floor would
+        // be the first of its kind and would break the structural claim below.
         const sameLine = CAUGHT.filter((s) => SOURCE.split('\n')[s.line - 1].includes('.catch('));
         expect(sameLine.length).toBe(16);
         expect(CAUGHT.length).toBe(20);
-        expect(BARE.length).toBe(52);
+        expect(BARE.length).toBe(53);
         expect(CAUGHT.length + BARE.length).toBe(SITES.length);
     });
 
-    it('⭐ every one of the 52 bare sites is guarded on the VERY NEXT LINE, and none of the 20 caught ones is', () => {
+    it('⭐ every one of the 53 bare sites is guarded on the VERY NEXT LINE, and none of the 20 caught ones is', () => {
         // This inverts the reason the thread gave for doing the bare sites
         // first ("no local signal that a fault becomes an anonymous subject").
         // The bare sites are bare BECAUSE the shared anonymous floor is the
         // next statement; the locally-caught ones carry a `.catch` because
         // they are NOT behind that floor and each must decide for itself.
-        expect(BARE.filter((s) => s.nextLine === ENFORCE_AUTH_GUARD).length).toBe(52);
+        expect(BARE.filter((s) => s.nextLine === ENFORCE_AUTH_GUARD).length).toBe(53);
         expect(CAUGHT.filter((s) => s.nextLine === ENFORCE_AUTH_GUARD).length).toBe(0);
     });
 });
 
 // ---------------------------------------------------------------------------
-// 3. The 52 bare sites, driven
+// 3. The 53 bare sites, driven
 // ---------------------------------------------------------------------------
 
-describe('[#13160] §3 the 52 bare sites — driven, every one of them', () => {
-    it('all 52 are reached by the mounted route table, so none is classified by inference', async () => {
+describe('[#13160] §3 the 53 bare sites — driven, every one of them', () => {
+    it('all 53 are reached by the mounted route table, so none is classified by inference', async () => {
         const reached = sitesOf(await sweep(undefined, 'FULL'));
         const unreached = BARE.map((s) => s.line).filter((l) => !reached.has(l));
         // ⛔ A bare site that stopped being reachable must show up as a
@@ -336,14 +363,14 @@ describe('[#13160] §3 the 52 bare sites — driven, every one of them', () => {
         expect(unreached).toEqual([]);
     }, 120_000);
 
-    it('an absent context is the ANONYMOUS SUBJECT at all 52: 401 UNAUTHENTICATED, and the same instrument serves an entitled caller', async () => {
+    it('an absent context is the ANONYMOUS SUBJECT at all 53: 401 UNAUTHENTICATED, and the same instrument serves an entitled caller', async () => {
         const fault = await sweep(undefined, 'FULL');
         const control = await sweep(ENTITLED, 'FULL');
         const bareLines = new Set(BARE.map((s) => s.line));
         const controlByRoute = new Map(control.map((r) => [r.route, r]));
 
         const rows = fault.filter((r) => r.sites.some((l) => bareLines.has(l)));
-        expect(rows.length).toBeGreaterThanOrEqual(52);
+        expect(rows.length).toBeGreaterThanOrEqual(53);
 
         for (const row of rows) {
             expect(row.status, `${row.route} under an absent context`).toBe(ANONYMOUS_DENY_STATUS);

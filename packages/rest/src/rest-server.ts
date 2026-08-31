@@ -7059,8 +7059,19 @@ export class RestServer {
                     // protocol that answers cannot be about three different
                     // environments.
                     const environmentId = await this.resolveRequestEnvironmentId(routeEnvironmentId, req);
-                    const context = await this.resolveExecCtx(environmentId, req)
-                        .catch(rethrowAuthzStoreUnavailable);
+                    // A BARE site, deliberately, and the census in
+                    // `execctx-consumer-census.test.ts` is what makes that a
+                    // decision rather than an omission: the 52 sites whose very
+                    // next statement is the shared anonymous floor carry no
+                    // local `.catch`, because `computeExecCtx` already converts
+                    // every fault except an authz-store outage into `undefined`
+                    // and re-raises that one — which this handler's own
+                    // `try/catch` turns into the declared fault response. A
+                    // local `.catch(rethrowAuthzStoreUnavailable)` here would be
+                    // behaviourally identical and would make this the only site
+                    // that is both locally caught AND behind the floor, which is
+                    // exactly the split that census asserts does not exist.
+                    const context = await this.resolveExecCtx(environmentId, req);
                     if (this.enforceAuth(req, res, context)) return;
                     if (this.enforceEnvironmentOwnership(req, res, environmentId, context)) return;
                     const p = await this.resolveProtocol(environmentId, req);

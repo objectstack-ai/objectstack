@@ -528,13 +528,24 @@ describe('[#13214] §1 channel: the `X-Environment-Id` header', () => {
         expect(JSON.stringify(observed.body)).not.toContain('Alpha');
         //   - identity WAS asked for, which is the step the seam did not have;
         expect(observed.execCtxCalls).toBeGreaterThan(0);
-        //   - ⚠️ B's kernel is still ACQUIRED before the refusal. Recorded, NOT
-        //     repaired: the deny sits at the seam, after environment
-        //     resolution, exactly as it does on the guarded sibling route in §5.
-        //     The ruling names that ordering as input knowledge and puts it out
-        //     of this card's scope, so it is pinned as the CURRENT fact rather
-        //     than asserted away.
-        expect(observed.acquired).toEqual([ENV_B]);
+        //   - ⚠️ and NO kernel is acquired on this path — which is NOT the
+        //     reading that was predicted before this ran, so it is written down
+        //     the way it came out. The prediction was that B's kernel would
+        //     still be ACQUIRED before the refusal, because the deny sits at the
+        //     seam after environment resolution, exactly as it does on the
+        //     guarded sibling route §5 measures. That prediction is right about
+        //     PRODUCTION and wrong about this instrument, and the difference is
+        //     the instrument itself: `instrument()` replaces `resolveExecCtx`,
+        //     so the only `getOrCreate` caller left on this path is
+        //     `resolveProtocol` — which the repair moved to AFTER the refusal.
+        //     Unstubbed, `computeExecCtx` acquires the named environment's
+        //     kernel to look for its `auth` service, and that is measured
+        //     against the real method in `ui-view-environment-ownership.test.ts`
+        //     (`authLookups` records B before the default). ⛔ So this zero is a
+        //     property of the stub and must not be read as "the ordering
+        //     property the ruling put out of scope has been repaired" — it has
+        //     not been, and repairing it is a separate card.
+        expect(observed.acquired).toEqual([]);
     }, 120_000);
 
     it('⭐ POSITIVE CONTROL — a caller ENTITLED TO B naming B is served, so the refusal above is a decision', async () => {

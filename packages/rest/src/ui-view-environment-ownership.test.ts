@@ -277,17 +277,27 @@ describe('[#13214] §2 the seam refuses a caller authenticated in another enviro
     }
 
     it('⭐ a caller validated in A, naming B, is REFUSED — and receives none of B', async () => {
-        const { kernelManager } = kernelManagerFor({
+        const wiring = kernelManagerFor({
             [ENV_A]: { authUserId: 'u_alpha', schema: SCHEMA_A },
             [ENV_B]: { schema: SCHEMA_B },   // no auth service → the crossing branch
         });
-        const refused = await drive(kernelManager, ENV_A, ENV_B);
+        const refused = await drive(wiring.kernelManager, ENV_A, ENV_B);
 
         expect(refused.status).toBe(ANONYMOUS_DENY_STATUS);
         expect(JSON.stringify(refused.body)).not.toContain('Beta');
         // ⛔ And NOT the default environment's view either — a refusal, not a
         // redirection to whatever the caller does hold.
         expect(JSON.stringify(refused.body)).not.toContain('Alpha');
+
+        // ⚠️ RECORDED, NOT REPAIRED — the ordering property the 2026-08-30
+        // ruling names as input knowledge and puts out of this card's scope.
+        // The foreign environment's kernel IS materialised before the refusal,
+        // because identity resolution has to find an `auth` service and the
+        // deny sits after environment resolution. This is the unstubbed
+        // reading; the tenancy suite's `acquired` stays empty there only
+        // because it replaces `resolveExecCtx` wholesale.
+        expect(wiring.acquired).toContain(ENV_B);
+        expect(wiring.authLookups[0]).toBe(ENV_B);
     }, 120_000);
 
     it('⭐ POSITIVE CONTROL — the same caller, naming their OWN environment, is served', async () => {
