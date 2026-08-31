@@ -29,7 +29,8 @@
  *      anonymous floor decides: **401 `UNAUTHENTICATED`**, "Authentication is
  *      required to access this endpoint." The caller may hold a valid session;
  *      the fault is elsewhere.
- *    - `GRANTS LOST` (two classes) — identity survives and the CAPABILITY
+ *    - `GRANTS LOST` (two classes, ⭐ both since repaired — #13279 and
+ *      [#13476]) — identity survives and the CAPABILITY
  *      aggregation is what faulted, so the door answered **403 `FORBIDDEN`**,
  *      "Reading packages requires the `studio.access` or `setup.access`
  *      capability." An authenticated administrator was told they lack a
@@ -45,12 +46,24 @@
  *      `PERMISSION_STORE_DOWN` class therefore answers **503
  *      `SERVICE_UNAVAILABLE`** and is no longer byte-identical to its innocent
  *      twin — section 5's assertion is INVERTED IN PLACE, with the superseded
- *      text quoted beside it. ⚠️ The SECOND grants-lost class,
- *      `DATA_ENGINE_UNRESOLVABLE`, is UNCHANGED and still answers 403: it
- *      reaches an empty grant set through `tryFind`'s `!ql` guard (there is no
- *      engine to read) rather than through its `catch` (a read that failed), so
- *      the ruling's landing point does not see it. That residue is asserted
- *      explicitly in section 3 rather than left to be rediscovered.
+ *      text quoted beside it.
+ *
+ *      ⭐ **[#13476] The SECOND grants-lost class is now repaired too, and the
+ *      GRANTS-LOST disguise has no members left on this door.** The superseded
+ *      text read: "`DATA_ENGINE_UNRESOLVABLE` is UNCHANGED and still answers
+ *      403: it reaches an empty grant set through `tryFind`'s `!ql` guard
+ *      (there is no engine to read) rather than through its `catch` (a read
+ *      that failed), so the ruling's landing point does not see it." That was
+ *      COVERAGE of an already-ruled class rather than a fresh trade-off: an
+ *      engine that cannot be RESOLVED leaves the caller's permissions just as
+ *      undetermined as a read that threw, so it takes the same 503. The seam
+ *      that used to collapse the two facts is `wiredEngineOrLoud`
+ *      (`rest-server.ts`).
+ *
+ *      ⚠️ What did NOT change, and is pinned so it cannot: an embedder that
+ *      wires NO engine at all is a supported shape and still resolves quietly
+ *      to an empty-but-valid envelope, answered 403. "Unresolvable" and
+ *      "unwired" are now two answers; section 3 drives both side by side.
  *  - **Is a fault ever served as ANONYMOUS ACCESS, or as a silent success? NO.**
  *    Every degraded class is REFUSED on every wire-reachable method of all
  *    four routes. The swallow fails CLOSED. (Section 6.)
@@ -85,8 +98,10 @@
  *
  * ⛔ The other half is still not repaired and still not asserted as a verdict:
  * `CONTEXT LOST` remains byte-identical to a genuine anonymous caller (section
- * 5's first case is unchanged), and `DATA_ENGINE_UNRESOLVABLE` remains a 403.
- * Both are recorded here as measurements, exactly as before.
+ * 5's first case is unchanged) and is recorded here as a measurement, exactly
+ * as before. ⭐ [#13476] `DATA_ENGINE_UNRESOLVABLE` is no longer the second
+ * half of that sentence — it is repaired, and its assertions are regression
+ * pins now rather than measurements of a defect.
  *
  * ## ⭐ [#13280] The SEAM ASYMMETRY is repaired; section 7 pins the repair
  *
@@ -396,7 +411,22 @@ const CLASSES: FaultClass[] = [
     id: 'DATA_ENGINE_UNRESOLVABLE',
     what: 'identity resolves, then the data engine cannot be resolved at all',
     faulted: () => ({ ...healthy(), objectQLProvider: async () => { throw new Error('datasource unavailable'); } }),
-    ctx: 'grants', read: FORBID, write: FORBID,
+    // ⭐ [#13476] INVERTED IN PLACE, not re-baselined. Until this card the row
+    // read `ctx: 'grants', read: FORBID, write: FORBID` — an authenticated
+    // administrator whose engine was simply GONE, told they lack a capability.
+    // It was the LAST surviving member of the GRANTS-LOST disguise on this
+    // door: #13279 made a read that was ISSUED and threw fail loud, and this
+    // class never issues a read, so that ruling's landing point could not see
+    // it. The engine seam now keeps "no engine is wired" and "the engine could
+    // not be resolved" apart (`wiredEngineOrLoud`, `rest-server.ts`), so this
+    // class takes the SAME loud answer #13279 chose, for the same reason:
+    // nothing was read, so no capability judgement was ever reached.
+    //
+    // ⚠️ Its innocent twin is NOT here and must never be: an embedder that
+    // wires no engine at all is a SUPPORTED shape and still resolves quietly to
+    // an empty-but-valid envelope (403). Section 3's dedicated pin drives both
+    // and asserts they now DIFFER — that pair is the whole card.
+    ctx: 'loud', read: UNAVAILABLE, write: UNAVAILABLE,
   },
 ];
 
@@ -492,13 +522,73 @@ describe('[#13255] consequence — the door\'s answer for each fault class', () 
     // taught to be loud while its siblings kept the disguise.
     expect(loud.length).toBeGreaterThan(0);
     expect(loud.every((s) => s === AUTHZ_STORE_UNAVAILABLE_STATUS)).toBe(true);
-    // ⚠️ The classes the ruling did NOT reach still answer a refusal, and that
-    // residue is deliberately left visible rather than asserted away:
-    // `DATA_ENGINE_UNRESOLVABLE` reaches an empty grant set through `tryFind`'s
-    // `!ql` guard (no engine to read) rather than through its `catch` (a read
-    // that failed), so the ruling's landing point does not see it.
+    // ⚠️ [#13476] The residue this comment used to record is GONE, and the
+    // superseded text is kept so the change is legible rather than silent:
+    //
+    //   > `DATA_ENGINE_UNRESOLVABLE` reaches an empty grant set through
+    //   > `tryFind`'s `!ql` guard (no engine to read) rather than through its
+    //   > `catch` (a read that failed), so the ruling's landing point does not
+    //   > see it.
+    //
+    // That class is now in the `loud` cohort above. What remains `quiet` is the
+    // CONTEXT-LOST family (#13255), still unruled and still measured, never
+    // asserted away — so this half keeps its original reading and this test
+    // stays a regression pin rather than a rubber stamp.
     expect(quiet.filter((s) => s >= 500)).toEqual([]);
     expect(quiet.every((s) => s === ANONYMOUS_DENY_STATUS || s === 403)).toBe(true);
+  });
+
+  it('⭐ [#13476] UNRESOLVABLE vs UNWIRED — the two facts the door used to answer identically', async () => {
+    // THE card, as one assertion. Both wirings reach `resolveAuthzContext` with
+    // no usable engine; only one of them is a fact the door may report as a
+    // capability verdict.
+    //
+    //  - UNWIRED   — the embedder never configured a data plane. "This caller
+    //                holds nothing" is TRUE. A supported shape; stays quiet.
+    //  - FAILED    — the engine was wired and could not be resolved. "This
+    //                caller holds nothing" is UNKNOWN, and was being asserted.
+    const unwired = await drive(mount(serverWith({ authServiceProvider: AUTH_OK })), 'GET', PKGS);
+    const failed = await drive(
+      mount(serverWith({ ...healthy(), objectQLProvider: async () => { throw new Error('datasource unavailable'); } })),
+      'GET', PKGS,
+    );
+
+    // The repair: the answers DIFFER. Before this card both were
+    // `403 FORBIDDEN` with a byte-identical body.
+    expect(failed.status).not.toBe(unwired.status);
+    expect(JSON.stringify(failed.body)).not.toEqual(JSON.stringify(unwired.body));
+
+    // …and each is the RIGHT one, named — a bare inequality would also be
+    // satisfied by breaking the innocent shape instead of repairing the guilty.
+    expect(failed.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
+    expect(failed.body?.error?.code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
+    expect(unwired.status).toBe(403);
+    expect(unwired.body?.error?.code).toBe('FORBIDDEN');
+
+    // ⭐ POSITIVE CONTROL on the UNWIRED leg specifically. Its 403 must still be
+    // the CAPABILITY refusal an authenticated caller gets, not a fault wearing
+    // the same number: an unwired embedder still RESOLVES an identity.
+    const ctx = await serverWith({ authServiceProvider: AUTH_OK })
+      .resolvePackageRouteExecutionContext({ params: {}, headers: {}, method: 'GET', path: PKGS });
+    expect(ctx?.userId).toBe('u_admin');
+    expect(ctx?.systemPermissions ?? []).toEqual([]);
+
+    // ⭐ CONTROL that the harness can still produce the SERVED answer, so the
+    // two refusals above are read as caused by their faults.
+    expect((await drive(mount(serverWith(healthy())), 'GET', PKGS)).status).toBe(200);
+  });
+
+  it('⭐ [#13476] a provider that RESOLVES `undefined` is "no engine", not a fault', async () => {
+    // The seam contract is `(environmentId?) => Promise<engine | undefined>`.
+    // A provider DECLARING absence must stay on the quiet path — otherwise the
+    // repair would refuse service to every embedder that wires a provider and
+    // legitimately has no engine for this environment. ⚠️ This is the pin that
+    // fails if `wiredEngineOrLoud` is ever "simplified" into treating any falsy
+    // resolution as a failure.
+    const captured = await drive(
+      mount(serverWith({ ...healthy(), objectQLProvider: async () => undefined })), 'GET', PKGS);
+    expect(captured.status).toBe(403);
+    expect(captured.body?.error?.code).toBe('FORBIDDEN');
   });
 
   it('the capability clause, isolated from the anonymous floor, refuses the lost context too', async () => {
@@ -705,15 +795,24 @@ describe('[#13280] at a post-identity provider seam, sync-throw and rejection AG
     expect(syncThrowing.status).toBe(rejecting.status);
   });
 
-  it('⭐ objectQL — the SECOND divergent seam the card did not measure: both shapes answer 403', async () => {
+  it('⭐ objectQL — the SECOND divergent seam the card did not measure: both shapes answer 503', async () => {
     // [#13280] Not in the card's table, found while verifying it: this seam
-    // diverged too, 403 (reject) vs 401 (sync throw). It agrees at 403 — the
-    // engine is unresolvable either way, so the caller reaches an EMPTY grant
-    // set and is refused on capability, NOT on identity.
+    // diverged too, 403 (reject) vs 401 (sync throw). It agrees — and ⭐
+    // [#13476] MOVED THE AGREED VALUE, 403 → 503. The superseded reading:
+    //
+    //   > It agrees at 403 — the engine is unresolvable either way, so the
+    //   > caller reaches an EMPTY grant set and is refused on capability, NOT
+    //   > on identity.
+    //
+    // "Reaches an EMPTY grant set" was the defect: a WIRED engine that failed
+    // is not an empty grant set, it is an UNDETERMINED one. Both shapes are now
+    // the outage they are. ⚠️ #13280's property is untouched and is what this
+    // test still exists for — the two shapes AGREE; only the value they agree
+    // on moved, and it moved for both together.
     const { rejecting, syncThrowing } = await bothShapes('objectQLProvider');
-    expect(rejecting.status).toBe(403);
-    expect(syncThrowing.status).toBe(403);
-    expect(syncThrowing.body?.error?.code).toBe('FORBIDDEN');
+    expect(rejecting.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
+    expect(syncThrowing.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
+    expect(syncThrowing.body?.error?.code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
     expect(syncThrowing.status).toBe(rejecting.status);
   });
 
@@ -730,24 +829,37 @@ describe('[#13280] at a post-identity provider seam, sync-throw and rejection AG
     expect(syncThrowing.status).toBe(rejecting.status);
   });
 
-  it('⭐ the three seams do NOT agree with EACH OTHER — 200 / 403 / 401, so agreement is not a blanket swallow', async () => {
+  it('⭐ the three seams do NOT agree with EACH OTHER — 200 / 503 / 401, so agreement is not a blanket swallow', async () => {
     // The guard against the rival repair. "Every seam absorbs everything"
     // would satisfy each per-seam pin above; it would NOT satisfy this. Each
     // seam still degrades according to what it supplies.
+    //
+    // ⭐ [#13476] The middle value moved, 403 → 503; the PROPERTY this test
+    // asserts did not. Superseded: `toEqual([200, 403, ANONYMOUS_DENY_STATUS])`.
+    // ⚠️ A blanket-loud regression — every seam raising the outage — is now as
+    // much a hazard as the blanket swallow, and this same three-way inequality
+    // catches both: settings must still be SERVED and auth must still be 401.
     const answers = await Promise.all(
       (['settingsServiceProvider', 'objectQLProvider', 'authServiceProvider'] as const)
         .map(async (seam) => (await bothShapes(seam)).syncThrowing.status),
     );
-    expect(answers).toEqual([200, 403, ANONYMOUS_DENY_STATUS]);
+    expect(answers).toEqual([200, AUTHZ_STORE_UNAVAILABLE_STATUS, ANONYMOUS_DENY_STATUS]);
     expect(new Set(answers).size).toBe(3);
   });
 
   it('⭐ [#13279] the loud permission-store outage is NOT absorbed by the normalised seams', async () => {
     // The regression that would matter most: `seamOrUndefined` swallows at the
     // seam, so a reader must be able to see that the branded outage still
-    // travels. It does — `AuthzStoreUnavailableError` is raised by `tryFind`
-    // inside `resolveAuthzContext`, downstream of every seam here, so no
-    // normalised seam is on its path.
+    // travels. It does — this one is raised by `tryFind` inside
+    // `resolveAuthzContext`, downstream of every seam here, so no normalised
+    // seam is on its path.
+    //
+    // ⚠️ [#13476] `AuthzStoreUnavailableError` now has a SECOND raise site, at
+    // the data-engine seam itself (`wiredEngineOrLoud`). That does not weaken
+    // this pin: this case fails the store with a REACHABLE engine whose reads
+    // throw (`qlDown`), so the engine seam RESOLVES here and the error can only
+    // have come from `tryFind`. The two raise sites are driven apart by the
+    // section-3 pin, which fails the ENGINE instead of the reads.
     const captured = await drive(mount(serverWith({ ...healthy(), objectQLProvider: async () => qlDown() })), 'GET', PKGS);
     expect(captured.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
     expect(captured.body?.error?.code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
