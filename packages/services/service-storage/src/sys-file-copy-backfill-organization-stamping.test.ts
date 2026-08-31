@@ -26,7 +26,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { RAW_FILE_VALUES_CONTEXT_KEY } from '@objectstack/spec/data';
-import { assertEngineFindOnePredicate } from '@objectstack/objectql';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { installFileReferenceHooks } from './file-reference-lifecycle.js';
 import { backfillFileReferences } from './backfill-file-references.js';
 
@@ -79,13 +79,19 @@ function lifecycleEngine(files: Array<Record<string, unknown>>) {
     },
     getObject: (name: string) => LIFECYCLE_REGISTRY[name],
     async find(object: string, options: any) {
-      return (tables[object] ?? []).filter((r) =>
-        Object.entries(options?.where ?? {}).every(([k, v]) =>
-          v && typeof v === 'object' && Array.isArray((v as any).$in)
+      const rows = (tables[object] ?? []).filter((r) =>
+        Object.entries(options?.where ?? {}).every(([k, v]) => {
+          // Refuse the combinators this double does not implement rather than
+          // reading one as a field name — a silently-wrong matcher passes by
+          // matching nothing.
+          if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+          return v && typeof v === 'object' && Array.isArray((v as any).$in)
             ? (v as any).$in.some((x: unknown) => String(x) === String(r[k]))
-            : r[k] === v,
-        ),
+            : r[k] === v;
+        }),
       );
+      // The caller's bound, applied AFTER the filter and by presence.
+      return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     async findOne(object: string, options: any) {
       assertEngineFindOnePredicate(object, options);
@@ -97,6 +103,7 @@ function lifecycleEngine(files: Array<Record<string, unknown>>) {
       return data;
     },
     async update(object: string, data: any, options?: any) {
+      assertEngineUpdateDispatch(data, options);
       if (object === 'sys_file') updates.push({ data: { ...data }, options });
       const row = (tables[object] ?? []).find((r) => String(r.id) === String(data.id));
       if (row) Object.assign(row, data);
@@ -262,7 +269,8 @@ function backfillEngine(tables: Record<string, Array<Record<string, unknown>>>) 
       (tables[object] ??= []).push({ ...data });
       return data;
     },
-    async update(object: string, data: any) {
+    async update(object: string, data: any, options?: any) {
+      assertEngineUpdateDispatch(data, options);
       const row = (tables[object] ?? []).find((r) => String(r.id) === String(data.id));
       if (row) Object.assign(row, data);
       return row;
