@@ -9489,6 +9489,73 @@ export class ObjectQL implements IObjectQLEngine {
         if (undeclaredPerRow[i] !== undefined) continue;
         await this.triggerHooks('beforeInsert', rowHookContexts[i]);
       }
+
+      // ── [#13657] The POST-hook half of the declared-field door ───────────
+      //
+      // #8737 moved the door above ahead of the hooks so that no work — no
+      // autonumber, no secret row — is done for a payload about to be refused.
+      // That is still right, and this does NOT move it (moving it re-opens
+      // #8682). What it left uncovered is the payload the HOOKS produce: the
+      // door judged the caller's keys, then `beforeInsert` ran and could add
+      // any key at all, and from there the three drivers disagreed —
+      // `memory` ACCEPTED and stored a shadow column, `driver-sql` threw a raw
+      // `SQLITE_ERROR` with no `status`, `sqlite-wasm` threw a bare `Error`
+      // with neither. One app, one hook, three meanings decided by which
+      // driver a deployment happens to run.
+      //
+      // So the same function runs a second time over the POST-hook rows. Same
+      // predicate, not a second one — a hook-written key and a caller-written
+      // key are the same defect (`declared = enforced`, PD #10) and must read
+      // identically to a caller: `INVALID_FIELD` / 400, on every driver.
+      //
+      // ## Why the platform's own stamps survive it
+      //
+      // The wildcard audit hook (`sys_stamp_audit_insert`, `object: '*'`, in
+      // plugin.ts) writes `created_at` and `updated_at` UNCONDITIONALLY —
+      // deliberately, because driver-sql creates those two as built-in columns
+      // on every table whether or not the object declares them. They are
+      // exactly two of `PLATFORM_PROVISIONED_COLUMNS`, which this function has
+      // tolerated since #8682 for that same reason, so the platform's own
+      // hook is covered by the tolerance that already existed rather than by
+      // an exemption invented here. Its other three stamps (`created_by`,
+      // `updated_by`, `tenant_id`) are each guarded by an explicit
+      // `hasField(objectName, …)`, and every other before-hook that ships in
+      // this repo either writes a DECLARED key or is structurally unable to
+      // introduce one (pinyin's `__search` returns early unless the object
+      // declares the companion; the storage file-reference pass rewrites only
+      // keys already present). ⛔ Do not add a per-key exemption list here: the
+      // tolerated set is the platform-provisioned one, and a hook that needs
+      // more than that is writing a field its object should declare.
+      //
+      // ## Placement: immediately after the dispatch, before every producer
+      //
+      // #8682's rule applied one step in — a refusal must cost nothing — so
+      // this runs before `resolveSystemInsertOrganization`, before the
+      // credential channel (`encryptSecretFields` writes a `sys_secret` row),
+      // before validation and before `applyAutonumbers`. Pre-statement, so the
+      // driver is never reached: that is also what puts #8682's Half B
+      // statement-and-values leak out of reach on this path, since both SQL
+      // refusals only ever came from the driver's own error string.
+      //
+      // Merged into `undeclaredPerRow` rather than thrown directly so partial
+      // mode behaves exactly as it does for a caller-written key: the row is
+      // culled, its siblings are unaffected, and the seed into `rowErrors`
+      // below happens before the first pass with a side effect. A row the
+      // PRE-hook door already refused ran no hook, so its verdict is kept as
+      // it stands — re-reporting it would replace the original error object
+      // with an equal one for no reason.
+      const postHookUndeclared = undeclaredWriteFieldErrors(
+        object,
+        this._registry.getObject(object) as { fields?: unknown } | undefined,
+        rowHookContexts.map((rowCtx) => rowCtx.input.data),
+      );
+      for (let i = 0; i < postHookUndeclared.length; i++) {
+        if (undeclaredPerRow[i] === undefined) undeclaredPerRow[i] = postHookUndeclared[i];
+      }
+      if (!partialRowMode) {
+        const postRefusal = postHookUndeclared.find((e) => e !== undefined);
+        if (postRefusal) throw postRefusal;
+      }
       // Thread the open transaction (if any) into the driver-facing
       // options so that knex's `.transacting(trx)` is honoured. Without
       // this, calls inside a `engine.transaction(...)` block would deadlock
@@ -10466,6 +10533,34 @@ export class ObjectQL implements IObjectQLEngine {
                }
            }
        }
+
+       // ── [#13657] The POST-hook half of the declared-field door ──────────
+       //
+       // The insert path's twin, applied to the second write verb — same
+       // function, same envelope, same reason (see the long-form note at the
+       // `insert()` call site, which is not restated here). The #8738 door
+       // above stays exactly where it is; this ADDS the check the hooks' own
+       // output never had.
+       //
+       // Placed at the CONFLUENCE of the two branches, which is what makes one
+       // call sufficient: the by-id branch mutates `hookContext.input.data` in
+       // place through `triggerHooks`, and the predicate branch's
+       // `dispatchPerRowBeforeHooks` accumulates each row context's payload
+       // back onto the SAME `batchCtx.input.data` after every dispatch (its D3
+       // half). So by this line `hookContext.input.data` is the final
+       // post-hook payload on either path, and it is still pre-statement:
+       // ahead of both readonly strips, `evaluateValidationRules` and every
+       // `driver.update` / `driver.updateMany` dispatch below.
+       //
+       // Single verdict, thrown: `update()` takes one payload and has no
+       // partial-row mode to carry a per-row verdict into — the same shape
+       // #8738 wrote down for the pre-hook door one screen up.
+       const postHookUndeclaredUpdate = undeclaredWriteFieldErrors(
+         object,
+         this._registry.getObject(object) as { fields?: unknown } | undefined,
+         [hookContext.input.data],
+       )[0];
+       if (postHookUndeclaredUpdate) throw postHookUndeclaredUpdate;
 
        hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
 
