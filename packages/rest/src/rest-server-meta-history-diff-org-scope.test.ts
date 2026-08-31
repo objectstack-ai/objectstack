@@ -36,10 +36,24 @@
 //     it, and it is the whole reason this file exists in this shape.
 //  2. `HistoryMetaItemRequestSchema` declares `organizationId:
 //     z.string().optional()` — optional plain string, NOT nullable, mirroring
-//     the implementation's `organizationId?: string`. `?? null` on the history
-//     door is a TS2353 compile error; on the diff door — reached through
-//     `(p as any)` — it type-checks and is a silent RUNTIME no-op, since
-//     `null ?? null` is `null`. Hence the omit-spread on both.
+//     the implementation's `organizationId?: string`. The two doors then fail
+//     DIFFERENTLY, and the asymmetry is the reason the omit-spread is on both:
+//
+//       • `/history` reddens with **TS2322** — measured: `Type 'string | null'
+//         is not assignable to type 'string | undefined'`. An ASSIGNABILITY
+//         failure. ⚠️ NOT TS2353, which is the UNDECLARED-member code:
+//         `organizationId` IS declared, so the unknown-property code cannot
+//         apply. (Both this line and the door's own comment said TS2353 when
+//         they landed, copied from a neighbouring paragraph that is about
+//         undeclared members and is correct in its own context — comment drift
+//         by adjacency, corrected and named rather than quietly fixed.)
+//
+//       • `/diff` reddens with **NOTHING**. It reaches `diffMetaItem` through
+//         `(p as any)`, so the compiler checks nothing about that literal:
+//         `?? null` type-checks there and is a silent RUNTIME no-op, since
+//         `null ?? null` is `null`. ⇒ the guard is WEAKEST exactly where the
+//         argument is most easily assumed to be strongest, and on that door
+//         the spread is the ONLY thing holding the contract.
 //
 // ── Why the harness is the REAL protocol, not a spy ───────────────────────
 //

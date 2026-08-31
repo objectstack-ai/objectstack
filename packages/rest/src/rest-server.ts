@@ -6229,8 +6229,26 @@ export class RestServer {
                     // `organizationId?: string` — and the spec's own describe
                     // text names the asymmetry against the audit twin, which
                     // declares `string | null`. Copying the audit door's
-                    // expression here is a TS2353 compile error, and would be a
-                    // no-op at runtime anyway (`null ?? null` is `null`).
+                    // expression here is a **TS2322** compile error, measured:
+                    // `error TS2322: Type 'string | null' is not assignable to
+                    // type 'string | undefined'`. It is also a no-op at runtime
+                    // (`null ?? null` is `null`).
+                    //
+                    // ⚠️ TS2322, NOT the TS2353 the paragraph directly above
+                    // names, and the difference is the whole point: TS2353 is
+                    // the UNDECLARED-member code, and `organizationId` IS
+                    // declared — so this is an assignability failure, not an
+                    // unknown-property one. This comment said TS2353 when it
+                    // landed, copied from its neighbour nine lines up, which is
+                    // correct in ITS context and wrong here. Comment drift by
+                    // adjacency; named so the next reader standing in the same
+                    // spot does not repeat it.
+                    //
+                    // ⚠️ And the guard is WEAKER one door over, not stronger:
+                    // the `/diff` twin reaches `diffMetaItem` through
+                    // `(p as any)`, so `?? null` there reddens with NOTHING and
+                    // is a silent runtime no-op. Do not generalise "the
+                    // compiler catches this" from here to that door.
                     const historyRequest: TransportScopedMetaRequest<HistoryMetaItemRequest> = {
                         type: req.params.type,
                         name: req.params.name,
