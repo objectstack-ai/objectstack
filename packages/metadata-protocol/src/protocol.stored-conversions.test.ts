@@ -153,7 +153,10 @@ describe('getMetaItems — stored rows are served canonical (#3903)', () => {
 // is exactly what the stub seeding reproduces), and objectui's
 // `reference ?? reference_to` fallback arms are being deleted on the strength
 // of this suite: the serve face must only ever emit `reference`.
-const legacyReferenceToRow = {
+// Typed `any` like the stub engine above: the seed deliberately carries an
+// object-literal `metadata` (makeStubEngine stringifies it), which `Row`'s
+// stored shape (`metadata: string`) rejects at the call site.
+const legacyReferenceToRow: any = {
     type: 'object',
     name: 'crm_contact',
     metadata: {
