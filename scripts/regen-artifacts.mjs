@@ -96,7 +96,18 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // explicit `--update-base` writes it, so it was never on the churn path that
   // made the other three the queue's serialization point — and its `baseRev` is
   // one commit for the whole surface, which a per-shard copy would let drift.
-  { path: 'packages/spec/authorable-surface.base.json', gen: 'gen:schema', check: 'check:authorable-surface' },
+  //
+  // `alsoWrittenBy` records the generator the paragraph above deliberately refuses
+  // to name as `gen`, so the #13731 accounting can see that
+  // `gen:authorable-surface-base` HAS a recorded disposition rather than reporting
+  // it as a generator nobody has judged. It is a declaration for that reconciliation
+  // only — no consumer runs it, which is the whole point of it not being `gen`.
+  {
+    path: 'packages/spec/authorable-surface.base.json',
+    gen: 'gen:schema',
+    check: 'check:authorable-surface',
+    alsoWrittenBy: ['gen:authorable-surface-base'],
+  },
   { path: 'packages/spec/json-schema.manifest/**', gen: 'gen:schema', check: 'check:authorable-surface' },
   // The #4666 default-value ratchet — what an author gets when they OMIT a key.
   // Same producer, same gate and the same sorted-array-per-category shape as its
@@ -218,13 +229,81 @@ export const REGEN_ARTIFACTS = Object.freeze([
     check: 'check:system-context-census',
     owner: ROOT_OWNER,
   },
+  // #13335 / #13731. The per-skill reference index — one row per `packages/spec`
+  // source module, rendered whole by `gen:skill-refs`. Nine tracked files today,
+  // matched as a SEGMENT glob so a tenth skill arrives routed instead of arriving
+  // unrouted and silent (`entryForPath` learned the form for this row).
+  //
+  // The measured case is #13335's, and it is the textbook shape: PR #13262 and the
+  // #13263 branch each regenerated `skills/objectstack-ui/references/_index.md`,
+  // and `git merge origin/main` conflicted on adjacent rows —
+  //
+  //     - node_modules/@objectstack/spec/src/ui/report.zod.ts — Exports: ReportType, ...
+  //     =======
+  //     - node_modules/@objectstack/spec/src/ui/report.zod.ts — Report Type Enum
+  //
+  // Both sides are correct-for-themselves projections of their own tree, and the
+  // merged tree's index equals NEITHER — the same "no text merge can reach the
+  // answer" property that put the elevation census page above here. The correct
+  // resolution #13335 records by hand (take either side, commit the merge,
+  // regenerate, let `check:skill-refs` prove it) is exactly what this row plus
+  // `os-regen-merge.sh` step 4 do mechanically.
+  //
+  // ⚠️ Routing is the CHEAP half and never the protection — the driver is LOCAL, so
+  // it does nothing for a merge-queue rebuild (the header's standing warning). The
+  // load-bearing half is server-side and already wired: `check:skill-refs` runs in
+  // `lint.yml` (`typecheck-source-gates`) on `pull_request` AND `merge_group` with
+  // no `paths:` filter, and it RE-DERIVES the index from the spec sources rather
+  // than reading the file back — so it catches the silent case too, which is the
+  // one that matters here (two branches whose rows do not overlap merge to exit 0
+  // and a file describing neither side).
+  //
+  // No `readsDist`/`readsSchemaTree`: the generator walks `src/` directly.
+  { path: 'skills/*/references/_index.md', gen: 'gen:skill-refs', check: 'check:skill-refs' },
+  // #13731. The ADR-0081 react-tier contract, both halves. Generated WHOLE — the
+  // markdown's frontmatter and its "do not edit by hand" banner are emitted by the
+  // generator too, so there is no hand-written region for a deferral to launder,
+  // which is the question this table exists to ask. A projection of the
+  // `REACT_BLOCKS` definition in `@objectstack/spec/ui`, one section per block: two
+  // PRs adding different blocks are a set union that git reports as a conflict.
+  //
+  // Same cheap-half caveat as its neighbour above, same answer: `check:react-blocks`
+  // runs in `lint.yml` on `pull_request` and `merge_group`, re-deriving from the
+  // definition, so the driver removes hand-merge rounds and is never the only signal.
+  {
+    path: 'skills/objectstack-ui/contracts/react-blocks.contract.json',
+    gen: 'gen:react-blocks',
+    check: 'check:react-blocks',
+  },
+  {
+    path: 'skills/objectstack-ui/references/react-blocks.md',
+    gen: 'gen:react-blocks',
+    check: 'check:react-blocks',
+  },
 ]);
 
 /**
- * Tracked files that LOOK generator-owned and deliberately are not. Recorded
- * rather than omitted: the dangerous mistake here is adding a path to
- * `.gitattributes` because a generator writes it, without asking whether
- * recomputing it can *lose* a decision a human made.
+ * Files that LOOK generator-owned and deliberately are not. Recorded rather than
+ * omitted: the dangerous mistake here is adding a path to `.gitattributes` because
+ * a generator writes it, without asking whether recomputing it can *lose* a
+ * decision a human made.
+ *
+ * Two optional fields, both added by #13731 and both read only by
+ * `reconcileGenerators` in `git-merge-regen.mjs`:
+ *
+ *   `gen` / `owner` — the generator whose output this path is. Present where the
+ *     accounting needs it, i.e. where the generator appears in no `REGEN_ARTIFACTS`
+ *     row's `gen` and this entry is therefore the only record of its disposition.
+ *     `owner` defaults to `DEFAULT_OWNER` exactly as a row's does, and it is part
+ *     of the key: `gen:test-typecheck-debt` exists in THREE manifests writing three
+ *     different ledgers, and declaring one of them must not silently account for
+ *     the other two — that was 2 of the 11 unaccounted generators #13731 found.
+ *
+ *   `untracked` — this path is not in git at all (gitignored build output). The
+ *     disposition is still recorded, because "git never merges it" is an answer to
+ *     the question and its absence is not. Asserted rather than asserted-once: the
+ *     self-test refuses if such a path becomes tracked, which is the moment the
+ *     reason expires and a real disposition is owed.
  */
 export const NOT_DRIVER_MANAGED = Object.freeze([
   {
@@ -244,6 +323,7 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
   },
   {
     path: 'packages/spec/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
     why:
       'a SHRINK-ONLY ratchet, same trade as docs-import-surface.baseline.json above (#5286). '
       + '`gen:test-typecheck-debt` writes it, and on a merge it is exactly the file two branches '
@@ -257,6 +337,7 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
   },
   {
     path: 'packages/spec/src/migrations/registry.ts',
+    gen: 'gen:migration-registry',
     why:
       'a MIXED file since #7297, and the mix is exactly why the driver must not own it. Its three '
       + 'append tables are now generated into marked regions from `src/migrations/entries/` (one file '
@@ -287,6 +368,87 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'generated whole, this one would defer 21 prose files to OURS and lose the other side\'s '
       + 'edits silently. Route the generated FILE; leave the neighbours to text-merge, which is '
       + 'correct for prose and always was.',
+  },
+  // ── #13731: the remaining generators, one recorded disposition each ──────────
+  {
+    path: 'packages/client/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/client',
+    why:
+      'a SHRINK-ONLY ratchet — the same file, the same generator and the same trade as '
+      + '`packages/spec/test-typecheck-debt.json` above, one package over. It is listed '
+      + 'SEPARATELY rather than covered by its sibling on purpose: three manifests define '
+      + '`gen:test-typecheck-debt` and each writes its own ledger, so one entry standing for '
+      + 'all three would be a disposition nobody actually made for this file. Recomputing it '
+      + 'mid-merge records whatever the half-merged tree compiles to, and a file that GAINED '
+      + 'errors enters the ledger as merge noise instead of as red.',
+  },
+  {
+    path: 'packages/rest/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/rest',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/client/test-typecheck-debt.json` directly above; '
+      + 'same generator, same per-package ledger, same reason a merge must never recompute it.',
+  },
+  {
+    path: 'packages/sdui-parser/objectui-lockstep.json',
+    gen: 'gen:sdui-lockstep',
+    owner: ROOT_OWNER,
+    why:
+      'a VENDORED RECORD OF ANOTHER REPOSITORY, and the only entry here that a merge could not '
+      + "regenerate even if regenerating were right. `--update` re-records objectui's side of the "
+      + 'sdui-parser lockstep and needs an objectui CHECKOUT to do it; a merge driver has no '
+      + 'network, no build and no sibling checkout, so "recompute from the merged sources" names '
+      + 'sources that are not in this tree at all. And the file is a human decision twice over — '
+      + 'the pinned `.objectui-sha` records WHICH objectui revision someone ported to, which is an '
+      + 'act of porting and not a projection of this repo. Regenerating it during a merge would '
+      + 'either fail or silently re-point the lockstep at whatever checkout happened to be on disk, '
+      + 'and a wrong answer here means the save gate and the renderer accept different grammars '
+      + 'while every gate stays green.',
+  },
+  {
+    path: 'skills/README.md',
+    gen: 'gen:skill-docs',
+    why:
+      'MIXED, and the mix is the whole reason — the same trade `packages/spec/src/migrations/'
+      + 'registry.ts` is kept out of the table for. `gen:skill-docs` rewrites ONLY the region '
+      + 'between `BEGIN/END GENERATED: skills`: 17 of the file\'s 114 lines. The other 97 are '
+      + 'hand-written prose about the bundle layout, and the driver defers the WHOLE file to OURS '
+      + "— so routing it would let a regeneration launder away a sibling's prose edit, trading a "
+      + 'merge conflict for a silent loss. `check:skill-docs` guards the generated region instead, '
+      + 'and a prose conflict here is a human\'s, as it always was.',
+  },
+  {
+    path: 'content/docs/ai/skills-reference.mdx',
+    gen: 'gen:skill-docs',
+    why:
+      'MIXED, exactly as `skills/README.md` above — one spliced `BEGIN/END GENERATED: skills` '
+      + 'block inside 267 lines of hand-written guide prose. Same generator, same deferral hazard, '
+      + 'same answer: guard the block with `check:skill-docs`, leave the prose to text-merge.',
+  },
+  {
+    path: 'packages/spec/json-schema/**',
+    gen: 'gen:openapi',
+    untracked: true,
+    why:
+      'GITIGNORED build output (`.gitignore:61`) — git never merges it, so it has no merge '
+      + 'semantics to decide. Recorded rather than omitted because the tree LOOKS like the routed '
+      + '`json-schema.manifest/**` next to it and invites the symmetry. It is also the tree '
+      + '`readsSchemaTree` already warns about: a merge never delivers it, and whatever sits on '
+      + 'disk describes one side. If it is ever committed, this entry expires and a real '
+      + 'disposition is owed — the self-test refuses at that moment rather than after the merge '
+      + 'that needed it.',
+  },
+  {
+    path: 'sbom.json',
+    gen: 'gen:sbom',
+    untracked: true,
+    why:
+      'GITIGNORED build output (`.gitignore:73`), produced at release time from the manifests. '
+      + 'Nothing merges it and no `check:` proves it current, so it has no place in either '
+      + 'ledger — recorded so that "no disposition" is not confused with "not yet decided". Same '
+      + 'expiry clause as the entry above: committing it turns this entry red.',
   },
   {
     path: 'docs/audits/**',
@@ -389,9 +551,39 @@ export function ownerRunCommand(owner, script, { silent = false } = {}) {
   return owner === ROOT_OWNER ? `pnpm${s} ${script}` : `pnpm${s} --filter ${owner} ${script}`;
 }
 
-/** Resolve the entry that owns a path, or undefined. Handles the one `**` entry. */
+/**
+ * Does `p` match a table path, read the way **git** reads the same string in
+ * `.gitattributes`?
+ *
+ * The table path and the `.gitattributes` pattern are literally the same string —
+ * `reconcileAttributes` holds them equal — so the two readers have to agree on what
+ * it MEANS, not merely on its bytes. Until #13731 they did not: the matcher below
+ * understood a trailing `/**` and exact equality and nothing else, so a pattern git
+ * matches happily (`skills/*` + a segment) would reconcile green and then be REFUSED
+ * by the driver at merge time, with the refusal blaming an absent table row. That is
+ * this card's own failure mode one level down — a gate green over a case it cannot
+ * see — and it surfaces during a merge, which is the worst moment to learn it.
+ *
+ * Two forms, both matching git's gitattributes semantics for a pattern containing a
+ * slash (anchored at the repo root):
+ *
+ *   `a/b/**`  — the subtree under `a/b/`
+ *   a slash-star-slash form   — one path SEGMENT; the star never crosses a `/`, as git has it
+ *
+ * `git-merge-regen.mjs --self-test` pins the agreement against `git check-attr`
+ * itself rather than against this comment, so a future divergence is measured.
+ */
+function pathMatches(pattern, p) {
+  if (pattern.endsWith('/**')) return p.startsWith(pattern.slice(0, -2));
+  if (!pattern.includes('*')) return pattern === p;
+  const rx = pattern
+    .split('*')
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('[^/]*');
+  return new RegExp(`^${rx}$`).test(p);
+}
+
+/** Resolve the entry that owns a path, or undefined. Handles the `**` and `*` forms. */
 export function entryForPath(p) {
-  return REGEN_ARTIFACTS.find((e) =>
-    e.path.endsWith('/**') ? p.startsWith(e.path.slice(0, -2)) : e.path === p,
-  );
+  return REGEN_ARTIFACTS.find((e) => pathMatches(e.path, p));
 }

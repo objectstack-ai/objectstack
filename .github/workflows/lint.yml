@@ -1862,6 +1862,38 @@ jobs:
       - name: Teaching-corpus lexical anti-drift ratchet
         run: pnpm check:corpus-claim-drift
 
+      # #13678: the third gate over this corpus, and the only one asking an
+      # EXISTENCE question rather than a lexical one. The two steps above ask
+      # whether a forbidden word appears, and whether a spelling stands next to
+      # prose naming a semantic it does not have. This one asks, in both
+      # directions, whether the identifiers the catalog names and the schema
+      # members it enumerates are the same set:
+      #
+      #   Leg 1 (phantom row)  a table row citing an identifier that greps to
+      #                        zero in `packages/**` is a red. Measured: 3 of 6
+      #                        falsehoods in one skill were this class, every one
+      #                        catchable by a single grep of the cited name.
+      #   Leg 2 (missing row)  a section REGISTERED as exhaustive over a schema
+      #                        symbol that does not document every member is a
+      #                        red. Measured on a later flight: 15 of 20.
+      #
+      # Leg 2 is table-driven rather than inferred, and that is a measurement
+      # result, not a preference — auto-binding a doc table to any enum it is a
+      # subset of scored 1 true positive in 3 on this corpus, because deliberate
+      # subsets ("Three action types dispatch headlessly") and semantically mixed
+      # enums are indistinguishable from real gaps without a human. The heuristic
+      # ships as `--suggest`, which cannot fail anything.
+      #
+      # It lives in this job for the reason every other docs guard does
+      # (`check:doc-anchors`, `check:role-word`, `check:corpus-claim-drift`
+      # above): this job carries the whole `check:*` gate family and has no paths
+      # filter. That matters more here than for its neighbours — the gate's two
+      # inputs are `skills/**` and `packages/**`, so a paths filter on either
+      # would let the OTHER side drift a member in or an identifier out without
+      # ever running the check that notices.
+      - name: Published-skills identifier liveness gate (two legs)
+        run: pnpm check:skill-identifier-liveness
+
       # #11671: `os i18n extract --fill=default` fills GAPS only, so revising a
       # source string rewrites `en` and strands the previous source text in every
       # other locale. The bundle stays in sync BY KEY, so `check:i18n` reports OK

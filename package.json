@@ -55,6 +55,7 @@
     "check:template-version-sync": "node scripts/sync-template-versions.mjs --self-test",
     "check:role-word": "node scripts/check-role-word.mjs --self-test && node scripts/check-role-word.mjs",
     "check:corpus-claim-drift": "node scripts/check-corpus-claim-drift.mjs --self-test && node scripts/check-corpus-claim-drift.mjs",
+    "check:skill-identifier-liveness": "node scripts/check-skill-identifier-liveness.mjs --self-test && node scripts/check-skill-identifier-liveness.mjs",
     "check:quick-reference-counts": "node scripts/check-quick-reference-counts.mjs --self-test && node scripts/check-quick-reference-counts.mjs",
     "check:overlay-whitelist-table": "node scripts/check-overlay-whitelist-table.mjs --self-test && node scripts/check-overlay-whitelist-table.mjs",
     "check:runtime-services-index": "node scripts/check-runtime-services-index.mjs --self-test && node scripts/check-runtime-services-index.mjs",

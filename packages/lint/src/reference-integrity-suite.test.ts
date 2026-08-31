@@ -42,6 +42,10 @@ describe('reference-integrity suite — membership', () => {
       // `ctx.api` update to a declared-`readonly` field, placed beside the flow
       // twin that asks the identical question one surface over.
       'validateReadonlyHookWrites',
+      // [#13770] The third write surface. Same question, and the one place the
+      // family's answer differs: an action body is elevated, so only the
+      // CONDITIONAL half of the readonly judgement survives there.
+      'validateReadonlyActionWrites',
       'validateReactPageProps',
     ]);
   });
@@ -68,6 +72,12 @@ describe('reference-integrity suite — every member actually runs', () => {
         fields: {
           name: { type: 'text', label: 'Name' },
           locked: { type: 'boolean', label: 'Locked', readonly: true },
+          // validateReadonlyActionWrites (#13770): a CONDITIONAL lock, which is
+          // the one readonly shape an ACTION body cannot write — an action runs
+          // elevated, and `isSystem` exempts the static strip but never the
+          // conditional one. A separate field from `locked` on purpose: the two
+          // rules must be able to go silent independently.
+          frozen_note: { type: 'text', label: 'Frozen note', readonlyWhen: "record.locked == true" },
           // validateSortableFields (#9257): a virtual field, so it is a REAL
           // field name (existence passes) with no stored column behind it.
           days_open: { type: 'formula', label: 'Days Open' },
@@ -116,6 +126,22 @@ describe('reference-integrity suite — every member actually runs', () => {
           language: 'js',
           source:
             "ctx.record.name = 'scored'; await ctx.api.object('crm_lead').update({ lead_score: 100 });",
+        },
+      },
+      // validateReadonlyActionWrites (#13770): `frozen_note` EXISTS on crm_lead
+      // and is `readonlyWhen`, so this is not an existence question — on a
+      // record whose predicate is TRUE the engine drops the key from the UPDATE
+      // payload and the action still returns success. A SEPARATE action from
+      // `score_now` on purpose, mirroring the hook split above: one body
+      // carrying both defects would let either rule go silent behind the
+      // other's finding.
+      {
+        name: 'freeze_now',
+        label: 'Freeze Now',
+        objectName: 'crm_lead',
+        body: {
+          language: 'js',
+          source: "await ctx.api.object('crm_lead').update({ id: ctx.recordId, frozen_note: 'x' });",
         },
       },
     ],
@@ -308,6 +334,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('flow-node-write-unknown-field');
     expect(rules).toContain('flow-update-readonly-field');
     expect(rules).toContain('hook-api-update-readonly-field');
+    expect(rules).toContain('action-api-update-readonly-when-field');
     expect(rules).toContain('react-prop-missing-required');
   });
 

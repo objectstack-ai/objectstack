@@ -136,6 +136,17 @@ export type {
   ReadonlyHookWriteSeverity,
 } from './validate-readonly-hook-writes.js';
 
+export {
+  validateReadonlyActionWrites,
+  ACTION_API_UPDATE_READONLY_WHEN_FIELD,
+  READONLY_ACTION_WRITE_PATTERN_IDS,
+  READONLY_ACTION_WRITE_EXCLUSIONS,
+} from './validate-readonly-action-writes.js';
+export type {
+  ReadonlyActionWriteFinding,
+  ReadonlyActionWriteSeverity,
+} from './validate-readonly-action-writes.js';
+
 export { validateViewContainers, VIEW_CONTAINER_SHAPE } from './validate-view-containers.js';
 export type { ViewContainerFinding, ViewContainerSeverity } from './validate-view-containers.js';
 

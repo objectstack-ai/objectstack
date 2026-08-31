@@ -255,6 +255,210 @@ function reconcileScripts() {
  * manifest" — passes every other assertion here and fails that one, which is the
  * whole difference between a resolution and a search.
  */
+/**
+ * ⭐ The third reconciliation (#13731): every GENERATOR must have a recorded
+ * disposition, not merely every declared path.
+ *
+ * ## What was invisible, and why the two reconciliations above could not see it
+ *
+ * `reconcileAttributes` holds `.gitattributes` equal to `REGEN_ARTIFACTS`, and
+ * `reconcileScripts` holds every declared name to its owner's manifest. Both are
+ * exact, both were green — and both are closed over the paths somebody already
+ * declared. An artifact in NEITHER ledger is not a disagreement between them; it
+ * is absent from both, so the gate returned green while saying nothing about it.
+ * That is this repo's recurring shape (an instrument reporting green where it
+ * cannot see) and the price was paid twice by hand: #13646 and #13335 were each
+ * discovered by hitting a merge conflict, on unrelated PRs.
+ *
+ * ## The population, and the one thing it cannot see
+ *
+ * A generator-ish script is a manifest `scripts` key spelled `gen:*`, or one whose
+ * command carries a `--fix` / `--update` mode — #13731's definition, reproduced
+ * here so the count is the card's count. It is enumerated from the manifests
+ * themselves (78 workspace members plus the root), never from a hand-kept list, so
+ * generator number 12 enters this population by existing.
+ *
+ * ⚠️ Its bound, stated because a bound nobody wrote down is a bound nobody checks:
+ * a generator that NO manifest script names is invisible here. `scripts/*.mjs`
+ * invoked directly by a workflow is the shape this misses; that population belongs
+ * to `check:ratchet-remedy-authority`, which builds its own from `readdirSync`.
+ * This gate answers "is every generator the manifests declare accounted for", and
+ * that is the question the two ledgers are keyed to.
+ *
+ * The `--fix`/`--update` limb currently adds ZERO members beyond the `gen:*` keys
+ * (measured on this tree: all 21 members carry a `gen:` key). It is kept because it
+ * fails CLOSED — a future generator spelled `fix:foo` still lands here — and its
+ * false-positive class is bounded and cheap: a transform that rewrites hand-written
+ * source (`eslint --fix` and friends) would be caught and costs one ledger line
+ * saying it writes nothing generated. A gate that asks for one line is not a noisy
+ * gate; a silent gap that costs a merge conflict is the alternative being priced.
+ *
+ * ## Accounting is per (owner, script), never per bare name
+ *
+ * `gen:test-typecheck-debt` is defined in THREE manifests and writes three separate
+ * ledgers. Keyed by name alone, declaring the `packages/spec` copy would have
+ * accounted for the `client` and `rest` copies too — and those two were 2 of the 11
+ * gaps this gate exists to find, so a name-keyed version of this check would have
+ * been born unable to see its own motivating case.
+ */
+function reconcileGenerators() {
+  const workspace = workspacePackages(REPO_ROOT);
+  const manifests = [
+    { dir: '.', manifest: JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) },
+    ...workspace,
+  ];
+
+  const key = (owner, script) => `${owner} :: ${script}`;
+
+  // Everything the two ledgers account for, with the owner as part of the key.
+  const accounted = new Map();
+  for (const e of REGEN_ARTIFACTS) {
+    for (const name of [e.gen, ...(e.alsoWrittenBy ?? [])]) {
+      accounted.set(key(ownerOf(e), name), `driver-managed: ${e.path}`);
+    }
+  }
+  for (const e of NOT_DRIVER_MANAGED) {
+    if (!e.gen) continue;
+    accounted.set(key(ownerOf(e), e.gen), `NOT_DRIVER_MANAGED: ${e.path}`);
+  }
+
+  const population = [];
+  for (const p of manifests) {
+    const owner = p?.manifest?.name;
+    if (!owner) continue;
+    for (const [name, cmd] of Object.entries(p.manifest.scripts ?? {})) {
+      const generatorish = name.startsWith('gen:') || /(^|\s)--(fix|update)(\s|$|=)/.test(String(cmd));
+      if (generatorish) population.push({ owner, name });
+    }
+  }
+
+  const unaccounted = population.filter((g) => !accounted.has(key(g.owner, g.name)));
+  // Two-way, for the same reason `reconcileScripts` is: a disposition naming a
+  // generator that no longer exists is a reason nobody can act on, and it makes the
+  // ledger read as covering a case the tree dropped.
+  const live = new Set(population.map((g) => key(g.owner, g.name)));
+  const dead = [...accounted.keys()].filter((k) => !live.has(k));
+
+  let ok = true;
+  if (unaccounted.length) {
+    ok = fail(`generator(s) with NO recorded merge disposition:\n  ${unaccounted
+      .map((g) => `${g.name}   [${g.owner}]`).join('\n  ')}\n`
+      + '  Every generator must be in ONE of the two ledgers in scripts/regen-artifacts.mjs.\n'
+      + '  ⛔ Routing it is NOT the default answer. Ask the question this file exists to ask:\n'
+      + '     would "discard both sides and re-run the generator" ever lose a decision a human\n'
+      + '     made? If yes — a hand-written region, a shrink-only ratchet, a vendored record —\n'
+      + '     add a NOT_DRIVER_MANAGED entry with `gen` and a per-path `why`. If no, add a\n'
+      + '     REGEN_ARTIFACTS row AND the matching .gitattributes line (both, in one commit).\n'
+      + '  ⚠️ And routing is LOCAL: it never protects a path in the merge queue. If the real\n'
+      + '     problem is queue eviction, say so in the reason — sharding is the precedent.');
+  }
+  if (dead.length) {
+    ok = fail(`disposition(s) naming a generator that no manifest defines:\n  ${dead.join('\n  ')}\n`
+      + '  The script was renamed or removed; the recorded reason now covers nothing.');
+  }
+  if (ok) {
+    console.log(`✓ all ${population.length} generator(s) across ${manifests.length} manifest(s)`
+      + ' have a recorded disposition');
+  }
+  return ok;
+}
+
+/**
+ * The `untracked: true` dispositions, held against git rather than against their own
+ * prose (#13731).
+ *
+ * "git never merges it" is a legitimate answer to this ledger's question and an
+ * expiring one: the day somebody commits `sbom.json`, the recorded reason becomes
+ * false and the path silently rejoins the population with a disposition that reads
+ * as settled. Asserting it here means that day reddens a gate instead of surfacing,
+ * later, as the merge conflict this whole file exists to pre-empt.
+ */
+function reconcileUntrackedDispositions() {
+  const claims = NOT_DRIVER_MANAGED.filter((e) => e.untracked);
+  const wrong = [];
+  for (const e of claims) {
+    const spec = e.path.endsWith('/**') ? e.path.slice(0, -3) : e.path;
+    const tracked = execFileSync('git', ['ls-files', '--', spec], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+    }).trim();
+    if (tracked) wrong.push(`${e.path} — declared untracked, but git tracks ${tracked.split('\n').length} file(s)`);
+  }
+  if (wrong.length) {
+    return fail(`untracked disposition(s) no longer true:\n  ${wrong.join('\n  ')}\n`
+      + '  The reason recorded for these paths was "git never merges it". It does now.\n'
+      + '  Replace the entry with a real disposition: route it, or say why a text merge is right.');
+  }
+  console.log(`✓ ${claims.length} untracked disposition(s) still hold — git tracks none of those paths`);
+  return true;
+}
+
+/**
+ * `entryForPath` and GIT must read a declared path the same way (#13731).
+ *
+ * The table path and the `.gitattributes` pattern are the same string, so a
+ * divergence in what that string MEANS is invisible to `reconcileAttributes` — it
+ * compares bytes, and the bytes agree. The failure it lets through is specific and
+ * bad: git routes a real file to the driver, `entryForPath` fails to resolve it, and
+ * the driver REFUSES with a message blaming a missing table row that is right there.
+ * Discovered at merge time, on a path whose whole purpose was to make merges cheaper.
+ *
+ * Measured against `git check-attr` — git's own answer, not a second implementation
+ * of it — over the tracked files the table claims. A row matching NOTHING is a
+ * failure too: it is either a typo or an artifact that left the tree, and both read
+ * as "covered" until someone looks.
+ */
+function reconcileAttributeSemantics() {
+  const tracked = execFileSync('git', ['ls-files', '-z'], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  }).split('\u0000').filter(Boolean);
+
+  const attrs = execFileSync('git', ['check-attr', '-z', 'merge', '--stdin'], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    input: tracked.map((t) => t + '\u0000').join(''),
+    maxBuffer: 64 * 1024 * 1024,
+  }).split('\u0000');
+
+  // `-z` output is a flat stream of (path, attr, value) triples.
+  const gitSays = new Set();
+  for (let i = 0; i + 2 < attrs.length; i += 3) {
+    if (attrs[i + 1] === 'merge' && attrs[i + 2] === DRIVER_NAME) gitSays.add(attrs[i]);
+  }
+
+  const tableSays = new Set(tracked.filter((p) => entryForPath(p)));
+  const gitOnly = [...gitSays].filter((p) => !tableSays.has(p));
+  const tableOnly = [...tableSays].filter((p) => !gitSays.has(p));
+
+  let ok = true;
+  if (gitOnly.length) {
+    ok = fail(`git routes these to merge=${DRIVER_NAME} but entryForPath does not resolve them:\n  `
+      + `${gitOnly.slice(0, 20).join('\n  ')}\n`
+      + '  The driver would REFUSE them mid-merge, blaming an absent table row that is present.\n'
+      + '  entryForPath understands `a/b/**` and one `*` segment — teach it the form, or\n'
+      + '  respell the path in BOTH files.');
+  }
+  if (tableOnly.length) {
+    ok = fail(`entryForPath claims these but git does not route them:\n  `
+      + `${tableOnly.slice(0, 20).join('\n  ')}\n`
+      + '  Those files text-merge today while the table reads as covering them.');
+  }
+  // A row that matches nothing is not "covered", it is unmeasured.
+  const empty = REGEN_ARTIFACTS
+    .filter((e) => !tracked.some((p) => entryForPath(p)?.path === e.path))
+    .map((e) => e.path);
+  if (empty.length) {
+    ok = fail(`declared path(s) matching no tracked file: ${empty.join(', ')}\n`
+      + '  A typo, or the artifact left the tree. Either way nothing here is being protected.');
+  }
+  if (ok) {
+    console.log(`✓ entryForPath agrees with git check-attr on all ${gitSays.size} routed file(s)`);
+  }
+  return ok;
+}
+
 function reconcileOwnership() {
   const workspace = workspacePackages(REPO_ROOT);
   const rootScripts = JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8'));
@@ -486,7 +690,10 @@ if (process.argv.includes('--self-test')) {
   console.log('git-merge-regen --self-test\n');
   const results = [
     reconcileAttributes(),
+    reconcileAttributeSemantics(),
     reconcileScripts(),
+    reconcileGenerators(),
+    reconcileUntrackedDispositions(),
     reconcileOwnership(),
     hookIsExecutable(),
     registeredDriverResolves(),
