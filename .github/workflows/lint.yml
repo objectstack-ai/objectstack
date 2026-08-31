@@ -795,6 +795,26 @@ jobs:
       - name: PM half-state sweeper self-test
         run: pnpm check:pm-half-states
 
+      # Clause-② carrier + declaration checker self-test (#13922 · #12409 ·
+      # #13914). Same family and the same split as the two steps either side:
+      # the LIVE sweep reads a shared board over the API and is report-only, so
+      # only the offline self-test runs here — a clause-② desync on somebody
+      # else's pair is a fact about the board, not about the PR that happens to
+      # run CI next, and failing that PR would punish the wrong actor.
+      #
+      # ⛔ Do not "promote" the live sweep into this step. The script's own
+      # `--pair <pr>` mode is the per-PR predicate, and it is a PRE-ARM tool a
+      # seat runs against its own pair — deliberately not a merge gate, because
+      # a new blocking context over board state is a required-set change and
+      # the required set is the maintainer's.
+      #
+      # The self-test is offline and imports `check-half-states.mjs` for the
+      # label constant, the `prDeliversCard` delivery relation and the shared
+      # PREREQUISITE-NOT-MET exit code — one source for each, so this checker
+      # and H31 cannot come to disagree about which PR delivers which card.
+      - name: Clause-② carrier checker self-test
+        run: pnpm check:pm-clause2-carriers
+
       # Governed-merges audit self-test (#9495) — same family, same split as
       # the half-state sweeper above: the live sweep enumerates the governed
       # merges since a date/ref for the PM round report — report-only by

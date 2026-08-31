@@ -71,6 +71,7 @@
     "check:pm-dispatch-gates": "node scripts/pm/check-dispatch-gates.mjs",
     "check:watch-hint-literal": "node scripts/check-watch-hint-literal.mjs --self-test && node scripts/check-watch-hint-literal.mjs",
     "check:pm-half-states": "node scripts/pm/check-half-states.mjs --self-test",
+    "check:pm-clause2-carriers": "node scripts/pm/check-clause2-carriers.mjs --self-test",
     "check:pm-governed-merges": "node scripts/pm/check-governed-merges.mjs --self-test",
     "check:pm-governed-prose": "node scripts/pm/check-governed-prose.mjs --self-test && node scripts/pm/check-governed-prose.mjs",
     "check:publish-smoke-pin": "node scripts/publish-smoke-pack.mjs --self-test",
