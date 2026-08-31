@@ -336,6 +336,15 @@ interface FaultClass {
 }
 
 const DENY = { status: ANONYMOUS_DENY_STATUS, code: ANONYMOUS_DENY_CODE };
+/**
+ * The capability refusal. ⭐ [#13476] No fault CLASS carries this any more — the
+ * two that did are both repaired (#13279, #13476) — but it is deliberately kept
+ * rather than deleted: it is now the answer the INNOCENT shapes must keep, and
+ * section 3's `UNRESOLVABLE vs UNWIRED` pin asserts it through this constant so
+ * "what an unwired embedder gets" and "what a genuine capability denial gets"
+ * stay one spelling. ⛔ Do not inline it back into literals — that is how the
+ * two answers drift apart unnoticed.
+ */
 const FORBID = { status: 403, code: 'FORBIDDEN' };
 /**
  * [#13279] The LOUD cohort — a permission-store outage, answered as the outage
@@ -562,8 +571,8 @@ describe('[#13255] consequence — the door\'s answer for each fault class', () 
     // satisfied by breaking the innocent shape instead of repairing the guilty.
     expect(failed.status).toBe(AUTHZ_STORE_UNAVAILABLE_STATUS);
     expect(failed.body?.error?.code).toBe(AUTHZ_STORE_UNAVAILABLE_CODE);
-    expect(unwired.status).toBe(403);
-    expect(unwired.body?.error?.code).toBe('FORBIDDEN');
+    expect(unwired.status).toBe(FORBID.status);
+    expect(unwired.body?.error?.code).toBe(FORBID.code);
 
     // ⭐ POSITIVE CONTROL on the UNWIRED leg specifically. Its 403 must still be
     // the CAPABILITY refusal an authenticated caller gets, not a fault wearing
@@ -587,8 +596,8 @@ describe('[#13255] consequence — the door\'s answer for each fault class', () 
     // resolution as a failure.
     const captured = await drive(
       mount(serverWith({ ...healthy(), objectQLProvider: async () => undefined })), 'GET', PKGS);
-    expect(captured.status).toBe(403);
-    expect(captured.body?.error?.code).toBe('FORBIDDEN');
+    expect(captured.status).toBe(FORBID.status);
+    expect(captured.body?.error?.code).toBe(FORBID.code);
   });
 
   it('the capability clause, isolated from the anonymous floor, refuses the lost context too', async () => {
