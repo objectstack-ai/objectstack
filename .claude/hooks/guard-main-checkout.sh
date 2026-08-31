@@ -46,6 +46,14 @@ esac
 root="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$d")"
 branch="$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null || printf '?')"
 name="$(basename "$root")"
+# ⭐ The recipe printed below is the HIGHEST-leverage copy of AGENTS.md PD#11's worktree
+# recipe: it reaches an agent at the exact moment it is about to create one, so an agent
+# following it lands wherever this string points. Keep it aligned with the prescribed form
+# there — both halves are adjudicated, and this copy carried NEITHER until #13663:
+#   `git fetch origin main` first — an unfetched local `main` bases the new tree on a stale
+#     commit (the ui#6208 class).
+#   `--no-track` on the add — plain `-b` writes branch.NAME.remote/merge into the .git/config
+#     that every worktree of this repo SHARES (the #13052 / ui#6880 class).
 cat >&2 <<EOF
 ⛔ Blocked: editing on the shared PRIMARY checkout, not a worktree.
    repo: $root  (branch: $branch)
@@ -54,7 +62,7 @@ This repo is edited by multiple agents at once — the shared checkout gets its 
 switched and tree reset under you, silently clobbering uncommitted work. A feature
 branch on the shared checkout is NOT enough; you must be in a dedicated worktree:
 
-  git worktree add ../${name}-<task> -b <branch> main
+  git fetch origin main && git worktree add --no-track ../${name}-<task> -b <branch> origin/main
   cd ../${name}-<task> && pnpm install    # then re-run your edits there
 
 This guard checks the edited file's OWN repo, so sibling repos are covered too.
