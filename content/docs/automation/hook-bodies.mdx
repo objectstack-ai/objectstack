@@ -175,7 +175,7 @@ Static validation around a hook is asymmetric, and it is worth knowing exactly w
 
 - **Checked — read side.** `hook.condition` is validated at build time against the target object's fields by the expression validator (`@objectstack/lint`), including array-valued `hook.object` targets. A condition referencing a nonexistent field fails the lint.
 - **Checked — capability side.** `body.capabilities` gates which `ctx` APIs the body may call at all; the sandbox throws on an undeclared call.
-- **Checked — write side, advisory and literal-only.** Since [#4271](https://github.com/objectstack-ai/objectstack/issues/4271), `body.source` is **parsed** (never executed, never type-checked) and the field names it writes are resolved against the target object's declarations. An unknown field raises `hook-body-write-unknown-field` — a **warning** carrying a did-you-mean suggestion, which never blocks a build. Action bodies get the same check on their `ctx.api` writes (`action-body-write-unknown-field`). Both run under `os validate`, `os lint` and `os compile`.
+- **Checked — write side, literal-only.** Since [#4271](https://github.com/objectstack-ai/objectstack/issues/4271), `body.source` is **parsed** (never executed, never type-checked) and the field names it writes are resolved against the target object's declarations. An unknown field raises `hook-body-write-unknown-field` — a **warning** carrying a did-you-mean suggestion, which never blocks a build. Action bodies get the same check on their `ctx.api` writes (`action-body-write-unknown-field`). Both run under `os validate`, `os lint` and `os compile`. The *existence* question is advisory like this because the answer can depend on a package the build cannot see; the separate *writability* question — [writing a `readonly` field through `ctx.api`](#writing-a-readonly-field) — **does** gate, because both halves of that judgement are declared in the stack being checked.
 - **Checked — writes to a system column the object has no storage for.** Since [#8663](https://github.com/objectstack-ai/objectstack/issues/8663), a write to an injected system column is no longer exempted on the strength of its NAME alone. The registry injects `owner_id` / `organization_id` / the audit family onto an ADR-0015 [`external` object](/docs/data-modeling/external-datasources) exactly as onto a local one, but the remote database owns that schema and no column exists behind them. Writing one raises `hook-body-write-unprovisioned-anchor` (or `action-body-write-unprovisioned-anchor` / `flow-node-write-unprovisioned-anchor` on the other two surfaces) — a **warning** on all three, including the flow-node rule that otherwise gates, because the claim is about a remote schema the build cannot see. A column you **declare** yourself is untouched: on a federated object a declared `owner_id` maps a remote column you vouch for. Why it matters more than an ordinary typo: an undeclared name is refused upstream by the engine's own write-path validator (`INVALID_FIELD`), whereas the injected anchor is in the registered schema and passes it — so it is the one payload key that reaches the remote database raw, where a SQL remote aborts the **whole statement** with an untyped `no such column` and takes the correctly named fields of the same payload with it.
 - **Checked — writes that reach nothing at all.** Since [#4345](https://github.com/objectstack-ai/objectstack/issues/4345), an action body assigning to `ctx.record` raises `action-record-write-discarded`, also a warning. This one is **not** a field-resolution question: an action's `ctx.record` is a snapshot the runtime never writes back, so the assignment is discarded whether or not the field is declared — see [Signature conventions](#signature-conventions) below.
 
@@ -211,11 +211,11 @@ An unknown field is **not** caught at runtime, and it does not fail quietly eith
 
 Neither outcome is the one you wanted, and the advisory warning is the earliest signal you get.
 
-Because the checking is advisory and literal-only:
+Because the existence check is advisory, and every write-side check here is literal-only:
 
 - **Treat `hook-body-write-unknown-field` as a build failure by convention.** It does not gate, but the rule is tuned for near-zero false positives — in practice a warning is a real typo.
 - **Check by hand what the parser cannot see.** Computed keys, spreads, aliased input and dynamic object names are invisible to the rule; for an array or `"*"` hook, every field must exist on every target.
-- **Prefer a flow `update_record` node when the write set is fixed — and for *this* check most of all.** A flow node's writes are structured config: they diff field-by-field, render in the Console designer, and a write to a `readonly:true` field is a **gating error** (`flow-update-readonly-field`) that hooks have no counterpart for. Since [#4271](https://github.com/objectstack-ai/objectstack/issues/4271) the field-existence check gates there too — `flow-node-write-unknown-field` is an **error**, not the advisory warning a body gets, because a node's `fields` is a literal map next to a literal `objectName`: there is no parser in between that could have mis-extracted it, so a finding is a certainty rather than a best effort.
+- **Prefer a flow `update_record` node when the write set is fixed — and for *this* check most of all.** A flow node's writes are structured config: they diff field-by-field, render in the Console designer, and since [#4271](https://github.com/objectstack-ai/objectstack/issues/4271) the field-existence check gates there too — `flow-node-write-unknown-field` is an **error**, not the advisory warning a body gets, because a node's `fields` is a literal map next to a literal `objectName`: there is no parser in between that could have mis-extracted it, so a finding is a certainty rather than a best effort. (The *writability* check now has a hook-side counterpart — see [Writing a `readonly` field](#writing-a-readonly-field) below — but it covers only the `ctx.api` channel.)
 - **Exercise the hook against a real object before shipping** — on SQL drivers the mistake surfaces on the first write; schemaless drivers won't tell you.
 
 ### Signature conventions
@@ -244,6 +244,26 @@ Per-invocation budgets default to **250ms** (hooks) / **5000ms** (actions) of **
 ### Nested cross-object writes
 
 A body may write *other* objects — e.g. `await ctx.api.object('parent').update({ ... })` from a child's `afterInsert`/`afterUpdate` (requires `api.write`). The target's own hooks fire too: the nested write runs in a **fresh sandbox VM** while the calling body is suspended, and this composes to any depth. This is the natural "when a child changes, roll the total up to the parent" automation — it does **not** need a denormalized, hand-maintained mirror field. Because each body's budget is **CPU time** (ADR-0102), the caller is **not** charged for the nested write's own run — so the stock 250ms default comfortably covers deep rollup chains, and you rarely need to raise `timeoutMs` (the spec still permits up to 30_000ms for a genuinely CPU-heavy body).
+
+### Writing a `readonly` field
+
+There is an asymmetry here that costs data if you learn it the hard way, so learn it here. A field declared `readonly: true` can still be **maintained by automation** — but only through two channels, and a nested `ctx.api` write is **not** one of them.
+
+`readonly` governs the *caller* surface. On UPDATE the engine strips read-only keys from the payload, but only the ones the **caller supplied** and only when the value is still the caller's. So:
+
+| How the body writes it | What happens |
+|:---|:---|
+| `ctx.input.<field> = …` in `beforeInsert`/`beforeUpdate` | **Lands.** The stamp is a *server* value, not a caller-supplied one, so the strip leaves it alone. This is the recommended shape. |
+| `ctx.api.object('x').update({ <field> })` | **Silently dropped.** `ctx.api` is scoped to the *triggering* operation's context, so on any non-system trigger the payload is an ordinary caller payload and the key is stripped. The call still returns success. |
+| `ctx.api.sudo().object('x').update({ <field> })` | **Lands.** `sudo()` elevates to a system context, which the strip skips — the hook-side analogue of a flow's `runAs: 'system'`. Use it deliberately: it also bypasses the acting user's row and field permissions for that write. |
+| `ctx.api.object('x').insert({ <field> })` | **Lands.** INSERT is exempt — a create may legitimately seed read-only columns. |
+
+The dropped case is the dangerous one: nothing fails, the step reports success, and the column is simply always null. Because both halves of that judgement are declared in your own stack, it is checked at author time and **gates the build**:
+
+- `hook-api-update-readonly-field` — **error**. A body's literal `ctx.api.object('…').update()` / `.updateById()` writes a field the named object declares `readonly: true`.
+- `hook-api-update-readonly-when-field` — **warning**. The same write against a `readonlyWhen` field, which strips per record *state*. Note that `readonlyWhen` also strips a `beforeUpdate`-derived value, so the own-hook stamp is **not** a workaround for it — `sudo()` is.
+
+Only literal object names and literal payload keys are seen; a `sudo()` chain, a dynamic object name, an object this stack does not declare, and `insert`/`create` are all skipped, so the rule has no opinion on them. The flow surface has carried the same gate as `flow-update-readonly-field` since [#3425](https://github.com/objectstack-ai/objectstack/issues/3425).
 
 ### Errors from `ctx.api`
 

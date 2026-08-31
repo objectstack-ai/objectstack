@@ -228,7 +228,7 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 ### @objectstack/service-cache
 
-**Cache Service** — In-memory caching behind the `ICacheService` contract.
+**Cache Service** — In-memory caching behind the [`ICacheService` contract](/docs/kernel/contracts/cache-service).
 
 - **Adapters**: Memory (the only working adapter). `RedisCacheAdapter` is a **skeleton** — every method throws `not yet implemented`, and `CacheServicePlugin({ adapter: 'redis' })` refuses to start. For a real distributed cache, register your own `ICacheService` via `ctx.registerService('cache', impl)`.
 - **Features**: `get` / `set` / `delete` / `has` / `clear` / `stats`, per-entry TTL, `maxSize` eviction, lookup & write metrics

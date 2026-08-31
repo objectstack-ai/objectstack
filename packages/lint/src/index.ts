@@ -124,6 +124,18 @@ export type {
   ReadonlyFlowWriteSeverity,
 } from './validate-readonly-flow-writes.js';
 
+export {
+  validateReadonlyHookWrites,
+  HOOK_API_UPDATE_READONLY_FIELD,
+  HOOK_API_UPDATE_READONLY_WHEN_FIELD,
+  READONLY_HOOK_WRITE_PATTERN_IDS,
+  READONLY_HOOK_WRITE_EXCLUSIONS,
+} from './validate-readonly-hook-writes.js';
+export type {
+  ReadonlyHookWriteFinding,
+  ReadonlyHookWriteSeverity,
+} from './validate-readonly-hook-writes.js';
+
 export { validateViewContainers, VIEW_CONTAINER_SHAPE } from './validate-view-containers.js';
 export type { ViewContainerFinding, ViewContainerSeverity } from './validate-view-containers.js';
 

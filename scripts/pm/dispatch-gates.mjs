@@ -2809,7 +2809,7 @@ export function collapseHint(hint) {
  * leaving it to whoever reads a prompt.
  */
 export function hintCovers(hint, inputPath) {
-  if (globInNonFinalSegment(hint))
+  if (judgedAsPattern(hint))
     return zeroSegmentForms(hint).some((form) => triggerCovers(form, inputPath));
   const plain = collapseHint(hint);
   if (plain.length < 2) return false;
@@ -2840,6 +2840,166 @@ export function globInNonFinalSegment(hint) {
   const segments = hint.split('/');
   for (let i = 0; i < segments.length - 1; i++) if (segments[i].includes('*')) return true;
   return false;
+}
+
+/**
+ * ## The OTHER shape collapse-by-deletion mangles: a glob with a literal SUFFIX
+ * ## behind it in the FINAL segment (#13448)
+ *
+ * `zeroSegmentForms`' docblock recorded this species and left it: "the sibling
+ * spelling `scripts/*.d.mts` is dead too, by the OLDER route … a different
+ * species (deletion-collapse mangling a final segment whose glob carries a
+ * literal SUFFIX)". It is the same defect as the non-final case one level
+ * finer. There, deletion splices ACROSS a separator
+ * (`skills/*\/references/_index.md` → `skills//references/_index.md`); here it
+ * splices WITHIN one segment (`.changeset/*.md` → `.changeset/.md`). Both
+ * produce a string no tree can hold, so the hint matches nothing BY
+ * CONSTRUCTION while reading as an ordinary literal, and both then get filed
+ * under the row this output calls its worst — "THE LAYOUT MOVED".
+ *
+ * The distinction that decides it is not "does the segment contain a glob" but
+ * "is the deletion a REDUCTION or a SPLICE". Deleting a glob that has nothing
+ * but more glob characters behind it truncates the hint to a prefix the tree
+ * really can have — `packages/**` → `packages`, `packages/*` → `packages`,
+ * `packages/client*` → `packages/client`, all sound, all untouched here.
+ * Deleting a glob with a literal behind it joins two strings that were never
+ * adjacent, which is not a reduction of anything.
+ *
+ * ## The live specimen and the whole blast radius, measured
+ *
+ * On 191 families × 749 distinct hints × 7588 tracked files at `4301f7846`,
+ * EXACTLY ONE hint in the fleet carries this shape:
+ *
+ *   .changeset/*.md    0 -> 548 files   check:changeset-gate-self-tests,
+ *                                       check-adr-0087-registration.mjs,
+ *                                       check-changeset-no-major.mjs,
+ *                                       check-empty-changeset.mjs,
+ *                                       release-rehearsal-clone.mjs --self-test
+ *
+ *   (hint, file) pairs              35275 -> 35823   (+548, ZERO lost)
+ *   (gate, file) pairs              140716 -> 143456 (+2740, ZERO lost)
+ *   hints reaching zero files       215 -> 214
+ *   distinct hints whose reach changes at all       1
+ *   residue notes asserting a layout move for it    5 -> 0
+ *
+ * The `.changeset` population is the reason the count is worth restating
+ * rather than quoting: 548 here, 548 by `git ls-files '.changeset/*.md' | wc
+ * -l` on the same ref, and four different readings on four different days
+ * (~400 on the filing, 537 at triage, 546 at dispatch, 548 here) because it grows
+ * with every merged PR. A hint over a directory like that is precisely the one
+ * a silent zero costs the most on.
+ *
+ * ## What it does NOT buy, measured rather than assumed
+ *
+ * ZERO cards gain a family and ZERO cards lose one. The card and its triage
+ * both expected the matched column to move — "a live change to which gates a
+ * dispatch brief names" — and on this tree it does not, for a reason only the
+ * census shows: all five owners ALSO declare the bare literal `.changeset`,
+ * which the subtree branch of `hintCovers` has always matched against every
+ * file beneath it. The brief was already naming all five families for a
+ * changeset card, through the sibling literal rather than through the glob.
+ *
+ * So the live cost of this defect was never an under-named brief. It was the
+ * FALSE REASON the residue printed about it (see `comparedForm`), plus a
+ * single point of failure nobody could see: the moment any of those five gates
+ * spells its population as the glob alone — the natural spelling, and the one
+ * `scripts/*.d.mts` already uses — its coverage would vanish silently. That is
+ * recorded here rather than left as a nicer-sounding claim about verdicts.
+ *
+ * One thing does move, and it is a printed KEY rather than a verdict: 548
+ * (family, card) pairs re-attribute from `.changeset` to `.changeset/*.md`, all
+ * of them in `release-rehearsal-clone.mjs --self-test`, the one owner that
+ * spells the glob before the bare literal. Same family, same `gate source`
+ * provenance, strictly more precise key — the pattern that actually matches
+ * rather than the directory it sits in. Every other owner keeps the exact key
+ * it printed.
+ *
+ * ## Deliberately narrow, in the three directions this file already prices
+ *
+ *   - only `*` counts, and only in the FINAL segment. `globInNonFinalSegment`
+ *     keeps its own branch and its own pins; nothing that reaches the collapse
+ *     today is re-routed. Measured: `packages/*` 5631, `examples/*` 243,
+ *     `skills/**` 50, `content/**` 442, `scripts/**` 299, `packages/**` 5631 —
+ *     the `ROOT_DIR_WATCH_HINTS` idiom is bit-for-bit unchanged;
+ *   - a TRAILING partial-segment glob is NOT this case, so the DECIDED
+ *     `packages/client*` trade above is untouched and stays pinned in both
+ *     directions. Re-measured: zero hints in the fleet carry that shape today,
+ *     exactly as its docblock recorded;
+ *   - `?`, `+` and `[…]` are NOT admitted. `collapseHint` never deleted them,
+ *     so they are not a mangle — they are an ordinary literal that fails to
+ *     match, which is the missing-lead direction this file errs in. Measured:
+ *     zero hints in the whole fleet carry any of the three. Admitting them
+ *     would be a fabricated-lead widening bought for no live instance, and the
+ *     self-test reds on their arrival rather than leaving it to a reader.
+ *
+ * The provenance criterion, which is what this file actually prices rather
+ * than volume: all 2740 recovered pairs are `.changeset/*.md` against real
+ * `.changeset/*.md` files, checked at the declaration site — `check-empty-
+ * changeset.mjs` and `check-changeset-no-major.mjs` both walk the directory
+ * and read every `.md` in it. Zero of them are fabricated.
+ */
+export function globCarriesLiteralSuffix(hint) {
+  const last = hint.split('/').pop();
+  const firstGlob = last.indexOf('*');
+  if (firstGlob < 0) return false;
+  // A literal character BEHIND the glob is what turns deletion into a splice.
+  // Nothing but further `*` behind it means the deletion truncates, which is
+  // the sound reduction the collapse is built on.
+  return /[^*]/.test(last.slice(firstGlob));
+}
+
+/**
+ * Is this hint judged as a PATTERN (`triggerCovers`) rather than by the glob
+ * collapse? The two shapes whose collapse is a splice rather than a reduction,
+ * asked as ONE question because two call sites need the same answer and a
+ * second copy of it is the drift this file refuses everywhere else:
+ * `hintCovers` needs it to route the comparison, and the residue reason needs
+ * it to avoid describing a hint in terms of a form the comparison never used.
+ *
+ * That second reader is the half #13448 is really about. Before it, every
+ * reason branch reasoned from `collapseHint` unconditionally, including for
+ * the hints `hintCovers` had already stopped judging that way — so the residue
+ * could state a specific cause ("the layout moved under it") derived from a
+ * string the comparison never looked at. See `comparedForm`.
+ */
+export function judgedAsPattern(hint) {
+  return globInNonFinalSegment(hint) || globCarriesLiteralSuffix(hint);
+}
+
+/**
+ * The form `hintCovers` ACTUALLY judged this hint by — the one string any
+ * statement about why the hint is dead has to be about.
+ *
+ * For a collapse-judged hint that is `collapseHint(hint)`, exactly as before.
+ * For a pattern-judged hint the collapsed form is not a form at all
+ * (`.changeset/.md`, `skills//references/_index.md`), and the string the
+ * comparison reasons from is the LITERAL PREFIX — the segments ahead of the
+ * first glob, which is the same prefix `triggerCovers` uses for its reverse
+ * containment. `.changeset/*.md` → `.changeset`; `skills/*\/references/
+ * _index.md` → `skills`; `src/**\/*` → `''`.
+ *
+ * ## Why this is the second half of the same defect, not a display polish
+ *
+ * `deepestTrackedPrefix` walks this form and `unreachableClass` compares
+ * against it, so with `collapseHint` hard-wired in both, a pattern hint could
+ * never satisfy `deepest === form` — `.changeset` is never `.changeset/.md` —
+ * and therefore ALWAYS fell through to the "the tree stops at X; the layout
+ * moved under it" branch. That is not a wording problem: the sentence names a
+ * directory rename as the cause, and a reader who acts on it goes looking for
+ * one that never happened. Repairing `hintCovers` alone would have retired
+ * today's five instances of that row and left the derivation that mints it
+ * intact, which is trading one error for a better-hidden one.
+ *
+ * With the form corrected the three branches mean what they say for BOTH
+ * comparison modes: `deepest === form` is "the population's root is right
+ * there", a strictly shorter `deepest` is a genuine move under a surviving
+ * parent, and an empty one is a literal that never was a repo path.
+ */
+export function comparedForm(hint) {
+  if (!judgedAsPattern(hint)) return collapseHint(hint);
+  const segments = hint.split('/');
+  const upto = segments.findIndex((s) => s.includes('*'));
+  return (upto < 0 ? segments : segments.slice(0, upto)).join('/');
 }
 
 /**
@@ -2935,15 +3095,24 @@ export const ZERO_SEGMENT_STAR_CAP = 8;
  * at check:test-source-alias 5534, check:type-source-resolution 5534,
  * check:published-files 5535.
  *
- * ## What this deliberately does NOT fix
+ * ## The sibling species this did NOT fix — since repaired next door (#13448)
  *
- * The sibling spelling `scripts/*.d.mts` is dead too, by the OLDER route: a
- * glob in the LAST segment still goes through `collapseHint`, which deletes the
- * `*` and yields `scripts/.d.mts` — a path no tree holds. That is a different
- * species (deletion-collapse mangling a final segment whose glob carries a
- * literal SUFFIX, next door to the DECIDED partial-segment trade), it is not
- * the zero-segment question, and it is left exactly as it was. Pinned below so
- * the asymmetry reads as recorded rather than overlooked.
+ * This section used to record `scripts/*.d.mts` as still dead by the OLDER
+ * route: a glob in the LAST segment went through `collapseHint`, which deletes
+ * the `*` and yields `scripts/.d.mts`, a path no tree holds. That was called a
+ * different species (deletion-collapse mangling a final segment whose glob
+ * carries a literal SUFFIX, next door to the DECIDED partial-segment trade)
+ * and left as it was, pinned so the asymmetry read as recorded rather than
+ * overlooked.
+ *
+ * It is now repaired by `globCarriesLiteralSuffix`, which routes exactly that
+ * shape into the same `triggerCovers` branch this one uses — the two are one
+ * defect, splicing across a separator and splicing inside a segment. The live
+ * cost of leaving it was `.changeset/*.md` measuring dead against 548 tracked
+ * changesets while the residue named a directory rename as the reason. The
+ * pins below flipped with it and now assert the reach rather than the deadness;
+ * the DECIDED partial-segment trade (`packages/client*`) is a TRAILING glob and
+ * is still not this case, still refused, still pinned in both directions.
  */
 export function zeroSegmentForms(hint) {
   const segments = hint.split('/');
@@ -4251,7 +4420,12 @@ export function watchHintTree(files = trackedFiles()) {
  * expressible from the tree.
  */
 export function deepestTrackedPrefix(hint, prefixes) {
-  const segments = collapseHint(hint).split('/');
+  // `comparedForm`, not `collapseHint`: for a pattern-judged hint the collapsed
+  // string is a splice the comparison never looked at, and walking it hands
+  // every downstream reason a prefix that cannot equal the form it is compared
+  // against — which is how the "layout moved" sentence became unconditional for
+  // that whole shape class. See `comparedForm` (#13448).
+  const segments = comparedForm(hint).split('/');
   let deepest = '';
   for (let i = 1; i <= segments.length; i++) {
     const candidate = segments.slice(0, i).join('/');
@@ -4561,7 +4735,12 @@ export function unreachableClass(dead) {
   // segment early because the specifier drops the extension, not because
   // anything left the directory. Counting it would put nine families under
   // "a real miss, worth triaging" with nothing to triage — see that helper.
-  const everMoved = dead.some(({ hint, deepest, target }) => !target && deepest && deepest !== collapseHint(hint));
+  // Compared against the form the hint was JUDGED by, never against the
+  // collapse unconditionally: a pattern-judged hint can never equal its own
+  // collapsed splice, so the hard-wired `collapseHint` made "layout moved" the
+  // only reachable verdict for that whole shape class — a specific wrong cause,
+  // printed under the heading that tells a reader to go chase it (#13448).
+  const everMoved = dead.some(({ hint, deepest, target }) => !target && deepest && deepest !== comparedForm(hint));
   return everMoved ? 'layout moved' : 'by construction';
 }
 
@@ -4610,7 +4789,19 @@ export function unreachableReason(dead, cap = 3) {
         return `'${hint}' — the tree HAS ${target}; the literal is that file's extensionless module spelling, which no whole-segment comparison reaches`;
       }
       if (!deepest) return `'${hint}' — no tracked path under its first segment; never was a repo path`;
-      if (deepest === collapseHint(hint)) {
+      // Every branch below reasons about the form the COMPARISON used, so the
+      // pattern-judged shapes get their own sentence instead of borrowing the
+      // collapse's. Borrowing it is what made the residue assert a directory
+      // rename for a hint whose directory is exactly where it has always been
+      // (#13448) — and the replacement is checkable by the reader, which is the
+      // bar a triage lead has to clear: `git ls-files` on the hint as written.
+      const form = comparedForm(hint);
+      if (judgedAsPattern(hint)) {
+        return deepest === form
+          ? `'${hint}' — the tree HAS ${form}; this hint is a GLOB PATTERN and nothing under that root matches it — check with \`git ls-files '${hint}'\``
+          : `'${hint}' — a glob pattern whose literal prefix ${form} is gone; the tree stops at ${deepest}, so the layout moved under it`;
+      }
+      if (deepest === form) {
         return `'${hint}' — the tree HAS it; the covering rule refuses the literal as too generic (no path separator)`;
       }
       return `'${hint}' — the tree stops at ${deepest}; the layout moved under it`;
@@ -8695,14 +8886,59 @@ function selfTest() {
   // `'**/package.json'` and is the live specimen.
   t('the trigger language still reads `**` as the character wildcard GitHub documents', !triggerCovers('**/package.json', 'package.json'));
   t('while the same spelling as a HINT covers the root file', hintCovers('**/package.json', 'package.json'));
-  // ⛔ The sibling spelling is dead by the OLDER route and is NOT repaired
-  // here: a glob in the LAST segment still goes through `collapseHint`, which
-  // yields `scripts/.d.mts`. A different species (deletion-collapse mangling a
-  // final segment whose glob carries a literal SUFFIX), next door to the
-  // DECIDED partial-segment trade. Pinned so the asymmetry reads as recorded
-  // rather than overlooked — see zeroSegmentForms' docblock.
-  t('the final-segment spelling of the same population is still dead', collapseHint('scripts/*.d.mts') === 'scripts/.d.mts');
-  t('and still reaches none of the files it names', !topLevelMirrors.some((f) => hintCovers('scripts/*.d.mts', f)));
+  // The sibling spelling used to be dead by the OLDER route and is repaired by
+  // `globCarriesLiteralSuffix` (#13448). The collapse still mangles it — that
+  // is the whole reason it must not be judged by the collapse — so BOTH halves
+  // are pinned: the mangle is still what deletion produces, and the hint no
+  // longer goes through it.
+  t('the collapse of a final-segment glob with a literal suffix is still a splice', collapseHint('scripts/*.d.mts') === 'scripts/.d.mts');
+  t('...so the hint is judged as a pattern instead', judgedAsPattern('scripts/*.d.mts') && globCarriesLiteralSuffix('scripts/*.d.mts'));
+  t('...and now reaches every one of the files it names', topLevelMirrors.every((f) => hintCovers('scripts/*.d.mts', f)));
+  t('...and claims nothing else in the whole tree', trackedFiles().filter((f) => hintCovers('scripts/*.d.mts', f)).length === topLevelMirrors.length);
+  t('a single `*` still never crosses a separator', !hintCovers('scripts/*.d.mts', 'scripts/pm/x.d.mts'));
+
+  // ── A final-segment glob with a literal SUFFIX is a splice too (#13448) ───
+  //
+  // The species `zeroSegmentForms` recorded and left. Deletion-collapse mangles
+  // `.changeset/*.md` into `.changeset/.md`, so the hint reached ZERO of 548
+  // tracked changesets while reading as an ordinary literal, and the residue
+  // then named a directory rename as the cause. Read from the REAL corpus: a
+  // fixture cannot show that the tree still holds the population the trap needs,
+  // and this one grows with every merged PR.
+  const suffixCorpus = trackedFiles();
+  const changesetPop = suffixCorpus.filter((f) => /^\.changeset\/[^/]+\.md$/.test(f));
+  t('the tree really does hold a large `.changeset/*.md` population', changesetPop.length >= 100);
+  t('the live specimen reaches every changeset it names', changesetPop.every((f) => hintCovers('.changeset/*.md', f)));
+  t('and claims nothing else in the whole tree', suffixCorpus.filter((f) => hintCovers('.changeset/*.md', f)).length === changesetPop.length);
+  t('so it is nobody\'s dead literal any more', hintReachesTree('.changeset/*.md', suffixCorpus));
+  t('the extension the glob names is honoured', !hintCovers('.changeset/*.md', '.changeset/config.json'));
+  t('a single `*` matches exactly one segment here too', !hintCovers('.changeset/*.md', '.changeset/pre/x.md'));
+  t('a directory surface above it still derives the gate', hintCovers('.changeset/*.md', '.changeset'));
+  t('but an unrelated root does not', !hintCovers('.changeset/*.md', 'packages'));
+  // The predicate, both directions. What decides it is a LITERAL behind the
+  // glob, never a literal in front of one.
+  t('a glob with a literal behind it in the last segment is the splice case', globCarriesLiteralSuffix('.changeset/*.md'));
+  t('a literal PREFIX before the glob is not what decides it', globCarriesLiteralSuffix('scripts/check-*.mjs') && !globCarriesLiteralSuffix('scripts/check-*'));
+  t('a TRAILING glob is not this case — deletion truncates it to a real prefix', !globCarriesLiteralSuffix('packages/**') && !globCarriesLiteralSuffix('packages/*') && !globCarriesLiteralSuffix('packages/client*'));
+  t('nor is a hint with no glob at all', !globCarriesLiteralSuffix('packages/spec/src/index.ts'));
+  // ⛔ The refusals, pinned as the losses they would be. Each of these MUST
+  // keep going through the collapse: the alternative was measured at −7404
+  // pairs on each of three gates (see zeroSegmentForms' docblock).
+  t('the ROOT_DIR_WATCH_HINTS idiom is bit-for-bit untouched',
+    hintCovers('skills/**', 'skills/objectstack-formula/SKILL.md') &&
+      hintCovers('examples/*', 'examples/app-showcase/src/x.ts') &&
+      hintCovers('packages/**', 'packages/spec/src/index.ts'));
+  t('the DECIDED partial-segment trade still refuses the sibling', !hintCovers('packages/client*', 'packages/client-react/src/index.ts'));
+  t('...and still covers the package it names', hintCovers('packages/client*', 'packages/client/src/index.ts'));
+  // ⛔ `?`, `+` and `[…]` are NOT admitted. `collapseHint` never deleted them,
+  // so they are not a mangle — they are an ordinary literal that fails to
+  // match, which is the MISSING-lead direction this file errs in. Measured at
+  // zero live instances; pinned so their arrival is a decision somebody makes
+  // rather than a fabricated-pair widening nobody sees.
+  const finalSegmentShapes = new Set();
+  for (const [, entry] of discoverFamilies().byCheck) for (const h of entry.hints ?? []) finalSegmentShapes.add(h.split('/').pop());
+  t('no hint in the fleet carries a `?`, `+` or character class', ![...finalSegmentShapes].some((s) => /[?+[]/.test(s)));
+  t('and such a hint is still judged by the collapse, exactly as before', !judgedAsPattern('scripts/check-?.mjs'));
 
   // The trailing-separator strip is ONE call, not two: `/\/+$/` is greedy and
   // anchored, so nothing survives for a second `/\/$/` to remove. Measured at
@@ -11238,6 +11474,38 @@ function selfTest() {
   t('the corpus reader really reads this tree', liveCorpus.length > 1000 && liveCorpus.includes('AGENTS.md'));
   t('and reads it null-separated, so a non-ASCII path is not quoted into a name nothing can match', !liveCorpus.some((f) => f.startsWith('"')));
   t('the collapse the reason speaks in is the one hintCovers judges by', collapseHint('packages/spec/**') === 'packages/spec' && hintCovers('packages/spec/**', 'packages/spec/src/index.ts'));
+
+  // ── The reason must speak in the form the COMPARISON used (#13448) ────────
+  //
+  // Every branch above used to reason from `collapseHint` unconditionally,
+  // including for the hints `hintCovers` had already stopped judging that way.
+  // A pattern-judged hint can never equal its own collapsed splice —
+  // `.changeset` is not `.changeset/.md` — so "the tree stops at X; the layout
+  // moved under it" was the ONLY reachable sentence for that whole shape class:
+  // a specific wrong cause, printed under the heading that tells a reader to go
+  // chase it. Repairing `hintCovers` alone would have retired the five live
+  // instances and left the derivation that mints them intact, which is trading
+  // one error for a better-hidden one.
+  t('the form a pattern hint is judged by is its literal prefix, not its splice',
+    comparedForm('.changeset/*.md') === '.changeset' && collapseHint('.changeset/*.md') === '.changeset/.md');
+  t('...and a collapse-judged hint still speaks in the collapse', comparedForm('packages/spec/**') === 'packages/spec');
+  t('...for the mid-segment shape too', comparedForm('skills/*/references/_index.md') === 'skills');
+  t('...and it stops at the FIRST glob segment, however many follow', comparedForm('src/**/*') === 'src');
+  t('...leaving nothing at all when the very first segment is the glob', comparedForm('**/package.json') === '');
+  const patternRootPresent = [{ hint: '.changeset/*.md', deepest: '.changeset', target: null }];
+  t('a dead glob pattern whose root is right there is NOT a layout move', unreachableClass(patternRootPresent) === 'by construction');
+  t('...and never asserts a directory rename that never happened', !/layout moved/.test(unreachableReason(patternRootPresent)));
+  t('...while the reason it does give is one the reader can check for themselves',
+    /GLOB PATTERN and nothing under that root matches/.test(unreachableReason(patternRootPresent)) &&
+      unreachableReason(patternRootPresent).includes("git ls-files '.changeset/*.md'"));
+  // ...and the exception is exactly that narrow: a pattern whose own literal
+  // prefix has gone IS a move, and still reads as one.
+  const patternPrefixGone = [{ hint: 'packages/gone-away/*.ts', deepest: 'packages', target: null }];
+  t('a glob pattern whose literal prefix is gone is still a layout move', unreachableClass(patternPrefixGone) === 'layout moved');
+  t('...and its reason names the prefix that went missing', unreachableReason(patternPrefixGone).includes('packages/gone-away'));
+  // The live half: the specimen is gone from the residue entirely, which is
+  // what the card was filed for. A fixture cannot show that.
+  t('the live specimen is not a dead literal on this tree at all', hintReachesTree('.changeset/*.md', trackedFiles()));
 
   // ── A slash is not proof of a path (#10097, option C) ─────────────────────
   //

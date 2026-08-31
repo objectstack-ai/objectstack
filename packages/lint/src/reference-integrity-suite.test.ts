@@ -38,6 +38,10 @@ describe('reference-integrity suite — membership', () => {
       'validateActionBodyWrites',
       'validateFlowNodeWrites',
       'validateReadonlyFlowWrites',
+      // [#13653] The hook-side half of the readonly write judgement: a body's
+      // `ctx.api` update to a declared-`readonly` field, placed beside the flow
+      // twin that asks the identical question one surface over.
+      'validateReadonlyHookWrites',
       'validateReactPageProps',
     ]);
   });
@@ -214,6 +218,22 @@ describe('reference-integrity suite — every member actually runs', () => {
         events: ['beforeInsert'],
         body: { language: 'js', source: "ctx.input.lead_score = 100;" },
       },
+      // validateReadonlyHookWrites (#13653): `locked` EXISTS on crm_lead and is
+      // static-`readonly`, so this is not an existence question — the engine
+      // strips the key from the ctx.api UPDATE payload on every non-system
+      // trigger and the call still returns success. A separate hook from
+      // `score_lead` on purpose, mirroring the `stamp`/`lock` flow-node split
+      // below: one body carrying both defects would let either rule go silent
+      // behind the other's finding.
+      {
+        name: 'lock_lead',
+        object: 'crm_lead',
+        events: ['afterUpdate'],
+        body: {
+          language: 'js',
+          source: "await ctx.api.object('crm_lead').update({ id: ctx.recordId, locked: true });",
+        },
+      },
     ],
     flows: [
       {
@@ -287,6 +307,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('action-record-write-discarded');
     expect(rules).toContain('flow-node-write-unknown-field');
     expect(rules).toContain('flow-update-readonly-field');
+    expect(rules).toContain('hook-api-update-readonly-field');
     expect(rules).toContain('react-prop-missing-required');
   });
 
