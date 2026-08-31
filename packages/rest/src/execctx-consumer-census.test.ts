@@ -629,6 +629,14 @@ describe('[#13279] §7 every caught resolveExecCtx site re-raises the outage', (
 //    door ANSWERS; §7 pins what each SITE spells. Only §7 fails on one reverted
 //    site, and that is the division of labour to keep.
 //
+//    ⚠️ [#13538] CORRECTED, by ablation, without touching the paragraph above:
+//    the mechanism named there is not the operative one. Reverting the `:type`
+//    site and driving THIS section leaves it green because `resolveObjectMasker`
+//    resolves the context again, guarded — and that method early-returns unless
+//    `metaType === 'object'`, which is exactly the type this section sweeps. The
+//    handler's 'app' and 'dashboard' resolves never run for `object`. §9 carries
+//    the measurement.
+//
 //    ⚠️ Which also names what neither section covers: a PARTIAL outage, where
 //    only the first read fails. There the swallow returns `undefined`, the
 //    handler proceeds with no `organizationId`, and the door answers the
@@ -743,6 +751,24 @@ describe('[#13279] §8 an outage at the four continuation sites is not served as
 //          whatever fault model it were given. The first CONTROL below pins
 //          both halves of that, so the reason §8 stops short stays measured
 //          instead of becoming folklore.
+//
+//    ⚠️ AND THE TWO ARE THE SAME FIXTURE, which is the part worth keeping.
+//    Ablation (collapse + swallow, both restored) recorded the list door's
+//    sites and answers directly:
+//
+//        TOTAL outage   → status 503, sites [2821, 4388]
+//        PARTIAL (1st)  → status 200, sites [4388], read carried NO organizationId
+//
+//    Site 2821 is `resolveObjectMasker`'s guarded resolve, and that method
+//    early-returns unless `metaType === 'object'`. So what actually keeps §8
+//    green under a swallow is a SECOND GUARDED RESOLVE THAT ONLY EXISTS FOR
+//    `object` — the same fixture choice that makes its org-scope question
+//    vacuous. ⛔ It is NOT the reading the card and §8's own note below record
+//    (three resolves inside the `:type` handler): the handler's other two sit
+//    behind `metaTypeSingular(...) === 'app'` and `=== 'dashboard'` and never
+//    run for `object` at all. The conclusion those notes drew was right; the
+//    mechanism they named was not, and re-deriving it by SYMBOL rather than by
+//    line is what separated the two.
 //
 //    ⇒ What is owed is therefore a changed CRITERION on §8's harness — fault
 //    selection per read, driven at an ORG-OVERRIDABLE type — not a new
