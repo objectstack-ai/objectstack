@@ -205,7 +205,26 @@ function makeStubEngine() {
             }
             return findRow(opts.where)?.row ?? null;
         },
-        async find(table: string, opts?: { where?: Record<string, unknown> }) {
+        async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
+            // ⛔ THE CALLER'S BOUND IS HELD, and applied AFTER the filter.
+            // `/history` accepts `?limit=` and threads it all the way down, so
+            // `limit` is a contract member of the very door this file pins — a
+            // double that silently ignored it would sit GREEN through a
+            // regression that dropped the bound on the way to
+            // `historyMetaItem`. That is the identical argument to refusing an
+            // unknown `$` combinator above: a parameter the door really
+            // carries, answered wrongly but well-formedly, is the failure this
+            // whole file exists to make impossible. Applied on BOTH tables so
+            // the two branches cannot disagree.
+            //
+            // AFTER the filter, never before: bounding first would decide which
+            // rows survive the predicate rather than how many of the survivors
+            // are returned. By PRESENCE (`typeof === 'number'`), so the calls
+            // that pass no bound — every call the repository makes today, since
+            // `SysMetadataRepository.history()` applies `limit` itself while
+            // iterating rather than pushing it into the engine — are untouched
+            // and every existing assertion keeps its meaning.
+            // `check:objectql-double-limit`.
             if (table === 'sys_metadata_history') {
                 // ⭐ THE POSITIVE CONTROL'S FOUNDATION. `history()` and
                 // `diffMetaItem` both filter `organization_id` by strict
@@ -213,13 +232,15 @@ function makeStubEngine() {
                 // identically and no org-scoping assertion here could ever
                 // fail. Partitioning the stub is what makes the door's
                 // behaviour observable at all.
-                return historyRows.filter(
+                const matched = historyRows.filter(
                     (h) => matchesWhere(h as unknown as Record<string, unknown>, opts?.where ?? {}),
                 );
+                return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
             }
-            return Array.from(rows.values()).filter(
+            const matched = Array.from(rows.values()).filter(
                 (r) => matchesWhere(r as unknown as Record<string, unknown>, opts?.where ?? {}),
             );
+            return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
         },
         async insert(table: string, data: Record<string, unknown>) {
             if (table === 'sys_metadata_audit') return { id: 'audit_skip' };
@@ -332,8 +353,8 @@ function boot() {
             drive('PUT', `${META}/:type/:name`, { params: { type, name }, body: bodyFor(type, name, label) }),
         get: (type: string, name: string) =>
             drive('GET', `${META}/:type/:name`, { params: { type, name } }),
-        history: (type: string, name: string) =>
-            drive('GET', `${META}/:type/:name/history`, { params: { type, name } }),
+        history: (type: string, name: string, query: Record<string, unknown> = {}) =>
+            drive('GET', `${META}/:type/:name/history`, { params: { type, name }, query }),
         diff: (type: string, name: string, query: Record<string, unknown> = {}) =>
             drive('GET', `${META}/:type/:name/diff`, { params: { type, name }, query }),
         /** ⭐ The fixture proof every read assertion below is gated on. */
@@ -388,6 +409,36 @@ describe('#13406 the /history and /diff read doors state the org partition', () 
                 'the door answered an empty change log for an item whose org partition holds two events',
             ).toBe(2);
             expect(read.body.events.map((e: any) => e.version)).toEqual([1, 2]);
+        });
+    });
+
+    describe('/history honours the caller\'s bound', () => {
+        it('?limit=1 over a two-revision log returns exactly the first event', async () => {
+            // Added with the `check:objectql-double-limit` repair rather than
+            // separately from it: the gate's finding was that the stub could
+            // not OBSERVE `limit`, and the honest close of that is a pin that
+            // proves the bound now travels the whole door — query string ->
+            // `historyMetaItem` -> `repo.history()`'s `yielded >= limit` break.
+            // Fixing the double alone would have satisfied the gate while
+            // leaving this contract member as untested as it was.
+            await b.put('view', 'bounded');
+            await b.put('view', 'bounded', MARKER_2);
+            expect(b.historyRowsFor('view', 'bounded', ORG_A).map((h) => h.version)).toEqual([1, 2]);
+
+            // The CONTROL, without which "1 event came back" proves nothing:
+            // the same read with no bound must return both.
+            const all = await b.history('view', 'bounded');
+            expect(all.body?.events?.length, 'the unbounded control did not see both revisions').toBe(2);
+
+            const bounded = await b.history('view', 'bounded', { limit: '1' });
+            expect(bounded.thrown, `bounded read threw: ${bounded.thrown?.message}`).toBeUndefined();
+            expect(bounded.status).toBe(200);
+            expect(bounded.body?.events?.length, 'the caller\'s ?limit= was dropped').toBe(1);
+            // Oldest-first (the response contract is `seq` order, the opposite
+            // end of the log from the audit twin), so a bound of 1 keeps
+            // revision 1 — naming WHICH event guards against a bound that
+            // truncates from the wrong end.
+            expect(bounded.body.events[0].version).toBe(1);
         });
     });
 
