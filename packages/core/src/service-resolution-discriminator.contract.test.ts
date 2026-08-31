@@ -54,7 +54,7 @@ describe('[#13905] the two service-resolution facts are distinguishable', () => 
         loader = makeLoader();
     });
 
-    it('brands "never registered" with an ADR-0112 code and the service name', async () => {
+    it('brands "never registered" with a code and the service name', async () => {
         const err = await rejectionOf(() => loader.getService('ghost'));
 
         expect(isServiceNotRegisteredError(err)).toBe(true);

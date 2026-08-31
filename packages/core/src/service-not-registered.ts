@@ -48,7 +48,7 @@
  *
  * ## Two deliberate omissions
  *
- * - **No `status`.** The ADR-0112 envelope pairs `code` with a `status`, but
+ * - **No `status`.** An ADR-0112 envelope pairs `code` with a `status`, but
  *   the whole point of this discriminator is that the CONSUMER decides what an
  *   unwired service means — absorb and degrade (the supported no-data-plane
  *   kernel) or refuse. Carrying an HTTP status here would presuppose that
@@ -72,7 +72,15 @@
  */
 
 /**
- * The ADR-0112 wire code carried by the "never registered" rejection.
+ * The code carried by the "never registered" rejection.
+ *
+ * ⚠️ Spelled the ADR-0112 way, but deliberately NOT wire vocabulary: this value
+ * is read in-process by the seam that catches the rejection and is never
+ * serialized into an `error.code` envelope. `dispatcher-error-vocabulary.ts`
+ * classifies it `door: 'none'` / `boot-refusal` for exactly that reason — the
+ * same class as the migration-journal runner refusals. If a transport ever
+ * needs to ANSWER with this fact, that is a registration question for #8846's
+ * ledger, ⛔ not something to start doing at a door.
  */
 export const SERVICE_NOT_REGISTERED_CODE = 'SERVICE_NOT_REGISTERED';
 

@@ -623,6 +623,26 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'and grep finds no other consumer in `packages/`. Same class as the two rows above and ruled ' +
             'by the same #8035 reasoning: a runner refusal the CLI rethrows is not wire vocabulary.',
     },
+    {
+        code: 'SERVICE_NOT_REGISTERED',
+        file: 'packages/core/src/service-not-registered.ts',
+        shape: 'assignconst',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            '[#13905] The discriminator that tells "nothing ever registered this service" from "the service ' +
+            'IS registered and could not be built", stamped on the ONE rejection `PluginLoader.getService` ' +
+            'raises for the first fact. Read in-process by the seam that catches the rejection and never ' +
+            'serialized: measured on this tree, the only references to the code are its own module and the ' +
+            '`@objectstack/core` re-export — no door reads it, and both seams that catch `getServiceAsync` ' +
+            'today (`seamOrUndefined` in packages/rest, `resolveService` in packages/runtime) use a bare ' +
+            '`catch` that inspects nothing. It carries no `status` on purpose: the whole point is that the ' +
+            'CONSUMER decides whether an unwired service degrades or refuses, so binding an HTTP status here ' +
+            'would presuppose that decision at the layer that must not make it. Same class as the ' +
+            'migration-journal runner refusals above and ruled by the same #8035 reasoning — a composition ' +
+            'fact caught in-process is not wire vocabulary. ⚠️ If a transport ever ANSWERS with this fact, ' +
+            'the verdict becomes pending-registration and the code belongs in #8846\'s ledger batch.',
+    },
     // ── [#13233] field-level catalogs, reached by the OBJECT-LITERAL helper ──
     //
     // The 29 rows below are the whole verdict cost of widening `codehelper` to
