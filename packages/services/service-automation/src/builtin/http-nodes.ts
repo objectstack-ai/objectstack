@@ -146,10 +146,13 @@ export function registerHttpNodes(engine: AutomationEngine, ctx: PluginContext):
                         // triage): a `single`-posture install and a stack before
                         // its first organization legitimately have none, and a
                         // durable callout there must still enqueue.
+                        // (Issue anchor lives in these comments, not in the
+                        // runtime string — operators cannot resolve a tracker
+                        // id; see check:doc-authoring.)
                         ctx.logger.warn(
                             `[http] node '${node.id}': no organization in scope for this durable callout — its ` +
                                 `sys_http_delivery row will carry organization_id = NULL, which is a global row ` +
-                                `every organization's redeliver door can reach on a walled deployment (#13546). ` +
+                                `every organization's redeliver door can reach on a walled deployment. ` +
                                 `On a multi-organization install the triggering context lost its tenant: give the ` +
                                 `flow's trigger an acting organization (AutomationContext.tenantId). On a ` +
                                 `single-organization install this is expected and can be ignored.`,
