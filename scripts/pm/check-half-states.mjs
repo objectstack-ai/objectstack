@@ -2301,6 +2301,31 @@ export function buildBlockingIndex(issues, options = {}) {
 export const BLOCKING_DEPENDENT_LIST_CAP = 5;
 
 /**
+ * The `repo:*` labels a card carries — the SEAM predicate H14's stale
+ * direction declines on (#13975).
+ *
+ * Exported and pinned for the reason every scoping policy in this file is: a
+ * policy that decides what gets JUDGED AT ALL is where a silent hole would
+ * live. The spelling is `censusLanesOf`'s, deliberately — one reading of the
+ * `repo:*` family, so the two rows cannot come to disagree about what a repo
+ * lane is.
+ *
+ * ⚠️ SOUND, not COMPLETE, and the surviving rows say so. The ruled predicate
+ * (#13975) is "carries any `repo:*` label", which catches the cards whose
+ * off-repo audience is DECLARED. It is not a test for "has an off-repo
+ * audience": measured on the 2026-08-31 board, 67 open cards name a
+ * sibling-repo issue (`objectui#N` / `cloud#N` / `hotcrm#N`) and only 9 of
+ * them carry a `repo:*` label — and the two cards this row's own filing
+ * recorded off-repo waiters for (#13439, #13568) carry none. Widening it (to
+ * "the body mentions another repo", say) is a DIFFERENT predicate and needs
+ * its own ruling; narrowing it is one too. Both are why this is a named
+ * function rather than an inline `.some()`.
+ */
+export function seamRepoLabels(issue) {
+  return labelNames(issue ?? {}).filter((l) => /^repo:/u.test(l));
+}
+
+/**
  * H14 — null when the cache agrees with the index, else the finding sentence.
  *
  * ## The two directions do NOT owe the index the same completeness (#10061)
@@ -2340,10 +2365,53 @@ export const BLOCKING_DEPENDENT_LIST_CAP = 5;
  * and #7917 / objectui#4356 is a live one this row would otherwise have
  * instructed a reader to sever.
  *
+ * ## …and on a SEAM card it declines outright (#13975)
+ *
+ * Naming the scope was not enough. The row's instruction is still imperative,
+ * and the class it is most often wrong about is the one the protocol creates
+ * ON PURPOSE: a seam card is kept in THIS repo, carrying `repo:cloud` /
+ * `repo:objectui` / `repo:hotcrm`, precisely so a sibling repo's work can
+ * depend on it. For exactly those cards "no open card here points at me" is
+ * not weak evidence of absence — it is the reading the index is structurally
+ * unable to make, and the filing round measured the cost: 4 of 5 stale rows
+ * stood on cards other repos were, on the record, waiting for.
+ *
+ * So `seamRepoLabels(issue)` non-empty DECLINES: the row is still emitted, and
+ * it says it is declining and why. Emitted rather than suppressed, on two
+ * measurements rather than taste:
+ *
+ *   - Dropping it silently would make the seam cards INVISIBLE to the patrol —
+ *     a card that no row mentions reads as a coherent one, which is the second
+ *     defect, not the fix. H27 already holds this shape for the same reason
+ *     (an UNJUDGED dispatch is reported out loud, "not confirmed healthy").
+ *   - The finding COUNT is unchanged by the swap, so a decline cannot quiet
+ *     the summary sentence the way a suppression would.
+ *
+ * The row carries `UNJUDGED_MARKER`, which is the mechanical half of that
+ * visibility rather than a label on it: unjudged rows sort ahead of judged ones
+ * so the markdown body's size trim can never be what removes them (#11218,
+ * where the trim ate 199 rows while the header promised they were kept). An
+ * emitted decline the trim can drop is the suppression this row rejects,
+ * arriving one budget overrun later.
+ *
+ * ⚠️ H32's decline is the OTHER shape and this row deliberately does not copy
+ * it: there, a seat on a lane this board cannot count returns `null` and the
+ * summary's coverage pair carries the disclosure — correct, because the seat
+ * is out of the POPULATION. A seam card is in this row's population (it holds
+ * the label this row exists to judge); it is the EVIDENCE that is unreadable.
+ *
+ * ⛔ The decline is scoped to the stale direction alone. MISSING (the add
+ * direction) stays untouched on a seam card, and must: a cross-repo edge the
+ * index cannot see can only make that direction under-label, which is the
+ * status quo and harms nobody.
+ *
  * @param {object} issue — an OPEN issue.
  * @param {Map<number, number[]>} index — from `buildBlockingIndex`.
- * @param {{ indexComplete?: boolean }} [options] — `false` when any gated
- *   comment fetch failed, i.e. the index is known to be missing edges.
+ * @param {{ indexComplete?: boolean, ownerRepo?: string }} [options] —
+ *   `indexComplete` is `false` when any gated comment fetch failed, i.e. the
+ *   index is known to be missing edges. `ownerRepo` is the swept `owner/repo`,
+ *   defaulted like `buildBlockingIndex`'s and read for one purpose only: to
+ *   tell a seam label naming ANOTHER repo from one naming this one.
  */
 export function h14BlockingCacheIncoherent(issue, index, options = {}) {
   const carries = labelNames(issue).includes('pm:blocking');
@@ -2351,11 +2419,64 @@ export function h14BlockingCacheIncoherent(issue, index, options = {}) {
   const indexComplete = options.indexComplete ?? true;
   if (carries && dependents.length === 0) {
     if (!indexComplete) return null;
+    const seam = seamRepoLabels(issue);
+    if (seam.length > 0) {
+      const bareRepo = String(options.ownerRepo ?? OWNER_REPO)
+        .split('/')
+        .pop();
+      const named = seam.map((l) => `\`${l}\``).join(', ');
+      // The over-covered edge, named rather than narrowed away. `repo:objectstack`
+      // is not in the label ledger's seam family (`ensure-pm-labels.sh` creates
+      // `repo:objectui` / `repo:cloud` / `repo:hotcrm`, each described as 「Seam
+      // card: cross-repo ordering with X is the substance」) but it exists on the
+      // board and 4 open cards carried it on 2026-08-31. A label naming the SWEPT
+      // repo cannot make this sweep's index blind, so declining on it is
+      // conservative — and the row says that rather than asserting an off-repo
+      // audience it has no evidence for. Kept literal because the ruled predicate
+      // is "any `repo:*` label"; narrowing it is a predicate change and belongs to
+      // whoever rules on it, not to this function.
+      const conservative =
+        seam.every((l) => l.slice('repo:'.length) === bareRepo)
+          ? ` ⚠️ ${named} names the SWEPT repo, so this decline is CONSERVATIVE rather than ` +
+            'structural — the ruled predicate is "any `repo:*` label" (#13975) and this is its ' +
+            'over-covered edge, left literal rather than narrowed here.'
+          : '';
+      return (
+        // The UNJUDGED rank, not decoration: it is what keeps this row ahead of
+        // the markdown body's size trim (#11218). A decline the trim can eat is
+        // a seam card the patrol silently stops mentioning — the same defect as
+        // suppressing the row outright, arriving later and less visibly.
+        `${UNJUDGED_MARKER} ` +
+        '`pm:blocking` carried while no open card in THIS REPO targets it with a `Blocked-by:` line ' +
+        `— body OR comment — and this row DECLINES to judge the label: the card carries ${named}, a ` +
+        'seam label whose whole meaning is that the ordering this card belongs to lives in another ' +
+        'repo (label ledger: 「Seam card: cross-repo ordering with X is the substance」), and the ' +
+        'protocol keeps such a card HERE precisely so a sibling repo can depend on it.' +
+        conservative +
+        ' The strip this row would otherwise prescribe rests on ABSENCE of evidence, and for this ' +
+        'card the evidence is not absent, it is UNREADABLE (#4690): `buildBlockingIndex` scans this ' +
+        'repo\'s open listing only, `Blocked-by:` edges are protocol-legal across repos, and a ' +
+        'sibling repo\'s card waiting on this one is invisible to the index BY CONSTRUCTION, not by ' +
+        'any read failure — ⛔ no re-run resolves it, and there is no cross-repo `Blocked-by:` ' +
+        'reader in the fleet to resolve it with. ⇒ UNJUDGED: neither a coherent cache nor a stale ' +
+        'one. The stakes are why this declines rather than guessing — `pm:blocking` ranks second ' +
+        'only to `priority:p0` in lane selection, so a wrong strip starves the sibling that is ' +
+        'waiting, while a wrong KEEP only over-ranks one card. Report-only: the remedy is a ' +
+        'cross-repo `Blocked-by:` read by hand before the triage sweep\'s derivation pass touches ' +
+        'this card, never a label written from this script — and ⛔ never a hand-applied or ' +
+        'hand-stripped `pm:blocking` either, in any direction: the label is the sweep\'s derived ' +
+        'cache (「⛔ 不手工挂」).'
+      );
+    }
     return (
-      '`pm:blocking` carried while no open card\'s `Blocked-by:` line — body OR comment — targets ' +
-      'it, judged against the two-channel index — a stale derived cache, scoped to THIS REPO ONLY: ' +
+      '`pm:blocking` carried while no open card in THIS REPO — the only board this sweep indexes ' +
+      '— targets it with a `Blocked-by:` line, body OR comment, judged against the two-channel ' +
+      'index — a stale derived cache, scoped to THIS REPO ONLY: ' +
       'no dependent found in this repo; cross-repo dependents are not swept, so this is not a claim ' +
-      'of exhaustiveness over the population — `Blocked-by:` edges are legally cross-repo. The label ' +
+      'of exhaustiveness over the population — `Blocked-by:` edges are legally cross-repo. ' +
+      '⚠️ This card carries NO `repo:*` label, which is why the seam decline (#13975) did not ' +
+      'apply — and that absence is not evidence of an in-repo-only audience: measured 2026-08-31, ' +
+      '58 of the 67 open cards naming a sibling-repo issue carry no `repo:*` label. The label ' +
       'is not a state a seat sets: the triage sweep derives it from the `Blocked-by:` reverse index, ' +
       'and the lane selection order ranks it second only to `priority:p0`. So a stale one is worse ' +
       'than an absent one — it boosts a card nothing depends on, with authority. Report-only: verify ' +
@@ -12589,6 +12710,91 @@ function selfTest() {
   t('H14-A: …and completeness defaults to true for body-only callers', typeof h14BlockingCacheIncoherent(epic9465, bodyOnlyIdx), 'string');
   t('H14-B: missing SURVIVES an incomplete index', h14row(carded(9465, ['domain:devx']), unionIdx, { indexComplete: false }).includes('#9709'), true);
   t('H14-B: …and an earned label stays clean either way', h14BlockingCacheIncoherent(epic9465, unionIdx, { indexComplete: false }), null);
+
+  // -- H14: the SEAM DECLINE on the stale direction (#13975) -----------------
+  //
+  // ⚠️ NAMING, because the two vocabularies are inverted and a case written
+  // under the wrong one pins the wrong direction: the cases above call STALE
+  // "H14-A" and MISSING "H14-B", while the filing card #13975 calls the strip
+  // "direction B". The ruling is about the STRIP under either name, so these
+  // cases say `seam` and name the direction in words.
+  //
+  // The fixtures are the real cards the defect was measured on (2026-08-31, 5
+  // stale rows): #12931 carries `repo:cloud` and declines; #13439 sits in the
+  // SAME position carrying no `repo:*` label and still fires — which is the
+  // predicate's measured under-coverage, since that card's own filing records
+  // cloud#1451 waiting on it.
+  const seamIdx = idx([]);
+  const seamCard = carded(12931, ['pm:queue', 'repo:cloud', 'pm:blocking']);
+  const nonSeamCard = carded(13439, ['bug', 'priority:p1', 'pm:queue', 'domain:spec', 'pm:blocking']);
+  const swept = { ownerRepo: 'objectstack-ai/objectstack' };
+
+  // The predicate, alone: one reading of the `repo:*` family, `censusLanesOf`'s.
+  t('H14 seam: the predicate reads the repo:* family', seamRepoLabels(seamCard).join(','), 'repo:cloud');
+  t('H14 seam: …and is empty on a card carrying none', seamRepoLabels(nonSeamCard).length, 0);
+  t('H14 seam: …and a domain lane is not a repo lane', seamRepoLabels(carded(1, ['domain:spec', 'pm:blocking'])).length, 0);
+  t('H14 seam: …and more than one repo label is all of them', seamRepoLabels(carded(1, ['repo:cloud', 'domain:spec', 'repo:hotcrm'])).join(','), 'repo:cloud,repo:hotcrm');
+  t('H14 seam: …and a missing issue does not crash', seamRepoLabels(undefined).length, 0);
+
+  // The decline: EMITTED, never suppressed (the row is the seam card's only
+  // trace in the report — H32's silent `foreign` return is the other shape,
+  // and it belongs to a row whose POPULATION is out of scope, not one whose
+  // evidence is unreadable).
+  t('H14 seam: a seam card in the stale position still EMITS a row', typeof h14BlockingCacheIncoherent(seamCard, seamIdx, swept), 'string');
+  t('H14 seam: …and the row declines rather than accusing', h14row(seamCard, seamIdx, swept).includes('DECLINES to judge'), true);
+  t('H14 seam: …and names the label it declined on', h14row(seamCard, seamIdx, swept).includes('`repo:cloud`'), true);
+  t('H14 seam: …and says the evidence is UNREADABLE, not absent', h14row(seamCard, seamIdx, swept).includes('UNREADABLE'), true);
+  t('H14 seam: …and that no re-run resolves it', h14row(seamCard, seamIdx, swept).includes('no re-run resolves it'), true);
+  t('H14 seam: …and reads as UNJUDGED, never as a stale cache', h14row(seamCard, seamIdx, swept).includes('stale derived cache'), false);
+  t('H14 seam: …so it never prescribes the strip', h14row(seamCard, seamIdx, swept).includes('drops the label'), false);
+  t('H14 seam: …and forbids the hand-strip as well as the hand-apply', h14row(seamCard, seamIdx, swept).includes('hand-stripped'), true);
+  // The trim-order rank, which is what makes "emitted" mean "still there in the
+  // rendered body" (#11218). Without it a decline is a suppression on a delay.
+  t('H14 seam: …and the row carries the UNJUDGED rank', isUnjudgedFinding(h14row(seamCard, seamIdx, swept)), true);
+  t('H14 seam: …while the ordinary stale row does NOT (it made a determination)', isUnjudgedFinding(h14row(nonSeamCard, seamIdx, swept)), false);
+  // Report-only and never loud, the H14–H16 property the decline must not break.
+  t('H14 seam: …and the decline is not a loud finding', isLoudFinding(h14row(seamCard, seamIdx, swept)), false);
+  // The card's own re-check (`grep -E "H14 .*carried while no open"`) has to
+  // keep listing BOTH shapes, or the seam cards vanish from the one-liner the
+  // filing seat used to find them.
+  t('H14 seam: …and the row head still answers the card\'s re-check grep', /carried while no open/u.test(h14row(seamCard, seamIdx, swept)), true);
+
+  // The paired negative: the same position, no `repo:*` label -> still fires.
+  t('H14 seam: a NON-seam card in the same position still fires', h14row(nonSeamCard, seamIdx, swept).includes('stale derived cache'), true);
+  t('H14 seam: …and its row names its own scope', h14row(nonSeamCard, seamIdx, swept).includes('no dependent found in this repo'), true);
+  t('H14 seam: …and says the missing label is NOT evidence of an in-repo audience', h14row(nonSeamCard, seamIdx, swept).includes('58 of the 67'), true);
+
+  // An earned label is clean whether or not the card is a seam: the decline
+  // fires on the stale position only, never on the population.
+  t('H14 seam: a seam card with a real in-repo dependent -> clean', h14BlockingCacheIncoherent(seamCard, idx([carded(10, [], 'Blocked-by: #12931')]), swept), null);
+  // Suspension outranks the decline: an index known incomplete silences the
+  // whole direction, unchanged by this row.
+  t('H14 seam: an incomplete index still silences the direction outright', h14BlockingCacheIncoherent(seamCard, seamIdx, { ...swept, indexComplete: false }), null);
+
+  // ⛔ The ADD direction is untouched on a seam card, and byte-identically so:
+  // a cross-repo edge the index cannot see can only make THAT direction
+  // under-label, which is the status quo and starves nobody.
+  const addIdx = idx([carded(9249, ['pm:queue'], 'Blocked-by: #9919')]);
+  t('H14 seam: the ADD direction still fires on a seam card', h14row(carded(9919, ['pm:queue', 'repo:cloud']), addIdx, swept).includes('#9249'), true);
+  t(
+    'H14 seam: …and its sentence is byte-identical to the same card without the label',
+    h14row(carded(9919, ['pm:queue', 'repo:cloud']), addIdx, swept),
+    h14row(carded(9919, ['pm:queue']), addIdx, swept),
+  );
+
+  // The over-covered edge, pinned rather than narrowed. `repo:objectstack` is
+  // not in the label ledger's seam family but 4 open cards carried it on
+  // 2026-08-31, and the ruled predicate is "any `repo:*` label" — so it
+  // declines, and SAYS the decline is conservative rather than asserting an
+  // off-repo audience it cannot see.
+  const ownRepoCard = carded(1, ['pm:queue', 'repo:objectstack', 'pm:blocking']);
+  t('H14 seam: a label naming the swept repo declines too (the predicate is literal)', h14row(ownRepoCard, seamIdx, swept).includes('DECLINES to judge'), true);
+  t('H14 seam: …and says that decline is CONSERVATIVE', h14row(ownRepoCard, seamIdx, swept).includes('CONSERVATIVE'), true);
+  t('H14 seam: …while a sibling label claims nothing conservative', h14row(seamCard, seamIdx, swept).includes('CONSERVATIVE'), false);
+  // …and the reading follows the SWEPT repo rather than a hardcoded name, so a
+  // copy of this patrol installed in a sibling repo reads its own board.
+  t('H14 seam: …the conservative reading follows the swept repo', h14row(seamCard, seamIdx, { ownerRepo: 'objectstack-ai/cloud' }).includes('CONSERVATIVE'), true);
+  t('H14 seam: …and a seam label there is still structural', h14row(ownRepoCard, seamIdx, { ownerRepo: 'objectstack-ai/cloud' }).includes('CONSERVATIVE'), false);
 
   // The summary line carries the third `read X of Y` pair, and says out loud
   // when the shortfall cost H14 its stale direction.
