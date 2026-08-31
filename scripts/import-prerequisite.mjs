@@ -394,21 +394,61 @@ export async function requireDefaultExport(specifier, load, importerUrl, options
  * The shared frame, in `check-i18n-coverage.mjs`'s wording and order: what is
  * unmet, why, the command that clears it, and — load-bearing — that nothing was
  * measured, so the exit code says nothing about the gate's actual question.
+ *
+ * ── The pipe-shape advisory, and why it says what it says ──────────────────
+ *
+ * Every importer of this module inherits the closing paragraph verbatim, so a
+ * wrong claim there is wrong in every gate at once. Measured here 2026-08-31 on
+ * node 22.22.2 / bash 5, one refusing gate plus constructed producers:
+ *
+ *   node scripts/check-test-completeness.mjs            -> 3   (no pipe)
+ *   … 2>&1 | tail -4   $? = 0   ${PIPESTATUS[0]} = 3   pipefail -> 3
+ *   … 2>&1 | head -1   $? = 0   ${PIPESTATUS[0]} = 3   pipefail -> 3
+ *
+ * So the false green is `$?` after ANY pipe — it is the LAST command's status,
+ * and `head`/`tail` both essentially never fail. It is NOT a property of one
+ * shape, and choosing a different shape does not repair it.
+ *
+ * ⚠️ `| head -N` does close the read end early and the producer DOES take EPIPE
+ * — proven by a producer that prints what it caught — but node ignores SIGPIPE
+ * and swallows the stdout write error, so the gate still reaches its own exit:
+ * a producer instrumented to exit 7 reported `${PIPESTATUS[0]}` = 7 through
+ * `| head -1`. ⛔ Do NOT write that `| head` turns `${PIPESTATUS[0]}`/`pipefail`
+ * green; it does not, and an earlier draft of this advisory said so. What `head`
+ * really costs is the VERDICT TEXT (truncated), and — for a producer that does
+ * not ignore SIGPIPE, unlike node — a real code replaced by 141: `seq 1
+ * 100000000 | head -1` reports `${PIPESTATUS[0]}` = 141. That is a false RED,
+ * the opposite direction.
+ *
+ * `selfTest` pins the four load-bearing clauses below.
  */
 export function reportPrerequisiteNotMet(importerUrl, verdict, measures) {
+  console.error(prerequisiteNotMetText(importerUrl, verdict, measures));
+  process.exit(1);
+}
+
+/**
+ * The text `reportPrerequisiteNotMet` prints, as a value — so the self-test can
+ * assert on the advisory without spawning a process or stubbing `process.exit`.
+ */
+function prerequisiteNotMetText(importerUrl, verdict, measures) {
   const gate = fileURLToPath(importerUrl).split('/').pop().replace(/\.mjs$/, '');
   const subject = measures ? `whether ${measures}` : `what it gates`;
-  console.error(
+  return (
     `\n${gate}: PREREQUISITE NOT MET — ${verdict.headline}\n\n` +
       verdict.detail.map((l) => (l ? `  ${l}` : '')).join('\n') +
       `\n\n  Fix:  ${verdict.fix}\n\n` +
       `  Nothing was measured: this gate exited before running a single check, so this\n` +
       `  result says NOTHING about ${subject}. It is NOT a finding, and it is not\n` +
       `  evidence that anything in the tree is wrong.\n` +
-      `  (Exit code 1 — but piping this gate reports the PIPE's status, so\n` +
-      `  \`node scripts/${gate}.mjs | tail -4\` reads green either way. Use \`echo "EXIT=$?"\`.)`,
+      `  (Exit code 1 — capture it BEFORE any pipe:\n` +
+      `  \`node scripts/${gate}.mjs > /tmp/${gate}.log 2>&1; echo "EXIT=$?"\`.\n` +
+      `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
+      `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
+      `  this gate's own code: \`| tail\` reads to EOF and forwards it, while \`| head -N\` closes the\n` +
+      `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
+      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`
   );
-  process.exit(1);
 }
 
 // ---------------------------------------------------------------------------
@@ -585,6 +625,32 @@ export function selfTest() {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+
+  // ── the inherited pipe-shape advisory ───────────────────────────────────
+  // Pinned HERE and nowhere else, because this is the one copy 45 importers
+  // print. The clauses are the four the advisory is for; the negative one is
+  // the load-bearing one, since the wrong claim it excludes reads perfectly
+  // plausible and shipped once already.
+  const advisory = prerequisiteNotMetText(
+    new URL('file:///repo/scripts/check-fixture-gate.mjs').href,
+    { headline: 'h', detail: ['d'], fix: 'f' },
+    undefined,
+  );
+  t('the advisory prescribes capturing the code BEFORE any pipe',
+    advisory.includes('capture it BEFORE any pipe') && advisory.includes('> /tmp/check-fixture-gate.log 2>&1'),
+    advisory);
+  t('the advisory names the shape-independent false green: `$?` is the LAST command\'s status',
+    advisory.includes("`$?` is the LAST command's status") && advisory.includes('no pipe shape repairs it'));
+  t('the advisory keeps `| tail` as the shape that FORWARDS the true status',
+    advisory.includes('`| tail` reads to EOF and forwards it'));
+  t('the advisory names `| head -N` and the EPIPE mechanism, with its real cost',
+    advisory.includes('`| head -N` closes the') && advisory.includes('EPIPE')
+      && advisory.includes('TRUNCATED') && advisory.includes('141'));
+  // ⛔ The claim this gate must never make again: measured 2026-08-31, `| head`
+  // does NOT defeat `${PIPESTATUS[0]}`/`pipefail` — node ignores SIGPIPE and
+  // reaches its own exit. See the mechanism note on `reportPrerequisiteNotMet`.
+  t('the advisory does NOT claim a pipe shape defeats `${PIPESTATUS[0]}`/`pipefail`',
+    !/turns even .*PIPESTATUS.*green|reads green either way/.test(advisory));
 
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name}${c.detail ? ` -- ${c.detail}` : ''}`);

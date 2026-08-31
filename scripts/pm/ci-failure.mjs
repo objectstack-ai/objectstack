@@ -167,7 +167,9 @@
  *                    environment exactly as much as one that was dead at
  *                    request 1.
  *
- * Piping hides all of it (`… | tail` reports the PIPE's status). Read `$?`.
+ * Piping hides all of it: after ANY pipe `$?` is the LAST command's status, and `head`/`tail`
+ * essentially never fail. Capture the exit code BEFORE any pipe; `${PIPESTATUS[0]}`/`pipefail`
+ * recover it, `| tail` reading to EOF while `| head -N` truncates the verdict text.
  *
  * ## The transport — node's fetch does not read HTTPS_PROXY, and the failure
  *    wears a credential fault's face
@@ -1537,7 +1539,12 @@ function render(result, target) {
 
   say(`(Exit ${verdict.exit}: 0 green · 1 red with the assertion in hand · 2 undetermined · ` +
       `${EXIT_PREREQUISITE_NOT_MET} prerequisite not met.`);
-  say(" Piping reports the PIPE's status, so `... | tail` reads green either way. Use `echo 'EXIT=$?'`.)");
+  say(" Capture it BEFORE any pipe: `node scripts/pm/ci-failure.mjs > /tmp/ci-failure.log 2>&1; echo \"EXIT=$?\"`.");
+  say(" Piped, `$?` is the LAST command's status, and `head`/`tail` essentially never fail — that is the");
+  say(" false green, and no pipe shape repairs it. `${PIPESTATUS[0]}`/`pipefail` do recover this tool's own");
+  say(" code: `| tail` reads to EOF and forwards it, while `| head -N` closes the read end early — the tool");
+  say(" takes EPIPE, its verdict text is TRUNCATED, and a producer that dies on SIGPIPE reports 141 rather");
+  say(" than what it meant to say.)");
   return { text: out.join('\n'), exit: verdict.exit, verdict };
 }
 
@@ -2421,7 +2428,12 @@ async function reportMidWalkFailure(error, stage) {
   console.error(`\nci-failure: ${decision.verdict} — ${decision.headline}\n`);
   for (const line of decision.detail) console.error(line ? `  ${line}` : '');
   for (const line of renderFixLines(decision.fix)) console.error(line);
-  console.error("  Piping reports the PIPE's status, so `... | tail` reads green either way. Use `echo \"EXIT=$?\"`.");
+  console.error("  Capture the exit code BEFORE any pipe: `node scripts/pm/ci-failure.mjs > /tmp/ci-failure.log 2>&1; echo \"EXIT=$?\"`.");
+  console.error("  Piped, `$?` is the LAST command's status, and `head`/`tail` essentially never fail — that is the");
+  console.error("  false green, and no pipe shape repairs it. `${PIPESTATUS[0]}`/`pipefail` do recover this tool's own");
+  console.error("  code: `| tail` reads to EOF and forwards it, while `| head -N` closes the read end early — the tool");
+  console.error("  takes EPIPE, its verdict text is TRUNCATED, and a producer that dies on SIGPIPE reports 141 rather");
+  console.error("  than what it meant to say.");
   process.exit(decision.exit);
 }
 
