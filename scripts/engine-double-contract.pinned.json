@@ -3232,6 +3232,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-storage/src/sys-file-copy-backfill-organization-stamping.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/sys-file-copy-backfill-organization-stamping.test.ts",
+      "verb": "update",
+      "pinned": 2
+    },
+    {
       "file": "packages/services/service-storage/src/sys-file-organization-stamping.test.ts",
       "verb": "delete",
       "pinned": 1

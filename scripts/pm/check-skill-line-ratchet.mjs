@@ -312,7 +312,12 @@ export const CEILINGS = new Map([
   // the maintainer-action ledger. A lane charter is read per seat session like
   // every entry above. Set at the landed line count read from this ratchet's own
   // run (headroom 0, same convention as the entries above).
-  ['.claude/skills/pm-dispatch/references/lanes/director.md', 75],
+  // 75 → 77: maintainer-directed placement (2026-08-27, verbatim: 「创业阶段不渐进
+  // 应该写入项目总监skills」) — the no-gradualism standing rule lands here by that
+  // directive; the file sat at headroom 0 with no losslessly compressible slack in
+  // the touched sections (arithmetic in the raising PR), so the directive is the
+  // ruling that pays for exactly the two lines it dictates.
+  ['.claude/skills/pm-dispatch/references/lanes/director.md', 77],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
