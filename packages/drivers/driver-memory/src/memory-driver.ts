@@ -908,7 +908,7 @@ export class InMemoryDriver implements IDataDriver {
 
     const table = this.getTable(object);
 
-    // [#13875] Resolve every id to its table row FIRST, then draw the touched
+    // [#13911] Resolve every id to its table row FIRST, then draw the touched
     // set from the RESOLVED rows' OWN ids — never from caller input. Ids are
     // resolved with a loose `==` (matching `update`, one method up), but a
     // `Set` membership test is always strict, so a caller naming a stored `1`
