@@ -4779,25 +4779,29 @@ export class AutomationEngine implements IAutomationService {
                 };
             }
 
+            // [#13909] How long the step log was AT THE PAUSE, read before
+            // anything downstream runs. `steps` below is the SAME array
+            // `traverseNext` appends to, so by the time the catch arm builds a
+            // restore snapshot the pause's own step log is no longer
+            // recoverable from it — this integer is what trims it back. One
+            // `int` on every resume and nothing else: the snapshot itself is
+            // built only on the failure path.
+            //
+            // ⛔ Deliberately NOT a change to the ordering. The consumption
+            // below still precedes the traversal, `forgetSuspendedRun` is
+            // untouched, and `hasSuspendedRun` still answers false for the
+            // whole traversal window (pinned in
+            // `consumed-suspension-restore.test.ts`). Which ordering is right
+            // is #13937's, and unruled.
+            const stepCountAtPause = run.steps.length;
+
             // Consume the suspension *before* running downstream work — a run
             // resumes exactly once per pause, and a duplicate resume after a
             // partial restart must not double-run side effects. (Folding the
             // signal above is pure in-memory work, not downstream work.)
             // This is also where the paused node learns its pause is over and
             // disarms what it armed on entry (#5512) — see forgetSuspendedRun.
-            // [#13909] How long the step log was AT THE PAUSE, read one line
-            // after the consumption and before anything downstream runs.
-            // `steps` below is the SAME array `traverseNext` appends to, so by
-            // the time the catch arm builds a restore snapshot the pause's own
-            // step log is no longer recoverable from it — this integer is what
-            // trims it back. An `int` on every resume, and nothing else: the
-            // snapshot itself is built only on the failure path.
-            //
-            // ⛔ Deliberately NOT a change to the ordering. The consumption
-            // still precedes the traversal, `forgetSuspendedRun` is untouched
-            // and `hasSuspendedRun` still answers false for the whole traversal
-            // window. Which ordering is right is #13937's, and unruled.
-            const stepCountAtPause = run.steps.length;
+            await this.forgetSuspendedRun(run, 'resumed');
 
             const steps = run.steps;
             const context = run.context;
