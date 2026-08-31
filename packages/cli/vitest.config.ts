@@ -79,6 +79,10 @@
 // re-checked. Whoever re-measures next: print your commit here, and keep these
 // counts in exactly one place in this file — a second copy is what rotted last
 // time, because the two drifted and neither said which was current.
+// ⇒ Re-measured on f532630d02 (#13504): the `cli` POPULATION below is
+//   superseded by the section further down, which also attributes the `import`
+//   term per file. The peer rows and every ratio in this section are from the
+//   2f665a1af run and were NOT re-taken.
 //
 // PROTOCOL. One machine, 4 cores, warm build, one `vitest run --maxWorkers=2`
 // per package, vitest 4.1.10 on node 22.22.2. ⚠️ Several agents share this
@@ -253,6 +257,119 @@
 //
 // So the work is real, the price is fair, and nothing contained in this package
 // removes it without changing what the e2e tests assert.
+//
+// ## THE `import` TERM, ATTRIBUTED PER FILE (#13504) — f532630d02, 2026-08-31
+//
+// #13504 asked the one question the section above does not answer. The run it
+// filed spent `import 401.08s`, a quarter of its wall, before any assertion
+// executed, and nothing said WHERE. This section says where, and the answer
+// settles three candidate routes without any of them having to be tried.
+//
+// ⚠️ SAME PROTOCOL, DIFFERENT RUN AND DIFFERENT COMMIT from the section above,
+// so the two are not interchangeable. This one is f532630d02: one
+// `pnpm --filter @objectstack/cli exec vitest run --maxWorkers=2` through the
+// shared lock, vitest 4.1.10 on node 22.22.2, dependency closure built.
+// ⛔ The five PEER packages above were deliberately NOT re-measured — each one
+// costs another hold of the very lock this card is about — so their
+// cross-package ratios stand on their own run and are not restated here. What
+// is superseded above is the `cli` POPULATION, nothing else.
+//
+//   Test Files 220 · Tests 2529 · Duration 1041.38s
+//     (transform 31.49s, setup 0ms, import 300.68s, tests 1741.68s, environment 30ms)
+//   os-verify-lock: held 1043s (17m23s) · waited 0s · exit 0
+//
+// ⚠️ The instrument is vitest's own arithmetic, not a proxy. The printed
+// `import` term IS `sum(file.collectDuration)` and the printed `tests` term IS
+// `sum(file.result.duration)` (vitest 4.1.10, the summary block in
+// `dist/chunks/index.*.js`). Per-file `collectDuration` is therefore a
+// DECOMPOSITION of the printed number rather than a correlate of it, and the
+// two can be checked against each other — this run's per-file sums reproduce
+// both printed terms exactly.
+//
+// WHERE THE `import` TERM IS: nowhere in particular. It is a per-file FLOOR.
+//
+//   p25 0.08s · p50 0.83s · p75 2.04s · p90 3.36s · p99 4.73s · max 10.66s
+//   mean 1.37s over 220 files · 112 files under 1s · 63 under 100ms
+//   top 10 files 17.8% · top 20 29.4% · top 40 50.9%
+//
+// The most expensive single file is 10.66s — 3.5% of the term. Half the term
+// takes FORTY files. ⇒ There is no hotspot to remove, and sharding cannot help
+// on this box: it divides files, a floor divides with them, and the wall then
+// falls only as far as the cores allow — which here is the binding constraint
+// (4 cores, `--maxWorkers=2`, beside other agents' unlocked work).
+//
+// WHO PAYS IT, by class — "spawner" spawns the real CLI as a child process,
+// "kernel" boots `bootSchemaStack` / `ObjectQL` / a real driver in-process:
+//
+//   class                        files  tests   import            tests
+//   spawns the real CLI             35    306     4.41s ( 1.5%)  1279.14s (73.4%)
+//   boots a real kernel in-proc     28    327    58.98s (19.6%)    59.05s ( 3.4%)
+//   neither                        157   1896   237.29s (78.9%)   403.49s (23.2%)
+//
+// ⭐ THAT TABLE REFUSES TWO OF THE THREE ROUTES THE CARD LISTED, on numbers:
+//
+//   - "move the kernel-booting cases to a narrower double" — those 28 files
+//     hold 3.4% of the test term. Convert every one of them and the wall moves
+//     by about half a minute. The route is not wrong, it is not the lever.
+//   - "shard it" — the floor above.
+//
+// The third, a slow-suite split, is not refused. It is a ROUTING decision and
+// it is priced at the end of this section.
+//
+// ⛔ ONE HYPOTHESIS THIS RUN ALREADY KILLED, so the next reader does not spend
+// a hold on it. The import term is not transform and not bundle size; it is
+// the per-file BOUNDARY — each test file re-executes its module graph in its
+// own registry, and that cost barely notices how the module arrived. The
+// control was already inside the run, because this config externalises exactly
+// one package and inlines every other, so both paths are present at once:
+//
+//   packages/types/dist/index.mjs    EXTERNAL     33 KB   188.7 ms/file (91 files)
+//   packages/spec/dist/index.mjs     inlined    2090 KB   165.2 ms/file (139 files)
+//
+// The externalised 33 KB module costs MORE per file than the inlined 2 MB one.
+// ⚠️ It is not a paired A/B — two different bundles, not one bundle measured
+// both ways — so it BOUNDS the idea rather than settling it. What it is enough
+// for is refusing "externalise more workspace `dist/`" as a speed fix for this
+// term. Widening `server.deps.external` still has its #11775 resolution
+// warrant; it does not have a speed warrant.
+//
+// Largest single module contributor: `packages/metadata-protocol/dist` at
+// 751 ms/file over 52 files (39.06s), then the `packages/spec/dist/*` entries
+// together at roughly 104s, each spread over 90-139 files.
+//
+// WHERE THE `tests` TERM IS: concentrated, and in exactly the files the card
+// forbids touching for being slow. The 35 spawner files are 73.4% of it while
+// carrying 306 of 2529 cases; top 10 files 42.0%, top 20 65.3%. The cost is a
+// product, not a mystery — about 13 spawns in a heavy file times the per-spawn
+// floor already measured above (5.45-6.07s for `bin/run-dev.js`, 2.46-2.66s
+// for `bin/run.js`) is the 84-96s those files take. And there is no idle time
+// to reclaim: the harness waits on a PATTERN, never on a fixed sleep
+// (`test/helpers/serve-process.ts`).
+//
+// ⭐ THE ONE LEVER THIS ATTRIBUTION DOES SURFACE — per-case work, never a
+// sweep. All ten of the heaviest spawner files spawn the SOURCE entry
+// (`bin/run-dev.js`, through tsx), whose floor is 2.2x the built entry's;
+// #11707 moved three files the other way and measured 2.06x. ⛔ The two
+// entries are not interchangeable: `bin/run-dev.js` pins `NODE_ENV=development`
+// and reads `src/`, and a `dist/` merely BEHIND its source turns a green run
+// into a verdict about build state (which is why the four files already on
+// `bin/run.js` each state that prerequisite in their own words). So this names
+// the lever and stops; taking it is one argument per file.
+//
+// THE TRADE, PRICED. This is the choice #13504 says is being made by the
+// suite's runtime rather than by a person. Estimated wall uses this run's own
+// measured effective parallelism (2043.29s of per-file work over a 1041s wall
+// = 1.96):
+//
+//   lane                        files  tests   est. wall   share of wall
+//   the whole suite               220   2529      1041s        100%
+//   minus every *.e2e.test.ts     177   2195       260s         25%
+//   only the *.e2e.test.ts         43    334       781s         75%
+//
+// 13% of the cases hold 75% of the wall. ⛔ This file does not take that trade:
+// `pnpm test` here still runs everything, and which lane a card's Definition of
+// done owes is a rule that lives in AGENTS.md, which no agent seat may land.
+// What this section removes is the option of not knowing the price.
 //
 // ## THE `test` BLOCK THAT NOW EXISTS, AND WHY IT IS NOT THE ONE REFUSED ABOVE
 //
