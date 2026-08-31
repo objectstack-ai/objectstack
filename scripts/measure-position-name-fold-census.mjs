@@ -381,7 +381,7 @@ function census() {
   const consts = scanStringConstants();
   const { positions, permissionSets } = scanDeclarations(consts);
   const bindings = scanJunctionBindings(consts, permissionSets);
-  const bound = new Set(bindings.map((b) => `${b.position} ${b.set}`));
+  const bound = new Set(bindings.map((b) => `${b.position}::${b.set}`));
 
   const nameFolds = [];
   const junctionOnSameName = [];
@@ -394,7 +394,7 @@ function census() {
       permissionSets: setDecls.map((d) => ({ scope: d.scope, kind: d.kind, file: d.file, line: d.line })),
       collision: posDecls.some((p) => setDecls.some((s) => s.scope === p.scope)) ? 'intra_scope' : 'cross_scope',
     };
-    if (bound.has(`${name} ${name}`)) junctionOnSameName.push(record);
+    if (bound.has(`${name}::${name}`)) junctionOnSameName.push(record);
     else nameFolds.push(record);
   }
 
@@ -492,7 +492,7 @@ function auditImplicitGrants(input) {
     }
 
     const isActive = (r) => r?.active !== false && r?.is_active !== false;
-    const boundPairs = new Set(junction.map((r) => `${r?.position_id} ${r?.permission_set_id ?? r?.permissionSetId}`));
+    const boundPairs = new Set(junction.map((r) => `${r?.position_id}::${r?.permission_set_id ?? r?.permissionSetId}`));
     const holders = assignments
       ? assignments.reduce((m, a) => m.set(a?.position_id, (m.get(a?.position_id) ?? 0) + 1), new Map())
       : null;
@@ -502,7 +502,7 @@ function auditImplicitGrants(input) {
       if (!isActive(p)) continue;
       for (const s of sets) {
         if (s?.name !== p?.name || !isActive(s)) continue;
-        if (boundPairs.has(`${p.id} ${s.id}`)) continue;
+        if (boundPairs.has(`${p.id}::${s.id}`)) continue;
         implicitGrants.push({
           name: p.name,
           positionId: p.id,
@@ -556,7 +556,20 @@ const CONTROLS = {
       + ' binding. It must also never appear as a name-fold -- and not merely because the two'
       + ' names differ: the pair must be present in the junction output.',
   },
-  /** Ruling anchor B: relies on the NAME -- must be DETECTED. */
+  /**
+   * Ruling anchor B: relies on the NAME -- must be DETECTED.
+   *
+   * ⚠️ TO WHOEVER LANDS 要点 2. This control pins TODAY's state: `sales_manager`
+   * is a name-fold *because nothing binds it yet*. The moment you materialise
+   * its junction row, the pair moves from `nameFolds` to `junctionOnSameName`
+   * and this control goes RED -- correctly. That is the ledger noticing the
+   * world changed, not a broken instrument. Measured both directions before
+   * this shipped: deleting the artifact's set half makes the control fail and
+   * the census refuse to print; adding `['sales_rep','sales_rep']` to an app
+   * binder moves `sales_rep` out of `nameFolds` (2 -> 1) and into
+   * `junctionOnSameName`. Re-point this anchor at a pair still on the fold, or
+   * retire it with the fold itself in 要点 3.
+   */
   nameFoldAnchor: {
     name: 'sales_manager',
     why: 'The #13419 observation: a principal holding the `sales_manager` POSITION resolves the'
