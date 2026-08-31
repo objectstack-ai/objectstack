@@ -73,9 +73,14 @@ function uid(prefix: string): string {
 
 /**
  * DbJobAdapter — IJobService that persists job registry and execution
- * history to ObjectQL while delegating timer mechanics to
- * `IntervalJobAdapter`. Cron is delegated to `CronJobAdapter` callers
- * supplied via {@link withCron}.
+ * history to ObjectQL while delegating timer mechanics downwards.
+ *
+ * Every SCHEDULED fire goes to the `cron` adapter callers supply — both
+ * `cron` and `interval` schedules — because that adapter is the one that
+ * leader-elects each fire against the cluster lock (#13686); `inner`
+ * (`IntervalJobAdapter`) keeps the registration for `trigger()` / `replay()`
+ * and owns the timer only for the schedule types nothing else can run. See
+ * {@link DbJobAdapter.schedule} for the routing and its no-cron fallbacks.
  *
  * Persisted side effects:
  *   - `schedule(name, …)` upserts a `sys_job` row (active=true)
@@ -114,6 +119,37 @@ export class DbJobAdapter implements IJobService {
 
   // ── IJobService ──────────────────────────────────────────────────
 
+  /**
+   * Register `name`, and decide WHICH adapter owns its scheduled fire — which
+   * is the same thing as deciding whether that fire is leader-elected (#13686).
+   *
+   * `CronJobAdapter` is the only adapter here that holds a cluster lock, and it
+   * takes that lock in `runScheduled()` — the single path BOTH its cron limb and
+   * its interval limb fire through. `IntervalJobAdapter` has no lock at all. So on
+   * a multi-replica deployment the routing below *is* the leader election: every
+   * schedule type this adapter hands to `inner` runs on every replica at once.
+   * `interval` used to be one of them, which made #2219's declared "leader-elect
+   * scheduled cron/interval jobs across the cluster" true of only its cron half —
+   * measured in the field as one tick executing N times, its duplicate writes
+   * visible wherever per-handler business de-duplication did not happen to cover
+   * them (three recipients, six notification rows, 54 ms apart).
+   *
+   * Both delegated types are ALSO registered in `inner` — via
+   * {@link IntervalJobAdapter.register}, which stores without arming a timer, so
+   * one process never ends up holding an elected timer and an unelected one for
+   * the same job. That registration is what keeps `trigger()`, `replay()`,
+   * `getExecutions()` and `listJobs()` reading from one place regardless of who
+   * owns the clock, and it is deliberately NOT leader-elected: a manual trigger is
+   * an operator asking THIS node to run the job now.
+   *
+   * **Without a `cron` adapter** (`enableCron: false`, or its construction threw)
+   * the two types part company, because their fallbacks are not the same choice: a
+   * `cron` schedule cannot run here at all, so it is warned about and left to
+   * manual triggering, whereas an `interval` schedule still fires on `inner`'s own
+   * timer exactly as it did before this routing existed. Unelected, so it is warned
+   * about too — but silently dropping a job an assembly CAN run is not an
+   * improvement on running it more often than intended.
+   */
   async schedule(name: string, schedule: JobSchedule, handler: JobHandler, options?: JobScheduleOptions): Promise<void> {
     const wrapped = this.wrap(name, handler, 'schedule', options);
     // The wrapper OWNS `retryPolicy`/`timeout` from here down — see withoutPolicy.
@@ -125,8 +161,17 @@ export class DbJobAdapter implements IJobService {
         `DbJobAdapter: cron schedule registered for "${name}" without CronJobAdapter — job will only run via manual trigger`,
       );
       // Still record in inner so trigger() works
-      await this.inner.schedule(name, schedule, wrapped, downstream);
+      await this.inner.register(name, schedule, wrapped, downstream);
+    } else if (schedule.type === 'interval' && this.cron) {
+      // The leader-elected path — same one cron takes, for the same reason.
+      await this.cron.schedule(name, schedule, wrapped, downstream);
+      await this.inner.register(name, schedule, wrapped, downstream);
     } else {
+      if (schedule.type === 'interval') this.logger?.warn?.(
+        `DbJobAdapter: interval schedule registered for "${name}" without CronJobAdapter — it will run, ` +
+          'but with NO leader election, so on a multi-replica deployment every replica runs it on every ' +
+          'tick. Enable the cron adapter (JobServicePlugin enableCron) to have one replica win each fire.',
+      );
       await this.inner.schedule(name, schedule, wrapped, downstream);
     }
 

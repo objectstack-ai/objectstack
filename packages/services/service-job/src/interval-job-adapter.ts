@@ -62,10 +62,7 @@ export class IntervalJobAdapter implements IJobService {
   }
 
   async schedule(name: string, schedule: JobSchedule, handler: JobHandler, options?: JobScheduleOptions): Promise<void> {
-    // Cancel any existing job with the same name
-    await this.cancel(name);
-
-    const record: JobRecord = { name, schedule, handler, options, executions: [] };
+    const record = await this.store(name, schedule, handler, options);
 
     if (schedule.type === 'interval' && schedule.intervalMs) {
       record.timerId = setInterval(async () => {
@@ -89,8 +86,50 @@ export class IntervalJobAdapter implements IJobService {
         'this adapter has no cron engine. Use the db/cron adapter, or an interval schedule.',
       );
     }
+  }
 
+  /**
+   * Register a job WITHOUT arming a timer — the registry half of
+   * {@link IntervalJobAdapter.schedule}, for an owner that runs the SCHEDULED
+   * fire somewhere else.
+   *
+   * `DbJobAdapter` keeps every registration here so `trigger()`, `replay()`,
+   * `getExecutions()` and `listJobs()` have one place to look, while the
+   * scheduled fire is owned by whichever adapter can leader-elect it. Calling
+   * `schedule()` for that would arm a SECOND, unelected timer beside the
+   * elected one and run the job twice per tick inside ONE process — strictly
+   * worse than the across-replicas duplication the delegation exists to fix
+   * (#13686).
+   *
+   * So the "store it, do not run it" half says so out loud, instead of being
+   * inferred from a schedule shape this adapter happens not to arm: that
+   * inference is what made `cron` safe to hand down here, and it silently
+   * stops holding the moment the delegated type is one this adapter CAN run.
+   */
+  async register(
+    name: string,
+    schedule: JobSchedule,
+    handler: JobHandler,
+    options?: JobScheduleOptions,
+  ): Promise<void> {
+    await this.store(name, schedule, handler, options);
+  }
+
+  /**
+   * Replace any registration under `name` and return the fresh record — with
+   * no timer on it. Arming, when it happens at all, is `schedule()`'s half.
+   */
+  private async store(
+    name: string,
+    schedule: JobSchedule,
+    handler: JobHandler,
+    options?: JobScheduleOptions,
+  ): Promise<JobRecord> {
+    // Cancel any existing job with the same name
+    await this.cancel(name);
+    const record: JobRecord = { name, schedule, handler, options, executions: [] };
     this.jobs.set(name, record);
+    return record;
   }
 
   /**
