@@ -70,6 +70,7 @@
     "check:pm-label-desc-cap": "node scripts/pm/check-label-desc-cap.mjs --self-test && node scripts/pm/check-label-desc-cap.mjs",
     "check:pm-dispatch-gates": "node scripts/pm/check-dispatch-gates.mjs",
     "check:watch-hint-literal": "node scripts/check-watch-hint-literal.mjs --self-test && node scripts/check-watch-hint-literal.mjs",
+    "check:declared-population-live": "node scripts/check-declared-population-live.mjs --self-test && node scripts/check-declared-population-live.mjs",
     "check:pm-half-states": "node scripts/pm/check-half-states.mjs --self-test",
     "check:pm-clause2-carriers": "node scripts/pm/check-clause2-carriers.mjs --self-test",
     "check:pm-governed-merges": "node scripts/pm/check-governed-merges.mjs --self-test",

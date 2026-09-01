@@ -315,17 +315,20 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
           rule: HOOK_API_UPDATE_READONLY_WHEN_FIELD,
           where,
           path,
-          // The conditional strip is #3042; that it also removes a
-          // beforeUpdate-derived value is #9107. Both ids stay in this comment.
+          // The conditional strip is #3042. #9107 REMOVED its one over-reach:
+          // the strip now judges the CALLER's entry snapshot, so a value a
+          // beforeUpdate hook derives is no longer deleted. Both ids stay here.
           message:
             `body writes field '${w.field}' through ${call}, and object '${objectName}' declares it ` +
             `readonlyWhen. On records whose predicate is TRUE that UPDATE strips the field, so this ` +
             `write may silently not land depending on the record's state.`,
           hint:
-            `readonlyWhen strips even a beforeUpdate-derived value, so an own-hook stamp is NOT a ` +
-            `workaround here - and neither is ctx.api.sudo(), which is not marshalled into the sandbox ` +
-            `(calling it from a body is a TypeError at run time). Confirm this call only targets records ` +
-            `whose readonlyWhen predicate is FALSE, or drop '${w.field}' from this payload.`,
+            `Either confirm this call only targets records whose readonlyWhen predicate is FALSE, or ` +
+            `derive '${w.field}' in a beforeUpdate hook on '${objectName}' - a hook-derived value is not ` +
+            `caller-supplied and does land, even on a locked record. Elevation is not a workaround here: ` +
+            `ctx.api.sudo() is not marshalled into the sandbox (calling it from a body is a TypeError at ` +
+            `run time), and a system context does not waive the conditional lock in any case. Otherwise ` +
+            `drop '${w.field}' from this payload. This warning never blocks a build.`,
         });
       }
     }

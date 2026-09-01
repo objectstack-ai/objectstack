@@ -23,11 +23,48 @@
  *
  * What each mode is worth is stated explicitly below, because the honest answer
  * differs per mode and a vacuous pass must not read as coverage.
+ *
+ * ## Why this suite lives in `packages/qa/dogfood` and not in the driver (#13513)
+ *
+ * It used to be `packages/drivers/driver-turso/src/date-bucket-parity.test.ts`,
+ * and the `@objectstack/verify` devDependency it needed was the ONE edge that
+ * made this workspace's manifest graph cyclic:
+ *
+ *     runtime --peerDependencies(optional)--> driver-turso
+ *     driver-turso --devDependencies--------> verify
+ *     verify --dependencies-----------------> runtime
+ *
+ * pnpm walks all four declaration classes when it computes a `PKG^...` /
+ * `PKG...` closure, so that cycle left `pnpm --filter '<pkg>^...' build` with no
+ * topological order to build in. pnpm does not refuse a cyclic selection — it
+ * schedules the members CONCURRENTLY, so `verify`'s DTS leg reads a `dist` that
+ * a sibling is still emitting, and the run dies with `TS2307`/`TS7016` naming a
+ * module the author never touched. Seven seats paid for that misattribution on
+ * unmodified trees before it was traced. Measured on 78 workspace manifests,
+ * this was the ONLY single edge whose removal makes the whole graph acyclic.
+ *
+ * Nothing about this suite wanted to live in the driver: the repo's convention
+ * for `@objectstack/verify`-based cross-package conformance is already this
+ * package — `date-bucket-parity-conformance.test.ts` next door runs the very
+ * same `checkDateBucketParity` over `driver-sql` and `driver-sqlite-wasm`, both
+ * of which are `@objectstack/dogfood` devDependencies for exactly this reason.
+ * TursoDriver was the outlier, and it is the outlier that closed the loop.
+ *
+ * ⭐ The move is semantics-preserving on the one axis that could have changed
+ * silently. In its old home this suite imported `./turso-driver.js` — the
+ * driver's SOURCE — so its verdict was about the checkout. A bare
+ * `@objectstack/driver-turso` specifier would instead resolve through the
+ * package's `exports` map to the BUILT `dist`, turning a source pin into a
+ * verdict about the last `pnpm build`. Two declarations keep it a source pin,
+ * and each is enforced by its own gate: an anchored `resolve.alias` entry in
+ * this package's `vitest.config.ts` (`check:test-source-alias`) and a `paths`
+ * rule in its `tsconfig.json` (`check:type-source-resolution`). Both carry the
+ * reasoning at the site.
  */
 
 import { describe, it, expect } from 'vitest';
 import { checkDateBucketParity } from '@objectstack/verify';
-import { TursoDriver } from './turso-driver.js';
+import { TursoDriver } from '@objectstack/driver-turso';
 
 describe('TursoDriver date-bucket parity (framework#3773)', () => {
   describe('local mode — the real check', () => {

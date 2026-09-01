@@ -16,7 +16,29 @@
     // package-internal on purpose (the guard's data, not public API), so
     // there is no entry point to import them from. Every other ledger guard
     // in the repo compiles them as relative sources for the same reason.
-    "rootDir": "../../.."
+    "rootDir": "../../..",
+    // [#13513] `test/date-bucket-parity-turso.test.ts` imports `TursoDriver` as
+    // a VALUE and drives it. Without this rule tsc resolves the specifier
+    // through the package's `exports` map — `dist/index.d.ts`, A BUILD ARTIFACT
+    // — so this suite's type verdict would be about the last `pnpm build`
+    // rather than about the driver source in the checkout, which is exactly
+    // what `check:type-source-resolution` refuses.
+    //
+    // The suite used to live inside `packages/drivers/driver-turso` and resolve
+    // the class through a relative source import; this rule is what keeps that
+    // property across the move. The move itself is #13513's cycle cut — the
+    // driver's `@objectstack/verify` devDependency was the one edge that made
+    // this workspace's manifest graph cyclic — not a change of intent about
+    // what the suite measures.
+    //
+    // ONE bare-name rule, no star: this package's `exports` map carries only
+    // `"."`, and a `paths` target matching nothing on disk is worse than absent
+    // — tsc falls back to node resolution, i.e. to `dist`, silently. `rootDir`
+    // already spans the repo root, so pulling the driver's source into this
+    // program needs no widening.
+    "paths": {
+      "@objectstack/driver-turso": ["../../drivers/driver-turso/src/index.ts"]
+    }
   },
   "include": ["test/**/*"],
   "exclude": ["node_modules"]

@@ -223,6 +223,26 @@ export interface ScriptContext {
    */
   dispatch?: { mode: 'record' | 'per-row'; index: number };
   /**
+   * The engine's referential-cleanup marker, marshalled for the HOOK face
+   * (#13644) — `true` exactly when this write is the engine's own reference
+   * cleanup (the `set_null` cascade UPDATE clearing, or on a `multiple: true`
+   * lookup member-removing, a lookup that references a record being deleted).
+   * Mirrors the declared `HookContextSchema.referentialFieldClear`
+   * (`@objectstack/spec/data`), which objectql's `update()` assembly projects
+   * from the operation-private `__referentialFieldClear` on the execution
+   * envelope.
+   *
+   * Marshalled EXPLICITLY, like `dispatch`, because this is the half the
+   * operation-private spelling could never offer: `buildSandboxApi` may hand a
+   * body a `{ object }` shim with no `executionContext` at all, so a predicate
+   * reading `ctx.api.executionContext.__referentialFieldClear` could be green
+   * in a kernel rig and silently false in production — the #11552
+   * declared≠observable family, and the whole point of declaring the key.
+   * Absent (never `false`) on every other dispatch and on the action face;
+   * read it as `ctx.referentialFieldClear === true`.
+   */
+  referentialFieldClear?: boolean;
+  /**
    * The caller's options bag, PROJECTED to the two members ADR-0058's D2
    * declares visible to the `before*` phase — `multi` and `where` — for the
    * HOOK face (#11552). `installCtx` grafts it onto the VM's `ctx.input` as a

@@ -5,32 +5,69 @@ import { z } from 'zod';
 /**
  * System Identifier Schema
  * 
- * Universal naming convention for all machine identifiers (API Names) in ObjectStack.
- * Enforces lowercase with underscores or dots to ensure:
- * - Cross-platform compatibility (case-insensitive filesystems)
- * - URL-friendliness (no encoding needed)
- * - Database consistency (no collation issues)
- * - Security (no case-sensitivity bugs in permission checks)
- * 
- * **Applies to all metadata that acts as a machine identifier:**
- * - Object names (tables/collections)
- * - Field names
- * - Role names
- * - Permission set names
- * - Action/trigger names
- * - Event keys
- * - App IDs
- * - Menu/page IDs
- * - Select option values
- * - Workflow names
- * - Webhook names
- * 
+ * A lowercase machine-identifier grammar: starts with a letter, then letters,
+ * digits, underscores or dots. It is one of several identifier grammars in
+ * this repo, not the universal one — see the binding list below before
+ * reaching for it. Where it *is* bound, the shape buys the usual four
+ * properties: cross-platform safety (case-insensitive filesystems),
+ * URL-friendliness (no encoding needed), database consistency (no collation
+ * issues), and no case-sensitivity bugs in permission checks.
+ *
+ * **Bound surfaces — this is the whole list.**
+ * An earlier revision of this docblock claimed eleven consuming surfaces. The
+ * per-surface census on #12245 — its `os-dev-report` comment is the
+ * measurement of record, taken on `origin/main` @ `e2debee6` — measured
+ * **exactly one** of those eleven as validated by this schema; the other ten
+ * are validated by something else (next block). What composes this schema is:
+ *
+ * | Bound key | Declared at | Authored population |
+ * |------|---------|---------|
+ * | Select option `value` | `SelectOptionSchema.value` (`data/field.zod.ts`) | 1218 authored values censused |
+ * | Lifecycle rule `id` | `LifecyclePolicyRuleSchema.id` (`system/object-storage.zod.ts`) | none — nothing authors it |
+ * | Bucket `name` | `BucketConfigSchema.name` (`system/object-storage.zod.ts`) | none |
+ * | Storage config `name` | `ObjectStorageConfigSchema.name` (`system/object-storage.zod.ts`) | none |
+ *
+ * Select option values are the only surface with a real authored population.
+ * The option shape is reused by the form-view option list
+ * (`FormSelectOptionSchema`, `ui/view.zod.ts`, derived from
+ * `SelectOptionSchema.shape`), so both option lists carry this grammar. The
+ * three object-storage keys are bound in declaration only: the census found no
+ * corpus to measure for them and reports them as "nothing to census", never as
+ * measured clean.
+ *
+ * **NOT bound here — where those names are actually validated.** A generator
+ * that consults this docblock to learn what validates a name needs the real
+ * answer. None of these is a looser or stricter spelling of this grammar;
+ * they are different accept sets, so substituting one for another changes
+ * what is refused:
+ *
+ * - Object names, field names, workflow names — inline
+ *   `/^[a-z_][a-z0-9_]*$/` at `data/object.zod.ts`, `data/field.zod.ts`,
+ *   `automation/flow.zod.ts`. Dots forbidden; a leading `_` allowed.
+ * - Role (position) names, permission set names, action/trigger names, app
+ *   IDs, menu/page IDs, webhook names — {@link SnakeCaseIdentifierSchema}.
+ *   Dots forbidden.
+ * - Metadata item names (the `sys_metadata` / `/api/v1/meta` addressing
+ *   identity) — {@link MetadataItemNameSchema}. Dots *allowed*, but as
+ *   qualifiers between anchored segments, so it refuses the empty-,
+ *   digit-initial and underscore-initial segments this schema accepts
+ *   (`a.`, `a..b`, `a.1b`, `a._b`). Enforced at the metadata publish door.
+ * - Event keys — no author-facing grammar at all. The event vocabulary is the
+ *   closed literal enums `DataEventType` / `BulkDataEventType`
+ *   (`api/events.zod.ts`); the sibling `EventNameSchema` that the census found
+ *   holding this claim was retired unbound under ADR-0049 (#13613 — tombstone
+ *   at the foot of this file). The four branded aliases that wrapped *this*
+ *   schema went the same way, also unbound (#13612).
+ *
  * **Naming Convention Summary:**
  * | Type | Pattern | Example |
  * |------|---------|---------|
  * | Machine ID | snake_case | `crm_account`, `btn_submit`, `role_admin` |
- * | Event keys | dot.notation | `user.login`, `order.created` |
  * | Labels | Any case | `Client Account`, `Submit Form` |
+ *
+ * The dot this grammar accepts is unexercised on the one live surface: 0 of
+ * the 1218 authored select option values contain one (#12245). Recorded as the
+ * measurement it is — dots are accepted, not a convention to write in.
  *
  * **Length ceiling — storage-owned, deliberately not declared here (#12144).**
  * The identifier schemas in this file declare a floor and a grammar but no
@@ -50,9 +87,11 @@ import { z } from 'zod';
  * - 'account'
  * - 'crm_account'
  * - 'user_profile'
- * - 'order.created' (for events)
  * - 'api_v2_endpoint'
- * 
+ * - 'order.created' (the grammar accepts a dot; no bound surface authors one
+ *   today — see the note above, and never read this row as the event-name
+ *   contract, which is a closed enum elsewhere)
+ *
  * @example Invalid identifiers (will be rejected)
  * - 'Account' (uppercase)
  * - 'CrmAccount' (camelCase)
