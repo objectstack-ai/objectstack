@@ -113,19 +113,24 @@ function makeFakeEngine() {
   return {
     rows,
     historyRows,
-    async find(table: string, opts: { where: Record<string, unknown> }) {
-      if (table === 'sys_metadata_history')
-        return historyRows.filter((h) => matchesHistory(h, opts.where));
-      return Array.from(rows.values()).filter((r) => {
-        if (opts.where.type && r.type !== opts.where.type) return false;
-        if (
-          opts.where.organization_id !== undefined &&
-          r.organization_id !== opts.where.organization_id
-        )
-          return false;
-        if (opts.where.state && r.state !== opts.where.state) return false;
-        return true;
-      });
+    async find(table: string, opts: { where: Record<string, unknown>; limit?: number }) {
+      const matched =
+        table === 'sys_metadata_history'
+          ? historyRows.filter((h) => matchesHistory(h, opts.where))
+          : Array.from(rows.values()).filter((r) => {
+              if (opts.where.type && r.type !== opts.where.type) return false;
+              if (
+                opts.where.organization_id !== undefined &&
+                r.organization_id !== opts.where.organization_id
+              )
+                return false;
+              if (opts.where.state && r.state !== opts.where.state) return false;
+              return true;
+            });
+      // Hold the caller's bound, AFTER the filter and by PRESENCE — a double
+      // that silently ignores `limit` answers more rows than the real engine
+      // would, which is the shape `check:objectql-double-limit` exists to stop.
+      return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
     },
     async findOne(table: string, opts: { where: Record<string, unknown> }) {
       assertEngineFindOnePredicate(table, opts);
