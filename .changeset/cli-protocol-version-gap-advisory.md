@@ -49,6 +49,11 @@ status moves: the advisory is print-only, `os validate` keeps it outside `--stri
 both faces, and `os doctor` never exited on warnings. The `--json` payload key stays
 `specVersionGap` with its value shape unchanged.
 
+`os doctor`'s row is renamed with the axis, from `Platform spec` to `Platform protocol`, and the
+sentence it prints when a config cannot be loaded — the one enumerating which config-aware checks
+were skipped — names the row by its new name too, so an operator reading either is pointed at a
+row that exists.
+
 What does change is that the advisory now **fires**. An app whose `engines.protocol` is
 behind the installed platform will start seeing the migration-guide pointer from all three
 commands, and `os doctor` will summarise that run as "functional but has some warnings"

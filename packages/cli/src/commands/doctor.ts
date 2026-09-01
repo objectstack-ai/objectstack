@@ -1434,8 +1434,8 @@ export function configLoadFailureCheck(err: unknown): HealthCheckResult {
       '`os serve` loads this same file the same way — bundle-require, under the `.env*`\n'
       + '      cascade named above (#5397) — and prints this error in full, so a config that\n'
       + '      lands here is one the server cannot boot either.\n'
-      + '      The config-aware checks were SKIPPED, not passed: spec version, circular\n'
-      + '      dependencies, unused objects, orphan views, dashboard integrity.\n'
+      + '      The config-aware checks were SKIPPED, not passed: platform protocol,\n'
+      + '      circular dependencies, unused objects, orphan views, dashboard integrity.\n'
       + `      cause: ${indentUnderGutter(cause)}`,
   };
 }
