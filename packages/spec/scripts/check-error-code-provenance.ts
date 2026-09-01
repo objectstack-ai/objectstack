@@ -374,7 +374,20 @@ function selfTest(): number {
   const check = (name: string, ok: boolean): void => {
     if (!ok) failures.push(name);
   };
-  const registered = new Set(['REGISTERED_ONE', 'REGISTERED_TWO']);
+  // ⚠️ The fixture code spellings are REAL registered codes on purpose, driven
+  // against a SYNTHETIC ledger (so every verdict below is still fixture-only).
+  // This file is itself inside `check:dispatcher-error-vocabulary`'s scan
+  // population (`packages/**` non-test source), and a made-up SCREAMING_SNAKE
+  // literal in a stamp-shaped position here would be reported by that gate as
+  // an unclassified unregistered stamp site — measured, not hypothetical: the
+  // first draft of this self-test reddened it with five fixture sites. A
+  // registered spelling is out of that gate's population by construction, and
+  // out of THIS gate's real run too (the real scan excludes non-`src/` trees,
+  // so this script never scans itself).
+  const CODE_A = 'UNIQUE_VIOLATION'; // real registered spelling, synthetic role: listed by the fixture owner
+  const CODE_B = 'FLOW_FAILED'; //     real registered spelling, synthetic role: the OTHER listed code
+  const CODE_OUT = 'ITEM_LOCKED'; //   real registered spelling, synthetic role: outside the injected set
+  const registered = new Set([CODE_A, CODE_B]);
   const site = (pkg: string, code: string): StampSite => ({
     file: 'packages/x/src/a.ts',
     line: 1,
@@ -382,58 +395,59 @@ function selfTest(): number {
     code,
     pattern: 'objlit',
   });
-  const ledger = { '@objectstack/owner': ['REGISTERED_ONE', 'REGISTERED_TWO'] } as const;
+  const ledger = { '@objectstack/owner': [CODE_A, CODE_B] } as const;
 
   // Each published pattern catches its spelling (red leg, per pattern).
   check(
     'objlit catches a stamp',
-    scanSourceText("return { code: 'REGISTERED_ONE' };", registered).some((h) => h.pattern === 'objlit'),
+    scanSourceText(`return { code: '${CODE_A}' };`, registered).some((h) => h.pattern === 'objlit'),
   );
   check(
     'assign catches a stamp',
-    scanSourceText("err.code = 'REGISTERED_ONE';", registered).some((h) => h.pattern === 'assign'),
+    scanSourceText(`err.code = '${CODE_A}';`, registered).some((h) => h.pattern === 'assign'),
   );
   check(
     'constdef catches a *_CODE constant',
-    scanSourceText("export const MY_CODE = 'REGISTERED_ONE';", registered).some((h) => h.pattern === 'constdef'),
+    scanSourceText(`export const MY_CODE = '${CODE_A}';`, registered).some((h) => h.pattern === 'constdef'),
   );
   check(
     'constdef admits a type annotation',
-    scanSourceText("const MY_CODE: string = 'REGISTERED_ONE';", registered).some((h) => h.pattern === 'constdef'),
+    scanSourceText(`const MY_CODE: string = '${CODE_A}';`, registered).some((h) => h.pattern === 'constdef'),
   );
-  // Population boundary: an unregistered code is the sibling gate's subject.
+  // Population boundary: a code outside the registered set is the sibling
+  // gate's subject, never a site here.
   check(
-    'unregistered code is out of population',
-    scanSourceText("return { code: 'NOT_IN_LEDGER' };", registered).length === 0,
+    'a code outside the registered set is out of population',
+    scanSourceText(`return { code: '${CODE_OUT}' };`, registered).length === 0,
   );
   // Comment masking: a code quoted in prose is not a site.
   check(
     'a commented stamp is not a site',
-    scanSourceText("// answers { code: 'REGISTERED_ONE' } on refusal\nconst x = 1;", registered).length === 0,
+    scanSourceText(`// answers { code: '${CODE_A}' } on refusal\nconst x = 1;`, registered).length === 0,
   );
   // A synthetic unlisted stamper is caught THROUGH the real reconciliation.
   {
-    const { violations } = deriveFindings([site('@objectstack/rogue', 'REGISTERED_ONE')], ledger, []);
+    const { violations } = deriveFindings([site('@objectstack/rogue', CODE_A)], ledger, []);
     check('unlisted stamper is a violation', violations.length === 1);
   }
   // A listed stamper is green.
   {
-    const { violations, listed } = deriveFindings([site('@objectstack/owner', 'REGISTERED_ONE')], ledger, []);
+    const { violations, listed } = deriveFindings([site('@objectstack/owner', CODE_A)], ledger, []);
     check('listed stamper is green', violations.length === 0 && listed.length === 1);
   }
   // A waiver admits exactly its (package, code) pair — and only that pair.
   {
     const waiver: ProvenanceWaiver = {
       package: '@objectstack/rogue',
-      code: 'REGISTERED_ONE',
+      code: CODE_A,
       registeredUnder: '@objectstack/owner',
       reason: 'self-test fixture: recorded decision',
     };
-    const admitted = deriveFindings([site('@objectstack/rogue', 'REGISTERED_ONE')], ledger, [waiver]);
+    const admitted = deriveFindings([site('@objectstack/rogue', CODE_A)], ledger, [waiver]);
     check('waiver admits its pair', admitted.violations.length === 0 && admitted.waived.length === 1
       && admitted.waiverProblems.length === 0);
     const other = deriveFindings(
-      [site('@objectstack/rogue', 'REGISTERED_ONE'), site('@objectstack/rogue', 'REGISTERED_TWO')],
+      [site('@objectstack/rogue', CODE_A), site('@objectstack/rogue', CODE_B)],
       ledger,
       [waiver],
     );
@@ -443,21 +457,21 @@ function selfTest(): number {
   {
     const noSite = deriveFindings([], ledger, [{
       package: '@objectstack/rogue',
-      code: 'REGISTERED_ONE',
+      code: CODE_A,
       registeredUnder: '@objectstack/owner',
       reason: 'self-test fixture',
     }]);
     check('waiver with no site reddens', noSite.waiverProblems.some((p) => p.includes('NO stamp site')));
-    const wrongOwner = deriveFindings([site('@objectstack/rogue', 'REGISTERED_ONE')], ledger, [{
+    const wrongOwner = deriveFindings([site('@objectstack/rogue', CODE_A)], ledger, [{
       package: '@objectstack/rogue',
-      code: 'REGISTERED_ONE',
+      code: CODE_A,
       registeredUnder: '@objectstack/absent',
       reason: 'self-test fixture',
     }]);
     check('waiver naming a non-listing owner reddens', wrongOwner.waiverProblems.some((p) => p.includes('registeredUnder')));
-    const deadWeight = deriveFindings([site('@objectstack/owner', 'REGISTERED_ONE')], ledger, [{
+    const deadWeight = deriveFindings([site('@objectstack/owner', CODE_A)], ledger, [{
       package: '@objectstack/owner',
-      code: 'REGISTERED_ONE',
+      code: CODE_A,
       registeredUnder: '@objectstack/owner',
       reason: 'self-test fixture',
     }]);
