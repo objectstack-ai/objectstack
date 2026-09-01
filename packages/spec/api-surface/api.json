@@ -914,6 +914,8 @@
     "ScheduledExportSchema (const)",
     "SearchAllHit (type)",
     "SearchAllHitSchema (const)",
+    "SearchAllPageHit (type)",
+    "SearchAllPageHitSchema (const)",
     "SearchAllResponse (type)",
     "SearchAllResponseSchema (const)",
     "ServiceInfo (type)",

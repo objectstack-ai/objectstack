@@ -120,7 +120,9 @@ describe('searchAll sorts newest-first (#4674)', () => {
     function makeProtocol() {
         const find = makeFind({ contact: SEARCH_ROWS });
         const engine = {
-            registry: { getObject: (n: string) => (n === 'contact' ? CONTACT : undefined), getAllObjects: () => [CONTACT] },
+            // [#13216] `listItems: () => []` — the page sweep's registry read;
+            // no pages here, sort vocabulary is the only thing under test.
+            registry: { getObject: (n: string) => (n === 'contact' ? CONTACT : undefined), getAllObjects: () => [CONTACT], listItems: () => [] },
             find,
         };
         return { p: new ObjectStackProtocolImplementation(engine as any), find };
