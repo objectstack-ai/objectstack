@@ -1,0 +1,103 @@
+// The TEST-layer type-check program (#13676), adopting the mechanism #5286 set
+// for `packages/spec` and #5449 generalised. `tsconfig.json` above stays as it
+// is: it is the BUILD config, and its `**/*.test.ts` exclusion has a reason —
+// ci.yml gates that no test file reaches the published artifact. This sibling
+// puts the excluded layer back in front of tsc, and `package.json`'s
+// `typecheck` script NAMES it (via `check:test-typecheck --project`), because a
+// config no script invokes is exactly the phantom this whole change is about.
+//
+// BEFORE THIS FILE, NO tsc PROGRAM COMPILED A SINGLE TEST FILE HERE. Measured
+// at 2a181174a6 with the workspace closure built first: `tsc --listFiles`
+// against the build config puts 536 files in the program and **0** of the
+// package's 251 `*.test.ts` files among them, while 50 `src/**` non-test files
+// ARE there — so the zero is the `exclude` line, not a probe that sees nothing.
+// The directional control is `packages/drivers/driver-memory`, whose tsconfig
+// carries no test exclusion: the same probe puts **38 of its 38** test files in
+// the program. `pnpm --filter @objectstack/objectql typecheck` exiting 0 was a
+// true sentence carrying no information about any test file in this package.
+//
+// ⭐ WHY THIS PACKAGE, AND WHY NOW. `src/engine-filter-array-lowering.test.ts`
+// is the negative pin required by maintainer ruling #13357 execution point 3
+// (landed in #13673): it proves a refused filter shape CANNOT REACH the
+// reference matcher. A pin whose whole job is a security-relevant
+// unreachability guarantee was type-checked by nothing at all.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - module semantics ONLY, plus `lib`. The tests are written and executed as
+//     ESM by vitest (esbuild/vite), while `objectql` has no `"type": "module"`,
+//     so the build config's NodeNext compiles them as CJS. Measured cost of
+//     that mismatch here: 9 of 251 raw diagnostics — TS2550 x8 (all eight the
+//     same `Array.prototype.at` message, against a `lib` older than es2022) and
+//     TS1470 x1 (`import.meta` in a CJS program). Those 9 are about the CHECK,
+//     never about the code. Notably SMALL next to the sibling packages
+//     (`rest` paid 137, `spec` 108): this layer's relative imports already
+//     carry their `.js` extensions, so there is no TS2835 pile here and hence
+//     none of the TS7006 cascade an unresolved import drags behind it.
+//     Matching vitest is fidelity, not laxity. No `DOM` in `lib`, unlike
+//     `packages/client`: nothing in this layer touches a browser global.
+//   - `rootDir` widens to the PACKAGE, from the build config's `src`. Under
+//     `noEmit` that setting carries no output meaning; all it does is constrain
+//     which files may enter the program. Measured: inherited as `src` it
+//     reports a TS6059 for `src/dry-run-hash-compat.test.ts` importing
+//     `scripts/dry-run-hash-compat.ts` — the SAME diagnostic #10779 retired
+//     from the TEST_DEBT ledger as "measuring the tape measure", i.e. the
+//     generated re-measure project billing this package for its own `rootDir`.
+//     Re-introducing it here would re-import a defect this repo already fixed.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
+//     are inherited from the root config, and `types: ["node"]` restates
+//     `tsconfig.json`'s. Nothing here may loosen a type rule; if a test does
+//     not compile, that is the finding. ⛔ Not one `any` and not one
+//     `@ts-expect-error` was added to any test file to open this gate — that
+//     shape is what turns a real gate into a phantom one.
+//
+// `include` deliberately stops at `src`, matching the build config's root and
+// covering all 251 test files (239 in `src`, plus `src/integrity`,
+// `src/lifecycle`, `src/validation`). `scripts/` is the sibling
+// `tsconfig.scripts.json` (#10756) and stays a separate program: it carries no
+// ledger entries at all, so plain `tsc` is a stricter gate for it than this
+// file's shrink-only debt list.
+//
+// MEASURED at 2a181174a6, workspace closure built first (an error count taken
+// against an unbuilt closure is not a reading — unresolved-import cascades
+// inflate it): this program reports **242 errors across 44 files**, from a raw
+// 251 under the inherited NodeNext semantics. By code: TS2339 x115,
+// TS7006 x36, TS2345 x34, TS2749 x14, TS2322 x14, TS6133 x9, TS18048 x8,
+// TS2353 x4, plus 8 singletons (TS7053, TS6196, TS2532, TS2493, TS2459,
+// TS2416, TS2367, TS2352). `src/engine.test.ts` alone carries 102 of the 242;
+// the next five are `datasource-mapping` x17, `plugin.integration` x12,
+// `hook-condition-fail-loud` x12, `registry` x10, `protocol-package-lifecycle`
+// x8. Every one of the 242 is PRE-EXISTING: this change edits no test file, and
+// each would have been reported on `origin/main` had this program always
+// existed. They are ledgered per file in `test-typecheck-debt.json` beside this
+// config, EXACT and shrink-only — a file that gains an error is red, one that
+// loses one is red until re-recorded, one that reaches zero is red until its
+// entry is deleted, and a file NOT listed there may have no errors at all.
+//
+// ⚠️ THE NEGATIVE PIN CARRIES NO LEDGER ENTRY, and that is load-bearing:
+// `src/engine-filter-array-lowering.test.ts` reports ZERO errors under this
+// program, so any error it ever gains is red on arrival. ⚠️ Read that zero
+// correctly — it is NOT evidence the pin is well typed. The file holds 20 `:
+// any` annotations, and the two that matter are at its witness seam: the
+// recording driver is `const driver: any` and the recorded AST is `interface
+// SeenRead { ast: any }`, so `lastWhere()` — the expression the whole
+// unreachability proof reads — is typed by nothing, and a drifted
+// `IDataDriver` signature would not redden this file. Its own header rejects
+// "a bare `as any`" in favour of `as unknown as EngineQueryOptions`
+// (`asFilterArrayQuery`, used 14 times), yet 31 call sites use the bare form
+// anyway. Putting the file in a program is the precondition for fixing that,
+// not the fix; the repair is tracked separately (see the PR that added this
+// file) and ⛔ must not be smuggled in by loosening anything here.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

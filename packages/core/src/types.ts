@@ -108,7 +108,13 @@ export interface Plugin {
     version?: string;
 
     /**
-     * Plugin type (standard, ui, driver, server, app, theme, agent)
+     * Plugin type (standard, ui, driver, server, app, theme, agent, objectql)
+     *
+     * Authoritative set: `CORE_PLUGIN_TYPES` in `@objectstack/spec`
+     * (`kernel/plugin.zod.ts`), which `PluginSchema.type` enumerates as
+     * `z.enum(['standard', ...CORE_PLUGIN_TYPES])`. This field is typed
+     * `string`, so nothing type-checks an author against the list above —
+     * keep the two in step when the declared set changes.
      * @default 'standard'
      */
     type?: string;

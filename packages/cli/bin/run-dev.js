@@ -13,12 +13,115 @@
 // exactly as it did.
 import { flush, handle, run, settings } from '@oclif/core';
 
+/**
+ * How long stderr may make NO PROGRESS before this shim stops waiting for it.
+ *
+ * A wall-clock deadline is the wrong instrument: it cannot tell a reader that
+ * is merely SLOW from one that is ABSENT, and those two want opposite answers —
+ * the slow one must be waited for (it is the whole point of this file), the
+ * absent one must never be (nobody is reading, so the bytes are worthless).
+ * Progress separates them exactly: a live reader keeps draining however slowly,
+ * an absent one drains nothing, ever.
+ *
+ * ## Where the number comes from — re-derive it, do not bump it
+ *
+ *   • A live reader under real load never stalled longer than **61 ms**: two
+ *     samples of a vitest worker's event loop while this package's e2e suite
+ *     ran beside it (12 680 and 9 663 samples of a 10 ms timer; p999 = 24/25 ms,
+ *     max = 61/57 ms).
+ *   • The stall that actually loses these bytes has to span the CLI's WHOLE
+ *     RUN, not just an instant: the bulk (~138 KB of oclif warnings) is emitted
+ *     during `Config.load()`, the diagnostic ~3 s later, and the bytes are only
+ *     lost if the child exits while the reader is away. So the bound must
+ *     outlast a whole run. Measured child runtime: **1.0 s idle, 6.9 s on a
+ *     contended box** (same container, other agents building).
+ *
+ * 15 s is ~2.2x that worst measured runtime, so a stall long enough to cause
+ * the bug is still waited out, and ~245x the worst measured live-reader stall,
+ * so a merely slow reader is never cut off.
+ *
+ * ⚠️ Exceeding the bound degrades to the behaviour this file had BEFORE the
+ * drain existed — lossy, but prompt. It can never degrade to a hang, which is
+ * the property that matters: the failure this replaced was unbounded.
+ */
+const STDERR_DRAIN_STALL_MS = 15_000;
+
+/** How often progress is sampled — comfortably under the 61 ms above. */
+const STDERR_DRAIN_POLL_MS = 50;
+
+/**
+ * Write to stderr and WAIT for the bytes to reach it.
+ *
+ * ⚠️ `process.stderr.write(x)` followed by an exit is the #6531 defect, and
+ * this shim had it. When stderr is a **pipe** node buffers the write
+ * asynchronously and `process.exit` tears the process down with the buffer only
+ * partly drained; `src/utils/format.ts` carries the whole argument for stdout
+ * (`emitJson`). One thing makes it worse here: `settings.debug` is on, so
+ * oclif's `displayWarnings()` has already queued ~138 KB of `ModuleLoadError`
+ * blocks AHEAD of these lines. Measured on the #12964 repro with a reader that
+ * was not draining: the pipe delivered exactly one 64 KiB buffer and everything
+ * after it was lost — this diagnostic AND oclif's own `command … not found`,
+ * which `handle()` writes a moment later and which the same tear-down takes.
+ * That is why the merge queue saw it and a developer's terminal never does: a
+ * TTY is written synchronously, a captured pipe is not.
+ *
+ * The `write` callback fires only once this chunk **and everything queued ahead
+ * of it** has been handed to the pipe, so awaiting it drains that backlog too —
+ * which is what leaves an empty buffer for `handle()`'s own write. The fix
+ * belongs at the write rather than at the exit because there is no hook between
+ * `handle()`'s `console.error` and its `process.exit`.
+ *
+ * ⛔ Deliberately NOT `process.stderr._handle.setBlocking(true)`: `format.ts`
+ * records why — the same binary runs `os serve` / `os dev`, and a blocking
+ * write to a pipe with a slow reader stalls the event loop.
+ */
+function writeStderr(text) {
+  return new Promise((resolve) => {
+    let poll;
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearInterval(poll);
+      resolve();
+    };
+
+    // ⛔ The return value is deliberately NOT consulted. `write()` returns true
+    // when the internal buffer sits below the highWaterMark, which is NOT the
+    // same as the bytes having reached the pipe — and an earlier version of this
+    // shim read it as "already flushed" and returned early. Measured: it
+    // returned TRUE with writableLength = 7621, so the bound meant to cap the
+    // wait was never armed at all and a reader that never drained hung the
+    // process indefinitely (observed alive at 25 s, 30 s and 60 s). The
+    // callback is the only thing that means "flushed"; it also fires on EPIPE,
+    // which is what releases the closed-reader paths promptly.
+    process.stderr.write(text, finish);
+
+    let fewestPending = process.stderr.writableLength;
+    let lastProgressAt = Date.now();
+    poll = setInterval(() => {
+      const pending = process.stderr.writableLength;
+      if (pending < fewestPending) {
+        fewestPending = pending;
+        lastProgressAt = Date.now();
+        return;
+      }
+      if (Date.now() - lastProgressAt >= STDERR_DRAIN_STALL_MS) finish();
+    }, STDERR_DRAIN_POLL_MS);
+
+    // ⛔ NOT unref'd, on purpose. `finish()` always clears it, so it cannot
+    // outlive the wait — and an unref'd detector is exactly the silent no-op
+    // this function already shipped once: a bound that never runs is
+    // indistinguishable from one that never trips.
+  });
+}
+
 /** See `bin/run.js` — the same lazy import, against `src/` instead of `dist/`. */
 async function announceInvocationFailure(error) {
   try {
     const { invocationFailureLine } = await import('../src/utils/invocation.ts');
     const line = invocationFailureLine(error, process.argv.slice(2));
-    if (line) process.stderr.write(`${line}\n`);
+    if (line) await writeStderr(`${line}\n`);
   } catch {
     // Stay quiet rather than replacing oclif's report with an error about the
     // reporter itself.
@@ -53,9 +156,10 @@ async function announceUnbuiltWorkspace(error) {
       import('../../../scripts/cli-unbuilt-workspace-lead.mjs'),
       import('../src/utils/invocation.ts'),
     ]);
-    for (const line of unbuiltWorkspaceLines(error, moduleLoadFailures, INVOCATION_PREFIX) ?? []) {
-      process.stderr.write(`${line}\n`);
-    }
+    // One write, so the drain that matters happens once, immediately before
+    // `handle()` gets its turn at the same pipe.
+    const lines = unbuiltWorkspaceLines(error, moduleLoadFailures, INVOCATION_PREFIX) ?? [];
+    if (lines.length) await writeStderr(`${lines.join('\n')}\n`);
   } catch {
     // Stay quiet rather than replacing oclif's report with an error about the
     // reporter itself.

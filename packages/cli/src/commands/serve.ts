@@ -2406,7 +2406,11 @@ export default class Serve extends Command {
       // The remote driver self-registers on import; import it dynamically so it
       // works in BOTH config-boot and compiled-artifact mode. Open-core ships
       // only the in-memory driver — remote drivers (e.g. redis) come from the EE
-      // distribution; if absent we fall back to the in-memory cluster.
+      // distribution. An absent driver does NOT fall back to the in-memory
+      // cluster: `clusterConfig` still names it and `defineCluster()` raises
+      // its documented error (cluster.mdx §8.1). The only documented downgrade
+      // here is a multi-node GATE DENIAL, below. (#13330 — this sentence said
+      // the opposite for as long as the silent catch below agreed with it.)
       let clusterConfig: { driver: string; url?: string } | undefined;
       // The gate's verdict, held for the operator-facing telemetry emitted near
       // the end of boot (#12667). The gate is consulted exactly once per
@@ -2418,8 +2422,19 @@ export default class Serve extends Command {
       const __clusterDriver = process.env.OS_CLUSTER_DRIVER?.trim();
       if (__clusterDriver && __clusterDriver !== 'memory') {
         // Multi-node authorization gate (open mechanism): a distribution (e.g.
-        // an EE license) may deny multi-node. On denial, downgrade to
-        // single-node rather than fail — multi-node is an add-on, never brick.
+        // an EE license) may deny multi-node. On denial this file drops the
+        // remote driver and leaves `clusterConfig` unset, so the Runtime falls
+        // back to the in-process driver.
+        //
+        // ⛔ That is NOT the same as "the boot survives", and this comment used
+        // to say it was ("never brick"). Measured on #14116: when the operator
+        // ALSO declared a multi-node topology (`OS_CLUSTER_REPLICAS > 1` /
+        // `OS_EXPECT_MULTI_NODE=true`), the in-process fallback then trips the
+        // split-brain guard in `ClusterServicePlugin.init` and the boot is
+        // REFUSED. The refusal is correct — N replicas on per-process locks is
+        // exactly the silent corruption that guard exists to stop — but a
+        // denial and a declared topology together mean refuse, not degrade.
+        // The warning below says so.
         // Dynamic, non-literal specifier so the CLI does not statically depend
         // on the cluster package (mirrors the remote-driver import below).
         //
@@ -2432,14 +2447,20 @@ export default class Serve extends Command {
         // '@objectstack/service-cluster'` and took the whole boot down — while
         // app-side code loaded the very same package fine.
         const __clusterPkg: string = '@objectstack/service-cluster';
-        const { checkMultiNodeAllowed, mountMultiNodeGateFromHost } = (await importFromHost(__clusterPkg)) as {
+        // The whole namespace, not just the gate: the DRIVER REGISTRY read
+        // further down has to come from this same module instance, because
+        // that is the instance `defineCluster()` consults (#13330).
+        const __clusterModule = (await importFromHost(__clusterPkg)) as {
           checkMultiNodeAllowed: (requested?: number) => MultiNodeGateVerdict;
+          /** Optional: an app on a pre-#13330 `service-cluster` does not have it. */
+          listClusterDrivers?: () => string[];
           // Optional: an app may pin an older service-cluster that predates
           // the mount helper (#13537); `?.` below keeps that boot walking.
           mountMultiNodeGateFromHost?: (
             importer: (specifier: string) => Promise<unknown>,
           ) => Promise<unknown>;
         };
+        const { checkMultiNodeAllowed, mountMultiNodeGateFromHost } = __clusterModule;
         // [#13537] Mount the distribution's gate on EVERY boot route, BEFORE
         // consulting it. Registration used to depend on one app config file
         // executing (the EE config calling `registerMultiNodeGate`), so the
@@ -2451,6 +2472,12 @@ export default class Serve extends Command {
         // `importFromHost` call above, just exercised inside the package that
         // owns the carrier list). Best-effort: with no distribution installed
         // nothing mounts, and the gate's fail-closed default answers below.
+        //
+        // ⚠️ Resolved against #13330's namespace read on main: the mount helper
+        // is destructured from THE SAME `__clusterModule`, so the instance that
+        // registers is provably the instance `checkMultiNodeAllowed` and
+        // `listClusterDrivers` are read from. Re-importing the package for the
+        // mount would have re-opened the split this file just closed.
         try { await mountMultiNodeGateFromHost?.(importFromHost); }
         catch { /* never brick the boot for an add-on — the check below fails closed */ }
         // Ask the gate about the topology the operator actually DECLARED.
@@ -2476,7 +2503,11 @@ export default class Serve extends Command {
         if (!__gate.allowed) {
           console.warn(
             `[cluster] multi-node not authorized (${__gate.reason ?? 'denied'}) — ` +
-            `downgrading to single-node (in-memory cluster). Remove OS_CLUSTER_DRIVER to silence.`,
+            `falling back to the in-process cluster driver. If this deployment ALSO ` +
+            `declared a multi-node topology (OS_CLUSTER_REPLICAS>1 / OS_EXPECT_MULTI_NODE=true), ` +
+            `the split-brain guard refuses the boot rather than run replicas on per-process ` +
+            `locks — drop the declaration to run single-node, or license the capability. ` +
+            `Remove OS_CLUSTER_DRIVER to silence.`,
           );
         } else {
           // Licensed-overflow advisory: the cluster IS entitled to run, it just
@@ -2485,12 +2516,97 @@ export default class Serve extends Command {
           const __capAdvisory = formatMultiNodeCapAdvisory(__gate);
           if (__capAdvisory) console.warn(__capAdvisory);
           // Same host-anchored resolution as the gate above — the shipped
-          // drivers (`-redis`, `-postgres`, …) are app-declared too. The catch
-          // stays deliberately silent: the driver may already have been
-          // registered by the loaded config, and an absent driver is a
-          // documented fall-back to the in-memory cluster, not a boot failure.
-          try { await importFromHost(`@objectstack/service-cluster-${__clusterDriver}`); }
-          catch { /* may already be registered by the loaded config */ }
+          // drivers (`-redis`, `-postgres`, …) are app-declared too.
+          //
+          // ── Why this is no longer a silent catch (#13330) ────────────────
+          //
+          // A driver package's entire contract is a load-time SIDE EFFECT:
+          // `registerClusterDriver('<driver>', …)` into the module-scope
+          // registry of `@objectstack/service-cluster`, which `defineCluster()`
+          // reads two statements below. Whether that side effect landed is a
+          // fact about THIS process, so it is read here rather than assumed.
+          //
+          // It used to be assumed. The catch was silent on two stated grounds —
+          // "may already be registered by the loaded config" and "an absent
+          // driver is a documented fall-back to the in-memory cluster" — and a
+          // single EE boot measured both wrong at once:
+          //
+          //   • the load SUCCEEDED and the registration was invisible. The
+          //     declared leg of `importFromHost` resolved with CommonJS
+          //     semantics, so the driver ran as its `.cjs` build and registered
+          //     into a SECOND instance of the registry, while the ESM Runtime
+          //     read the first. Fixed at the seam (`@objectstack/types/node`);
+          //     this reading is what makes any residual split audible instead
+          //     of arriving as "not registered" one line later.
+          //   • an absent driver falls back to nothing HERE — `clusterConfig`
+          //     below names the driver either way, so `defineCluster()` raises
+          //     its documented error (cluster.mdx §8.1). That is left exactly
+          //     as it is: downgrading to in-memory instead would boot a silent
+          //     single node for an operator who explicitly asked for a remote
+          //     driver, and on the multi-replica deployments this matters for,
+          //     the ADR-0010 split-brain guard throws on that downgrade anyway.
+          //     What changes is only that the reason is no longer swallowed.
+          //
+          // Nothing below throws: every branch is a diagnosis printed ahead of
+          // behaviour that is unchanged.
+          let __driverLoadError: unknown;
+          try {
+            await importFromHost(`@objectstack/service-cluster-${__clusterDriver}`);
+          } catch (err) {
+            __driverLoadError = err;
+          }
+          // `undefined` ⇒ the app's `@objectstack/service-cluster` predates
+          // `listClusterDrivers`, so the registry cannot be read from here.
+          // That is NOT MEASURED — it is not "registered" and not "missing",
+          // and no branch below claims either.
+          const __registeredDrivers =
+            typeof __clusterModule.listClusterDrivers === 'function'
+              ? __clusterModule.listClusterDrivers()
+              : undefined;
+          const __driverVisible =
+            __registeredDrivers === undefined
+              ? undefined
+              : __registeredDrivers.indexOf(__clusterDriver) >= 0;
+          if (__driverVisible !== true) {
+            if (__driverLoadError !== undefined) {
+              // Resolution failures carry a kind and are already worded for an
+              // operator by `createHostImporter`; anything else RESOLVED and
+              // then crashed while evaluating. Swallowing the second is how a
+              // driver with a broken dependency reported as "not registered",
+              // sending operators to look for a package already installed.
+              const __kind = hostImportFailureKind(__driverLoadError);
+              if (__kind !== undefined) {
+                console.warn(
+                  `[cluster] driver "${__clusterDriver}" was requested but could not be ` +
+                  `loaded (${__kind}):\n${
+                    __driverLoadError instanceof Error
+                      ? __driverLoadError.message
+                      : String(__driverLoadError)
+                  }`,
+                );
+              } else {
+                console.warn(
+                  `[cluster] driver "${__clusterDriver}" resolved but threw while loading — ` +
+                  `this is the driver package's own failure, not a missing package:`,
+                  __driverLoadError,
+                );
+              }
+            } else if (__driverVisible === false) {
+              // Loaded cleanly and still not in the registry: two live
+              // instances of `@objectstack/service-cluster` in one process,
+              // which is a PHYSICAL-copy split no resolver condition can merge.
+              console.warn(
+                `[cluster] driver "${__clusterDriver}" loaded but did not register: ` +
+                `@objectstack/service-cluster-${__clusterDriver} evaluated without error, yet the ` +
+                `registry this boot reads holds [${__registeredDrivers?.join(', ') || 'nothing'}]. ` +
+                `Two instances of @objectstack/service-cluster are live in this process and the ` +
+                `driver registered into the other one — look for two physical copies (a version ` +
+                `skew between the app and the framework, or a bundled one). Importing ` +
+                `"@objectstack/service-cluster-${__clusterDriver}" from objectstack.config.ts ` +
+                `registers into the instance the Runtime reads.`,
+              );
+            }
+          }
           clusterConfig = { driver: __clusterDriver, url: process.env.OS_REDIS_URL };
         }
       }

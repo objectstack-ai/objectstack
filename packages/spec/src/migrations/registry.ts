@@ -5511,6 +5511,52 @@ const step18: MigrationStep = {
         'and that anonymous sign-up now answers 403 SELF_REGISTRATION_CLOSED.',
     },
     {
+      id: 'branded-identifier-schemas-retired',
+      surface:
+        'the six branded identifier schemas of `@objectstack/spec/shared` '
+        + '(`shared/branded-types.zod.ts`, removed whole): `ObjectNameSchema`, '
+        + '`FieldNameSchema`, `ViewNameSchema`, `AppNameSchema`, `FlowNameSchema`, '
+        + '`RoleNameSchema`, and their type exports (`ObjectName`/`ObjectNameParsed` '
+        + 'through `RoleName`/`RoleNameParsed`).',
+      replacement:
+        '(removed — no replacement brand layer. Parse an identifier through the '
+        + 'schema of the surface that stores it: object and field names through '
+        + '`ObjectSchema`/`FieldSchema` (inline snake_case regex), flow names '
+        + 'through `FlowSchema`, app names through `AppSchema` '
+        + '(`SnakeCaseIdentifierSchema`), position/role names through '
+        + '`PositionSchema`. A caller that wants a standalone identifier check '
+        + 'uses `SnakeCaseIdentifierSchema` or `SystemIdentifierSchema` from '
+        + '`@objectstack/spec/shared` directly — both stay published.)',
+      reason:
+        'Maintainer ruling 2026-09-01 on #13612 (director decision batch C, '
+        + 'verbatim 「同意」: retire) — ADR-0049 enforce-or-remove. The brands '
+        + 'promised compile-time safety ("you cannot pass an ObjectName where a '
+        + 'FieldName is expected") that no consumer could obtain: no schema in '
+        + 'either repository ever composed a brand, so nothing produced or '
+        + 'accepted a branded value, while the surfaces the brands were named for '
+        + 'are validated by inline regexes or bare `SnakeCaseIdentifierSchema` '
+        + 'three files away. Binding was weighed and not adopted: zero consumers '
+        + 'exist, binding would silently change five surfaces\' accept sets (the '
+        + 'inline regexes admit a leading underscore the brand base does not), '
+        + 'and a future real need for centralized identifier grammar re-opens '
+        + 'freely against actual pull.',
+      acceptanceCriteria:
+        'No code imports any of the six schemas or their types from '
+        + '`@objectstack/spec/shared` (TS2305 after upgrade — the module is '
+        + 'removed, not stubbed); the five surfaces\' validators are byte-for-byte '
+        + 'untouched (inline regexes at `data/object.zod.ts`, `data/field.zod.ts`, '
+        + '`automation/flow.zod.ts`; bare `SnakeCaseIdentifierSchema` at '
+        + '`ui/app.zod.ts`, `identity/position.zod.ts`); '
+        + '`SnakeCaseIdentifierSchema` and `SystemIdentifierSchema` themselves '
+        + 'remain published and unchanged; the six def keys (`shared/ObjectName`, '
+        + '`shared/FieldName`, `shared/ViewName`, `shared/AppName`, '
+        + '`shared/FlowName`, `shared/RoleName`) leave '
+        + '`json-schema.manifest/shared.json` in the same change that registers '
+        + 'this entry. No authored metadata document ever embedded a branded '
+        + 'value, so no source rewrite ships and `objectstack migrate meta` has '
+        + 'nothing to visit.',
+    },
+    {
       id: 'cbp-master-detail-required-forced',
       surface: 'object.fields.<master>.required on a `master_detail` reference under '
         + '`sharingModel: \'controlled_by_parent\'` — authored via `ObjectSchema.create()`',
@@ -5648,6 +5694,44 @@ const step18: MigrationStep = {
         + 'asks whether a row went away, the latter whether the call was accepted. Any test '
         + 'that passed while asserting on `deleted` was asserting on `undefined` and needs '
         + 'rewriting, not renaming.',
+    },
+    {
+      id: 'cluster-driver-dangling-values-removed',
+      surface: 'kernel.cluster.driver (ClusterDriverSchema, kernel/cluster.zod.ts) '
+        + '- the `postgres` and `nats` enum values',
+      replacement: 'the drivers that actually ship - `memory` (single-process '
+        + 'default), `redis` (@objectstack/service-cluster-redis, the production '
+        + 'recommendation), or `custom` + registerClusterDriver(name, factory) for '
+        + 'a self-provided transport. A config naming `postgres` or `nats` never '
+        + 'worked: pick `redis`, or register the transport yourself under `custom`',
+      reason:
+        'Maintainer ruling on objectstack-ai/cloud#1626 (2026-08-24, option B '
+        + 'adopted): single-node is the ObjectOS EE boundary, multi-node is Cloud '
+        + 'differentiation, and a DB-first postgres cluster driver is not built '
+        + 'absent concrete customer pull. The ruling\'s principle rider decides '
+        + 'this entry: a schema-valid value must not be an unconditional runtime '
+        + 'throw. Both removed values were dangling by the same measurement - the '
+        + 'only non-test registerClusterDriver() caller is service-cluster-redis, '
+        + 'so `driver: \'postgres\'` or `driver: \'nats\'` passed schema '
+        + 'validation and then reached defineCluster()\'s unconditional `Cluster '
+        + 'driver "<name>" is not registered` throw. It is a SEMANTIC entry '
+        + 'rather than a mechanical conversion because the right replacement is a '
+        + 'deployment decision (which transport actually backs this cluster), not '
+        + 'a rename a codemod could apply; nothing at rest breaks, because a '
+        + 'stored config naming either value never survived boot in the first '
+        + 'place. The ruling records its own reversal condition: a value returns '
+        + 'to the enum only in the release that ships an implementation behind '
+        + 'it. No authorable KEY was retired (the `useExistingPool` field stays, '
+        + 'reworded), so nothing lands in RETIRED_KEYS_BY_MAJOR.',
+      acceptanceCriteria:
+        'No `cluster.driver` config names `postgres` or `nats`; '
+        + '`ClusterDriverSchema.parse` on the chosen driver value succeeds; a '
+        + 'deployment that needed a distributed transport boots on `redis` (or '
+        + 'its `custom` registration) and `defineCluster()` no longer throws '
+        + '`Cluster driver "<name>" is not registered` at startup. TypeScript '
+        + 'call sites that typed the removed spellings against `ClusterDriver` '
+        + 'fail tsc on upgrade; the fix is choosing a shipped driver, never '
+        + 'widening a local mirror of the enum.',
     },
     {
       id: 'dashboard-header-modal-target-page-only',
@@ -6148,6 +6232,49 @@ const step18: MigrationStep = {
         + 'head field itself (`{"project_id": <id>}`). A dotted path into a structured/JSON field '
         + '(`{"address.city": …}`) needs NO action — it is deliberately not judged. Reads complete '
         + 'with no `INVALID_FIELD` naming a dotted filter key, at either door.',
+    },
+    {
+      id: 'event-name-schema-retired',
+      surface:
+        '`EventNameSchema` and its `EventName` type '
+        + '(`@objectstack/spec/shared`, `shared/identifiers.zod.ts`), and the '
+        + 'dot-notation grammar it imposed on its only three binding fields: '
+        + '`EventTypeDefinitionSchema.name` and `EventSchema.name` '
+        + '(`kernel/events/core.zod.ts`) and `EventMessageSchema.eventName` '
+        + '(`api/websocket.zod.ts`).',
+      replacement:
+        '(removed — no replacement grammar layer. The three binding fields stay '
+        + 'and widen to plain `z.string()`; the event vocabulary the platform '
+        + 'actually checks is the closed literal enums `DataEventType` / '
+        + '`BulkDataEventType` (`@objectstack/spec/api`, `api/events.zod.ts`), '
+        + 'which stand as the only event-name contract. A caller that imported '
+        + '`EventNameSchema` for standalone validation deletes the import; if it '
+        + 'was validating platform event names, it parses through the enums '
+        + 'instead.)',
+      reason:
+        'Maintainer ruling 2026-09-01 on #13613 (director decision batch C, '
+        + 'verbatim 「同意」: retire) — ADR-0049 enforce-or-remove. The schema '
+        + 'presented itself as the platform\'s event-name grammar while nothing '
+        + 'that runs consumed its three binding schemas, and the closed enums '
+        + 'that do the real checking never referenced it. The event surface is '
+        + 'platform-defined, not author-extensible, so a grammar layer for a '
+        + 'hypothetical extension surface is a trap, not a reserve: a generator '
+        + 'satisfying `EventNameSchema` has satisfied nothing the platform will '
+        + 'check, while one emitting outside the closed enums is refused by a '
+        + 'rule the identifier file never mentioned.',
+      acceptanceCriteria:
+        'No code imports `EventNameSchema` or `EventName` from '
+        + '`@objectstack/spec/shared` (TS2305 after upgrade); '
+        + '`EventTypeDefinitionSchema.name`, `EventSchema.name` and '
+        + '`EventMessageSchema.eventName` parse as plain strings (the accept set '
+        + 'at those three fields widens — every previously valid document stays '
+        + 'valid, so no source rewrite ships and `objectstack migrate meta` has '
+        + 'nothing to visit); `DataEventType` / `BulkDataEventType` are '
+        + 'byte-for-byte untouched; `WebSocketEventSchema.channel` remains a '
+        + 'deliberate bare `z.string()` (the ruling adds no constraint there); '
+        + 'the `shared/EventName` def key leaves '
+        + '`json-schema.manifest/shared.json` in the same change that registers '
+        + 'this entry.',
     },
     {
       id: 'field-master-detail-set-null-refused',
@@ -9805,6 +9932,87 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // the production-posture hard-refusal as the first-landed half (#11846 ruling
     // record).
     'kernel/PreviewModeConfig',
+    // #13612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
+    // batch C: retire; binding was weighed and not adopted). One of the six
+    // branded identifier schemas of `shared/branded-types.zod.ts`, removed whole
+    // with the module. No schema in either repo ever composed `AppNameSchema`,
+    // so the promised brand safety was unobtainable. The real app-name contract
+    // is the bare `SnakeCaseIdentifierSchema` at `ui/app.zod.ts` — untouched by
+    // this retirement. No tombstone and no D2 conversion (no authored document
+    // ever embedded a branded value); this table plus the D3 semantic entry
+    // `branded-identifier-schemas-retired` are the declaration.
+    'shared/AppName',
+    // #13613 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
+    // batch C: retire). `EventNameSchema` presented itself as the platform's
+    // event-name grammar while nothing that runs consumed it: its only three
+    // binding schemas (`EventTypeDefinitionSchema.name`, `EventSchema.name`,
+    // `EventMessageSchema.eventName`) have zero runtime consumers, and the
+    // vocabulary the platform actually checks is the closed literal enums
+    // `DataEventType` / `BulkDataEventType` (`api/events.zod.ts`), which never
+    // referenced it. The three fields stay as plain `z.string()`; the enums are
+    // the only event-name contract. `WebSocketEventSchema.channel` stays a
+    // deliberate `z.string()` — the ruling adds no constraint there. No authored
+    // document is invalidated (the accept set at the three fields widens), so no
+    // tombstone and no D2 conversion — this table plus the D3 semantic entry
+    // `event-name-schema-retired` are the declaration (the #8715 route-3 shape).
+    'shared/EventName',
+    // #13612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
+    // batch C: retire; binding was weighed and not adopted). One of the six
+    // branded identifier schemas of `shared/branded-types.zod.ts`, removed whole
+    // with the module. No schema in either repo ever composed `FieldNameSchema`,
+    // so the promised brand safety was unobtainable. The real field-name contract
+    // is the inline `z.string().regex(/^[a-z_][a-z0-9_]*$/)` at
+    // `data/field.zod.ts` — untouched by this retirement. No tombstone and no D2
+    // conversion (no authored document ever embedded a branded value); this table
+    // plus the D3 semantic entry `branded-identifier-schemas-retired` are the
+    // declaration.
+    'shared/FieldName',
+    // #13612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
+    // batch C: retire; binding was weighed and not adopted). One of the six
+    // branded identifier schemas of `shared/branded-types.zod.ts`, removed whole
+    // with the module. No schema in either repo ever composed `FlowNameSchema`,
+    // so the promised brand safety was unobtainable. The real flow-name contract
+    // is the inline `z.string().regex(/^[a-z_][a-z0-9_]*$/)` at
+    // `automation/flow.zod.ts` — untouched by this retirement. No tombstone and
+    // no D2 conversion (no authored document ever embedded a branded value); this
+    // table plus the D3 semantic entry `branded-identifier-schemas-retired` are
+    // the declaration.
+    'shared/FlowName',
+    // #13612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
+    // batch C: retire; binding was weighed and not adopted). One of the six
+    // branded identifier schemas of `shared/branded-types.zod.ts`, removed whole
+    // with the module. The brand promised compile-time safety no consumer could
+    // obtain: no schema in either repo ever composed `ObjectNameSchema`, so
+    // nothing produced or accepted a branded value. The real object-name contract
+    // is the inline `z.string().regex(/^[a-z_][a-z0-9_]*$/)` at
+    // `data/object.zod.ts` — untouched by this retirement (the ruling keeps the
+    // five surfaces' real validators as the contract of record). No authored
+    // document ever embedded a branded value, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `branded-identifier-schemas-retired` are the declaration (the #8715
+    // route-3 shape).
+    'shared/ObjectName',
+    // #13612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
+    // batch C: retire; binding was weighed and not adopted). One of the six
+    // branded identifier schemas of `shared/branded-types.zod.ts`, removed whole
+    // with the module. No schema in either repo ever composed `RoleNameSchema`,
+    // so the promised brand safety was unobtainable. The real role/position-name
+    // contract is the bare `SnakeCaseIdentifierSchema` at
+    // `identity/position.zod.ts` — untouched by this retirement. No tombstone and
+    // no D2 conversion (no authored document ever embedded a branded value); this
+    // table plus the D3 semantic entry `branded-identifier-schemas-retired` are
+    // the declaration.
+    'shared/RoleName',
+    // #13612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
+    // batch C: retire; binding was weighed and not adopted). One of the six
+    // branded identifier schemas of `shared/branded-types.zod.ts`, removed whole
+    // with the module. No schema in either repo ever composed `ViewNameSchema`,
+    // so the promised brand safety was unobtainable. View names are validated
+    // where views are declared, not through a brand. No tombstone and no D2
+    // conversion (no authored document ever embedded a branded value); this table
+    // plus the D3 semantic entry `branded-identifier-schemas-retired` are the
+    // declaration.
+    'shared/ViewName',
     // #10485 — `ui/BorderRadius` (the border-radius scale sub-block) left with `ui/Theme`:
     // its ONLY consumer was the retired `ThemeSchema` (the #3950 rule — an
     // exported value schema with no consumer reads as a capability). See

@@ -175,6 +175,16 @@ variables: [
 > flagged as a warning.) Do **not** work around this by removing `readonly`;
 > that loses the field's edit protection.
 
+> **Elevate the write, not the flow.** A `screen` flow stays `runAs: 'user'`.
+> When one step in it must write a `readonly` field, move that step into a
+> dedicated `runAs: 'system'` flow and call it from a `subflow` node — raising
+> the whole flow silently elevates every other write in it.
+>
+> **A `runAs: 'system'` sweep must pin its organization.** System context has no
+> trigger user, so nothing narrows the query: a scan or rollup with no
+> organization predicate reads and writes across every tenant. The tenant column
+> is platform-injected — filter on it, never re-declare it per object.
+
 ```typescript
 {
   name: 'escalate_overdue_cases',

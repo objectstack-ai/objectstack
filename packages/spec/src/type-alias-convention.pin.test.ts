@@ -407,6 +407,7 @@ export type Iso83 = Assert<Eq< z.input< typeof M20.RetryStrategy >, z.infer< typ
 
 // api/error-code-ledger.zod.ts
 export type Iso838 = Assert<Eq< z.input< typeof M182.StandardSynonymWaiverSchema >, z.infer< typeof M182.StandardSynonymWaiverSchema > >>;
+export type Iso865 = Assert<Eq< z.input< typeof M182.ProvenanceWaiverSchema >, z.infer< typeof M182.ProvenanceWaiverSchema > >>;
 export type Iso84 = Assert<Eq< z.input< typeof M20.FieldErrorCode >, z.infer< typeof M20.FieldErrorCode > >>;
 export type Iso85 = Assert<Eq< z.input< typeof M20.FieldErrorSchema >, z.infer< typeof M20.FieldErrorSchema > >>;
 
@@ -1037,7 +1038,6 @@ export type Iso496 = Assert<Eq< z.input< typeof M112.StaticMountSchema >, z.infe
 // shared/identifiers.zod.ts
 export type Iso497 = Assert<Eq< z.input< typeof M113.SystemIdentifierSchema >, z.infer< typeof M113.SystemIdentifierSchema > >>;
 export type Iso498 = Assert<Eq< z.input< typeof M113.SnakeCaseIdentifierSchema >, z.infer< typeof M113.SnakeCaseIdentifierSchema > >>;
-export type Iso499 = Assert<Eq< z.input< typeof M113.EventNameSchema >, z.infer< typeof M113.EventNameSchema > >>;
 export type Iso862 = Assert<Eq< z.input< typeof M113.MetadataItemNameSchema >, z.infer< typeof M113.MetadataItemNameSchema > >>;
 
 // shared/mapping.zod.ts
@@ -2038,6 +2038,25 @@ describe('ADR-0122 type-alias convention', () => {
     // either tree, so the two shapes coincide and ADR-0122 gives each a pin
     // rather than an `XParsed`. Ids `Iso863`/`Iso864`, the next free ones —
     // ids are claims about pins, not positions.
+    //
+    // 835 -> 836 is #13353's `ProvenanceWaiverSchema` — the recorded waiver
+    // that keeps a registered-code stamp site without an owner-key row a
+    // decision instead of drift (the door-not-producer class). Isomorphism
+    // MEASURED, not assumed: four `z.string()`s (three regex-, one
+    // min-constrained — constraints refine, they do not reshape), with no
+    // `.default()`, `.transform()`, `.catch()`, `.optional()` or `.pipe()`
+    // anywhere, so the two shapes coincide and ADR-0122 gives it a pin rather
+    // than an `XParsed` — the exact reasoning of its #8211 sibling `Iso838`
+    // one entry up. Its id is `Iso865`, the next free one — ids are claims
+    // about pins, not positions.
+    //
+    // 836 -> 835 is #13613's ADR-0049 retirement of `EventNameSchema`
+    // (shared/identifiers.zod.ts): its pin `Iso499` left with the schema —
+    // the alias no longer exists, so there is nothing to be isomorphic. The
+    // three schemas that bound it keep their fields as plain `z.string()`;
+    // the platform-checked event vocabulary is the closed `DataEventType` /
+    // `BulkDataEventType` enums. -1 removed; the Iso number stays vacant
+    // (ids are claims about pins, not positions).
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
     expect(pins).toHaveLength(835);

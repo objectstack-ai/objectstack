@@ -1609,9 +1609,20 @@ describe('[#5978] reverse verification: without the guard, the third path locks 
 // "Who is a platform admin" is resolved BY NAME: `resolveAdminUserIds` looks
 // the permission set up as `where: { name: 'admin_full_access' }` and only then
 // reads the grants pointing at its id. So the row named `admin_full_access` is
-// itself part of the administrator evidence, and deleting it — or calling it
-// something else — un-makes every platform admin in one write while `sys_user`,
-// `sys_member` and `sys_user_permission_set` all stay exactly as they were.
+// itself part of the GRANT-anchored administrator evidence, and deleting it —
+// or calling it something else — un-makes every grant-anchored platform admin
+// in one write while `sys_user`, `sys_member` and `sys_user_permission_set` all
+// stay exactly as they were.
+//
+// ⚠️ Not "every platform admin": since the #11663 re-anchor (L2) standing has a
+// SECOND anchor this write cannot reach — a config-anchored administrator (a
+// declared `OS_PLATFORM_OWNER_EMAIL` address on a VERIFIED `sys_user` row) is
+// derived at `resolve-authz-context.ts` §6b-config without reading this row at
+// all, and `resolveAdminUserIds` counts it through the resolver's own
+// predicate. Where one stands these refusals are re-priced away and the write
+// is PERMITTED (pinned in `last-admin-guard.re-pricing.test.ts`). This file
+// declares no owner emails, so the grant anchor is the whole population here
+// and the refusals below are the live price.
 //
 // The block pins the same five things each earlier path did, plus the one this
 // path adds: the guard must NOT go quiet on every other path afterwards.

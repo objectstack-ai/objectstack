@@ -28,7 +28,7 @@ const result = EventSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | optional | Unique event identifier |
-| **name** | `string` | ✅ | Event name (lowercase with dots, e.g., user.created, order.paid) |
+| **name** | `string` | ✅ | Event name (dot notation by convention, e.g. user.created, order.paid; the platform-checked event vocabulary is the closed DataEventType / BulkDataEventType enums) |
 | **payload** | `any` | ✅ | Event payload schema |
 | **metadata** | `{ source: string; timestamp: string; userId?: string; tenantId?: string; … }` | ✅ | Event metadata |
 
@@ -93,7 +93,7 @@ const result = EventSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **name** | `string` | ✅ | Event type name (lowercase with dots) |
+| **name** | `string` | ✅ | Event type name (dot notation by convention, e.g. order.created; the platform-checked event vocabulary is the closed DataEventType / BulkDataEventType enums) |
 | **version** | `string` | optional (default: `"1.0.0"`) | Event schema version |
 | **schema** | `any` | optional | JSON Schema for event payload validation |
 | **description** | `string` | optional | Event type description |

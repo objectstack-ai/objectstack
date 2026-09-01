@@ -8,11 +8,12 @@
  *
  *  1. **The pure decision matrix** (`shouldStampOwnerVerifiedAtCreation`) —
  *     every bound of the contract as a direct call: walled family only,
- *     declared-owner match only (compared the way the elevation gate
- *     compares), operator-provisioned creation only (operator class, or the
- *     bootstrap carve-out; provider and non-bootstrap self-serve NEVER).
+ *     declared-owner match only (compared the way the platform-admin
+ *     derivation compares), operator-provisioned creation only (operator
+ *     class, or the bootstrap carve-out; provider and non-bootstrap
+ *     self-serve NEVER).
  *  2. **The store probe** (`probeWalledOwnerAccountState`) over a REAL
- *     `ObjectQL` engine — the same backend the elevation gate reads, so the
+ *     `ObjectQL` engine — the same backend the derivation reads, so the
  *     probe's answers are measured against real driver representations, not
  *     a fake's.
  *  3. **The wiring, end to end** — real better-auth pipeline over the real
@@ -20,9 +21,20 @@
  *     owner's operator-provisioned row is BORN `email_verified`, and every
  *     "never" cell of the matrix stays unverified through the same pipeline.
  *     The verified read-back uses the shared [#11343] allow-list
- *     (`isEmailVerifiedUserRow`) — the predicate the elevation gate itself
- *     refuses on — so a green here IS "the elevation gate would accept this
- *     row", without booting plugin-security.
+ *     (`isEmailVerifiedUserRow`) — the predicate the derivation itself
+ *     refuses on — so a green here IS "`resolve-authz-context.ts` §6b-config
+ *     would resolve PLATFORM_ADMIN for this row", without booting
+ *     plugin-security.
+ *
+ * ⚠️ The mechanism this file's prose used to name — the walled platform-admin
+ * ELEVATION GATE — is RETIRED (#11663 leg L4): `bootstrapPlatformAdmin` writes
+ * no grant row under a walled posture and elevates nobody, it reports.
+ * Standing is derived PER REQUEST instead, and the implementation this file
+ * covers says the same ([#11973] note in `walled-owner-operator-stamp.ts`:
+ * "the invariant is enforced at the derivation site … rather than by an
+ * elevation write; the stamp's value is unchanged"). One `it()` title below
+ * still names the gate; correcting a title is an executable change, not a
+ * comment fix, so it is left for the card that can price it.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -88,8 +100,9 @@ const walledWithOwner = (owner = OWNER, posture = 'isolated') => {
  * `OS_PLATFORM_OWNER_EMAIL` takes one address OR a list (#11663 Choice 2B).
  * Before this card the stamp compared a candidate against the operator's WHOLE
  * raw value as one address, so under a list no member was ever stamped — the
- * account was born unverified and the elevation gate then refused it
- * (`walled_owner_not_verified`), silently.
+ * account was born unverified, so the per-request derivation
+ * (`resolve-authz-context.ts` §6b-config) resolved it non-admin and the walled
+ * boot log reported it "registered, NOT verified", silently.
  */
 const SECOND_OWNER = 'ops@corp.example';
 const OWNER_LIST = `${OWNER}, ${SECOND_OWNER}`;
@@ -392,8 +405,8 @@ describe('#12751 — probeWalledOwnerAccountState over a real ObjectQL engine', 
     expect((await signUp(manager, SECOND_OWNER)).status).toBe(200);
     expect(await probeWalledOwnerAccountState(engine as never)).toBe('owner-unverified');
 
-    // One verified member is all the elevation gate needs, so it is all the
-    // probe reports — the gate's own three outcomes, mirrored.
+    // One verified member is all the derivation needs, so it is all the probe
+    // reports — the standing surface's own outcomes, mirrored.
     const row = await userRow(engine, SECOND_OWNER);
     await engine.update(
       'sys_user',
@@ -440,8 +453,8 @@ describe('#12751 — the stamp lands through the REAL creation pipeline', () => 
     expect(res.status, `owner bootstrap sign-up refused: ${await res.clone().text()}`).toBe(200);
 
     const row = await userRow(engine, OWNER);
-    // Read back through the elevation gate's own predicate: a `true` here is
-    // "bootstrapPlatformAdmin would elevate this row", representation
+    // Read back through the derivation's own predicate: a `true` here is
+    // "§6b-config would resolve PLATFORM_ADMIN for this row", representation
     // included.
     expect(
       isEmailVerifiedUserRow(row),

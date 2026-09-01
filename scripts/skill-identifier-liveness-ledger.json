@@ -31,10 +31,5 @@
       "note": "Live in ../objectui at packages/plugin-gantt/src/GanttView.tsx, same shift-band prop family as dayStart. Unreachable from this repo's index for the same reason."
     }
   ],
-  "leg2Gaps": {
-    "navigation-item-types": [
-      "action",
-      "component"
-    ]
-  }
+  "leg2Gaps": {}
 }

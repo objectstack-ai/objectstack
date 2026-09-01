@@ -336,7 +336,7 @@ const fieldZoo = defineSeed(FieldZoo, {
       f_boolean: true, f_toggle: true,
       f_select: 'high', f_multiselect: ['red', 'green'], f_radio: 'yes', f_checkboxes: ['email', 'push'], f_tags: ['alpha', 'beta'],
       f_lookup: 'Northwind', f_lookups: ['Northwind', 'Contoso'], f_master_detail: 'Website Relaunch',
-      f_location: { lat: 47.6062, lng: -122.3321 }, f_address: { street: '1 Main St', city: 'Seattle', state: 'WA', postal_code: '98101', country: 'US' },
+      f_location: { lat: 47.6062, lng: -122.3321 }, f_address: { street: '1 Main St', city: 'Seattle', state: 'WA', postalCode: '98101', country: 'US' },
       f_code: '{\n  "ok": true\n}', f_json: { nested: { k: 'v' }, list: [1, 2, 3] }, f_color: '#2563EB',
       f_rating: 4, f_slider: 60, f_progress: 80,
       f_composite: { width: 10, height: 20 }, f_repeater: [{ label: 'one', qty: 1 }, { label: 'two', qty: 2 }],

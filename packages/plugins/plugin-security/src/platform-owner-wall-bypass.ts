@@ -34,9 +34,14 @@
  * (`normalizePlatformAdminEmail`: trim, then lowercase) — identical in effect to
  * the `String(email).trim().toLowerCase()` this used to spell inline.
  *
- * `walled-owner-operator-stamp.ts` (plugin-auth) and the elevation gate ask the
- * same parser for the same reason. The sites MUST agree — an account the stamp
- * verifies is one the gate must elevate and the wall must recognise.
+ * `walled-owner-operator-stamp.ts` (plugin-auth) and the platform-admin
+ * DERIVATION (`resolve-authz-context.ts` §6b-config, through
+ * `matchesConfiguredPlatformAdmin`) ask the same parser for the same reason.
+ * The sites MUST agree — an account the stamp verifies is one the derivation
+ * must resolve `PLATFORM_ADMIN` for and the wall must recognise. Before the
+ * #11663 re-anchor the third site was the elevation gate, which conferred that
+ * standing by a WRITE; the agreement requirement is unchanged by its
+ * retirement.
  *
  * Fail-closed by construction, both directions the ruling pins:
  *  - no declared owner (env unset/blank, or a list REFUSED for an unparseable

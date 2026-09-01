@@ -698,6 +698,12 @@ the AI-safety axis breaks remaining ties toward the loud option; security and
 destructive actions stay with the human. The order ranks recommendations
 only — a split still escalates.
 
+**Axis ② carries the highest weight — at least 50%** when the axes conflict:
+lead with the long-term reading, and the other three together cannot outvote
+it. Read that weight through axis ②'s own definition — shrink special-cases
+and contract accretion, never grow them — so it never underwrites speculative
+expansion. It ranks recommendations only, never authority.
+
 ### 9. Round report, then next round
 
 Print a round report to the maintainer: a table of issue → verdict → PR link →
@@ -848,7 +854,11 @@ Justify your recommendation on all four axes; if they conflict, present the
 trade-off and let the maintainer decide, ranking the recommendation pull-first
 (real pull → long-term shape; zero pull → non-proliferation; the AI-safety
 axis breaks ties; security/destructive → always the maintainer); the ranking
-orders recommendations only — a split still escalates.
+orders recommendations only — a split still escalates. Long-term soundness
+carries the highest weight, at least 50%: lead with it, the other three
+together cannot outvote it, and read it as shrinking special-cases rather than
+as licence to expand speculatively; weight ranks recommendations only, never
+authority.
 
 Return "blocked" (with evidence) when the default branch is broken under you, a
 dependency issue is unmerged, or CI infrastructure fails — after retrying

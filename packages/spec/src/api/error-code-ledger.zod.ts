@@ -93,6 +93,18 @@
  * A code emitted by several packages is listed once per emitting package —
  * the union dedupes; the per-package rows are provenance, not identity.
  *
+ * Since #13353 that sentence has a mechanical half: the provenance gate
+ * (`check:error-code-provenance`, `packages/spec/scripts/`) sweeps every
+ * stamp site of a REGISTERED code in `packages/**` non-test source and fails
+ * when the stamping package's own owner key does not list it. The admission
+ * rules below never ask WHO emits, so before that gate an unlisted emitter was
+ * invisible to every gate the repo has (three hand sweeps found the same class
+ * three times: #7504, #13254, #13353). Two deliberate shapes are NOT rows and
+ * are recorded in {@link PROVENANCE_WAIVERS} instead: a DOOR in another
+ * package that names the wire vocabulary itself (`FLOW_DISABLED`,
+ * `UPDATE_ID_MISMATCH` — see their rows' comments), and a shared constructor
+ * package whose throw is served under another package's registration.
+ *
  * ## Retiring a code
  *
  * A row whose last EMITTER is deleted comes out with it. The admission rules
@@ -590,7 +602,27 @@ export const ERROR_CODE_LEDGER = {
   ],
   '@objectstack/trigger-api': [
     'ENQUEUE_FAILED',                // queue accepted the call but publish threw
+    // [#13353] The hook endpoint's malformed-body refusals — `handleRequest`
+    // (`api-trigger.ts`) answers 400 with this code for a body that is not
+    // valid JSON or not a JSON object, and the package's OWN plugin serves
+    // that `{ status, body }` verbatim (`plugin.ts`, `c.json(out.body,
+    // out.status)` on the raw-app `POST .../automation/hooks/:flowName/:hookId`
+    // route). Same handler, same door as the two rows beside it — the wire
+    // vocabulary is named here, not at some other package's door. Provenance
+    // only: the code was already registered (six other packages), so the
+    // union, casing and every other row are unchanged.
+    'INVALID_REQUEST',
     'INVALID_SIGNATURE',             // hook secret did not verify the request body
+  ],
+  '@objectstack/cli': [
+    // [#13353] The serve command's unknown-hostname guard (`commands/serve.ts`,
+    // `unknown-hostname-guard`): a request whose hostname is bound to no
+    // environment is answered 404 with this code by the CLI's OWN middleware
+    // (`c.json`, the JSON limb beside the HTML one) on a server already
+    // serving HTTP. The door is the stamping package itself. Second EMITTER of
+    // the code `@objectstack/cloud-connection` already registers — one
+    // condition, one vocabulary; provenance, not identity (see above).
+    'ENVIRONMENT_NOT_FOUND',
   ],
   '@objectstack/cloud-connection': [
     'CLOUD_FETCH_FAILED',            // fetching the manifest/bundle from cloud failed
@@ -599,6 +631,16 @@ export const ERROR_CODE_LEDGER = {
     'DRIVER_UNAVAILABLE',            // no driver service — cannot purge seeded rows
     'ENVIRONMENT_BIND_FAILED',
     'ENVIRONMENT_NOT_FOUND',
+    // [#13353] `requireInstallCapability`'s 403
+    // (`marketplace-install-local-plugin.ts`): a caller without the
+    // install-local capability is refused on all four install/uninstall/
+    // reseed/purge doors, by the plugin's OWN Hono routes — the same
+    // plugin-route door this package's UNIQUE_SCOPE_CONFIRMATION_REQUIRED row
+    // below already records. The wire value predates the row (provenance
+    // only); the spelling is the #8211-waived FORBIDDEN synonym — the waiver
+    // admits the (code, shadows) pair, and this row extends its emitter list,
+    // never endorses the spelling for new code.
+    'FORBIDDEN',
     'INVALID_REQUEST',
     'MANIFEST_CONFLICT',             // manifest_id already defined by local code
     'MARKETPLACE_PROXY_FAILED',
@@ -675,6 +717,18 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_METADATA',
     'SUGGESTION_NOT_FOUND',
     'SUGGESTION_STATE',           // suggestion exists but is not in a confirmable/dismissable state
+  ],
+  '@objectstack/plugin-webhooks': [
+    // [#13353] The redeliver endpoint's malformed-body refusal — the plugin
+    // mounts `POST /api/v1/webhooks/redeliver` DIRECTLY on the raw Hono app
+    // (`webhook-outbox-plugin.ts`, `registerAdminRoutes`) and answers 400 with
+    // this code when the body is not JSON. The door is the stamping package
+    // itself (the same raw-app plugin-route door shape as
+    // UNIQUE_SCOPE_CONFIRMATION_REQUIRED under cloud-connection); its sibling
+    // refusals on the route use standard-catalog members (`UNAUTHENTICATED`,
+    // `MISSING_REQUIRED_FIELD`), which need no row. Provenance only: the code
+    // was already registered by six other packages.
+    'INVALID_REQUEST',
   ],
   '@objectstack/driver-memory': [
     // [#13254] Provenance for the in-memory driver's uniqueness refusal, which
@@ -887,7 +941,9 @@ export const STANDARD_SYNONYM_WAIVERS: readonly StandardSynonymWaiver[] = [
     code: 'FORBIDDEN',
     shadows: 'PERMISSION_DENIED',
     reason: 'Pre-gate synonym on the wire from @objectstack/rest, plugin-sharing and ' +
-      'plugin-approvals. Wire value kept; consolidation deferred per #8211.',
+      'plugin-approvals; #13353 added the cloud-connection provenance row for the same ' +
+      'pre-existing wire value (its marketplace-install plugin-route 403). ' +
+      'Wire value kept; consolidation deferred per #8211.',
   },
   {
     code: 'INTERNAL',
@@ -944,3 +1000,136 @@ export function standardSynonymViolations(
   }
   return violations;
 }
+
+// ==========================================
+// Provenance waivers (#13353)
+// ==========================================
+
+/**
+ * A recorded provenance waiver: why a package whose non-test source stamps a
+ * REGISTERED code deliberately carries no owner-key row for it (#13353).
+ *
+ * The provenance gate (`check:error-code-provenance`,
+ * `packages/spec/scripts/`) fails any stamp site of a registered code that the
+ * stamping package's own owner key does not list — the drift three hand
+ * sweeps (#7504, #13254, #13353) each re-found. But "stamps the string" and
+ * "owns the wire emission" are different facts, and the ledger already records
+ * decisions where they diverge. A waiver keeps that divergence a decision on
+ * the record, in the same file the rows live in, exactly as
+ * {@link STANDARD_SYNONYM_WAIVERS} does for the synonym rule. Three recorded
+ * shapes:
+ *
+ * - **The door, not the producer, names the wire vocabulary.** The stamped
+ *   value is read by a door in ANOTHER package, which owns — and registers —
+ *   the wire emission (`FLOW_DISABLED` et al. under `@objectstack/runtime`;
+ *   `EXTERNAL_IMPORT_ERROR` under `@objectstack/rest`, whose import route's
+ *   catch stamps the code itself for every `importObject` throw).
+ * - **A shared constructor one package over from its registered emitter.**
+ *   The helper that spells the string lives in a dependency-light package by
+ *   design (#8016), and the package whose production path throws/serves it is
+ *   the one registered (`UPDATE_ID_MISMATCH` under `@objectstack/objectql`,
+ *   stamped by metadata-core's helper).
+ * - **Client-side synthesis.** The SDK mirrors a code the SERVER registers so
+ *   caller branches fire identically; the ledger's scope prose is about the
+ *   serving side (`UPLOAD_SESSION_EXPIRED`).
+ *
+ * A waiver admits exactly the `(package, code)` pair it records, and the gate
+ * holds each one live in three directions: the named `registeredUnder` key
+ * must still list the code, the waived package must still NOT list it (a row
+ * plus a waiver is dead weight), and the scan must still find a stamp site for
+ * the pair (a waiver whose site is gone comes out with it).
+ */
+export const ProvenanceWaiverSchema = z.object({
+  package: z.string().regex(/^@objectstack\/[a-z0-9-]+$/)
+    .describe('The package whose source stamps the code without an owner-key row'),
+  code: z.string().regex(/^[A-Z][A-Z0-9_]*$/)
+    .describe('The registered code the package stamps'),
+  registeredUnder: z.string().regex(/^@objectstack\/[a-z0-9-]+$/)
+    .describe('The owner key that deliberately carries the row instead'),
+  reason: z.string().min(1)
+    .describe('Why the stamping package carries no row — recorded so provenance is a decision, not drift'),
+});
+
+export type ProvenanceWaiver = z.input<typeof ProvenanceWaiverSchema>;
+
+/**
+ * The recorded provenance waivers. Every entry is a decision with its evidence
+ * — most were written down in the rows' own comments long before the gate
+ * existed and are transcribed here so a machine can hold them; the
+ * `EXTERNAL_IMPORT_ERROR` and `UPLOAD_SESSION_EXPIRED` entries were
+ * adjudicated on #13353 itself.
+ */
+export const PROVENANCE_WAIVERS: readonly ProvenanceWaiver[] = [
+  {
+    package: '@objectstack/metadata-core',
+    code: 'UPDATE_ID_MISMATCH',
+    registeredUnder: '@objectstack/objectql',
+    reason: 'Shared constructor one package over: metadata-core\'s ' +
+      '`engineUpdateDispatchRejectError` spells the string, but the throw ships in ' +
+      'production from `ObjectQL.update` (engine.ts) — the objectql row\'s own comment ' +
+      'records "hence registered here" (#11142/#11230).',
+  },
+  {
+    package: '@objectstack/service-automation',
+    code: 'FLOW_DISABLED',
+    registeredUnder: '@objectstack/runtime',
+    reason: 'The trigger door, not the producer, names the wire vocabulary: the engine ' +
+      'returns `AutomationResult.code` and runtime\'s doors read it and answer 409 ' +
+      '(#9415/#9446; the runtime row\'s comment records the decision).',
+  },
+  {
+    package: '@objectstack/service-automation',
+    code: 'FLOW_NO_START_NODE',
+    registeredUnder: '@objectstack/runtime',
+    reason: 'Same decision as FLOW_DISABLED, 422 arm (#9415/#9446): the trigger door ' +
+      'names the wire vocabulary; the engine result carries the classification.',
+  },
+  {
+    package: '@objectstack/service-automation',
+    code: 'FLOW_INPUT_SCHEMA_INVALID',
+    registeredUnder: '@objectstack/runtime',
+    reason: 'Registered ahead of its producer by design (#10025 → #11504, the #10413 → ' +
+      '#10576 split shape): the engine\'s `execute()` catch classifies the refusal, the ' +
+      'trigger door serves it — the runtime row\'s comment records "registered HERE and ' +
+      'not under the engine\'s package" with its three FLOW_* siblings.',
+  },
+  {
+    package: '@objectstack/service-datasource',
+    code: 'EXTERNAL_IMPORT_ERROR',
+    registeredUnder: '@objectstack/rest',
+    reason: 'Adjudicated on #13353: the only door for `importObject` is rest\'s ' +
+      '`POST …/tables/:remote/import` (external-datasource-routes.ts), whose catch stamps ' +
+      'this code itself for EVERY importObject throw and never reads the producer\'s ' +
+      'declaration — the door names the wire vocabulary. The producer\'s `err.code` ' +
+      '(`importNameRefusedError`) is the #8016 declaration shape, agreeing with the door ' +
+      'by construction, not a second wire emitter.',
+  },
+  {
+    package: '@objectstack/client',
+    code: 'UPLOAD_SESSION_EXPIRED',
+    registeredUnder: '@objectstack/service-storage',
+    reason: 'Client-side synthesis (#7870): `resumeUpload` mirrors the server\'s 410 pair ' +
+      'when the progress poll reports `expired`, so caller branches fire identically. The ' +
+      'ledger\'s scope prose covers the SERVING side; whether a client-synthesised code ' +
+      'belongs in the ledger at all is the open scope question #13353 recorded — ' +
+      'deliberately a waiver, not a row, until that question is ruled.',
+  },
+  {
+    package: '@objectstack/spec',
+    code: 'ITEM_LOCKED',
+    registeredUnder: '@objectstack/metadata-protocol',
+    reason: 'Shared evaluator one package over: `evaluateLockForWrite`/`…ForDelete` ' +
+      '(kernel/metadata-protection.zod.ts) construct the structured refusal, and the ' +
+      'protocol layer — the registered emitter — turns it into the 403 the wire carries ' +
+      '(ADR-0010 §3.3). Spec ships schemas and pure helpers, never an HTTP door.',
+  },
+  {
+    package: '@objectstack/types',
+    code: 'VALIDATION_FAILED',
+    registeredUnder: '@objectstack/runtime',
+    reason: 'Shared constructor by design (#8016/#3918): `validationFailure()` lives in ' +
+      'the dependency-light package so BOTH doors recognise one shape; the throws are ' +
+      'served under the emitting doors\' own registrations (runtime\'s dispatcher exits, ' +
+      'rest\'s `mapDataError` — both packages list the code).',
+  },
+];

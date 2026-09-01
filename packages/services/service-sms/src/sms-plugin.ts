@@ -226,8 +226,10 @@ export class SmsServicePlugin implements Plugin {
           try {
             const payload = await settings.getNamespace('sms');
             const values: Record<string, unknown> = {};
+            const sources: Record<string, string> = {};
             for (const [k, v] of Object.entries(payload.values as Record<string, any>)) {
               values[k] = v?.value;
+              if (v?.source) sources[k] = String(v.source);
             }
             // #2814 — the daily cost ceiling binds for EVERY composition,
             // including a host-injected transport: "how much may this
@@ -239,7 +241,7 @@ export class SmsServicePlugin implements Plugin {
             this.dailyQuota?.setQuota(values.daily_quota);
             // A host-injected transport, by contrast, IS authoritative — the
             // settings form only manages the provider-tag path.
-            if (!this.options.transport) this.applySmsSettings(values, ctx);
+            if (!this.options.transport) this.applySmsSettings(values, sources, ctx);
           } catch (err: any) {
             ctx.logger.warn('SmsServicePlugin: failed to apply sms settings: ' + (err?.message ?? err));
           }
@@ -313,7 +315,11 @@ export class SmsServicePlugin implements Plugin {
    * on the running SmsService. Incomplete credentials keep the previous
    * transport (with a warning) so a half-saved form can't break delivery.
    */
-  private applySmsSettings(values: Record<string, unknown>, ctx: PluginContext): void {
+  private applySmsSettings(
+    values: Record<string, unknown>,
+    sources: Record<string, string>,
+    ctx: PluginContext,
+  ): void {
     if (!this.service) return;
     const resolved = providerFromSettings(values);
     if (resolved.missing) {
@@ -323,9 +329,19 @@ export class SmsServicePlugin implements Plugin {
       return;
     }
     if (resolved.provider === 'log') {
-      // Downgrade to the dev transport only when the operator explicitly
-      // selected `log`; an unset namespace keeps the constructor opts.
-      if (values.provider === 'log') {
+      // [#5536] Downgrade to the dev transport only when an operator (or an
+      // env override) actually AUTHORED the `log` selection —
+      // `values.provider === 'log'` alone cannot tell that apart from the
+      // manifest default, which resolves to `'log'` on every boot whether or
+      // not anyone ever opened the settings page. Same criterion, same
+      // reason as EmailServicePlugin: the manifest default
+      // (`source: 'default'`) is not a decision anyone made, and treating it
+      // as one would let a settings page nobody opened silently switch off
+      // the transport the deployment declared via constructor options. A
+      // missing `source` (a non-conforming snapshot) reads as 'default': the
+      // conservative side keeps the deployment's declared transport
+      // delivering.
+      if (values.provider === 'log' && (sources.provider ?? 'default') !== 'default') {
         this.service.setTransport(new LogSmsTransport(ctx.logger), false);
         ctx.logger.info('SmsServicePlugin: sms settings applied (provider=log; SMS will NOT be sent).');
       }

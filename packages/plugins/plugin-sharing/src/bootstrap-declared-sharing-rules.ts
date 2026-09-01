@@ -51,6 +51,7 @@
 import type { SharingRuleService } from './sharing-rule-service.js';
 import type { SharingRuleRecipientType, ShareAccessLevel } from '@objectstack/spec/contracts';
 import { compileCelToFilter } from '@objectstack/formula';
+import type { CelFilterFailReason } from '@objectstack/formula';
 import { isMatchAllCriteria } from './rule-criteria.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
@@ -129,8 +130,50 @@ function mapRecipientType(t: unknown): SharingRuleRecipientType | null {
  * never seeding a permissive match-all (ADR-0049).
  */
 export function celToFilter(cel: unknown): Record<string, unknown> | null {
+  return celToFilterOutcome(cel).filter;
+}
+
+/**
+ * Why a declared rule's `condition` produced no criteria — the compiler's OWN
+ * answer, carried instead of discarded. [#13943]
+ *
+ * `compileCelToFilter` already returns `{ reason, detail }` on every refusal;
+ * `celToFilter` used to consume `!ok` and collapse the rest to `null` one line
+ * before the only WARN that could surface it — so an operator whose declared
+ * rule was silently not granting got the fact ("skipped") and the source text
+ * back, but not WHICH shape the compiler refused or why. The extra member is
+ * this FILE's own drop (the ADR-0049 match-all guard at the call site), which
+ * the compiler reports as a success — same skip, same silence, so it joins the
+ * same vocabulary rather than staying unnamed (the `empty-membership`
+ * precedent in `plugin-security/src/rls-compiler.ts`, #13639).
+ */
+type SharingSkipReason = CelFilterFailReason | 'match-all-criteria';
+
+/** A skipped rule's cause: the compiler's `reason` (the aggregatable category) plus its human `detail` (the concrete fault). */
+interface SharingSkipCause {
+  reason: SharingSkipReason;
+  detail: string;
+}
+
+/** {@link celToFilterOutcome}'s answer: the filter, or why there is none. */
+type CelToFilterOutcome =
+  | { filter: Record<string, unknown>; cause?: undefined }
+  | { filter: null; cause: SharingSkipCause };
+
+/**
+ * [#13943] {@link celToFilter}'s answer WITH the reason it refused.
+ *
+ * Same compile, same decision, same returned filter — the only difference is
+ * that the compiler's `{ reason, detail }` survives to the caller instead of
+ * being collapsed into `null` at the `!result.ok` line. `celToFilter` stays
+ * exactly as published (`Record | null`) and delegates here — the
+ * `compileExpressionOutcome` shape from `plugin-security/src/rls-compiler.ts`
+ * (#13942), one seam over.
+ */
+export function celToFilterOutcome(cel: unknown): CelToFilterOutcome {
   const result = compileCelToFilter(cel as string | { source?: string }, { variables: {} });
-  return result.ok ? (result.filter as Record<string, unknown>) : null;
+  if (!result.ok) return { filter: null, cause: { reason: result.reason, detail: result.detail } };
+  return { filter: result.filter as Record<string, unknown> };
 }
 
 /**
@@ -197,12 +240,29 @@ export async function bootstrapDeclaredSharingRules(
     // schema requires `condition`, so reaching here means a hand-crafted
     // `{ dialect, source: '' }` envelope or a stale pre-built package, and
     // neither earns a match-all.
-    const f = celToFilter(r.condition);
-    if (!f || isMatchAllCriteria(f)) {
-      logger?.warn?.('[sharing-rule] skipped (missing or untranslatable CEL condition — never seeded as match-all) [experimental]', { rule: r.name, condition: r.condition });
+    const outcome = celToFilterOutcome(r.condition);
+    if (outcome.filter === null || isMatchAllCriteria(outcome.filter)) {
+      // [#13943] The skip keeps its REASON. `reason` + `detail` are what the
+      // compiler already computed — the shape it refused, the variable path,
+      // the parse bound that was overrun — and discarding them here is what
+      // left an operator with a skipped rule, its source text, and no why.
+      // The skip decision itself is byte-identical to before (ADR-0049: an
+      // unlowerable condition is never seeded as a permissive match-all).
+      const cause: SharingSkipCause = outcome.filter === null
+        ? outcome.cause
+        : {
+            // The compiler answered `ok`, so there is no compiler detail to
+            // carry — this drop is THIS file's match-all guard, and it names
+            // itself rather than being reported as untranslatable.
+            reason: 'match-all-criteria',
+            detail:
+              `the condition lowered to ${JSON.stringify(outcome.filter)}, which constrains nothing — ` +
+              'seeding it would share every record of the object (ADR-0049)',
+          };
+      logger?.warn?.('[sharing-rule] skipped (missing or untranslatable CEL condition — never seeded as match-all) [experimental]', { rule: r.name, condition: r.condition, reason: cause.reason, detail: cause.detail });
       skipped += 1; continue;
     }
-    const criteria: Record<string, unknown> = f;
+    const criteria: Record<string, unknown> = outcome.filter;
     try {
       await ruleService.defineRule({
         name: r.name,

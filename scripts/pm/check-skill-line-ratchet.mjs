@@ -248,14 +248,52 @@ export const CEILINGS = new Map([
   // or folded; the residual +6 could not be paid without deleting ruled clauses
   // (refused on the state-machine precedent). Landed count, headroom 0, same
   // convention.
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 57],
+  // Raised 57 → 60 by the clear-equals-land CRITERIA encoding — the 清标即落地
+  // section gains the arm-precondition list it never carried: an in-seat at-tier
+  // PASS on record, `needs:contract-review` cleared on BOTH carriers, and ALL of
+  // the PR's checks green (never the required subset), with the per-pair
+  // mechanical reading (`check-clause2-carriers --pair`) and its exit register,
+  // and the governed-surface boundary restated as unchanged. The rule is the
+  // 2026-08-31 director batch #17 ruling, verbatim and untranslated: 「同意」,
+  // which ordered the text into THIS file and THIS section; the raise itself is
+  // authorized by the maintainer on 2026-09-01, director decision batch A,
+  // verbatim and untranslated: 「同意。」 — that ruling also chose the FULL
+  // encoding over the 58-line bare minimum, so the two extra lines are ruled
+  // content, not slack. Paid in place first: the downgrade-fuse bullet's
+  // restatement of the served-tier READING collapsed to the platform-readings
+  // pointer it already carried (4 lines → 3, 437 B → 353 B), the one real
+  // deletion the surface had; the residual +4 could not be paid without deleting
+  // a ruled clause, and the nearest candidates were the governed-surface
+  // boundary and the terminal clause (refused on the state-machine precedent).
+  // Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 60],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
   // Lowered 48 → 46 by the #12081 soft-break closure (lowering is always
   // legitimate): three of this file's measured Han+ASCII-punct breaks merged
   // back into their paragraphs, and two of the three paid for themselves.
-  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 46],
+  // Raised 46 → 54 by TWO same-day maintainer rulings on the decision frame,
+  // both of which explicitly order their own encoding into the skills. Verbatim
+  // and untranslated — the decision-batch presentation rule:
+  //   「每批5张详细解释，不是这样一堆列给我，这个也要写入skills」
+  // and the axis-weighting rule, whose card-face half lands here (its full
+  // statement is in the frame's single source, SKILL.md 「升级与决策」, paid from
+  // that file's existing headroom):
+  //   「四维分析中，长期合理应该权重最高，至少50%」
+  // +5 for the presentation teeth (exactly-5 / stop-and-wait / ⛔ multi-batch,
+  // and the prose-per-card duty with its applicability boundary — presenting
+  // items for a RULING, never already-decided result statements), +3 for the
+  // weight floor with its two guards (read through axis ①'s own definition, so
+  // it cannot underwrite speculative expansion; recommendation-only, so it
+  // cannot move the human floor). Could not be paid in place: all 46 lines are
+  // already packed to their own minimum at the 120-byte cap (measured per line
+  // — the file was densified at phrase boundaries by #13389 and the widest
+  // reflow saving available is zero), and re-wrap funding is refused per the
+  // 2026-08-17 rule in any case; the only other in-place payment was deleting a
+  // ruled clause, refused on the state-machine precedent. Landed count, headroom
+  // 0 again, same convention.
+  ['.claude/skills/pm-dispatch/references/decision-analysis.md', 54],
   // 134 → 133: whole-text restructuring round, PR-2 (maintainer ruling
   // 2026-08-23) — the three write-side sanitizer rows consolidated to one
   // author rule + one measured-behaviour row per surface (body / comment).
@@ -350,7 +388,21 @@ export const CEILINGS = new Map([
   // and 4 of the 8 paid for themselves. Zero content change — the diff is
   // byte-identical after whitespace normalization (39,313 B both sides), so the
   // 4 lines are re-flow slack, never a cut. Headroom 0 again, same convention.
-  ['.claude/agents/os-dev.md', 466],
+  // Raised 466 → 469 by the axis-weighting ruling (maintainer 2026-09-01, PM
+  // chat, verbatim and untranslated): 「四维分析中，长期合理应该权重最高，至少50%」.
+  // This file is one of the four `check:skill-frame-sync` COPIES, so a rule that
+  // changes which recommendation the frame yields has to reach it — the #5130
+  // drift is exactly a frame-semantics change that skipped a mirror. +3 lines,
+  // folded into the existing binding sentence rather than added as a new
+  // paragraph. ⚠️ Re-wrap funding was AVAILABLE here and was REFUSED: three
+  // paragraphs nearby carry wrap artifacts (two orphan lines of 6 and 8 bytes)
+  // worth exactly the 3 lines needed, and merging them would have landed this
+  // file at 466/466 with no raise — that is 筹行, banned by the 2026-08-17
+  // ruling, since the ratchet governs content volume and lines are only its
+  // machine-readable proxy. Measured both ways before reverting to the raise.
+  // The density fix is legitimate on its own and belongs in a net-reducing PR
+  // (2026-08-29 ruling), not this one. Landed count, headroom 0, same convention.
+  ['.claude/agents/os-dev.md', 469],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
   // isn't specific to the pm-dispatch surface. Set at current counts on
@@ -403,10 +455,10 @@ export const CEILINGS = new Map([
   // prose amended to the 2026-08-27 approve-gated queue ruling — the superseded
   // "Reviewed + approved + fully green does not override this" replaced by the
   // GOVERNED_APPROVERS pinned-approval landing path, the agent-never-approves
-  // prohibition, and the pure-regeneration proactive-approval line (the queue
-  // leg installs no dependencies, so the byte-equality lift never evaluates at
-  // queue time); § Skills' twin sentence reconditioned in place at net 0. All
-  // three PD #14 paragraphs measure 0 lossless-rewrap headroom under wrapLine
+  // prohibition, and the pure-regeneration proactive-approval line (the queue leg
+  // then installed nothing, so the byte-equality lift never evaluated; SUPERSEDED
+  // 2026-09-01/#14067); § Skills' twin sentence reconditioned in place at net 0.
+  // All three PD #14 paragraphs measure 0 lossless-rewrap headroom under wrapLine
   // and the card's seven-cut ledger was exhausted first: held draft +2, the
   // proactive-approval rider +2 (a 161-byte minimal variant still wraps to +2;
   // anything smaller drops ruled content), fold 0. Maintainer batch ruling

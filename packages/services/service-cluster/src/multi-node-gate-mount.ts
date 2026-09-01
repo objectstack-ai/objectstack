@@ -46,8 +46,10 @@
  * "not registered" — the attempt is recorded as `loaded-without-gate` rather
  * than papered over. Fixing that split is #13330's job for the registry class
  * generally; this module deliberately does not anchor one registry by hand.
- * Until it lands, the fail-closed default means a mis-anchored registration
- * downgrades to single-node loudly instead of running unlicensed silently.
+ * Until it lands, the fail-closed default means a mis-anchored registration is
+ * refused loudly instead of running unlicensed silently — and on a deployment
+ * that declared multi-node, "refused" means the boot stops (see the gate
+ * module's boot-outcome note). ⛔ Not a quiet single-node degrade.
  */
 
 import { hasMultiNodeGate } from './multi-node-gate.js';

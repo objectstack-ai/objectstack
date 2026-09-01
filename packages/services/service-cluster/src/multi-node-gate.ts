@@ -23,8 +23,9 @@
  * unregistered gate must not silently mean "permitted" on a licensed
  * capability, so the default direction is now:
  *
- *   - `requested > 1` with no gate → **refused** (the caller downgrades to
- *     single-node and warns — never bricks; see below);
+ *   - `requested > 1` with no gate → **refused** (the caller drops the remote
+ *     driver and warns; ⛔ see the boot-outcome note below — with a multi-node
+ *     topology declared, that is a boot REFUSAL, not a quiet degrade);
  *   - `requested` absent or `1` with no gate → allowed, exactly as before.
  *     A single-replica process declares no multi-node topology, so there is
  *     nothing for a licence to gate. This keeps the refusal keyed to what the
@@ -36,10 +37,30 @@
  * the distribution's gate is loaded on EVERY boot route, instead of only on
  * the route where one particular app config file happens to execute.
  *
- * When a gate denies, the caller (e.g. `os serve`) **downgrades to single-node**
- * rather than failing — multi-node is an add-on, not a precondition for the
- * runtime to serve. This is distinct from the split-brain guard, which throws
- * on an outright misconfiguration (memory driver declared multi-node).
+ * ## ⛔ What a denial ACTUALLY does at boot — it is not always a degrade
+ *
+ * When a gate denies, the caller (e.g. `os serve`) drops the remote driver and
+ * lets the runtime fall back to the in-process one — multi-node is an add-on,
+ * not a precondition for the runtime to serve.
+ *
+ * ⚠️ This module used to stop there, saying the caller "downgrades to
+ * single-node rather than failing", and to place the split-brain guard as a
+ * DISTINCT concern. Measured on #14116, the two are not independent — they key
+ * off the SAME operator declaration:
+ *
+ *   - denial + no multi-node declared (`requested` absent or 1) → a genuine
+ *     downgrade; the process serves single-node.
+ *   - denial + multi-node declared (`OS_CLUSTER_REPLICAS > 1` /
+ *     `OS_EXPECT_MULTI_NODE=true`) → the in-process fallback trips
+ *     `assertClusterDriverSafeForTopology` in `ClusterServicePlugin.init` and
+ *     the boot is **REFUSED**.
+ *
+ * ⭐ The refusal is correct, and must not be "fixed" by weakening the guard: N
+ * replicas each holding a per-process lock is exactly the silent split-brain
+ * that guard exists to stop. What was wrong was the promise. ⛔ Do not restate
+ * "never bricks" anywhere in this package — for the fail-closed default above,
+ * whose trigger (`requested > 1`) is the guard's trigger, refusal is the
+ * ordinary outcome, not the exception.
  *
  * ## Two different questions (#8367)
  *

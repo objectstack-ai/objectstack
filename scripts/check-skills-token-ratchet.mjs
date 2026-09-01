@@ -234,6 +234,44 @@ export const CEILING_BASIS = {
   bundleExtension: 'c026b0d2d',
 };
 
+// ── The 2026-08-31 app-repo-principles raise, shared by five rows below ─────
+//
+// ⚠️ PLACEMENT IS LOAD-BEARING: this block sits ABOVE the doc comment below, not
+// between it and the declaration. check-ratchet-remedy-authority.mjs anchors this
+// gate's expanding-remedy offer by finding SHRINK testimony within 400 chars of a
+// `CEILINGS` mention in source, and that testimony is the "SHRINK-ONLY" line in
+// that doc comment. Inserting prose between the two pushed it out of the window
+// and flipped this gate's classification from `marked` to `excluded` — a MISCLASSIFIED
+// failure, i.e. the farm reporting that a gate silently left the convention.
+// Measured both ways while landing this raise. Keep new prose on this side.
+//
+// The maintainer ruled that day that the way a metadata app works is itself
+// published-skill material. Verbatim and untranslated:
+//
+//   「元数据应用就应该是在平台的规范下，基于skills 写元数据，并且使用平台提供的
+//   os命令校验元数据的合法性，而不是重新造轮子。这个也应该进入 hotcrm 的规范，
+//   甚至是 objectstack 的skills」
+//
+// and, on the layout escape hatch (same day):
+//
+//   「或者说 skills 应该说明，逃生仓是极端场景按照客户需求自定义的场景下才需要，
+//   应该尽量避免。」
+//
+// That is the authorization this raise runs on, and it names THIS surface —
+// `skills/`. The app-side half of the same ruling landed first in the app repo's
+// own AGENTS.md; these rows are the platform half, carrying only the items that
+// are universal to any ObjectStack app (the app/platform boundary, the docs
+// discipline, the invariant-vs-transition-gate choice, blocking on a human
+// judgement, flow privilege, the org predicate, and the section ladder).
+//
+// PAID DOWN FIRST, then raised for the remainder. The only genuine deletion
+// available was in the ui row and it is recorded there; every other file's new
+// text is a live fact with no existing text it makes redundant, so deleting to
+// fund would have removed a fact with no other home. 27 tokens of existing
+// headroom across three rows absorb part of the growth, so the ceilings move by
+// 900 while the bundle grows by 927. The raising PR's body carries the same
+// arithmetic, per-file and summed.
+
 /**
  * Measured counts, in the convention above. SHRINK-ONLY: lower freely, and see
  * the header for what the other direction costs.
@@ -258,11 +296,35 @@ export const CEILINGS = new Map([
   // published teaching is the only guard. +132 tokens, compressed to minimum.
   // Maintainer ruling 2026-08-25 (option B1, raise the ceiling), verbatim and
   // untranslated: 「我看到了,你分析过了,接受你的建议」.
-  ['skills/objectstack-automation/SKILL.md', 12643],
-  ['skills/objectstack-data/SKILL.md', 13783], //       -34 (was 13817)
+  // 12643 -> 12768 (2026-08-31 app-repo-principles raise, see the block above).
+  // Two flow rules an app author gets wrong in the direction that leaks data.
+  // The `readonly` blockquote above them says "a flow that maintains a readonly
+  // field must run runAs:'system'" — true of the SCHEDULED flow it was written
+  // for, and read by an agent writing a SCREEN flow it says "elevate the whole
+  // screen flow", which elevates every other write in it. The second rule has no
+  // prior statement anywhere in the bundle: a `runAs:'system'` sweep has no
+  // trigger user to narrow it, so one with no organization predicate reads and
+  // writes across every tenant. +150 tokens, of which the row's 25 tokens of
+  // headroom absorb 25; the CEILING moves 125.
+  ['skills/objectstack-automation/SKILL.md', 12768],
+  // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
+  // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
+  // bullet list where the tool is actually picked. Both wrong picks are silent:
+  // a transition gate written as a `validations[]` invariant bricks rows that
+  // were legal when stored, and an invariant written as `requiredWhen` never
+  // enforces itself at all. +110 tokens, 1 absorbed by headroom, ceiling +109.
+  ['skills/objectstack-data/SKILL.md', 13892],
   ['skills/objectstack-formula/SKILL.md', 6002], //     -53 (was 6055)
   ['skills/objectstack-i18n/SKILL.md', 6338], //        -11 (was 6349)
-  ['skills/objectstack-platform/SKILL.md', 12705], //   -11 (was 12716)
+  // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).
+  // The largest of the five and the frame the other four are read under: what an
+  // app IS (metadata under the platform's spec, authored from these skills,
+  // checked with `os`), where a capability gap gets fixed (upstream, never
+  // compensated for locally), and what a platform defect obliges — wait for the
+  // fix; no defensive coding, no shape tolerance, no hand-written predicate
+  // re-implementing a platform rule, and no landing of the half that fits.
+  // Nothing in this file said any of it. +280 tokens, 1 absorbed, ceiling +279.
+  ['skills/objectstack-platform/SKILL.md', 12984],
   // 14239 -> 14391: the pull-directed split-resolution order joined the decision
   // frame (maintainer ruling 2026-08-27, verbatim and untranslated: 「tong y 4」 —
   // accepting the four-rule set), and this file carries TWO enforced frame copies
@@ -270,7 +332,25 @@ export const CEILINGS = new Map([
   // with the frame it amends — the #5130 drift is exactly a frame-semantics change
   // that skipped this mirror. +152 tokens across both copies, compressed to the
   // minimal anchor form; the raising PR's body carries the arithmetic.
-  ['skills/objectstack-pm-dispatch/SKILL.md', 14391],
+  // 14391 -> 14549: the axis WEIGHTING joined the decision frame — long-term
+  // soundness carries the highest weight, at least 50%. Maintainer ruling
+  // 2026-09-01, verbatim and untranslated (kept on ONE line, #11106: a governed
+  // quotation that soft-breaks stops being findable by the things that grep it):
+  // 「四维分析中，长期合理应该权重最高，至少50%」
+  // Same shape and same reason as the +152 row above it: this file carries TWO
+  // enforced frame copies (check:skill-frame-sync COPIES), and a rule that
+  // changes WHICH RECOMMENDATION the frame yields is exactly the #5130 drift
+  // class if it ships to third-party installers with only the old tie-break —
+  // the customer's agent would weigh the axes co-equally while this repo weighs
+  // long-term ≥50%, and no report would reveal it. +158 tokens across both
+  // copies, against +152 for the comparable 2026-08-27 rule. Compressed twice
+  // before landing: the first cut measured +242, and the provenance was then
+  // removed on the #5451 route-B convention — the published copy carries the
+  // RULE without this repo's dates or quoted rulings (verified: the file holds
+  // zero of each), so the verbatim ruling lives in the internal copies and in
+  // the raising PR's body. No genuine deletion was available: the rule makes no
+  // existing sentence redundant, and a re-wrap moves no tokens and pays nothing.
+  ['skills/objectstack-pm-dispatch/SKILL.md', 14549],
   ['skills/objectstack-query/SKILL.md', 5552], //       -17 (was 5569)
   // 25125 -> 25143: the CRM UI Blueprint — the catalog's module-completeness
   // list, and the only place an agent is told what a finished module contains —
@@ -286,7 +366,23 @@ export const CEILINGS = new Map([
   // that restated report binding a second time inside its own paragraph — +120
   // net, 25113 -> 25143 tokens. The row's 12 tokens of headroom absorb part of
   // it, so the CEILING moves 18. The raising PR's body carries the same numbers.
-  ['skills/objectstack-ui/SKILL.md', 25143],
+  // 25143 -> 25445 (2026-08-31 app-repo-principles raise, see the block above).
+  // Two additions, one of them the escape-hatch ruling quoted there. The section
+  // ladder joins Record Presentation, which already tells an author to declare
+  // `fieldGroups` + `Field.group` and let the platform lay it out but never said
+  // what `sections` are FOR: derive (author none) -> reference a declared group
+  // (`{ group: '…' }`) -> enumerate members by hand, last, for a named-customer
+  // shape a reference cannot express. Corpus gravity is the whole reason the
+  // teaching has to move: every existing tutorial enumerates, so an agent copies
+  // enumeration unless the page says otherwise. The docs rule is the second
+  // addition — a doc explains business concepts, and a hand-copied inventory of
+  // objects/fields/components has no producer and goes stale.
+  // THE ONE GENUINE DELETION in this raise is here too: the file's two worked
+  // `sections` examples enumerated their members, i.e. taught rung 3 as the
+  // default in the very PR that demotes it. Both now reference a declared group,
+  // which is shorter — -13 tokens, real, and the fix the ruling asks for rather
+  // than a payment invented to fund it. +315 gross, -13, ceiling +302.
+  ['skills/objectstack-ui/SKILL.md', 25445],
   ['skills/objectstack-upgrade/SKILL.md', 8333], //      -2 (was 8335)
 
   // ── the #12392 extension: the rest of the AUTHORED bundle ────────────────
@@ -313,7 +409,13 @@ export const CEILINGS = new Map([
   ['skills/objectstack-data/rules/lifecycle.md', 1590],
   ['skills/objectstack-data/rules/naming.md', 773],
   ['skills/objectstack-data/rules/relationships.md', 3778],
-  ['skills/objectstack-data/rules/validation.md', 3024],
+  // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
+  // Severity Levels listed the three values and left the CHOICE unstated: a
+  // block rests on a judgement a person made, so a machine-inferred signal — a
+  // score, a duplicate guess — warns and never errors, and an override flag
+  // added to soften a block is evidence the block should have been a warning.
+  // +85 tokens, no headroom to absorb any of it, ceiling +85.
+  ['skills/objectstack-data/rules/validation.md', 3109],
 
   // objectstack-platform
   ['skills/objectstack-platform/evals/README.md', 514],
@@ -735,8 +837,19 @@ function selfTest() {
     // 117943 -> 118095: shifted by exactly the +152 ruling-authorized raise on
     // the pm-dispatch row (2026-08-27 「tong y 4」, see that row), so the strip's
     // lowering claim keeps its original slack instead of being silently eaten.
+    // 118095 -> 118910: same operation for the 2026-08-31 app-repo-principles
+    // raise (see the block above the map), which lands on FOUR SKILL.md rows —
+    // platform +279, ui +302, data +109, automation +125 = +815. The fifth row
+    // of that raise, `objectstack-data/rules/validation.md`, is not a SKILL.md
+    // and correctly does not shift this pin. Subtotal after: 118830, i.e. the
+    // same 80 tokens of slack the strip's claim had before either raise — which
+    // is the point of shifting rather than widening.
+    // 118910 -> 119068: same operation for the 2026-09-01 axis-weighting raise
+    // on the pm-dispatch row (+158, see that row) — one SKILL.md row, so the
+    // shift equals the raise exactly, and the strip's claim keeps the same 80
+    // tokens of slack it has carried since before any of the three raises.
     ['the re-measure lowered the SKILL.md subtotal',
-      skillMdCeilings.reduce((a, [, n]) => a + n, 0) < 118095, true],
+      skillMdCeilings.reduce((a, [, n]) => a + n, 0) < 119068, true],
 
     // ── the #12392 extension basis ───────────────────────────────────────
     // Same reasoning as the pins above: the gate never reads this sha, so it

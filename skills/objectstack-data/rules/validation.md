@@ -260,6 +260,12 @@ severity: 'warning'  // Allows save, shows warning
 severity: 'info'     // Informational only
 ```
 
+**Blocking rests on a human judgement.** A machine-inferred signal — a score, a
+duplicate guess, anything the system decided — may `warning`, never `error`.
+Only a value a person wrote may block a save. Do not add an override flag to
+soften a block either: an escape hatch around a rule is evidence the rule should
+have been a warning.
+
 ### Events
 
 ```typescript

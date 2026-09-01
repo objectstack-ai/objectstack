@@ -25,8 +25,14 @@ Both halves change:
 
 - **Fail-closed default** (`@objectstack/service-cluster`): with no gate
   registered, a DECLARED multi-node topology (`requested > 1`) is now
-  **refused** — `os serve` downgrades to single-node with a loud warning,
-  never bricks. An undeclared or single-replica count (`OS_CLUSTER_REPLICAS`
+  **refused** — `os serve` drops the remote driver and warns loudly.
+  ⛔ Read the boot outcome precisely: with a multi-node topology declared, the
+  in-process fallback then trips the split-brain guard and the boot is
+  **REFUSED**, not quietly degraded (measured on #14116; the guard's trigger
+  and this default's trigger are the same declaration). The refusal is the
+  correct outcome — N replicas on per-process locks is the silent split-brain
+  that guard exists to stop — but it is a refusal, and an operator upgrading
+  into this default must be told so. An undeclared or single-replica count (`OS_CLUSTER_REPLICAS`
   unset, `1`, or meaningless) keeps the historical allow: it declares no
   multi-node topology, so there is nothing to gate. A registered gate's
   verdicts are byte-identical to before — entitled deployments are untouched.
@@ -46,4 +52,4 @@ to single-node at boot and logs the refusal. Deploy a distribution that
 registers the gate (at module load of a carrier package, so every boot route
 mounts it), or remove the multi-node declaration.
 
-<!-- adr-0087: not-required (no-migration-prescription) A runtime default-direction change on the multi-node authorization gate: no spec key is removed, renamed or re-shaped, so there is no tombstone and nothing mechanical for `objectstack migrate meta` to rewrite. The channel that reaches an affected operator is the boot-time refusal itself (`os serve` downgrades to single-node and logs `MULTI_NODE_NO_GATE_REASON` with the remedy); whether to deploy a gate-registering distribution or drop the multi-node declaration is a deployment decision no migration entry can perform. -->
+<!-- adr-0087: not-required (no-migration-prescription) A runtime default-direction change on the multi-node authorization gate: no spec key is removed, renamed or re-shaped, so there is no tombstone and nothing mechanical for `objectstack migrate meta` to rewrite. The channel that reaches an affected operator is the boot-time refusal itself (`os serve` logs `MULTI_NODE_NO_GATE_REASON` with the remedy, and a declared multi-node topology then stops the boot at the split-brain guard rather than degrading silently); whether to deploy a gate-registering distribution or drop the multi-node declaration is a deployment decision no migration entry can perform. -->

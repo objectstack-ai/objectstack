@@ -45,8 +45,8 @@ export class ComposedClusterService implements IClusterService {
 
 /**
  * Build an `IClusterService` from a `ClusterCapabilityConfig`. The only
- * driver shipped from this package is `memory`; other drivers (postgres,
- * redis, nats) live in dedicated packages and register themselves via
+ * driver shipped from this package is `memory`; other drivers (e.g.
+ * `redis`) live in dedicated packages and register themselves via
  * `registerClusterDriver()`.
  *
  * @example
@@ -83,7 +83,7 @@ export function defineCluster(
 }
 
 // ---------------------------------------------------------------------------
-// Driver registry (for postgres/redis/nats/custom drivers)
+// Driver registry (for redis/custom drivers)
 // ---------------------------------------------------------------------------
 
 export interface DriverFactoryConfig {
@@ -103,8 +103,8 @@ const driverRegistry = new Map<string, ClusterDriverFactory>();
 
 /**
  * Register a custom cluster driver. Driver packages (e.g.
- * `@objectstack/service-cluster-postgres`) should call this at module
- * load time so `defineCluster({ driver: 'postgres' })` resolves them.
+ * `@objectstack/service-cluster-redis`) should call this at module
+ * load time so `defineCluster({ driver: 'redis' })` resolves them.
  */
 export function registerClusterDriver(
     name: string,
@@ -114,6 +114,29 @@ export function registerClusterDriver(
         throw new Error('The "memory" driver is reserved.');
     }
     driverRegistry.set(name, factory);
+}
+
+/**
+ * The driver names currently in this module instance's registry.
+ *
+ * Exported so a boot sequence can READ whether a driver package's load-time
+ * `registerClusterDriver()` actually landed, instead of assuming it did.
+ * `defineCluster()` consults this same `Map`, so an answer from here is an
+ * answer about the call that comes next — which is the whole point (#13330:
+ * `os serve` loaded a driver that registered into a SECOND, CommonJS instance
+ * of this module and then failed one line later in `defineCluster` with
+ * "not registered", with nothing between the two to say so).
+ *
+ * `memory` is deliberately absent: it is not registered, it is special-cased
+ * inside `defineCluster`. This lists what the REGISTRY holds, so an empty array
+ * is a true and useful reading rather than a misleading one.
+ *
+ * A list rather than a `has()` predicate because the caller that needs the
+ * boolean also needs to print what WAS there when the answer is no — one call,
+ * both readings, no way for the two to drift.
+ */
+export function listClusterDrivers(): string[] {
+    return [...driverRegistry.keys()];
 }
 
 // ---------------------------------------------------------------------------

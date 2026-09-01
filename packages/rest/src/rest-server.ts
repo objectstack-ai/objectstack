@@ -10360,12 +10360,23 @@ export class RestServer {
         // signals the verdict via message prefixes, the plugin's established
         // error idiom — this maps them onto HTTP. Returns true when handled.
         //
-        // [#8111] The prefix is a SERVER-INTERNAL service→REST derivation: it
-        // is stripped below and never reaches the wire, so no consumer can
-        // read it (censused at claim — the only in-repo `startsWith(CODE)`
-        // readers are this file's own route mappings plus one
-        // `plugin-approvals` check on an error it threw itself in-process).
-        // It therefore stays exactly as it is; only the response SHAPE moved.
+        // [#8111] The prefix is a SERVER-INTERNAL service→REST derivation.
+        // ⚠️ [#13095] This comment used to claim the MECHANISM guaranteed
+        // that: "it is stripped below and never reaches the wire". That was
+        // true of the prefix-idiom arm it was written about and FALSE for the
+        // classified limb #11683 added beside it, which re-dresses
+        // `resolveErrorResponse`'s answer — an answer that shipped the prefix
+        // inside the sentence until the 2026-08-31 ruling converged that arm
+        // onto the same declared-code-anchored strip. Even now the strip is
+        // ANCHORED (it removes only a prefix restating the declared code), so
+        // "never reaches the wire" is not a mechanism anyone may lean on.
+        // What holds instead is MEASURED, not guaranteed: no consumer
+        // branches on the prefix in the wire `error` text — censused at
+        // #8111's claim and re-censused 2026-09-01 (objectstack + objectui:
+        // zero wire readers; every `startsWith(CODE)` hit is this file's own
+        // route mappings or an in-process producer-side check; `cloud` was
+        // not reachable and is NOT measured). The prefix idiom itself stays
+        // exactly as it is; #8111 moved only the response SHAPE.
         //
         // [#11683] …and it stays exactly as it is here too. What moved is that
         // the prefix read is no longer the FIRST question, and no longer the
@@ -11459,7 +11470,18 @@ export class RestServer {
             ];
             for (const [re, status, code] of mapping) {
                 if (re.test(msg)) {
-                    res.status(status).json({ code, error: msg.replace(/^[A-Z_]+:\s*/, '') });
+                    // [#13095] The strip is anchored to the CODE this row just
+                    // answered — the same declared-code anchoring
+                    // `withoutDeclaredCodePrefix` (error-response.ts) and
+                    // `respondSharingError`'s prefix arm apply, converged here
+                    // by the 2026-08-31 ruling. The blanket
+                    // SCREAMING_SNAKE-colon regex that used to sit here
+                    // (`/^[A-Z_]+:\s*/`) is exactly the shape #12975 rejected:
+                    // it could eat a token the wire carries nowhere else (a
+                    // message opening with a DIFFERENT capitalised word and a
+                    // colon), where the anchored form can only ever remove a
+                    // duplicate of the `code` already on the wire.
+                    res.status(status).json({ code, error: msg.replace(new RegExp(`^${code}:\\s*`), '') });
                     return true;
                 }
             }

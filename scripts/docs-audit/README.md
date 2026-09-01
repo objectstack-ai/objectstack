@@ -456,17 +456,33 @@ node scripts/docs-audit/check-audit-scope.mjs --write   # regenerate the list fr
 node scripts/docs-audit/check-audit-scope.mjs --self-test
 ```
 
-The `docs-accuracy-audit` workflow (part 3) carries its default scope **inline**, as
-`ALL_HANDWRITTEN`. It has to: a workflow script runs inside a `node:vm` context whose
-only globals are `log`/`phase`/`console`/`budget`/timers plus
-`agent`/`parallel`/`pipeline`/`workflow`/`args`, with code generation disabled — no
-`require`, no `import`, no filesystem. It can neither walk `content/docs/` nor read a
-JSON artifact, so the list cannot be derived *at run time*.
+**THE single source is `scripts/docs-audit/handwritten-docs.json`** — one generated file,
+with two consumers: this gate, and whoever invokes the `docs-accuracy-audit` workflow
+(part 3), who reads it and hands its `docs` array in as `args.handwritten`.
 
-It is therefore derived at *generation* time instead: `--write` rewrites the block from
+The workflow body cannot read it itself. A workflow script runs inside a `node:vm`
+context whose only globals are `log`/`phase`/`console`/`budget`/timers plus
+`agent`/`parallel`/`pipeline`/`workflow`/`args`, with code generation disabled — no
+`require`, no `import`, no filesystem. It can neither walk `content/docs/` nor open a
+JSON artifact. But it does not have to: `args` **is** an injection channel, delivered
+verbatim from the invocation, so the read happens in the **caller**, outside the sandbox,
+and the list arrives as data.
+
+The list used to live inline in the workflow body, as `ALL_HANDWRITTEN`. `.claude/**` is
+a governed surface (human-merge-only, never armed, never queued), so adding one customer
+documentation page forced a governed edit — through a bookkeeping list that merely
+happened to live there, and invisibly: nothing in such a card's file list showed a
+governed path until this gate ran. Maintainer ruling, 2026-09-01, verbatim 「同意」: move
+it off. ⚠️ The governed register itself is **unchanged** — narrowing it was the option
+that ruling explicitly rejected, and this file is no precedent for relocating anything
+else out of `.claude/**`.
+
+The list is derived at *generation* time: `--write` rewrites the artifact from
 `affected-docs.mjs --all` (one definition of "hand-written doc", not two), and the plain
-run is a CI gate in `lint.yml` that fails when the block and `content/docs/` disagree
-**in either direction**.
+run is a CI gate in `lint.yml` that fails when the artifact and `content/docs/` disagree
+**in either direction**. It also runs the workflow against stub agents and checks that the
+body still *consumes* what it is handed — an artifact in sync with `content/docs/` proves
+nothing about a body that has stopped reading it, and that failure would be silent.
 
 Both directions matter, and only one had ever been noticed (#4851):
 
@@ -642,14 +658,21 @@ a consumer, add it to that list.**
 A Claude Code multi-agent workflow (`.claude/workflows/docs-accuracy-audit.js`). For each
 doc: an agent reads it, locates the real implementation, and applies evidence-backed
 fixes in place; a second **adversarial verifier** re-checks every fix against the code and
-repairs over-corrections. Scope it with `args.docs`; omit for a full audit.
+repairs over-corrections. Scope it with `args.docs`; for a full audit hand in the whole
+set as `args.handwritten`.
 
 ```js
 // scoped to the docs a code change touched:
 Workflow({ name: 'docs-accuracy-audit', args: { docs: [/* output of affected-docs.mjs */] } })
-// full audit of all hand-written docs:
-Workflow({ name: 'docs-accuracy-audit' })
+// full audit of all hand-written docs — read the artifact first, OUTSIDE the sandbox:
+//   node -e "console.log(JSON.stringify(require('./scripts/docs-audit/handwritten-docs.json').docs))"
+Workflow({ name: 'docs-accuracy-audit', args: { handwritten: [/* that array */] } })
 ```
+
+⛔ There is no "omit `args` and audit everything" invocation, and there cannot be: the
+body has no filesystem, so with nothing handed in it does not know what "everything" is.
+It refuses by name rather than inventing a scope — the two shapes it could invent are a
+silent audit of nothing and a stale list, and both report success.
 
 It edits files in place (frontmatter preserved, no moves) and returns a per-doc log of
 fixes, verifier repairs, and residual items that couldn't be confirmed against code —

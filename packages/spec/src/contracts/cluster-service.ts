@@ -263,7 +263,7 @@ export interface ICounter {
 export interface IClusterService {
     /** Stable identifier of this node within the cluster. */
     readonly nodeId: string;
-    /** Driver name in use ('memory' | 'redis' | 'postgres' | 'nats' | 'custom'). */
+    /** Driver name in use ('memory' | 'redis' | 'custom', or a runtime-registered driver name). */
     readonly driver: string;
     readonly pubsub: IPubSub;
     readonly lock: ILock;
