@@ -8,6 +8,7 @@
 //   node scripts/check-vendor-version-stamps.mjs --list         # every stamp it can see
 //   node scripts/check-vendor-version-stamps.mjs --census       # the drift census
 //   node scripts/check-vendor-version-stamps.mjs --window-sweep # window sensitivity
+//   node scripts/check-vendor-version-stamps.mjs --attribution-sweep  # attribution mechanisms
 //   node scripts/check-vendor-version-stamps.mjs --json
 //   node scripts/check-vendor-version-stamps.mjs --self-test    # verify the checker
 //
@@ -54,12 +55,13 @@
 //     named version. Editing the version without redoing the measurement
 //     produces a claim nobody ever made. A stale stamp tells the truth about
 //     when it was checked; a restamped-but-unmeasured one lies about it.
-//   - Measured on the #13940 corpus, 2026-08-31: of 249 stamp sites this gate
-//     sees, 130 name a version other than the resolved one and 116 of those are
-//     anchored historical facts of the `[#11374] Bound from better-auth 1.7.1's
-//     own MySQL schema` shape — true when written, true now, true after 1.9.0.
-//     Forcing them to the pin would fabricate that many measurements. (Those
-//     figures are a dated reading, not a live one: run `--census` for today's.)
+//   - Measured 2026-08-31, over the code roots and `content/docs`: of 250 stamp
+//     sites this gate sees, 138 name a version other than the resolved one. 51
+//     carry an anchor outright; the rest are bare facts about a named release
+//     — `[#11374] Bound from better-auth 1.7.1's own MySQL schema`, true when
+//     written, true now, true after 1.9.0. Forcing them to the pin would
+//     fabricate that many measurements. (Those figures are a dated reading, not
+//     a live one: run `--census` for today's.)
 //   - Some sites are not attestations at all. It is SELF-TEST FIXTURE DATA
 //     inside `check-prerelease-pin-watch.mjs` — a synthetic npm registry payload
 //     whose `1.7.1` is an arbitrary input proving the watcher notices a stable
@@ -70,8 +72,29 @@
 //   RED    a LIVE-READING stamp (it says "installed", "resolves to", "still
 //          true", "today") that names a version which is not the resolved one,
 //          and carries no date anchor scoping that present tense.
+//   RED    an UNANCHORED MEASUREMENT — "measured on 1.7.1", "verified against
+//          1.7.1" — resting a standing claim on a reading taken against a
+//          version that no longer installs, without saying when it was taken.
+//          The prose root is what made this shape visible: a docs page reads
+//          "better-auth declares `addMember` as a server-only API … — measured
+//          on 1.7.1", and the claim in front of the evidence is present tense
+//          and unqualified, so the page reads as current.
 //   GREEN  an ANCHORED stamp — one carrying a measurement date or an issue
 //          reference — naming ANY version. Permanently true, never swept again.
+//          One anchor answers both red shapes, which is why the remedy is the
+//          same sentence either way.
+//
+// ## ⛔ Why the prose root is not just another entry in ROOTS
+//
+// `content/docs` was added by #13981, and adding it was measured to be the
+// smaller half of that work. The detector could SEE the docs population before
+// the root existed — 15 sites over 405 files — and still could not JUDGE the
+// one site that mattered, because the package name sat ~90 characters back
+// across a wrapped prose line, past the character window attribution used.
+// Wiring the root without repairing attribution would have produced the
+// appearance of coverage over the substance of none. See the attribution
+// section below for what replaced the window, and why widening it was rejected
+// with numbers rather than with an argument.
 //
 // The consequence is the point: once a stamp is anchored it is green at every
 // future bump. The population that must be touched per bump falls from "every
@@ -100,13 +123,14 @@
 //
 // The width is swept rather than guessed, and the sweep says something different
 // from what was expected. The SITE count has no plateau at all — it climbs
-// monotonically (198 at width 1, 249 at 4, 343 at 20 on today's corpus), because
+// monotonically (199 at width 1, 250 at 4, 349 at 20 on today's corpus), because
 // a wider window always drags more version tokens near some family mention. A
 // plateau there was never going to exist, and a width picked by looking for one
 // would have been picked on a fiction.
 //
 // The number that decides anything is the FAILING set, and it is flat: 0 at
-// every width from 1 to 20. The verdict is window-INSENSITIVE on this corpus,
+// every width from 1 to 20 (re-measured 2026-08-31, with the prose root in and
+// the corpus repaired). The verdict is window-INSENSITIVE on this corpus,
 // because a live-reading claim and the version it names are the same clause —
 // they are never four lines apart. So the width is a cheap knob, not a
 // calibration, and `--window-sweep` prints both columns so the next author can
@@ -152,9 +176,33 @@ export const WATCHED_FAMILIES = [
   },
 ];
 
-export const ROOTS = ['packages', 'scripts', 'apps', 'examples'];
+const CODE_EXTENSIONS = new Set(['.ts', '.mts', '.mjs', '.js', '.tsx']);
+const PROSE_EXTENSIONS = new Set(['.mdx', '.md']);
+
+/**
+ * Where this gate reads — and, for the prose root, what it deliberately does not.
+ *
+ * The code roots came first because the class was found in code. They are not
+ * where it does the most damage: a stale stamp in a docblock misleads the next
+ * maintainer, while a stale stamp in `content/docs` is a CUSTOMER-FACING
+ * attestation. That is why the prose root is here.
+ *
+ * ⛔ `content/docs/releases` is excluded BY CONSTRUCTION, not by oversight.
+ * Release pages are written centrally at release time and are never edited by a
+ * code PR — CLAUDE.md states that as a standing rule — so a red there names no
+ * author who may act on it: the gate would be demanding an edit the repo
+ * forbids. Measured 2026-08-31, the exclusion drops 14 of the 15 docs sites,
+ * every historical one among them. That is the intended shape, and the single
+ * site it leaves is the one this root exists to judge.
+ */
+export const ROOTS = [
+  { path: 'packages', extensions: CODE_EXTENSIONS },
+  { path: 'scripts', extensions: CODE_EXTENSIONS },
+  { path: 'apps', extensions: CODE_EXTENSIONS },
+  { path: 'examples', extensions: CODE_EXTENSIONS },
+  { path: 'content/docs', extensions: PROSE_EXTENSIONS, exclude: ['content/docs/releases'] },
+];
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage', '.objectstack']);
-const EXTENSIONS = new Set(['.ts', '.mts', '.mjs', '.js', '.tsx']);
 
 /**
  * Window, in lines, within which a family name and a version token count as one
@@ -204,9 +252,87 @@ export const HISTORICAL_SCOPE_MARKERS = [
 ];
 
 /**
+ * Verbs that make the version behind them the PROVENANCE OF A READING.
+ *
+ * This is the second rotting shape, and the docs population is what made it
+ * visible. A live-reading marker asserts something about this tree in the
+ * present tense ("the installed 1.7.1"). A measurement verb asserts something
+ * weaker and just as perishable: that a standing claim rests on a reading taken
+ * against the version named. `content/docs/permissions/authentication.mdx`
+ * reads "better-auth declares `addMember` as a server-only API … — measured on
+ * 1.7.1" — a customer-facing attestation whose evidence was taken on a version
+ * that no longer installs, with nothing saying when. The claim in front of it
+ * is present tense and unqualified, so the page reads as current.
+ *
+ * ⭐ Contrast, from the SAME file, and the reason this rule is positional
+ * rather than a sentence-wide substring: ":1217" says "the stable `1.7.0` /
+ * `1.7.1` releases renamed it back to `accountId`". That names versions as the
+ * SUBJECT of a permanently true statement. It carries no measurement verb, it
+ * rots never, and a gate that reported it would be inviting an author to turn a
+ * true sentence into a false one.
+ *
+ * ⛔ The verb must GOVERN the version token, which is why this is checked over
+ * the characters immediately in front of the number rather than over the whole
+ * sentence. Measured: `packages/cli/src/commands/init.ts` writes "Measured on
+ * the configuration the range *does* govern (…), 1.7.1 behaves identically on
+ * better-sqlite3 13.0.3" — the verb is real, and what it measures is a
+ * CONFIGURATION, not the version. A sentence-wide substring test reds that line;
+ * a positional one leaves it alone, correctly.
+ */
+export const MEASUREMENT_MARKERS = [
+  'measured on',
+  'measured against',
+  'measured with',
+  'verified on',
+  'verified against',
+  'tested on',
+  'tested against',
+  'checked on',
+  'checked against',
+  'confirmed on',
+  'confirmed against',
+  'observed on',
+  'benchmarked on',
+];
+
+/**
+ * How many characters of flattened text may separate a measurement verb from
+ * the version it governs. Wide enough for a determiner, an adjective and a
+ * wrapped comment line ("measured on the\n * installed 1.7.1"); far too narrow
+ * to reach across the clause in the `init.ts` counter-example above.
+ */
+export const MEASUREMENT_LEAD = 48;
+
+/** Words that carry no meaning between a measurement verb and the number. */
+const MEASUREMENT_FILLER = /^(?:the|a|an|our|its|their|this|that|these|those|vendor|vendor's|vendors|installed|stable|current|currently|resolved|pinned|shipped|released|latest|same|exact|then|version|release|v|on|against|both|only)$/i;
+
+/**
+ * The measurement verb governing the version at `pos`, or null.
+ *
+ * @param {string} text
+ * @param {number} pos flat offset of the version token
+ * @returns {string|null}
+ */
+export function measurementLead(text, pos) {
+  const lead = text.slice(Math.max(0, pos - MEASUREMENT_LEAD), pos);
+  const low = lead.toLowerCase();
+  for (const marker of MEASUREMENT_MARKERS) {
+    const at = low.lastIndexOf(marker);
+    if (at === -1) continue;
+    // Only filler may stand between the verb and the number. A package name
+    // counts as filler ("measured against @better-auth/sso 1.7.1"); it is
+    // recognised by its shape, so an ordinary noun cannot pass as one.
+    const words = lead.slice(at + marker.length).replace(/[`'"()\[\],:;*_–—]/g, ' ').split(/\s+/).filter(Boolean);
+    if (words.every((w) => MEASUREMENT_FILLER.test(w) || /[-/@]/.test(w))) return marker;
+  }
+  return null;
+}
+
+/**
  * What makes a stamp historical, and therefore permanent. A measurement date or
  * an issue reference says WHEN the reading was taken, which is exactly the
- * coordinate a frozen version number is missing.
+ * coordinate a frozen version number is missing — and it is the anchor BOTH red
+ * shapes are missing, so it is the one repair that answers both.
  */
 export const ANCHOR_PATTERN = /\b20\d\d-\d\d-\d\d\b|#\d{3,6}\b/;
 
@@ -225,17 +351,234 @@ export const ANCHOR_PATTERN = /\b20\d\d-\d\d-\d\d\b|#\d{3,6}\b/;
  */
 export const FIXTURE_MARKER = 'vendor-stamp:fixture';
 
+/** The verdicts that FAIL the gate. Everything else is reported, not enforced. */
+export const FAILING_VERDICTS = new Set(['live-stale', 'unanchored-measurement']);
+
 const SEMVER = /(?<prefix>[\^~>=<]\s*)?\b(?<ver>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/g;
 
 /**
- * How far, in characters of flattened text, a package name may reach forward to
- * claim a version token. A name claims the FIRST unclaimed version after it and
- * then stops claiming — which is what keeps
- * `better-auth 1.7.1 behaves identically on 13.0.3 and on 12.11.1` from reading
- * 13.0.3 as a better-auth stamp. 60 spans a wrapped prose line; beyond that the
- * two tokens are no longer one sentence.
+ * ── Attribution: binding a version to the package it is ABOUT ──────────────
+ *
+ * Everything downstream is a consequence of this step. An unattributed site is
+ * counted and never judged, so a stamp the gate cannot attribute is a stamp the
+ * gate cannot hold — it appears in the census and is silently exempt from the
+ * rule.
+ *
+ * The first mechanism was a character window: a name claims the first unclaimed
+ * version within `CLAIM_GAP` characters. It approximates "the same sentence"
+ * with a byte count, and the approximation has a measured hole. In
+ * `content/docs/permissions/authentication.mdx`, "better-auth declares
+ * `addMember` as a server-only API with no HTTP path of its own — measured on
+ * 1.7.1" puts about 90 characters of prose between the name and the version:
+ * one sentence, two tokens, no attribution. The same hole hides live-reading
+ * stamps in code — `organization-add-member.ts` writes "better-auth declares
+ * `addMember` WITHOUT an HTTP path — measured on the installed 1.7.1" across a
+ * wrapped comment line, ~73 characters, and went unjudged for the same reason.
+ *
+ * ⛔ WIDENING THE WINDOW IS NOT THE REPAIR. Swept over the 5,593-file code
+ * corpus on 2026-08-31, raising the gap from 60 to 120 attributed 23 further
+ * sites — and among those 23, `better-call@1.3.7`, `@better-auth/utils@0.4.2`,
+ * `minimatch 10.2.3` and an internal `'0.0.0-polyfill'` sentinel were each
+ * bound to a watched family member that none of them is about. A wider window
+ * does not see further, it sees more indiscriminately, because the mechanism
+ * models only ONE claimant and every version in reach is fair game.
+ *
+ * So attribution is two rules, and neither of them is a width:
+ *
+ *   1. SENTENCE SCOPE. A name reaches to the end of its sentence and no
+ *      further — a blank line, a bullet, a heading, a JSX tag, a `.` or a `;`
+ *      ends the reach whether it falls at character 20 or character 200. In
+ *      code that is the statement terminator, so an attribution cannot leap
+ *      from one statement into the next; in prose it is the unit a reader
+ *      already parses as one claim.
+ *   2. NEAREST CLAIMANT WINS. Every package in this tree may claim, not only
+ *      the watched ones. `better-call@1.3.7` and `minimatch 10.2.3` bind their
+ *      own versions, so a watched name standing further back never reaches
+ *      them, at any width. The vocabulary is read from `pnpm-lock.yaml` — the
+ *      same measured ground truth the resolved pin comes from, never a hand
+ *      list that can rot away from the tree.
+ *
+ * The two failure directions are deliberately asymmetric. A foreign claimant
+ * this misses costs an attribution that would have been judged; a foreign
+ * claimant it invents costs a site its verdict — and an unjudged site is this
+ * gate's own documented safe state ("counted as a site and reported, never
+ * judged"). Where the rules are uncertain they therefore fail toward silence,
+ * never toward a false red. `--attribution-sweep` prints both mechanisms side
+ * by side, with a CONTESTED column counting attributions that bind a version
+ * some other package owns, so the next author can re-derive this rather than
+ * trust it.
+ */
+
+/**
+ * The legacy character window. No longer the mechanism; still the yardstick
+ * `--attribution-sweep` measures the current one against.
  */
 export const CLAIM_GAP = 60;
+
+/**
+ * A hard cap on sentence scope, in characters of flattened text.
+ *
+ * A sentence terminator can be missing — a table row, a minified line, a
+ * comment block written without punctuation — and an unbounded reach would let
+ * one such line attribute every version in it.
+ *
+ * This is a guard rail, not a calibration, and `--attribution-sweep` is where
+ * that is checked rather than asserted: it runs the sentence mechanism at
+ * several caps and prints what each one attributes and fails. Measured
+ * 2026-08-31, attribution saturates at 141 sites by 240 and does not move at
+ * 400 or 800, and the failing column is identical at every cap — so the number
+ * below decides nothing today. It exists so that a pathological line cannot
+ * make it decide everything tomorrow.
+ */
+export const ATTRIBUTION_REACH = 240;
+
+/**
+ * The longest `(…)` that still reads as an aside inside one sentence. Beyond
+ * this a round bracket is structure — a call, a test body — not punctuation.
+ */
+export const PARENTHETICAL_SPAN = 200;
+
+/**
+ * Strip the decoration a comment or a doc block puts at the start of a line, so
+ * the structural test below sees the sentence rather than the comment syntax.
+ *
+ * A JSDoc continuation (` * installed 1.7.1`) must NOT read as a new paragraph
+ * — the stamps this gate exists to catch wrap across exactly those lines. The
+ * price is that a Markdown bullet written `* item` loses its marker and does not
+ * end a scope; `- item`, the spelling this repo's prose uses, still does.
+ */
+export function stripDecoration(line) {
+  return line.replace(/^[ \t]*(?:\/\/+|\/\*+|\*+\/|\*)?[ \t]*/, '');
+}
+
+/** Line starts that begin a new claim regardless of punctuation. */
+const STRUCTURAL_START = /^(?:#{1,6}\s|[-+]\s|\d+[.)]\s|\|\s?|<\/?[A-Za-z!]|```|:::|>\s?)/;
+
+/**
+ * Words whose trailing `.` is not a sentence end. Without these, "e.g. 1.7.1"
+ * would put a boundary between a name and the version it introduces.
+ */
+const ABBREVIATIONS = new Set(['e.g', 'i.e', 'eg', 'ie', 'etc', 'vs', 'cf', 'approx', 'no', 'fig', 'al', 'resp', 'ca']);
+
+/**
+ * Every position at which an attribution scope ENDS.
+ *
+ * @param {string} text
+ * @returns {number[]} sorted flat offsets; a claim may not cross one
+ */
+export function attributionBoundaries(text) {
+  const bounds = new Set();
+  const lines = text.split('\n');
+  let at = 0;
+  for (const line of lines) {
+    const body = stripDecoration(line).trim();
+    // A blank (or decoration-only) line ends a paragraph; a structural line
+    // start begins a new one.
+    if (body === '' || STRUCTURAL_START.test(body)) bounds.add(at);
+    at += line.length + 1;
+  }
+
+  // A terminator inside a PARENTHETICAL does not end the sentence. Measured:
+  // `(server-only \`auth.api.addMember\`; measured on the installed 1.7.1)`
+  // reads as one claim, and cutting it at the `;` left a live-reading stamp
+  // unattributed — the very shape this gate exists to hold.
+  //
+  // ⛔ A running bracket DEPTH cannot express this, and the first draft of this
+  // function proved it: `it('…', () => {` leaves a round bracket open for the
+  // length of a test, so every terminator in the body was suppressed and one
+  // comment ran on for 170 characters as a single claim. What counts is a
+  // parenthetical that CLOSES — an aside inside one sentence — so only spans
+  // that open and close within `PARENTHETICAL_SPAN` are honoured, and an
+  // unclosed or runaway bracket is ignored entirely.
+  const inAside = new Uint8Array(text.length);
+  const open = [];
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '(') open.push(i);
+    else if (ch === ')' && open.length > 0) {
+      const from = open.pop();
+      if (i - from <= PARENTHETICAL_SPAN) inAside.fill(1, from, i);
+    }
+  }
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch !== '.' && ch !== '!' && ch !== '?' && ch !== ';') continue;
+    if (inAside[i]) continue;
+    // A terminator only ends a sentence when nothing but closing punctuation
+    // stands between it and whitespace. `foo.bar` and `1.7.1` are untouched.
+    const rest = text.slice(i + 1, i + 8);
+    const tail = rest.match(/^[)\]}"'`*_,]*/)[0];
+    const next = rest[tail.length];
+    if (next !== undefined && next !== '' && !/\s/.test(next)) continue;
+    if (ch === '.') {
+      const word = text.slice(Math.max(0, i - 12), i).match(/[A-Za-z.]+$/);
+      if (word && (ABBREVIATIONS.has(word[0].toLowerCase()) || word[0].length === 1)) continue;
+    }
+    bounds.add(i + 1);
+  }
+  return [...bounds].sort((a, b) => a - b);
+}
+
+/**
+ * Read every package name the tree actually contains, from the lockfile.
+ *
+ * This is the vocabulary rule 2 needs. It is MEASURED rather than listed for
+ * the same reason the resolved pin is: a hand list of "other packages that
+ * appear near our stamps" would rot the moment a dependency changed, and its
+ * rot would be invisible — a missing name silently restores the false
+ * attribution it existed to prevent.
+ *
+ * @param {string} lockText contents of pnpm-lock.yaml
+ * @returns {Set<string>} lowercased package names
+ */
+export function collectPackageNames(lockText) {
+  const names = new Set();
+  for (const m of lockText.matchAll(/^\s+'?((?:@[^/'\s@]+\/)?[^@'\s:]+)@\d+\.\d+\.\d+[^:']*'?:/gm)) {
+    names.add(m[1].toLowerCase());
+  }
+  return names;
+}
+
+/**
+ * The package that owns a version token by standing right in front of it.
+ *
+ * Two spellings, and only two. `name@1.2.3` binds whatever it names, vocabulary
+ * or not — the `@` IS the binding. A bare `name 1.2.3` binds only if the tree
+ * really contains a package by that name, because prose is full of words that
+ * sit in front of numbers ("installed 1.7.1", "on 1.7.1", "the four resolve
+ * 0.5.0") and reading those as owners would silence real stamps.
+ *
+ * "Immediately" allows a few characters of punctuation, because the spelling
+ * that needed it is a pnpm override key: `'@better-auth/core>@better-auth/utils':
+ * '0.5.0'` puts four characters between the owner and its version, and reading
+ * that version as `@better-auth/core`'s — which the character window did — gets
+ * the wrong side of the `>` every time.
+ *
+ * ⛔ Reaching FURTHER than that was tried and measured, and the trade is
+ * backwards: matching any package-shaped name anywhere between the watched name
+ * and the number removed five misattributions that were all already
+ * `historical` — harmless — and cost one genuine `live-stale` catch, where
+ * "the better-call one went with the rc pin (stable 1.7.1 …)" mentions another
+ * package in passing without owning anything. The failing set is what this gate
+ * decides; silence bought with a real red is not a saving.
+ *
+ * @returns {string|null} the owning package name, or null if nothing owns it
+ */
+export function nearestClaimant(flat, pos, vocabulary, familyNames) {
+  const before = flat.slice(Math.max(0, pos - 80), pos);
+  const m = before.match(/([@A-Za-z0-9][@A-Za-z0-9._/-]*?)(@|[\s`'"([:,=]{1,4})$/);
+  if (!m) return null;
+  const name = m[1];
+  const lower = name.toLowerCase();
+  // The family's own name is not a foreign claimant — it is THE claimant, and
+  // the watched-token path is what binds it.
+  if (familyNames.has(lower)) return null;
+  if (m[2] === '@') return name;
+  return vocabulary.has(lower) ? name : null;
+}
+
+
 
 // ── Pure analysis ───────────────────────────────────────────────────────────
 
@@ -279,11 +622,17 @@ export function resolveInstalledVersions(lockText, packages) {
  *
  * @param {string} text file contents
  * @param {{id: string, packages: string[]}} family
- * @param {{window?: number}} [opts]
- * @returns {Array<{line: number, version: string, text: string, window: string}>}
+ * @param {{window?: number, vocabulary?: Set<string>, reach?: number, attribution?: 'sentence'|{gap: number}}} [opts]
+ *   `attribution` selects the mechanism: sentence scope with foreign claimants
+ *   (the default), or `{gap}` for the legacy character window, which exists so
+ *   `--attribution-sweep` can measure one against the other.
+ * @returns {Array<{line: number, pos: number, version: string, pkg: string|null, text: string}>}
  */
 export function findStampSites(text, family, opts = {}) {
   const window = opts.window ?? WINDOW;
+  const attribution = opts.attribution ?? 'sentence';
+  const reach = opts.reach ?? ATTRIBUTION_REACH;
+  const vocabulary = opts.vocabulary ?? new Set();
   const lines = text.split('\n');
 
   // Offsets so a token's flat position maps back to a line number.
@@ -342,14 +691,39 @@ export function findStampSites(text, family, opts = {}) {
     return names.some((n) => ll.includes(n.toLowerCase()));
   });
 
+  const familyNames = new Set(names.map((n) => n.toLowerCase()));
+  const bounds = attribution === 'sentence' ? attributionBoundaries(flat) : [];
+  /** Does a scope boundary fall in `(from, to]`? */
+  const crossesBoundary = (from, to) => {
+    let lo = 0, hi = bounds.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (bounds[mid] <= from) lo = mid + 1; else hi = mid; }
+    return lo < bounds.length && bounds[lo] <= to;
+  };
+
   const sites = [];
   let armed = null; // the most recent package name that has not yet claimed a version
   for (const tok of stream) {
     if (tok.kind === 'pkg') { armed = tok; continue; }
     let pkg = null;
-    if (armed && tok.pos - (armed.pos + armed.value.length) <= CLAIM_GAP) {
+    if (attribution === 'sentence') {
+      const owner = nearestClaimant(flat, tok.pos, vocabulary, familyNames);
+      if (owner) {
+        // Another package owns this version. The armed name stops reaching:
+        // a sentence that has begun naming other packages' versions is no
+        // longer one claim, and reaching PAST an owned version is exactly how
+        // a wider window bound `better-call@1.3.7`'s neighbour `1.4.0` to
+        // `@better-auth/scim`. Silence is the safe direction here.
+        armed = null;
+      } else if (armed) {
+        const from = armed.pos + armed.value.length;
+        if (tok.pos - from <= reach && !crossesBoundary(from, tok.pos)) {
+          pkg = armed.value;
+          armed = null; // a name claims ONE version, then stops claiming
+        }
+      }
+    } else if (armed && tok.pos - (armed.pos + armed.value.length) <= attribution.gap) {
       pkg = armed.value;
-      armed = null; // a name claims ONE version, then stops claiming
+      armed = null;
     }
     const i = lineOf(tok.pos);
     const lo = Math.max(0, i - window);
@@ -359,6 +733,7 @@ export function findStampSites(text, family, opts = {}) {
     if (!near) continue;
     sites.push({
       line: i + 1,
+      pos: tok.pos,
       version: tok.value,
       pkg,
       text: lines[i].trim(),
@@ -406,9 +781,16 @@ export function classifySite(site, text, resolvedFor) {
   if (!resolved) return { verdict: 'unattributed', live, anchored, drifted: false, resolved: undefined };
 
   const drifted = site.version !== resolved;
-  if (!drifted) return { verdict: 'current', live, anchored, drifted, resolved };
-  if (live && !anchored) return { verdict: 'live-stale', live, anchored, drifted, resolved };
-  return { verdict: 'historical', live, anchored, drifted, resolved };
+  if (!drifted) return { verdict: 'current', live, anchored, drifted, resolved, measured: null };
+  if (live && !anchored) return { verdict: 'live-stale', live, anchored, drifted, resolved, measured: null };
+  // The measurement rule is POSITIONAL, so it needs the token's offset. Sites
+  // built by `findStampSites` always carry one; a hand-built site without one is
+  // judged by the sentence-level rules alone rather than by a guessed position.
+  const measured = scoped || site.pos === undefined ? null : measurementLead(text, site.pos);
+  if (measured && !anchored) {
+    return { verdict: 'unanchored-measurement', live, anchored, drifted, resolved, measured };
+  }
+  return { verdict: 'historical', live, anchored, drifted, resolved, measured };
 }
 
 /** The author-facing remedy. Three honest options; restamping is never alone. */
@@ -433,16 +815,39 @@ export function liveStaleMessage(file, site, resolved) {
   );
 }
 
+/** The author-facing remedy for an unanchored measurement. */
+export function unanchoredMeasurementMessage(file, site, resolved, marker) {
+  return (
+    `${file}:${site.line}: MEASUREMENT stamp — "${marker} ${site.version}" — but the resolved version is ${resolved}.\n` +
+    `    ${site.text}\n` +
+    `    This sentence rests a standing claim on a reading taken against ${site.version}, and never\n` +
+    `    says WHEN. ${site.version} is not what installs any more, so a reader cannot tell whether the\n` +
+    `    claim was re-checked since or simply left behind — and on a customer-facing page that\n` +
+    `    reads as a current attestation.\n` +
+    `    ⛔ Do NOT just rewrite ${site.version} to ${resolved}. A stamp attests that a behaviour was\n` +
+    `    MEASURED against the version it names; changing the number without redoing the\n` +
+    `    measurement manufactures a claim nobody made, which is worse than a stale one.\n` +
+    `    Three honest fixes:\n` +
+    `      (a) re-measure against ${resolved}, then restamp AND date it;\n` +
+    `      (b) ANCHOR the reading you already took — add the measurement date or the issue\n` +
+    `          reference to this sentence ("${marker} ${site.version} (2026-08-31)", "(#1234)").\n` +
+    `          It re-measures nothing, changes no claim, and is permanent;\n` +
+    `      (c) drop the version from the claim and describe the behaviour without it.`
+  );
+}
+
 export function censusLine(total, drifted, resolved, familyId) {
   return (
     `  ${familyId}: ${total} version stamp(s); resolved ${resolved}; ` +
-    `${drifted} name(s) a different version (anchored, so reported not enforced).`
+    `${drifted} name(s) a different version, reported and not enforced.`
   );
 }
 
 // ── Self-test ───────────────────────────────────────────────────────────────
 
-function walk(dir, out) {
+const rel = (p) => relative(REPO_ROOT, p).split(sep).join('/');
+
+function walk(dir, extensions, exclude, out) {
   let entries;
   try {
     entries = readdirSync(dir, { withFileTypes: true });
@@ -454,12 +859,45 @@ function walk(dir, out) {
     const p = join(dir, e.name);
     if (e.isDirectory()) {
       if (SKIP_DIRS.has(e.name)) continue;
-      walk(p, out);
-    } else if (EXTENSIONS.has(p.slice(p.lastIndexOf('.')))) {
+      if (exclude.has(rel(p))) continue;
+      walk(p, extensions, exclude, out);
+    } else if (extensions.has(p.slice(p.lastIndexOf('.')))) {
       out.push(p);
     }
   }
   return out;
+}
+
+/**
+ * Every file the gate reads, per root.
+ *
+ * ⛔ A configured exclusion that no longer names a real directory is a HARD
+ * ERROR, not a no-op. `content/docs/releases` is excluded because a red there
+ * names no author allowed to fix it; if that directory is renamed, a silently
+ * dead exclusion would start scanning it again and demand edits CLAUDE.md
+ * forbids — the failure this gate would least be able to explain.
+ */
+function collectFiles() {
+  const files = [];
+  for (const root of ROOTS) {
+    const abs = join(REPO_ROOT, root.path);
+    for (const ex of root.exclude ?? []) {
+      if (!existsSync(join(REPO_ROOT, ex))) {
+        console.error(
+          `check:vendor-version-stamps: root "${root.path}" excludes "${ex}", which does not exist.\n` +
+          `    An exclusion that matches nothing is not a no-op here: it means the directory moved\n` +
+          `    and this gate has silently started scanning it. Point the exclusion at the new path,\n` +
+          `    or drop it if the reason for it is gone.`,
+        );
+        process.exit(1);
+      }
+    }
+    if (existsSync(abs) && statSync(abs).isDirectory()) {
+      walk(abs, root.extensions, new Set(root.exclude ?? []), files);
+    }
+  }
+  files.sort();
+  return files;
 }
 
 function selfTest() {
@@ -588,6 +1026,183 @@ function selfTest() {
   check('remedy offers the live-pointer shape', /point at the resolved pin/.test(msg));
   check('remedy names why restamping is worse', /manufactures a claim nobody made/.test(msg));
 
+  // ── Prose distance: the docs population's two buckets ───────────────────
+  //
+  // ⭐ These two sentences sit in ONE file, `content/docs/permissions/
+  // authentication.mdx`, and they are the acceptance test for this root. One
+  // must be caught and the other must be left alone; a detector that reports
+  // the second is worse than no detector, because "fixing" it turns a true
+  // sentence into a false one.
+  const vocab = new Set(['minimatch', 'better-call', '@better-auth/utils']);
+  const sitesOf = (text, opts = {}) => findStampSites(text, family, { vocabulary: vocab, ...opts });
+
+  // BUCKET 1 — a customer-facing attestation naming a version that is no
+  // longer installed. The package name is ~90 characters back, across a
+  // wrapped prose line: past CLAIM_GAP, inside the sentence.
+  const attestation = [
+    'better-auth declares `addMember` as a **server-only** API with no HTTP path of',
+    'its own — measured on 1.7.1, where `addMember` builds its endpoint with no path',
+    'argument while every sibling in the same module (`/organization/remove-member`,',
+  ].join('\n');
+  const attestationSites = sitesOf(attestation);
+  check('a prose sentence attributes across a wrapped line',
+    attestationSites.length === 1 && attestationSites[0].pkg === 'better-auth',
+    JSON.stringify(attestationSites));
+  check('...and the distance it crossed is beyond the legacy character window',
+    attestationSites[0].pos - attestation.indexOf('better-auth') - 'better-auth'.length > CLAIM_GAP,
+    String(attestationSites[0].pos - 'better-auth'.length));
+  check('an unanchored measurement naming a stale version is CAUGHT',
+    classifySite(attestationSites[0], attestation, R('1.7.2')).verdict === 'unanchored-measurement',
+    JSON.stringify(classifySite(attestationSites[0], attestation, R('1.7.2'))));
+
+  // BUCKET 2 — correctly frozen history, in the same file. The versions are
+  // the SUBJECT of a permanently true statement, not the provenance of a
+  // reading, and the nearest family mention is seven lines away.
+  const frozenHistory = [
+    'better-auth 1.7 identifies an account by `(issuer, accountId)`. `issuer` names',
+    'the authority that vouched for the row.',
+    '',
+    '<Callout type="warn">',
+    'The account id field\'s NAME changed twice inside the 1.7 line, so read it off',
+    'the version you run rather than off an older note. The `1.7.0-rc.2` pre-release',
+    'renamed `accountId` → `providerAccountId`; the stable `1.7.0` / `1.7.1` releases',
+    'renamed it **back to `accountId`**, keeping the new `issuer`.',
+    '</Callout>',
+  ].join('\n');
+  const frozenSites = sitesOf(frozenHistory);
+  check('frozen history far from any family mention is not even a site',
+    frozenSites.every((s) => !['1.7.0', '1.7.1'].includes(s.version)),
+    JSON.stringify(frozenSites.map((s) => `${s.line}:${s.version}`)));
+  // ⭐ And it must survive someone widening the window later: even ATTRIBUTED,
+  // the sentence carries no live reading and no measurement verb, so it can
+  // never be reported.
+  const frozenNear = [
+    'better-auth 1.7 identifies an account by `(issuer, accountId)`.',
+    'The `1.7.0-rc.2` pre-release renamed `accountId` → `providerAccountId`; the',
+    'stable `1.7.0` / `1.7.1` releases renamed it **back to `accountId`**.',
+  ].join('\n');
+  //
+  // ⛔ Each site is judged with the attribution FORCED on. Left to itself this
+  // sentence is unattributed, and an unattributed site is never reported for a
+  // reason that has nothing to do with its phrasing — so the pin would pass
+  // even if the classifier had been taught to red it. Forcing `pkg` is what
+  // makes this a test of the RULE rather than of the attribution.
+  const frozenSites2 = sitesOf(frozenNear, { window: 20 });
+  check('the frozen sentence really does contain version tokens to judge',
+    frozenSites2.length >= 3, JSON.stringify(frozenSites2.map((s) => s.version)));
+  for (const s of frozenSites2) {
+    const forced = classifySite({ ...s, pkg: 'better-auth' }, frozenNear, R('1.7.2'));
+    check(`frozen history is never reported, even attributed (${s.version})`,
+      !FAILING_VERDICTS.has(forced.verdict), JSON.stringify(forced));
+  }
+
+  // Two names near one version: the LAST name before it claims it.
+  const twoNames = [
+    'The SDK ships as better-auth and the SSO surface as `@better-auth/sso` —',
+    'measured on 1.7.1, whose endpoint list is unchanged.',
+  ].join('\n');
+  check('the nearest preceding family name wins, not the first in the sentence',
+    sitesOf(twoNames).find((s) => s.version === '1.7.1')?.pkg === '@better-auth/sso',
+    JSON.stringify(sitesOf(twoNames)));
+
+  // ── Sentence scope ───────────────────────────────────────────────────────
+  const stopped = 'better-auth mounts the route itself. Node 20.11.0 is the floor.';
+  check('a full stop ends the reach, however close the number is',
+    sitesOf(stopped).every((s) => s.pkg === null), JSON.stringify(sitesOf(stopped)));
+
+  const blankLine = ['better-auth mounts the route itself', '', 'The floor is 20.11.0'].join('\n');
+  check('a blank line ends the reach', sitesOf(blankLine).every((s) => s.pkg === null),
+    JSON.stringify(sitesOf(blankLine)));
+
+  const bullet = ['better-auth notes:', '- the floor is 20.11.0'].join('\n');
+  check('a bullet starts a new claim', sitesOf(bullet).every((s) => s.pkg === null),
+    JSON.stringify(sitesOf(bullet)));
+
+  // ⛔ A terminator inside a parenthetical does NOT end the sentence — the
+  // shape that hid a live-reading stamp until this was fixed.
+  const aside = [
+    '// better-auth declares `addMember`',
+    '// WITHOUT an HTTP path (server-only `auth.api.addMember`; measured on the',
+    '// installed 1.7.1), so the catch-all never mounts it.',
+  ].join('\n');
+  const asideSite = sitesOf(aside).find((s) => s.version === '1.7.1');
+  check('a `;` inside a parenthetical does not end the sentence',
+    asideSite?.pkg === 'better-auth', JSON.stringify(sitesOf(aside)));
+  check('...and the live reading it hid is now caught',
+    classifySite(asideSite, aside, R('1.7.2')).verdict === 'live-stale');
+
+  const runaway = ['it(\'a test\', () => {', '  // better-auth notes; the floor is 20.11.0 here'].join('\n');
+  check('an UNCLOSED bracket is structure, not a parenthetical, so terminators still end sentences',
+    attributionBoundaries(runaway).some((b) => b > runaway.indexOf('notes;') && b <= runaway.indexOf('20.11.0')),
+    JSON.stringify(attributionBoundaries(runaway)));
+
+  // ── Nearest claimant wins ────────────────────────────────────────────────
+  const otherSpecifier = '// better-auth 1.7.2 peers an exact `better-call@1.3.7` in the rc line';
+  check('a `name@version` specifier binds its own version, not a watched name\'s',
+    sitesOf(otherSpecifier).find((s) => s.version === '1.3.7')?.pkg === null,
+    JSON.stringify(sitesOf(otherSpecifier)));
+
+  const otherProse = "// better-auth notes that an exact STABLE pin is not watched (minimatch 10.2.3)";
+  check('a package name from the tree claims the number in front of it',
+    sitesOf(otherProse).find((s) => s.version === '10.2.3')?.pkg === null,
+    JSON.stringify(sitesOf(otherProse)));
+
+  const overrideKey = "  '@better-auth/sso>@better-auth/utils': '0.5.0',";
+  check('an override key binds the version to the RIGHT side of the `>`',
+    sitesOf(overrideKey).every((s) => s.pkg === null), JSON.stringify(sitesOf(overrideKey)));
+
+  const notAPackage = '// better-auth: the installed 1.7.1 reads TEST directly';
+  check('an ordinary word in front of a number is NOT a claimant',
+    sitesOf(notAPackage).find((s) => s.version === '1.7.1')?.pkg === 'better-auth',
+    JSON.stringify(sitesOf(notAPackage)));
+
+  check('the lockfile vocabulary is read from its snapshot keys',
+    (() => {
+      const v = collectPackageNames(["  better-call@1.4.0:", "  '@better-auth/utils@0.5.0':"].join('\n'));
+      return v.has('better-call') && v.has('@better-auth/utils');
+    })());
+
+  // ── The measurement rule is POSITIONAL ───────────────────────────────────
+  const measuredSomethingElse = [
+    '// Measured on the configuration the range *does* govern (better-auth\'s own',
+    '// Kysely dialect: migrations, sign-up, sign-in, adapter find/update/delete),',
+    '// 1.7.1 behaves identically on 13.0.3 and on 12.11.1.',
+  ].join('\n');
+  for (const s of sitesOf(measuredSomethingElse)) {
+    check(`a measurement verb that governs something else is not a stamp claim (${s.version})`,
+      classifySite(s, measuredSomethingElse, R('1.7.2')).verdict !== 'unanchored-measurement',
+      JSON.stringify(classifySite(s, measuredSomethingElse, R('1.7.2'))));
+  }
+
+  const measuredDated = '// better-auth: measured on 1.7.1 (2026-08-19), the handler skips the delete';
+  check('a dated measurement is anchored, so permanent',
+    classifySite(sitesOf(measuredDated)[0], measuredDated, R('1.7.2')).verdict === 'historical');
+
+  const measuredScoped = '// better-auth: measured on the then-installed 1.7.1, the handler skips it';
+  check('a scoped measurement claims nothing about this tree',
+    classifySite(sitesOf(measuredScoped)[0], measuredScoped, R('1.7.2')).verdict === 'historical');
+
+  const measuredCurrent = '// better-auth: measured on 1.7.2, the handler skips the delete';
+  check('a measurement naming the resolved version is current',
+    classifySite(sitesOf(measuredCurrent)[0], measuredCurrent, R('1.7.2')).verdict === 'current');
+
+  check('the remedy for an unanchored measurement never presents restamping alone',
+    (() => {
+      const m = unanchoredMeasurementMessage('a.mdx', { line: 1, version: '1.7.1', text: 'x' }, '1.7.2', 'measured on');
+      return m.includes('⛔ Do NOT just rewrite') && /ANCHOR the reading you already took/.test(m);
+    })());
+
+  // ── Structure ────────────────────────────────────────────────────────────
+  check('every site carries the offset the positional rules need',
+    sitesOf(attestation).every((s) => typeof s.pos === 'number'));
+
+  const proseRoot = ROOTS.find((r) => r.path === 'content/docs');
+  check('the prose root is wired', Boolean(proseRoot), JSON.stringify(ROOTS.map((r) => r.path)));
+  check('⛔ content/docs/releases is excluded BY CONSTRUCTION',
+    proseRoot?.exclude?.includes('content/docs/releases'), JSON.stringify(proseRoot?.exclude));
+  check('...and the excluded directory still exists, so the exclusion is not silently dead',
+    existsSync(join(REPO_ROOT, 'content/docs/releases')));
+
   // The gate offers no ratchet, ledger or baseline — nothing to weaken.
   const src = readFileSync(fileURLToPath(import.meta.url), 'utf8');
   check(
@@ -625,6 +1240,7 @@ if (isEntrypoint(import.meta.url)) {
   const censusMode = process.argv.includes('--census');
   const jsonMode = process.argv.includes('--json');
   const sweepMode = process.argv.includes('--window-sweep');
+  const attributionSweepMode = process.argv.includes('--attribution-sweep');
 
   const lockPath = join(REPO_ROOT, 'pnpm-lock.yaml');
   if (!existsSync(lockPath)) {
@@ -633,12 +1249,11 @@ if (isEntrypoint(import.meta.url)) {
   }
   const lockText = readFileSync(lockPath, 'utf8');
 
-  const files = [];
-  for (const root of ROOTS) {
-    const abs = join(REPO_ROOT, root);
-    if (existsSync(abs) && statSync(abs).isDirectory()) walk(abs, files);
-  }
-  files.sort();
+  const files = collectFiles();
+  // The vocabulary rule 2 of the attribution model needs: every package name the
+  // tree actually contains, so a version another package owns is never claimed
+  // by a watched name standing further back.
+  const vocabulary = collectPackageNames(lockText);
 
   const SELF = join(REPO_ROOT, 'scripts', 'check-vendor-version-stamps.mjs');
 
@@ -663,10 +1278,9 @@ if (isEntrypoint(import.meta.url)) {
       if (file === SELF) continue;
       const text = readFileSync(file, 'utf8');
       scanned++;
-      for (const site of findStampSites(text, family, { window: WINDOW })) {
+      for (const site of findStampSites(text, family, { window: WINDOW, vocabulary })) {
         const verdict = classifySite(site, text, (pkg) => resolvedMap.get(pkg));
-        const rel = relative(REPO_ROOT, file).split(sep).join('/');
-        sites.push({ file: rel, ...site, ...verdict, window: undefined });
+        sites.push({ file: rel(file), ...site, ...verdict, window: undefined });
       }
     }
 
@@ -678,9 +1292,9 @@ if (isEntrypoint(import.meta.url)) {
         for (const file of files) {
           if (file === SELF) continue;
           const text = readFileSync(file, 'utf8');
-          for (const site of findStampSites(text, family, { window: w })) {
+          for (const site of findStampSites(text, family, { window: w, vocabulary })) {
             n++;
-            if (classifySite(site, text, (pkg) => resolvedMap.get(pkg)).verdict === 'live-stale') failing++;
+            if (FAILING_VERDICTS.has(classifySite(site, text, (pkg) => resolvedMap.get(pkg)).verdict)) failing++;
           }
         }
         // Both numbers, because only the second one is a DECISION. The site count
@@ -692,11 +1306,54 @@ if (isEntrypoint(import.meta.url)) {
       continue;
     }
 
+    if (attributionSweepMode) {
+      // Both mechanisms, one table. CONTESTED counts attributions binding a
+      // version some OTHER package in this tree owns — the false-attribution
+      // column, measured rather than argued.
+      console.log(`\nattribution sweep — ${family.id}`);
+      const familyNames = new Set(family.packages.map((p) => p.toLowerCase()));
+      const measure = (label, attribution, reach) => {
+        let total = 0, attributed = 0, contested = 0, failing = 0;
+        for (const file of files) {
+          if (file === SELF) continue;
+          const text = readFileSync(file, 'utf8');
+          for (const site of findStampSites(text, family, { window: WINDOW, vocabulary, attribution, reach })) {
+            total++;
+            if (site.pkg) {
+              attributed++;
+              if (nearestClaimant(text, site.pos, vocabulary, familyNames)) contested++;
+            }
+            if (FAILING_VERDICTS.has(classifySite(site, text, (pkg) => resolvedMap.get(pkg)).verdict)) failing++;
+          }
+        }
+        console.log(
+          `  ${label.padEnd(22)}: ${String(total).padStart(4)} site(s), ${String(attributed).padStart(4)} attributed, ` +
+          `${String(contested).padStart(3)} contested, ${failing} failing`,
+        );
+      };
+      for (const gap of [60, 75, 90, 120, 200, 400]) measure(`legacy char-gap ${gap}`, { gap });
+      // The sentence mechanism at several caps. The cap is a guard rail against
+      // a line with no punctuation, so what it must NOT do is decide anything:
+      // read the failing column across these rows, not the site count.
+      for (const reach of [120, 240, 400, 800]) measure(`sentence, reach ${reach}`, 'sentence', reach);
+      continue;
+    }
+
     const drifted = sites.filter((s) => s.drifted);
     const liveStale = sites.filter((s) => s.verdict === 'live-stale');
-    report.push({ family: family.id, resolved, total: sites.length, drifted: drifted.length, liveStale: liveStale.length, sites });
+    const unanchoredMeasurements = sites.filter((s) => s.verdict === 'unanchored-measurement');
+    report.push({
+      family: family.id,
+      resolved,
+      total: sites.length,
+      drifted: drifted.length,
+      liveStale: liveStale.length,
+      unanchoredMeasurements: unanchoredMeasurements.length,
+      sites,
+    });
 
     for (const s of liveStale) errors.push(liveStaleMessage(s.file, s, s.resolved));
+    for (const s of unanchoredMeasurements) errors.push(unanchoredMeasurementMessage(s.file, s, s.resolved, s.measured));
 
     if (listMode || censusMode) {
       console.log(`\n${family.id} — resolved ${resolved}`);
@@ -707,7 +1364,7 @@ if (isEntrypoint(import.meta.url)) {
     }
   }
 
-  if (sweepMode) process.exit(0);
+  if (sweepMode || attributionSweepMode) process.exit(0);
 
   if (jsonMode) {
     // `process.exitCode`, never `process.exit()`. stdout to a PIPE is async, so
@@ -723,15 +1380,16 @@ if (isEntrypoint(import.meta.url)) {
   if (jsonMode) {
     // nothing further to print; the JSON above is the whole report
   } else if (errors.length > 0) {
-    console.error(`\ncheck:vendor-version-stamps: ${errors.length} live-reading stamp(s) name a version that is not installed.\n`);
+    console.error(`\ncheck:vendor-version-stamps: ${errors.length} stamp(s) name a version that is not installed, in a sentence that does not survive the pin having moved.\n`);
     for (const e of errors) console.error(`  ✗ ${e}\n`);
     process.exitCode = 1;
   } else {
     console.log(`check:vendor-version-stamps: OK — ${scanned} file(s) scanned.`);
     for (const r of report) console.log(censusLine(r.total, r.drifted, r.resolved, r.family));
     console.log(
-    '  Drifted stamps are ANCHORED (they carry a measurement date or an issue reference), so they\n' +
-    '  are reported and not enforced: restamping them without re-measuring would manufacture\n' +
+    '  A drifted stamp is REPORTED, never enforced. Every one that reaches this line is a fact\n' +
+    '  about a named release, or carries a measurement date or issue reference — the shapes that\n' +
+    '  rot were already failures above. Restamping the rest without re-measuring would manufacture\n' +
       '  attestations. Re-verify one and you may restamp it; otherwise it stays a historical fact.',
     );
   }

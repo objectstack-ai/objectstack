@@ -7,7 +7,7 @@
  * ── Why this mount exists (the measurement) ─────────────────────────────────
  *
  * better-auth declares `addMember` WITHOUT an HTTP path — measured on the
- * installed 1.7.1, `dist/plugins/organization/routes/crud-members.mjs`:
+ * then-installed 1.7.1, `dist/plugins/organization/routes/crud-members.mjs`:
  * `addMember` returns `createAuthEndpoint({ method: "POST", ... })` (no path
  * argument), while its siblings keep theirs
  * (`createAuthEndpoint("/organization/remove-member", …)`,

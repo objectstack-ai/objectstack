@@ -5,6 +5,10 @@ import {
     // [#13279] Re-raise a permission-store OUTAGE through the fail-closed nets
     // below instead of degrading it into an anonymous/denied answer.
     rethrowAuthzStoreUnavailable,
+    // [#13476] Raised HERE too, at the data-engine seam: an engine that cannot
+    // be RESOLVED leaves the caller's permissions equally undetermined, so it
+    // takes the same loud answer rather than the quiet 403 it used to wear.
+    AuthzStoreUnavailableError,
     effectiveTenancyPosture,
     assembleExecutionContext, normalizeAuthGate, type AuthGate,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
@@ -862,11 +866,17 @@ export interface MountedRoute extends RouteEntry {
  * post-identity fault SHOULD discard identity; that is a behaviour change on a
  * public door and is deliberately left unruled here.
  *
- * ⚠️ Absorbing here cannot weaken the #13279 loud path: an
- * `AuthzStoreUnavailableError` has exactly one construction site
- * (`tryFind`, in `@objectstack/core`'s `resolve-authz-context.ts`), which is
- * reached from `resolveAuthzContext` — never from a provider seam — so no
- * branded outage travels through this helper in either direction.
+ * ⚠️ Absorbing here cannot weaken the #13279 loud path, but the reason is
+ * no longer "one construction site" — [#13476] added a SECOND one, at the
+ * data-engine seam below ({@link wiredEngineOrLoud}). The invariant that
+ * matters is narrower and is what this helper actually needs: no branded
+ * outage is ever CONSTRUCTED INSIDE a `seamOrUndefined` call, and none is in
+ * flight through one. `tryFind`'s (`@objectstack/core`'s
+ * `resolve-authz-context.ts`) is reached from `resolveAuthzContext`, which
+ * this helper never wraps; `wiredEngineOrLoud`'s is raised by a DIFFERENT
+ * helper, deliberately, precisely because this one would swallow it.
+ * ⛔ Do not route the data-engine seam back through this helper to "make the
+ * seams uniform" — uniformity there IS the defect #13476 repaired.
  *
  * ⚠️ `call` is invoked SYNCHRONOUSLY (an async function body runs to its first
  * `await` synchronously), so this changes when a provider *fails*, never when
@@ -883,6 +893,83 @@ async function seamOrUndefined<T>(call: () => T | PromiseLike<T>): Promise<T | u
         return await call();
     } catch {
         return undefined;
+    }
+}
+
+/**
+ * Reach the DATA-ENGINE seam keeping "no engine is wired" and "the engine
+ * could not be resolved" two facts instead of one value.
+ *
+ * ## The defect this exists to end [#13476]
+ *
+ * The engine used to be resolved through {@link seamOrUndefined}, so a seam
+ * that FAILED and a seam that was never WIRED both handed `resolveAuthzContext`
+ * the same `undefined`. The resolver then took `tryFind`'s `!ql` guard —
+ * correctly, for its own contract, because "no engine is wired" is a supported
+ * embedder shape that must keep resolving to an empty-but-valid envelope — and
+ * the package door answered **403 FORBIDDEN**: "Reading packages requires the
+ * `studio.access` or `setup.access` capability." Measured on a real
+ * `RestServer` with a real `registerPackageRoutes`, that answer was identical
+ * to the one an embedder with no data plane gets, and one of the two is a lie:
+ *
+ * | wiring | before | after |
+ * |:--|:--|:--|
+ * | healthy engine granting the capabilities | 200 | 200 |
+ * | no engine wired at all (supported shape) | 403 | 403 — unchanged |
+ * | the engine cannot be RESOLVED            | **403** | **503** |
+ *
+ * ⭐ This is COVERAGE of #13279's already-ruled class, not a new trade-off.
+ * That ruling (2026-08-30, verbatim 「第一批其余同意」) settled the DIRECTION — a
+ * permission-store read that fails must fail LOUD rather than resolve as an
+ * authenticated principal holding zero capabilities. `tryFind` implemented it
+ * for a read that was ISSUED and threw. An engine that cannot be resolved never
+ * issues a read at all, so the ruling's landing point could not see it, and it
+ * was the LAST surviving member of that disguise on this door. The answer is
+ * the same one the ruling chose, for the same reason: nothing was read, so no
+ * capability judgement was ever reached.
+ *
+ * ⚠️ The direction is CONSERVATIVE in both readings — the unknown was already
+ * answered as a REFUSAL (403) and is now answered as the outage it is (503).
+ * Nothing that was refused becomes served; this repair moves no route from
+ * refused to allowed.
+ *
+ * ## What decides WHICH fact this is
+ *
+ * The caller passes the wiring fact SEPARATELY, as `wired`, instead of leaving
+ * it to be inferred from the resolved value — inferring it from the value is
+ * the collapse itself. A seam that is not wired is never called; a seam that IS
+ * wired and then fails is the outage.
+ *
+ * ⛔ A provider that RESOLVES `undefined` still means "no engine", quietly and
+ * unchanged: that is the seam contract (`(environmentId?) => Promise<engine |
+ * undefined>`) declaring absence, not failing. Only a THROW or a REJECTION is
+ * the outage — which is why this helper, like {@link seamOrUndefined}, invokes
+ * `call` synchronously so a non-`async` provider that throws before returning a
+ * promise reaches the same answer as one that rejects (#13280).
+ *
+ * ⚠️ RESIDUE, deliberately not repaired here and filed separately — do not
+ * read this helper as covering it. The KERNEL branch of the seam resolves
+ * through `kernel.getServiceAsync('objectql')`, which rejects with a bare
+ * `Error` BOTH when the service was never registered (the supported no-data-
+ * plane shape) and when it was registered and failed to construct. Those two
+ * facts are not distinguishable at this transport, so making that branch loud
+ * would refuse service to a correctly-configured embedder. Separating them
+ * needs the SERVICE REGISTRY to stop conflating them, which is a
+ * `@objectstack/core` contract change and its own card.
+ */
+async function wiredEngineOrLoud<T>(
+    wired: boolean,
+    call: () => T | PromiseLike<T>,
+): Promise<T | undefined> {
+    if (!wired) return undefined;
+    try {
+        return await call();
+    } catch (err) {
+        // The engine is the store the grants live in. It was wired, it was
+        // asked, and it did not answer — so the permissions were never
+        // determined. `cause` keeps the driver's own diagnostic, which is the
+        // part an operator actually needs.
+        throw new AuthzStoreUnavailableError('objectql', err);
     }
 }
 
@@ -2097,9 +2184,25 @@ export class RestServer {
             }
 
             // Resolve the data engine for this scope (shared by the resolver below).
+            //
+            // [#13476] The PROVIDER branch reaches the seam through
+            // `wiredEngineOrLoud`, so "no engine is wired" and "the engine could
+            // not be resolved" stop arriving at `resolveAuthzContext` as the same
+            // `undefined`. The wiring fact is the provider's PRESENCE — asked
+            // here, once — and never inferred from what it returned.
+            //
+            // ⚠️ The KERNEL branch deliberately still absorbs. Not an oversight
+            // and not symmetry for its own sake: `getServiceAsync` rejects the
+            // same way for a service that was never registered as for one that
+            // failed to construct, so the two facts are not separable at this
+            // transport and making it loud would refuse every embedder running a
+            // kernel with no data plane. See `wiredEngineOrLoud`'s RESIDUE note.
             const ql: any = kernel
                 ? await seamOrUndefined(() => kernel.getServiceAsync('objectql'))
-                : (this.objectQLProvider ? await seamOrUndefined(() => this.objectQLProvider!(environmentId)) : undefined);
+                : await wiredEngineOrLoud(
+                    Boolean(this.objectQLProvider),
+                    () => this.objectQLProvider!(environmentId),
+                );
 
             // Delegate ALL identity + role/permission/RLS aggregation to the SINGLE
             // shared resolver (`resolveAuthzContext`, @objectstack/core) — the same one
