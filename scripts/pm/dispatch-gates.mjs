@@ -1818,13 +1818,22 @@ export { maskComments };
  * Re-derived at 6193e576d across the 169 scripts under `scripts/` that carry
  * one — 185 declarations: 111 `function selfTest(`, 28
  * `export function selfTest(`, 19 `async function selfTest(`, 8
- * `export async function selfTest(`, and 19 compound names — one of which is
- * this module's own `maskSelfTests`, so this file's masker blanks its own body
- * whenever it scans itself. That was true long before the helper follow below
- * existed and it costs nothing today, because none of the functions it reaches
- * spells a path; it is recorded because it is the kind of thing that stops
- * being free the day one of them does. The load-bearing half holds: 185 of 185
- * at column 0, and a column-0 scan for the const/arrow spelling finds ZERO.
+ * `export async function selfTest(`, and 19 compound names. The load-bearing
+ * half holds: 185 of 185 at column 0, and a column-0 scan for the const/arrow
+ * spelling finds ZERO.
+ *
+ * ⚠ A name is not a role, so this anchor also fires on production code whose
+ * name merely spells self-test — `maskSelfTests` six hundred lines below is one,
+ * which is why this file's masker blanks its own body whenever it scans itself.
+ * ⛔ That is NOT one specimen: it is a class with seven live members over four
+ * files, and this docblock claimed it was one until a census counted them. The
+ * census, what each member costs, why this pattern is deliberately NOT narrowed
+ * to exclude them, and the live pin that keeps their cost at zero all live at
+ * `COMPOUND_ANCHOR_LEDGER`. Read that table before touching this pattern; the
+ * short version is that one spelling, `runSelfTest`, is a genuine entry point in
+ * one script and production code in another, so no name predicate can separate
+ * the two classes and narrowing this anchor can only trade a silence that costs
+ * nothing for a fabricated lead that does.
  * ⚠ The counts in this paragraph read 61/53/7/4 when it was written and had
  * gone stale by a factor of three before anyone re-read them — re-derive them
  * rather than quoting them; only the two PROPERTIES are what this pattern
@@ -2141,6 +2150,188 @@ export function maskSelfTests(source) {
     for (let k = decl.start; k < decl.end; k++) flags[k] = 1;
   }
   return blank(source, flags);
+}
+
+/**
+ * The source extensions the name-anchor census below reads. The anchor is a
+ * JavaScript declaration shape, so the corpus is the tree's JavaScript and
+ * TypeScript, and nothing else.
+ */
+const ANCHOR_CENSUS_EXTENSIONS = /\.(?:[cm]?[jt]sx?)$/;
+
+/**
+ * The bare name this tree's self-test convention spells. Every other name the
+ * anchor matches is COMPOUND, and a compound name is the only place the anchor
+ * can be wrong in either direction.
+ */
+const BARE_ENTRY_POINT_NAME = 'selfTest';
+
+/**
+ * Every COMPOUND-name declaration the self-test anchor matches, tree-wide, and
+ * whether that match is what the anchor MEANT.
+ *
+ * ## The defect this ledger answers
+ *
+ * `SELF_TEST_DECL` decides "this is a self-test" from the declaration's NAME.
+ * A name is not a role, so the anchor also fires on production code whose name
+ * merely spells self-test — and when it does, `maskSelfTests` blanks that
+ * production body, and `extractWatchHints` never sees the paths in it. The
+ * failure direction is SILENCE: a hint that is never extracted cannot be
+ * missed, so a gate family quietly stops being derived for a file it really
+ * opens.
+ *
+ * The specimen that opened this is `maskSelfTests` itself, six lines above:
+ * `mask` + `Self` + `Test` + `s` matches, so this module's masker blanks its own
+ * body whenever the module scans itself.
+ *
+ * ## The census, re-derived on this tree
+ *
+ * 209 code-position matches over the tracked JS/TS corpus. 187 are the bare
+ * `selfTest`; the remaining 22 carry compound names over 21 distinct spellings,
+ * and they are the rows below. Fifteen are genuine self-test batteries — the
+ * anchor firing on them is the anchor working. SEVEN are production code:
+ *
+ *   scripts/check-self-test-wired.mjs            carriesSelfTest
+ *   scripts/check-self-test-workflow-commands.mjs runSelfTest
+ *   scripts/check-step-collectors.mjs            selfTestTargets
+ *   scripts/check-step-collectors.mjs            selfTestDiscoveries
+ *   scripts/measure-self-test-floor.mjs          selfTestDefs
+ *   scripts/pm/dispatch-gates.mjs                selfTestOnlyCallables
+ *   scripts/pm/dispatch-gates.mjs                maskSelfTests
+ *
+ * Every one of them is a gate that REASONS ABOUT self-tests, which is why they
+ * cluster: a tool that finds, spawns, counts or masks other scripts' self-tests
+ * names its functions after the thing it handles, and the anchor cannot tell
+ * "runs a self-test" from "is one".
+ *
+ * ## What it costs today: nothing, MEASURED, and that is the whole point
+ *
+ * Neutralising each of the seven one at a time and re-extracting moves no hint
+ * in any of the four files. The claim is therefore live rather than recalled —
+ * and it is exactly the kind of claim that stops being true without anything
+ * going red, which is what the pin in this module's self-test exists to catch.
+ *
+ * The same measurement over the fifteen genuine rows is NOT zero, and that
+ * asymmetry is what makes the classification load-bearing rather than
+ * decorative: `fixtureSelfTest` drops `packages/spec/spec-changes.json` and
+ * `prePushIsArmedSelfTest` drops `.githooks/pre-push`, both fixture paths in
+ * `scripts/check-regen-pending.mjs`, both correctly refused. So "no
+ * compound-name match may contribute a hint" is FALSE as a blanket invariant;
+ * the invariant holds only over the accidental half, and only a classification
+ * can name that half.
+ *
+ * ## ⛔ Why the anchor is NOT narrowed, and why nothing is special-cased
+ *
+ * The obvious repairs were both refuted by the census rather than judged:
+ *
+ *   - **Narrowing the name pattern is impossible.** `runSelfTest` is a GENUINE
+ *     entry point in `scripts/check-turbo-task-graph.mjs`, reached only from
+ *     that file's `--self-test` guard, and ACCIDENTAL in
+ *     `scripts/check-self-test-workflow-commands.mjs`, where it is exported and
+ *     spawns other scripts' self-tests from the gate body. One spelling, both
+ *     classes. No predicate over the name can separate them, so any narrowing
+ *     that excludes the accidental one also unmasks a real self-test battery and
+ *     readmits its fixture paths as hints — the fabricated-lead family this
+ *     whole masker exists to refuse, traded for a silence that costs nothing.
+ *   - **Special-casing this module's own path fixes two rows of seven.** The
+ *     other five live in three other files, so the objection that a rename
+ *     "fixes one instance and leaves the class" applies to it too, one file
+ *     wider — and it would make the tool's self-scan differ from every other
+ *     scan, which is a hazard of its own.
+ *
+ * ⇒ What ships is neither. The anchor keeps firing on all 22, the mask keeps
+ * blanking all 22, and the cost of the seven accidental ones is MEASURED on
+ * every run instead of asserted in prose. Silence was the defect; the remedy is
+ * noise on the day it starts costing something.
+ *
+ * ## Maintaining this table
+ *
+ * A compound-name declaration this table does not list reds
+ * `check:pm-dispatch-gates`. Classify it and add a row: `accidental: false` if
+ * it is a self-test battery (its fixtures SHOULD be masked away), `true` if it
+ * is production code the anchor caught by accident — in which case the pin then
+ * measures, and keeps measuring, that masking it costs no hint. ⛔ Do not
+ * "repair" a red by renaming the function to dodge the anchor: the row is the
+ * record, and the next accidental name is the one nobody will notice.
+ */
+const COMPOUND_ANCHOR_LEDGER = [
+  ['packages/lint/scripts/check-doc-formula-expressions.mjs', 'specSelfTest', false],
+  ['packages/lint/scripts/check-doc-formula-expressions.mjs', 'fieldRuleSelfTest', false],
+  ['scripts/check-comment-mask-corpus.mjs', 'runSelfTestCases', false],
+  ['scripts/check-doc-authoring.mjs', 'selfTestRule3', false],
+  ['scripts/check-doc-authoring.mjs', 'selfTestPackagesProse', false],
+  ['scripts/check-durability-degradation-log-level.mjs', 'selfTestReadSeams', false],
+  ['scripts/check-platform-checklist.mjs', 'selfTestTrapVocabulary', false],
+  ['scripts/check-platform-checklist.mjs', 'selfTestProvisioningUse', false],
+  ['scripts/check-platform-checklist.mjs', 'selfTestUnreferencedRecipes', false],
+  ['scripts/check-platform-checklist.mjs', 'selfTestMetaCallSpelling', false],
+  ['scripts/check-platform-checklist.mjs', 'selfTestSourceLineCitations', false],
+  ['scripts/check-regen-pending.mjs', 'fixtureSelfTest', false],
+  ['scripts/check-regen-pending.mjs', 'prePushIsArmedSelfTest', false],
+  ['scripts/check-regen-pending.mjs', 'decisionTableSelfTest', false],
+  ['scripts/check-turbo-task-graph.mjs', 'runSelfTest', false],
+  ['scripts/check-self-test-wired.mjs', 'carriesSelfTest', true],
+  ['scripts/check-self-test-workflow-commands.mjs', 'runSelfTest', true],
+  ['scripts/check-step-collectors.mjs', 'selfTestTargets', true],
+  ['scripts/check-step-collectors.mjs', 'selfTestDiscoveries', true],
+  ['scripts/measure-self-test-floor.mjs', 'selfTestDefs', true],
+  ['scripts/pm/dispatch-gates.mjs', 'selfTestOnlyCallables', true],
+  ['scripts/pm/dispatch-gates.mjs', 'maskSelfTests', true],
+];
+
+/**
+ * The ledger as `"<file>::<name>"` keys. `runSelfTest` alone proves the key has
+ * to carry the file: that one spelling is a genuine entry point in one script
+ * and production code in another, so a name-keyed ledger could not hold both
+ * verdicts at once — the same reason the anchor itself cannot be narrowed.
+ */
+export const COMPOUND_ANCHOR_KEYS = new Map(
+  COMPOUND_ANCHOR_LEDGER.map(([file, name, accidental]) => [`${file}::${name}`, accidental]),
+);
+
+/**
+ * Every COMPOUND-name declaration the self-test anchor matches in `source`, at
+ * CODE positions only.
+ *
+ * Comments are masked first for the same reason `maskSelfTests` composes them
+ * first: this tree's docblocks quote declaration shapes at column 0, and a
+ * quoted one is prose, not a declaration. A match inside a string literal is
+ * excluded by the same means the mask uses — `scanSource`'s literal map — so a
+ * self-test fixture that BUILDS a module source cannot enter the census as if
+ * it were a declaration of the file holding it.
+ */
+export function compoundAnchorDecls(source) {
+  const scan = scanSource(source);
+  const decommented = maskComments(source);
+  const out = [];
+  for (const m of decommented.matchAll(SELF_TEST_DECL)) {
+    if (scan.comment[m.index] || scan.literal[m.index]) continue;
+    const name = m[0].match(/function[ \t]+([A-Za-z0-9_$]+)/)[1];
+    if (name === BARE_ENTRY_POINT_NAME) continue;
+    out.push({ name, index: m.index, line: decommented.slice(0, m.index).split('\n').length });
+  }
+  return out;
+}
+
+/**
+ * `source` with one declaration renamed so the self-test anchor no longer sees
+ * it — the counterfactual the accidental half is measured against.
+ *
+ * The rename replaces the self-test token INSIDE the identifier rather than
+ * appending or truncating, because the anchor matches the token anywhere in the
+ * name: a mangle that leaves any spelling of it behind is a mutation that does
+ * not land, and a mutation that does not land reads exactly like a clean
+ * measurement. Both directions are asserted by the caller, which refuses unless
+ * the anchored-declaration count drops by exactly one.
+ *
+ * Word-anchored so a longer identifier sharing the prefix is untouched —
+ * renaming `runSelfTest` must not also rewrite `runSelfTestCases`.
+ */
+export function withoutAnchor(source, name) {
+  const replacement = name.replace(/[Ss]elf[_]?[Tt]est/, 'Probe');
+  if (/[Ss]elf[_]?[Tt]est/.test(replacement)) return null;
+  if (new RegExp(`\\b${replacement}\\b`).test(source)) return null;
+  return source.replace(new RegExp(`\\b${name}\\b`, 'g'), replacement);
 }
 
 /**
@@ -9894,6 +10085,85 @@ function selfTest() {
     'a destructured default in the signature does not end the body early',
     !transitiveHints.includes('packages/branch/fixture.ts'),
   );
+
+  // ── The anchor fires on NAMES, so it also fires on production code ───────
+  //
+  // Live, over the tracked tree, against `COMPOUND_ANCHOR_LEDGER`. The census
+  // and the argument for measuring rather than narrowing are at that table;
+  // what runs here is the half that can go red.
+  //
+  // Read the three assertions as one instrument. The first says the population
+  // has not moved under the table. The second says masking the accidental half
+  // still costs no hint — the claim the ledger makes in prose, re-measured on
+  // every run, so the day someone writes a path literal into `maskSelfTests`,
+  // `carriesSelfTest` or any other accidental row, THIS goes red and names the
+  // hint instead of dropping it in silence. The third is the control that makes
+  // the second mean anything: a counterfactual that silently failed to rename
+  // would report "no hint moves" for every row, which is indistinguishable from
+  // a pass, so at least one GENUINE row must be seen to move a hint.
+  {
+    const census = new Map();
+    for (const rel of trackedFiles()) {
+      if (!ANCHOR_CENSUS_EXTENSIONS.test(rel)) continue;
+      let text;
+      try {
+        text = readFileSync(join(ROOT, rel), 'utf8');
+      } catch {
+        continue;
+      }
+      if (!/[Ss]elf[_]?[Tt]est/.test(text)) continue;
+      for (const decl of compoundAnchorDecls(text)) census.set(`${rel}::${decl.name}`, rel);
+    }
+    const unlisted = [...census.keys()].filter((k) => !COMPOUND_ANCHOR_KEYS.has(k)).sort();
+    const stale = [...COMPOUND_ANCHOR_KEYS.keys()].filter((k) => !census.has(k)).sort();
+    t(
+      `every compound self-test NAME the anchor matches is classified in COMPOUND_ANCHOR_LEDGER` +
+        (unlisted.length ? ` — unlisted: ${unlisted.join(', ')}` : '') +
+        (stale.length ? ` — listed but gone: ${stale.join(', ')}` : ''),
+      unlisted.length === 0 && stale.length === 0,
+    );
+
+    const costly = [];
+    const movers = [];
+    for (const [key, accidental] of COMPOUND_ANCHOR_KEYS) {
+      const rel = census.get(key);
+      if (!rel) continue;
+      const name = key.slice(rel.length + 2);
+      const src = readFileSync(join(ROOT, rel), 'utf8');
+      const alt = withoutAnchor(src, name);
+      if (alt === null || compoundAnchorDecls(alt).length !== compoundAnchorDecls(src).length - 1) {
+        costly.push(`${key} (the counterfactual rename did not land — this row was NOT measured)`);
+        continue;
+      }
+      const before = extractWatchHints(src, rel);
+      const after = extractWatchHints(alt, rel);
+      const dropped = after.filter((h) => !before.includes(h));
+      if (dropped.length === 0) continue;
+      if (accidental) costly.push(`${key} now hides ${JSON.stringify(dropped)}`);
+      else movers.push(key);
+    }
+    t(
+      'masking an ACCIDENTAL name match still costs this tree no watch hint' +
+        (costly.length ? ` — ${costly.join('; ')}` : ''),
+      costly.length === 0,
+    );
+    t(
+      'control: at least one GENUINE self-test battery is seen to lose a fixture hint, so the ' +
+        'measurement above is an instrument and not a broken rename reporting zero everywhere',
+      movers.length > 0,
+    );
+  }
+
+  // The card's own specimen, pinned by identity: this module's masker and the
+  // helper predicate beside it are both named into the anchor's population, so a
+  // rename that "fixes" either one has to move the ledger row rather than the
+  // problem.
+  {
+    const selfCensus = compoundAnchorDecls(readFileSync(join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8'));
+    const names = selfCensus.map((d) => d.name);
+    t("this module's own masker is in the anchor's population", names.includes('maskSelfTests'));
+    t('…and so is the reachability helper beside it', names.includes('selfTestOnlyCallables'));
+  }
 
   // A population DECLARED for this very scanner is referenced by no executing
   // code — being unreferenced is what such a declaration IS. Extending the mask
