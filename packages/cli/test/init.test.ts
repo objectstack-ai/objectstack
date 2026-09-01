@@ -388,13 +388,13 @@ describe('benign peer-skew declarations (#10326)', () => {
 
   it('kept the @better-auth/utils widening when the better-call pin retired (#3653)', () => {
     // @better-auth/scim appeared in TWO entries for two unrelated reasons, and
-    // they retire on different days — which HAPPENED: the better-call one went
-    // with the rc pin (stable 1.7.1 peers better-call 1.4.0), while the utils
-    // one outlives it (stable 1.7.1 still peers @better-auth/utils 0.4.2;
-    // its own retirement key is the pnpm 10.31 floor). Deleting both together
-    // — the obvious move when the rc pin lifted — would have silently put the
-    // utils report back on a newcomer's first screen; this pin is what stops
-    // that regression from ever landing quietly.
+    // they retire on different days — which HAPPENED in #3653: the better-call
+    // one went with the rc pin (stable 1.7.1 peers better-call 1.4.0), while
+    // the utils one outlives it (stable 1.7.1 still peers @better-auth/utils
+    // 0.4.2; its own retirement key is the pnpm 10.31 floor). Deleting both
+    // together — the obvious move when the rc pin lifted — would have silently
+    // put the utils report back on a newcomer's first screen; this pin is what
+    // stops that regression from ever landing quietly.
     expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>better-call']).toBeUndefined();
     expect(SCAFFOLD_ALLOWED_PEER_VERSIONS['@better-auth/scim>@better-auth/utils']).toBe('0.5.0');
   });

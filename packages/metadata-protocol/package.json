@@ -27,6 +27,7 @@
     "build": "tsup && node ../../scripts/check-dts-emitted.mjs",
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },

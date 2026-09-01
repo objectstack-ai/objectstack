@@ -433,6 +433,7 @@ publicSharing:
   allowedPermissions: [view]
   redactFields: [internal_notes]
   maxExpiryDays: 30
+  eligibility: "record.status == 'published'"
 ```
 
 **Who may mint and revoke** (ADR-0111 D8). Minting a link requires the object's
@@ -442,6 +443,29 @@ Revoking a link is allowed for the link's **creator**, a **record share-manager*
 (the record's owner or a `modifyAllRecords` admin — the same authority as
 `canManageShares`), or system context: a link someone else minted on your record
 is your record's exposure to kill, not only its creator's.
+
+**When `eligibility` is enforced** (#13608). The optional `eligibility` CEL
+predicate is a **standing policy about which records may be reached
+anonymously**, not a mint-time check. The platform evaluates it when a link is
+minted **and again on every redemption**, against the record it is about to
+serve. So flipping a record out of the policy — `audience` to internal, `status`
+back to draft — stops every token minted while it was in, immediately, with no
+revocation step to remember. Fail-**closed** at both points: a predicate that
+will not compile, or that faults on the record, refuses rather than assuming
+consent. What an anonymous holder sees is the ordinary "invalid or expired"
+answer, identical to the one an unknown token gets; the readable reason a link
+died is written to the server log, never to the response.
+
+<Callout type="warn">
+**Upgrade note.** Before this, `eligibility` was enforced only at mint, so a
+record reclassified after a link was issued kept being served in full to
+anyone holding the URL. Deployments upgrading across that change can feel it:
+links minted while a record qualified stop resolving as soon as it stops
+qualifying. That is the intent — the alternative was a declared policy the
+platform did not hold — but if you depend on links surviving a
+reclassification, widen the predicate rather than relying on the old
+behaviour.
+</Callout>
 
 ---
 

@@ -57,7 +57,12 @@ function matches(r: Record<string, any>, where: Record<string, unknown>): boolea
  * actually observable.
  */
 function makeStubEngine(
-    seedRows: Array<Partial<Row> & { type: string; name: string; metadata: unknown }>,
+    // `metadata` is `Omit`-ed out of the `Partial<Row>` half, never merely
+    // intersected over it: on the row `metadata` is the STORED string, and
+    // `string & unknown` is `string`, so a plain intersection refuses every
+    // body written as an object literal — which is the seeding convenience
+    // this harness exists for, and what it already does at runtime below.
+    seedRows: Array<Omit<Partial<Row>, 'metadata'> & { type: string; name: string; metadata: unknown }>,
 ) {
     let nextId = 0;
     const tables = new Map<string, Record<string, any>[]>();

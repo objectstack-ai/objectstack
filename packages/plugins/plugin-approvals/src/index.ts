@@ -25,6 +25,8 @@ export {
   type ApprovalNodeAutoOutcome,
   // #4469 — the read-only stranded-request inspection's report shape.
   type StrandedApprovalRequest,
+  // #13909 — which unrecoverable shape a reported row is in.
+  type StrandedRunState,
 } from './approval-service.js';
 export {
   ApprovalsServicePlugin,

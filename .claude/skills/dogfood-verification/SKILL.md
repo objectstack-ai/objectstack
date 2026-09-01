@@ -137,8 +137,8 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
 
 - [ ] 只捕获你自己的文件:`git diff -- <explicit paths…> > /tmp/fix.patch`
       (用**显式路径**,不用多行 shell 变量 —— 后者会静默产出空 patch)。
-- [ ] `git worktree add -b <branch> /tmp/pr origin/main` → `git -C /tmp/pr apply /tmp/fix.patch`
-      → 确认 `git -C /tmp/pr status` *只*列你的文件。
+- [ ] `git fetch origin main && git worktree add --no-track -b <branch> /tmp/pr origin/main`
+      → `git -C /tmp/pr apply /tmp/fix.patch` → 确认 `git -C /tmp/pr status` *只*列你的文件。
 - [ ] 加 **changeset**(`.changeset/<slug>.md`,`"@objectstack/<pkg>": patch`)——
       发布包的改动过不了 CI 的「Check Changeset」门。
 - [ ] 提交(信息末尾带 `Co-Authored-By:` trailer)、推送、`gh pr create`,然后
