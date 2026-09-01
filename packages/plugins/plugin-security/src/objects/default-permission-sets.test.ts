@@ -384,26 +384,43 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
  */
 describe('managed-deny targets — independent-property floor + registry union reaches the derived variant (#14029)', () => {
   // Derived from `defaultPermissionSets`, never from the list under test.
-  // "Grants a write" in the evaluator's own terms: the three CRUD flags OR
-  // `modifyAllRecords` — the super-user bypass grants edit/delete and the
-  // destructive class by a second route (`MODIFY_ALL_WRITE_KEYS`,
-  // `permission-evaluator.ts`), so `'*': { modifyAllRecords: true }` is
-  // write-granting even with all three CRUD flags false. Value tests
-  // (`=== true`), not key-existence: Zod materialises the superuser bits with
-  // `.default(false)` (`permission.zod.ts`), so they are present-as-false.
-  const writeGrantingWildcardSets: string[] = defaultPermissionSets
-    .filter((s: any) => {
-      const wc = s.objects?.['*'];
-      return (
-        !!wc &&
-        (wc.allowCreate === true ||
-          wc.allowEdit === true ||
-          wc.allowDelete === true ||
-          wc.modifyAllRecords === true)
-      );
-    })
-    .map((s) => s.name)
-    .sort();
+  // "Grants a write" in the evaluator's own terms — the bits its grant routes
+  // read (`permission-evaluator.ts`):
+  //  - FIRST route, a direct bit read off `OPERATION_TO_PERMISSION`: the three
+  //    CRUD write flags, plus `allowTransfer` (`transfer: 'allowTransfer'` —
+  //    reassigning `owner_id`; a real grant, ENFORCED today through the
+  //    insert/update owner_id door, #3004), so
+  //    `'*': { allowRead: true, allowTransfer: true }` is write-granting even
+  //    with all three CRUD flags AND `modifyAllRecords` false (#14137);
+  //  - SECOND route, the `modifyAllRecords` super-user bypass, which grants
+  //    edit/delete and the destructive class (`MODIFY_ALL_WRITE_KEYS`), so
+  //    `'*': { modifyAllRecords: true }` is write-granting even with all three
+  //    CRUD flags false.
+  // (A census of grant routes beyond these two tables has NOT been done —
+  // #14137 "Not established" — so this clause list is exhaustive over the two
+  // known routes, not a claim about the whole evaluator.)
+  // Value tests (`=== true`), not key-existence: Zod materialises these bits
+  // with `.default(false)` (`permission.zod.ts`), so they are present-as-false
+  // (#14129 first review; pinned below).
+  const grantsWildcardWrite = (wc: any): boolean =>
+    wc.allowCreate === true ||
+    wc.allowEdit === true ||
+    wc.allowDelete === true ||
+    wc.modifyAllRecords === true ||
+    wc.allowTransfer === true;
+
+  // The REAL derivation under pin — also applied to synthetic sets below so
+  // the floor is testable against shapes no seeded set carries yet.
+  const deriveWriteGrantingWildcardSets = (sets: readonly any[]): string[] =>
+    sets
+      .filter((s: any) => {
+        const wc = s.objects?.['*'];
+        return !!wc && grantsWildcardWrite(wc);
+      })
+      .map((s) => s.name)
+      .sort();
+
+  const writeGrantingWildcardSets: string[] = deriveWriteGrantingWildcardSets(defaultPermissionSets);
 
   /**
    * The one documented exclusion: `admin_full_access` keeps its unqualified
@@ -433,6 +450,77 @@ describe('managed-deny targets — independent-property floor + registry union r
   it('the exclusion list is exactly admin_full_access, and it really is outside the target list', () => {
     expect(WILDCARD_DENY_EXCLUSIONS).toEqual(['admin_full_access']);
     expect([...MANAGED_DENY_TARGET_SETS]).not.toContain('admin_full_access');
+  });
+
+  // ── The floor judged against synthetic wildcards (#14137) ──
+  // `allowTransfer` is the evaluator's FIRST grant route (a direct bit read
+  // off `OPERATION_TO_PERMISSION`) and is ENFORCED today through the
+  // insert/update owner_id door (#3004): a transfer-only wildcard holds
+  // ownership reassignment on every managed identity table while all three
+  // CRUD write flags and `modifyAllRecords` are false — visible only in the
+  // evaluator's grant semantics, never in the flags the older clauses read.
+  // Every shape below goes through `PermissionSetSchema.parse` first so Zod
+  // materialises the `.default(false)` bits: the parsed wildcard carries the
+  // unauthored bits present-as-false, exactly what the seeded sets look like
+  // to the filter.
+  describe('the floor sees the evaluator first grant route — allowTransfer (#14137)', () => {
+    const parseProbeSet = (wildcard: Record<string, boolean>): any =>
+      PermissionSetSchema.parse({
+        name: 'synthetic_floor_probe',
+        label: 'Synthetic floor probe',
+        objects: { '*': wildcard },
+      });
+
+    it('a transfer-only wildcard is required to be a managed-deny target (the card)', () => {
+      const probe = parseProbeSet({ allowRead: true, allowTransfer: true });
+      const wc: any = probe.objects['*'];
+      // The shape really is the card's: all three CRUD write flags AND
+      // `modifyAllRecords` are (present-as-)false after parse.
+      expect(wc.allowCreate).toBe(false);
+      expect(wc.allowEdit).toBe(false);
+      expect(wc.allowDelete).toBe(false);
+      expect(wc.modifyAllRecords).toBe(false);
+      expect(wc.allowTransfer).toBe(true);
+      expect(deriveWriteGrantingWildcardSets([probe])).toEqual(['synthetic_floor_probe']);
+    });
+
+    it('reverse control: a read-only wildcard is still NOT required', () => {
+      const probe = parseProbeSet({ allowRead: true });
+      expect(deriveWriteGrantingWildcardSets([probe])).toEqual([]);
+    });
+
+    it('present-as-false: an explicit allowTransfer:false wildcard does not trip the floor (value test, not key-existence)', () => {
+      const probe = parseProbeSet({ allowRead: true, allowTransfer: false });
+      const wc: any = probe.objects['*'];
+      // The key IS present after parse — `.default(false)` materialises it —
+      // so a key-existence rewrite of the floor turns exactly this pin red
+      // (#14129 first review; not to be re-litigated).
+      expect('allowTransfer' in wc).toBe(true);
+      expect(wc.allowTransfer).toBe(false);
+      expect(deriveWriteGrantingWildcardSets([probe])).toEqual([]);
+    });
+
+    it('invariance: the allowTransfer clause changes no existing seeded set verdict (zero delta today)', () => {
+      // The pre-#14137 four-clause floor, restated ONLY to diff verdicts
+      // against: if a future seeded set legitimately relies on the
+      // `allowTransfer` clause, this pin goes red and the zero-delta claim is
+      // consciously retired — the same review moment the membership diff
+      // above forces.
+      let wildcardsSeen = 0;
+      for (const s of defaultPermissionSets as any[]) {
+        const wc = s.objects?.['*'];
+        if (!wc) continue;
+        wildcardsSeen += 1;
+        const preFloor =
+          wc.allowCreate === true ||
+          wc.allowEdit === true ||
+          wc.allowDelete === true ||
+          wc.modifyAllRecords === true;
+        expect(grantsWildcardWrite(wc), `verdict drifted for ${s.name}`).toBe(preFloor);
+      }
+      // Non-vacuousness: the loop really visited the seeded wildcards.
+      expect(wildcardsSeen).toBeGreaterThanOrEqual(3);
+    });
   });
 
   // ── The behaviour the membership buys, measured on the REAL derived set ──

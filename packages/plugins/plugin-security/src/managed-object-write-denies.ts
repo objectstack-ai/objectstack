@@ -82,7 +82,11 @@ export const MANAGED_DENY_ENTRY = {
  *
  * Holding a write-granting `'*'` wildcard is the FLOOR of membership, not its
  * definition: every default set whose wildcard grants any generic write class
- * — via the three write flags (`allowCreate`/`allowEdit`/`allowDelete`) OR via
+ * — via the three write flags (`allowCreate`/`allowEdit`/`allowDelete`), OR
+ * via `allowTransfer` (#14137), the ownership-reassignment bit the
+ * evaluator's FIRST route reads directly off `OPERATION_TO_PERMISSION`
+ * (`transfer: 'allowTransfer'`, `permission-evaluator.ts`; a real grant,
+ * ENFORCED today through the insert/update `owner_id` door, #3004), OR via
  * `modifyAllRecords`, whose super-user bypass grants edit/delete and the
  * destructive class by the evaluator's second route (`MODIFY_ALL_WRITE_KEYS`,
  * `permission-evaluator.ts`) — must be listed here (or carry a documented
@@ -90,7 +94,9 @@ export const MANAGED_DENY_ENTRY = {
  * writes on a newly-declared identity table — that floor is what
  * `default-permission-sets.test.ts` derives independently and diffs against
  * this list (#14029), so a future write-granting set that is not added here
- * fails a pin instead of silently keeping its wildcard.
+ * fails a pin instead of silently keeping its wildcard. (The clause list is
+ * exhaustive over the evaluator's two known grant tables; a census of routes
+ * beyond them has not been done — #14137 "Not established".)
  * Membership is WIDER than the floor: `viewer_readonly`'s wildcard is read-only
  * and `member_default` has held none since #5491 — their injected entries are
  * belt-and-suspenders and the read grant itself, respectively (see the module
