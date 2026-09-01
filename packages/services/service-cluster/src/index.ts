@@ -76,8 +76,20 @@ export type {
 export {
     registerMultiNodeGate,
     checkMultiNodeAllowed,
+    hasMultiNodeGate,
+    MULTI_NODE_NO_GATE_REASON,
     __resetMultiNodeGate,
     type MultiNodeGate,
     type MultiNodeVerdict,
     type ResolvedMultiNodeVerdict,
 } from './multi-node-gate.js';
+
+// [#13537] Route-independent gate mounting: a boot surface hands its
+// host-anchored importer over so the distribution's gate is mounted on EVERY
+// boot route, not only where one app config file executes.
+export {
+    mountMultiNodeGateFromHost,
+    MULTI_NODE_GATE_CARRIER_PACKAGES,
+    type MultiNodeGateMountAttempt,
+    type MultiNodeGateMountReading,
+} from './multi-node-gate-mount.js';

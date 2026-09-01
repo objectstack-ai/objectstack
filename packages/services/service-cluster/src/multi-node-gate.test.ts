@@ -3,14 +3,39 @@ import { describe, it, expect, afterEach } from 'vitest';
 import {
     registerMultiNodeGate,
     checkMultiNodeAllowed,
+    hasMultiNodeGate,
+    MULTI_NODE_NO_GATE_REASON,
     __resetMultiNodeGate,
 } from './multi-node-gate.js';
 
 afterEach(() => __resetMultiNodeGate());
 
 describe('multi-node gate', () => {
-    it('allows when no gate is registered (open framework)', () => {
+    it('allows when no gate is registered and no count is declared', () => {
+        // #13537: the no-gate default is fail-closed only for a DECLARED
+        // multi-node topology. An undeclared count states no topology, so the
+        // historical allow stands (single-replica path unchanged).
         expect(checkMultiNodeAllowed()).toEqual({ allowed: true, refused: 0, capped: false });
+    });
+
+    it('allows a single declared replica with no gate registered', () => {
+        // The single-replica negative (#13537): one replica declares no
+        // multi-node topology, so an unregistered gate must not refuse it.
+        expect(checkMultiNodeAllowed(1)).toEqual({ allowed: true, refused: 0, capped: false });
+    });
+
+    it('refuses a declared multi-node topology when no gate is registered', () => {
+        // #13537 — the default direction itself: an unregistered gate must not
+        // silently mean "permitted" on the licensed capability. Smallest
+        // multi-node count first, same verdict shape as a registered gate's
+        // outright denial (no third branch for consumers).
+        expect(checkMultiNodeAllowed(2)).toEqual({
+            allowed: false,
+            reason: MULTI_NODE_NO_GATE_REASON,
+            admitted: 0,
+            refused: 2,
+            capped: false,
+        });
     });
 
     it('honors a denying gate with reason', () => {
@@ -35,10 +60,19 @@ describe('multi-node gate', () => {
         expect(checkMultiNodeAllowed().allowed).toBe(true);
     });
 
-    it('reset restores open default', () => {
+    it('reset restores the unregistered default', () => {
         registerMultiNodeGate({ allowMultiNode: () => ({ allowed: false }) });
         __resetMultiNodeGate();
         expect(checkMultiNodeAllowed()).toEqual({ allowed: true, refused: 0, capped: false });
+        expect(checkMultiNodeAllowed(3).allowed).toBe(false);
+    });
+
+    it('reports whether a gate is registered on this module instance', () => {
+        expect(hasMultiNodeGate()).toBe(false);
+        registerMultiNodeGate({ allowMultiNode: () => ({ allowed: true }) });
+        expect(hasMultiNodeGate()).toBe(true);
+        __resetMultiNodeGate();
+        expect(hasMultiNodeGate()).toBe(false);
     });
 });
 
@@ -117,8 +151,48 @@ describe('multi-node gate: count-carrying admission', () => {
         });
     });
 
-    it('treats the open framework (no gate) as uncapped for any count', () => {
-        expect(checkMultiNodeAllowed(9)).toEqual({ allowed: true, refused: 0, capped: false });
+    it('refuses every declared count above one when no gate is registered', () => {
+        // #13537 flipped this pin's direction: this exact call used to be the
+        // "open framework is uncapped for any count" default-ALLOW pin. An
+        // unregistered gate now refuses the whole declared topology, and the
+        // refusal carries the counts (`admitted: 0`, everything refused) so
+        // the operator surfaces stay coherent.
+        expect(checkMultiNodeAllowed(9)).toEqual({
+            allowed: false,
+            reason: MULTI_NODE_NO_GATE_REASON,
+            admitted: 0,
+            refused: 9,
+            capped: false,
+        });
+    });
+
+    it('keeps meaningless declared counts on the allow path with no gate', () => {
+        // `OS_CLUSTER_REPLICAS` unset (`Number(undefined)` = NaN), zero or
+        // negative all normalize to "not declared" — none states a multi-node
+        // topology, so none may trip the fail-closed default (#13537).
+        for (const requested of [Number.NaN, 0, -1]) {
+            expect(checkMultiNodeAllowed(requested)).toEqual({
+                allowed: true,
+                refused: 0,
+                capped: false,
+            });
+        }
+    });
+
+    it('never blocks a properly-entitled deployment: the new default engages only with NO gate', () => {
+        // The entitled negative (#13537): a registered gate whose cap covers
+        // the declared count answers exactly as before — the fail-closed
+        // branch is unreachable the moment a gate is registered.
+        registerMultiNodeGate({
+            allowMultiNode: () => ({ allowed: true, reason: 'licensed', admitted: 5 }),
+        });
+        expect(checkMultiNodeAllowed(3)).toEqual({
+            allowed: true,
+            reason: 'licensed',
+            admitted: 3,
+            refused: 0,
+            capped: false,
+        });
     });
 
     it('normalizes a degenerate admitted count from a third-party gate', () => {

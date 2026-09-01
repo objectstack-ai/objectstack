@@ -2432,9 +2432,27 @@ export default class Serve extends Command {
         // '@objectstack/service-cluster'` and took the whole boot down — while
         // app-side code loaded the very same package fine.
         const __clusterPkg: string = '@objectstack/service-cluster';
-        const { checkMultiNodeAllowed } = (await importFromHost(__clusterPkg)) as {
+        const { checkMultiNodeAllowed, mountMultiNodeGateFromHost } = (await importFromHost(__clusterPkg)) as {
           checkMultiNodeAllowed: (requested?: number) => MultiNodeGateVerdict;
+          // Optional: an app may pin an older service-cluster that predates
+          // the mount helper (#13537); `?.` below keeps that boot walking.
+          mountMultiNodeGateFromHost?: (
+            importer: (specifier: string) => Promise<unknown>,
+          ) => Promise<unknown>;
         };
+        // [#13537] Mount the distribution's gate on EVERY boot route, BEFORE
+        // consulting it. Registration used to depend on one app config file
+        // executing (the EE config calling `registerMultiNodeGate`), so the
+        // thin-extension and artifact-direct routes booted with no gate at
+        // all — and the gate then defaulted to allow. The helper imports the
+        // gate-carrying distribution packages through this file's own
+        // host-anchored importer (passed as a value, so every carrier load
+        // resolves from the served app per #4719 — same guarantee as the
+        // `importFromHost` call above, just exercised inside the package that
+        // owns the carrier list). Best-effort: with no distribution installed
+        // nothing mounts, and the gate's fail-closed default answers below.
+        try { await mountMultiNodeGateFromHost?.(importFromHost); }
+        catch { /* never brick the boot for an add-on — the check below fails closed */ }
         // Ask the gate about the topology the operator actually DECLARED.
         // Calling zero-arg leaves `requested` undefined, which a cap-aware gate
         // has nothing to clamp against — so the licensed-overflow verdict was
