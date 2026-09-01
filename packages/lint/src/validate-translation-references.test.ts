@@ -1,6 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+// The contract the object branch's coverage is pinned against (#13835) — see
+// the coverage describe block at the foot of this file. `@objectstack/spec` is
+// already a runtime dependency of this package, so the pin adds no edge.
+import { ObjectTranslationDataSchema } from '@objectstack/spec/system';
 import {
   validateTranslationReferences,
   TRANSLATION_TARGET_UNKNOWN,
@@ -1119,6 +1123,193 @@ describe('validateTranslationReferences — section anchors', () => {
 });
 
 /**
+ * #13835 — the `_tabs` leg, the `flows` leg of #11608 one group over.
+ *
+ * The asymmetry it closes: `collectExpectedEntries` already emits
+ * `objects.<obj>._tabs.<tab>.label` and `os i18n check` DEMANDS a translation
+ * for it, while this rule walked `fields` / `options` / `_views` / `_sections` /
+ * `_actions` and never `_tabs` — so a key naming a preset that had been renamed
+ * away warned nobody, and the tab bar rendered in the source locale above a
+ * fully localized grid with every gate green.
+ *
+ * A list page carrying `interfaceConfig.userFilters.tabs` is the fixture shape
+ * throughout, because it is the only carrier of `ViewTabSchema` that anything
+ * renders (`translateInterfaceTabs`).
+ */
+describe('validateTranslationReferences — filter-preset tabs (#13835)', () => {
+  /** A lead list page whose preset bar declares `urgent` and `mine`. */
+  const tabStack = (translations: unknown[], page?: Record<string, unknown>) => ({
+    objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+    pages: [
+      page ?? {
+        name: 'lead_list',
+        object: 'crm_lead',
+        interfaceConfig: {
+          userFilters: {
+            element: 'tabs',
+            tabs: [
+              { name: 'urgent', label: 'Urgent', filter: [] },
+              { name: 'mine', label: 'Mine', filter: [] },
+            ],
+          },
+        },
+      },
+    ],
+    translations,
+  });
+
+  it('flags a `_tabs` key naming a preset no page declares', () => {
+    const findings = validateTranslationReferences(
+      tabStack([
+        { 'zh-CN': { objects: { crm_lead: { _tabs: { overdue: { label: '逾期' } } } } } },
+      ]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].objects.crm_lead._tabs.overdue');
+    expect(findings[0].hint).toContain('Declared tabs: mine, urgent.');
+  });
+
+  it('accepts a `_tabs` key naming a declared preset', () => {
+    const findings = validateTranslationReferences(
+      tabStack([
+        { 'zh-CN': { objects: { crm_lead: { _tabs: { urgent: { label: '紧急' }, mine: { label: '我的' } } } } } },
+      ]),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  // The false-negative direction, stated as one falsifiable pair: without the
+  // leg BOTH bundles above are silent, so "orphan reported" alone does not
+  // distinguish this rule from one that reports every `_tabs` key. The valid
+  // half is what makes the orphan half mean something.
+  it('separates the two directions on ONE stack', () => {
+    const findings = validateTranslationReferences(
+      tabStack([
+        {
+          en: {
+            objects: {
+              crm_lead: { _tabs: { urgent: { label: 'Urgent' }, overdue: { label: 'Overdue' } } },
+            },
+          },
+        },
+      ]),
+    );
+    expect(findings.map((f) => f.path)).toEqual([
+      'translations[0].en.objects.crm_lead._tabs.overdue',
+    ]);
+  });
+
+  it('binds tabs by `interfaceConfig.source` over the page-level `object`', () => {
+    // The resolver's own order (`translateInterfaceTabs`): the preset bar
+    // filters the records `interfaceConfig.source` names, which need not be the
+    // page's record binding. Both directions in one fixture — "crm_lead is
+    // still reported" alone would pass just as well if the page contributed
+    // nothing at all, and it is the `crm_contact` half that falsifies that.
+    const stack = (objectName: string) => ({
+      objects: [
+        { name: 'crm_lead', fields: { name: { type: 'text' } } },
+        { name: 'crm_contact', fields: { name: { type: 'text' } } },
+      ],
+      pages: [
+        {
+          name: 'mixed',
+          object: 'crm_lead',
+          interfaceConfig: {
+            source: 'crm_contact',
+            userFilters: { element: 'tabs', tabs: [{ name: 'urgent', filter: [] }] },
+          },
+        },
+      ],
+      translations: [{ en: { objects: { [objectName]: { _tabs: { urgent: { label: 'Urgent' } } } } } }],
+    });
+
+    expect(validateTranslationReferences(stack('crm_contact'))).toEqual([]);
+
+    const findings = validateTranslationReferences(stack('crm_lead'));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._tabs.urgent');
+  });
+
+  it('de-duplicates one preset name authored on several pages over the same object', () => {
+    // `walkObjectTabs` de-duplicates through an index so it emits each key
+    // once; the universe is a Set, which is the same fact with nothing to
+    // choose between two authorings. Pinned because a per-page fact set would
+    // still ACCEPT this bundle — the observable difference is the hint.
+    const findings = validateTranslationReferences({
+      objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+      pages: [
+        {
+          name: 'lead_list',
+          object: 'crm_lead',
+          interfaceConfig: { userFilters: { tabs: [{ name: 'urgent', filter: [] }] } },
+        },
+        {
+          name: 'lead_board',
+          object: 'crm_lead',
+          interfaceConfig: { userFilters: { tabs: [{ name: 'urgent', filter: [] }, { name: 'mine', filter: [] }] } },
+        },
+      ],
+      translations: [{ en: { objects: { crm_lead: { _tabs: { ghost: { label: 'Ghost' } } } } } }],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].hint).toContain('Declared tabs: mine, urgent.');
+  });
+
+  it('says so when the object declares no preset bar at all, and names the dead carrier', () => {
+    // `ListViewSchema.tabs` is `ViewTabSchema`'s other carrier and has no
+    // renderer in either repo, so a `_tabs` key written for one resolves
+    // nowhere. The hint has to say that, or an author reads the finding as a
+    // bug in the rule and "fixes" it by moving the tab to a list view.
+    const findings = validateTranslationReferences({
+      objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+      views: [
+        {
+          name: 'lead_list',
+          objectName: 'crm_lead',
+          tabs: [{ name: 'urgent', label: 'Urgent' }],
+        },
+      ],
+      translations: [{ en: { objects: { crm_lead: { _tabs: { urgent: { label: 'Urgent' } } } } } }],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].path).toBe('translations[0].en.objects.crm_lead._tabs.urgent');
+    expect(findings[0].hint).toContain('declares a filter-preset tab bar at all');
+    expect(findings[0].hint).toContain("list view's own `tabs` has no renderer");
+  });
+
+  it('reads the preset bar on a source-authored page, which the component walk skips', () => {
+    // `walkPageComponents` skips `kind: 'html' | 'react' | 'jsx'` because their
+    // `regions` are a derived cache. `interfaceConfig` is authored metadata at
+    // the page root, and neither `translateInterfaceTabs` nor `walkObjectTabs`
+    // consults `kind` — so skipping it here would report a key the runtime
+    // resolves.
+    const findings = validateTranslationReferences(
+      tabStack(
+        [{ en: { objects: { crm_lead: { _tabs: { urgent: { label: 'Urgent' } } } } } }],
+        {
+          name: 'lead_list',
+          kind: 'react',
+          object: 'crm_lead',
+          source: 'export default () => null;',
+          interfaceConfig: { userFilters: { tabs: [{ name: 'urgent', filter: [] }] } },
+        },
+      ),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it('suggests the near-miss spelling of a real preset', () => {
+    const findings = validateTranslationReferences(
+      tabStack([{ en: { objects: { crm_lead: { _tabs: { urgnt: { label: 'Urgent' } } } } } }]),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('Did you mean "urgent"?');
+  });
+});
+
+/**
  * #5415, pinned against the metadata the repo actually ships.
  *
  * `examples/app-showcase` is imported here rather than reduced by hand on
@@ -1225,4 +1416,129 @@ describe('validateTranslationReferences — the showcase contact surface (#5415)
       expect(finding.hint).not.toContain('declares no named section at all');
     }
   }, 60_000);
+});
+
+/**
+ * #13835 — the coverage pin: the object branch's legs, held equal to
+ * `ObjectTranslationDataSchema`'s key set.
+ *
+ * **Why a pin rather than a comment.** `_tabs` was not skipped by anyone's
+ * decision — it arrived after the object branch was written, and the branch had
+ * no way to notice. That is a defect of the CLASS "a group joined the shape and
+ * no leg followed", and the same silence is available to the next group. This
+ * ledger is the mechanical answer: it names every key the schema declares and
+ * what this rule does about it, and the first assertion holds the two sets
+ * equal, so a new group fails HERE — at a test whose name says what is missing
+ * — rather than shipping a demanded-but-unchecked key.
+ *
+ * **The classification is not self-certifying.** A ledger of names alone would
+ * let a new group be waved through by writing one line, which is the same
+ * silence one layer up. So every `reference-checked` entry carries a bundle
+ * whose key names something the stack does not declare, and the second
+ * assertion requires that bundle to actually produce a finding. Claiming
+ * coverage therefore costs a working leg; the only cheap route is
+ * `leaf-copy`, which has to state a reason and is a deliberate, reviewable act.
+ */
+describe('validateTranslationReferences — object-branch coverage vs the schema (#13835)', () => {
+  /** A stack declaring one real instance of every referenceable group. */
+  const coverageStack = (objectNode: Record<string, unknown>) => ({
+    objects: [
+      {
+        name: 'crm_lead',
+        fields: { name: { type: 'text', label: 'Name' } },
+        fieldGroups: [{ key: 'basics', label: 'Basics' }],
+        actions: [{ name: 'convert_lead', label: 'Convert' }],
+      },
+    ],
+    views: [{ name: 'open_leads', objectName: 'crm_lead', label: 'Open Leads' }],
+    pages: [
+      {
+        name: 'lead_list',
+        object: 'crm_lead',
+        interfaceConfig: { userFilters: { tabs: [{ name: 'urgent', filter: [] }] } },
+      },
+    ],
+    translations: [{ en: { objects: { crm_lead: objectNode } } }],
+  });
+
+  type Coverage =
+    | { kind: 'reference-checked'; ghost: Record<string, unknown>; path: string }
+    | { kind: 'leaf-copy'; why: string };
+
+  /**
+   * Every key of `ObjectTranslationDataSchema`, and this rule's disposition.
+   *
+   * `leaf-copy` is the honest classification for a key whose VALUE is prose:
+   * there is no identifier in it to resolve, so there is no reference to check
+   * and a leg would have nothing to say. Group keys are the opposite — each is
+   * a record keyed by a machine name that either exists in this stack or does
+   * not.
+   */
+  const COVERAGE: Record<string, Coverage> = {
+    label: { kind: 'leaf-copy', why: "the object's own translated label — prose, no identifier to resolve" },
+    pluralLabel: { kind: 'leaf-copy', why: 'prose' },
+    description: { kind: 'leaf-copy', why: 'prose' },
+    fields: {
+      kind: 'reference-checked',
+      ghost: { fields: { ghost_field: { label: 'Ghost' } } },
+      path: 'translations[0].en.objects.crm_lead.fields.ghost_field',
+    },
+    _views: {
+      kind: 'reference-checked',
+      ghost: { _views: { ghost_view: { label: 'Ghost' } } },
+      path: 'translations[0].en.objects.crm_lead._views.ghost_view',
+    },
+    _sections: {
+      kind: 'reference-checked',
+      ghost: { _sections: { ghost_section: { label: 'Ghost' } } },
+      path: 'translations[0].en.objects.crm_lead._sections.ghost_section',
+    },
+    _actions: {
+      kind: 'reference-checked',
+      ghost: { _actions: { ghost_action: { label: 'Ghost' } } },
+      path: 'translations[0].en.objects.crm_lead._actions.ghost_action',
+    },
+    _tabs: {
+      kind: 'reference-checked',
+      ghost: { _tabs: { ghost_tab: { label: 'Ghost' } } },
+      path: 'translations[0].en.objects.crm_lead._tabs.ghost_tab',
+    },
+  };
+
+  it('classifies every key `ObjectTranslationDataSchema` declares, and no key it does not', () => {
+    // Read off the schema itself, so the pin tracks the contract rather than a
+    // transcription of it that can drift.
+    const declared = Object.keys(
+      (ObjectTranslationDataSchema as unknown as { shape: Record<string, unknown> }).shape,
+    ).sort();
+    expect(Object.keys(COVERAGE).sort()).toEqual(declared);
+  });
+
+  it('backs every `reference-checked` claim with a leg that actually reports', () => {
+    for (const [key, coverage] of Object.entries(COVERAGE)) {
+      if (coverage.kind !== 'reference-checked') continue;
+      const findings = validateTranslationReferences(coverageStack(coverage.ghost));
+      expect(findings.map((f) => f.path), `group "${key}" has no working leg`).toEqual([coverage.path]);
+      expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    }
+  });
+
+  it('accepts a bundle that names the real instance of every group at once', () => {
+    // The over-reporting control for the assertion above: the same eight-key
+    // shape, spelled correctly, must be silent — otherwise "one finding per
+    // ghost" could be a rule that reports everything.
+    const findings = validateTranslationReferences(
+      coverageStack({
+        label: 'Lead',
+        pluralLabel: 'Leads',
+        description: 'A sales lead',
+        fields: { name: { label: 'Name' } },
+        _views: { open_leads: { label: 'Open' } },
+        _sections: { basics: { label: 'Basics' } },
+        _actions: { convert_lead: { label: 'Convert' } },
+        _tabs: { urgent: { label: 'Urgent' } },
+      }),
+    );
+    expect(findings).toEqual([]);
+  });
 });

@@ -91,7 +91,8 @@
  * labels are exactly the kind of thing an app localizes. Resolution follows the
  * §4 ladder of the assessment, with the field-level S3 rule intact:
  *
- *   1. own object                          → check its fields/views/actions/sections
+ *   1. own object                          → check its fields/views/actions/
+ *                                             sections/tabs
  *   2. platform object in the registry     → skip WHOLLY (we cannot see its
  *                                             fields, so we cannot judge them)
  *   3. platform-prefixed, not in registry  → warn on the object key only
@@ -230,6 +231,12 @@ interface ObjectFacts {
   views: Set<string>;
   actions: Map<string, AnyRec>;
   sections: Set<string>;
+  /**
+   * `_tabs` names — the filter-preset tabs declared for this object, from
+   * `page.interfaceConfig.userFilters.tabs[].name`. See {@link collectPageTabs}
+   * for why that is the only carrier and how the object binding is resolved.
+   */
+  tabs: Set<string>;
 }
 
 /** Everything a `flows.<name>.screens.<node_id>` key may legally name. */
@@ -271,7 +278,13 @@ interface Universe {
 }
 
 function emptyFacts(): ObjectFacts {
-  return { fields: new Map(), views: new Set(), actions: new Map(), sections: new Set() };
+  return {
+    fields: new Map(),
+    views: new Set(),
+    actions: new Map(),
+    sections: new Set(),
+    tabs: new Set(),
+  };
 }
 
 /**
@@ -381,6 +394,59 @@ function collectViewRecord(view: AnyRec, factsFor: (objectName: string) => Objec
   if (isRec(view.form)) addSections(view.form, bindingOf(view.form) ?? listBinding);
 
   addSections(view, recordObject ?? listBinding);
+}
+
+/**
+ * Register the `_tabs` names ONE page contributes — its filter-preset tab bar,
+ * `interfaceConfig.userFilters.tabs[].name`, under the object those presets
+ * filter.
+ *
+ * Three shape facts, each asked of the code that already owns it rather than
+ * re-derived here — this is the third reader of one surface, and the leg is
+ * only correct while all three agree:
+ *
+ *  1. **`ViewTabSchema` has two carriers and only one is live.**
+ *     `UserFiltersSchema.tabs` (the page-only preset bar, ADR-0047) is drawn by
+ *     objectui's `TabFilters` off a page's `interfaceConfig`; `ListViewSchema.tabs`
+ *     ("multi-tab view interface") has no renderer in either repo.
+ *     `translateInterfaceTabs` (`spec/src/system/i18n-resolver.ts`) covers the
+ *     live carrier and stops there, so a `_tabs` key is resolvable only against
+ *     this one. Registering the ListView carrier here would make legal a key
+ *     nothing resolves — the mirror image of the orphan this rule reports, and
+ *     the failure that made `_views.form` a non-key (#5164).
+ *  2. **The object comes from `interfaceConfig.source` first, then the page's
+ *     own `object`.** That is the order `translateInterfaceTabs` resolves in and
+ *     the order `walkObjectTabs` (`packages/cli/src/utils/i18n-extract.ts`)
+ *     scaffolds in — the "component's own binding first" discipline `_sections`
+ *     follows. A page-level lookup alone would file the presets of every
+ *     `source`-bound list page under the wrong object, reporting correct keys.
+ *  3. **One tab name may be authored on several pages over the same object** — a
+ *     shared "urgent" preset — which is why the fact set is per object rather
+ *     than per page. `walkObjectTabs` de-duplicates through an index because it
+ *     must emit each key exactly once; a `Set` is the same de-duplication with
+ *     nothing left to choose between two authorings.
+ *
+ * ⚠️ Source-authored pages (`kind: 'html' | 'react' | 'jsx'`) are NOT skipped
+ * here, deliberately, even though {@link walkPageComponents} skips them. That
+ * skip exists because such a page's `regions` are a derived cache the `source`
+ * wins over; `interfaceConfig` is authored metadata at the page root, and both
+ * the resolver and the extractor read it without regard to `kind`. Skipping it
+ * would leave a tab bar whose keys this rule reports as orphans while the
+ * runtime resolves them.
+ */
+function collectPageTabs(page: AnyRec, factsFor: (objectName: string) => ObjectFacts): void {
+  const cfg = isRec(page.interfaceConfig) ? page.interfaceConfig : undefined;
+  if (!cfg) return;
+  const userFilters = isRec(cfg.userFilters) ? cfg.userFilters : undefined;
+  if (!userFilters) return;
+
+  const objectName = strName(cfg.source) ?? strName(page.object);
+  if (!objectName) return;
+
+  for (const tab of asArray(userFilters.tabs)) {
+    const tabName = strName(tab.name);
+    if (tabName) factsFor(objectName).tabs.add(tabName);
+  }
 }
 
 /**
@@ -559,9 +625,14 @@ function buildUniverse(stack: AnyRec): Universe {
     collectViewRecord(view, factsFor);
   }
 
-  // ── Pages: `record:details` sections are the other `_sections` anchor ──
+  // ── Pages: `record:details` sections are the other `_sections` anchor, and
+  //    `interfaceConfig.userFilters.tabs` is the ONE `_tabs` anchor ──
   const pages = asArray(stack.pages);
   for (let pi = 0; pi < pages.length; pi++) {
+    // Read off the page ROOT, before the component walk and independent of it:
+    // `interfaceConfig` is not a component, and unlike `regions` it is authored
+    // on source-authored pages too (see `collectPageTabs`).
+    collectPageTabs(pages[pi], factsFor);
     for (const walked of walkPageComponents(pages[pi], `pages[${pi}]`)) {
       if (!walked.objectName) continue;
       const props = isRec(walked.component.properties) ? walked.component.properties : undefined;
@@ -797,6 +868,35 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
               (facts.sections.size > 0
                 ? ` Declared sections: ${listNames(facts.sections)}.`
                 : ` Object "${objectName}" declares no named section at all.`),
+          );
+        }
+
+        // _tabs.<name>
+        //
+        // The asymmetry this closes (#13835, the `flows` leg of #11608 one
+        // group over): `collectExpectedEntries` already DEMANDS a translation
+        // for every declared tab (`objects.<obj>._tabs.<tab>.label`), while
+        // nothing told an author that a `_tabs` key they wrote names a preset
+        // that no longer exists. Rename a filter preset and the bundle keeps
+        // its old key: the tab bar renders in the source locale above a fully
+        // localized grid, every gate green.
+        for (const tabName of Object.keys(asRecord(rawNode._tabs))) {
+          if (facts.tabs.has(tabName)) continue;
+          orphan(
+            `${inLocale} · object "${objectName}" · tab "${tabName}"`,
+            `${objPath}._tabs.${tabName}`,
+            `Translations are keyed to filter-preset tab "${tabName}", which no page over ` +
+              `object "${objectName}" declares in \`interfaceConfig.userFilters.tabs\`. The tab ` +
+              `keeps its source-locale label — above a grid whose every column resolves, so the ` +
+              `hole reads as a styling quirk rather than a missing translation.` +
+              suggest(tabName, facts.tabs),
+            `Match the key to the tab's \`name\` (not its label), or drop it if the preset was ` +
+              `renamed or removed.` +
+              (facts.tabs.size > 0
+                ? ` Declared tabs: ${listNames(facts.tabs)}.`
+                : ` No page over "${objectName}" declares a filter-preset tab bar at all. Note ` +
+                  `only a page's \`interfaceConfig.userFilters.tabs\` is resolvable — a list ` +
+                  `view's own \`tabs\` has no renderer, so nothing reads a key written for one.`),
           );
         }
 
