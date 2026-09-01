@@ -413,6 +413,38 @@ describe('datasourceConnectivityChanged — the ruled field set, read from what 
     expect(datasourceConnectivityChanged(base, { ...base, active: false })).toBe(true);
   });
 
+  it('a schemaMode-only edit trips it — the seventh member, ruled in by the contract review', () => {
+    // Three real readings on the connect path: the policy gate (`canConnect`),
+    // `toSpec` -> `factory.create` (the driver is built from it), and
+    // `registerDatasourceDef` (the write gate's def). It is patchable by
+    // `updateDatasource`, so without this member a schemaMode-only save
+    // persisted the new record while all three kept the OLD value until
+    // restart — a narrower instance of the stale-pool defect this card fixes.
+    expect(datasourceConnectivityChanged(base, { ...base, schemaMode: 'external' })).toBe(true);
+    // Both directions: first-time set, and cleared.
+    expect(
+      datasourceConnectivityChanged(
+        { driver: 'sqlite' },
+        { driver: 'sqlite', schemaMode: 'validate-only' },
+      ),
+    ).toBe(true);
+    expect(
+      datasourceConnectivityChanged(
+        { driver: 'sqlite', schemaMode: 'external' },
+        { driver: 'sqlite' },
+      ),
+    ).toBe(true);
+    // Widened by exactly ONE member, not into "rebuild on everything": an
+    // unchanged schemaMode is still no change, which is what leaves the
+    // label-only reverse control above reading the same as before.
+    expect(
+      datasourceConnectivityChanged(
+        { ...base, schemaMode: 'external' },
+        { ...base, schemaMode: 'external' },
+      ),
+    ).toBe(false);
+  });
+
   it('deep-equal values are no change, whatever the object identity', () => {
     const same = {
       driver: 'postgres',

@@ -1,5 +1,5 @@
 ---
-"@objectstack/service-datasource": patch
+"@objectstack/service-datasource": minor
 ---
 
 Updating a datasource now rebuilds its live pool when the change actually bears on connectivity — and `active: false` actually takes it out of service
@@ -18,10 +18,10 @@ plane kept serving.
 What "Save" now means for the live pool, decided by what actually changed:
 
 - **A connectivity-bearing field changed** (`driver`, `config`, `external`
-  including `credentialsRef`, `pool`, `active` — the set verified against what
-  `attemptConnect` reads into driver construction; a supplied secret counts
-  too, since a rewrap-in-place changes the credential without changing the
-  ref) → the pool is rebuilt in place via the new
+  including `credentialsRef`, `pool`, `schemaMode`, `active` — the set verified
+  against what `attemptConnect` reads into driver construction; a supplied
+  secret counts too, since a rewrap-in-place changes the credential without
+  changing the ref) → the pool is rebuilt in place via the new
   `DatasourceConnectionService.reconnect`: the old registration is evicted
   (the #13578 door), a new driver is built FROM THE NEW RECORD through the one
   shared connect path, and the replaced pool's connection is closed.

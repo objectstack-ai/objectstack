@@ -492,8 +492,9 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     //
     // Ruled decision tree (triage on the card):
     //  - a connectivity-bearing field changed (`driver` / `config` /
-    //    `external` incl. `credentialsRef` / `pool` / `active` — the reading
-    //    behind the set lives on `datasourceConnectivityChanged`) → rebuild
+    //    `external` incl. `credentialsRef` / `pool` / `schemaMode` / `active`
+    //    — the reading behind the set lives on
+    //    `datasourceConnectivityChanged`) → rebuild
     //    in place, keeping the old pool if the rebuild fails;
     //  - `active: false` → tear the pool down: an explicitly disabled
     //    datasource must stop serving (matching boot, where it is never

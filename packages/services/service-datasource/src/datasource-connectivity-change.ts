@@ -25,6 +25,10 @@
  *    dereferences to), which is why `updateDatasource` treats "a secret was
  *    supplied" as a connectivity change alongside this function's verdict.
  *  - `pool` — read by the pool-support gate and `toSpec`.
+ *  - `schemaMode` — read by the connect policy gate (`canConnect`), by
+ *    `toSpec` (so it reaches `factory.create` and the driver it builds), and
+ *    by `registerDatasourceDef` (the write gate's def). It is patchable on
+ *    the update path, so all three of those readings can go stale.
  *  - `active` — never read by `attemptConnect`, but it governs whether a pool
  *    may exist at all: `connectDeclared` skips `active === false` at boot and
  *    rehydration filters on `active ?? true`, so an update flipping it must
@@ -33,14 +37,21 @@
  * `label` is read by nothing on the connect path — the reverse control: an
  * edit to it must not churn a working connection.
  *
- * ⚠️ Known fork, reported on the card rather than resolved here: `schemaMode`
- * is patchable on the update path AND is read by `attemptConnect` (policy
- * gate, `toSpec` → `factory.create`, `registerDatasourceDef`), yet the ruled
- * set omits it — so a schemaMode-only edit does not rebuild, and the engine's
- * datasource def keeps the OLD schemaMode until restart. Deliberately not
- * added: the ruling fixed the set, and widening it is the maintainer's call.
- * (`ssl` is also a `toSpec` input but is not a field of `StoredDatasource` or
- * `DatasourceDraft`, so it cannot change through this path.)
+ * How `schemaMode` joined the set — RESOLVED, not open. It was found during
+ * this card's premise verification and reported as a fork rather than added
+ * unilaterally (an implementer does not widen a ruled set on its own). The
+ * contract review then ruled it IN, in the same stroke: it is really read at
+ * the three sites listed above, so leaving it out would have left a narrower
+ * instance of the very stale-pool defect this module exists to close — a
+ * schemaMode-only edit persisting a new record while the engine's datasource
+ * def, the driver, and the policy decision all kept the OLD value until
+ * restart.
+ *
+ * Two candidates were examined and are deliberately NOT members: `ssl` is a
+ * `toSpec` input but is not a field of `StoredDatasource` or
+ * `DatasourceDraft`, so it cannot change through the update path at all; and
+ * `autoConnect` is neither patchable by `updateDatasource` nor read by
+ * `attemptConnect`.
  */
 
 import type { StoredDatasource } from './datasource-admin-service.js';
@@ -48,7 +59,7 @@ import type { StoredDatasource } from './datasource-admin-service.js';
 /** The slice of a stored record this comparison consults. */
 export type ConnectivityBearingFields = Pick<
   StoredDatasource,
-  'driver' | 'config' | 'external' | 'pool' | 'active'
+  'driver' | 'config' | 'external' | 'pool' | 'schemaMode' | 'active'
 >;
 
 /**
@@ -61,6 +72,10 @@ export type ConnectivityBearingFields = Pick<
  *  - Keys holding `undefined` count as absent (JSON semantics, and the merge
  *    in `updateDatasource` writes `credentialsRef: undefined` onto a record
  *    that never had the key — that round-trip is not a change).
+ *  - `schemaMode` compares strictly, with no default applied: the connect
+ *    path applies none either (`toSpec` omits the key when the record has no
+ *    value; the policy gate and `registerDatasourceDef` receive it raw), so
+ *    an absent value and a defaulted one are not the same reading here.
  */
 export function datasourceConnectivityChanged(
   before: ConnectivityBearingFields,
@@ -70,6 +85,7 @@ export function datasourceConnectivityChanged(
   if (!deepEqual(before.config ?? {}, after.config ?? {})) return true;
   if (!deepEqual(before.external, after.external)) return true;
   if (!deepEqual(before.pool, after.pool)) return true;
+  if (before.schemaMode !== after.schemaMode) return true;
   if ((before.active ?? true) !== (after.active ?? true)) return true;
   return false;
 }
