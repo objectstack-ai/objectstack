@@ -260,11 +260,27 @@ describe('QuickJSScriptRunner — L2 hook script', () => {
     expect(typeofSudo.value).toBe('undefined');
   });
 
-  it('a body calling ctx.api.sudo() fails - it does not silently no-op (#14010)', async () => {
+  it('a body calling ctx.api.sudo() throws, and the message names NOTHING (#14010)', async () => {
     // The runtime half of the story the CLI now refuses to lower
-    // (`extract-hook-body.ts` FORBIDDEN_PATTERNS). Pinned because the failure
-    // MODE matters: a throw is recoverable and visible, whereas a silent no-op
-    // would leave the computed column null for the life of the app.
+    // (`extract-hook-body.ts` FORBIDDEN_PATTERNS). Two things are pinned, and
+    // the second is why the refusal cannot live only here:
+    //
+    //   1. It THROWS rather than silently no-opping. That much is good: a
+    //      silent drop would leave the computed column null for the life of
+    //      the app (the failure mode `hook-api-update-readonly-field` exists
+    //      to catch), whereas a throw is at least visible.
+    //   2. The message is `TypeError: not a function` — QuickJS names neither
+    //      the member nor the receiver, so the one diagnostic production gets
+    //      identifies no member, no file and no line. Under a hook's default
+    //      `onError: 'abort'` this arrives as an unrelated SAVE being refused,
+    //      and nothing in it points at `sudo`.
+    //
+    // A message this blind cannot be the place an author learns the rule,
+    // which is the argument for refusing at BUILD time, where the reason can
+    // be spelled out and the handler can still be routed to a runtime that
+    // supports it. This assertion is deliberately written against what QuickJS
+    // actually emits: if a future runner starts naming the member, that is an
+    // improvement and this pin should be updated to demand it.
     let elevated = 0;
     const api = {
       object: (_n: string) => ({ update: () => 1 }),
@@ -283,8 +299,9 @@ describe('QuickJSScriptRunner — L2 hook script', () => {
         ctx({ api }),
         hookOpts,
       ),
-    ).rejects.toThrow(/sudo/);
-    // And the host's real sudo was never reached through the VM.
+    ).rejects.toThrow(/TypeError: not a function/);
+    // And the host's real sudo was never reached through the VM — the failure
+    // is the marshalling boundary, not a broken host double.
     expect(elevated).toBe(0);
   });
 

@@ -228,7 +228,9 @@ describe('extractHookBody', () => {
     };
     const ext = extractHookBody(fn, 'hook plain');
     expect(ext.capabilities).toContain('api.write');
-    expect(ext.source).toContain("object('crm_account')");
+    // Quote-agnostic: this file is itself bundled, and esbuild rewrites the
+    // literal's quotes before `String(fn)` ever runs.
+    expect(ext.source).toMatch(/object\((['"])crm_account\1\)/);
   });
 
   it('extracts a self-contained handler that only uses params + globals (#1876)', () => {
