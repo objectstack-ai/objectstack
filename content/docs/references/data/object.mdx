@@ -432,7 +432,7 @@ const result = ApiMethod.parse(data);
 | **allowedPermissions** | `Enum<'view' \| 'comment' \| 'edit'>[]` | optional | Permission levels selectable on the share dialog |
 | **maxExpiryDays** | `integer` | optional | Reject links with expiry beyond this many days |
 | **redactFields** | `string[]` | optional | Field names removed from records served via a share token |
-| **eligibility** | `string` | optional | CEL expression that must evaluate to true on the target record |
+| **eligibility** | `string` | optional | CEL expression that must evaluate to true on the target record. Enforced at BOTH points in a link's life: when the link is minted, and again on every redemption — a record that stops qualifying stops being served through links already minted for it. Fail-closed: a predicate that will not compile, or that faults on the record, refuses. |
 
 ### Nested Shape: `Object.actions[number]`
 

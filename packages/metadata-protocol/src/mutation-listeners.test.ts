@@ -20,7 +20,12 @@ function makeProtocol() {
   return new ObjectStackProtocolImplementation({} as any);
 }
 
-const evt = (over: Partial<MetadataMutationEvent> = {}): MetadataMutationEvent => ({
+// `body` mirrors `runMutationProjector`'s own declared parameter
+// (`MetadataMutationEvent & { body?: unknown }`) — the projector cases below
+// pass one, and the bare `Partial<MetadataMutationEvent>` rejected it.
+const evt = (
+  over: Partial<MetadataMutationEvent> & { body?: unknown } = {},
+): MetadataMutationEvent & { body?: unknown } => ({
   type: 'hook',
   name: 'rebind_probe_hook',
   state: 'active',
