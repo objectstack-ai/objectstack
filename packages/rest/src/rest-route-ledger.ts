@@ -349,7 +349,7 @@ export const REST_ROUTE_LEDGER: readonly RestRouteLedgerEntry[] = [
   // ── search ────────────────────────────────────────────────────────────────
   { route: 'GET /api/v1/search', family: 'search', source: 'route-manager', disposition: 'sdk', client: 'search',
     responseSchema: 'SearchAllResponseSchema',
-    note: '[#11924] answers BARE (res.json(result), no envelope), so the named schema is the whole body. ⚠️ NOT `SearchResult` — that exported contract types the per-object ISearchService.search (hits of score/document), the #8140 near-miss trap. Filled with its conformance coverage: search-clone-route-schema-conformance.test.ts drives this mount, and metadata-protocol\'s search-clone-schema-conformance.test.ts parses the real searchAll producer' },
+    note: '[#11924] answers BARE (res.json(result), no envelope), so the named schema is the whole body. ⚠️ NOT `SearchResult` — that exported contract types the per-object ISearchService.search (hits of score/document), the #8140 near-miss trap. Filled with its conformance coverage: search-clone-route-schema-conformance.test.ts drives this mount, and metadata-protocol\'s search-clone-schema-conformance.test.ts parses the real searchAll producer. [#13216] the body additionally carries `pages` — published-page hits swept by the same producer through the caller\'s own meta read verb; still this one named schema, no handler change (bare relay)' },
 
   // ── email ─────────────────────────────────────────────────────────────────
   { route: 'POST /api/v1/email/send', family: 'email', source: 'route-manager', disposition: 'sdk', client: 'email.send' },

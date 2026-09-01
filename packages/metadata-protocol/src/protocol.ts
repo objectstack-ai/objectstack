@@ -50,6 +50,11 @@ import {
     ITEM_KEY_DISCRIMINATORS,
     itemDiscriminator,
     type MetadataItem,
+    // [#13216] The search sweep's page read carries the SAME org scope the
+    // REST `/meta` read doors derive — registry-gated, never a bare tenant id
+    // (#9454's read-side rule). One predicate on both doors means the swept
+    // page set and the served page set cannot drift.
+    organizationIdForMetaRead,
 } from '@objectstack/metadata-core';
 // [#5532] One vocabulary of "which driver read errors are benign", shared with
 // `sys-metadata-repository.ts` in this package and with `DatabaseLoader` in
@@ -79,7 +84,7 @@ import {
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal, METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
-import { type FormView, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
+import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel } from '@objectstack/spec/ui';
 // [#11350] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
 // this file imports BOTH `@objectstack/spec` (root, for
@@ -10470,6 +10475,17 @@ export class ObjectStackProtocolImplementation implements
      * whose table was never provisioned (`isMissingTableError`): it can hold no
      * rows, so "no hits from here" is the truth and it is skipped exactly as
      * before. Every other read failure propagates. See the `catch` below.
+     *
+     * ## [#13216] Published pages are swept too — into the sibling `pages`
+     *
+     * On an UNSCOPED sweep the response additionally carries `pages`: hits
+     * over the published pages the caller's own metadata read door serves,
+     * matched on name / label / description. Deliberately a SIBLING array,
+     * never members of `hits` — every `hits` element is a record with an
+     * `object`/`id` address, and an existing consumer iterating it must not
+     * receive an element whose address vocabulary it predates. The sweep's
+     * authorization story and matching rules are documented at the sweep
+     * itself, below the record loop.
      */
     async searchAll(request: {
         q: string;
@@ -10486,13 +10502,20 @@ export class ObjectStackProtocolImplementation implements
             snippet?: string;
             record: any;
         }>;
+        pages: Array<{
+            kind: 'page';
+            name: string;
+            title: string;
+            snippet?: string;
+            pageType?: string;
+        }>;
         totalObjects: number;
         totalHits: number;
         truncated: boolean;
     }> {
         const q = (request.q ?? '').trim();
         if (!q) {
-            return { query: '', hits: [], totalObjects: 0, totalHits: 0, truncated: false };
+            return { query: '', hits: [], pages: [], totalObjects: 0, totalHits: 0, truncated: false };
         }
 
         const overallLimit = Math.max(1, Math.min(100, Number(request.limit ?? 20)));
@@ -10501,13 +10524,31 @@ export class ObjectStackProtocolImplementation implements
             ? new Set(request.objects)
             : null;
 
-        // [#7643] SNIPPET tokens only. The engine does its own tokenisation
-        // inside the `$search` expansion (same split, same AND-of-terms rule),
-        // so these no longer decide what MATCHES — they decide where the
-        // excerpt is cut. Kept as a separate local rather than fed to the
-        // engine: the query text is what the contract carries, and a second
-        // pre-tokenised channel is exactly the divergence this card closed.
-        const terms = q.split(/\s+/).filter(Boolean).slice(0, 8);
+        // [#7643] SNIPPET tokens only, for the RECORD sweep. The engine does
+        // its own tokenisation inside the `$search` expansion (same split,
+        // same AND-of-terms rule), so these no longer decide what MATCHES on
+        // records — they decide where the excerpt is cut. Kept as a separate
+        // local rather than fed to the engine: the query text is what the
+        // contract carries, and a second pre-tokenised channel is exactly the
+        // divergence this card closed. [#13216] `allTerms` (uncapped) is what
+        // the PAGE sweep matches on — pages are metadata, not engine rows, so
+        // there is no expansion to delegate to, and matching on the capped
+        // list would silently drop terms 9+ from the page predicate while the
+        // engine still ANDs them for records.
+        const allTerms = q.split(/\s+/).filter(Boolean);
+        const terms = allTerms.slice(0, 8);
+
+        // One producer of excerpt geometry, shared by record and page hits
+        // (#13216): the first term literally contained in `v` anchors a cut of
+        // 30 chars before / 90 after, ellipsized at whichever ends truncate.
+        const cutExcerpt = (v: string, excerptTerms: string[]): string | undefined => {
+            const lc = v.toLowerCase();
+            const idx = excerptTerms.map(t => lc.indexOf(t.toLowerCase())).find(i => i >= 0);
+            if (idx == null || idx < 0) return undefined;
+            const start = Math.max(0, idx - 30);
+            const end = Math.min(v.length, idx + 90);
+            return (start > 0 ? '…' : '') + v.slice(start, end) + (end < v.length ? '…' : '');
+        };
 
         // [#11754] No `?.` and no `?? []` on this read. The invented empty
         // list made the whole sweep a silent no-op — zero hits,
@@ -10674,14 +10715,8 @@ export class ObjectStackProtocolImplementation implements
                     for (const f of searchableFields) {
                         const v = row[f];
                         if (typeof v === 'string' && v) {
-                            const lc = v.toLowerCase();
-                            const idx = terms.map(t => lc.indexOf(t.toLowerCase())).find(i => i >= 0);
-                            if (idx != null && idx >= 0) {
-                                const start = Math.max(0, idx - 30);
-                                const end = Math.min(v.length, idx + 90);
-                                snippet = (start > 0 ? '…' : '') + v.slice(start, end) + (end < v.length ? '…' : '');
-                                break;
-                            }
+                            snippet = cutExcerpt(v, terms);
+                            if (snippet !== undefined) break;
                         }
                     }
                     hits.push({
@@ -10731,9 +10766,110 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
+        // ── [#13216] Published-page sweep — the palette's page hits ─────────
+        //
+        // A custom page created and published at runtime renders perfectly and
+        // was absent from this door only (#13100 measured it): `searchAll`
+        // swept object RECORDS and nothing else, so the artifact an agent just
+        // grew into a running app could be reached by direct URL alone.
+        //
+        // ## The swept set IS the served set — zero new authorization surface
+        //
+        // Pages are read through {@link getMetaItems} — the SAME verb the REST
+        // `GET /meta/page` list door serves — never through a parallel read of
+        // the registry or the store. That single decision carries the whole
+        // authorization story (the 2026-08-29 ruling's basis, as direction 1
+        // established it):
+        //
+        //  - PUBLISHED only: `getMetaItems` reads `state: 'active'` overlay
+        //    rows plus code-registered pages; drafts surface only under
+        //    `previewDrafts`, which this sweep never passes.
+        //  - Org scope: threaded through `organizationIdForMetaRead('page',
+        //    context.tenantId)` — the registry-gated predicate every REST meta
+        //    read door uses (#9454), so the sweep and the read door move
+        //    together if `page` ever declares org override (today it does
+        //    not, and the predicate answers env-wide).
+        //  - Disabled-package and conversion handling ride along for free —
+        //    whatever `getMetaItems` withholds, this sweep never saw.
+        //
+        // So a page hit surfaces to a caller exactly what `GET /meta/page`
+        // already answers that caller — name, label, description — never
+        // more, and search is not a second read door. The page's own audience
+        // gate (`assignedProfiles`) is measured to have no backend consumer
+        // on the read door today; it is enforced where it is enforced now, at
+        // page render — the delegation posture direction 1's ruling recorded
+        // (a second enforcement point here would be a NEW authorization
+        // surface, the very thing the ruling's basis excludes).
+        //
+        // ## Matching and shape
+        //
+        //  - AND of terms, OR of fields (`name`, every locale value of
+        //    `label` / `description`), case-folded — the same term semantics
+        //    the engine expansion applies to records, restated here because
+        //    metadata is not engine rows and there is no expansion to
+        //    delegate to.
+        //  - Capped at `perObject`: the page store is swept as one more
+        //    container, not competing with records for `limit`.
+        //  - SCOPED sweeps skip pages entirely: `?objects=lead` asks for
+        //    records of `lead`, and answering pages there would widen a
+        //    request the caller deliberately narrowed.
+        //  - A failed page read PROPAGATES (#8896's rule one seam over):
+        //    `getMetaItems` already discriminates the benign
+        //    store-unprovisioned case and raises everything else as a 503, so
+        //    this sweep adds no `catch` — a partial scan must not wear a
+        //    whole one's answer.
+        const pageHits: Array<{ kind: 'page'; name: string; title: string; snippet?: string; pageType?: string }> = [];
+        if (!objectsFilter) {
+            const pageOrgId = organizationIdForMetaRead('page', request.context?.tenantId);
+            const served = await this.getMetaItems({
+                type: 'page',
+                ...(pageOrgId !== undefined ? { organizationId: pageOrgId } : {}),
+            });
+            const pageItems: unknown[] = Array.isArray(served) ? served : served.items;
+            const localeTexts = (v: unknown): string[] => {
+                if (typeof v === 'string') return v ? [v] : [];
+                if (v && typeof v === 'object') {
+                    return Object.values(v).filter((s): s is string => typeof s === 'string' && s !== '');
+                }
+                return [];
+            };
+            for (const rawItem of pageItems) {
+                if (pageHits.length >= perObject) break;
+                const page = rawItem as { name?: unknown; label?: unknown; description?: unknown; type?: unknown } | null;
+                if (!page || typeof page.name !== 'string' || !page.name) continue;
+                const descTexts = localeTexts(page.description);
+                const texts = [page.name.toLowerCase(), ...localeTexts(page.label).map(t => t.toLowerCase()), ...descTexts.map(t => t.toLowerCase())];
+                const matched = allTerms.every((t) => {
+                    const lt = t.toLowerCase();
+                    return texts.some((x) => x.includes(lt));
+                });
+                if (!matched) continue;
+                // Excerpt from the DESCRIPTION only: a name/label match is
+                // already fully visible in the title, so absence is a correct
+                // answer there (#7643's rule, restated for metadata).
+                let snippet: string | undefined;
+                for (const d of descTexts) {
+                    snippet = cutExcerpt(d, allTerms);
+                    if (snippet !== undefined) break;
+                }
+                // Title through the SHARED label resolution (#6765) — the
+                // default-locale chain (`en` → any available) rather than a
+                // fourth hand-rolled spelling; this route carries no locale.
+                const title = resolveI18nLabel(page.label as I18nLabel | undefined, undefined) || page.name;
+                pageHits.push({
+                    kind: 'page',
+                    name: page.name,
+                    title,
+                    ...(snippet !== undefined ? { snippet } : {}),
+                    ...(typeof page.type === 'string' && page.type ? { pageType: page.type } : {}),
+                });
+            }
+        }
+
         return {
             query: q,
             hits,
+            pages: pageHits,
             totalObjects: objectsScanned,
             totalHits: hits.length,
             truncated: hits.length >= overallLimit,
