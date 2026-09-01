@@ -41,6 +41,18 @@
  * boot and the module-scope slot stays empty — silently. A fix proved only on
  * the TS-config path would be a second escape with the same blind spot, so the
  * artifact boot is driven through the REAL `loadArtifactBundle` here.
+ *
+ * ## The backend, and why it is sqlite `:memory:`
+ *
+ * These tests need *a* store — nothing here is about any one driver's behaviour.
+ * #5704 migrated this project's test backends to sqlite `:memory:` and ruled
+ * that only the two files in `scripts/driver-memory-census.ledger.json` keep
+ * `@objectstack/driver-memory`, each being one arm of a cross-family pin that
+ * genuinely cannot run on SQL. This file is neither, so it boots on the migrated
+ * backend. ⛔ Do not "simplify" it back onto the in-memory driver: that is an
+ * unledgered arrival and `pnpm check:driver-memory-census` refuses it (#6664).
+ * The card's own reproduction used the in-memory driver because that is what the
+ * reporter had in hand — a manual probe, never a constraint on this rig.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -51,11 +63,15 @@ import type { PluginContext } from '@objectstack/core';
 import type { JobHandler } from '@objectstack/spec/contracts';
 import { defineJob } from '@objectstack/spec/system';
 import { ObjectQL } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { CronJobAdapter } from '@objectstack/service-job';
 import { AppPlugin } from './app-plugin.js';
 import { loadArtifactBundle } from './load-artifact-bundle.js';
 import type { JobHandlerContext } from './job-handler-context.js';
+import {
+    captureExpectedReadRefusals,
+    type ExpectedReadRefusalCapture,
+} from './expected-read-refusal-noise.js';
 
 /** The record a scheduled sweep is supposed to be able to write. */
 const NOTE = {
@@ -85,30 +101,78 @@ interface Harness {
     warnLogs: () => string[];
 }
 
-const live: Array<{ engine?: ObjectQL; adapter?: CronJobAdapter; dir?: string }> = [];
+const live: Array<{
+    engine?: ObjectQL;
+    adapter?: CronJobAdapter;
+    driver?: SqlDriver;
+    dir?: string;
+    noise?: ExpectedReadRefusalCapture;
+    /** The channels this test's path MUST have provoked — see `harness()`. */
+    requiredChannels?: readonly string[];
+}> = [];
+
+/**
+ * [#10629] This fixture provisions `sweep_note` and nothing else, so the
+ * engine's own single-tenant probe (`ObjectQL.probeInstallOrganizations`) reads
+ * a `sys_organization` that was never created. The probe is fail-soft by
+ * construction, but the driver and the engine each log the fault on the way out.
+ * Withheld and ASSERTED rather than muted — see `expected-read-refusal-noise.ts`.
+ */
+const ABSENT_TENANCY_TABLE = 'sys_organization';
 
 afterEach(async () => {
     for (const entry of live.splice(0)) {
         try { await entry.adapter?.destroy(); } catch { /* noop */ }
         try { await entry.engine?.destroy(); } catch { /* noop */ }
+        try { await entry.driver?.disconnect(); } catch { /* noop */ }
         if (entry.dir) rmSync(entry.dir, { recursive: true, force: true });
+        // A capture nobody asserts is a mute. The probe is memoised behind the
+        // FIRST data operation, so only the paths that actually touch the store
+        // provoke it — `silentChannels(required)` is the API's own answer to a
+        // table read on some of a file's paths and not others. The withholding
+        // is unconditional either way; only the must-have-fired set narrows.
+        if (entry.noise) {
+            expect(entry.noise.silentChannels(entry.requiredChannels ?? [ABSENT_TENANCY_TABLE])).toEqual([]);
+        }
     }
 });
 
-/** A real engine over the in-memory driver, with `sweep_note` registered. */
-async function bootEngine(): Promise<ObjectQL> {
-    const driver = new InMemoryDriver();
+/**
+ * A real engine over the MIGRATED test backend — sqlite `:memory:` (#5704) —
+ * with `sweep_note` provisioned and registered.
+ */
+async function bootEngine(): Promise<{ engine: ObjectQL; driver: SqlDriver; noise: ExpectedReadRefusalCapture }> {
+    const driver = new SqlDriver({
+        client: 'better-sqlite3',
+        connection: { filename: ':memory:' },
+        useNullAsDefault: true,
+    });
+    // Installed before the driver runs a statement and before the engine issues
+    // a read — the two sinks the expected refusal travels out on.
+    const noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
+    noise.captureDriver(driver);
+    await driver.initObjects([NOTE as never]);
     const engine = new ObjectQL();
+    noise.captureEngine(engine);
     engine.registerDriver(driver as never, true);
     await engine.init();
     engine.registry.registerObject(NOTE as never);
-    return engine;
+    return { engine, driver, noise };
 }
 
-async function harness(): Promise<Harness> {
-    const engine = await bootEngine();
+/**
+ * @param opts.touchesStore whether this test's path performs a data operation.
+ *   `true` (the default) requires the tenancy probe to have fired and been
+ *   withheld; a context-shape test that never reads or writes passes `false`,
+ *   which keeps the withholding and drops only the must-have-fired requirement.
+ */
+async function harness(opts: { touchesStore?: boolean } = {}): Promise<Harness> {
+    const { engine, driver, noise } = await bootEngine();
     const adapter = new CronJobAdapter();
-    live.push({ engine, adapter });
+    live.push({
+        engine, adapter, driver, noise,
+        requiredChannels: opts.touchesStore === false ? [] : [ABSENT_TENANCY_TABLE],
+    });
 
     const readyHooks: Array<() => Promise<void>> = [];
     const ctx = {
@@ -181,7 +245,8 @@ describe('#14094 — a declarative job handler has data reach (TS-config path)',
     });
 
     it('the context is the pre-#14094 set PLUS exactly `ql` and `logger`', async () => {
-        const h = await harness();
+        // Reads nothing and writes nothing — this one is about the shape.
+        const h = await harness({ touchesStore: false });
         const seen: Array<Record<string, unknown>> = [];
 
         const plugin = new AppPlugin({
@@ -209,7 +274,7 @@ describe('#14094 — a declarative job handler has data reach (TS-config path)',
     });
 
     it('`data` from a manual trigger still reaches the handler beside the new members', async () => {
-        const h = await harness();
+        const h = await harness({ touchesStore: false });
         const seen: Array<Record<string, unknown>> = [];
         const plugin = new AppPlugin({
             id: 'com.test.job-reach',
@@ -318,7 +383,7 @@ export const meta = { builtAt: '2026-09-01T00:00:00.000Z' };
 
 describe('#14094 — additivity (Zone 1.1)', () => {
     it('a handler written against the PRE-#14094 context runs unchanged, byte for byte', async () => {
-        const h = await harness();
+        const h = await harness({ touchesStore: false });
         const calls: Array<{ jobId: string; data?: unknown }> = [];
 
         // Verbatim the shape `IJobService`'s `JobHandler` declares — the type an
