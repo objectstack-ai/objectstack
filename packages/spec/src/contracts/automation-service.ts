@@ -70,10 +70,25 @@ export interface AutomationContext {
      * Machine name of the flow this run executes, stamped by the engine at run
      * setup alongside {@link runAs} / {@link flowRunId} (same single
      * construction point, same lifetime). Provenance, not authorization — no
-     * security middleware keys on it. Its consumer is audit attribution: a
-     * `runAs:'system'` run resolves no user, so `resolveRunDataContext` labels
-     * its data operations `svc:flow:<flowName>` on `ExecutionContext.actor`
-     * (ADR-0014 D2) instead of leaving the audit row unattributed (#4366).
+     * security middleware keys on it.
+     *
+     * Its consumer is audit attribution: `resolveRunDataContext` labels a
+     * `runAs:'system'` run's data operations `svc:flow:<flowName>` on
+     * `ExecutionContext.actor` (ADR-0014 D2), naming WHICH automation performed
+     * the write. The label is a FALLBACK, not a replacement — the audit writer
+     * records `session.userId ?? session.actor` on `sys_audit_log.actor` — and
+     * elevation never costs the run its operator: a `runAs:'system'` run
+     * carries the triggering user through UNCHANGED whenever the trigger
+     * resolved one (#5494), so its writes still stamp `created_by` /
+     * `updated_by` and `sys_audit_log.user_id` with that human, exactly as the
+     * same trigger would under `runAs:'user'`. `runAs` declares the run's
+     * AUTHORIZATION posture and leaves ATTRIBUTION alone (ADR-0073 D2).
+     *
+     * The `svc:flow:` label is therefore what a genuinely USER-LESS run falls
+     * back to — a schedule, or a `runAs:'system'` flow fired by a write that
+     * itself carried no user — instead of leaving the audit row unattributed
+     * (#4366). There the user column stays null: ADR-0118 D1 forbids inventing
+     * a sentinel or pseudo-user in its place.
      *
      * Callers do NOT set this — the engine derives it, exactly like {@link runAs}.
      */
