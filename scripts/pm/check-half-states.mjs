@@ -14622,7 +14622,12 @@ function selfTest() {
   const ranked = renderMarkdown([...inventoryFlood, lateGateRow], counts);
   t('#13947 order: the flood really does trigger the trim', ranked.includes('further row(s) omitted'), true);
   t('#13947 order: ⭐ the LAST-arriving gate row survives it', ranked.includes('#99999'), true);
-  t('#13947 order: …and is laid out FIRST, above every inventory row', ranked.indexOf('#99999') < ranked.indexOf('#1000'), true);
+  // ⚠️ `> 0 &&` is load-bearing: a trimmed-away row yields indexOf === -1, which
+  // is less than every other index, so a bare `<` comparison passes VACUOUSLY on
+  // exactly the regression this case exists to catch (measured while ablating
+  // the sort key — the bare form stayed green with the gate row gone).
+  t('#13947 order: …and is laid out FIRST, above every inventory row', ranked.indexOf('#99999') > 0 && ranked.indexOf('#99999') < ranked.indexOf('#1000'), true);
+  t('#13947 order: …and the ledger records it as fully rendered', ranked.includes('| `H31` | gate | 1 | 1 |'), true);
   t('#13947 order: …while the inventory family is the one that loses rows', ranked.includes('| `H22` | inventory | 900 |'), true);
   t('#13947 order: the body still fits the render budget', ranked.length <= MARKDOWN_BODY_BUDGET, true);
   t('#13947 order: …and the hard cap', ranked.length <= ISSUE_BODY_LIMIT, true);
@@ -14631,8 +14636,8 @@ function selfTest() {
   // must survive this change rather than be re-litigated by it.
   const unjudgedInventory = finding(88888, 'H19', `${UNJUDGED_MARKER} a cross-repo target could not be resolved`);
   const banded = renderMarkdown([...inventoryFlood, lateGateRow, unjudgedInventory], counts);
-  t('#13947 order: an UNJUDGED row still outranks a gate row', banded.indexOf('#88888') < banded.indexOf('#99999'), true);
-  t('#13947 order: …and a loud row outranks both', renderMarkdown([lateGateRow, loudRow], counts).indexOf('#900') < renderMarkdown([lateGateRow, loudRow], counts).indexOf('#99999'), true);
+  t('#13947 order: an UNJUDGED row still outranks a gate row', banded.indexOf('#88888') > 0 && banded.indexOf('#88888') < banded.indexOf('#99999'), true);
+  t('#13947 order: …and a loud row outranks both', renderMarkdown([lateGateRow, loudRow], counts).indexOf('#900') > 0 && renderMarkdown([lateGateRow, loudRow], counts).indexOf('#900') < renderMarkdown([lateGateRow, loudRow], counts).indexOf('#99999'), true);
 
   // ⑤ ⭐⭐ The acceptance test: zero rendered H31 rows, read two ways. The loud
   // band outranks every family band by design, so a P0 flood is the one shape
