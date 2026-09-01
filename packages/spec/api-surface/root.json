@@ -9,6 +9,8 @@
     "AUDIENCE_ANCHOR_POSITIONS (const)",
     "Agent (type)",
     "ApplyConversionsOptions (interface)",
+    "ArtifactPackageEntry (type)",
+    "ArtifactPackageEntrySchema (const)",
     "AssembledViewArtifact (type)",
     "AssembledViewArtifactParsed (type)",
     "AssembledViewArtifactSchema (const)",
