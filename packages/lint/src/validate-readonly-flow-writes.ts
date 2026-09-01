@@ -18,9 +18,20 @@
 //     field is NOT a no-op and is never flagged.
 //
 //   • Only `runAs !== 'system'`. A `runAs:'system'` run is elevated and the
-//     engine skips the strip entirely, so a system flow legitimately MAINTAINS
-//     readonly fields ("users can't edit this, but automation does"). That is
-//     the intended channel, so it is never flagged.
+//     engine skips the STATIC `readonly` strip, so a system flow legitimately
+//     MAINTAINS readonly fields ("users can't edit this, but automation does").
+//     That is the intended channel, so it is never flagged.
+//
+//     ⚠️ That exemption is the STATIC strip's alone. `stripReadonlyWhenFields`
+//     runs with no `isSystem` guard at all (engine.ts, the #9107 note: "`isSystem`
+//     is still NOT an exemption here, unlike the static strip below"), pinned as
+//     "LOCK 2 - isSystem does NOT exempt a caller-supplied value" in
+//     `engine-readonly-when-derived-writes.test.ts`. So elevation is NOT a
+//     `readonlyWhen` remedy, and this rule's hint must never offer it. The skip
+//     above is therefore WIDER than the conditional lock warrants - a
+//     `runAs:'system'` flow writing a `readonlyWhen` field is still stripped on a
+//     locked record and goes unflagged. Left as-is deliberately: the match set is
+//     out of scope for the message-text correction that fixed the hint.
 //
 //   • Static `readonly:true` + a LITERAL field name is a 100%-certain no-op →
 //     ERROR (gates the build). `readonlyWhen` is per-record-state — it strips
@@ -204,8 +215,12 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
               `where that predicate is TRUE, a runAs:'${runAs}' UPDATE strips the field (#3042), so this ` +
               `write may silently not land depending on the record's state.`,
             hint:
-              `If automation must maintain this field regardless of record state, run the flow runAs:'system'. ` +
-              `Otherwise confirm this node only targets records whose readonlyWhen predicate is FALSE.`,
+              `Elevation is not a workaround here: unlike the static readonly strip, the conditional lock ` +
+              `is NOT waived by a system context, so runAs:'system' strips this field on a locked record ` +
+              `exactly as this run does. Either confirm this node only targets records whose readonlyWhen ` +
+              `predicate is FALSE, or derive '${fieldName}' in a beforeUpdate hook on '${objectName}' - a ` +
+              `hook-derived value is not caller-supplied and does land, even on a locked record. Otherwise ` +
+              `remove '${fieldName}' from this update_record node. This warning never blocks a build.`,
           });
         }
       }
