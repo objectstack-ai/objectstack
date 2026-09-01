@@ -21,6 +21,10 @@ describe('reference-integrity suite — membership', () => {
       'validateActionNameRefs',
       'validatePageFieldBindings',
       'validateChartBindings',
+      // [#14105] The dataset's OWN references, one level below the two binding
+      // rules above it — the conscious edit this written-out list exists to
+      // force, placed so the family reports top-down.
+      'validateDatasetReferences',
       'validateNavAccess',
       'validateNavTargetRefs',
       // [#13216] The conscious edit this written-out list exists to force: the
@@ -194,7 +198,13 @@ describe('reference-integrity suite — every member actually runs', () => {
       {
         name: 'lead_metrics',
         object: 'crm_lead',
-        dimensions: [{ name: 'source' }],
+        // validateDatasetReferences (#14105): `budget` is not a field on
+        // crm_lead, so the dimension groups by a column that does not exist —
+        // the chart renders successfully and empty. The dimension NAME stays
+        // `source` because validateChartBindings resolves the report's
+        // `xAxis: 'source'` against it; the two members must be able to go
+        // silent independently.
+        dimensions: [{ name: 'source', field: 'budget' }],
         measures: [{ name: 'count_leads', aggregate: 'count' }],
       },
     ],
@@ -318,6 +328,7 @@ describe('reference-integrity suite — every member actually runs', () => {
     expect(rules).toContain('action-name-undefined');
     expect(rules).toContain('page-field-unknown');
     expect(rules).toContain('chart-measure-unknown');
+    expect(rules).toContain('dataset-field-unknown');
     expect(rules).toContain('nav-object-ungranted');
     expect(rules).toContain('nav-object-unservable');
     expect(rules).toContain('translation-target-unknown');

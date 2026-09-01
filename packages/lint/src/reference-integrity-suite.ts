@@ -82,6 +82,7 @@ import { validateSortableFields } from './validate-sortable-fields.js';
 import { validateActionNameRefs } from './validate-action-name-refs.js';
 import { validatePageFieldBindings } from './validate-page-field-bindings.js';
 import { validateChartBindings } from './validate-chart-bindings.js';
+import { validateDatasetReferences } from './validate-dataset-references.js';
 import { validateNavAccess } from './validate-nav-access.js';
 import { validateNavTargetRefs } from './validate-nav-target-refs.js';
 import { validateViewPageRefs } from './validate-view-page-refs.js';
@@ -189,6 +190,16 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   { name: 'validateActionNameRefs', run: validateActionNameRefs },
   { name: 'validatePageFieldBindings', run: validatePageFieldBindings },
   { name: 'validateChartBindings', run: validateChartBindings },
+  // [#14105] One level BELOW the two members above it. `validateChartBindings`
+  // and `validateWidgetBindings` resolve a presentation's binding against the
+  // dataset (#7529/#8902); this one resolves the DATASET's own references —
+  // `include[]`, `dimensions[].field`, `measures[].field` and filter KEYS —
+  // against the object graph. Placed here so the family reports top-down: a
+  // board proven to point at a real dataset, then that dataset proven to point
+  // at real columns. Its base-object sibling is `validateObjectReferences`
+  // (rung ①, and the reason this member skips a dataset whose object does not
+  // resolve rather than repeating the typo once per position).
+  { name: 'validateDatasetReferences', run: validateDatasetReferences },
   { name: 'validateNavAccess', run: validateNavAccess },
   // Nav targets that are NOT object names — page/report/dashboard. Restores the
   // coverage `defineStack`'s own cross-reference block switches off whenever the

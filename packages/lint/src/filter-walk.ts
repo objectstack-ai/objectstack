@@ -35,7 +35,20 @@
  * they resolve an additional vocabulary (`AppContextSelector` ids such as
  * `{active_package}`) that is meaningless in a filter, and restricting the walk
  * is what holds false positives at zero.
+ *
+ * ## The two halves of a filter, and where each one is answered
+ *
+ * `walkAuthoredFilters` finds the SUBTREES. Inside one, a rule wants either the
+ * VALUES (`validate-filter-tokens.ts` classifies placeholders in them;
+ * `validate-preset-comparands.ts` judges ordering comparands) or the FIELD KEYS
+ * — the names the query is filtered BY. {@link walkFilterFieldKeys} is the
+ * second half (#14105), and it is here rather than in its first caller because
+ * the shape dispatch is identical to the one `validate-preset-comparands.ts`
+ * already performs on values: the platform authors filters three ways, and a
+ * reader that handles only one shape is the exact bug #3574 was filed against.
  */
+
+import { VALID_AST_OPERATORS } from '@objectstack/spec/data';
 
 /** Any plain metadata record. */
 type AnyRec = Record<string, unknown>;
@@ -161,4 +174,123 @@ export function walkAuthoredFilters(
       scanForFilters(item, `${key}[${i}]`, `${kind} "${name}"`, visit, new Set());
     });
   }
+}
+
+// ── The FIELD-KEY half of a filter subtree (#14105) ──────────────────────────
+
+/** One field position inside an authored filter. */
+export interface FilterFieldKey {
+  /**
+   * The field the condition filters BY, exactly as authored — a bare name
+   * (`status`), or a dotted relationship path (`account.region`, whether
+   * spelled that way or reached by descending a nested condition object).
+   */
+  field: string;
+  /** Config path of the position, e.g. `datasets[1].measures[1].filter.last_update_at`. */
+  path: string;
+}
+
+/** Recursion guard — an authored filter is a bounded document, not a graph. */
+const MAX_KEY_DEPTH = 32;
+
+function isPlainObject(v: unknown): v is AnyRec {
+  return !!v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date);
+}
+
+/**
+ * Emit the field positions of one Mongo-style condition NODE.
+ *
+ * `prefix` carries the relationship path accumulated by descending nested
+ * condition objects, so `{ account: { region: { $eq: 'emea' } } }` reports the
+ * single position `account.region` rather than a bare `region` that would
+ * resolve against the wrong object. A node whose value carries `$` operators is
+ * a leaf condition and ends the descent; a `$`-prefixed key that is not a
+ * recognised combinator is skipped and NOT descended, matching
+ * `validate-preset-comparands.ts` — an unrecognised operator's operand shape is
+ * not ours to guess.
+ */
+function conditionFieldKeys(
+  node: AnyRec,
+  path: string,
+  prefix: string,
+  visit: (key: FilterFieldKey) => void,
+  depth: number,
+): void {
+  if (depth > MAX_KEY_DEPTH) return;
+  for (const [key, value] of Object.entries(node)) {
+    const here = `${path}.${key}`;
+    if (key === '$and' || key === '$or') {
+      if (Array.isArray(value)) {
+        value.forEach((arm, i) => {
+          if (isPlainObject(arm)) conditionFieldKeys(arm, `${here}[${i}]`, prefix, visit, depth + 1);
+        });
+      }
+      continue;
+    }
+    if (key === '$not') {
+      if (isPlainObject(value)) conditionFieldKeys(value, here, prefix, visit, depth + 1);
+      continue;
+    }
+    if (key.startsWith('$')) continue; // unrecognised combinator
+    const field = prefix ? `${prefix}.${key}` : key;
+    if (isPlainObject(value) && !Object.keys(value).some((k) => k.startsWith('$'))) {
+      // Nested relation / deep equality — the field position is one level
+      // deeper, so descend rather than reporting the intermediate hop twice.
+      // An EMPTY nested object addresses nothing further; report the hop itself.
+      if (Object.keys(value).length > 0) {
+        conditionFieldKeys(value, here, field, visit, depth + 1);
+        continue;
+      }
+    }
+    visit({ field, path: here });
+  }
+}
+
+/**
+ * Emit every FIELD KEY inside one authored filter subtree, whatever shape it
+ * was authored in — the key half of what `validate-preset-comparands.ts` does
+ * for values, and the traversal `filter-token-unknown` already performs while
+ * reasoning only about the strings it finds.
+ *
+ * Holds no judgement: it does not know which object the filter is bound to and
+ * emits no findings. Resolution is {@link resolveFieldPath}'s job
+ * (`object-graph.ts`) and the verdict is the caller's.
+ */
+export function walkFilterFieldKeys(
+  node: unknown,
+  path: string,
+  visit: (key: FilterFieldKey) => void,
+  depth = 0,
+): void {
+  if (depth > MAX_KEY_DEPTH) return;
+
+  if (Array.isArray(node)) {
+    // Triple: ['field', op, value] — the field position is a non-keyword
+    // string and the operator position is in the AST vocabulary (the
+    // `isFilterAST` test `validate-preset-comparands.ts` uses).
+    if (
+      typeof node[0] === 'string' && typeof node[1] === 'string'
+      && !['and', 'or'].includes(node[0].toLowerCase())
+      && VALID_AST_OPERATORS.has(node[1].toLowerCase())
+    ) {
+      visit({ field: node[0], path: `${path}[0]` });
+      return;
+    }
+    // Group ['and'|'or', ...members] or a bare list — recurse the members.
+    node.forEach((member, i) => {
+      if (typeof member === 'string') return; // the leading keyword
+      walkFilterFieldKeys(member, `${path}[${i}]`, visit, depth + 1);
+    });
+    return;
+  }
+
+  if (!isPlainObject(node)) return;
+
+  // View filter rule: { field, operator[, value] }.
+  if (typeof node.field === 'string' && typeof node.operator === 'string') {
+    visit({ field: node.field, path: `${path}.field` });
+    return;
+  }
+
+  conditionFieldKeys(node, path, '', visit, depth);
 }
