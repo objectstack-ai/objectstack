@@ -100,7 +100,18 @@ function getPolicy(schema: any): {
       enabled: false,
       allowedAudiences: [],
       allowedPermissions: [],
-      redactFields: [],
+      // [#13856] The declared redaction set is read REGARDLESS of `enabled`.
+      // This branch used to return `redactFields: []`, so a link minted while
+      // the object was opted IN and redeemed after it was opted OUT kept
+      // resolving AND started serving the very fields the object declares
+      // redacted — turning the feature off WIDENED what the anonymous
+      // endpoint serves. Opting out gates MINTING (`createLink`'s 422 reads
+      // `enabled`, not this list) and whatever #14033 rules for standing
+      // links; it must never strip the object's declared redactions from
+      // tokens that still serve. An object with no `publicSharing` block at
+      // all keeps `[]` — nothing declared, nothing redacted — exactly as
+      // before.
+      redactFields: Array.isArray(raw?.redactFields) ? (raw.redactFields as string[]) : [],
     };
   }
   return {
