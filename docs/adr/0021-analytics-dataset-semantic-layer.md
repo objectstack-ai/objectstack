@@ -11,7 +11,7 @@
 
 ## TL;DR
 
-The platform's **query *schema*** (`QuerySchema`, [`query.zod.ts:586`](../../packages/spec/src/data/query.zod.ts#L586)) already *describes* `joins` (inner/left/right/full + strategies + subquery + cross-datasource), `aggregations`, `groupBy` (with date bucketing), `having`, and `windowFunctions`.
+The platform's **query *schema*** (`QuerySchema`, [`packages/spec/src/data/query.zod.ts#QuerySchema`](../../packages/spec/src/data/query.zod.ts)) already *describes* `joins` (inner/left/right/full + strategies + subquery + cross-datasource), `aggregations`, `groupBy` (with date bucketing), `having`, and `windowFunctions`.
 
 > **Correction (revised 2026-05-31).** An implementation scan found the *runtime* does **not** match the schema: `groupBy` + `aggregations` execute (single-object only), but `joins` / `having` / `windowFunctions` are **schema-only — not executed** by `IDataEngine` or the SQL driver. A separate, already-implemented **Cube semantic layer** (`IAnalyticsService` + `CubeSchema`) is the *only* path that emits cross-object joins today (and it bypasses RLS/tenant). This reframes the work and the naming — see the "Implementation scan" section. The decisions below stand; the cost and the build-vs-reuse choice change.
 
@@ -357,7 +357,7 @@ So "revenue by `account.region`" — the headline dataset use case — **cannot 
 
 ### Finding 2 — a parallel semantic layer already exists (must reconcile)
 
-`data/analytics.zod.ts` `CubeSchema` + `contracts/analytics-service.ts` `IAnalyticsService` are **implemented** (`AnalyticsService` in `service-analytics`, `MemoryAnalyticsService` in `driver-memory`): a Cube.io-style `{ measures, dimensions, timeDimensions }` layer — conceptually the same "semantic layer" this ADR proposes. Its `NativeSQLStrategy` is the **only** code that emits cross-object `LEFT JOIN` (single-hop), but via raw `engine.execute()` which **bypasses the sharing-middleware RLS and tenant isolation** ([`engine.ts:2077`](../../packages/objectql/src/engine.ts#L2077) warns explicitly). It loads opt-in (`requires: ['analytics']`), and its grammar is **disjoint from `QuerySchema`** — nothing compiles `QuerySchema.joins/having/window` to execution.
+`data/analytics.zod.ts` `CubeSchema` + `contracts/analytics-service.ts` `IAnalyticsService` are **implemented** (`AnalyticsService` in `service-analytics`, `MemoryAnalyticsService` in `driver-memory`): a Cube.io-style `{ measures, dimensions, timeDimensions }` layer — conceptually the same "semantic layer" this ADR proposes. Its `NativeSQLStrategy` is the **only** code that emits cross-object `LEFT JOIN` (single-hop), but via raw `engine.execute()` which **bypasses the sharing-middleware RLS and tenant isolation** ([`packages/objectql/src/engine.ts`](../../packages/objectql/src/engine.ts) warns explicitly). It loads opt-in (`requires: ['analytics']`), and its grammar is **disjoint from `QuerySchema`** — nothing compiles `QuerySchema.joins/having/window` to execution.
 
 **Implication:** do not build a *third* semantic layer. Either (b) adopt/extend Cube as the dataset, or (c) compile `dataset` → `AnalyticsQuery` and reuse the Cube runtime (then harden its RLS/tenant). Both are far cheaper than teaching `IDataEngine` to join.
 

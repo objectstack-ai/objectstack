@@ -65,12 +65,12 @@ The chain today, end to end:
   *receives* the derived rung.
 - **Nothing consumes it.** The Layer 0 exemption gate re-derives platform-ness
   from a capability probe (`hasPlatformAdminPosture`,
-  `security-plugin.ts:2390` — checking `manage_metadata` /
+  `packages/plugins/plugin-security/src/security-plugin.ts#manage_metadata` — checking `manage_metadata` /
   `manage_platform_settings` / `studio.access` / `manage_users`); the
   Layer 1 superuser bypass reads the raw super-bits; the explain engine reads
   `ctx.posture` when present but replicates the derivation when absent
   (#2949's patch). The comment above the probe
-  (`security-plugin.ts:71-77`) still gives "the field is NOT plumbed" as the
+  (`packages/plugins/plugin-security/src/security-plugin.ts`) still gives "the field is NOT plumbed" as the
   reason for probing — **that reason expired with #2956**; the probe is now a
   choice, not a necessity.
 
@@ -195,7 +195,7 @@ its visibility; misconfiguration can only narrow. What this ADR adds is the
    fail-closed, never fall-through to the member rule.
 3. **Write side**: edit requires an explicit share granting edit; the
    `owner`-type sharing rules currently marked
-   `[experimental — not enforced]` (`sharing.zod.ts:104`, ADR-0049 marker)
+   `[experimental — not enforced]` (`packages/spec/src/security/sharing.zod.ts`, ADR-0049 marker)
    stay outside the EXTERNAL rung until separately enforced — an external
    principal's visibility never depends on an unenforced construct.
 4. **Matrix first**: the `EXTERNAL × layer` cells land with this ADR
@@ -241,7 +241,7 @@ Strictly serial, each step behind the matrix:
   EXTERNAL dead-branch cells). Pure test additions; no behavior change.
 - **P1** — flip the Layer 0 exemption gate and explain to read the carried
   rung (probe demoted to fallback; stale comment at
-  `security-plugin.ts:71-77` retired). Behavior-preserving under P0's gate.
+  `packages/plugins/plugin-security/src/security-plugin.ts` retired). Behavior-preserving under P0's gate.
   Unblocked today (#2956); small.
 - **P2** *(superseded — rejected at adjudication, replaced by P2′; see the
   Amendment)* — the original "Layer 1 short-circuit reads posture for tier"
@@ -314,12 +314,12 @@ Strictly serial, each step behind the matrix:
 - Landed substrate: #2920 B2/B4 (`posture-ladder.ts`, derivation), #2956
   (posture carried on `ExecutionContext` — closes #2947), #2957 (readonly
   write guard, I6), cloud#835/#836 (multi-org / position-anchor e2e gates).
-- Code (current state): `packages/plugins/plugin-security/src/security-plugin.ts:2390`
-  (`hasPlatformAdminPosture` probe; stale rationale at `:71-77`),
+- Code (current state): `packages/plugins/plugin-security/src/security-plugin.ts#hasPlatformAdminPosture`
+  (`hasPlatformAdminPosture` probe; stale rationale at `#hasPlatformAdminPosture`),
   `packages/core/src/security/posture-ladder.ts`,
   `packages/core/src/security/resolve-authz-context.ts` (derivation),
   `packages/plugins/plugin-security/src/explain-engine.ts` (carried-value
-  preference), `packages/spec/src/security/sharing.zod.ts:104` (`owner`-rule
+  preference), `packages/spec/src/security/sharing.zod.ts` (`owner`-rule
   experimental marker), `packages/spec/src/kernel/execution-context.zod.ts`
   (`posture` field).
 

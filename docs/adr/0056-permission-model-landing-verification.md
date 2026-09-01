@@ -50,25 +50,25 @@ Legend — **E** enforced · **P** partial · **U** declared-but-unenforced (fai
 
 | # | Primitive | Enforced? | Enforcement site (evidence) | Proven e2e? | Verdict |
 | :-- | :-- | :-: | :-- | :-: | :-- |
-| 1 | Object CRUD (`allowRead/Create/Edit/Delete`) | **E** | `plugin-security/security-plugin.ts` ~`326` checkObjectPermission (fail-closed 403) | partial (delete ✗pf) | OK; add DELETE proof |
-| 2 | FLS read-mask / write-deny | **E** | `security-plugin.ts` ~`441`/`530`, `field-masker.ts` | unit only ✗pf | OK; **prove FLS+RLS composition** |
-| 3 | RLS `using` (read) | **E** | `security-plugin.ts` ~`504` AND-inject; `rls-compiler.ts` | ✓ `rls-fixture` | OK |
+| 1 | Object CRUD (`allowRead/Create/Edit/Delete`) | **E** | `packages/plugins/plugin-security/src/security-plugin.ts` checkObjectPermission (fail-closed 403) | partial (delete ✗pf) | OK; add DELETE proof |
+| 2 | FLS read-mask / write-deny | **E** | `packages/plugins/plugin-security/src/security-plugin.ts`, `field-masker.ts` | unit only ✗pf | OK; **prove FLS+RLS composition** |
+| 3 | RLS `using` (read) | **E** | `packages/plugins/plugin-security/src/security-plugin.ts` AND-inject; `rls-compiler.ts` | ✓ `rls-fixture` | OK |
 | 4 | RLS `check` (insert/update) | **E** | `security-plugin.ts` write path | ✓ `rls-fixture` | OK |
-| 5 | RLS by-id write (#1994) | **E** | `security-plugin.ts` ~`361` pre-image re-read | ✓ `rls-fixture` | OK |
+| 5 | RLS by-id write (#1994) | **E** | `packages/plugins/plugin-security/src/security-plugin.ts` pre-image re-read | ✓ `rls-fixture` | OK |
 | 6 | RLS compiler grammar | **P** | `rls-compiler.ts` — only `=`(id/email/org)/`IN`/literal/`1=1`; **uncompilable predicates silently dropped** | unit | **D4: no silent drop** |
 | 7 | `current_user.*` vars | **P** | resolves `id`,`email`,`organization_id`,`org_user_ids`,`rlsMembership`; **`name` excluded by design** | unit | OK (documented) |
-| 8 | OWD `private` (owner-only) | **P** | `plugin-sharing/sharing-service.ts` ~`53` `effectiveSharingModel` — **only if sharing plugin loaded** | ✓ `rls-fixture` | **D1/D3** |
+| 8 | OWD `private` (owner-only) | **P** | `packages/plugins/plugin-sharing/src/sharing-service.ts#effectiveSharingModel` `effectiveSharingModel` — **only if sharing plugin loaded** | ✓ `rls-fixture` | **D1/D3** |
 | 9 | OWD `read` / `public_read` | **U** | `read` handled; `public_read` falls through to "public" (no filter) | ✗pf | **D1** |
 | 10 | OWD `read_write`/`full`/`public_read_write` | **U** | all collapse to default-ALLOW; no distinction | ✗pf | **D1 (fail-open)** |
-| 11 | `controlled_by_parent` | **E** | `security-plugin.ts` ~`864`/`908` (read+write) | ✓ `controlled-by-parent`, `showcase-invoice-cbp` | OK (ADR-0055) |
-| 12 | Ownership `owner_id` stamp + scope | **E** | `security-plugin.ts` ~`479` auto-stamp; owner RLS | ✓ `rls-fixture` | OK |
-| 13 | Manual record shares (`sys_record_share`) | **E** | `sharing-service.ts` ~`117` buildReadFilter | unit ✗pf | OK; add proof |
+| 11 | `controlled_by_parent` | **E** | `packages/plugins/plugin-security/src/security-plugin.ts` (read+write) | ✓ `controlled-by-parent`, `showcase-invoice-cbp` | OK (ADR-0055) |
+| 12 | Ownership `owner_id` stamp + scope | **E** | `packages/plugins/plugin-security/src/security-plugin.ts` auto-stamp; owner RLS | ✓ `rls-fixture` | OK |
+| 13 | Manual record shares (`sys_record_share`) | **E** | `sharing-service.ts` buildReadFilter | unit ✗pf | OK; add proof |
 | 14 | Sharing rules (criteria/owner) | **P** | rules materialize into `sys_record_share`; **spec CEL `condition`+recipients diverge from runtime `criteria_json`** | unit ✗pf | **D5 (spec↔runtime reconcile, per 0049)** |
-| 15 | Role hierarchy widening (`parent`) | **N** | `sharing-rule-service.ts` ~`253` `expandRecipient` has no `role_and_subordinates` case (declared in the enum, never expanded); `team-graph.ts:27` flat; no consumer of `Role.parent` | ✗ | **D6: implement or `experimental`** |
-| 16 | Multi-tenant org isolation | **E** | `plugin-org-scoping` ~`129` stamp + wildcard RLS + field-existence fail-closed | ✓ `rls-multitenant` | OK |
+| 15 | Role hierarchy widening (`parent`) | **N** | `packages/plugins/plugin-sharing/src/sharing-rule-service.ts#expandRecipient` `expandRecipient` has no `role_and_subordinates` case (declared in the enum, never expanded); `packages/plugins/plugin-sharing/src/team-graph.ts` flat; no consumer of `Role.parent` | ✗ | **D6: implement or `experimental`** |
+| 16 | Multi-tenant org isolation | **E** | `plugin-org-scoping` stamp + wildcard RLS + field-existence fail-closed | ✓ `rls-multitenant` | OK |
 | 17 | Anonymous / unauthenticated | **P/U** | `rest-server.ts` `requireAuth` **defaults false**; no context ⇒ checks skipped ⇒ reads unscoped data | unit ✗pf | **D2 (fail-open, HIGH)** |
-| 18 | `systemPermissions` / tab-app gating | **E** | `rest-server.ts` ~`1069` filterAppForUser (server-side) | ✗pf | OK; add proof |
-| 19 | Default/fallback provisioning | **P** | `security-plugin.ts` ~`724` hardcoded `member_default`; **not app-declarable** | unit ✗pf | **D7** |
+| 18 | `systemPermissions` / tab-app gating | **E** | `packages/rest/src/rest-server.ts#filterAppForUser` filterAppForUser (server-side) | ✗pf | OK; add proof |
+| 19 | Default/fallback provisioning | **P** | `packages/plugins/plugin-security/src/security-plugin.ts` hardcoded `member_default`; **not app-declarable** | unit ✗pf | **D7** |
 | 20 | `allowTransfer/Restore/Purge`, `Policy`, flow `runAs` | **(removed)** | — | — | already 0049 → M2, leave |
 | 21 | Compliance / Encryption / Masking / `RLSConfig` / DataClassification | **U** | declared in `spec/system/*`; no runtime consumer found | ✗ | **D8: triage per 0049** |
 
@@ -116,7 +116,7 @@ The spec declares `CriteriaSharingRuleSchema`/`OwnerSharingRuleSchema` with a CE
 
 ### D6 — Role-hierarchy widening: implement, or mark `experimental`
 
-`Role.parent` exists and is documented as "managers see subordinates," but no code consumes it: `expandRecipient` (`sharing-rule-service.ts:253`) resolves a `role` recipient to its **direct** members only and has **no `role_and_subordinates` branch** (the enum value ships, unexpanded). It is **silently a no-op** — a 0049 violation. (Department hierarchy *is* walked — `department-graph.ts:32` — so the gap is role-specific.)
+`Role.parent` exists and is documented as "managers see subordinates," but no code consumes it: `expandRecipient` (`packages/plugins/plugin-sharing/src/sharing-rule-service.ts#expandRecipient`) resolves a `role` recipient to its **direct** members only and has **no `role_and_subordinates` branch** (the enum value ships, unexpanded). It is **silently a no-op** — a 0049 violation. (Department hierarchy *is* walked — `department-graph.ts` — so the gap is role-specific.)
 
 - **Decision: mark `Role.parent`'s visibility-rollup semantics `[EXPERIMENTAL — not enforced]`** in the spec now (it is not on the critical path for v1), with a roadmap entry to implement it as a `rlsMembership` pre-resolution (`current_user.subordinate_user_ids`) reusing the ADR-0055 IN-form — **no compiler change**. (Implementing now is acceptable if cheap; the default is honest-tagging over a silent no-op.)
 

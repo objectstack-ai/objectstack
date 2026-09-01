@@ -16,7 +16,7 @@ The protocol already includes:
 
 - `Datasource` (`packages/spec/src/data/datasource.zod.ts`) — connection
   + driver + capabilities (transactions, queryFilters, readOnly, …).
-- `Object.datasource` (`packages/spec/src/data/object.zod.ts:432`) — per-object
+- `Object.datasource` (`packages/spec/src/data/object.zod.ts#datasource`) — per-object
   routing key, defaulting to `'default'`.
 - `ISchemaDiffService` (`packages/spec/src/contracts/schema-diff-service.ts`) —
   introspect → diff → migration plan.
@@ -386,8 +386,8 @@ if (datasource.schemaMode !== 'managed') {
 }
 ```
 
-**Concretely** — `packages/drivers/driver-sql/src/sql-driver.ts:1064`
-and `:1084` (current `createTable` / `alterTable` call sites) gain a
+**Concretely** — `packages/drivers/driver-sql/src/sql-driver.ts`
+and `packages/drivers/driver-sql/src/sql-driver.ts` (current `createTable` / `alterTable` call sites) gain a
 guard at the top. The `applyMigrations` implementation (forthcoming
 in `service-migration` per ADR-0008) also calls this guard.
 

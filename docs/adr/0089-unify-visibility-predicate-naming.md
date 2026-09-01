@@ -15,9 +15,9 @@ different ways depending on which layer you are in:
 
 | Layer | Key today | Location |
 |---|---|---|
-| Data field / field option | `visibleWhen` | `packages/spec/src/data/field.zod.ts:592, 108` |
-| View form section / field | `visibleOn` | `packages/spec/src/ui/view.zod.ts:762, 781` |
-| Page component | `visibility` | `packages/spec/src/ui/page.zod.ts:109` |
+| Data field / field option | `visibleWhen` | `packages/spec/src/data/field.zod.ts#visibleWhen` |
+| View form section / field | `visibleOn` | `packages/spec/src/ui/view.zod.ts#visibleOn` |
+| Page component | `visibility` | `packages/spec/src/ui/page.zod.ts#visibility` |
 
 Because every one is `.optional()` and the schemas run zod's default **strip** mode, a
 key placed on the wrong layer — `visibleOn` on a data field, `visibleWhen` on a form
@@ -32,13 +32,13 @@ a **loud** error instead of a silent no-op. The boolean `visible` (Tab on/off) i
 different type and concept and is explicitly **out of scope**.
 
 This is not a new pattern — it is the exact move already made for
-`conditionalRequired → requiredWhen` (`field.zod.ts:594-598`), applied to visibility.
+`conditionalRequired → requiredWhen` (`packages/spec/src/data/field.zod.ts#requiredWhen`), applied to visibility.
 
 ## Context
 
 ### The `*When` family already exists — and `visibleWhen` is in it
 
-`field.zod.ts:592-594` defines a coherent conditional-rule triad on data fields:
+`packages/spec/src/data/field.zod.ts` defines a coherent conditional-rule triad on data fields:
 
 ```ts
 visibleWhen:  ExpressionInputSchema.optional(),  // shown when TRUE
@@ -55,10 +55,10 @@ binding environment (`record` + `current_user`), and an enforcement path.
 
 The repo has already run this exact consolidation once. `requiredWhen` is the canonical
 name; `conditionalRequired` is retained as a `@deprecated` alias
-(`field.zod.ts:594-598`), and the enforcer resolves the pair with a coalesce:
+(`packages/spec/src/data/field.zod.ts#requiredWhen`), and the enforcer resolves the pair with a coalesce:
 
 ```ts
-// packages/objectql/src/validation/rule-validator.ts:378
+// packages/objectql/src/validation/rule-validator.ts#requiredWhen
 const pred = def?.requiredWhen ?? def?.conditionalRequired;
 ```
 
@@ -71,7 +71,7 @@ Three compounding traps:
 
 1. **Same concept, name switches by layer.** `visibleWhen` (data) vs `visibleOn` (view)
    vs `visibility` (page). The docs already need a disambiguation paragraph
-   (`content/docs/protocol/objectui/layout-dsl.mdx:796-798`) — a sign the surface, not
+   (`objectui:content/docs/protocol/objectui/layout-dsl.mdx`) — a sign the surface, not
    the reader, is the problem.
 
 2. **`visibleOn` has two binding roots.** In runtime forms it binds the live record
@@ -83,7 +83,7 @@ Three compounding traps:
    (only two `.passthrough()` sites exist in `view.zod.ts`, none relevant here), so a
    mis-layered key is discarded with no diagnostic. ADR-0085 already deleted one
    consumer-less `visibleOn` from `fieldGroups` under the enforce-or-remove rule
-   (`object.zod.ts:227-230`); this ADR closes the general case.
+   (`packages/spec/src/data/object.zod.ts#visibleOn`); this ADR closes the general case.
 
 ### Why unify to `visibleWhen` and not `visibleOn`
 
@@ -128,7 +128,7 @@ silently inert):
     form predicate).
 
 **D4 — the boolean `visible` is out of scope.**
-`view.zod.ts:276` `visible: z.boolean()` (Tab on/off) is a static flag, not a predicate.
+`packages/spec/src/ui/view.zod.ts` `visible: z.boolean()` (Tab on/off) is a static flag, not a predicate.
 Folding it into `visibleWhen` would create a new type ambiguity (boolean vs expression).
 It keeps its name and type. `hidden` (field boolean) and `visibleFields` (gallery card
 array) are likewise unrelated and untouched.

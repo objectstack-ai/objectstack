@@ -52,11 +52,11 @@ N manifests inside it, register N packages in dependency-topological order at lo
 
 The load-bearing insight is that the runtime registry was **already built multi-package**:
 namespaces are stored as `Map<namespace, Set<packageId>>`
-(`packages/objectql/src/registry.ts:1456`), registration is per-manifest
-(`ObjectQL.registerApp`, `packages/objectql/src/engine.ts:4746`), uninstall is per-package
-(`SchemaRegistry.unregisterObjectsByPackage`, `registry.ts:2679`), and objects already carry a
+(`packages/objectql/src/registry.ts#registerApp`), registration is per-manifest
+(`ObjectQL.registerApp`, `packages/objectql/src/engine.ts#registerApp`), uninstall is per-package
+(`SchemaRegistry.unregisterObjectsByPackage`, `packages/objectql/src/registry.ts#unregisterObjectsByPackage`), and objects already carry a
 per-item owner. **The only gate is `installPackage`** — and that gate's criterion
-(`owner !== manifest.id`, `registry.ts:3583`) is a *proxy*. What it means to ask is "do these
+(`owner !== manifest.id`, `packages/objectql/src/registry.ts`) is a *proxy*. What it means to ask is "do these
 packages have the same owner?"; what it actually asks is "are they the same package?". This
 record corrects the proxy to its intent: **the release artifact itself is the co-ownership
 declaration**, because everything inside one artifact is delivered atomically by one publisher.
@@ -106,7 +106,7 @@ group nodes).
 
 That asymmetry is structural, and re-verified here: the object document has **no** grouping,
 module, category or section key — the only `group` spelling in
-`packages/spec/src/data/object.zod.ts:1779` is a *rejection-guidance* entry redirecting the
+`packages/spec/src/data/object.zod.ts#userActions` is a *rejection-guidance* entry redirecting the
 author to the view's `userActions`. There is nothing for Studio to group by.
 
 **(b) The context budget has no module boundary.** The product promise is that a CRM sales
@@ -124,7 +124,7 @@ package as the sales module. Commercially it does not exist as a thing.
 | --- | --- | --- |
 | **Add a `module` tag to objects/flows** | A pure grouping key priced at ~1,100–1,200 tokens across 190 authored files — **70–75% of the downstream ratchet's remaining headroom**, for zero enforcement. Raising the ceiling is a maintainer floor item, not an agent's. | The absence it would fill is real (§1.3a); the ratchet itself is a downstream-app script, see §7. |
 | **Split into packages with separate namespaces** | This is **rename-on-install by another name**. `${namespace}_${shortName}` is kernel-validated and the object `name` **is** the table name, the REST path, the formula token and the saved-view key (ADR-0129 D1–D2). `crm_account` → `sales_account` breaks all of them. | ADR-0048 §3.5 and its Non-goals (line 171) already record this as an explicit non-goal: *"Namespace rename-on-install is an explicit non-goal for now (deep rewrite of every object name, cross-reference, and formula)."* |
-| **Merge with the existing `composeStacks`** | It **flattens**, and flattening is the whole loss. Its `manifest` option is `z.union([z.enum(['first','last']), z.number().int().min(0)]).default('last')` — it *picks one manifest and drops the rest*. Running the full refactor through it lands back on one 30-object flat package: the benefit evaporates exactly where it was supposed to appear. | `packages/spec/src/stack.zod.ts:1759`, with the doc comment above it stating the selection semantics ("Which manifest to keep when multiple stacks provide one"). |
+| **Merge with the existing `composeStacks`** | It **flattens**, and flattening is the whole loss. Its `manifest` option is `z.union([z.enum(['first','last']), z.number().int().min(0)]).default('last')` — it *picks one manifest and drops the rest*. Running the full refactor through it lands back on one 30-object flat package: the benefit evaporates exactly where it was supposed to appear. | `packages/spec/src/stack.zod.ts#composeStacks`, with the doc comment above it stating the selection semantics ("Which manifest to keep when multiple stacks provide one"). |
 
 ### 1.5 What the runtime already does (the reason this is small)
 
@@ -132,15 +132,15 @@ Re-verified in this worktree, not taken from the proposal:
 
 | Fact | Anchor |
 | --- | --- |
-| Namespace ownership is stored **many-to-one**: `private namespaceRegistry = new Map<string, Set<string>>();` | `packages/objectql/src/registry.ts:1456` |
-| `getNamespaceOwners()` returns an **array** of package ids | `registry.ts:1540` |
-| Registration is **per manifest** — `registerApp(manifest)` stamps each object with that manifest's id/namespace | `packages/objectql/src/engine.ts:4746` |
-| Uninstall is **per package**, not a namespace sweep | `registry.ts:2679` (`unregisterObjectsByPackage`) |
-| The one place a second package is refused | `registry.ts:3575` `installPackage`, gate at `3583`, throw at `3595` |
-| The load-time call site that registers exactly one manifest | `packages/objectql/src/plugin.ts:405` (`ql.registerApp(manifest)`) |
-| `validateSingleApp` constrains only `type: 'app'` — it returns `[]` for every other type | `packages/spec/src/stack.zod.ts:854` |
-| Shareable namespaces are `{base, system}` plus `sys` | `registry.ts:45` + `registry.ts:1116` (`isShareableNamespace`) |
-| The artifact's `manifest` key is **singular and optional** on the schema `os compile` validates and writes | `packages/spec/src/stack.zod.ts:240`; `packages/cli/src/commands/compile.ts:271` (parse) and `:596` (write); `os build` is an alias of `os compile` (`packages/cli/src/commands/build.ts:6`) |
+| Namespace ownership is stored **many-to-one**: `private namespaceRegistry = new Map<string, Set<string>>();` | `packages/objectql/src/registry.ts#namespaceRegistry` |
+| `getNamespaceOwners()` returns an **array** of package ids | `packages/objectql/src/registry.ts#getNamespaceOwners` |
+| Registration is **per manifest** — `registerApp(manifest)` stamps each object with that manifest's id/namespace | `packages/objectql/src/engine.ts#registerApp` |
+| Uninstall is **per package**, not a namespace sweep | `packages/objectql/src/registry.ts#unregisterObjectsByPackage` (`unregisterObjectsByPackage`) |
+| The one place a second package is refused | `packages/objectql/src/registry.ts#installPackage` — the gate and the throw are inside it |
+| The load-time call site that registers exactly one manifest | `packages/objectql/src/plugin.ts` (`ql.registerApp(manifest)`) |
+| `validateSingleApp` constrains only `type: 'app'` — it returns `[]` for every other type | `packages/spec/src/stack.zod.ts#validateSingleApp` |
+| Shareable namespaces are `{base, system}` plus `sys` | `packages/objectql/src/registry.ts#isShareableNamespace` + `packages/objectql/src/registry.ts#isShareableNamespace` (`isShareableNamespace`) |
+| The artifact's `manifest` key is **singular and optional** on the schema `os compile` validates and writes | `packages/spec/src/stack.zod.ts`; `packages/cli/src/commands/compile.ts` (parse) and `packages/cli/src/commands/compile.ts` (write); `os build` is an alias of `os compile` (`packages/cli/src/commands/build.ts`) |
 
 #14122 also measured the authoring side: a sub-package declaring `namespace: 'crm'`, defining
 `crm_*` objects and injecting navigation through `navigationContributions` is ACCEPTED by
@@ -165,7 +165,7 @@ Therefore the install gate's criterion is corrected from *"is this the same pack
 *"are these co-owners within one artifact?"*. This is not a new permission being granted; it is
 an existing check being asked the question it was always meant to ask. The 2026-08-06 ruling
 recorded in ADR-0048's addendum already located ownership at the **publisher**, not the package
-(addendum D2, `0048-cross-package-metadata-collision.md:459`); one artifact is the smallest
+(addendum D2, `docs/adr/0048-cross-package-metadata-collision.md`); one artifact is the smallest
 publisher-atomic unit the runtime can observe without a new field.
 
 ### D2 — The consumer model does not move; the artifact stops at the control plane
@@ -175,19 +175,19 @@ still installs one thing, opens one thing, uninstalls one thing: the single `typ
 The other packages in the artifact are `type: module` / `plugin` — ADR-0019 D2's "internal
 contribution" tier, which that record defines as *"the 'frameworks inside the `.app` bundle':
 they ship inside an App or are operator-provisioned, and are never independently browsed or
-installed by a consumer"* (`0019-app-as-consumer-unit.md:68`). `isConsumerInstallable(type)`
+installed by a consumer"* (`docs/adr/0019-app-as-consumer-unit.md`). `isConsumerInstallable(type)`
 already filters them out of the consumer marketplace and
 `MarketplaceListingSchema.packageType` already cannot represent a non-App listing — neither
 changes.
 
 D4 of ADR-0019 accommodates this case in its own words, unchanged: *"An App declares and owns
-**a set of namespaces**; uninstall is atomic over that set"* (`0019-app-as-consumer-unit.md:81`,
-`:83`) — a **set**, and its parenthetical already cites the very `Map<namespace, Set<packageId>>`
-this record leans on (`:85–86`).
+**a set of namespaces**; uninstall is atomic over that set"* (`docs/adr/0019-app-as-consumer-unit.md`,
+`docs/adr/0019-app-as-consumer-unit.md`) — a **set**, and its parenthetical already cites the very `Map<namespace, Set<packageId>>`
+this record leans on (`docs/adr/0019-app-as-consumer-unit.md`).
 
 ⛔ **The line this must not cross.** The artifact is a **control-plane and publishing** noun. The
 moment it becomes something a consumer browses, installs or uninstalls, it is the **suite**
-ADR-0019 D3 removed by name, and that record's Apple argument (`:73–79`, `:44–46`) applies
+ADR-0019 D3 removed by name, and that record's Apple argument (`docs/adr/0019-app-as-consumer-unit.md`, `docs/adr/0019-app-as-consumer-unit.md`) applies
 unaltered: *"there is no user-visible container above the app"*. The artifact must never appear
 in the consumer marketplace, never be an install target a consumer selects, and never be a unit
 a consumer can partially uninstall. It has exactly one consumer-visible consequence — the App
@@ -210,9 +210,9 @@ part specified as a machine constraint rather than an instruction.
 Today's namespace exclusivity is **carrying a second guarantee for free**. ADR-0048's own TL;DR
 says why: objects *"dodge collisions because their names are namespace-prefixed (`crm_account`)
 and map to physical tables; a clash fails **loudly** at the DB"*
-(`0048-cross-package-metadata-collision.md:20–23`), and §3.2 grounds the gate on exactly that:
+(`docs/adr/0048-cross-package-metadata-collision.md`), and §3.2 grounds the gate on exactly that:
 *"two packages with namespace `crm` both try to create `crm_account` and the second fails at the
-DB"* (`:208–210`). So "no two packages share a namespace" has been silently proxying for **"no
+DB"* (`docs/adr/0048-cross-package-metadata-collision.md`). So "no two packages share a namespace" has been silently proxying for **"no
 two packages define the same object name."**
 
 Relax the first without adding the second, and two packages in one artifact both defining
@@ -245,7 +245,7 @@ legibly.
 ### D4 — Artifact schema: `packages: [...]` is additive, and both shapes are read
 
 `ObjectStackDefinitionSchema` gains an **optional** `packages` key carrying an array of
-manifests. `manifest` (singular, `stack.zod.ts:240`) is **retained**, and the load path reads
+manifests. `manifest` (singular, `packages/spec/src/stack.zod.ts`) is **retained**, and the load path reads
 both:
 
 - `packages` present → iterate it.
@@ -257,7 +257,7 @@ second branch and its behaviour is unchanged. A *replacement* of `manifest` by `
 break every artifact already built — the schema shape is the compatibility mechanism.
 
 Forward compatibility rides on the mechanism that already exists: `manifest.engines.protocol`
-(`packages/spec/src/kernel/manifest.zod.ts:70`, ADR-0025). A new-format artifact declares a new
+(`packages/spec/src/kernel/manifest.zod.ts`, ADR-0025). A new-format artifact declares a new
 protocol range and an older runtime **refuses it cleanly** rather than mis-parsing it into a
 half-registered install. ⛔ No new version-negotiation mechanism is introduced.
 
@@ -284,7 +284,7 @@ the extension simply does not take effect. A silent failure that a reviewer cann
 failure the tests must own.
 
 ⛔ **Reuse `resolvePluginOrder`; do not write a second ordering mechanism.**
-`packages/core/src/plugin-order.ts:66` is the platform's single topological sorter, and
+`packages/core/src/plugin-order.ts#resolvePluginOrder` is the platform's single topological sorter, and
 [ADR-0116](./0116-plugin-ordering-declared-contract.md) already established that ordering is a
 **declared** contract resolved from `dependencies` / `optionalDependencies` — with the failure
 mode ADR-0116 exists for being precisely "correctness rode on which array slot each caller put it
@@ -342,7 +342,7 @@ The field becomes **necessary** the day a module ships as its own artifact and m
 across artifacts *"I have the same publisher as HotCRM."* That is exactly the moment D6's cost
 bites, and it is exactly the case ADR-0048's 2026-08-08 addendum already has a home for: **D2
 holds the namespace reservation at the `publisherOrgId`, not at the package**
-(`0048-cross-package-metadata-collision.md:459–463`). When the field lands, it aligns with that
+(`docs/adr/0048-cross-package-metadata-collision.md`). When the field lands, it aligns with that
 key rather than inventing a parallel identity. Until then it is not built.
 
 This deferral is a decision, recorded so the next author finds a reason instead of an absence.
@@ -354,8 +354,8 @@ It is listed again under Non-goals.
 
 - **A manifest `owner` / `publisher` field.** Deferred, D8. Aligns with ADR-0048 addendum D2 when
   it lands.
-- **Namespace rename-on-install.** Unchanged non-goal — ADR-0048 §3.5 and Non-goals (`:171`,
-  `:261–267`). This record's entire value is that it does **not** require a rename; it must never
+- **Namespace rename-on-install.** Unchanged non-goal — ADR-0048 §3.5 and Non-goals (,
+  ). This record's entire value is that it does **not** require a rename; it must never
   become the wedge that reintroduces one.
 - **The artifact as a consumer-visible unit.** D2's ⛔ line. Not a suite, not a browse target, not
   an install target, not partially uninstallable.
@@ -407,8 +407,8 @@ It is listed again under Non-goals.
 | # | Change | Size | Repo |
 | --- | --- | --- | --- |
 | 1 | Artifact schema: optional `packages: [...]`, both shapes read (D4) | The one substantive change | objectstack |
-| 2 | Load path: `ql.registerApp(manifest)` at `packages/objectql/src/plugin.ts:405` becomes an iteration, **topologically ordered** (D5) | A loop plus the sorter call | objectstack |
-| 3 | `composeStacks`: add a **preserve** mode alongside today's deliberate pick semantics; default `'last'` unchanged (`stack.zod.ts:1759`) | Small, additive | objectstack |
+| 2 | Load path: `ql.registerApp(manifest)` at `packages/objectql/src/plugin.ts` becomes an iteration, **topologically ordered** (D5) | A loop plus the sorter call | objectstack |
+| 3 | `composeStacks`: add a **preserve** mode alongside today's deliberate pick semantics; default `'last'` unchanged (`packages/spec/src/stack.zod.ts#composeStacks`) | Small, additive | objectstack |
 | 4 | `installPackage` namespace gate accepts co-owners within one artifact (D1) | ~One criterion | objectstack |
 | 5 | **Install-time per-object-name uniqueness check — same PR as #4, with the pairing gate test** (D3) | Small, **not omittable** | objectstack |
 | 6 | Studio package picker lists project-domain `module` packages (today only `app.objectstack.hotcrm` shows; 22 system plugins are filtered out) | UI, separate card | **objectui** |
@@ -436,7 +436,7 @@ turn into a mechanism, and it does not become one until the cards above ship.
    non-goal, and under ADR-0129 D1 the object `name` is the table name, so the rename reaches
    every customer's data plane.
 3. **`composeStacks` as-is.** Rejected: it flattens by design and drops N−1 manifests
-   (`stack.zod.ts:1759`), destroying the sub-package identity that is the whole point.
+   (`packages/spec/src/stack.zod.ts#composeStacks`), destroying the sub-package identity that is the whole point.
 4. **Add the `owner` field now, alongside the gate change.** Rejected for now as scope the pull
    does not justify (D8): within one artifact the field restates what delivery already proves,
    and a second source of truth for ownership can drift from the first. It is deferred with a
@@ -468,8 +468,8 @@ informed act rather than a rubber stamp:
 Recorded rather than silently corrected, because the proposal is this record's evidence base and
 a reader deserves to know which of its anchors were re-measured:
 
-- **`objectql/src/engine.ts:4745` is off by one.** `registerApp(manifest: any)` is declared at
-  **`:4746`**; line 4745 is the closing `*/` of its doc block. The claim it supports —
+- **`packages/objectql/src/engine.ts#registerApp` is off by one.** `registerApp(manifest: any)` is declared at
+  **`#registerApp`**; line 4745 is the closing `*/` of its doc block. The claim it supports —
   registration is per-manifest and stamps that manifest's id/namespace — holds exactly as
   described.
 - **`scripts/check-source-token-ratchet.mjs` does not exist in this repository.** The token
@@ -479,11 +479,11 @@ a reader deserves to know which of its anchors were re-measured:
   this repo — which does not weaken §1.3b's argument (the *absence* of a module boundary is a
   platform fact, verified here in §1.3a) but does change who owns the number.
 - Every other anchor cited by #14122 and re-checked while drafting was found exactly as
-  described: `registry.ts:1456`, the `installPackage` gate at `:3575`/`:3583`/`:3595`,
-  `getNamespaceOwners` at `:1540`, `unregisterObjectsByPackage` at `:2679`,
-  `plugin.ts:405`, `stack.zod.ts:240` / `:854` / `:1759`, `RESERVED_NAMESPACES` at
-  `registry.ts:45` with `isShareableNamespace` at `:1116`, and ADR-0048's rename-on-install
-  non-goal in all three of its recorded places (`:57–59`, `:171`, `:261–267`).
+  described: `packages/objectql/src/registry.ts#installPackage` with its gate and its throw,
+  `#getNamespaceOwners`, `#unregisterObjectsByPackage`,
+  `packages/objectql/src/plugin.ts`, `packages/spec/src/stack.zod.ts#composeStacks`, `RESERVED_NAMESPACES` at
+  `packages/objectql/src/registry.ts#RESERVED_NAMESPACES` with `#isShareableNamespace`, and ADR-0048's rename-on-install
+  non-goal in all three of its recorded places (`docs/adr/0048-cross-package-metadata-collision.md`).
 
 ---
 

@@ -1,6 +1,6 @@
 # ADR-0065: SDUI styling model — scoped style-objects over arbitrary Tailwind classes
 
-**Status**: Accepted (2026-06-22) — open-mechanism half implemented: `style`/`responsiveStyles` on the spec UI envelope (`page.zod.ts:97,106`), reference scoped-styles compiler + four-property test (objectui `core/src/styling/scoped-styles.ts(.test)`), token/Tailwind lint (`lint/validate-responsive-styles.ts`). Cloud tier-policy + VLM gate remain the cloud half.
+**Status**: Accepted (2026-06-22) — open-mechanism half implemented: `style`/`responsiveStyles` on the spec UI envelope (`packages/spec/src/ui/page.zod.ts#responsiveStyles`), reference scoped-styles compiler + four-property test (objectui `core/src/styling/scoped-styles.ts(.test)`), token/Tailwind lint (`lint/validate-responsive-styles.ts`). Cloud tier-policy + VLM gate remain the cloud half.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0026](./0026-client-ui-plugin-distribution.md) (client UI distribution), [ADR-0016](./0016-studio-package-authoring-and-publish.md) (package authoring/publish), [ADR-0049](./0049-no-unenforced-security-properties.md) (spec must not promise what the runtime can't deliver)
 **Consumers**: `@objectstack/spec` (UI component envelope), the objectui renderers (`@object-ui/components`), cloud SDUI page authoring, the AI metadata-authoring agents.
@@ -20,7 +20,7 @@ Three independent failure axes, any one of which is disqualifying, all bite at o
 
 1. **Compilation.** Tailwind is JIT-compiled at *build* time, scanning *source*.
    The renderer (objectui Console) is a shipped, frozen artifact whose CSS scans
-   only objectui's own `src` (`objectui: apps/console/src/index.css:12-19`),
+   only objectui's own `src` (`objectui: `objectui:apps/console/src/index.css``),
    **never** the page metadata. There is **no safelist**. So a class in metadata
    produces CSS *only if it coincidentally also appears in objectui source*.
    (The Pricing page renders today purely because all 16 of its classes happen
@@ -62,7 +62,7 @@ platform.
 ### What we have
 
 UI components carry a loose `className` passthrough. The objectui renderers apply
-it directly — e.g. `objectui: packages/components/src/renderers/basic/elements.tsx:87`
+it directly — e.g. `objectui: `objectui:packages/components/src/renderers/basic/elements.tsx``
 (`cn(VARIANT_CLASS, ALIGN_CLASS, schema?.className)`). The spec does **not** even
 formally model a styling field (`packages/spec/src/ui/component.zod.ts` defines
 per-component `properties` + `children`, no `style`). So styling today is "write
@@ -93,11 +93,11 @@ Builder.io solves exactly this shape (visual content authored separately,
 rendered into arbitrary host stacks) and **does not bet on Tailwind classes**:
 
 - Styles are CSS **objects**, per breakpoint —
-  `Builder.io SDK: packages/sdks/src/types/builder-block.ts:42`
+  `Builder.io SDK: packages/sdks/src/types/builder-block.ts:42` <!-- anchor-exempt: EXTERNAL -->
   (`responsiveStyles?: { large?, medium?, small?, xsmall?: Partial<CSSStyleDeclaration> }`).
 - Responsive is an **explicit breakpoint map in the data model** (desktop-first:
   `large` is base, smaller sizes override via `@media (max-width: …)` —
-  `Builder.io SDK: packages/sdks/src/constants/device-sizes.ts:34`), **not**
+  `Builder.io SDK: packages/sdks/src/constants/device-sizes.ts:34` <!-- anchor-exempt: EXTERNAL -->), **not**
   `md:` utility variants the author writes.
 - At render, each block's styles compile to **id-scoped CSS** —
   `Builder.io SDK: packages/sdks/src/helpers/css.ts` (`createCssClass` emits

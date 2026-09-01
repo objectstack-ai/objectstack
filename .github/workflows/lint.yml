@@ -2148,6 +2148,62 @@ jobs:
       - name: ADR anchors + number uniqueness (governed code names its decision)
         run: pnpm check:adr-anchors
 
+      # #13556 ADR SYMBOL ANCHORS — the other direction of the same contract.
+      # `check:adr-anchors` above asks whether governed CODE still names its
+      # ADR; this asks whether an ADR's pointer INTO code still resolves.
+      #
+      # The census on #13556 enumerated every line anchor in docs/adr/** — 343
+      # across 35 records, plus 52 continuation anchors, a 395-anchor surface —
+      # and found 243 of 337 live anchors BROKEN: 72.1%, declared as a one-way
+      # LOWER bound because the census's own test accepted a symbol appearing
+      # in a comment. Rot tracked target-file CHURN, not ADR age: the four
+      # hottest targets were 100% broken across 50 anchors. A line number into
+      # a 16,000-line file has a lifetime measured in days, and it does not
+      # fail loudly — it silently points a reader at unrelated code.
+      #
+      # Maintainer ruling 2026-09-01 (总监批 #27), option A: migrate the whole
+      # corpus to symbol anchors with a resolver that reds on an absent symbol,
+      # in ONE migration with no transition period (「C 不作过渡」). That is why
+      # a surviving `path:NNN` is a hard finding rather than a warning here.
+      #
+      # ⭐ The mechanism is SHARED, by the same ruling (「共享同一个 resolver,
+      # ⛔ 不造第二套」): scripts/symbol-anchors.mjs holds the grammar, extractor
+      # and resolution rule, and this gate is a `defineCorpus` registration.
+      # #13788 (1,647 platform-checklist citations) joins by registering its own
+      # corpus — ⛔ not by forking the resolver.
+      #
+      # Invoked as `node` rather than a pnpm alias per the GATE INVOCATION IDIOM
+      # at the top of this file; the gate's own --self-test asserts BOTH lines
+      # below are present, so rewiring it silently reddens it.
+      #
+      # ⚠️ The two self-tests go through a `run_self_test` COLLECTOR, not a bare
+      # sequence. Under `bash -e` the first non-zero exit aborts the step, so a
+      # chained second self-test is neither green nor red — it never runs
+      # (#10814). The collector runs both unconditionally and fails at the end
+      # naming every one that broke.
+      - name: ADR symbol anchors resolve (no line numbers survive)
+        run: |
+          failed=""
+          run_self_test() {
+            echo "-- $*"
+            if "$@"; then
+              echo "PASS  $*"
+            else
+              echo "FAIL  $*"
+              failed="${failed}  $*"$'\n'
+            fi
+            return 0
+          }
+          run_self_test node scripts/symbol-anchors.mjs --self-test
+          run_self_test node scripts/check-adr-symbol-anchors.mjs --self-test
+          if [ -n "$failed" ]; then
+            echo ""
+            echo "ADR symbol-anchor self-tests — the following FAILED:"
+            printf "%s" "$failed"
+            exit 1
+          fi
+          node scripts/check-adr-symbol-anchors.mjs
+
       # NOTE: the standing platform test checklist (docs/qa/platform-checklist/)
       # is validated by `pnpm check:platform-checklist`, but by MAINTAINER
       # DECISION it is NOT wired into CI — it runs on a periodic manual cadence

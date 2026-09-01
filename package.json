@@ -82,6 +82,7 @@
     "check:turbo-task-graph": "node scripts/check-turbo-task-graph.mjs --self-test && node scripts/check-turbo-task-graph.mjs",
     "check:adr-anchors": "node scripts/check-adr-anchors.mjs --self-test && node scripts/check-adr-anchors.mjs",
     "check:adr-links": "node scripts/check-adr-links.mjs --self-test && node scripts/check-adr-links.mjs",
+    "check:adr-symbol-anchors": "node scripts/symbol-anchors.mjs --self-test && node scripts/check-adr-symbol-anchors.mjs --self-test && node scripts/check-adr-symbol-anchors.mjs",
     "check:platform-checklist": "node scripts/checklist-select.mjs --self-test && node scripts/check-platform-checklist.mjs",
     "check:org-identifier": "node scripts/check-org-identifier.mjs --self-test && node scripts/check-org-identifier.mjs",
     "check:runner-env-posture": "node scripts/check-runner-env-posture.mjs --self-test && node scripts/check-runner-env-posture.mjs",

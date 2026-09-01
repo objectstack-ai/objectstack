@@ -73,7 +73,7 @@ opens.
 The specific defects the implementation names:
 
 - **`titleFormat` is unqueryable by construction.** It is a render-only
-  template. `packages/lint/src/validate-record-title.ts:92` states the
+  template. `packages/lint/src/validate-record-title.ts` states the
   consequence: *"titleFormat is a render-only template the server cannot return
   or query"*. A title the server cannot return cannot be sorted on, searched,
   or sent in a notification body — so a title expressed only as a template is
@@ -98,7 +98,7 @@ Not a template, not a client-side composition.
 > "A record's human title is a STRUCTURAL INVARIANT: every object has exactly
 > one primary title field, which is a real STORED field (text / autonumber /
 > formula whose result is text)."
-> — `packages/spec/src/data/display-name.ts:6-8`
+> — `packages/spec/src/data/display-name.ts`
 
 ### D2 — `nameField` is canonical; `displayNameField` is a deprecated alias
 
@@ -108,20 +108,20 @@ contract:
 
 - `ObjectSchema.parse` / `.safeParse` / `.create()` copy `displayNameField` onto
   `nameField` when `nameField` is absent
-  (`normalizeNameFieldAlias`, `packages/spec/src/data/object.zod.ts:2082-2095`,
-  installed on the parse path at `:2149-2158` and reached by `create()` at
-  `:2204`).
+  (`normalizeNameFieldAlias`, `packages/spec/src/data/object.zod.ts#normalizeNameFieldAlias`,
+  installed on the parse path at `packages/spec/src/data/object.zod.ts` and reached by `create()` at
+  `packages/spec/src/data/object.zod.ts`).
 - **Both keys are preserved on the parsed output** — deliberately, for
   cross-repo consumers and older tests that still read the old spelling
-  (`object.zod.ts:2084-2085`).
+  (`packages/spec/src/data/object.zod.ts#displayNameField`).
 - The schema's own text marks the direction: `displayNameField` describes
-  itself as `[DEPRECATED → nameField]` (`object.zod.ts:1698`).
+  itself as `[DEPRECATED → nameField]` (`packages/spec/src/data/object.zod.ts#nameField`).
 
 This is the alias mechanic ADR-0085 later adopted verbatim: *"Mechanics follow
 ADR-0079's `displayNameField → nameField` precedent exactly: `compactLayout` is
 accepted as a parse-time alias, copied onto `highlightFields`, both preserved on
 output, describe marks the old key deprecated."*
-(`docs/adr/0085-object-semantic-roles-over-surface-hint-blocks.md:57`)
+(`docs/adr/0085-object-semantic-roles-over-surface-hint-blocks.md`)
 
 ### D3 — `titleFormat` is retired in favour of `nameField`
 
@@ -139,8 +139,8 @@ the diagnostic is advisory, not an error:
 **Migration is stated, not left to the author**: a single-field title becomes
 `nameField: '<field>'`; a **composite** title becomes a `formula` field with
 `returnType: 'text'`, designated as the `nameField`
-(`validate-record-title.ts:91-96`; the worked example is
-`content/docs/data-modeling/formulas.mdx:94-102`).
+(`packages/lint/src/validate-record-title.ts`; the worked example is
+`content/docs/data-modeling/formulas.mdx`).
 
 ### D4 — One resolution order, shared by every consumer
 
@@ -161,10 +161,10 @@ Derivation, restricted to title-eligible fields, is ranked:
 The two runtime seams that consume it compute it identically, and each says so
 where it does:
 
-- `packages/objectql/src/engine.ts:5212` — *"[ADR-0079] `nameField` is the
+- `packages/objectql/src/engine.ts` — *"[ADR-0079] `nameField` is the
   canonical primary-title pointer; `displayNameField` is the deprecated alias
   (still honored)"*, feeding `expandSearchToFilter`.
-- `packages/metadata-protocol/src/protocol.ts:4793` — *"[ADR-0079] Same
+- `packages/metadata-protocol/src/protocol.ts` — *"[ADR-0079] Same
   precedence the engine's search expansion applies"*, feeding the REST
   `$searchFields` ingress gate.
 
@@ -184,16 +184,16 @@ Two judgement calls are recorded rather than left implicit:
 
 - **`email` is eligible, `phone` is not.** *"`phone` is deliberately excluded (a
   phone number is not a title); `email` IS eligible (commonly the human handle
-  on identity-ish objects)"* (`display-name.ts:71-72`).
+  on identity-ish objects)"* (`packages/spec/src/data/display-name.ts`).
 - **`autonumber` is a valid primary but is never *derived*.** *"an autonumber is
   a valid primary only when an author points at it explicitly … not something we
-  silently pick"* (`display-name.ts:66-68`).
+  silently pick"* (`packages/spec/src/data/display-name.ts`).
 
 ### D6 — A record never renders as "Untitled"; the floor is `Record #<id>`
 
 `resolveRecordDisplayName` returns the value at the resolved field, and falls
 back to a stable `Record #<id>` — *"NEVER a bare 'Untitled'"*
-(`display-name.ts:13-14`). A view may override the object's choice for one
+(`packages/spec/src/data/display-name.ts#viewTitleField`). A view may override the object's choice for one
 render via `viewTitleField` (e.g. a list view labelling rows by another column);
 that override is per-render and does not change the object's title.
 
@@ -201,7 +201,7 @@ that override is per-render and does not change the object's title.
 
 `SchemaRegistry.registerObject` runs `provisionPrimary(schema, { synthesize:
 false })` — for **owned** objects only, after `applySystemFields`
-(`packages/objectql/src/registry.ts:1079-1090`).
+(`packages/objectql/src/registry.ts`).
 
 - Where a title-eligible field already exists, `nameField` is **designated** —
   so it is reliably populated for normal / user-built / AI-built objects.
@@ -223,18 +223,18 @@ returns `status: 'none'`) — and **never errors**:
 
 > "Both are warnings: the auto-provision transform and the id floor mean a green
 > build never ships a fully title-less object."
-> — `packages/lint/src/validate-record-title.ts:26-27`
+> — `packages/lint/src/validate-record-title.ts`
 
 It runs on `os build` / `os validate` / `os lint`, the MCP authoring surface and
 hand authoring — *not* only on the cloud graph-lint path. That is ADR-0078's
 "not cloud-only" principle applied
-(`validate-record-title.ts:12-14`, `packages/lint/src/authoring-rules.ts:668-678`).
+(`packages/lint/src/validate-record-title.ts`, `packages/lint/src/authoring-rules.ts`).
 
 ### D9 — There is exactly one title pointer; a second is not a tolerable alias
 
 `primaryField` was read as a title pointer by two lint rules and was **removed**,
 not declared, in #6326. The reasoning is recorded at
-`packages/lint/src/data-model-rules.ts:404-409`:
+`packages/lint/src/data-model-rules.ts`:
 
 > "The maintainer ruled remove, not declare: `nameField` is ADR-0079's one
 > canonical title pointer and a second parallel pointer contradicts 'one Zod
@@ -253,12 +253,12 @@ contract. Same-looking code, opposite verdicts.
 Search-adjacent consumers read the resolved display field, but it does not
 buy the field an exemption from their own exclusion rules. `$search` field
 resolution leads with the display field **as ordering, never as membership**
-(`packages/spec/src/data/search-fields.ts:75-92`, #4483) — the concrete failure
+(`packages/spec/src/data/search-fields.ts`, #4483) — the concrete failure
 that forced the distinction being D7's designate-only pass setting `nameField:
 'id'` on tables whose only textual column is the primary key, which had turned
 `$search` into a substring scan over the primary key. The ADR-0098 pinyin
 companion column likewise takes *only* the resolved display field as its source
-(`packages/objectql/src/search-companion.ts:19`, `:104`).
+(`packages/objectql/src/search-companion.ts`, `packages/objectql/src/search-companion.ts`).
 
 ---
 
@@ -283,7 +283,7 @@ them needs a maintainer, and — for the first three — probably the cloud orig
 
 1. **When, if ever, does `nameField` become required?** #2434 recorded "No hard
    `.refine()` requiring a title (would reject existing metadata)" and
-   `object.zod.ts:1684-1685` still says *"Optional at the schema level for now
+   `packages/spec/src/data/object.zod.ts` still says *"Optional at the schema level for now
    (a hard required-refine is staged)"*. Two months on, "staged" names no
    trigger and no criterion. Nothing in the tree says what would make it fire.
 
@@ -303,7 +303,7 @@ them needs a maintainer, and — for the first three — probably the cloud orig
    word.
 
 4. **`code` is name-like to lint and not to spec.** `packages/lint/src/data-
-   model-rules.ts:36`'s `NAME_LIKE_FIELDS` includes `code`; spec's derivation
+   model-rules.ts`'s `NAME_LIKE_FIELDS` includes `code`; spec's derivation
    set (`display-name.ts:NAME_ISH_EXACT`) does not. So an object whose only
    name-ish field is `code` passes lint's R9 "has a title face" check while
    `resolveDisplayField` will not derive `code` as its title (it may still be

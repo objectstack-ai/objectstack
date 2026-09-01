@@ -26,41 +26,41 @@ So this ADR does not pick one of the three. It separates what the four consumers
 
 #4612 prices option 1 as "a real design project, not a plumbing task", naming middleware/hook semantics inside a transaction, cache invalidation on rollback, and cross-driver support. That was the correct price in the abstract. It is not the price here, because ADR-0034 already paid it:
 
-`ObjectQL.transaction()` (`packages/objectql/src/engine.ts:4934-4973`) opens a driver transaction and runs the callback inside an `AsyncLocalStorage` store; `buildDriverOptions` (`:1257-1275`) lifts that ambient handle onto **every** driver call. The consequence is precisely the hard part the issue budgets for: a hook body, a validation predicate, an FK-resolution read, or any nested `engine.*` call issued during a transactional write automatically binds to that transaction's connection. ADR-0034 exists because *not* doing this deadlocked SQLite's single-connection pool — the failure was found, fixed, and pinned.
+`ObjectQL.transaction()` (`packages/objectql/src/engine.ts#transaction`) opens a driver transaction and runs the callback inside an `AsyncLocalStorage` store; `buildDriverOptions` (`#buildDriverOptions`) lifts that ambient handle onto **every** driver call. The consequence is precisely the hard part the issue budgets for: a hook body, a validation predicate, an FK-resolution read, or any nested `engine.*` call issued during a transactional write automatically binds to that transaction's connection. ADR-0034 exists because *not* doing this deadlocked SQLite's single-connection pool — the failure was found, fixed, and pinned.
 
-The issue's second premise is also stale in this repo: it cites `driver-turso` primitives at `turso-driver.ts:764-776` and `remote-transport.ts:430-443` as evidence the capability exists but is unsurfaced. There is no Turso driver here — only `docs/design/driver-turso.md` (Status: Proposal). The in-repo drivers need no surfacing work either:
+The issue's second premise is also stale in this repo: it cites `driver-turso` primitives at `turso-driver.ts:764-776` <!-- anchor-exempt: HISTORICAL --> and `remote-transport.ts:430-443` <!-- anchor-exempt: HISTORICAL --> as evidence the capability exists but is unsurfaced. There is no Turso driver here — only `docs/design/driver-turso.md` (Status: Proposal). The in-repo drivers need no surfacing work either:
 
 > **Editorial note (2026-08-05, #4645):** the sentence above was true when this ADR was written. `@objectstack/driver-turso` has since been migrated back into this repo at `packages/drivers/driver-turso`. The *decision* recorded here is unaffected — Turso extends `SqlDriver` and inherits the same `beginTransaction` / `commit` / `rollback` members the argument turns on, so it needs no surfacing work either.
- `beginTransaction` / `commit` / `rollback` are **required** members of `IDataDriver` (`packages/spec/src/contracts/data-driver.ts:221-235`), implemented by driver-sql (`sql-driver.ts:2214+`), driver-memory (`:595+`), and driver-mongodb (`:545+`).
+ `beginTransaction` / `commit` / `rollback` are **required** members of `IDataDriver` (`packages/spec/src/contracts/data-driver.ts#beginTransaction`), implemented by driver-sql (`packages/drivers/driver-sql/src/sql-driver.ts#beginTransaction`), driver-memory, and driver-mongodb.
 
 ### The gap that is real: declared reach
 
 `IObjectQLEngine` (`packages/spec/src/contracts/objectql-engine.ts`) is the contract of the `objectql` service slot — what a plugin sees through `ctx.getService('objectql')`. It declares 25 members and not `transaction`. `IDataEngine`, behind the `data` slot, has no transaction member either. So a plugin typed to either contract cannot see the primitive, and the consumers that need it reach around the type system:
 
-- `packages/metadata-protocol/src/protocol.ts:2289` — the `/discovery` capability probe, `typeof (this.engine as { transaction?: unknown })?.transaction === 'function'`;
-- `:7455-7458` — `publishPackageDrafts`' `inTxn`, a `typeof` probe plus `as unknown as { transaction: <R>(fn) => Promise<R> }`;
+- `packages/metadata-protocol/src/protocol.ts` — the `/discovery` capability probe, `typeof (this.engine as { transaction?: unknown })?.transaction === 'function'`;
+- `#publishPackageDrafts` — `publishPackageDrafts`' `inTxn`, a `typeof` probe plus `as unknown as { transaction: <R>(fn) => Promise<R> }`;
 - `packages/metadata-protocol/src/sys-metadata-repository.ts` — a hand-declared local `transaction?` member on its own engine stub.
 
 Each is an honest but **unchecked** claim about a class none of them import. This is the exact problem the contract file was created to end: its header records seven such local surfaces being merged into one checkable declaration, and states the bar for admitting a member — *"a member is declared here only where a CROSS-PACKAGE consumer already calls it through the service slot … Widening this is for whoever needs more, with the call site to prove it."* Three call sites already prove it. The evidence was there; nobody recorded it.
 
-Below plugin space it is worse. A migration-class tool runs behind `McpDataBridge` (`packages/mcp/src/mcp-http-tools.ts:48-81`) — one record per call, no transaction, no batch — or behind `IObjectQLEngine`. The wire has an atomic cross-object route (`POST {basePath}/batch`, ADR-0034's D4 deliverable), but a route is not callable in-process. Hence the issue's accurate observation that plugin-visible multi-row mutation is a JS loop of single-row writes.
+Below plugin space it is worse. A migration-class tool runs behind `McpDataBridge` (`packages/mcp/src/mcp-http-tools.ts#McpDataBridge`) — one record per call, no transaction, no batch — or behind `IObjectQLEngine`. The wire has an atomic cross-object route (`POST {basePath}/batch`, ADR-0034's D4 deliverable), but a route is not callable in-process. Hence the issue's accurate observation that plugin-visible multi-row mutation is a JS loop of single-row writes.
 
 ### Why transactions alone still do not close #4612
 
 Granting every consumer `transaction()` would not let the four queued tools delete their journals:
 
 - A **million-row backfill** (ADR-0117 D8's shape) cannot hold one write transaction for its duration — on SQLite that is the single writer lock for the whole run.
-- `driver-memory.beginTransaction` deep-clones the entire database (`memory-driver.ts:595-630`), so it is O(database) per begin.
-- `ObjectQL.transaction()` binds only the **default** driver (`engine.ts:4950`). Objects routed elsewhere by `setDatasourceMapping` are written outside the transaction, silently.
+- `driver-memory.beginTransaction` deep-clones the entire database (`packages/drivers/driver-memory/src/memory-driver.ts#beginTransaction`), so it is O(database) per begin.
+- `ObjectQL.transaction()` binds only the **default** driver (`packages/objectql/src/engine.ts#transaction`). Objects routed elsewhere by `setDatasourceMapping` are written outside the transaction, silently.
 - A **process crash** — as opposed to a thrown error — defeats in-process compensation entirely. The issue says this plainly and it is the decisive point: no amount of transaction plumbing produces recoverability across a `SIGKILL` mid-run.
 
 The honest shape is therefore *both*: the transaction is the unit of atomicity for a chunk; a durable journal is what makes a multi-chunk run recoverable. That is what the four consumers keep independently rediscovering, and what D2 standardizes.
 
 ### Rot found on the way
 
-**`IDataEngine.batch?`** (`packages/spec/src/contracts/data-engine.ts:97-100`) — the member #4612 opens with. Optional, so nothing must implement it; no engine does. Its entire specification is the three-word comment `Batch Operations (Transactional)` — nothing about partial failure, ordering, cross-object references, rollback scope, or what `transaction: false` means. `DataEngineRequest` is imported by exactly one non-spec file: the contract declaring it. Its request union (`packages/spec/src/data/data-engine.zod.ts:706-717`) even nests batches recursively, a shape nobody designed against because nobody built it. The only test (`contracts/data-engine.test.ts:162-177`) constructs an ad-hoc literal with a `batch` property and asserts it is defined — it pins the type, not an implementation.
+**`IDataEngine.batch?`** (`packages/spec/src/contracts/data-engine.ts#IDataEngine`) — the member #4612 opens with. Optional, so nothing must implement it; no engine does. Its entire specification is the three-word comment `Batch Operations (Transactional)` — nothing about partial failure, ordering, cross-object references, rollback scope, or what `transaction: false` means. `DataEngineRequest` is imported by exactly one non-spec file: the contract declaring it. Its request union (`packages/spec/src/data/data-engine.zod.ts#DataEngineRequest`) even nests batches recursively, a shape nobody designed against because nobody built it. The only test (`packages/spec/src/contracts/data-engine.test.ts`) constructs an ad-hoc literal with a `batch` property and asserts it is defined — it pins the type, not an implementation.
 
-**`batchData`'s `atomic` flag** (`packages/metadata-protocol/src/protocol.ts:5220-5323`) — advertised as *"rollback entire batch on any failure (transaction mode)"*. It opens no transaction. It breaks the loop (`:5302-5305`):
+**`batchData`'s `atomic` flag** (`packages/metadata-protocol/src/protocol.ts#batchData`) — advertised as *"rollback entire batch on any failure (transaction mode)"*. It opens no transaction. It breaks the loop :
 
 ```ts
 if (options?.atomic) {
@@ -71,7 +71,7 @@ if (options?.atomic) {
 
 Everything already written stays written, and the response reports those rows `success: true` under a flag whose one job is to guarantee they were undone. This is #4346's class exactly — a write-path guarantee that is declared and not enforced, silent and destructive when it matters — and #4612 cites #4346 as evidence this write path is sharp. It is the same edge.
 
-The declaration is inconsistent with itself too: `BatchOptionsSchema.atomic` declares `.default(true)` (`packages/spec/src/api/batch.zod.ts:62`) while no enforcement site delivers atomicity, and the REST route deliberately forwards the original body rather than the parsed output, so the declared default never reaches the loop. The same file already tombstoned `validateOnly` for this exact shape — a flag promising a data-safety guarantee it did not keep — calling it *"the worst shape of 'declared ≠ enforced'"*.
+The declaration is inconsistent with itself too: `BatchOptionsSchema.atomic` declares `.default(true)` (`packages/spec/src/api/batch.zod.ts#BatchOptionsSchema`) while no enforcement site delivers atomicity, and the REST route deliberately forwards the original body rather than the parsed output, so the declared default never reaches the loop. The same file already tombstoned `validateOnly` for this exact shape — a flag promising a data-safety guarantee it did not keep — calling it *"the worst shape of 'declared ≠ enforced'"*.
 
 ## Decision
 
@@ -87,7 +87,7 @@ verbatim from the class, so `ObjectQL implements IObjectQLEngine` continues to t
 
 The three cast sites drop their casts. The two narrow host surfaces that must stay tolerant of stubs — `MetadataHostEngine` and the sys-metadata repository's engine — declare their member as `transaction?: IObjectQLEngine['transaction']`, optional locally but **typed from the contract**, so a narrow surface can no longer drift from the real signature.
 
-Two caveats are written into the contract TSDoc as part of the member's declared meaning rather than left as behaviour a caller discovers: `transaction()` covers only the **default driver**, and when that driver lacks `beginTransaction` the callback runs **without a transaction and without rollback** (`engine.ts:4952-4954`). Declaring a caveat is not fixing it; tightening these is #4619. A caller that cannot tolerate silent degradation must fail closed itself — which is what D4 does.
+Two caveats are written into the contract TSDoc as part of the member's declared meaning rather than left as behaviour a caller discovers: `transaction()` covers only the **default driver**, and when that driver lacks `beginTransaction` the callback runs **without a transaction and without rollback** (`packages/objectql/src/engine.ts#transaction`). Declaring a caveat is not fixing it; tightening these is #4619. A caller that cannot tolerate silent degradation must fail closed itself — which is what D4 does.
 
 ### D2 — the migration-journal runner is framework-owned (specified here, implemented in #4617)
 
@@ -115,7 +115,7 @@ Mechanical removal is #4618, following the `spec-property-retirement` playbook's
 
 `batchData` honours `options.atomic === true` by running the whole batch inside one `engine.transaction()`. The first failure aborts and rolls back every prior write, and — the part that makes it honest — **the response says so**: `succeeded: 0`, and every row reports failure, with rows before the failure marked `ROLLED_BACK:`, the failing row carrying its causal error, and rows never reached marked `NOT_ATTEMPTED:`. A response claiming `success: true` for a row that was rolled back is the bug, not merely a missing transaction.
 
-Where the runtime **cannot** roll back — no `transaction()` on the engine, or a default driver without `beginTransaction` — an atomic request is **refused** with `501 NOT_IMPLEMENTED` rather than silently degrading to best-effort. This follows the cross-object `/batch` route's existing precedent (`rest-server.ts:7166-7171`) and uses the standard error catalog, so no new code enters the ADR-0112 ledger. Refusing is the whole point: silent degradation is how the flag came to lie in the first place, and a caller that asked for atomicity is exactly the caller who must not receive best-effort without being told.
+Where the runtime **cannot** roll back — no `transaction()` on the engine, or a default driver without `beginTransaction` — an atomic request is **refused** with `501 NOT_IMPLEMENTED` rather than silently degrading to best-effort. This follows the cross-object `/batch` route's existing precedent (`packages/rest/src/rest-server.ts#NOT_IMPLEMENTED`) and uses the standard error catalog, so no new code enters the ADR-0112 ledger. Refusing is the whole point: silent degradation is how the flag came to lie in the first place, and a caller that asked for atomicity is exactly the caller who must not receive best-effort without being told.
 
 `atomic` takes precedence over `continueOnError` — whose own description already scopes it to `atomic=false`, making this precedence documented rather than new. In atomic mode the upsert path's defensive `catch { insert }` fallback rethrows instead of retrying, because inside an aborted transaction the fallback insert can only fail with a secondary error that masks the real cause.
 
@@ -133,7 +133,7 @@ The declared default is aligned to the enforced one: `BatchOptionsSchema.atomic`
 
 **Implement `IDataEngine.batch?` rather than retire it.** No caller has ever wanted its shape; D1 and D4 deliver its stated purpose with semantics somebody actually specified.
 
-**Do nothing and bless the hand-rolled pattern (#4612's option 3).** Rejected on the issue's own evidence: four consumers converging independently on the same shape is a platform gap, and the copies differ in exactly the places that matter — `ImportUndoLog` (`packages/rest/src/import-runner.ts:48-59`) journals per-row before-images; the publish path (`protocol.ts:7400-7424`) captures a revert plan; `batchData` captured nothing at all and said it did.
+**Do nothing and bless the hand-rolled pattern (#4612's option 3).** Rejected on the issue's own evidence: four consumers converging independently on the same shape is a platform gap, and the copies differ in exactly the places that matter — `ImportUndoLog` (`packages/rest/src/import-runner.ts#ImportUndoLog`) journals per-row before-images; the publish path (`packages/metadata-protocol/src/protocol.ts#batchData`) captures a revert plan; `batchData` captured nothing at all and said it did.
 
 ## Consequences
 

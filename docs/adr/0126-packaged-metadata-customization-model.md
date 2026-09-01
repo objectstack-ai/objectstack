@@ -74,9 +74,9 @@ admitted by naming its regime under §3's rule, or it is not admitted.
 
 The survey ([#12049 comment 5406807988](https://github.com/objectstack-ai/objectstack/issues/12049#issuecomment-5406807988))
 enumerated all **27 declared metadata types** (`DEFAULT_METADATA_TYPE_REGISTRY`,
-`packages/spec/src/kernel/metadata-plugin.zod.ts:654` — the total universe per #8586, plus the
+`packages/spec/src/kernel/metadata-plugin.zod.ts#DEFAULT_METADATA_TYPE_REGISTRY` — the total universe per #8586, plus the
 dynamic-kind channel for plugin-registered kinds such as `connector`). The write door partitions
-them into three tiers by flags × item provenance (`packages/metadata-protocol/src/protocol.ts:13227-13260`):
+them into three tiers by flags × item provenance (`packages/metadata-protocol/src/protocol.ts`):
 
 | Tier | Types | A packaged item can be… |
 |:--|:--|:--|
@@ -87,12 +87,12 @@ them into three tiers by flags × item provenance (`packages/metadata-protocol/s
 Three real mechanisms operate across those tiers, each invented separately:
 
 - **Org overlay** (ADR-0005): tier A only. Per-org rows for any other type are **phantom writes**
-  — the #6190 measured defect (`packages/metadata-core/src/meta-write-org-scope.ts:16-24`).
+  — the #6190 measured defect (`packages/metadata-core/src/meta-write-org-scope.ts`).
 - **Clone-to-customize** (#11513, permission sets only): server-side lock on the packaged base
   (`packaged-permission-set-lock.ts`), a clone action demanding a new name, and — the piece this
   ADR generalizes — the ruling that **switching a packaged artifact off is row state, not a
-  definition write** (`permission-set-projection.ts:1128-1145`, #4669).
-- **Extend** (`objectExtensions`, `packages/spec/src/data/object.zod.ts:2920`; navigation
+  definition write** (`packages/plugins/plugin-security/src/permission-set-projection.ts`, #4669).
+- **Extend** (`objectExtensions`, `packages/spec/src/data/object.zod.ts`; navigation
   contributions, ADR-0029 D7): a package adds fields/validations/indexes to another package's
   object, or nav items to another package's app, merged at boot. Package-grain, additive,
   upgrade-safe.
@@ -115,9 +115,9 @@ consume it instead of re-litigating it.
 ### 1.3 The shipped promise
 
 Two published pages promise post-install customization generically —
-`content/docs/capabilities/integrations.mdx:17` (*"install complete apps … objects, views, flows,
+`content/docs/capabilities/integrations.mdx` (*"install complete apps … objects, views, flows,
 dashboards, and seed data included, **then customize in Studio**"*) and
-`content/docs/build-without-code.mdx:37` (*"ready to customize in Studio"*). Measured against the
+`content/docs/build-without-code.mdx` (*"ready to customize in Studio"*). Measured against the
 tier table, the promise is keepable today for views and dashboards, and for **no tier-B type**.
 This is stronger pull than any wish-list: it is a shipped claim the platform cannot keep, and the
 flows half of it is the #11665 breach specifically.
@@ -277,7 +277,7 @@ read at each runtime's own consult point; an empty ledger changes nothing anywhe
    instrument grepped the module's **schema** names, and that set genuinely does read zero outside
    `packages/spec`, positive controls included — but it was blind to the module's exported **type**
    names, and one of those has a real build-against consumer: `packages/metadata`'s
-   `metadata-manager.ts:45` imports `type MetadataOverlay` from `@objectstack/spec/kernel` and
+   `packages/metadata/src/metadata-manager.ts` imports `type MetadataOverlay` from `@objectstack/spec/kernel` and
    backs a working three-layer overlay limb (in-memory map at 315-316; `getOverlay` /
    `saveOverlay` / `removeOverlay` / `getEffective` at 2166-2249). The corrected predicate is
    **one unreachable build-against consumer, zero served-surface consumers**: no route serves the
@@ -348,8 +348,8 @@ callers first, or don't), and preserves "packaged code calls what it names".
 
 - **Leaning D2 — a Setup page for packaged automation** (final call rides this ADR's merge):
   packaged flows with their activation state and the enable/disable and clone actions,
-  contributed the way `nav_permission_sets` is (`security-plugin.ts:974`). The maintainer
-  corrected the record here: automation UI is **Studio-only today** (`studio.app.ts:234-239`),
+  contributed the way `nav_permission_sets` is (`packages/plugins/plugin-security/src/security-plugin.ts#nav_permission_sets`). The maintainer
+  corrected the record here: automation UI is **Studio-only today** (`packages/platform-objects/src/apps/studio.app.ts`),
   so this page is new work, and the Setup permission-set page is the precedent shape. Studio
   keeps the editing; Setup gets the operational state. Minimum honest content per packaged flow:
   **on/off for this scope** — that is all the ledger knows (§4), and the page claims nothing

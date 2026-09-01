@@ -42,7 +42,7 @@ authoring loop:
 
 But the **authoring → publish closed loop is not yet implemented**. Today:
 
-1. Studio create/edit (`ResourceEditPage.tsx:733`) calls
+1. Studio create/edit (`objectui:ResourceEditPage.tsx`) calls
    `client.save(type, name, item, { force, mode:'draft' })` with **no
    `packageId`**. Per ADR-0003 this produces a **runtime/overlay** row
    (`env_id` set, `package_id` NULL, loaded under sentinel `'sys_metadata'`,

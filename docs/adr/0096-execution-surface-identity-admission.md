@@ -176,23 +176,23 @@ All trace to the same `positions==0 && permissions==0 && !userId → skip` predi
 
 | Site | Surface | Note |
 |:---|:---|:---|
-| `plugin-security/security-plugin.ts:626` | find/write middleware | the original seam (#2849) |
-| `plugin-security/security-plugin.ts:1689` | `getReadFilter` (analytics / reports / raw-SQL RLS compile) | returns `undefined` = *no filter*; the analytics mirror of :626 |
+| `packages/plugins/plugin-security/src/security-plugin.ts#getReadFilter` | find/write middleware | the original seam (#2849) |
+| `packages/plugins/plugin-security/src/security-plugin.ts#getReadFilter` | `getReadFilter` (analytics / reports / raw-SQL RLS compile) | returns `undefined` = *no filter*; the analytics mirror of :626 |
 | `objectql/engine.ts` Layer-0 + `driver-sql` `applyTenantScope` (opt-in on `tenantId`) | tenant scoping | Layer-0 is computed **after** the :626 skip, and the driver scope is opt-in → a principal-less context gets **no tenant filter at either layer** (cross-tenant read/write) |
-| `rest/rest-server.ts:4317` (+ lookup `:4744`) | guest / public-form routes | bypass `enforceAuth`; fall open when `guest_portal` unregistered (partly mitigated by the `publicFormGrant`) |
-| `runtime/http-dispatcher.ts:4231,4236,4240` | custom `object_operation` API endpoints | **accidental** — `callData` invoked with no `executionContext` (every sibling threads it) |
-| `runtime/sandbox/body-runner.ts:155` | authored action/hook **body** interior facade | the inside of #2849 — only the *invoke* is gated (#2964); the body's `api.object().find/insert/...` run context-less |
-| `mcp/mcp-server-runtime.ts:335` | MCP resource `…/records/{id}` | record read with no session identity |
+| `packages/rest/src/rest-server.ts#enforceAuth` (+ lookup) | guest / public-form routes | bypass `enforceAuth`; fall open when `guest_portal` unregistered (partly mitigated by the `publicFormGrant`) |
+| `packages/runtime/src/http-dispatcher.ts#executionContext` | custom `object_operation` API endpoints | **accidental** — `callData` invoked with no `executionContext` (every sibling threads it) |
+| `packages/runtime/src/sandbox/body-runner.ts` | authored action/hook **body** interior facade | the inside of #2849 — only the *invoke* is gated (#2964); the body's `api.object().find/insert/...` run context-less |
+| `packages/mcp/src/mcp-server-runtime.ts` | MCP resource `…/records/{id}` | record read with no session identity |
 | `service-messaging/messaging-service.ts` (+ recipient resolver) | notification read/write + recipient-role lookup | unscoped reads of `sys_notification*` and `sys_user`/`sys_member` |
-| minor: `http-dispatcher.ts:1322` (env-member), `plugin-webhooks/auto-enqueuer.ts:175`, `objectql/engine.ts:722` (`visibleWhen`) | system plumbing | rely on the *implicit* fall-open; should carry an **explicit** grant so they survive the D5 flip |
+| minor: `packages/runtime/src/http-dispatcher.ts` (env-member), `packages/plugins/plugin-webhooks/src/auto-enqueuer.ts`, `packages/objectql/src/engine.ts` (`visibleWhen`) | system plumbing | rely on the *implicit* fall-open; should carry an **explicit** grant so they survive the D5 flip |
 
 ### E2 — Trusted-implicit surfaces (ignore the caller / fall back to system) — confirmed exploitable, spun out
 
 | Instance | Verdict | Issue |
 |:---|:---|:---|
 | Reports `getReport`/`deleteReport`/`listReports` discard the caller and query with `SYSTEM_CTX`; routes only `enforceAuth` → cross-user/cross-tenant IDOR (read+delete any report) | CONFIRMED exploitable | #2980 |
-| Scheduled reports (`report-service.ts:425` `dispatchDue`) run `executeReport(..., {isSystem:true})` → a member-owned schedule emails the target object's **entire** table, RLS bypassed | CONFIRMED exploitable | #2980 |
-| Knowledge/RAG `applyPermissionFilter` (`knowledge-service.ts:312`) returns **all** hits when `ctx` is missing/system; `chatWithTools`'s `ToolExecutionContext.actor` is optional with a system fallback → agent retrieval escapes the data ceiling | CONFIRMED (framework); exposure gated on cloud impl | #2981 |
+| Scheduled reports (`packages/plugins/plugin-reports/src/report-service.ts#isSystem` `dispatchDue`) run `executeReport(..., {isSystem:true})` → a member-owned schedule emails the target object's **entire** table, RLS bypassed | CONFIRMED exploitable | #2980 |
+| Knowledge/RAG `applyPermissionFilter` (`packages/services/service-knowledge/src/knowledge-service.ts#applyPermissionFilter`) returns **all** hits when `ctx` is missing/system; `chatWithTools`'s `ToolExecutionContext.actor` is optional with a system fallback → agent retrieval escapes the data ceiling | CONFIRMED (framework); exposure gated on cloud impl | #2981 |
 
 These are *not* the :626 fall-open (they use an unconditional `SYSTEM_CTX`), but they are exactly what a D4 conformance row (`caller-scoped?` proof) + the D2 audit would have flagged. Fixed independently of the mechanism, tracked as the mechanism's motivating evidence.
 
@@ -200,14 +200,14 @@ These are *not* the :626 fall-open (they use an unconditional `SYSTEM_CTX`), but
 
 | Site | Note |
 |:---|:---|
-| `objectql/engine.ts:641` `executeAction` | handler invoked **directly**, not via `executeWithMiddleware` — an action touching the driver gets no RLS/FLS/CRUD/tenant |
-| `objectql/engine.ts:2793` `engine.execute()` / `driver-sql:1371` `driver.execute()` | raw SQL, documented tenant-bypass; caller trusted to inline the filter |
-| `objectql/engine.ts:2956/2991` `getDriverByName`/`getDriverForObject` | hand out the raw driver — middleware-free read/write |
-| bulk `update({multi:true})`/`deleteMany` on pure-OWD `private` objects (`sharing-plugin.ts:391`, `security-plugin.ts:821`) | single-id owner check not applied to multi-writes → members modify peers' rows | (#2982)
+| `packages/objectql/src/engine.ts#executeAction` `executeAction` | handler invoked **directly**, not via `executeWithMiddleware` — an action touching the driver gets no RLS/FLS/CRUD/tenant |
+| `packages/objectql/src/engine.ts` `engine.execute()` / `driver-sql:1371` `driver.execute()` | raw SQL, documented tenant-bypass; caller trusted to inline the filter |
+| `packages/objectql/src/engine.ts#getDriverByName` `getDriverByName`/`getDriverForObject` | hand out the raw driver — middleware-free read/write |
+| bulk `update({multi:true})`/`deleteMany` on pure-OWD `private` objects (`packages/plugins/plugin-sharing/src/sharing-plugin.ts`, `packages/plugins/plugin-security/src/security-plugin.ts`) | single-id owner check not applied to multi-writes → members modify peers' rows | (#2982)
 
 ### E4 — Unknown seams (identity not visibly threaded — investigate, then register)
 
-`runtime/http-dispatcher.ts:1488` **GraphQL** (passes only `{request}`, not the resolved `ec`); `service-realtime` **websocket** delivery (no per-subscriber RLS re-check); attachment **blob-level** RLS; the `chatWithTools` contract's optional actor. Each becomes a D4 matrix row in state `experimental`/`UNKNOWN` with a follow-up.
+`packages/runtime/src/http-dispatcher.ts` **GraphQL** (passes only `{request}`, not the resolved `ec`); `service-realtime` **websocket** delivery (no per-subscriber RLS re-check); attachment **blob-level** RLS; the `chatWithTools` contract's optional actor. Each becomes a D4 matrix row in state `experimental`/`UNKNOWN` with a follow-up.
 
 ### E5 — The D2 migration is large but has a prototype
 
@@ -269,6 +269,6 @@ Everything else — the D3 signature migration, strict-mode-ON-in-CI per package
 - framework#2308 / #1888 — the flow instance of the same class; the lint idiom D3/D6 reuse
 - framework#2845 / #2843 — the agent action surface whose safety framing this ADR makes true by construction
 - framework#2980 / #2981 / #2982 — the confirmed-exploitable instances the Evidence sweep surfaced (reports IDOR + scheduled-report RLS bypass; knowledge/RAG retrieval fall-open; bulk-write OWD gap) — fixed independently; this ADR's motivating evidence
-- `packages/plugins/plugin-security/src/security-plugin.ts` — the empty-principal seam (`:626` middleware, `:1689` getReadFilter) (D5's target)
+- `packages/plugins/plugin-security/src/security-plugin.ts` — the empty-principal seam (`packages/plugins/plugin-security/src/security-plugin.ts` middleware, `packages/plugins/plugin-security/src/security-plugin.ts` getReadFilter) (D5's target)
 - `packages/runtime/src/http-dispatcher.ts` — `buildActionEngineFacade` (both facades), `invokeBusinessAction`
 - `packages/qa/dogfood/test/authz-conformance.matrix.ts` — the ADR-0056 D10 matrix D4 extends

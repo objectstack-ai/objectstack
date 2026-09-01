@@ -52,10 +52,10 @@ lists in three packages, or silently corrupting data.
 The spec does export three per-type value schemas — and they make things
 worse, not better, because **all three are dead and two contradict reality**:
 
-- `CurrencyValueSchema` (`field.zod.ts:151`) declares `{value, currency}`;
+- `CurrencyValueSchema` (`packages/spec/src/data/field.zod.ts#CurrencyValueSchema`) declares `{value, currency}`;
   the validator, the SQL driver, import-coerce, and the field-zoo round-trip
   all treat currency as a **bare number**.
-- `LocationCoordinatesSchema` (`field.zod.ts:121`) declares
+- `LocationCoordinatesSchema` (`packages/spec/src/data/field.zod.ts#LocationCoordinatesSchema`) declares
   `{latitude, longitude}`; the field-zoo oracle stores `{lat, lng}`.
 - `AddressSchema` is imported by nothing but its own tests.
 
@@ -74,29 +74,29 @@ Three concrete failure classes motivated this design:
 2. **Untyped action handlers**: the declared `params[]` contract (`type`,
    `required`, `multiple`, `accept`, `maxSize`, `options`) informs **only the
    client dialog**. The server passes `reqBody.params` through raw
-   (`http-dispatcher.ts:3882`; same on the MCP path, line 1093), the sandbox
-   exposes it as `input: unknown` (`script-runner.ts:60`), and handlers are
-   registered as `(ctx: any) => any` (`objectql/src/engine.ts:678`). Every
+   (`packages/runtime/src/http-dispatcher.ts`; same on the MCP path, line 1093), the sandbox
+   exposes it as `input: unknown` (`packages/runtime/src/sandbox/script-runner.ts`), and handlers are
+   registered as `(ctx: any) => any` (`packages/objectql/src/engine.ts`). Every
    shipped handler does unchecked casts
    (`(params?.selectedIds ?? []) as string[]`,
-   `examples/app-todo/src/actions/task.handlers.ts:63`). `required`,
+   `examples/app-todo/src/actions/task.handlers.ts`). `required`,
    option membership, `maxSize` — none of it is enforced where it matters.
 3. **File fields bypass the platform's own file primitive.** There are two
    disconnected file worlds. `Field.file` / `image` / `avatar` / `video` /
    `audio` values are inline JSON blobs (`{url, name, size}` — a shape no spec
    schema defines, no validator checks) stored in the record column
-   (`sql-driver.ts:59`). Meanwhile `service-storage` already ships a
+   (`packages/drivers/driver-sql/src/sql-driver.ts`). Meanwhile `service-storage` already ships a
    first-class file object — `sys_file` with opaque `fileId`, status
    lifecycle, tombstone/reap GC (ADR-0057), and parent-derived download
    authorization — but it is wired **only** to the Attachments panel
-   (`sys_attachment`), and `attachment-lifecycle.ts:27-29` explicitly notes
+   (`sys_attachment`), and `packages/services/service-storage/src/attachment-lifecycle.ts#sys_attachment` explicitly notes
    field values "reference files from record columns the join-row count cannot
    see". Consequences: no reference integrity, no GC (clearing a `Field.image`
    leaks the blob forever), anonymous capability URLs for everything that
    isn't attachments-scoped, no `accept`/`maxSize` anywhere in `FieldSchema`
    (the audit: "no size/type/virus enforcement in write path"), and
    `client.storage.upload()` doesn't even return the `fileId` (the
-   `/upload/complete` response omits it, `storage-routes.ts:231-241`).
+   `/upload/complete` response omits it, `packages/services/service-storage/src/storage-routes.ts`).
 
 The common root cause: **the runtime value shape of a field is nobody's
 contract.** This ADR makes it the spec's.
@@ -131,7 +131,7 @@ Directive #2. It exports:
      `lookup` → the related record object; `file` → the spec-owned
      `FileValueSchema` (D3). For types without an expansion, `expanded` ≡
      `stored`. This names the lookup polymorphism that already exists
-     (`engine.ts:2092-2098` overwrites the field in place) instead of leaving
+     (`packages/objectql/src/engine.ts` overwrites the field in place) instead of leaving
      every consumer to branch on `typeof val === 'object'`.
 3. **`FieldValue<T>`** — the inferred TS types, so handlers and SDK code can
    speak the same shapes at compile time (D2).
@@ -179,7 +179,7 @@ Action params are already fields-lite (`ActionParamSchema` mirrors `FieldType`,
 free. Three changes:
 
 1. **Server-side enforcement at dispatch.** `handleActions` (REST,
-   `http-dispatcher.ts:3797`) and `invokeBusinessAction` (MCP, line 1080)
+   `packages/runtime/src/http-dispatcher.ts`) and `invokeBusinessAction` (MCP, line 1080)
    resolve the invoked action's declared `params[]` (field-backed params
    resolve through the referenced object field, as the dialog already does)
    and validate `reqBody.params` against a Zod object built from
@@ -320,7 +320,7 @@ rediscoveries.
   is quiet.
 - **R3 — unknown-param-key rejection will hit real callers.** Dispatch itself
   merges `recordId` / `objectName` into `params`
-  (`http-dispatcher.ts:3944`), and programmatic integrators send loose bags.
+  (`packages/runtime/src/http-dispatcher.ts`), and programmatic integrators send loose bags.
   D2 needs a built-in-key allowlist and the same warn-then-error window;
   "unknown key" errors must name the key and the declared param list.
 - **R4 — GC mis-deletion is irreversible data loss.** During the D3 migration

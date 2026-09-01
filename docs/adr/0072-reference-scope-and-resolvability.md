@@ -36,7 +36,7 @@ These are the same class of bug: **referencing something that is not actually in
 
 ### Evidence — how the runtime actually seeds references
 
-**Flow / edge / decision conditions** (`packages/services/service-automation/src/engine.ts:946-964`): the engine seeds `$record` + `record` = the **raw** trigger record, **flattens** its fields to top-level (so bare `status`/`budget` resolve), and adds `previous`, flow `variables`, prior-node outputs, `$runId`/`$flowName`. Crucially the record is injected verbatim:
+**Flow / edge / decision conditions** (`packages/services/service-automation/src/engine.ts#variables`): the engine seeds `$record` + `record` = the **raw** trigger record, **flattens** its fields to top-level (so bare `status`/`budget` resolve), and adds `previous`, flow `variables`, prior-node outputs, `$runId`/`$flowName`. Crucially the record is injected verbatim:
 
 ```js
 variables.set('record', context.record);
@@ -50,22 +50,22 @@ for (const [k, v] of Object.entries(context.record))
 
 | Surface | Evaluator (file:line) | In-scope references | Token shape |
 | :-- | :-- | :-- | :-- |
-| Flow / edge / decision | `service-automation/src/engine.ts:946-964` | `record`,`previous`, **flattened record fields**, flow `variables`, node outputs, `$runId`/`$flowName` | bare **and** `record.x` |
-| Formula field (`Field.expression`) | `objectql/src/engine.ts:119` | `{ now, timezone, user, org, record }` | `record.x` only |
-| Validation (`script`/`cross_field`/`when`) | `objectql/src/validation/rule-validator.ts:289` | `{ record: {...previous,...patch}, previous }` | `record.x` only |
-| Field `visibleWhen`/`requiredWhen`/`readonlyWhen` | `objectql/src/validation/rule-validator.ts:178-190` | merged `record`, `previous`, (`parent` for master-detail — server-bound for `readonlyWhen` since #4889; the client grid binds it for all three) | `record.x` only |
-| Hook lifecycle `condition` | `objectql/src/hook-wrappers.ts:84` | `{ record }` | `record.x` only |
-| RLS `using`/`check` (compile→filter) | `plugin-security/src/rls-compiler.ts:259` | `current_user.*` (+ pre-resolved membership), record field names | field operands; pushdown subset only |
-| Sharing-rule `condition` (compile→filter) | `plugin-sharing/src/bootstrap-declared-sharing-rules.ts:61` | record fields only | field operands; pushdown subset only |
-| Action/view/app `visible` | framework UI layer; roots in `@objectstack/formula cel-engine.ts:52-62` | `record`,`os`,`user`,`ctx`,`features`,… | `record.x` / namespaced |
+| Flow / edge / decision | `packages/services/service-automation/src/engine.ts#variables` | `record`,`previous`, **flattened record fields**, flow `variables`, node outputs, `$runId`/`$flowName` | bare **and** `record.x` |
+| Formula field (`Field.expression`) | `packages/objectql/src/engine.ts#expression` | `{ now, timezone, user, org, record }` | `record.x` only |
+| Validation (`script`/`cross_field`/`when`) | `packages/objectql/src/validation/rule-validator.ts#cross_field` | `{ record: {...previous,...patch}, previous }` | `record.x` only |
+| Field `visibleWhen`/`requiredWhen`/`readonlyWhen` | `packages/objectql/src/validation/rule-validator.ts#readonlyWhen` | merged `record`, `previous`, (`parent` for master-detail — server-bound for `readonlyWhen` since #4889; the client grid binds it for all three) | `record.x` only |
+| Hook lifecycle `condition` | `packages/objectql/src/hook-wrappers.ts#condition` | `{ record }` | `record.x` only |
+| RLS `using`/`check` (compile→filter) | `packages/plugins/plugin-security/src/rls-compiler.ts` | `current_user.*` (+ pre-resolved membership), record field names | field operands; pushdown subset only |
+| Sharing-rule `condition` (compile→filter) | `packages/plugins/plugin-sharing/src/bootstrap-declared-sharing-rules.ts` | record fields only | field operands; pushdown subset only |
+| Action/view/app `visible` | framework UI layer; roots in `@objectstack/formula packages/formula/src/cel-engine.ts` | `record`,`os`,`user`,`ctx`,`features`,… | `record.x` / namespaced |
 
-The canonical CEL scope roots the engine recognises are declared in `@objectstack/formula cel-engine.ts:52-62`: `record, previous, input, output, os, vars, variables, automation, context, args, item, env, user, step, result, trigger, event, payload, data, params, config, settings, ctx, features, parent`.
+The canonical CEL scope roots the engine recognises are declared in `@objectstack/formula packages/formula/src/cel-engine.ts`: `record, previous, input, output, os, vars, variables, automation, context, args, item, env, user, step, result, trigger, event, payload, data, params, config, settings, ctx, features, parent`.
 
 Two consequences for the picker model:
 - **Token shape is surface-specific** (flow = bare-or-dotted; everything else = dotted). The picker must know the surface.
 - There is **one canonical root allowlist** the validator should reuse, instead of a hand-rolled one.
 
-**`outputSchema` today** (`packages/spec/src/automation/flow.zod.ts:129-132`): `Record<string, { type: 'string'|'number'|'boolean'|'object'|'array'; description?: string }>`, **optional**, carries **no `objectName`**, is **not consumed by the engine**, and is read by the designer only for connector/Tool display. So it cannot, today, tell the picker *which object* an `object`-typed output holds. The reliable signal is the **producing node's `config.objectName`** (required on CRUD nodes) found by walking the graph back — exactly the walk the objectui picker already does (`@object-ui/app-shell` · `inspectors/flow-scope.ts` `flowAncestors`).
+**`outputSchema` today** (`packages/spec/src/automation/flow.zod.ts#outputSchema`): `Record<string, { type: 'string'|'number'|'boolean'|'object'|'array'; description?: string }>`, **optional**, carries **no `objectName`**, is **not consumed by the engine**, and is read by the designer only for connector/Tool display. So it cannot, today, tell the picker *which object* an `object`-typed output holds. The reliable signal is the **producing node's `config.objectName`** (required on CRUD nodes) found by walking the graph back — exactly the walk the objectui picker already does (`@object-ui/app-shell` · `inspectors/flow-scope.ts` `flowAncestors`).
 
 ### What already shipped (Slice 0/1, objectui #1934)
 
@@ -83,7 +83,7 @@ The flow data-picker and its inline validator already landed in objectui: graph-
 
 **D4 — Relationships are a guided fetch, never a lookup dot-walk.** Because the engine does not expand lookups (Evidence), `record.<lookup>.<field>` is **forbidden** from the picker. When an author wants a related record's fields, the picker offers the lookup as a leaf (`record.account`, an id) plus an affordance — *"Account is a related record — add a Get Records step to load it"* — that scaffolds a `get_record` node whose output is then drillable (`account_data.*`). This is the Salesforce-Flow pattern and the only runtime-honest relational story.
 
-**D5 — Validation pairs with the picker and reuses the engine's truth.** Inline validation flags (a) ADR-0032 brace/shape errors (deterministic, scope-free) and (b) scope-aware unknown roots. Its allowlist of "known roots" MUST track the engine's canonical scope roots (`@objectstack/formula cel-engine.ts:52-62`) rather than a private list, and it MUST skip surfaces/positions where it cannot decide without a fetch (e.g. the start node's bare trigger fields) to keep false positives at zero. Flow-level issues also surface as Problems-panel rows + canvas badges (ADR-0058 fail-policy: authoring-time guidance, non-blocking).
+**D5 — Validation pairs with the picker and reuses the engine's truth.** Inline validation flags (a) ADR-0032 brace/shape errors (deterministic, scope-free) and (b) scope-aware unknown roots. Its allowlist of "known roots" MUST track the engine's canonical scope roots (`@objectstack/formula packages/formula/src/cel-engine.ts`) rather than a private list, and it MUST skip surfaces/positions where it cannot decide without a fetch (e.g. the start node's bare trigger fields) to keep false positives at zero. Flow-level issues also surface as Problems-panel rows + canvas badges (ADR-0058 fail-policy: authoring-time guidance, non-blocking).
 
 **D6 — `outputSchema` evolves into the authoritative output-typing channel.** Add an optional `objectName` (and array-item type) to `FlowNode.outputSchema` entries so an `object`-typed output can name its object — making D3 work for *any* producer, including connectors and subflows that have no `config.objectName`. Built-in CRUD executors populate it from their `objectName`; the designer prefers `outputSchema.objectName`, falling back to the graph-walk. Until then, D3 runs on `config.objectName`. (Spec change owned by this repo; coordinate the designer change in objectui.)
 
@@ -116,7 +116,7 @@ The flow data-picker and its inline validator already landed in objectui: graph-
 
 1. **Auto-expand lookups (`record.account.name`).** Rejected — the engine does not expand lookups (Evidence); every such token would resolve to `undefined`, violating D1. This is the literal #1934 follow-up ask; the investigation that killed it is the reason for this ADR.
 2. **Pre-fetch the whole schema graph and show a flat list.** Rejected — N+M fetches on open, hundreds of entries, and still can't represent relationships honestly. The lazy tree (D3) scales and stays quiet.
-3. **A private "known globals" allowlist in the validator.** Rejected for the long term — drifts from the engine. D5 reuses `cel-engine.ts:52-62`.
+3. **A private "known globals" allowlist in the validator.** Rejected for the long term — drifts from the engine. D5 reuses `packages/formula/src/cel-engine.ts`.
 4. **Designer-only `outputSchema` typing (no spec change).** Rejected as the end state — connectors/subflows have no `config.objectName`; D6 makes typing authoritative and plugin-extensible.
 
 ## Open questions

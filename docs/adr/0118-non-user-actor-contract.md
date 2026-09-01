@@ -21,10 +21,10 @@ AI 工具的服务端调用。每到这种时刻，系统都要回答同一个�
 
 | 现场 | 当前答案 | 毛病 |
 |---|---|---|
-| `sys_metadata_history.recorded_by`（#4556） | `lookup('sys_user')` 列里存哨兵字符串 `'system'`（声明：`packages/metadata-core/src/objects/sys-metadata-history.object.ts:156`；写入：`packages/metadata-protocol/src/sys-metadata-repository.ts:423,545`） | 类型撒谎：声明是外键、存的不是 id，join 断；读侧被迫 `?? 'unknown'` 兜底（同文件 `:317`、`:824`） |
-| AI `ToolExecutionContext`（#2991） | 契约曾把「缺 actor」文档化为 system 级缺省 | fall-open：忘传上下文 = 拿到最高权限。契约文本已改为 fail-closed（`packages/spec/src/contracts/ai-service.ts:394-404`），执行器逐一验证仍未闭合 |
+| `sys_metadata_history.recorded_by`（#4556） | `lookup('sys_user')` 列里存哨兵字符串 `'system'`（声明：`packages/metadata-core/src/objects/sys-metadata-history.object.ts#recorded_by`；写入：`packages/metadata-protocol/src/sys-metadata-repository.ts#recorded_by`） | 类型撒谎：声明是外键、存的不是 id，join 断；读侧被迫 `?? 'unknown'` 兜底（同文件、） |
+| AI `ToolExecutionContext`（#2991） | 契约曾把「缺 actor」文档化为 system 级缺省 | fall-open：忘传上下文 = 拿到最高权限。契约文本已改为 fail-closed（`packages/spec/src/contracts/ai-service.ts#ToolExecutionContext`），执行器逐一验证仍未闭合 |
 | SQL driver（#4560） | `current_user` 框架令牌被原样发射成列 DEFAULT | 框架层概念泄漏进存储层：数据库自己往 user lookup 列写非 id |
-| 引擎 `isSystem`（#3166） | 特权内部写自愿声明 `isSystem`（如 `packages/objectql/src/lifecycle/lifecycle-service.ts:39` 的 `SYSTEM_CTX`；#4441 写路径守卫的 isSystem 豁免） | 惯例成立但自愿：不声明也没人拦 |
+| 引擎 `isSystem`（#3166） | 特权内部写自愿声明 `isSystem`（如 `packages/objectql/src/lifecycle/lifecycle-service.ts#isSystem` 的 `SYSTEM_CTX`；#4441 写路径守卫的 isSystem 豁免） | 惯例成立但自愿：不声明也没人拦 |
 
 ### 为什么这是一个问题，不是四个
 
@@ -43,7 +43,7 @@ AI 工具的服务端调用。每到这种时刻，系统都要回答同一个�
 
 Salesforce 用 Automated Process 伪用户行，ServiceNow 用 system 用户行。**本仓不能抄**，
 有一个仓库特有的硬约束：`sys_user` 是 `managedBy: 'better-auth'` 的表
-（`packages/spec/src/data/object.zod.ts:824-831`，ADR-0092）——身份驱动拥有全部写路径，
+（`packages/spec/src/data/object.zod.ts#managedBy`，ADR-0092）——身份驱动拥有全部写路径，
 密码哈希、令牌签发、邀请流都从它走。往里播种一行「永不登录的伪用户」等于绕过身份驱动
 写身份表；且该账号从此要在用户列表、邀请流程、许可计数、权限选择器等**每一个**面被
 排除，漏一处就是 bug——可被引用进权限授予时，是安全 bug。
@@ -67,7 +67,7 @@ Salesforce 用 Automated Process 伪用户行，ServiceNow 用 system 用户行�
 - `isSystem: true` → 系统上下文（RLS 旁路），显式、可 grep 的提权；
 - **两者皆无 → 匿名上下文（RLS 开、什么都看不见），永远不是 system。**
 
-该语义已在 AI 工具边界落为契约文本（`ai-service.ts:394-404`，#2991 的契约面修复）。
+该语义已在 AI 工具边界落为契约文本（`packages/spec/src/contracts/ai-service.ts`，#2991 的契约面修复）。
 本条把它升为**全平台规则**：任何执行路径——工具执行器、REST 处理器、任务运行器——
 不得把「上下文缺失」解释为特权。「没有身份」永远不是授权。
 

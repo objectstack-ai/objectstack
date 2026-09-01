@@ -69,14 +69,14 @@ object, which an AI author cannot reliably produce and ADR-0049 forbids shipping
 
 - **`sys_role` is ObjectStack-native**, not better-auth. better-auth's 18 managed tables do not include
   it; better-auth only owns the `role` *string* on `sys_member`
-  (`packages/platform-objects/src/identity/sys-member.object.ts:152`, `managedBy:'better-auth'`, enum
+  (`packages/platform-objects/src/identity/sys-member.object.ts#managedBy`, `managedBy:'better-auth'`, enum
   owner/admin/member) and `sys_user`. The word "role" collides; the *table* does not. The platform may
   own the concept outright.
 - **Scope-depth and rollup need no RLS-compiler change.** The compiler already compiles
   `field IN (current_user.<key>)` against arbitrary pre-resolved sets supplied through
-  `ExecutionContext.rlsMembership` (`packages/plugins/plugin-security/src/rls-compiler.ts:126`, `:225`);
+  `ExecutionContext.rlsMembership` (`packages/plugins/plugin-security/src/rls-compiler.ts`, `packages/plugins/plugin-security/src/rls-compiler.ts`);
   `org_user_ids` is the existing precedent
-  (`packages/runtime/src/security/resolve-execution-context.ts:260`). New scopes resolve into new keys;
+  (`packages/runtime/src/security/resolve-execution-context.ts`). New scopes resolve into new keys;
   the engine's existing AND-injection (`packages/plugins/plugin-security/src/security-plugin.ts ~504`)
   applies them.
 
@@ -100,7 +100,7 @@ as pre-resolved `IN` sets, never compiler subqueries. One decision per gap.
 
 ### D1 — Scope-depth on object grants (the ERP core)
 
-Extend `ObjectPermissionSchema` (`packages/spec/src/security/permission.zod.ts:17`) so each per-object
+Extend `ObjectPermissionSchema` (`packages/spec/src/security/permission.zod.ts#ObjectPermissionSchema`) so each per-object
 grant carries a **read scope** and a **write scope** drawn from a canonical enum:
 
 ```
@@ -151,7 +151,7 @@ subordinate_user_ids   -> users below me on the sys_user.manager_id chain (manag
 ```
 
 - Sourced by `BusinessUnitGraphService` (D2) and the existing `managerOf` chain
-  (`packages/plugins/plugin-sharing/src/team-graph.ts:94`). Bounded (hard cap + cache, mirroring the
+  (`packages/plugins/plugin-sharing/src/team-graph.ts#managerOf`). Bounded (hard cap + cache, mirroring the
   `org_user_ids` cap) and **org-scoped**.
 - Rollup is **additive only** (widens, never restricts) and respects tenant isolation. It powers both
   D1's `unit*` scopes and sharing-rule recipients (D6). Because it is pure pre-resolution, the choice
@@ -165,13 +165,13 @@ role".
 
 - `resolve-execution-context` resolves `ctx.roles` from `sys_user_role` (union `sys_member.role` during
   a transition window), replacing the current sole dependence on the better-auth membership string
-  (`packages/runtime/src/security/resolve-execution-context.ts:226`).
+  (`packages/runtime/src/security/resolve-execution-context.ts`).
 - `sys_member.role` is **reframed to org-administration only** (owner/admin/member) and **relabelled**
   in ObjectStack's projection to `org_membership_level` (the underlying better-auth column/API param
   stays `role`; we relabel the platform schema projection in
   `packages/plugins/plugin-auth/src/auth-schema-config.ts`).
 - Continue feeding declared role names to better-auth `additionalOrgRoles`
-  (`packages/plugins/plugin-auth/src/auth-manager.ts:657`) **only** so invitations to those role names
+  (`packages/plugins/plugin-auth/src/auth-manager.ts`) **only** so invitations to those role names
   are accepted — never as the authority for RBAC.
 
 ### D5 — `sys_role` is a *job role* (capability bundle), not a second hierarchy
@@ -182,7 +182,7 @@ permission sets** (via the existing `sys_role_permission_set`) plus an optional 
 `sys_role`.** Therefore:
 
 - **Retire the broken `sys_role.parent` path.** `role-graph.ts`'s `childRoles` query targets a `parent`
-  column `sys_role` does not have (`packages/plugins/plugin-sharing/src/role-graph.ts:52`; the ADR-0056
+  column `sys_role` does not have (`packages/plugins/plugin-sharing/src/role-graph.ts`; the ADR-0056
   D6 "landed" claim was proven only against a mock engine). Rather than add the missing column, the
   `role_and_subordinates` sharing recipient is **re-homed onto the BU subtree** (D2/D3) and renamed
   `unit_and_subordinates`, with `role_and_subordinates` kept as a deprecated alias that resolves
@@ -202,12 +202,12 @@ activate — closing the #2077 "decorative metadata" gap.
   UI-created rows. Home: `plugin-security` (sibling to `bootstrapPlatformAdmin`,
   `packages/plugins/plugin-security/src/bootstrap-platform-admin.ts`).
 - **Sharing rules -> `sys_sharing_rule`**: seed inside `SharingServicePlugin.start()`'s `kernel:ready`
-  **before** `listRules()`/`bindRuleHooks` (`packages/plugins/plugin-sharing/src/sharing-plugin.ts:168`)
+  **before** `listRules()`/`bindRuleHooks` (`packages/plugins/plugin-sharing/src/sharing-plugin.ts#bindRuleHooks`)
   so hooks bind to a populated table.
 - **#1887 / ADR-0056 D5 — pick the canonical sharing-rule shape.** The spec `SharingRuleSchema` (CEL
   `condition`, `ownedBy`, `sharedWith` enum incl. `group`/`guest`) diverges from the runtime
   `sys_sharing_rule` (`criteria_json` JSON filter, `recipient_type`/`recipient_id`) and is flagged
-  `EXPERIMENTAL — NOT ENFORCED` (`packages/spec/src/security/sharing.zod.ts:97`). Decision: the
+  `EXPERIMENTAL — NOT ENFORCED` (`packages/spec/src/security/sharing.zod.ts`). Decision: the
   **runtime shape is canonical**. The seeder translates the directly-mappable authoring fields
   (`object`->`object_name`, `accessLevel`->`access_level`,
   `sharedWith{type,value}`->`recipient_type`/`recipient_id` for user/role/unit-and-subordinates), and
@@ -301,19 +301,19 @@ sharing recipient e2e** (a manager + their unit subordinates gain access via the
 
 - ADRs: 0010, 0049, 0054, 0055, 0056. Issues: #2077 (seed roles/rules), #1887 (SharingRuleSchema
   disconnected).
-- Capability shape: `packages/spec/src/security/permission.zod.ts:17` (`allow*` +
+- Capability shape: `packages/spec/src/security/permission.zod.ts#ObjectPermissionSchema` (`allow*` +
   `viewAllRecords`/`modifyAllRecords`).
-- RLS IN-form + membership injection: `packages/plugins/plugin-security/src/rls-compiler.ts:126`,
-  `packages/runtime/src/security/resolve-execution-context.ts:226`.
+- RLS IN-form + membership injection: `packages/plugins/plugin-security/src/rls-compiler.ts`,
+  `packages/runtime/src/security/resolve-execution-context.ts`.
 - BU tree: `packages/platform-objects/src/identity/sys-department.object.ts`,
   `packages/plugins/plugin-sharing/src/department-graph.ts`.
 - Role concept: `packages/plugins/plugin-security/src/objects/sys-role.object.ts` (no `parent`),
-  `packages/plugins/plugin-sharing/src/role-graph.ts:52` (broken walk).
-- better-auth boundary: `packages/platform-objects/src/identity/sys-member.object.ts:152`,
-  `packages/plugins/plugin-auth/src/auth-manager.ts:657`,
+  `packages/plugins/plugin-sharing/src/role-graph.ts` (broken walk).
+- better-auth boundary: `packages/platform-objects/src/identity/sys-member.object.ts#managedBy`,
+  `packages/plugins/plugin-auth/src/auth-manager.ts`,
   `packages/plugins/plugin-auth/src/auth-schema-config.ts`.
 - Seeding precedent: `packages/plugins/plugin-security/src/bootstrap-platform-admin.ts`; sharing boot:
-  `packages/plugins/plugin-sharing/src/sharing-plugin.ts:168`.
+  `packages/plugins/plugin-sharing/src/sharing-plugin.ts#bindRuleHooks`.
 
 ---
 
@@ -371,7 +371,7 @@ open/paid resolver seam). It did **not** settle how the three org-shaped objects
 - `sys_team` (better-auth) — the **flat collaboration grouping**.
 
 Left unaddressed, all three land flat in the Setup `group_people_org` menu
-(`packages/platform-objects/src/apps/setup-nav.contributions.ts:48-55`) and read as three
+(`packages/platform-objects/src/apps/setup-nav.contributions.ts#group_people_org`) and read as three
 competing "organisation" concepts — the ambiguity is sharpest in a single-tenant install,
 where `sys_organization` is a single, un-creatable row. This addendum closes that gap. One
 decision per gap (ADR-0049 discipline); no model change, only surfacing + one denormalised
@@ -426,14 +426,14 @@ migration; BU stays usable as owning-unit coordinate, explicit sharing recipient
 people-picker filter even when its nav is hidden). Only the **nav entries** tier:
 
 - **Business Units.** `nav_business_units` today carries `requiresObject: 'sys_business_unit'`
-  (`setup-nav.contributions.ts:50`), but `platform-objects` registers that object
+  (`packages/platform-objects/src/apps/setup-nav.contributions.ts`), but `platform-objects` registers that object
   unconditionally, so the gate is **inert (always true)**. Move the entry **out** of
   `SETUP_NAV_CONTRIBUTIONS` and contribute it from the capability that gives BU teeth —
   the hierarchy-security capability (`@objectstack/security-enterprise` when present), or an
   explicit app opt-in feature `business-units` — exactly the ADR-0029 K2 pattern already
   used for webhooks/approvals/sharing ("nav lives and dies with the capability").
 - **Organizations / Invitations.** `nav_organizations` / `nav_invitations`
-  (`setup-nav.contributions.ts:52-53`) carry no gate at all today. Add a
+  (`packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_organizations`) carry no gate at all today. Add a
   `multiOrgEnabled != false` visibility gate (same predicate as the create action).
 - **Mechanism gap to close first (ADR-0049 — gated, never silently inert).** The
   `create_organization` *action* gates via a `visible` CEL string, but a `NavigationItem`
@@ -443,7 +443,7 @@ people-picker filter even when its nav is hidden). Only the **nav entries** tier
 
 ### D11 — Resolve the `team` naming collision: drop `team` from `sys_business_unit.kind`
 
-`sys_business_unit.kind` includes `team` (`sys-business-unit.object.ts:96`,
+`sys_business_unit.kind` includes `team` (`packages/platform-objects/src/identity/sys-business-unit.object.ts#sys_business_unit`,
 `company | division | department | team | office | cost_center`), colliding head-on with the
 first-class `sys_team`: a `kind='team'` BU walks `BusinessUnitGraphService` (hierarchical)
 while `sys_team` walks `TeamGraphService` (flat) — two "teams", different semantics, no UI
@@ -568,15 +568,15 @@ Both consumers that need it still terminate in `sys_member.role` only, and neith
 `sys_user_role`:
 
 - **plugin-approvals** — `expandApprovers` dispatches a `role` approver to
-  `expandRoleUsers` (`approval-service.ts:306`), which queries `find('sys_member', { filter: { role } })`
-  (`approval-service.ts:380-389`; the doc comment at `:286` even pins the semantics to
+  `expandRoleUsers` (`packages/plugins/plugin-approvals/src/approval-service.ts#sys_member`), which queries `find('sys_member', { filter: { role } })`
+ (`packages/plugins/plugin-approvals/src/approval-service.ts#sys_member`; the doc comment at even pins the semantics to
   "`sys_member.role = value`"). No `sys_role` / `sys_user_role` read.
 - **plugin-sharing** — a `role` recipient resolves via `teamGraph.expandRoleUsers`
-  (`role-graph.ts:100`, `team-graph.ts:144`), whose terminal query is
-  `find('sys_member', …)` (`team-graph.ts:70-80`; comment `:25` "`sys_member.role` for
+  (`role-graph.ts`, `packages/plugins/plugin-sharing/src/team-graph.ts#expandRoleUsers`), whose terminal query is
+ `find('sys_member', …)` (`packages/plugins/plugin-sharing/src/team-graph.ts#sys_member`; comment "`sys_member.role` for
   tenant role expansion"). Sharing is *partially* further along — its
   `RoleHierarchyGraph` walks `sys_role.parent` to find subordinate roles
-  (`role-graph.ts:57`) — but the final role→**user** hop is still `sys_member`.
+  (`role-graph.ts`) — but the final role→**user** hop is still `sys_member`.
 
 Note `plugin-approvals` is **not** in this ADR's Consumers list; `plugin-sharing` **is**.
 That both behave identically is the key signal below.

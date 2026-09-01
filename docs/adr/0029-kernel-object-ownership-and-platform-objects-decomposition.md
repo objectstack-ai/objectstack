@@ -52,12 +52,12 @@ The codebase scan found the kernel is a monolith with split ownership:
 | Finding | Evidence |
 |:--|:--|
 | **All `sys_*` objects are defined in `platform-objects`** — identity, audit, security, metadata, system domains. | `platform-objects/src/{identity,audit,security,metadata,system}/**` |
-| Plugins **declare** `namespace:'sys'`, `scope:'system'` but **define no objects** — the data model lives in `platform-objects`. | `plugin-auth/src/manifest.ts:58-67`; `service-job`, `service-settings` manifests |
-| `sys` is a **shared** namespace co-claimed by ~14 packages with no arbiter at the namespace level. | `objectql/src/registry.ts:346-389` (`namespaceRegistry: Map<ns, Set<pkgId>>`) |
-| The `own`/`extend` ownership model is fully implemented: **one owner per object** (second `own` throws), extenders merge by `priority` (owner 100, extender 200). **No package extends a `sys_` object today.** | `objectql/src/registry.ts:406-518`; `object.zod.ts:856-897` |
+| Plugins **declare** `namespace:'sys'`, `scope:'system'` but **define no objects** — the data model lives in `platform-objects`. | `packages/plugins/plugin-auth/src/manifest.ts#namespace`; `service-job`, `service-settings` manifests |
+| `sys` is a **shared** namespace co-claimed by ~14 packages with no arbiter at the namespace level. | `packages/objectql/src/registry.ts#namespaceRegistry` (`namespaceRegistry: Map<ns, Set<pkgId>>`) |
+| The `own`/`extend` ownership model is fully implemented: **one owner per object** (second `own` throws), extenders merge by `priority` (owner 100, extender 200). **No package extends a `sys_` object today.** | `packages/objectql/src/registry.ts`; `packages/spec/src/data/object.zod.ts` |
 | ~60 lookup fields converge on the **hub objects `sys_user` / `sys_organization`**, referenced from every domain (incl. `service-ai`'s `ai_conversations.user_id`). | scan |
-| `RESERVED_NAMESPACES = {'base','system'}` — `sys` is **not** reserved. "Apps may reference but never define `sys_*`" is documented intent with **no enforcing validator**. | `registry.ts:13`; `manifest.zod.ts:66-70` |
-| `scope: cloud\|system\|project` and `managedBy: platform\|config\|system\|append-only\|better-auth` already mark system data. | `manifest.zod.ts:133`; `object.zod.ts:354-385` |
+| `RESERVED_NAMESPACES = {'base','system'}` — `sys` is **not** reserved. "Apps may reference but never define `sys_*`" is documented intent with **no enforcing validator**. | `packages/objectql/src/registry.ts#RESERVED_NAMESPACES`; `packages/spec/src/kernel/manifest.zod.ts` |
+| `scope: cloud\|system\|project` and `managedBy: platform\|config\|system\|append-only\|better-auth` already mark system data. | `packages/spec/src/kernel/manifest.zod.ts`; `packages/spec/src/data/object.zod.ts#managedBy` |
 | The **`setup` admin app is a static monolith** that hard-references every `sys_*` object as nav entries — and its own comment notes it was made static *because* the objects were centralized (the older `@objectstack/plugin-setup` that assembled it at runtime was deleted). | `platform-objects/src/apps/setup.app.ts` |
 | `manifest.contributes.menus` exists in the schema but is **consumed nowhere** — a vestigial, unimplemented contribution point. No app-navigation merge / `appExtensions` analog to `objectExtensions` exists. | `manifest.zod.ts` (`contributes.menus`); no consumer found |
 
@@ -350,20 +350,20 @@ is unchanged. What changes is that a tenant overlay stops *borrowing* that slot.
 ### 1. What the code does today, measured
 
 An object's registry entry is a list of `ObjectContributor`s keyed by name
-(`packages/objectql/src/registry.ts:38-44`), and `registerObject` accepts exactly
-two kinds — `own` and `extend` (`:1070-1075`, the vocabulary at
-`packages/spec/src/data/object.zod.ts:2435`).
+(`packages/objectql/src/registry.ts#registerObject`), and `registerObject` accepts exactly
+two kinds — `own` and `extend` (`packages/objectql/src/registry.ts`, the vocabulary at
+`packages/spec/src/data/object.zod.ts`).
 
 A tenant overlay of an `object` reaches that verb through two seams, and both
 pass **two arguments only**, so `ownership` takes its default `'own'`:
 
 | seam | call | when |
 |:--|:--|:--|
-| `applyObjectRegistryMutation` | `packages/metadata-protocol/src/protocol.ts:7897-7911` | every `saveMetaItem` write-through |
-| `loadMetaFromDb` | `packages/metadata-protocol/src/protocol.ts:11670-11673` | **every boot**, no authorization gate |
+| `applyObjectRegistryMutation` | `packages/metadata-protocol/src/protocol.ts#applyObjectRegistryMutation` | every `saveMetaItem` write-through |
+| `loadMetaFromDb` | `packages/metadata-protocol/src/protocol.ts#loadMetaFromDb` | **every boot**, no authorization gate |
 
 When the row's `package_id` equals the packaged owner's id, `registerObject`
-takes the re-registration branch at `registry.ts:1157-1160` and **splices the
+takes the re-registration branch at `packages/objectql/src/registry.ts#registerObject` and **splices the
 packaged contributor out of the list**. The packaged definition is *destroyed at
 write time* — it is not shadowed, and no second copy exists anywhere in the
 registry. Four consequences follow, all measured end-to-end in the 08:12Z report
@@ -375,24 +375,24 @@ on #6853 (P0-P6) and re-read in the source here:
 2. **It re-happens on every boot** (P6), through `loadMetaFromDb`, silently:
    `{"loaded":1,"errors":0,"invalid":0}` with no warning.
 3. **`isArtifactBacked` starts lying.** It asks `getArtifactItem('object', …)`
-   (`protocol.ts:7535-7540`), whose object branch resolves the **merged** object
-   and rejects it when `_provenance === 'org'` (`registry.ts:1727-1733`, predicate
-   at `:844-846`). Since the overlay is now the *owner*, the merged body carries
+   (`packages/metadata-protocol/src/protocol.ts#isArtifactBacked`), whose object branch resolves the **merged** object
+   and rejects it when `_provenance === 'org'` (`packages/objectql/src/registry.ts`, predicate
+   at `packages/objectql/src/registry.ts`). Since the overlay is now the *owner*, the merged body carries
    the tenant's provenance, so the predicate answers `false` for a name a code
    package still ships.
 4. **Two gates that read that predicate silently disarm.** `saveMetaItem`'s
-   two-tier gate (`protocol.ts:8460-8472`) stops refusing — `object` declares
+   two-tier gate (`packages/metadata-protocol/src/protocol.ts`) stops refusing — `object` declares
    `allowOrgOverride: false, allowRuntimeCreate: true`
-   (`packages/spec/src/kernel/metadata-plugin.zod.ts:628`), so the *first* write
+   (`packages/spec/src/kernel/metadata-plugin.zod.ts#allowOrgOverride`), so the *first* write
    is refused and every later one is admitted through the wrong tier. And tier 3
-   of `restoreArtifactRegistryView` (`protocol.ts:8259-8272`), whose comment says
+   of `restoreArtifactRegistryView` (`packages/metadata-protocol/src/protocol.ts#restoreArtifactRegistryView`), whose comment says
    in as many words that it never retires a code-shipped object, fires:
    `objectContributors` goes empty, `getObject` answers `null`, and data CRUD
    404s on a table the package still ships, until the process restarts (P3/P6).
 
 A fifth shape belongs to the same mechanism. When the row's `package_id`
-**differs** from the packaged owner's, the ownership rule at `:1149-1155` throws,
-the throw is caught and `console.warn`-ed at `protocol.ts:7906-7910`, and
+**differs** from the packaged owner's, the ownership rule at `#package_id` throws,
+the throw is caught and `console.warn`-ed at `packages/metadata-protocol/src/protocol.ts`, and
 `saveMetaItem` still reports success — the write-side silent discard filed as
 [#6995](https://github.com/objectstack-ai/objectstack/issues/6995), which the
 ruling requires this model to answer (§ D9.6).
@@ -407,13 +407,13 @@ layer's body as a replay of the same one.
 The borrowed slot carries authority the overlay measurably never uses:
 
 - **It claims no namespace.** `registerObject` calls `registerNamespace` only when
-  a namespace argument is passed (`:1136-1138`); both overlay seams pass none, so
+  a namespace argument is passed (`packages/metadata-protocol/src/protocol.ts`); both overlay seams pass none, so
   `namespaceRegistry` keeps the package's entry. What the splice *does* destroy is
   the owner contributor's own `namespace` field (measured `''` where the package
   had `'myapp'`, P5) — inert today only because `computeFQN` is identity
-  (`:61-63`).
+  (`#packageId`).
 - **It does not decide package membership.** `getAllObjects(packageId)` matches
-  *any* contribution's `packageId` (`:1307`), owner or not.
+  *any* contribution's `packageId` (`#packageId`), owner or not.
 - **It owns no table.** The physical table is the packaged owner's, created by
   its schema sync; an overlay's new fields ride ADR-0045 additive materialization.
 
@@ -427,20 +427,20 @@ question, and D9 answers it as one.
 #### D9.1 — a third contributor kind, loader-set and never authorable
 
 `ObjectContributor.ownership` gains `'overlay'`, and the vocabulary
-`ObjectOwnershipEnum` (`packages/spec/src/data/object.zod.ts:2435`) gains it too
+`ObjectOwnershipEnum` (`packages/spec/src/data/object.zod.ts#ObjectOwnershipEnum`) gains it too
 — one vocabulary, not a parallel list (Prime Directive #8).
 
 That enum is **loader-facing, not author-facing**, and this amendment binds it to
 stay that way. Measured: `ObjectOwnershipEnum` has no runtime consumer at all in
 this repo (`registry.ts` imports only the `ObjectOwnership` *type*), and the two
 existing kinds are set at exactly three call sites — `own` by the package loader
-(`packages/objectql/src/engine.ts:2920`, `:2933`, `:3147`, `:3157`) and `extend`
-by the `objectExtensions` loop (`engine.ts:2956`, priority from the manifest
+(`packages/objectql/src/engine.ts`, `packages/objectql/src/engine.ts`, `packages/objectql/src/engine.ts`, `packages/objectql/src/engine.ts`) and `extend`
+by the `objectExtensions` loop (`packages/objectql/src/engine.ts`, priority from the manifest
 entry). No author ever writes `ownership: 'own'`; a package author declares
 `objectExtensions: [{ extend: '…' }]` and the loader picks the kind. `'overlay'`
 is therefore set by the two hydration seams and by nothing else, and the enum's
 docblock must say so alongside the existing warning that separates it from the
-record-`ownership` model (`object.zod.ts:1385-1392`).
+record-`ownership` model (`packages/spec/src/data/object.zod.ts#ownership`).
 
 This is the "hard to get wrong" property doing real work: the new kind adds **no
 authoring surface**, so no hand-written or AI-written metadata can reach for it,
@@ -448,7 +448,7 @@ correctly or otherwise.
 
 #### D9.2 — resolution: the overlay replaces the BASE layer; extenders still fold on top
 
-`resolveObject` (`registry.ts:1206-1234`) selects its base layer as
+`resolveObject` (`packages/objectql/src/registry.ts#resolveObject`) selects its base layer as
 `overlay ?? owner` instead of `owner`, then folds `extend` contributions exactly
 as it does today.
 
@@ -463,8 +463,8 @@ That is the argument for replace-semantics over the two alternatives, and it is
 the one the ruling asked for:
 
 - **Overlay as `extend` is refused.** `mergeObjectDefinitions` merges fields
-  additively (`registry.ts:86-108`; `merged.fields = { ...base.fields,
-  ...extension.fields }` at `:91`) and has no expression for *removal* at all.
+  additively (`packages/objectql/src/registry.ts#mergeObjectDefinitions`; `merged.fields = { ...base.fields,
+  ...extension.fields }` at `packages/objectql/src/registry.ts`) and has no expression for *removal* at all.
   An overlay that drops a packaged field would silently stop dropping it — the
   measured overlay body carried `overlay_only` and neither `amount` nor
   `packaged_only`; as an extender the resolved object would carry all three.
@@ -536,21 +536,21 @@ Binding consequences:
 
 #### D9.3 — selection is by KIND; priority stays descriptive
 
-`contributors.sort((a, b) => a.priority - b.priority)` (`:1189`) totals the whole
+`contributors.sort((a, b) => a.priority - b.priority)` (`#contributors`) totals the whole
 list, so the overlay needs a priority for deterministic ordering:
 `DEFAULT_OVERLAY_PRIORITY = 150`, between `DEFAULT_OWNER_PRIORITY = 100` and
-`DEFAULT_EXTENDER_PRIORITY = 200` (`:31-32`), so a `getObjectContributors()` read
+`DEFAULT_EXTENDER_PRIORITY = 200` (`#getObjectContributors`), so a `getObjectContributors()` read
 lists the stack in layer order.
 
 It is **not** the selection rule. Base selection asks the kind, never "highest
 priority wins", because extender priority is author-declared (`ext.priority ?? 200`,
-`engine.ts:2944`) and a package could otherwise re-rank a tenant's overlay by
+`packages/objectql/src/engine.ts`) and a package could otherwise re-rank a tenant's overlay by
 declaring `priority: 140`. Declared numbers order *peers*; they must not be able
 to change *which layer is the base*.
 
 #### D9.4 — `computeFQN` is untouched, and the namespace loss is repaired for free
 
-`computeFQN` is identity (`:61-63`); the overlay layer shares the owner's key and
+`computeFQN` is identity (`packages/objectql/src/engine.ts`); the overlay layer shares the owner's key and
 this amendment introduces **no namespace dimension** — an overlay is a layer over
 one object name, not a second object. The measured namespace loss (P5) is not
 fixed by a rule but by subtraction: the packaged owner's contributor is no longer
@@ -560,7 +560,7 @@ overlay slot per object, unchanged.
 
 #### D9.5 — `assertSingleOwnerPerObject` is unchanged, and gains one violation class
 
-`assertSingleOwnerPerObject` (`:1355-1379`) counts `ownership === 'own'`. Overlays
+`assertSingleOwnerPerObject` (`packages/objectql/src/engine.ts`) counts `ownership === 'own'`. Overlays
 are not owners, so it keeps reading exactly one owner per object name — literally
 the D3 sentence, with no exemption list. This matters beyond tidiness: ADR-0028's
 D5/D6 (reserved `sys`, single-owner-per-object, apps-cannot-define-kernel)
@@ -581,7 +581,7 @@ This is the clause that makes `isArtifactBacked` stop lying, and it is **not**
 implied by D9.2 — it has to be decided, because D9.2 deliberately leaves the
 merged body identical, `_provenance: 'org'` included.
 
-`getArtifactItem(type, name)`'s object branch (`registry.ts:1727-1733`) currently
+`getArtifactItem(type, name)`'s object branch (`packages/objectql/src/registry.ts#getArtifactItem`) currently
 resolves `getObject(name)` — the merged body — and applies the
 `_packageId`/`isTenantAuthored` test to it. Under D9 it applies that test to the
 **owner contributor's definition**. Consequences:
@@ -602,7 +602,7 @@ evidence it admits every subsequent write through the `allowRuntimeCreate` tier.
 So this is the declared contract being enforced consistently, not a new
 restriction; but a deployment that has been living in the post-first-write state
 will see writes start being refused. The documented operator hatch
-(`OS_METADATA_WRITABLE=object`, `protocol.ts:7380`) is the same one door as
+(`OS_METADATA_WRITABLE=object`, `packages/metadata-protocol/src/protocol.ts#OS_METADATA_WRITABLE`) is the same one door as
 before, and it now has to stay open for the *life* of the customization rather
 than only for its first save. Deployments that cannot accept that must move the
 customization into a package — which is the position ADR-0005's whitelist has
@@ -621,11 +621,11 @@ always taken for `object`.
   moment the information is still in hand — **write time, where the packaged
   owner is one lookup away — instead of delete time, where it has been
   destroyed.**
-- **Removing the object** (`unregisterObject`, `:1482-1520`) keeps its ADR-0029
+- **Removing the object** (`unregisterObject`, `packages/metadata-protocol/src/protocol.ts`) keeps its ADR-0029
   extender guard verbatim. Tier 3 of `restoreArtifactRegistryView` then reads:
   a packaged `own` survives → remove the overlay layer only; no packaged owner →
   remove the entry, as today.
-- **Uninstalling the owning package** (`unregisterObjectsByPackage`, `:1385-1415`)
+- **Uninstalling the owning package** (`unregisterObjectsByPackage`, `packages/metadata-protocol/src/protocol.ts`)
   takes the object's overlay layer with the owner it layers over. Nothing durable
   is lost: the layer is a runtime projection of a `sys_metadata` row that is not
   touched, and a re-install re-hydrates it. D9.5's orphan violation is the
@@ -648,7 +648,7 @@ Both seams — `applyObjectRegistryMutation` and `loadMetaFromDb` — sit **afte
 package registration in the real boot order (measured in P6), so the lookup is
 answerable. The same discriminator is owed to the two metadata-service ingest
 paths that also register `'own'` from a reloaded body
-(`packages/objectql/src/plugin.ts:688-693`, `:765-770`); left alone they re-open
+(`packages/objectql/src/plugin.ts`, `packages/objectql/src/plugin.ts`); left alone they re-open
 the splice through a third door.
 
 #### D9.9 — #6995: the row's `package_id` is provenance on the layer, never an ownership claim
@@ -662,7 +662,7 @@ binding `P` against the packaged owner's id `O`:
 |:--|:--|
 | `P == O` | the normal case — one overlay layer over `O`'s object. |
 | `P` empty / absent (the `'sys_metadata'` sentinel) | **accepted.** A package-less env-wide overlay is ADR-0005's platform-global shape; the row addresses the object by name and the registry knows who owns it. Today this throws (measured, P2) — that refusal was an artefact of the borrowed slot, not a decision. |
-| `P == Q`, some other package | **refused at the producer, loudly.** On the write path `saveMetaItem` returns an error (an ADR-0112-registered code minted by the implementation card) instead of a success receipt; at boot the row is not layered and is counted in `loadMetaFromDb`'s per-record `errors` with its reason — which that seam already does today (`protocol.ts:11706-11708`), and which is why #6995 is a **write-path** divergence and not a boot-path one. |
+| `P == Q`, some other package | **refused at the producer, loudly.** On the write path `saveMetaItem` returns an error (an ADR-0112-registered code minted by the implementation card) instead of a success receipt; at boot the row is not layered and is counted in `loadMetaFromDb`'s per-record `errors` with its reason — which that seam already does today (`packages/metadata-protocol/src/protocol.ts#saveMetaItem`), and which is why #6995 is a **write-path** divergence and not a boot-path one. |
 
 The last row is a real decision, not bookkeeping, and the reason is a store
 asymmetry worth recording: the overlay-uniqueness index keys on
@@ -685,9 +685,9 @@ The ruling named the alternative as "a new ownership kind" — a contributor tha
 *also* owns, with `assertSingleOwnerPerObject` taught to accept two. Rejected:
 
 - **It grants authority nothing consumes.** § 2 measured what ownership carries
-  (namespace registration, the `_packageId` stamp at `:1314`, the table) and the
+  (namespace registration, the `_packageId` stamp at `packages/metadata-protocol/src/protocol.ts`, the table) and the
   overlay uses none of it.
-- **It makes D3 conditional.** Every consumer of `getObjectOwner` (`:1332-1335`)
+- **It makes D3 conditional.** Every consumer of `getObjectOwner` (`packages/metadata-protocol/src/protocol.ts`)
   would have to be re-read to decide *which* owner it means, and ADR-0028's
   D5/D6 rest on D3 being unconditional. An assertion with an exemption clause is
   an assertion that has to be re-litigated at every call site.
@@ -705,25 +705,25 @@ does to it:
 
 | site | today | under D9 |
 |:--|:--|:--|
-| `registry.ts:1075` default priority | `own ? 100 : 200` | third arm, `DEFAULT_OVERLAY_PRIORITY = 150` |
-| `registry.ts:1116-1130` `provisionPrimary` / `provisionSearchCompanion` | gated on `own` | **gate becomes "is this a BASE layer" (`own` or `overlay`)**. Missing this is a silent regression: the overlay body *is* the resolved base, so skipping title provisioning would change `nameField` on every overlaid object. |
-| `:1148-1155` second-owner throw | overlay hits it (#6995) | unreachable from the overlay seams |
-| `:1157-1160` same-package `own` splice | **destroys the packaged body** | untouched; the overlay never enters this branch |
-| `:1167-1170` same-package `extend` splice | — | mirrored for `overlay`: at most one layer, replaced on re-write |
-| `:1217` base selection | `find(own)` | `find(overlay) ?? find(own)` |
-| `:1228` extender fold | folds `extend` | unchanged |
-| `:1314` `getAllObjects` `_packageId` stamp | the overlay's id | the packaged owner's id (the same value whenever `P == O`) |
-| `:1332-1335` `getObjectOwner` | — | unchanged; keeps meaning "the package that owns the table" |
-| `:1355-1379` `assertSingleOwnerPerObject` | — | unchanged + orphan-overlay class (D9.5) |
-| `:1385-1415` `unregisterObjectsByPackage` | — | overlay layer leaves with its base (D9.7) |
-| `:1482-1520` `unregisterObject` | — | extender guard unchanged; tier 3 calls the layer-addressed verb first |
-| `:1727-1733` `getArtifactItem` object branch | reads the merged body | reads the owner contributor (D9.6) |
-| `spec/data/object.zod.ts:2435` | `['own','extend']` | third value + the "loader-set, never authored" clause |
-| `protocol.ts:7897-7911`, `:11670-11673` | register `'own'` | D9.8 discriminator |
-| `objectql/src/plugin.ts:688`, `:765` | register `'own'` | D9.8 discriminator |
+| `packages/objectql/src/registry.ts#DEFAULT_OVERLAY_PRIORITY` default priority | `own ? 100 : 200` | third arm, `DEFAULT_OVERLAY_PRIORITY = 150` |
+| `packages/objectql/src/registry.ts` `provisionPrimary` / `provisionSearchCompanion` | gated on `own` | **gate becomes "is this a BASE layer" (`own` or `overlay`)**. Missing this is a silent regression: the overlay body *is* the resolved base, so skipping title provisioning would change `nameField` on every overlaid object. |
+| `packages/objectql/src/registry.ts` second-owner throw | overlay hits it (#6995) | unreachable from the overlay seams |
+| `packages/objectql/src/registry.ts` same-package `own` splice | **destroys the packaged body** | untouched; the overlay never enters this branch |
+| `packages/objectql/src/registry.ts` same-package `extend` splice | — | mirrored for `overlay`: at most one layer, replaced on re-write |
+| `packages/objectql/src/registry.ts` base selection | `find(own)` | `find(overlay) ?? find(own)` |
+| `packages/objectql/src/registry.ts` extender fold | folds `extend` | unchanged |
+| `#getAllObjects` `getAllObjects` `_packageId` stamp | the overlay's id | the packaged owner's id (the same value whenever `P == O`) |
+| `#getObjectOwner` `getObjectOwner` | — | unchanged; keeps meaning "the package that owns the table" |
+| `#assertSingleOwnerPerObject` `assertSingleOwnerPerObject` | — | unchanged + orphan-overlay class (D9.5) |
+| `#unregisterObjectsByPackage` `unregisterObjectsByPackage` | — | overlay layer leaves with its base (D9.7) |
+| `#unregisterObject` `unregisterObject` | — | extender guard unchanged; tier 3 calls the layer-addressed verb first |
+| `#getArtifactItem` `getArtifactItem` object branch | reads the merged body | reads the owner contributor (D9.6) |
+| `packages/spec/src/data/object.zod.ts` | `['own','extend']` | third value + the "loader-set, never authored" clause |
+| `packages/metadata-protocol/src/protocol.ts`, `packages/metadata-protocol/src/protocol.ts` | register `'own'` | D9.8 discriminator |
+| `packages/objectql/src/plugin.ts`, `packages/objectql/src/plugin.ts` | register `'own'` | D9.8 discriminator |
 
-`ObjectContributor` is exported (`packages/objectql/src/index.ts:28`,
-`core.ts:24`), so the widened union is a public type change for `objectui` /
+`ObjectContributor` is exported (`packages/objectql/src/index.ts`,
+`packages/objectql/src/core.ts`), so the widened union is a public type change for `objectui` /
 `cloud` consumers and belongs in a minor with a changeset.
 
 ### 6. Deliberately left open for the implementation card
@@ -769,7 +769,7 @@ does to it:
 - The honest gate refuses repeat overlay writes that today succeed (D9.6). This
   is the declared contract, and it is still a behaviour change a live deployment
   can feel.
-- Two ingest paths (`plugin.ts:688`, `:765`) must adopt the discriminator or the
+- Two ingest paths (`packages/objectql/src/plugin.ts`, `packages/objectql/src/plugin.ts`) must adopt the discriminator or the
   splice returns through a third door — a coupling that is easy to miss because
   those paths are about metadata-service reloads, not about tenant overlays.
 
@@ -785,8 +785,8 @@ does to it:
 `packages/objectql/src/registry.ts` is registered against ADR-0029 in
 `scripts/adr-anchors.json` by this change. It was **unanchored**, which is the
 recurrence shape Prime Directive #13 names and the same one #6825's amendment
-found for ADR-0005: the file that implements D3 (the `own` splice at `:1157-1160`,
-`assertSingleOwnerPerObject` at `:1355`, the extender guard at `:1490`) never said
+found for ADR-0005: the file that implements D3 (the `own` splice at `packages/objectql/src/registry.ts`,
+`assertSingleOwnerPerObject` at `#assertSingleOwnerPerObject`, the extender guard at) never said
 which decision an author editing it was standing on — so the splice could be read
 as an ordinary re-registration convenience, which is precisely how it came to
 destroy a packaged definition.

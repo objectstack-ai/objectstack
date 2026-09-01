@@ -1,6 +1,6 @@
 # ADR-0049: Spec must not declare security properties the runtime does not enforce (enforce-or-remove gate)
 
-**Status**: Accepted (2026-06-15) — implemented: fail-closed `DESTRUCTIVE_OPERATIONS` (`permission-evaluator.ts:37,122`), lifecycle bits RBAC-gated, `apiEnabled` enforced (`runtime/src/api-exposure.ts`), `PolicySchema` removed, EXPERIMENTAL tag convention live. Two gate-valid disposition deviations: agent access-control shipped experimental-tagged (not enforced), `flow.runAs` kept + enforced (not removed). `action.disabled` CEL enforcement to confirm in objectui.
+**Status**: Accepted (2026-06-15) — implemented: fail-closed `DESTRUCTIVE_OPERATIONS` (`packages/plugins/plugin-security/src/permission-evaluator.ts#DESTRUCTIVE_OPERATIONS`), lifecycle bits RBAC-gated, `apiEnabled` enforced (`runtime/src/api-exposure.ts`), `PolicySchema` removed, EXPERIMENTAL tag convention live. Two gate-valid disposition deviations: agent access-control shipped experimental-tagged (not enforced), `flow.runAs` kept + enforced (not removed). `action.disabled` CEL enforcement to confirm in objectui.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (artifact vs runtime overlay), [ADR-0010](./0010-metadata-protection-model.md) (package provenance), [ADR-0027](./0027-metadata-authoring-lifecycle.md) (authoring lifecycle)
 **Consumers**: `@objectstack/spec` (security/identity schemas), `@objectstack/plugin-security` (`PermissionEvaluator`, `SecurityPlugin`), spec authors, the metadata-property liveness audit follow-ups (#1878 P0 cluster).
@@ -35,7 +35,7 @@ Shipping a security property in a fourth state — *parsed, unmarked, unenforced
 
 A second, roadmap-independent defect compounds the first: `PermissionEvaluator`
 **fails open** for operations it doesn't recognise
-(`permission-evaluator.ts:35`, `if (!permKey) return true`). Any future
+(`packages/plugins/plugin-security/src/permission-evaluator.ts#permKey`, `if (!permKey) return true`). Any future
 destructive operation added without registering it in `OPERATION_TO_PERMISSION`
 is silently ungated. The evaluator must **fail closed** for the destructive
 operation class.
@@ -46,13 +46,13 @@ operation class.
 
 - Evidence: `docs/audits/2026-06-security-identity-property-liveness.md` and the
   cross-type synthesis in `docs/audits/README.md` (cluster #1).
-- The CRUD path *is* enforced: `SecurityPlugin` (`security-plugin.ts:326`)
+- The CRUD path *is* enforced: `SecurityPlugin` (`packages/plugins/plugin-security/src/security-plugin.ts#SecurityPlugin`)
   resolves permission sets and calls `PermissionEvaluator.checkObjectPermission`,
   which maps the ObjectQL operation to an `ObjectPermission` key via
-  `OPERATION_TO_PERMISSION` (`permission-evaluator.ts:8-16`).
+  `OPERATION_TO_PERMISSION` (`packages/plugins/plugin-security/src/permission-evaluator.ts#OPERATION_TO_PERMISSION`).
 - That map covers only `find/findOne/count/aggregate/insert/update/delete`. The
   three destructive permission bits in the spec
-  (`permission.zod.ts:28-30` — `allowTransfer`/`allowRestore`/`allowPurge`)
+  (`packages/spec/src/security/permission.zod.ts#allowTransfer` — `allowTransfer`/`allowRestore`/`allowPurge`)
   have **no operation pointing at them**, and the operations they describe
   (`transfer`/`restore`/`purge`) **do not yet exist** as ObjectQL operations.
   So the bits are dangling, and the `if (!permKey) return true` default means

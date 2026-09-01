@@ -16,7 +16,7 @@ and *"SOC 2, HIPAA, GDPR"* currently **registers five objects across five
 bounded contexts**:
 
 ```ts
-// packages/plugins/plugin-audit/src/audit-plugin.ts:40
+// packages/plugins/plugin-audit/src/audit-plugin.ts
 objects: [SysAuditLog, SysActivity, SysComment, SysAttachment, SysNotification]
 ```
 
@@ -71,7 +71,7 @@ default-loaded, it became the path of least resistance for anything
   and a denormalized activity row:
 
   ```ts
-  // packages/plugins/plugin-audit/src/audit-writers.ts:328-329
+  // packages/plugins/plugin-audit/src/audit-writers.ts#auditRow
   await sys.object('sys_audit_log').create(auditRow);
   await sys.object('sys_activity').create(activityRow);
   ```
@@ -79,7 +79,7 @@ default-loaded, it became the path of least resistance for anything
   The two objects are 80% the same event at different fidelities —
   `sys_audit_log` is *"immutable, compliance-grade"*, `sys_activity` is
   *"denormalized, human-readable summaries shown [in the UI]"*
-  (`audit-writers.ts:43-45`).
+  (`packages/plugins/plugin-audit/src/audit-writers.ts`).
 
 - **Homeless objects parked in the audit manifest.** `sys_comment` is *defined*
   by `plugin-audit` but **written by the UI directly** (the audit writer never
@@ -88,7 +88,7 @@ default-loaded, it became the path of least resistance for anything
   way, and the code **says so**:
 
   ```ts
-  // packages/plugins/plugin-audit/src/audit-plugin.ts:6-11
+  // packages/plugins/plugin-audit/src/audit-plugin.ts
   // Registered here but still owned by platform-objects (the plugin contributes
   //   - sys_attachment    — a file↔record link belonging with service-storage's …
   //   - sys_notification  — … belonging with messaging
@@ -102,9 +102,9 @@ default-loaded, it became the path of least resistance for anything
 
 - **Runtime cross-context coupling.** The same writer lazily resolves the
   messaging service to emit collaboration notifications
-  (`audit-plugin.ts:96-99`), and a regression test exists specifically to stop
+  (`packages/plugins/plugin-audit/src/audit-plugin.ts`), and a regression test exists specifically to stop
   the audit writer from auditing its own writes
-  (`audit-writers.test.ts:9`) — evidence the coupling already bites.
+  (`packages/plugins/plugin-audit/src/audit-writers.test.ts`) — evidence the coupling already bites.
 
 ## 2. The design flaws (what we are correcting)
 
@@ -155,7 +155,7 @@ needs). Audit no longer dual-writes.
 
 `sys_audit_log` is the only object whose contract is *governance*: every field
 `readonly: true`, `managedBy: 'append-only'`
-(`sys-audit-log.object.ts:22`), retention policy, security-gated read. Per
+(`packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts#managedBy`), retention policy, security-gated read. Per
 ADR-0049 (enforce-or-remove), those properties must be enforced at audit's own
 boundary — which is only possible once mutable co-tenants (`sys_comment`) leave.
 Audit **remains a default platform capability**: compliance is foundational,

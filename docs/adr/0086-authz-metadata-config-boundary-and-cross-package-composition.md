@@ -54,11 +54,11 @@ scope-fix, P1 framework `bootstrapDeclaredPermissions`, P2 two-door + overlay).
 ### The trigger, and why it is not a one-off
 
 The Access pillar renders `<AccessPillar/>` with **zero props**, so it never receives the
-route's `packageId` (`objectui StudioDesignSurface.tsx:589`). Its matrix loads **all** objects
-via `client.list('object')` with no filter (`PermissionMatrixEditor.tsx:171`) — the "84
+route's `packageId` (`objectui `objectui:StudioDesignSurface.tsx``). Its matrix loads **all** objects
+via `client.list('object')` with no filter (`objectui:PermissionMatrixEditor.tsx`) — the "84
 objects" — and **saves the whole permission-set record**, including its full `objects` dict
-(`:289`). Every other pillar already scopes by `client.list('object', { packageId })`
-(Interfaces `:822`, Data `:1377`); Access simply never got the same treatment. So the surface
+(). Every other pillar already scopes by `client.list('object', { packageId })`
+(Interfaces , Data ); Access simply never got the same treatment. So the surface
 is doing three wrong things at once: it edits an **environment-level** thing from a **package**
 door, with **no package scope**, and **no composition model** to say what "the package's
 access" even means. The last one is the actual gap — the UI can't be scoped correctly until
@@ -68,30 +68,30 @@ the model says which permission bits belong to the package and which to the envi
 
 - **Permission sets are environment-level today, with no owning-package field.**
   `sys_permission_set` is `managedBy: 'config'` on the object-affordance axis
-  (`plugin-security/objects/sys-permission-set.object.ts:20`); `PermissionSetSchema`
-  (`spec/security/permission.zod.ts:108`) has **no `packageId`**. Grants live **inline as flat
-  dicts** on the record: `objects: Record<name, ObjectPermission>` (`:120`) and
-  `fields: Record<"object.field", FieldPermission>` (`:122`). **One record holds every
+  (`packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts`); `PermissionSetSchema`
+  (`packages/spec/src/security/permission.zod.ts#packageId`) has **no `packageId`**. Grants live **inline as flat
+  dicts** on the record: `objects: Record<name, ObjectPermission>` (`#ObjectPermission`) and
+  `fields: Record<"object.field", FieldPermission>` (`#FieldPermission`). **One record holds every
   package's grants.**
 - **Object api names are package-namespaced and collision-proof** (`crm_account`, `todo_task`);
   the prefixed name is the physical table name, so two packages cannot collide
-  (`manifest.zod.ts:142-179`). ⭐ *This is what makes cross-package composition conflict-free at
+  (`packages/spec/src/kernel/manifest.zod.ts#namespace`). ⭐ *This is what makes cross-package composition conflict-free at
   the key level* — a package's grants are exactly the `objects.<namespace>_*` keys.
 - **Runtime resolution is a most-permissive UNION** across a user's assigned sets
-  (`permission-evaluator.ts:64-101`, `'*'` wildcard fallback `:40`); assignment resolution
-  user→roles→sets→union in `core/security/resolve-authz-context.ts:84-252`.
+  (`packages/plugins/plugin-security/src/permission-evaluator.ts#OPERATION_TO_PERMISSION`, `'*'` wildcard fallback `packages/plugins/plugin-security/src/permission-evaluator.ts`); assignment resolution
+  user→roles→sets→union in `packages/core/src/security/resolve-authz-context.ts`.
 - **No package-shipped access exists.** `bootstrapDeclaredRoles` seeds a package manifest's
-  `roles` into `sys_role` (`bootstrap-declared-roles.ts:61`), but there is **no
+  `roles` into `sys_role` (`bootstrap-declared-roles.ts`), but there is **no
   `bootstrapDeclaredPermissions`**. `stack.permissions: PermissionSetSchema[]`
-  (`stack.zod.ts:235`, "Permission Sets and Profiles") is **declarable but never migrated**
-  into `sys_permission_set`. The manifest's `permissions` field (`manifest.zod.ts:264`) is
+  (`packages/spec/src/stack.zod.ts#permissions`, "Permission Sets and Profiles") is **declarable but never migrated**
+  into `sys_permission_set`. The manifest's `permissions` field (`packages/spec/src/kernel/manifest.zod.ts#permissions`) is
   **plugin install-consent scopes** (ADR-0025), *not* RBAC grants. → **a package cannot ship
   default access for its own objects, and the metadata it *can* declare is silently inert** —
   a live ADR-0078 violation. (ADR-0066 **D5** named this "gap to close"; this ADR closes it.)
 - **The vocabulary for the boundary already exists** — two `managedBy` axes:
   provenance/layer `managedBy: 'package' | 'platform' | 'user'`
-  (`metadata-persistence.zod.ts:72`) and the object CRUD-affordance bucket
-  `'platform' | 'config' | 'system' | 'append-only' | 'better-auth'` (`object.zod.ts:408`).
+  (`packages/spec/src/system/metadata-persistence.zod.ts#managedBy`) and the object CRUD-affordance bucket
+  `'platform' | 'config' | 'system' | 'append-only' | 'better-auth'` (`packages/spec/src/data/object.zod.ts`).
   We build on the **provenance** axis, not a parallel one.
 
 ### Governing precedent (do not re-litigate)
@@ -203,7 +203,7 @@ so Shape B loses no flexibility.
 Runtime composition semantics (unchanged, now stated as the contract): **grants UNION
 most-permissively across all of a user's assigned sets; keys never collide because object api
 names are package-namespaced; the flattened per-user effective grant is served at
-`GET /api/v1/auth/me/permissions` (`objectui MePermissionsProvider.tsx:56`).** Precedence with
+`GET /api/v1/auth/me/permissions` (`objectui `objectui:MePermissionsProvider.tsx``).** Precedence with
 AND-gates (`private` posture, `requiredPermissions`) and RLS OR/AND is per ADR-0066's
 *Precedence / combination semantics* — this ADR does not change it.
 
@@ -211,8 +211,8 @@ AND-gates (`private` posture, `requiredPermissions`) and RLS OR/AND is per ADR-0
 
 Installing a package **should** grant working default access to **its own** objects.
 Implement `bootstrapDeclaredPermissions` — the exact sibling of `bootstrapDeclaredRoles`
-(`plugin-security/security-plugin.ts:719`) — that migrates `stack.permissions`
-(`stack.zod.ts:235`) into `sys_permission_set` as `managedBy:'package'` + `packageId`,
+(`packages/plugins/plugin-security/src/security-plugin.ts`) — that migrates `stack.permissions`
+(`packages/spec/src/stack.zod.ts#packageId`) into `sys_permission_set` as `managedBy:'package'` + `packageId`,
 **idempotently** and **upgrade-aware** (re-seed the package's own slice on version bump; never
 clobber env-authored `platform`/`user` sets). This:
 
@@ -252,10 +252,10 @@ each door only writes what it owns.
 ## Change list (phased — each phase independently shippable)
 
 ### P0 — objectui, low-risk (closes the leak + the data-loss trap) — mirrors objectui#2197
-- Pass the route `packageId` into `<AccessPillar/>` (`StudioDesignSurface.tsx:589`).
-- Scope the matrix rows to `client.list('object', { packageId })` (`PermissionMatrixEditor.tsx:171`)
-  and fields likewise (`:208`) — render **only this package's object rows**.
-- **Slice-merge on save** (`:289`): persist `{ ...original.objects, ...editedPackageKeys }` so
+- Pass the route `packageId` into `<AccessPillar/>` (`objectui:StudioDesignSurface.tsx`).
+- Scope the matrix rows to `client.list('object', { packageId })` (`objectui:PermissionMatrixEditor.tsx`)
+  and fields likewise () — render **only this package's object rows**.
+- **Slice-merge on save** (): persist `{ ...original.objects, ...editedPackageKeys }` so
   editing the package's slice **never deletes other packages' grants** from the shared record.
   The namespaced keys make the package's slice unambiguous.
 - Keep the left rail global (permission sets are still env-level under the current model).
@@ -338,14 +338,14 @@ each door only writes what it owns.
   ADR-0048 (namespace isolation), ADR-0078 (no inert metadata), ADR-0016 / ADR-0033
   (draft/publish), ADR-0084 + `docs/design/builder-ui.md` §7 & §3.5 (Access pillar; defers
   composition), ADR-0025 (manifest consent scopes ≠ grants), ADR-0010 (metadata protection).
-- Framework: `spec/security/permission.zod.ts`, `spec/stack.zod.ts:235`,
-  `spec/system/metadata-persistence.zod.ts:72`, `spec/data/object.zod.ts:408`,
-  `spec/kernel/manifest.zod.ts:142-179,264`, `plugin-security/bootstrap-declared-roles.ts`,
+- Framework: `spec/security/permission.zod.ts`, `packages/spec/src/stack.zod.ts`,
+  `packages/spec/src/system/metadata-persistence.zod.ts`, `packages/spec/src/data/object.zod.ts`,
+  `packages/spec/src/kernel/manifest.zod.ts`, `plugin-security/bootstrap-declared-roles.ts`,
   `plugin-security/default-permission-sets.ts`, `plugin-security/permission-evaluator.ts`,
   `core/security/resolve-authz-context.ts`, `dogfood/test/authz-conformance.matrix.ts`.
-- objectui: `StudioDesignSurface.tsx` (`AccessPillar` `:589`, Interfaces `:822`, Data `:1377`),
-  `metadata-admin/PermissionMatrixEditor.tsx` (`:171`, `:208`, `:289`),
-  `permissions/MePermissionsProvider.tsx:56`.
+- objectui: `StudioDesignSurface.tsx` (`AccessPillar` `packages/qa/dogfood/test/authz-conformance.matrix.ts`, Interfaces `packages/qa/dogfood/test/authz-conformance.matrix.ts`, Data `packages/qa/dogfood/test/authz-conformance.matrix.ts`),
+  `metadata-admin/PermissionMatrixEditor.tsx` (`packages/qa/dogfood/test/authz-conformance.matrix.ts`, `packages/qa/dogfood/test/authz-conformance.matrix.ts`, `packages/qa/dogfood/test/authz-conformance.matrix.ts`),
+  `objectui:permissions/MePermissionsProvider.tsx`.
 - Related issues: objectui#2196 (trigger), objectui#2197 (Interfaces scope-fix template),
   framework#1828 (ADR-0048), #1892/#1893 (aspirational-metadata hygiene), #2377 (ADR-0049
   enforce-or-remove), #1883 (permission lifecycle ops ungated).
@@ -373,7 +373,7 @@ flagged inline below.
 |---|---|---|
 | **D1** classification on the provenance axis | **Adopted**; table vocabulary now stale — see "revised table" below | Principle intact. Rows renamed/removed by ADR-0090 (Profile gone, role→position). |
 | **D2** DEFINITION↔ASSIGNMENT principle | **Adopted, reinforced** | ADR-0090 D2 leans on it to justify removing Profile; ADR-0091 dates the *assignment* rows only (`valid_from`/`valid_until`), confirming they are env data. |
-| **D3** `packageId` + provenance `managedBy` on the set | **Implemented** | `spec/security/permission.zod.ts:167` (`packageId`, tagged `[ADR-0086 D3]`) + `:178` (`managedBy` enum); record fields `package_id`/`managed_by`/`customized` + index on `sys-permission-set.object.ts:217-266`. |
+| **D3** `packageId` + provenance `managedBy` on the set | **Implemented** | `packages/spec/src/security/permission.zod.ts#managedBy` (`packageId`, tagged `[ADR-0086 D3]`) + (`managedBy` enum); record fields `package_id`/`managed_by`/`customized` + index on `packages/plugins/plugin-security/src/objects/sys-permission-set.object.ts#managedBy`. |
 | **D4** Shape B (packages ship own sets; union; shared slices env-only) | **Adopted, reinforced; subtract layer upgraded** | ADR-0090 D9 / Alt #6 reject package-written shared/builtin sets for the same reasons. Composition is now anchored at the **position** ("bind several packages' sets to one position"), ADR-0094 D5. **Subtract layer changed** — see ⚠️ below. |
 | **D5** `bootstrapDeclaredPermissions` | **Implemented; `isDefault` semantics refined by ADR-0090 D5** | `plugin-security/src/bootstrap-declared-permissions.ts` (invoked at `kernel:ready`, `security-plugin.ts`); seeds `managed_by:'package'` + `package_id`, idempotent/upgrade-aware; closes the ADR-0078 inert-metadata smell the D5 header calls out. `isDefault` no longer means "profile fallback": app-level default sets **auto-bind to the `everyone` position**; package-level default sets materialize a `sys_audience_binding_suggestion` an admin confirms (new object). |
 | **D6** package Access door under draft/publish | **Implemented** | objectui writes the package door as `mode:'draft', packageId` (`PermissionMatrixEditor.tsx`); env door stays live and, per ADR-0094 D3, that "live" save is itself redirected into a metadata overlay. |
