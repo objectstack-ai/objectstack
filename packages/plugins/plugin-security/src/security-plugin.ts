@@ -6481,23 +6481,46 @@ export class SecurityPlugin implements Plugin {
       // every later by-id write through the stored-row leg below. The residual
       // envelope asymmetry is confined to exactly those shapes.
       //
-      // [#8959, re-measured 2026-08-16] "Confined" is still NOT a publish-time
-      // bound today, though the reason has moved on from #8959's finding. #8772
-      // has since been RULED (2026-08-16, comment 5306089973) — it is no longer
-      // "open and unruled" — but the ramp it ordered has two code legs and
-      // neither has landed yet: Direction 2 (the authoring builder forces
-      // `required: true` under `controlled_by_parent`, #9138) is dispatchable
-      // now but not yet merged; Direction 1 (`relationship/master-detail-required`
-      // promoted `warning` → `error`, scoped to `controlled_by_parent`, #9139) is
-      // deliberately held for the **v18** boundary (`main` is still 17.x as of
-      // this note). So the lint measured by #8959 is unchanged: `master_detail`
-      // with no `required` still draws only `severity: 'warning'`, and
-      // `required` + `readonly` / `required` + `system` still draw nothing at
-      // all (`packages/lint/src/data-model-rules.ts`). A freshly authored detail
-      // therefore still reaches this branch and its `422` — the residue is a
-      // live, newly-authorable surface, not a shrinking legacy tail, until BOTH
-      // #9138 and #9139 land. Re-check this paragraph before trusting it; once
-      // both have landed it is the one that goes stale next.
+      // [#8959, re-measured 2026-09-01] "Confined" is now a PARTIAL publish-time
+      // bound: of the three shapes above, ONE is fenced at authoring time and
+      // two are not. #8772 was RULED (2026-08-16, comment 5306089973) and the
+      // ramp it ordered has two code legs, of which exactly one has landed.
+      // Direction 2 (#9138) IS merged: `ObjectSchema.create()` now runs
+      // `forceCbpMasterDetailRequired` (`packages/spec/src/data/object.zod.ts`)
+      // — under `controlled_by_parent`, a `master_detail` reference with
+      // `required` omitted is forced to `required: true`, and an explicit
+      // `required: false` is refused with a located error. Direction 1
+      // (`relationship/master-detail-required` promoted `warning` → `error`,
+      // scoped to `controlled_by_parent`, #9139) has NOT landed — that card is
+      // open and `pm:on-hold`, deliberately held for the **v18** boundary
+      // (`main` is still 17.x as of this note).
+      //
+      // ⛔ #9138 landing is NOT "the residue is gone". It narrows the FIRST
+      // shape only, and only on the builder path:
+      //   • no `required` — no longer newly authorable through
+      //     `ObjectSchema.create()`, but it survives on the raw
+      //     `.parse()`/`.safeParse()` path, which #9138 left untouched ON
+      //     PURPOSE so metadata already at rest keeps loading (its docblock
+      //     says so). Measured: `safeParse` of a `controlled_by_parent` object
+      //     takes both an omitted `required` and an explicit `required: false`.
+      //   • `required` + `readonly` and `required` + `system` — STILL newly
+      //     authorable through `ObjectSchema.create()` itself: the force
+      //     returns early on `required === true` and never inspects
+      //     `readonly`/`system`. It in fact MINTS them — a `readonly`/`system`
+      //     master reference authored with no `required` comes out of
+      //     `create()` as `required: true` plus the flag, which is exactly a
+      //     shape `validateRecord` skips.
+      //
+      // And nothing warns on the way past: the lint measured by #8959 is
+      // unchanged — the predicate is still `def.required !== true` at
+      // `severity: 'warning'` (`packages/lint/src/data-model-rules.ts`), so the
+      // two flagged shapes draw NO finding at ANY severity and only the
+      // un-flagged one draws a warning. A freshly authored detail therefore
+      // still reaches this branch and its `422`: for the two flagged shapes
+      // straight through the builder, for the third through raw parse. It is a
+      // live surface, not a shrinking legacy tail. Re-check this paragraph
+      // before trusting it — it goes stale when #9139 lands, or when the
+      // builder force grows to cover the two flagged shapes.
       //
       // ⛔ [#9137] FREEZE NOTE — maintainer ruling on #8772, Direction 4,
       // "immediately": until the two legs above both land, this `if` is the
