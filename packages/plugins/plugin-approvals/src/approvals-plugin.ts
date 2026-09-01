@@ -20,7 +20,12 @@ import {
   type ApprovalEngine,
   type ApprovalMessagingSurface,
 } from './approval-service.js';
-import { bindApprovalLockHook, bindDelegationWriteGuard, unbindAllHooks } from './lifecycle-hooks.js';
+import {
+  bindApprovalLockHook,
+  bindDelegationWriteGuard,
+  bindRecordDeleteCancelHook,
+  unbindAllHooks,
+} from './lifecycle-hooks.js';
 import { bindSnapshotRedactionMiddleware } from './payload-redaction-middleware.js';
 import type { FieldVisibilitySource } from './payload-redaction.js';
 import { registerApprovalNode, type ApprovalAutomationSurface } from './approval-node.js';
@@ -244,13 +249,19 @@ export class ApprovalsServicePlugin implements Plugin {
     });
 
     // Record lock: block edits to a record while it has a pending request.
+    // Record-delete cancel (#13568): void a record's pending requests when the
+    // record itself is deleted — the other half of the lock's lifecycle, and
+    // the reason `disableAutoHooks` now suppresses BOTH (a deployment that
+    // wants no engine-level approval wiring wants neither half; leaving the
+    // lock off and the cancel on would be a shape nobody asked for).
     // Delegation write-guard: a self-service OOO delegation may only name the
-    // acting user as delegator (#1322 follow-up). Both bind under the same
+    // acting user as delegator (#1322 follow-up). All bind under the same
     // package id, so unbindAllHooks clears them together.
     if (!this.options.disableAutoHooks) {
       try {
         unbindAllHooks(engine);
         bindApprovalLockHook(engine, ctx.logger);
+        bindRecordDeleteCancelHook(engine, this.service, ctx.logger);
         bindDelegationWriteGuard(engine, ctx.logger);
         // [#10749] Generic-door snapshot redaction. Registered here so the
         // service door and the generic data door narrow together — see

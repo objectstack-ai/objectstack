@@ -77,11 +77,25 @@ export const APPROVALS_HOOK_PACKAGE = 'plugin-approvals:lock';
 interface MinimalEngine {
   registerHook(event: string, handler: (ctx: any) => any | Promise<any>, options?: {
     object?: string | string[];
+    excludeObjects?: string | string[];
     priority?: number;
     packageId?: string;
   }): void;
   unregisterHooksByPackage(packageId: string): number;
   find<T = any>(object: string, args: any, opts?: any): Promise<T[]>;
+}
+
+/**
+ * The one thing {@link bindRecordDeleteCancelHook} needs from the approvals
+ * service — declared structurally so the hook can be bound (and tested) against
+ * anything that answers it, and so this module keeps depending on no more of
+ * the service than it uses.
+ */
+export interface RecordDeleteCancelSurface {
+  cancelForDeletedRecord(
+    objectName: string,
+    recordId: string,
+  ): Promise<{ cancelled: string[]; suspendedRuns: string[] }>;
 }
 
 interface MinimalLogger {
@@ -382,6 +396,122 @@ export function bindApprovalLockHook(engine: MinimalEngine, logger?: MinimalLogg
   }, { packageId: APPROVALS_HOOK_PACKAGE, priority: 50 });
 
   logger?.info?.('[approvals] record-lock hook bound');
+}
+
+/**
+ * The approvals plugin's own bookkeeping tables.
+ *
+ * The lock hook above skips them with a `startsWith('sys_approval')` test
+ * because it is a `beforeUpdate` guard and the cheap test is enough. The delete
+ * linkage below excludes them at REGISTRATION instead, which is strictly
+ * stronger: `hookMatchesObject` subtracts `excludeObjects` before
+ * `hasHooksFor` answers, so these objects do not even pay the delete-side
+ * pre-image read the hook's presence would otherwise demand of them.
+ *
+ * Literal names, not a prefix: `excludeObjects` matches literally by design
+ * (`'*'` is refused at registration), so a sixth approvals object added later
+ * must be added here too — which is the loud direction. A missing entry costs
+ * one pointless lookup, never a wrong answer, because
+ * {@link bindRecordDeleteCancelHook} would find no request whose
+ * `object_name` names an approvals table anyway.
+ */
+const APPROVALS_OWN_OBJECTS = [
+  'sys_approval_request',
+  'sys_approval_action',
+  'sys_approval_approver',
+  'sys_approval_token',
+  'sys_approval_delegation',
+] as const;
+
+/**
+ * Bind the global record-delete → approval-cancel linkage (#13568, maintainer
+ * ruling 2026-08-31 「同意」).
+ *
+ * ## Why this is a GLOBAL hook and not a per-module rule
+ *
+ * The card reached us from a leave-request module, but nothing about it is
+ * specific to leave: any object whose approval node declares `lockRecord` puts
+ * its authors on the same path — the lock blocks the EDIT, so "delete and
+ * recreate" becomes the only way to fix a wrong record, and every such delete
+ * used to leave its pending request sitting in the approvers' inbox, counted,
+ * openable, and pointing at a record that no longer exists. So the linkage
+ * belongs exactly where the lock already lives: one global registration, and
+ * every "approval + lockRecord" combination is covered at once.
+ *
+ * ## Why `afterDelete`, and why it needs no row-set plumbing
+ *
+ * `after`, because a cancellation must not be written for a delete that then
+ * fails; the delete has landed by the time this runs. And the engine hands it
+ * the rows outright: a by-id delete binds `previous` from the pre-image it
+ * already reads for the not-found gate (#7867), and a predicate delete reads
+ * the doomed rows ONCE before they are gone and dispatches this hook per row
+ * with each row bound (#5038 / #5574, `bulkPerRowRows` in ObjectQL's
+ * `delete()`). So there is no "which rows was this?" question left to answer —
+ * no before-hook stash, no predicate re-resolution, no unbounded branch.
+ *
+ * ## Cost
+ *
+ * A global delete-side registration makes `hasHooksFor('afterDelete', object)`
+ * true for every non-excluded object, which is what makes the engine read the
+ * doomed rows on a predicate delete. That is not a new cost on any real
+ * deployment: `plugin-sharing`, `service-storage` and `plugin-audit` already
+ * register global delete-side hooks, so the read was already demanded of every
+ * object (ObjectQL's `engine-delete-prior-read-scope.test.ts` enumerates them).
+ *
+ * ## Failure posture
+ *
+ * Nothing here throws. The delete already happened; failing this hook would
+ * turn a successful delete into an error for the caller while leaving the row
+ * gone. A failure degrades to the PRE-EXISTING state (the stale request stays)
+ * and is logged — see {@link RecordDeleteCancelSurface}'s implementation for
+ * the per-request warning.
+ */
+export function bindRecordDeleteCancelHook(
+  engine: MinimalEngine,
+  service: RecordDeleteCancelSurface,
+  logger?: MinimalLogger,
+): void {
+  engine.registerHook('afterDelete', async (ctx: any) => {
+    const object = (ctx?.object ?? ctx?.objectName) as string | undefined;
+    if (!object) return;
+
+    // The deleted row's own id. `previous` first: on the per-row dispatch it IS
+    // the deleted row, and on the by-id path it is the pre-image the engine
+    // proved present before deleting. `input.id` is the fallback for a
+    // hand-built context (a direct handler call, a test) that carries no
+    // pre-image.
+    const raw = (ctx?.previous as any)?.id ?? ctx?.input?.id;
+    const recordId = raw == null ? '' : String(raw);
+    if (!recordId) {
+      // "We do not know which row this was" — never read as "no row changed".
+      // Unreachable on the engine paths above (both bind an id), so a sighting
+      // is a real finding about a caller this hook has not met.
+      logger?.warn?.(
+        '[approvals] a delete reached the approval-cancel hook with no record id — pending approvals '
+        + 'for the deleted record (if any) stay in the inbox',
+        { object },
+      );
+      return;
+    }
+
+    try {
+      await service.cancelForDeletedRecord(String(object), recordId);
+    } catch (err: any) {
+      // Belt: the service already swallows its own per-request failures, so
+      // reaching here means something outside them threw. The delete stands.
+      logger?.warn?.(
+        '[approvals] the approval-cancel linkage failed for a deleted record — its pending approvals '
+        + 'stay in the inbox pointing at a record that no longer exists',
+        { object, record: recordId, error: err?.message ?? String(err) },
+      );
+    }
+  }, {
+    excludeObjects: [...APPROVALS_OWN_OBJECTS],
+    packageId: APPROVALS_HOOK_PACKAGE,
+    priority: 50,
+  });
+
+  logger?.info?.('[approvals] record-delete cancel hook bound');
 }
 
 /** The self-service out-of-office delegation object (#1322). */

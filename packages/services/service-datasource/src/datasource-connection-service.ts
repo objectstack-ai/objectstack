@@ -135,6 +135,7 @@ export type ConnectionEngineLike = Partial<
     | 'getDefaultDriverName'
     | 'markDatasourceUnavailable'
     | 'clearDatasourceUnavailable'
+    | 'unregisterDriver'
   >
 >;
 
@@ -587,6 +588,13 @@ export class DatasourceConnectionService {
       }
     }
 
+    // #13578 — set to the registry key ONLY when this attempt is the thing that
+    // put it there, so the rollback below can never evict a driver someone else
+    // owns. `registerDriver` is a no-op on a name it already holds (it keeps the
+    // incumbent and discards the newcomer), and the `asDefault` branch's
+    // idempotency guard above tests for A default rather than for THIS name — so
+    // "we called register" is not evidence that "we registered".
+    let registeredByThisAttempt: string | undefined;
     try {
       const handle = await factory.create({ ...toSpec(record), ...(secret ? { secret } : {}) });
       if (typeof handle?.connect === 'function') await handle.connect();
@@ -615,7 +623,17 @@ export class DatasourceConnectionService {
           /* frozen driver — registration may still work if name already matches */
         }
       }
+      // Fails SAFE when the engine cannot answer: an engine without
+      // `getDriverByName` (the seam is `Partial<…>`) leaves us unable to tell
+      // our registration from someone else's, and evicting on a guess is the
+      // worse error of the two — so assume it was already held and roll nothing
+      // back.
+      const heldBefore =
+        typeof engine.getDriverByName === 'function'
+          ? engine.getDriverByName(engineDriver.name) !== undefined
+          : true;
       engine.registerDriver(engineDriver, opts.asDefault === true);
+      if (!heldBefore) registeredByThisAttempt = engineDriver.name;
       engine.registerDatasourceDef?.({
         name,
         schemaMode: record.schemaMode,
@@ -645,6 +663,18 @@ export class DatasourceConnectionService {
       this.logger?.info?.(`datasource '${name}': connected (driver=${record.driver}, schemaMode=${record.schemaMode ?? 'managed'})`);
       return { name, status: 'connected', ...(handle.ownership ? { ownership: handle.ownership } : {}) };
     } catch (err) {
+      // #13578 — failed-start ROLLBACK, the first path the card asked to be
+      // walked. Registration happens partway through this block, so a throw
+      // after it used to return `failed-degraded` while leaving a live entry in
+      // the registry: a datasource the admin list reports as failed, whose
+      // driver the readiness probe still pings. Narrow today (the steps after
+      // `registerDriver` are individually guarded), but the window is real and
+      // the rollback is what makes "failed ⇒ not registered" true by
+      // construction rather than by the current arrangement of the lines.
+      //
+      // Before `handleFailure`, which records the unavailable mark: eviction
+      // deliberately does not touch that map, and the mark must outlive it.
+      if (registeredByThisAttempt) engine.unregisterDriver?.(registeredByThisAttempt);
       // `err` itself is handed on, not just its message: the driver package's
       // build output being absent is reported as `err.code ===
       // 'ERR_MODULE_NOT_FOUND'`, and that structured signal is gone the moment
@@ -686,6 +716,22 @@ export class DatasourceConnectionService {
     // datasource that no longer exists in that state.
     this.states.delete(name);
     engine?.clearDatasourceUnavailable?.(name);
+
+    // #13578 — the eviction this method never did. Closing the pool above only
+    // ends the CONNECTION; the driver instance stayed in the engine registry,
+    // so `checkDriversHealth()` (and through it `GET /api/v1/ready`) kept
+    // naming a datasource whose record had already been deleted, with a process
+    // restart as the only recovery.
+    //
+    // It goes LAST, and after the disconnect: `driver` above is resolved out of
+    // the registry, so evicting first would leave the pool open with nothing
+    // left holding a handle to close it.
+    //
+    // `driverName` rather than `name`: the DEFAULT driver is registered under
+    // its NATURAL name (#3826), so `name` ('default') matches no registry key
+    // and evicting by it would silently remove nothing — the same
+    // exit-0-and-did-nothing shape this fix exists to remove.
+    if (driverName) engine?.unregisterDriver?.(driverName);
   }
 
   /**

@@ -2101,9 +2101,10 @@ export class AuthManager {
         // resolved `baseURL` origin and treats `trustedOrigins` as purely
         // ADDITIVE, so an empty list and an omitted key are equivalent and
         // both leave exactly the deployment's own origin trusted; every other
-        // origin is refused with `403 INVALID_ORIGIN`. Measured against
-        // better-auth 1.7.1 (`getTrustedOrigins` in `dist/context/helpers.mjs`,
-        // `validateOrigin` in `dist/api/middlewares/origin-check.mjs`).
+        // origin is refused with `403 INVALID_ORIGIN`. Measured against the
+        // then-installed better-auth 1.7.1 (`getTrustedOrigins` in
+        // `dist/context/helpers.mjs`, `validateOrigin` in
+        // `dist/api/middlewares/origin-check.mjs`).
         if (
           process.env.NODE_ENV !== 'production' &&
           !origins.length && (!corsOrigin || corsOrigin === '*')
@@ -2409,6 +2410,17 @@ export class AuthManager {
     // platform-standard truthy set (`true`/`1`/`yes`/`on`, case-insensitive)
     // instead of only the literal string `'true'` — a repeated operator footgun
     // (`OS_SSO_ENABLED=1` silently parsed as disabled).
+    //
+    // Precedence for `scim` / `sso` / `ssoDomainVerification` (#13439,
+    // maintainer ruling 2026-08-31): an EXPLICIT config value wins over the
+    // env var; the env var decides only where the config leaves the key unset
+    // (tri-state `z.boolean().optional()` in AuthPluginConfigSchema). This is
+    // deliberately the OPPOSITE of the env-wins order the OIDC/2FA/HIBP keys
+    // above keep: for these three, config is how the code constructing the
+    // AuthPlugin states a value the deployment env must not silently outrank
+    // (the cloud control plane's plan-derived `plugins.scim` is the known
+    // writer), while the operator per-environment override survives for every
+    // deployment that leaves the keys unset.
     const ssoFromEnv = readBooleanEnv('OS_SSO_ENABLED');
     const scimFromEnv = readBooleanEnv('OS_SCIM_ENABLED');
     // Opt-in DNS domain-verification for external SSO providers (ADR-0024 ②).
@@ -2423,7 +2435,7 @@ export class AuthManager {
     // @better-auth/scim's `active:false` → ban runs through the admin plugin,
     // and org-scoped tokens need the organization plugin — so enabling SCIM
     // forces `admin` on (organization already defaults on). See ADR-0071.
-    const scimEffective = scimFromEnv ?? (pluginConfig as any).scim ?? false;
+    const scimEffective = pluginConfig.scim ?? scimFromEnv ?? false;
     const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
     const hibpFromEnv = readBooleanEnv('OS_AUTH_PASSWORD_REJECT_BREACHED');
     const enabled = {
@@ -2440,8 +2452,8 @@ export class AuthManager {
       // #2766 V1.5 — phone+password sign-in. Opt-in; OTP flows stay off until
       // SMS infrastructure exists (tracked separately).
       phoneNumber: (pluginConfig as any).phoneNumber ?? false,
-      sso: ssoFromEnv ?? (pluginConfig as any).sso ?? false,
-      ssoDomainVerification: ssoDomainVerifyFromEnv ?? (pluginConfig as any).ssoDomainVerification ?? false,
+      sso: pluginConfig.sso ?? ssoFromEnv ?? false,
+      ssoDomainVerification: pluginConfig.ssoDomainVerification ?? ssoDomainVerifyFromEnv ?? false,
       scim: scimEffective,
     };
 
@@ -5061,7 +5073,7 @@ export class AuthManager {
       // plugin on, ADR-0071) — previously `?? false`, which advertised the
       // admin surface as absent in SCIM-enabled deployments where it was
       // actually mounted, hiding the admin sys_user actions (#2766 V1).
-      admin: pluginConfig.admin ?? (readBooleanEnv('OS_SCIM_ENABLED') ?? (pluginConfig as any).scim ?? false),
+      admin: pluginConfig.admin ?? (pluginConfig.scim ?? readBooleanEnv('OS_SCIM_ENABLED') ?? false),
       // #2766 V1.5 — mirrors `enabled.phoneNumber` in buildPluginList().
       phoneNumber: (pluginConfig as any).phoneNumber ?? false,
       // #2780 — OTP sign-in / self-service reset is only advertised when the
@@ -5095,9 +5107,11 @@ export class AuthManager {
   /**
    * Coarse "is the domain-routed `@better-auth/sso` plugin wired" flag.
    * Resolved with the EXACT logic that decides whether the plugin is mounted
-   * in `buildPlugins()` (`ssoFromEnv ?? pluginConfig.sso ?? false`) so the
+   * in `buildPlugins()` (`pluginConfig.sso ?? ssoFromEnv ?? false`) so the
    * advertised capability can never disagree with the actual `/sign-in/sso`
-   * route. `OS_SSO_ENABLED` (when set) wins over the config-file setting.
+   * route. An explicit `plugins.sso` wins over `OS_SSO_ENABLED`; the env var
+   * decides only when the config leaves it unset (#13439, maintainer ruling
+   * 2026-08-31).
    * Public so `AuthPlugin` can gate the Setup-nav "SSO Providers" entry on it
    * (captures both self-host `OS_SSO_ENABLED` and the cloud per-env
    * `planAllowsSso` config, since that arrives via `plugins.sso`).
@@ -5106,7 +5120,7 @@ export class AuthManager {
     // Same parser as `buildPluginList` (`readBooleanEnv`) so the advertised
     // capability can never disagree with the actually-mounted route.
     const ssoFromEnv = readBooleanEnv('OS_SSO_ENABLED');
-    return ssoFromEnv ?? (this.config.plugins as any)?.sso ?? false;
+    return this.config.plugins?.sso ?? ssoFromEnv ?? false;
   }
 
   /**
@@ -5121,7 +5135,7 @@ export class AuthManager {
   public isSsoDomainVerificationEnabled(): boolean {
     if (!this.isSsoWired()) return false;
     const fromEnv = readBooleanEnv('OS_SSO_DOMAIN_VERIFICATION');
-    return fromEnv ?? (this.config.plugins as any)?.ssoDomainVerification ?? false;
+    return this.config.plugins?.ssoDomainVerification ?? fromEnv ?? false;
   }
 
   /**

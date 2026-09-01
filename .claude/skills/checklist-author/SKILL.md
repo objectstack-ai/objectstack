@@ -30,8 +30,8 @@ metadata:
 
 ## 编排契约
 
-1. **Worktree 先行**(PD#11):`git worktree add ../objectstack-<task> -b <branch> main`。
-   全部编辑都在那里做。派发任何 agent 之前先读清单现状。
+1. **Worktree 先行**(PD#11):`git fetch origin main && git worktree add --no-track ../objectstack-<task>
+   -b <branch> origin/main`。全部编辑都在那里做。派发任何 agent 之前先读清单现状。
 2. **五个只读 gap hunter 并行** —— 每个 SWEEP.md 角度一个(console UI / spec 枚举 /
    路由与运行时 / 内置应用 / 文档声称)。每个拿到:当前 item-id 清单、已知的 waiver
    与 blocked 项(不重复上报),以及输出契约 `surface | evidence path | coverage

@@ -1182,8 +1182,13 @@ export function sinkGeneratorVerdict({ path, entry, run }) {
  * Every failure — no toolchain, spawn error, unreadable manifest, drift —
  * returns `ok: false` with the reason, and `sinkGeneratorVerdict` turns that
  * into a governed verdict. ⚠️ "No toolchain" is a real environment here, not a
- * hypothetical: the merge-group guard job installs no dependencies (see the
- * header), so there it fails closed on every run.
+ * hypothetical. It used to be the merge-group guard job's PERMANENT state: that
+ * job installed nothing, so every row with a `verify` failed closed there while
+ * the seat-side `--test` lifted the same diff. #14063 gave the job an install
+ * (maintainer 2026-09-01, quoted in `check-governed-queue-guard.mjs`'s header),
+ * and made every step of it `continue-on-error` — so this branch is now the
+ * DEGRADED path rather than the normal one, and it degrades to exactly the
+ * fail-closed behaviour that preceded it.
  */
 export function runSinkGenerator(root, entry) {
   let dir;

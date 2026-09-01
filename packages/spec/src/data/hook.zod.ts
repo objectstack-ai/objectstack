@@ -2,11 +2,6 @@
 
 import { z } from 'zod';
 import { ExpressionInputSchema } from '../shared/expression.zod';
-
-/**
- * Hook Lifecycle Events
- * Defines the interception points in the ObjectQL execution pipeline.
- */
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
@@ -67,6 +62,11 @@ const hookTargetError =
   + 'name nothing matches, so it could never fire. Name the object(s) — '
   + "`object: 'account'` or `object: ['account', 'contact']` — or, if firing on "
   + "every object really is the intent, write the wildcard explicitly: `object: '*'`.";
+
+/**
+ * Hook Lifecycle Events
+ * Defines the interception points in the ObjectQL execution pipeline.
+ */
 
 /**
  * The lifecycle events a hook can subscribe to.

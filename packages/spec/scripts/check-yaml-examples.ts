@@ -75,6 +75,19 @@
  * and cites ADR-0089), so this gate deliberately adds no vocabulary of its
  * own: the author reads exactly the rejection a runtime save would print.
  *
+ * ── Depth: a component's `properties` is judged too (#13338) ────────────────
+ * The declared schema's `safeParse` closes a node's OWN keys and stops there —
+ * Zod strictness does not recurse, and `PageComponentSchema.properties` is an
+ * open record. So a tagged component example used to claim "verified against
+ * the live schema" while saying nothing about `properties`, which is where
+ * essentially all of its authored content lives: `record:details` with
+ * `columns: 2` against the enum `"1"|"2"|"3"|"4"` was GREEN. After a block
+ * validates against its declared schema, every node carrying a `type` string
+ * plus a `properties` mapping is now dispatched through `ComponentPropsMap` —
+ * the #5068 authoring gate's own map — and a type with no row (SDUI blocks,
+ * `custom.*`) is skipped. The full reasoning, the reuse boundary and the
+ * recursion choice are at the dispatch itself, below.
+ *
  * ── Coverage census (opt-in must stay visible) ──────────────────────────────
  * Every run prints how many top-level YAML fences the corpus carries and how
  * many are tagged. Opt-in means an untagged block is still invisible to this
@@ -493,13 +506,182 @@ function formatIssues(result: z.ZodSafeParseResult<unknown>, prefix: string): st
   return result.error.issues.map((iss) => `    · at ${prefix}${formatPath(iss.path)}: ${iss.message}`);
 }
 
+// ── Component props dispatch (#13338) ────────────────────────────────────────
+
+/**
+ * The declared schema's `safeParse` closes a component node's OWN keys and
+ * stops there. `PageComponentSchema.properties` is `z.record(z.string(),
+ * z.unknown())` and Zod strictness does not RECURSE, so before this dispatch a
+ * tagged fence said nothing at all about `properties` — the half of a component
+ * example where essentially all of the authored content lives, and the half an
+ * author is most likely to get wrong. The measured instance: `record:details`
+ * with `columns: 2` (numeric, against the enum `"1"|"2"|"3"|"4"`) was GREEN
+ * under `os:check-yaml page` and caught only by a hand-run props dispatch.
+ *
+ * A green tag is what stops the next author from checking by hand, so a gate
+ * that is green where it cannot see is worse than no gate there.
+ *
+ * ## The verdict is REUSED, never re-derived
+ *
+ * `ComponentPropsMap` (`src/ui/component.zod.ts`) is the one owned source of
+ * what a component type's props are — the same map the #5068 authoring-rules
+ * gate (`@objectstack/lint`'s `validate-component-props`) dispatches, whose
+ * rows are maintained per component against objectui's renderer read points.
+ * This gate calls that map and prints its rejection VERBATIM, exactly as it
+ * already does for the declared schema: same `· at <path>: <message>` line, no
+ * hint text, no rule ids, no vocabulary of its own. The author reads the
+ * rejection the props schema itself writes.
+ *
+ * ⚠️ Why the traversal is written here rather than imported: `@objectstack/lint`
+ * DEPENDS on `@objectstack/spec`, so this script cannot import it back without
+ * a package cycle — and lint's `walkPageComponents` is rooted at a *stack*
+ * (`stack.pages[].regions[]` / `.slots`), which a tagged fence usually is not.
+ * What is duplicated is a traversal; what is NOT duplicated — and must never be
+ * — is the props vocabulary or the verdict text.
+ *
+ * ## Recursion boundary: generic, by node SHAPE
+ *
+ * Any node carrying a `type` string plus a `properties` mapping is a candidate,
+ * wherever it sits in the parsed value. The alternative — walking only known
+ * page-component positions — cannot serve this gate's population: six of the
+ * corpus's tagged fences declare a bare `PageComponentSchema` (a single
+ * component, no page around it) and would be skipped entirely by a page-rooted
+ * walk, while `properties.items[].children[]` / `.children[]` / `.body[]` /
+ * `.footer[]` nesting means the interesting nodes are inside the open bag
+ * anyway. Shape-recognition is also what `mapPageComponents`
+ * (`src/conversions/walk.ts`) settled on for the container keys, and for the
+ * same reason: `properties` is an open bag that nothing validates by `type` on
+ * the load path.
+ *
+ * Generic reach is SAFE here because the skip below is the filter: only a type
+ * with a `ComponentPropsMap` row is ever judged, and every row is namespaced
+ * (`page:*`, `record:*`, `element:*`, `nav:*`, `ai:*`, `object-*`, plugin
+ * widgets), so no field/view/datasource `type` value collides with one.
+ *
+ * ## Unregistered and `custom.*` types are SKIPPED
+ *
+ * `PageComponentSchema.type` is `z.union([PageComponentType, z.string()])`, an
+ * open namespace by the maintainer's 2026-08-05 ruling: SDUI blocks live in
+ * objectui's registry, and `custom.*` is an extension point this repo's own
+ * docs teach. Judging those against an absent schema would turn the first run
+ * into a wall of false refusals — so a type with no row is passed over in
+ * silence, the same skip `validate-component-props` documents in its header.
+ */
+
+/** A Zod schema, as much of one as this dispatch reads. */
+interface PropsSchema {
+  safeParse(value: unknown): z.ZodSafeParseResult<unknown>;
+}
+
+const COMPONENT_PROPS_SCHEMAS = UI.ComponentPropsMap as unknown as Record<string, PropsSchema>;
+
+/** How many component nodes a run judged, and how many it skipped. */
+interface PropsDispatchStats {
+  /** Nodes whose `type` had a `ComponentPropsMap` row and whose props were parsed. */
+  dispatched: number;
+  /** Nodes with `type` + `properties` whose type has no row (SDUI / `custom.*`). */
+  skipped: number;
+}
+
+function isPlainRecord(v: unknown): v is Record<string, unknown> {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+const joinKey = (base: string, key: string) => (base ? `${base}.${key}` : key);
+
+/**
+ * The one prop whose absence is NOT reported when the component carries a
+ * per-element `dataSource` — ported deliberately from
+ * `validate-component-props.ts`, which carries the full reasoning: the props
+ * schemas declare `object` as the flat shorthand, objectui's element renderers
+ * read `dataSource.object` first (`const object = ds.object ?? props.object`),
+ * and a component that binds through the richer sibling has omitted nothing.
+ * `content/docs/ui/pages.mdx` and `deployment/validating-metadata.mdx` both
+ * teach that precedence, so this is a shape the tagged corpus can grow at any
+ * time — and reporting it would be a WRONG verdict, not a strict one.
+ */
+const DATASOURCE_SUPPLIED_PROP = 'object';
+
+function suppliedByDataSource(
+  issue: { path: ReadonlyArray<PropertyKey> },
+  node: Record<string, unknown>,
+): boolean {
+  if (issue.path.length !== 1 || issue.path[0] !== DATASOURCE_SUPPLIED_PROP) return false;
+  const dataSource = isPlainRecord(node.dataSource) ? node.dataSource : undefined;
+  return typeof dataSource?.object === 'string' && dataSource.object.length > 0;
+}
+
+/**
+ * Walk one parsed block value and judge every component node's `properties`
+ * against that type's own props schema, appending findings in this gate's
+ * standard line shape.
+ *
+ * `ancestors` is an ANCESTOR set, not a visited set — the distinction
+ * `walkPageComponents` and `translatePage` both settled on. YAML anchors can
+ * legally alias one node into two sibling positions, and both placements must
+ * be judged; only a node that is its own ancestor is a cycle, and a cycle stops
+ * the descent silently (deciding a self-referential document is an authoring
+ * error would be new reject behaviour, which is not this gate's call).
+ */
+function collectComponentPropsFindings(
+  value: unknown,
+  basePath: string,
+  out: string[],
+  stats: PropsDispatchStats,
+  ancestors: Set<object> = new Set(),
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((element, i) => {
+      collectComponentPropsFindings(element, `${basePath}[${i}]`, out, stats, ancestors);
+    });
+    return;
+  }
+  if (!isPlainRecord(value)) return;
+  if (ancestors.has(value)) return;
+  ancestors.add(value);
+  try {
+    const type = typeof value.type === 'string' && value.type.length > 0 ? value.type : undefined;
+    const props = isPlainRecord(value.properties) ? value.properties : undefined;
+    if (type && props) {
+      const schema = COMPONENT_PROPS_SCHEMAS[type];
+      if (!schema) {
+        // Unregistered / `custom.*` — see the section header above.
+        stats.skipped += 1;
+      } else {
+        stats.dispatched += 1;
+        const parsed = schema.safeParse(props);
+        if (!parsed.success) {
+          const propsPath = joinKey(basePath, 'properties');
+          for (const issue of parsed.error.issues) {
+            if (suppliedByDataSource(issue, value)) continue;
+            const at = issue.path.length === 0 ? propsPath : joinKey(propsPath, formatPath(issue.path));
+            out.push(`    · at ${at}: ${issue.message}`);
+          }
+        }
+      }
+    }
+    for (const [key, child] of Object.entries(value)) {
+      collectComponentPropsFindings(child, joinKey(basePath, key), out, stats, ancestors);
+    }
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
 /**
  * Validate ONE tagged block. Returns human-readable finding lines (empty =
  * the block holds its claim). Blocks are independent — one block's refusal
  * never suppresses another's verdict (unlike the sibling gate's tsc program,
  * where a single parse error stops a whole surface's semantic pass).
+ *
+ * `stats`, when passed, accumulates the component-props dispatch census across
+ * blocks — `main()` reads it for the third vacuous-green guard.
  */
-function checkBlock(block: TaggedBlock, namespaces: NameIndex): string[] {
+function checkBlock(
+  block: TaggedBlock,
+  namespaces: NameIndex,
+  stats: PropsDispatchStats = { dispatched: 0, skipped: 0 },
+): string[] {
   const { decl, error } = parseDecl(block.decl);
   if (!decl) return [`    · marker: ${error ?? 'unparseable declaration'}`];
 
@@ -556,10 +738,21 @@ function checkBlock(block: TaggedBlock, namespaces: NameIndex): string[] {
     value.forEach((element, idx) => {
       findings.push(...formatIssues(schema.safeParse(element), `[${idx}] `));
     });
+    // The props dispatch runs only over a value the DECLARED schema accepted
+    // (#13338's sequencing): a node the outer parse already refused has no
+    // settled shape to dispatch on, and piling a second verdict on top of the
+    // first buries the one the author has to fix.
+    if (findings.length > 0) return findings;
+    value.forEach((element, idx) => {
+      collectComponentPropsFindings(element, `[${idx}]`, findings, stats);
+    });
     return findings;
   }
 
-  return formatIssues(schema.safeParse(value), '');
+  const findings = formatIssues(schema.safeParse(value), '');
+  if (findings.length > 0) return findings;
+  collectComponentPropsFindings(value, '', findings, stats);
+  return findings;
 }
 
 // ── Census ───────────────────────────────────────────────────────────────────
@@ -631,8 +824,9 @@ function main(): void {
   }
 
   const failures: Array<{ block: TaggedBlock; findings: string[] }> = [];
+  const propsStats: PropsDispatchStats = { dispatched: 0, skipped: 0 };
   for (const block of scan.tagged) {
-    const findings = checkBlock(block, NAMESPACES);
+    const findings = checkBlock(block, NAMESPACES, propsStats);
     if (findings.length > 0) failures.push({ block, findings });
   }
 
@@ -651,9 +845,27 @@ function main(): void {
     process.exit(1);
   }
 
+  // Third vacuous-green guard, in the shape of the two above: the props
+  // dispatch is INVISIBLE when it reaches nothing, so a corpus that carries
+  // component fences while zero nodes were judged means the walk stopped
+  // finding them (a renamed carrier key, a shape change) — green would again
+  // be a lie about the half this gate was deepened to see.
+  if (propsStats.dispatched === 0) {
+    fail(
+      'No component node was dispatched against ComponentPropsMap. Every tagged block validated, but ' +
+        'the props half checked nothing — the walk no longer reaches nodes carrying `type` + `properties` ' +
+        '(content/docs/protocol/objectui/layout-dsl.mdx has carried them since #13086). ' +
+        'This gate refuses to report a green it cannot back.',
+    );
+  }
+
   console.log(
     `✅ ${scan.tagged.length} tagged YAML example(s) across ` +
       `${new Set(scan.tagged.map((t) => t.source)).size} file(s) validate against their declared live spec schemas`,
+  );
+  console.log(
+    `   ↳ ${propsStats.dispatched} component node(s) also judged against their ComponentPropsMap props ` +
+      `schema; ${propsStats.skipped} skipped (no row for the type — SDUI blocks and custom.* are an open namespace)`,
   );
 }
 
@@ -840,6 +1052,212 @@ function selfTest(): never {
     const emptyDecl = checkBlock(block('label: X\nfields: [a]\n', ''), NAMESPACES);
     check('an empty declaration is a finding, not a silent pass',
       emptyDecl.length === 1 && emptyDecl[0].includes('declares no schema'));
+  }
+
+  console.log('Self-test: component props dispatch (#13338)');
+  {
+    const freshStats = (): PropsDispatchStats => ({ dispatched: 0, skipped: 0 });
+
+    // The card's measured instance, verbatim — `record:details` with a NUMERIC
+    // `columns` against the enum `"1"|"2"|"3"|"4"`, inside a page that is
+    // otherwise valid. Green before this dispatch existed.
+    const customer360 = (columns: string) =>
+      [
+        'name: customer_360',
+        'label: Customer 360',
+        'type: record',
+        'object: customer',
+        'regions:',
+        '  - name: main',
+        '    components:',
+        '      - type: record:details',
+        '        properties:',
+        `          columns: ${columns}`,
+        '          fields: [name, status]',
+        '',
+      ].join('\n');
+
+    // The expected text is read from the LIVE props schema at test time, so
+    // this pin follows the spec's wording instead of fossilising a copy of it
+    // — the same idiom the declared-schema verbatim pin above uses.
+    const liveProps = COMPONENT_PROPS_SCHEMAS['record:details'].safeParse({
+      columns: 2,
+      fields: ['name', 'status'],
+    });
+    const expectedPropsMsg = liveProps.success ? '' : liveProps.error.issues[0].message;
+
+    const redStats = freshStats();
+    const red = checkBlock(block(customer360('2'), 'page'), NAMESPACES, redStats);
+    check(
+      "the card's `columns: 2` instance is REFUSED with the props schema's own message verbatim",
+      expectedPropsMsg.length > 0 && red.some((f) => f.includes(expectedPropsMsg)),
+      `expected to find: ${expectedPropsMsg} in ${red.join(' | ')}`,
+    );
+    check(
+      'the finding locates the component inside the page it was authored in',
+      red.some((f) => f.includes('regions[0].components[0].properties.columns')),
+      red.join(' | '),
+    );
+    check('the dispatched node is counted', redStats.dispatched === 1 && redStats.skipped === 0, JSON.stringify(redStats));
+
+    const greenStats = freshStats();
+    const green = checkBlock(block(customer360("'2'"), 'page'), NAMESPACES, greenStats);
+    check('the corrected spelling `columns: \'2\'` passes', green.length === 0, green.join(' | '));
+    check('a green block still counts its dispatch', greenStats.dispatched === 1, JSON.stringify(greenStats));
+
+    // A misspelled prop — the #5068 verdict class — reaches the author with the
+    // props schema's rename hint intact, since the message is printed verbatim.
+    const typo = COMPONENT_PROPS_SCHEMAS['record:details'].safeParse({ inlineEdt: true, fields: ['name'] });
+    const typoMsg = typo.success ? '' : typo.error.issues[0].message;
+    const typoFindings = checkBlock(
+      block('type: record:details\nproperties:\n  inlineEdt: true\n  fields: [name]\n', 'PageComponentSchema'),
+      NAMESPACES,
+      freshStats(),
+    );
+    check(
+      "an undeclared prop is refused with the schema's own rename hint verbatim",
+      typoMsg.length > 0 && typoFindings.some((f) => f.includes(typoMsg)),
+      `expected: ${typoMsg.slice(0, 70)}… in ${typoFindings.join(' | ').slice(0, 160)}`,
+    );
+    check(
+      'a fence whose ROOT is the component dispatches too (no page around it)',
+      typoFindings.some((f) => f.includes('at properties')),
+      typoFindings.join(' | '),
+    );
+
+    // Nesting lives inside the open bag: `page:tabs` → items[].children[].
+    const nestedStats = freshStats();
+    const nested = checkBlock(
+      block(
+        [
+          'type: page:tabs',
+          'properties:',
+          '  items:',
+          '    - label: Details',
+          '      value: details',
+          '      children:',
+          '        - type: record:details',
+          '          properties:',
+          '            columns: 2',
+          '            fields: [name]',
+          '',
+        ].join('\n'),
+        'PageComponentSchema',
+      ),
+      NAMESPACES,
+      nestedStats,
+    );
+    check(
+      'a component nested in `properties.items[].children[]` is reached and judged',
+      nested.some((f) => f.includes('properties.items[0].children[0].properties.columns')),
+      nested.join(' | '),
+    );
+    check('both the container and the nested node are counted', nestedStats.dispatched === 2, JSON.stringify(nestedStats));
+
+    // The skip that keeps the first run from being a wall of false refusals.
+    const skipStats = freshStats();
+    const skipped = checkBlock(
+      block(
+        [
+          'type: custom.approval_timeline',
+          'properties:',
+          "  recordId: '{recordId}'",
+          '  showComments: true',
+          '',
+        ].join('\n'),
+        'PageComponentSchema',
+      ),
+      NAMESPACES,
+      skipStats,
+    );
+    check('a `custom.*` type is skipped, not refused', skipped.length === 0, skipped.join(' | '));
+    check('the skip is counted rather than silent', skipStats.skipped === 1 && skipStats.dispatched === 0, JSON.stringify(skipStats));
+
+    const sduiStats = freshStats();
+    const sdui = checkBlock(
+      block('type: flex\nproperties:\n  gap: 4\n  anything: goes\n', 'PageComponentSchema'),
+      NAMESPACES,
+      sduiStats,
+    );
+    check('an unregistered SDUI block type is skipped, not refused', sdui.length === 0 && sduiStats.skipped === 1, sdui.join(' | '));
+
+    // `dataSource.object` supplies the flat `object` prop — reporting it would
+    // be a wrong verdict, not a strict one (see DATASOURCE_SUPPLIED_PROP).
+    const boundStats = freshStats();
+    const bound = checkBlock(
+      block(
+        'type: element:record_picker\ndataSource:\n  object: showcase_project\nproperties:\n  limit: 50\n',
+        'PageComponentSchema',
+      ),
+      NAMESPACES,
+      boundStats,
+    );
+    check('a component binding through `dataSource` is not refused for the flat `object` prop',
+      bound.length === 0 && boundStats.dispatched === 1, bound.join(' | '));
+    const unbound = checkBlock(
+      block('type: element:record_picker\nproperties:\n  limit: 50\n', 'PageComponentSchema'),
+      NAMESPACES,
+      freshStats(),
+    );
+    check('…while the same node with no binding at all still reports the missing prop',
+      unbound.some((f) => f.includes('properties.object')), unbound.join(' | '));
+
+    // Sequencing: the declared schema's verdict is never buried under a second one.
+    const shortCircuit = checkBlock(
+      block(
+        [
+          'name: broken_page',
+          'label: Broken',
+          'type: record',
+          'object: customer',
+          'nosuchkey: 1',
+          'regions:',
+          '  - name: main',
+          '    components:',
+          '      - type: record:details',
+          '        properties:',
+          '          columns: 2',
+          '',
+        ].join('\n'),
+        'page',
+      ),
+      NAMESPACES,
+      freshStats(),
+    );
+    check('a block the DECLARED schema refuses reports only that verdict, not a props pile-on',
+      shortCircuit.length > 0 && !shortCircuit.some((f) => f.includes('properties.columns')),
+      shortCircuit.join(' | '));
+
+    // A YAML anchor may alias one node into two sibling positions; both are
+    // judged, and a self-referential alias terminates instead of blowing the stack.
+    const aliasStats = freshStats();
+    const aliased = checkBlock(
+      block(
+        [
+          'name: aliased',
+          'label: Aliased',
+          'type: record',
+          'object: customer',
+          'regions:',
+          '  - name: main',
+          '    components:',
+          '      - &bad',
+          '        type: record:details',
+          '        properties:',
+          '          columns: 2',
+          '          fields: [name]',
+          '      - *bad',
+          '',
+        ].join('\n'),
+        'page',
+      ),
+      NAMESPACES,
+      aliasStats,
+    );
+    check('an aliased node is judged at BOTH placements (ancestor set, not a visited set)',
+      aliasStats.dispatched === 2 &&
+        aliased.filter((f) => f.includes('properties.columns')).length === 2,
+      `${JSON.stringify(aliasStats)} :: ${aliased.join(' | ')}`);
   }
 
   console.log('Self-test: vacuous-green guards');

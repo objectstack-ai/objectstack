@@ -163,6 +163,29 @@ function noValueSatisfiesNegation(op: string): boolean {
 }
 
 /**
+ * [#13553] The four ORDERING operators — the ones whose arm answers a
+ * RELATIONAL comparison between the stored value and a comparand.
+ *
+ * A set, and consulted from the pre-switch guard, because what it selects is a
+ * RULING and not an implementation detail: a row whose field has NO VALUE is
+ * not inside `$gt` / `$gte` / `$lt` / `$lte`. Two independent authorities
+ * decide that and agree — this package's live mingo path excludes such a row
+ * (runtime truth, measured), and the platform's settled reading admits a
+ * no-value row only for the operators that carry a negation (`$ne` / `$nin` /
+ * `$notContains`, #5298 option A, re-affirmed 2026-08-10; see
+ * {@link noValueSatisfiesNegation}, whose membership is this set's exact
+ * complement on this question).
+ *
+ * ⚠️ `$between` is deliberately NOT a member, though it is a relational
+ * comparison too. It decides the no-value case itself, in
+ * {@link valueWithinRange}, and its answer is not this one: the degenerate
+ * range whose BOTH ends are no value SELECTS the no-value rows. Adding
+ * `$between` here would return `false` before that function ran and silently
+ * move a cell #13495 ruled.
+ */
+const ORDERING_OPERATORS: ReadonlySet<string> = new Set(['$gt', '$gte', '$lt', '$lte']);
+
+/**
  * [#13495/#13549] Is `value` inside the closed range `[min, max]`?
  *
  * `$between` is the conjunction of `$gte min` and `$lte max`. That is not an
@@ -291,6 +314,42 @@ function checkCondition(value: any, condition: any): boolean {
         if (value === undefined && op !== '$exists' && op !== '$null' && op !== '$eq'
             && !noValueSatisfiesNegation(op)) {
             return false; 
+        }
+
+        // [#13553] The OTHER reading of "no value" — the key is present and
+        // holds `null` — on the four {@link ORDERING_OPERATORS}. It is decided
+        // here, beside the reading above, because the two readings have to land
+        // on ONE answer and this file's recurring defect is that they do not:
+        // the guard above sees only `undefined`, so a stored `null` used to
+        // reach the arm and be COMPARED.
+        //
+        // ⚠️ Being compared is the whole defect, and it is measured rather than
+        // reasoned: JS coerces `null` to `0` under a relational operator, so
+        // `null >= -1` is a true comparison between two NUMBERS and the
+        // no-value row lands inside the bound. On a STRING comparand the same
+        // line looks correct — `null >= '2026-07-01'` compares `0` against
+        // `NaN` and is false — which is why every fixture in #13494, #13495 and
+        // #13549 showed these four arms healthy. The repair is the one
+        // {@link valueWithinRange} landed for `$between`: comparability is
+        // decided BEFORE the comparison, never by it.
+        //
+        // Written over the OPERATOR, like the `$eq` exemption above and for the
+        // same reason — a rule spelled over "the value is null" alone would
+        // reach arms whose no-value answer is ruled elsewhere.
+        //
+        // ⛔ A no-value COMPARAND is excluded from this guard, deliberately, so
+        // those cells keep TODAY's answer rather than being decided here.
+        // `$gt: null` is the one null-comparand position the contract still
+        // ACCEPTS (measured at `parseFilterAST`): the 2026-08-31 ruling refused
+        // the three siblings — `$in` / `$nin` null members and `$between`'s
+        // null endpoints (#13357) — and #5332's landing had already recorded
+        // this position in writing as one "no ruling covers". Deciding it in an
+        // operator arm would pick a camp the platform declined to pick, and its
+        // sibling was settled by REFUSING the shape rather than by answering
+        // it.
+        if (value === null && ORDERING_OPERATORS.has(op)
+            && target !== null && target !== undefined) {
+            return false;
         }
 
         switch (op) {

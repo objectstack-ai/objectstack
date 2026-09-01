@@ -19,6 +19,14 @@
  * — whose result already carries `userMessage` — and then did not read the
  * field. `declared ≠ enforced` at exactly one door.
  *
+ * ⭐ [#13623] There was a SECOND door, and this file is where it was recorded:
+ * `HttpDispatcher.dispatch`'s foot catch answers `isPermissionDeniedError`
+ * itself, so a marked `PERMISSION_DENIED` 403 never reaches the exit above and
+ * lost its mark there instead. §2's carve-out row pinned that absence as an
+ * observation; #13623 closed the door and MOVED the row to assert presence —
+ * see its docblock for why moving it (rather than fixing it green) is the
+ * deliverable.
+ *
  * ## Why this is the compensation channel and not a decoration
  *
  * The 2026-08-27 ruling on #12509 (option D), propagated to #12281, made this
@@ -225,7 +233,10 @@ describe('[#13241] the dispatcher throw-transparent exit carries `userMessage`',
             { status: 400, code: 'VALIDATION_FAILED', prose: 'measure revenue not additive over stage', mark: 'Pick a measure that adds up across stages.' },
             // ⚠️ `FORBIDDEN`, deliberately NOT `PERMISSION_DENIED` — see the
             // carve-out pinned below this table: a throw spelling
-            // `PERMISSION_DENIED` never arrives at this exit at all.
+            // `PERMISSION_DENIED` never arrives at this exit at all. It is
+            // answered by `HttpDispatcher.dispatch`'s foot catch, which since
+            // #13623 carries the mark itself; this row keeps a status the foot
+            // catch does NOT intercept, so it still measures THIS exit's 403.
             { status: 403, code: 'FORBIDDEN', prose: 'principal lacks cube_read on pipeline', mark: 'You do not have access to this report. Ask an admin for the Reporting role.' },
             { status: 409, code: 'RECORD_LOCKED', prose: 'cube pipeline locked by in-flight rebuild', mark: 'This report is being rebuilt. Try again shortly.' },
             { status: 503, code: 'SERVICE_UNAVAILABLE', prose: 'warehouse pool exhausted', mark: 'Reporting is briefly offline.' },
@@ -247,25 +258,37 @@ describe('[#13241] the dispatcher throw-transparent exit carries `userMessage`',
         }
 
         /**
-         * ⚠️ MEASURED CARVE-OUT — the one 403 that is NOT throw-transparent, and
-         * therefore NOT closed by this change.
+         * ⭐ [#13623] THE CARVE-OUT MOVED — and this row is how a reader finds out.
          *
-         * `HttpDispatcher.dispatch`'s foot catch is not a pure rethrow: it
-         * intercepts `isPermissionDeniedError` — `name === 'PermissionDeniedError'`
-         * **or** `code === 'PERMISSION_DENIED'` **or** a message starting
-         * `[Security] Access denied` — and answers it itself, via `this.error(…)`
-         * in `packages/runtime/src/http-dispatcher.ts`. Such a throw never
-         * reaches `errorResponseBase`, so its mark is dropped by a DIFFERENT
-         * door than the one this card repairs.
+         * It was written as the opposite assertion (`expectNoUserMessageAnywhere`)
+         * with a docblock saying, in terms: *"if a later change makes the denial
+         * path throw-transparent, this test fails and tells the author that the
+         * carve-out has moved"*. #13623 is that change, so the row is MOVED
+         * deliberately rather than repaired green — the instrument worked, and
+         * softening or deleting it would have thrown away the only signal.
          *
-         * ⛔ That door is #7898's on-hold trigger file and is out of this PR's
-         * file surface, so the gap is recorded here rather than closed. Pinned
-         * as an observation and not as a wish: if a later change makes the
-         * denial path throw-transparent, this test fails and tells the author
-         * that the carve-out has moved — which is the only way a reader finds
-         * out that the sentence above went stale.
+         * ⚠️ What moved is the MARK, not the route. The sentence the old
+         * docblock opened with is still true: `HttpDispatcher.dispatch`'s foot
+         * catch is not a pure rethrow — it recognises `isPermissionDeniedError`
+         * (`name === 'PermissionDeniedError'` **or** `code === 'PERMISSION_DENIED'`
+         * **or** a message starting `[Security] Access denied`) and answers it
+         * itself via `this.error(…)` in
+         * `packages/runtime/src/http-dispatcher.ts`. Such a throw still never
+         * reaches `errorResponseBase`. What changed is that the OTHER door now
+         * reads the same `declaredUserMessage` rule, so the mark survives both.
+         *
+         * ⇒ The row therefore pins a DIFFERENT door's behaviour from every other
+         * row in this file, and is kept here on purpose: the two doors' answers
+         * to one question belong in one place, and if either regresses the
+         * failure names the door in its own title.
+         *
+         * ⛔ Still NOT a claim that this exit became throw-transparent. A
+         * regression that made it so would silently satisfy this row; the pin
+         * against that is `expect(res.body.error.details)` below — the foot
+         * catch derives `details.object` from the ROUTE (`permissionDeniedErrorDetails`)
+         * and `errorResponseBase` does nothing of the kind.
          */
-        it('CARVE-OUT — a `PERMISSION_DENIED` 403 does not reach this exit, so its mark is still dropped', async () => {
+        it('MOVED CARVE-OUT — a `PERMISSION_DENIED` 403 is answered by the foot catch, and now keeps its mark there', async () => {
             const res = await throwFromAnalyticsQuery(
                 declaring(
                     { status: 403, code: 'PERMISSION_DENIED', userMessage: 'Ask an admin for the Reporting role.' },
@@ -275,8 +298,33 @@ describe('[#13241] the dispatcher throw-transparent exit carries `userMessage`',
 
             expect(res.statusCode).toBe(403);
             expect(res.body.error.code).toBe('PERMISSION_DENIED');
-            // Not a claim that dropping it is CORRECT — only that it is where
-            // the field is dropped today, and that it is not this exit.
+            // The half this card repaired: the author's channel now survives
+            // the denial door too (#9934 is status-agnostic, and 403 is the
+            // refusal class most likely to carry authored text).
+            expect(res.body.error.userMessage).toBe('Ask an admin for the Reporting role.');
+            // …verbatim, and never in place of the diagnostic channel.
+            expect(JSON.stringify(res.body)).toContain('Ask an admin for the Reporting role.');
+            expect(res.body.error.message).not.toBe('Ask an admin for the Reporting role.');
+            // Still the foot catch answering, NOT this exit — the route-derived
+            // `details` shape only that door produces. `/analytics/query` names
+            // no object, so `permissionDeniedErrorDetails` contributes nothing
+            // but the promoted `code`, and `details` is absent entirely.
+            expect(res.body.error.details).toBeUndefined();
+            // ⛔ #7450's withhold is untouched: the mark is a top-level sibling,
+            // never `details` context.
+            expect((res.body.error.details as any)?.userMessage).toBeUndefined();
+        });
+
+        it('POSITIVE CONTROL (the denial door) — an UNMARKED `PERMISSION_DENIED` 403 still has no key', async () => {
+            // Without this, the row above could pass on a door that always
+            // reports a `userMessage`. Same route, same code, same status — the
+            // ONLY difference is the mark.
+            const res = await throwFromAnalyticsQuery(
+                declaring({ status: 403, code: 'PERMISSION_DENIED' }, 'principal lacks cube_read on pipeline'),
+            );
+
+            expect(res.statusCode).toBe(403);
+            expect(res.body.error.code).toBe('PERMISSION_DENIED');
             expectNoUserMessageAnywhere(res);
         });
 

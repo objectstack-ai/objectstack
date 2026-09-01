@@ -43,6 +43,14 @@ import type { ExecutionContext } from '../kernel/execution-context.zod.js';
  * terminal for THIS request/round; the flow walks the `revise` edge to a wait
  * point, and a later resubmit opens a fresh `pending` request (next round).
  * Distinct from `recalled` (submitter-initiated withdrawal).
+ *
+ * `cancelled` (#13568): the platform voided a pending request because the thing
+ * it was about stopped existing — nobody decided it and nobody withdrew it.
+ * Terminal, and deliberately its own state rather than a re-use of `recalled`:
+ * a recall is an ACT by the submitter, and reporting a platform-initiated void
+ * as one attributes a withdrawal to a person who never performed it. The
+ * machine-readable cause rides {@link APPROVAL_CANCEL_REASONS} on the row, so
+ * the vocabulary here does not have to grow a state per cause.
  */
 export const APPROVAL_STATUSES = [
   'pending',
@@ -50,6 +58,7 @@ export const APPROVAL_STATUSES = [
   'rejected',
   'recalled',
   'returned',
+  'cancelled',
 ] as const;
 
 /** Lifecycle state of an approval request — derived from {@link APPROVAL_STATUSES}. */
@@ -78,7 +87,50 @@ export const APPROVAL_STATUS_LABELS = {
   rejected: 'Rejected',
   recalled: 'Recalled',
   returned: 'Returned',
+  cancelled: 'Cancelled',
 } as const satisfies Record<ApprovalStatus, string>;
+
+/**
+ * Why a request reached {@link APPROVAL_STATUSES}' `cancelled` — the
+ * machine-readable half of a platform-initiated void (#13568, maintainer
+ * ruling 2026-08-31).
+ *
+ * A VALUE for the same reason as {@link APPROVAL_STATUSES}, and a VOCABULARY
+ * rather than free text because the reason has a consumer that is not a human
+ * reader: the inbox and the tombstone presentation branch on WHY a row is
+ * cancelled, and `sys_approval_action.comment` — the only other place the
+ * cause could have ridden — is submitter/approver prose that no client can
+ * narrow. A free-text reason on a shipped audit row is the declared-≠-enforced
+ * shape PD #10 exists to refuse.
+ *
+ * One entry today, and the vocabulary still earns its keep: the ruling asked
+ * for a reason "class", so the next platform-initiated cancellation cause
+ * extends THIS list instead of minting a second terminal status for itself.
+ *
+ * `record_deleted`: the record the request was about was deleted while the
+ * request was still `pending`. The row is kept as audit evidence — it records
+ * that an approval was opened and never decided — but it leaves the pending
+ * count and the inbox's default view, because there is nothing left to decide.
+ */
+export const APPROVAL_CANCEL_REASONS = [
+  'record_deleted',
+] as const;
+
+/** Why a request was cancelled — derived from {@link APPROVAL_CANCEL_REASONS}. */
+export type ApprovalCancelReason = (typeof APPROVAL_CANCEL_REASONS)[number];
+
+/**
+ * Authored English display label per {@link APPROVAL_CANCEL_REASONS} entry —
+ * same contract-first shape as {@link APPROVAL_STATUS_LABELS}: the
+ * `sys_approval_request.cancel_reason` column derives its option labels from
+ * this map and never re-types them, so the `en` bundle regenerates from the
+ * contract's own text.
+ *
+ * `satisfies` is exhaustive in both directions.
+ */
+export const APPROVAL_CANCEL_REASON_LABELS = {
+  record_deleted: 'Related record deleted',
+} as const satisfies Record<ApprovalCancelReason, string>;
 
 /** Live request row. */
 export interface ApprovalRequestRow {
@@ -106,6 +158,16 @@ export interface ApprovalRequestRow {
   submitter_id?: string;
   submitter_comment?: string;
   status: ApprovalStatus;
+  /**
+   * Why the request was cancelled (#13568) — present only on rows whose
+   * {@link ApprovalRequestRow.status} is `cancelled`, absent everywhere else.
+   *
+   * Optional-nullable rather than required-on-cancelled because a TypeScript
+   * optional cannot be conditioned on a sibling's value, and because a row
+   * written before this column existed carries no value: absent reads as "not
+   * recorded", never as "cancelled for no reason".
+   */
+  cancel_reason?: ApprovalCancelReason | null;
   /** The flow node id that opened the request (mirrors `flow_node_id`). */
   current_step?: string;
   current_step_index?: number;
@@ -299,9 +361,18 @@ export interface ApprovalRequestRow {
  *                  its own `submit`)
  *   ooo_substitute #1322 M1: an out-of-office approver's slot was auto-rerouted
  *                  to their delegate at resolution time
+ *   cancel         #13568: the PLATFORM voided a pending request — nobody
+ *                  decided it and nobody withdrew it. The only kind with no
+ *                  human actor (`actor_id` is null on it, by construction),
+ *                  which is exactly why it must not be recorded as `recall`:
+ *                  that would file a submitter withdrawal nobody performed.
+ *                  The cause rides `sys_approval_request.cancel_reason`
+ *                  ({@link APPROVAL_CANCEL_REASONS}).
  *
  * `reassign` / `remind` / `request_info` / `comment` / `ooo_substitute` are
  * thread interactions and never move the flow; `revise` / `resubmit` do.
+ * `cancel` moves nothing either — it records that the request stopped being
+ * decidable.
  */
 export const APPROVAL_ACTION_KINDS = [
   'submit',
@@ -316,6 +387,7 @@ export const APPROVAL_ACTION_KINDS = [
   'revise',
   'resubmit',
   'ooo_substitute',
+  'cancel',
 ] as const;
 
 /** Kinds of entries on a request's audit trail — derived from {@link APPROVAL_ACTION_KINDS}. */
@@ -349,6 +421,7 @@ export const APPROVAL_ACTION_KIND_LABELS = {
   revise: 'Revise',
   resubmit: 'Resubmit',
   ooo_substitute: 'Out-of-Office Substitution',
+  cancel: 'Cancel',
 } as const satisfies Record<ApprovalActionKind, string>;
 
 /**

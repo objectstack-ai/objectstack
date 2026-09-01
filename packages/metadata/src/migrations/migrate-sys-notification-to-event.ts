@@ -27,12 +27,16 @@
  *   await migrateSysNotificationToEvent({ driver, data });
  *
  * `driver` provides raw access to read legacy columns the re-modeled schema no
- * longer projects and to clear them; `data` (IDataEngine) performs the
+ * longer projects and to clear them — through the surface `IDataDriver`
+ * declares, `execute(sql, bindings?)`, falling back to `raw(sql, bindings?)`
+ * (see `./driver-exec.ts`); `data` (IDataEngine) performs the
  * structured inbox/receipt writes and the event rewrite so ids, JSON fields and
  * tenant stamping are handled uniformly across drivers.
  */
 
 import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
+
+import { type DriverExec, driverExecRefusal, resolveDriverExec } from './driver-exec.js';
 
 const EVENT_OBJECT = 'sys_notification';
 const INBOX_OBJECT = 'sys_inbox_message';
@@ -67,32 +71,32 @@ export interface SysNotificationMigrationOptions {
 export async function migrateSysNotificationToEvent(
     opts: SysNotificationMigrationOptions,
 ): Promise<SysNotificationMigrationResult> {
-    const driver = opts.driver as any;
     const { data } = opts;
     const now = opts.now ?? (() => new Date().toISOString());
 
-    if (typeof driver?.raw !== 'function') {
+    const exec = resolveDriverExec(opts.driver);
+    if (!exec) {
         return {
             status: 'error',
             migrated: 0,
-            error: 'migrateSysNotificationToEvent: driver must expose a .raw(sql, bindings?) method.',
+            error: driverExecRefusal('migrateSysNotificationToEvent'),
         };
     }
 
     // No legacy `recipient_id` column → the table never held the inbox shape.
-    if (!(await columnExists(driver, EVENT_OBJECT, 'recipient_id'))) {
+    if (!(await columnExists(exec, EVENT_OBJECT, 'recipient_id'))) {
         return { status: 'not_applicable', migrated: 0 };
     }
 
     // Only null-out columns that actually exist on this deployment.
     const presentLegacy: string[] = [];
     for (const col of LEGACY_COLUMNS) {
-        if (await columnExists(driver, EVENT_OBJECT, col)) presentLegacy.push(col);
+        if (await columnExists(exec, EVENT_OBJECT, col)) presentLegacy.push(col);
     }
 
     let migrated = 0;
     try {
-        const rows = await selectLegacyRows(driver);
+        const rows = await selectLegacyRows(exec);
         if (rows.length === 0) return { status: 'already_done', migrated: 0 };
 
         for (const row of rows) {
@@ -100,7 +104,7 @@ export async function migrateSysNotificationToEvent(
             const recipientId = row.recipient_id != null ? String(row.recipient_id) : null;
             if (!recipientId) continue; // defensive — guarded by the SELECT filter
             const orgId = row.organization_id != null ? String(row.organization_id) : null;
-            const createdAt = row.created_at != null ? String(row.created_at) : now();
+            const createdAt = row.created_at != null ? canonicalTimestampText(row.created_at) : now();
             const title = row.title != null ? String(row.title) : (row.type != null ? String(row.type) : 'Notification');
             const isRead = row.is_read === true || row.is_read === 1 || row.is_read === '1';
             // One topic for both the inbox row and the rewritten event, so the
@@ -128,7 +132,7 @@ export async function migrateSysNotificationToEvent(
                 user_id: recipientId,
                 channel: 'inbox',
                 state: isRead ? 'read' : 'delivered',
-                at: isRead && row.read_at != null ? String(row.read_at) : createdAt,
+                at: isRead && row.read_at != null ? canonicalTimestampText(row.read_at) : createdAt,
                 organization_id: orgId,
                 created_at: createdAt,
             });
@@ -154,7 +158,7 @@ export async function migrateSysNotificationToEvent(
             // migration filter (idempotency) and carries no stale recipient.
             if (presentLegacy.length > 0) {
                 const setClause = presentLegacy.map((c) => `"${c}" = NULL`).join(', ');
-                await driver.raw(`UPDATE "${EVENT_OBJECT}" SET ${setClause} WHERE id = ?`, [id]);
+                await exec(`UPDATE "${EVENT_OBJECT}" SET ${setClause} WHERE id = ?`, [id]);
             }
 
             migrated += 1;
@@ -170,8 +174,54 @@ export async function migrateSysNotificationToEvent(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-async function selectLegacyRows(driver: any): Promise<any[]> {
-    const result: any[] = await driver.raw(
+/**
+ * The canonical text spelling of a timestamp read back out of the legacy table.
+ *
+ * `selectLegacyRows` reads through `driver.raw`/`execute`, which hands the
+ * dialect client's own materialisation straight back — that door does not run
+ * `formatOutput`, so none of its repairs apply here on any dialect:
+ *
+ *  - `created_at` is a BUILTIN audit column, so it is never in `datetimeFields`
+ *    and no declared-field coercion reaches it; `formatOutput` repairs it only
+ *    inside its `if (this.isSqlite)` arm (`repairNaiveUtcAuditTimestamp` over
+ *    `AUDIT_TIMESTAMP_COLUMNS`).
+ *  - `read_at` is a LEGACY column ADR-0030 removed from the object, so it is
+ *    not declared either — it can never enter `datetimeFields`, and it is not
+ *    an audit column, so no arm of `formatOutput` could reach it even at the
+ *    record read door.
+ *
+ * On SQLite both arrive as canonical ISO text and `String()` is the identity —
+ * which is why every test in this directory stayed green. On Postgres and
+ * MySQL an instant column materialises as a JS `Date`
+ * (`withPostgresCalendarDayAsText` leaves the instant types alone deliberately;
+ * pinned in `sql-driver-13567-audit-stamp-materialisation.test.ts`), and
+ * `String(date)` spells
+ *
+ *   Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)
+ *
+ * — whole seconds in the MIGRATING HOST's zone, with the milliseconds gone.
+ * This migration is one-way and this value is WRITTEN, so that spelling is what
+ * the platform would carry afterwards: either accepted and stored skewed and
+ * de-precisioned, or rejected outright, since the trailing zone name is in no
+ * dialect's timestamp grammar (#13998).
+ *
+ * Canonicalising HERE, at the consumer that writes, is deliberate and is the
+ * only shape that could also repair an already-migrated deployment (#13973
+ * option A). It is not a tolerant alias: `Date` and ISO text are two
+ * materialisations of ONE instant, not two spellings of a key. Matches the
+ * repo's existing correct form at `metadata-protocol/src/protocol.ts` (the
+ * `occurred_at` read in `readMetadataAuditEvents`); anything that is neither a
+ * string nor a `Date` keeps its previous `String()` rendering unchanged rather
+ * than having a unit guessed for it on a one-way write path.
+ */
+function canonicalTimestampText(value: unknown): string {
+    if (typeof value === 'string') return value;
+    if (value instanceof Date) return value.toISOString();
+    return String(value);
+}
+
+async function selectLegacyRows(exec: DriverExec): Promise<any[]> {
+    const result: any[] = await exec(
         `SELECT id, recipient_id, type, title, body, url, actor_name, is_read, read_at, created_at, organization_id ` +
             `FROM "${EVENT_OBJECT}" WHERE recipient_id IS NOT NULL`,
     );
@@ -182,13 +232,13 @@ async function selectLegacyRows(driver: any): Promise<any[]> {
     return Array.isArray(result) ? result : [];
 }
 
-async function columnExists(driver: any, table: string, column: string): Promise<boolean> {
+async function columnExists(exec: DriverExec, table: string, column: string): Promise<boolean> {
     // SQLite path: PRAGMA table_info. On Postgres/others this raises a syntax
     // error — swallow it *locally* and fall through to information_schema (the
     // outer-catch version of this would never reach the fallback, making the
     // migration silently no-op on every non-SQLite DB).
     try {
-        const rows: any = await driver.raw(`PRAGMA table_info("${table}")`);
+        const rows: any = await exec(`PRAGMA table_info("${table}")`);
         const list: any[] = Array.isArray(rows)
             ? (Array.isArray(rows[0]) ? rows[0] : rows)
             : [];
@@ -200,7 +250,7 @@ async function columnExists(driver: any, table: string, column: string): Promise
     }
     // Postgres / others.
     try {
-        const result: any = await driver.raw(
+        const result: any = await exec(
             `SELECT column_name FROM information_schema.columns WHERE table_name = ? AND column_name = ?`,
             [table, column],
         );

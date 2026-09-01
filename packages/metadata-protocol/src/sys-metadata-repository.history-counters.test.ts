@@ -334,7 +334,7 @@ describe('#4867 — history counters are never invented from a failed read', () 
       expect(infoSpy).toHaveBeenCalledTimes(1);
       expect((infoSpy.mock.calls[0] as [string])[0]).toMatch(/readable again/i);
       // Numbering resumes after the surviving max — never from 1 again.
-      expect(engine.committed().at(-1)).toEqual({
+      expect(engine.committed().slice(-1)[0]).toEqual({
         name: 'case_grid',
         version: 3,
         event_seq: 4,

@@ -92,6 +92,7 @@ describe('approval status vocabulary (#7232)', () => {
       rejected: 'Rejected',
       recalled: 'Recalled',
       returned: 'Returned',
+      cancelled: 'Cancelled',
     });
   });
 
@@ -102,6 +103,11 @@ describe('approval status vocabulary (#7232)', () => {
       rejected: '已拒绝',
       recalled: '已撤回',
       returned: '已退回修改',
+      // #13568. 已作废, deliberately not 已取消: `recalled` is already 已撤回
+      // (the submitter withdrew), and a platform-initiated void has to read as
+      // something nobody chose to do — the same distinction the English pair
+      // Recalled / Cancelled carries.
+      cancelled: '已作废',
     });
   });
 

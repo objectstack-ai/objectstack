@@ -356,7 +356,7 @@ prompt you can give verbatim:
 |:---|:---|:---|
 | Data model — objects, fields, relationships, validations, seeds | `objectstack-data` | "Add an `account` object and link tickets to it with a required lookup. Seed three demo accounts." |
 | Queries & reports over records | `objectstack-query` | "Show me the count of open tickets per priority, using an aggregation." |
-| Views, dashboards, apps, record pages | `objectstack-ui` | "Add a dashboard with a metric for open tickets and a bar chart of tickets by priority." |
+| Views, dashboards, apps, record pages | `objectstack-ui` | "Declare a `tickets` dataset over the ticket object, then add a dashboard with a metric for open tickets and a bar chart of tickets by priority." |
 | Business automation — flows, approvals, schedules | `objectstack-automation` | "Every day at 9:00, escalate tickets that have been open more than 48 hours." |
 | Permissions & row-level security | `objectstack-data` (security sections) | "Members should only see their own tickets; support managers see everything." |
 | Formula / conditional-field logic (CEL) | `objectstack-formula` | "Make `resolved_at` required and visible only when status is resolved." |
@@ -364,8 +364,16 @@ prompt you can give verbatim:
 | REST/auth surface tuning | `objectstack-api` | "Restrict the ticket API to read-only for non-members." |
 | Translations | `objectstack-i18n` | "Add a zh-CN translation bundle for the ticket object and app navigation." |
 
-Two habits keep this reliable as the app grows:
+Three habits keep this reliable as the app grows:
 
+- **A module is not finished until its analytics face exists.** Objects, views
+  and a nav entry make an object usable; they do not make it *reportable*.
+  Dashboards and reports bind a **declared dataset** by name
+  (`src/datasets/*.dataset.ts`) — the layer that carries the governed joins,
+  filters and measure definitions an object does not express — so an object with
+  no dataset simply never appears in the report builder. Ask for the dataset in
+  the same breath as the views, and `objectstack-ui`'s completeness blueprint
+  lists it as its own line item.
 - **The gate applies to every domain.** Flows, dashboards, permissions, and
   translations all go through the same `npm run validate` — the agent should run
   it after each change, exactly as `AGENTS.md` instructs.
