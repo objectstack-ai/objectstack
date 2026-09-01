@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { Plugin, PluginContext, IHttpServer } from '@objectstack/core';
+import { Plugin, PluginContext, IHttpServer, isServiceNotRegisteredError } from '@objectstack/core';
 import { RestServer, RestKernelManager, RestProtocol, RestRequestEnvResolver, RestEnvRegistry } from './rest-server.js';
 import { RestServerConfig } from '@objectstack/spec/api';
 import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
@@ -286,7 +286,48 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             // slot is the SAME instance as `data` seen whole, and the consumer
             // (`resolveExecCtx`, and the `transaction` probe behind the batch
             // routes) reaches the full engine, not just the data plane.
+            //
+            // [#13904] Absorb ONLY "nothing is registered under 'objectql'" —
+            // the supported no-data-plane composition (`optionalDependencies:
+            // ['com.objectstack.engine.objectql']` above), which must keep
+            // resolving `undefined` quietly. Every other rejection re-raises,
+            // so it reaches the transport's `wiredEngineOrLoud` seam (#13476)
+            // and answers as the outage it is, instead of being collapsed into
+            // "no engine is wired" one layer before that seam can see it.
+            //
+            // The classification is the REGISTRY's, never message text. The
+            // resolution goes through `kernel.getServiceAsync` →
+            // `PluginLoader.getService`, whose "never registered" rejection is
+            // branded (`isServiceNotRegisteredError`, #13905) and whose every
+            // other rejection — a factory that threw, a scoped registration
+            // resolved without a scope id, a circular service dependency —
+            // stays unbranded: the set is closed and its default is LOUD.
+            //
+            // The old `ctx.getService` + catch-all collapsed three
+            // distinguishable conditions into one `undefined`. Where each
+            // lands now:
+            //   - never registered             → branded → `undefined`, quiet;
+            //   - registered as a FACTORY      → the async accessor constructs
+            //     and returns the engine (the sync accessor could only throw
+            //     `is async - use await` here — the condition dissolves);
+            //   - registered and FAILED to build → unbranded → re-raised, loud.
+            //
+            // The sync leg below is for a KernelBase-shaped host (`LiteKernel`)
+            // with no `getServiceAsync`. Such a host has no service factories
+            // either (its `registerServiceFactory` throws "not supported"), so
+            // its accessor has exactly ONE fault to report — not registered —
+            // and absorbing it is the same classification, not a second
+            // collapse.
             const objectQLProvider = async (_environmentId?: string): Promise<IObjectQLEngine | undefined> => {
+                const kernel = typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined;
+                if (kernel && typeof kernel.getServiceAsync === 'function') {
+                    try {
+                        return await kernel.getServiceAsync<IObjectQLEngine>('objectql');
+                    } catch (err) {
+                        if (isServiceNotRegisteredError(err)) return undefined;
+                        throw err;
+                    }
+                }
                 try {
                     return ctx.getService<IObjectQLEngine>('objectql');
                 } catch { return undefined; }
