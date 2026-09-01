@@ -42,7 +42,7 @@ interface RecordedWrite {
 }
 
 /**
- * A driver with the row-write surface of `IDataSourceDriver`, recording what it
+ * A driver with the row-write surface of `IDataDriver`, recording what it
  * was asked to do. Methods live on the PROTOTYPE, like every real driver's, so
  * the guard is exercised against the shape it actually meets: an own property
  * shadowing a prototype method, restored by `delete` rather than by rewrite.
@@ -51,6 +51,13 @@ class RecordingDriver {
   name = 'recording';
   version = '1.0.0';
   writes: RecordedWrite[] = [];
+  /** Raw commands `execute()` actually RAN — the escape hatch is forwarded, not refused. */
+  executed: unknown[] = [];
+
+  async execute(command: unknown): Promise<unknown> {
+    this.executed.push(command);
+    return { ran: command };
+  }
 
   async create(object: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
     this.writes.push({ method: 'create', object });
@@ -240,10 +247,66 @@ describe('the declaration boot writes nothing (#13332)', () => {
       'write:kernel:listening',
     ]);
 
-    // The refusal is reported, per phase, rather than swallowed.
+    // The refusal is reported, per phase, rather than swallowed — and with no
+    // raw execute() forwarded this run, the outcome claim HELD and is printed.
     const note = guard.disarm();
     expect(note).toContain('Refused 3 write(s)');
+    expect(note).toContain('a plan writes nothing');
     expect(note).toContain('create() on sys_ai_model x3');
+
+    await kernel.shutdown();
+  });
+
+  it('execute() — the contract\'s raw escape hatch — is FORWARDED and REPORTED, never silent (#14053 R1)', async () => {
+    // `execute()` is a REQUIRED member of `IDataDriver`
+    // (`packages/spec/src/contracts/data-driver.ts`, "Raw Execution (Escape
+    // Hatch)") — not a driver-sql extension. The guard cannot classify a raw
+    // command as read-vs-write (the contract admits any native shape), so it
+    // must not refuse — but the one unacceptable outcome is the SILENT one: a
+    // raw write landing while the run claims "a plan writes nothing". This
+    // pins all three properties: forwarded, counted, and the claim dropped.
+    const driver = new RecordingDriver();
+    const guard = createDeclarationBootWriteGuard();
+    const kernel = newKernel();
+    const seen: unknown[] = [];
+    const RAW = "INSERT INTO sys_metadata (id) VALUES ('landed')";
+
+    const rawCaller: Plugin = {
+      name: 'com.example.calls-execute',
+      version: '1.0.0',
+      init: async (ctx: PluginContext) => {
+        ctx.hook('kernel:ready', async () => {
+          const d = ctx.getService<RecordingDriver>('driver.recording');
+          seen.push(await d.execute(RAW));
+          // An in-run control: the guarded surface still refuses.
+          await d.create('sys_thing', { name: 'refused' });
+        });
+      },
+    };
+
+    await kernel.use(datasourcePlugin(driver));
+    await kernel.use(guard.plugin as Plugin);
+    await kernel.use(composeForDeclarations(rawCaller));
+    await kernel.bootstrap();
+
+    // FORWARDED: the real driver ran the raw command, and its own return
+    // value came back to the caller.
+    expect(driver.executed).toEqual([RAW]);
+    expect(seen).toEqual([{ ran: RAW }]);
+    // …while the contract surface was refused in the same boot.
+    expect(driver.writes).toEqual([]);
+
+    // COUNTED, per driver, on the guard's own surface.
+    expect(guard.rawExecutions).toEqual([{ driver: 'driver.recording', count: 1 }]);
+
+    // REPORTED — and the flat claim is DROPPED: neither the refusal half nor
+    // any other part of the note may print "a plan writes nothing" over a run
+    // in which a raw command went through unclassified.
+    const note = guard.disarm();
+    expect(note).toContain('Refused 1 write(s) during the declaration boot:');
+    expect(note).toContain('Raw execute() was called 1 time(s) during the declaration boot');
+    expect(note).toContain('1 via driver.recording');
+    expect(note).not.toContain('a plan writes nothing');
 
     await kernel.shutdown();
   });
@@ -332,18 +395,25 @@ describe('the declaration boot writes nothing (#13332)', () => {
     const kernel = newKernel();
 
     const before = Object.getPrototypeOf(driver).create;
+    const beforeExecute = Object.getPrototypeOf(driver).execute;
 
     await kernel.use(datasourcePlugin(driver));
     await kernel.use(guard.plugin as Plugin);
     await kernel.bootstrap();
 
     expect(Object.getOwnPropertyDescriptor(driver, 'create')).toBeDefined();
-    expect(guard.disarm()).toBeNull(); // nothing was refused — no note at all
+    expect(Object.getOwnPropertyDescriptor(driver, 'execute')).toBeDefined();
+    // Nothing was refused and no raw execute() was CALLED (the forwarding
+    // shadow was installed, but installation alone is not an event) — so no
+    // note at all, and a quiet boot renders byte-identically to before.
+    expect(guard.disarm()).toBeNull();
 
-    // The shadowing own property is GONE, not overwritten with a copy: the
+    // The shadowing own properties are GONE, not overwritten with a copy: the
     // instance is back to resolving through its prototype.
     expect(Object.getOwnPropertyDescriptor(driver, 'create')).toBeUndefined();
     expect(driver.create).toBe(before);
+    expect(Object.getOwnPropertyDescriptor(driver, 'execute')).toBeUndefined();
+    expect(driver.execute).toBe(beforeExecute);
 
     await driver.create('sys_thing', {});
     expect(driver.writes).toEqual([{ method: 'create', object: 'sys_thing' }]);

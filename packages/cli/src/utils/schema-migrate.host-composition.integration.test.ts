@@ -704,10 +704,83 @@ describe('a plan writes nothing even when the host writes from init() (#13332)',
       }
 
       // The refusals are REPORTED, not swallowed — this is the line the plan
-      // prints and `--json` carries.
+      // prints and `--json` carries. No raw execute() went through on this
+      // boot, so the outcome claim HELD and is printed with the report.
       const notes = stack.composition.notes.join(' ');
-      expect(notes).toContain('Refused 6 write(s) during the declaration boot');
+      expect(notes).toContain('Refused 6 write(s) during the declaration boot — a plan writes nothing');
       expect(notes).toContain('create() on sys_metadata');
+    } finally {
+      await stack.shutdown();
+    }
+  }, 60_000);
+
+  it('R1 (#14053): a raw execute() is FORWARDED — the row lands — and the run reports it instead of claiming it wrote nothing', async () => {
+    // The at-tier review's own control shape, pinned: in one guarded boot, a
+    // hook issues a contract write (refused — the in-run control) and a raw
+    // `execute("INSERT …")`. `execute()` is a REQUIRED member of `IDataDriver`
+    // (`packages/spec/src/contracts/data-driver.ts`, "Raw Execution (Escape
+    // Hatch)"), and the guard cannot classify a raw command as read-vs-write,
+    // so the row LANDS — that is the documented behaviour, not the defect.
+    // The defect was the SILENT half: before this case's fix, the same run
+    // printed "a plan writes nothing" and a refusal list that looked
+    // complete. Now the notes name the forwarded call and drop the claim.
+    const rawWritingPlugin: any = {
+      name: 'com.example.raw-execute-from-init',
+      version: '1.0.0',
+      init: async (ctx: any) => {
+        ctx.hook('kernel:ready', async () => {
+          const entry = [...ctx.getServices().entries()]
+            .find(([n]: [string, unknown]) => n.startsWith('driver.'));
+          if (!entry) return;
+          const driver = entry[1];
+          // In-run control: the guarded surface refuses this one.
+          await driver.create('sys_metadata', {
+            id: 'os14053-create-probe',
+            name: 'os14053-create-probe',
+            type: 'os14053_create_probe',
+          });
+          // The escape hatch: forwarded, so this one LANDS.
+          await driver.execute(
+            "INSERT INTO sys_metadata (id, name, type) VALUES "
+            + "('os14053-exec-probe', 'os14053-exec-probe', 'os14053_exec_probe')",
+          );
+        });
+      },
+    };
+
+    const stack = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${dbFile}`,
+      deferSchemaDdl: true,
+      composeHostStack: true,
+      extraPlugins: [rawWritingPlugin],
+      projectRoot: dir,
+    });
+    try {
+      const countByType = async (type: string) => {
+        const rows: any = await (stack.driver as any).knex('sys_metadata')
+          .where({ type }).count({ c: '*' });
+        return Number((Array.isArray(rows) ? rows[0] : rows)?.c ?? -1);
+      };
+      // The control half: the contract write was refused.
+      expect(await countByType('os14053_create_probe')).toBe(0);
+      // The escape hatch half: the raw INSERT landed — forwarded on purpose.
+      expect(await countByType('os14053_exec_probe')).toBe(1);
+
+      // …and the run SAYS so. The refusal line drops the flat claim (the
+      // colon directly after "boot" is the dropped phrase), the forwarded
+      // call is named with its count, and no note in the run claims the
+      // plan wrote nothing. 4 refusals: the host config's plugin on three
+      // phases, plus this fixture's in-run control.
+      const notes = stack.composition.notes.join(' ');
+      expect(notes).toContain('Refused 4 write(s) during the declaration boot:');
+      expect(notes).toContain('Raw execute() was called 1 time(s) during the declaration boot');
+      expect(notes).not.toContain('a plan writes nothing');
+
+      // The guard's structural surface carries it too, for `--json` consumers.
+      expect(stack.composition.writeGuard?.rawExecutions).toEqual([
+        expect.objectContaining({ count: 1 }),
+      ]);
     } finally {
       await stack.shutdown();
     }
