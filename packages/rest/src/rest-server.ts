@@ -554,9 +554,16 @@ function importJobUndoable(row: any): boolean {
  * declaration is right; the emitted value was wrong. This makes the value what
  * the declaration already says.
  *
- * Same three branches as the landed normaliser in
- * `@objectstack/metadata-protocol`'s `protocol.ts` (`occurredAt`) — ONE
- * spelling repo-wide for this repair, deliberately not a fourth variant.
+ * Same three branches as the two landed normalisers in
+ * `@objectstack/metadata-protocol` — `auditMetaItem`'s `occurredAt` in
+ * `protocol.ts` and `canonicalIsoInstant` in `sys-metadata-repository.ts`
+ * (#13997) — ONE spelling repo-wide for this repair, deliberately not a new
+ * variant. The only difference from `canonicalIsoInstant` is its nullish arm,
+ * and that difference is forced by the call sites: it returns `undefined` so
+ * each caller's own `?? <default>` chain keeps its meaning, whereas the four
+ * sites here are the DTO's last step and the required `createdAt` field's
+ * absent-value spelling — `''` — is folded in, exactly as the `String(row?.
+ * created_at ?? '')` it replaces produced.
  */
 function canonicalIsoStamp(value: unknown): string {
     if (typeof value === 'string') return value;
