@@ -6,19 +6,10 @@ import { RowLevelSecurityPolicySchema } from './rls.zod';
 import { ApiOperationSchema } from '../data/object.zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-
-/**
- * Entity (Object) Level Permissions
- * Defines CRUD + VAMA (View All / Modify All) + Lifecycle access.
- * 
- * Refined with enterprise data lifecycle controls:
- * - Transfer (Ownership change)
- * - Restore (Soft delete recovery)
- * - Purge (Hard delete / Compliance)
- */
 import { lazySchema } from '../shared/lazy-schema';
 import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
+
 /**
  * [ADR-0057 D1] Object access DEPTH — the Dataverse "access level" axis,
  * layered on top of OWD. Widens the owner-match for owner-scoped objects.
@@ -41,6 +32,16 @@ export type ObjectAccessScope = z.input<typeof ObjectAccessScopeSchema>;
  * (the bodies are allocated lazily; `permission.test.ts` drift-guards every
  * entry), and each error map names the canonical key when the authored one is
  * a recognisable spelling of it.
+ */
+
+/**
+ * Entity (Object) Level Permissions
+ * Defines CRUD + VAMA (View All / Modify All) + Lifecycle access.
+ *
+ * Refined with enterprise data lifecycle controls:
+ * - Transfer (Ownership change)
+ * - Restore (Soft delete recovery)
+ * - Purge (Hard delete / Compliance)
  */
 
 /**

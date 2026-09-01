@@ -4,10 +4,22 @@
  * ADR-0092 / ADR-0103 — registry-driven managed-object write denies for the
  * default permission sets.
  *
- * The default write-granting permission sets (`organization_admin`,
- * `member_default`, `viewer_readonly`, and the MCP write set) grant CRUD via a
- * `'*'` wildcard, then DENY writes on the better-auth-managed identity tables so
- * mutations must flow through the auth pipeline (ADR-0092). That deny-list was a
+ * The default sets this module targets (`organization_admin`, `member_default`,
+ * `viewer_readonly`, and the MCP write set) DENY writes on the
+ * better-auth-managed identity tables so mutations must flow through the auth
+ * pipeline (ADR-0092). What that entry narrows differs per set, and the
+ * difference is load-bearing for the rest of this file: `organization_admin` and
+ * the MCP write set grant CRUD through an `objects['*']` wildcard, so their
+ * managed-table entries are a narrowing overlay; `viewer_readonly`'s wildcard is
+ * read-only, so its entries are belt-and-suspenders over a wildcard that already
+ * denies; and `member_default` carries NO wildcard at all since #5491 (the
+ * additive `everyone` baseline merges most-permissively, so a wildcard there was
+ * a floor no app could get under — maintainer ruling 2026-08-07: the baseline
+ * narrows to explicit-allow, and a wildcard is not to be reintroduced here in
+ * any form). Its access is exactly the objects it NAMES, so a managed-table
+ * entry in that set is the read grant itself rather than a narrowing of
+ * anything — which is what keeps `/auth/me`, the org switcher and the Account
+ * app working for a member with no application profile. That deny-list was a
  * hand-maintained object-name array (`BETTER_AUTH_MANAGED_OBJECTS` in
  * `default-permission-sets.ts`) — precisely the drift ADR-0092 forbids, and it
  * HAD drifted (the static list missed schemas that later declared
@@ -36,11 +48,12 @@
  *
  * ── Deliberately NOT covered: engine-owned system / append-only objects ──
  * ADR-0103's engine-owned objects (`sys_audit_log`, `sys_automation_run`, …)
- * are also wildcard-granted in these sets, but we do NOT inject deny entries for
- * them: a per-object entry FULLY OVERRIDES the wildcard (lookup, not merge — see
- * `default-permission-sets.ts`), so injecting `{ allowRead: true, ...writes:false }`
- * would silently drop the wildcard's `viewAllRecords` / `modifyAllRecords` — a
- * read-side narrowing. Their user-context writes are already rejected at the
+ * are also reached by the wildcard in the target sets that carry one, but we do
+ * NOT inject deny entries for them: a per-object entry FULLY OVERRIDES the
+ * wildcard (lookup, not merge — see `default-permission-sets.ts`), so injecting
+ * `{ allowRead: true, ...writes:false }` would silently drop
+ * `organization_admin`'s `viewAllRecords` / `modifyAllRecords` — a read-side
+ * narrowing. Their user-context writes are already rejected at the
  * engine by `assertEngineOwnedWriteAllowed` (ADR-0103) and reflected in the
  * `/me/permissions` clamp, so the permission-set layer needs no change for them.
  */
@@ -62,11 +75,14 @@ export const MANAGED_DENY_ENTRY = {
 };
 
 /**
- * The default sets whose `'*'` wildcard grants writes and therefore must carry
- * the managed-table denies. Explicit allowlist — `admin_full_access` is
- * deliberately excluded (it keeps its unqualified wildcard so an admin can
- * rescue data directly; the runtime guards are its boundary), as are the MCP
- * read / restricted sets (they grant no writes).
+ * The default sets that must carry an explicit entry for every managed table.
+ * Membership is NOT "holds a write-granting `'*'` wildcard" — only
+ * `organization_admin` and the MCP write set hold one; `viewer_readonly`'s
+ * wildcard is read-only and `member_default` has held none since #5491 (see the
+ * module docblock for what the injected entry does in each). Explicit allowlist
+ * — `admin_full_access` is deliberately excluded (it keeps its unqualified
+ * wildcard so an admin can rescue data directly; the runtime guards are its
+ * boundary), as are the MCP read / restricted sets (they grant no writes).
  */
 export const MANAGED_DENY_TARGET_SETS: readonly string[] = [
   'organization_admin',

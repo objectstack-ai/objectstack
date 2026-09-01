@@ -51,7 +51,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           approved: "Approved",
           rejected: "Rejected",
           recalled: "Recalled",
-          returned: "Returned"
+          returned: "Returned",
+          cancelled: "Cancelled"
+        }
+      },
+      cancel_reason: {
+        label: "Cancellation Reason",
+        help: "Why the platform voided this request (set only when the status is cancelled)",
+        options: {
+          record_deleted: "Related record deleted"
         }
       },
       current_step: {
@@ -232,7 +240,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           comment: "Comment",
           revise: "Revise",
           resubmit: "Resubmit",
-          ooo_substitute: "Out-of-Office Substitution"
+          ooo_substitute: "Out-of-Office Substitution",
+          cancel: "Cancel"
         }
       },
       actor_id: {

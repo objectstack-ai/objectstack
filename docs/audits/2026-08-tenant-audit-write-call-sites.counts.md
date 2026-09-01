@@ -29,17 +29,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 215 |
-| Object name statically decidable | 143 |
+| Write call sites | 217 |
+| Object name statically decidable | 145 |
 | Object name chosen at run time | 72 |
-| Against a tenancy-enabled object | 143 |
+| Against a tenancy-enabled object | 145 |
 | Against an object declaring tenancy off | 0 |
-| Threading a tenant context | 131 |
+| Threading a tenant context | 133 |
 | Provably carrying none | 17 |
 | …and decidably tenancy-enabled | 9 |
 | Options argument unreadable | 67 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 97 |
+| Threading a decidably elevated context | 99 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 101 |
 
@@ -52,7 +52,7 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-08-31 at `fc8858a24`.
+Measured on 2026-09-01 at `d3ebf3b55`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
@@ -66,11 +66,11 @@ Measured on 2026-08-31 at `fc8858a24`.
 | file | verb | object | tenancy | tenant context | n |
 |---|---|---|---|---|---:|
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_action` | enabled | elevated | 13 |
+| `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_action` | enabled | elevated | 14 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `delete` | `sys_approval_approver` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_approver` | enabled | elevated | 2 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_request` | enabled | elevated | 1 |
-| `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `sys_approval_request` | enabled | elevated | 8 |
+| `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `sys_approval_request` | enabled | elevated | 9 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_token` | enabled | elevated | 1 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `sys_approval_token` | enabled | elevated | 1 |
 | `packages/plugins/plugin-approvals/src/backfill-platform-row-organizations.ts` | `update` | `objectPlan.object` | undecidable | context, elevation undecidable | 1 |

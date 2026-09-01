@@ -193,6 +193,46 @@ describe('extractHookBody', () => {
     expect(() => extractHookBody(fn, 'hook free')).toThrow(/not in scope at runtime|moduleScopeHelper/);
   });
 
+  // ── `sudo()` is not a body-reachable member (#14010) ────────────────────
+  //
+  // `ScopedContext.sudo()` is REAL in-process and absent from the VM's
+  // `ctx.api`, so the same handler source passes a native `hook.handler(ctx)`
+  // test and TypeErrors once the build lowers it into a body. Refusing the
+  // extraction is what keeps the two runtimes honest: `lowerCallables` catches
+  // this throw and ships the callable through the .mjs bundle, so the handler
+  // keeps working in-process — only the unrunnable body is declined.
+  it('rejects a handler calling ctx.api.sudo() (#14010)', () => {
+    const fn = async (ctx: any) => {
+      await ctx.api.sudo().object('crm_account').update({ id: ctx.input.id, current_grade: 'A' });
+    };
+    expect(() => extractHookBody(fn, 'hook elevate')).toThrow(/`sudo\(\)` is not reachable/);
+  });
+
+  it('rejects the aliased receiver too — `const api = ctx.api; api.sudo()` (#14010)', () => {
+    // Receiver-loose on purpose: under-refusing here is the failure that only
+    // production sees, which is the whole defect.
+    const fn = async (ctx: any) => {
+      const api = ctx.api;
+      await api.sudo().object('crm_account').update({ id: ctx.input.id, x: 1 });
+    };
+    expect(() => extractHookBody(fn, 'hook elevate alias')).toThrow(/`sudo\(\)` is not reachable/);
+  });
+
+  // The reverse leg: without the pattern this body extracts CLEANLY and the
+  // build emits a `body.source` that TypeErrors in the sandbox. Asserting the
+  // ordinary shape still passes is what proves the pattern did not widen into
+  // the majority case it sits beside.
+  it('still extracts an ordinary non-elevated ctx.api write (#14010)', () => {
+    const fn = async (ctx: any) => {
+      await ctx.api.object('crm_account').update({ id: ctx.input.id, current_grade: 'A' });
+    };
+    const ext = extractHookBody(fn, 'hook plain');
+    expect(ext.capabilities).toContain('api.write');
+    // Quote-agnostic: this file is itself bundled, and esbuild rewrites the
+    // literal's quotes before `String(fn)` ever runs.
+    expect(ext.source).toMatch(/object\((['"])crm_account\1\)/);
+  });
+
   it('extracts a self-contained handler that only uses params + globals (#1876)', () => {
     const fn = (ctx: any) => {
       ctx.record.id = Math.round(Number(ctx.record.raw));

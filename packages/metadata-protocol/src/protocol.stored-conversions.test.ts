@@ -44,7 +44,12 @@ function matches(r: Row, where: Record<string, unknown>): boolean {
     return true;
 }
 
-function makeStubEngine(seedRows: Array<Partial<Row> & { type: string; name: string; metadata: unknown }>) {
+// `metadata` is `Omit`-ed out of the `Partial<Row>` half, never merely
+// intersected over it: `string & unknown` is `string`, so a plain
+// intersection refuses every body written as an object literal.
+function makeStubEngine(
+    seedRows: Array<Omit<Partial<Row>, 'metadata'> & { type: string; name: string; metadata: unknown }>,
+) {
     let nextId = 0;
     const rows: Row[] = seedRows.map((r) => ({
         id: `r_${++nextId}`,

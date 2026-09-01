@@ -14,7 +14,7 @@
  * For v1 we apply a deliberately simple **regex allow-list** over the
  * extracted body — full TypeScript AST analysis is deferred to v2. Anything
  * the regex rejects (top-level `import`, `require(` / esbuild's `__require(`,
- * `fetch(`, `process.*`, `globalThis.*`, `eval`, `new Function`) makes
+ * `fetch(`, `process.*`, `globalThis.*`, `eval`, `new Function`, `.sudo(`) makes
  * extraction **throw**.
  *
  * ⚠️ What that throw costs the BUILD depends on the flag, and the two outcomes
@@ -29,11 +29,18 @@
  *                       until #10678, which is the whole defect that card names.
  *   `--strict-body`     the same recorded warnings become a hard failure (exit 1)
  *                       with a per-callable diagnostic, and nothing is bundled.
+ *   `os lint`           (#13651) reads the REFUSAL KIND, not the exit code, and
+ *                       gives the two classes different verdicts: an accidental
+ *                       scope leak (`free-identifiers`) is a lint `error`, so a
+ *                       gate can fail on it; a structural one (`forbidden-token`)
+ *                       stays a warning, because bundling is its designed answer.
+ *                       `os lint` calls THIS function, so its verdict cannot
+ *                       drift from what `os build` would do to the same handler.
  *
  * So the allow-list gates what may become `body.source`; it does not (yet) gate
  * what may build. Closing the L3 `.mjs` path is `--strict-body`'s job today and
  * Phase 3's later — not this list's. Docs `hook-bodies.mdx` describe the same
- * two outcomes; when this header and that page disagree, they are both wrong
+ * outcomes; when this header and that page disagree, they are both wrong
  * until one of them is measured over a real `os build`.
  *
  * Capability inference: we scan the body for known `ctx.api.*`, `ctx.log.*`,
@@ -68,6 +75,69 @@
 
 import { detectFreeIdentifiers } from './detect-free-identifiers.js';
 
+/**
+ * WHY a refusal carries a machine-readable kind (#13651).
+ *
+ * Every refusal below already KNOWS which rule refused — the rule is what
+ * produced the sentence. Until this type existed, that knowledge was flattened
+ * into the message string at the `throw` and never recovered: `lowerCallables`
+ * caught the error, kept `err.message`, and every consumer downstream had a
+ * paragraph of English where it needed a category. So the two refusals that
+ * mean OPPOSITE things to an author shared one undifferentiated fate:
+ *
+ *   `free-identifiers`   the handler IS expressible as a metadata-only body.
+ *                        It references a module-scope helper/import/const, so
+ *                        the deployment shape silently changed from metadata to
+ *                        bundled closure — against what the author wrote. The
+ *                        remedy is local and mechanical (inline the value).
+ *   `forbidden-token`    the handler is NOT expressible as a metadata-only body
+ *                        at ALL. `fetch`/`require`/`process`/… are capabilities
+ *                        the QuickJS sandbox does not have, so writing one IS
+ *                        choosing a bundled closure. Falling back to the bundle
+ *                        is the designed answer, not a degradation to report as
+ *                        an error.
+ *   `unparseable`        the extractor could not find a body to peel. An
+ *                        instrument limit, not an author verdict.
+ *
+ * ⛔ The kind is NOT a license to change what `os build` accepts. Both classes
+ * still fall back to bundling and still exit 0 — see `lowerCallables`, whose
+ * catch is deliberately kept. What the kind buys is that a consumer can now
+ * treat the accidental class differently from the structural one; `os lint` is
+ * the first to do so.
+ */
+export type HookBodyRefusalKind = 'unparseable' | 'forbidden-token' | 'free-identifiers';
+
+/**
+ * A refusal from {@link extractHookBody}, carrying the classification the
+ * refusing rule already had.
+ *
+ * The `message` is deliberately byte-identical to what this function threw
+ * before the class existed: `os build`'s warn-and-bundle line, `--strict-body`'s
+ * per-callable diagnostic and `content/docs/automation/hook-bodies.mdx` all
+ * quote those sentences, and a refusal that reads differently would be a
+ * documentation break wearing a refactor's clothes. The class ADDS structure
+ * beside the prose; it does not restate it.
+ */
+export class HookBodyExtractionError extends Error {
+  readonly kind: HookBodyRefusalKind;
+  readonly originLabel: string;
+  /** Names the handler referenced but does not bind — `free-identifiers` only. */
+  readonly freeIdentifiers: readonly string[];
+
+  constructor(
+    kind: HookBodyRefusalKind,
+    originLabel: string,
+    message: string,
+    freeIdentifiers: readonly string[] = [],
+  ) {
+    super(message);
+    this.name = 'HookBodyExtractionError';
+    this.kind = kind;
+    this.originLabel = originLabel;
+    this.freeIdentifiers = freeIdentifiers;
+  }
+}
+
 const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string }> = [
   { rx: /\bimport\s*[\(\*\{]/, reason: 'dynamic `import()` and ES imports are not allowed in hook/action bodies — declare a Connector recipe instead' },
   // Both spellings, one reason (#10678). A TypeScript config is loaded through
@@ -85,6 +155,35 @@ const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string }> = [
   { rx: /\bglobalThis\s*\./, reason: '`globalThis` access is not allowed in hook/action bodies' },
   { rx: /\beval\s*\(/, reason: '`eval()` is not allowed in hook/action bodies' },
   { rx: /\bnew\s+Function\s*\(/, reason: '`new Function()` is not allowed in hook/action bodies' },
+  // [#14010] `sudo()` exists on the HOST `ScopedContext` and is NOT marshalled
+  // into the VM, so lowering a handler that calls it turns working in-process
+  // code into a `TypeError` that only production sees. Refusing here is what
+  // makes the two runtimes agree: the callable is still registered in
+  // `functions` and still shipped through the `.mjs` bundle by `lowerCallables`,
+  // so the handler keeps running in-process where `sudo()` is real — the build
+  // just declines to ALSO emit it as a body that cannot run.
+  //
+  // Same family as the `crypto.hash` retirement three lines into
+  // CAPABILITY_PATTERNS below (#4391): a member advertised ahead of its
+  // implementation, where the build-time inference was the amplifier rather
+  // than the safety net. The difference is the remedy — `crypto.hash` had no
+  // working channel to fall back to, this one does.
+  //
+  // Receiver-loose, like the `.object(...)` / `.title(...)` capability patterns:
+  // a local alias (`const api = ctx.api; api.sudo()`) must not slip through,
+  // and over-refusal is the SAFE direction here (the handler is bundled and
+  // works; it is only `--strict-body`, which demands a body for every callable,
+  // that turns this into a hard failure — correctly, since a body needing
+  // elevation genuinely cannot be one).
+  {
+    rx: /\.\s*sudo\s*\(/,
+    reason:
+      '`sudo()` is not reachable from a sandboxed body — the VM\'s `ctx.api` carries only `object()` '
+      + 'and `transaction()`, so the call is a TypeError at run time (and under a hook\'s default '
+      + '`onError: \'abort\'` that aborts the triggering write). Stamp the value from the record\'s own '
+      + 'before-hook (`ctx.input.<field> = ...`), or leave this handler bundled so it runs in-process '
+      + 'where `sudo()` exists',
+  },
 ];
 
 const CAPABILITY_PATTERNS: Array<{ rx: RegExp; cap: 'api.read' | 'api.write' | 'crypto.uuid' | 'log' }> = [
@@ -142,7 +241,9 @@ export function extractHookBody(fn: (...a: unknown[]) => unknown, originLabel: s
   // result is a pure block body suitable for `new Function('ctx', body)`.
   const block = peelToBlockBody(raw);
   if (!block) {
-    throw new Error(
+    throw new HookBodyExtractionError(
+      'unparseable',
+      originLabel,
       `[hook-body-extract] could not parse the body of ${originLabel}; ` +
         `please rewrite the handler as a single arrow function or named function expression`,
     );
@@ -151,7 +252,9 @@ export function extractHookBody(fn: (...a: unknown[]) => unknown, originLabel: s
   // Reject any forbidden token before we ship the source as metadata.
   for (const { rx, reason } of FORBIDDEN_PATTERNS) {
     if (rx.test(block.source)) {
-      throw new Error(
+      throw new HookBodyExtractionError(
+        'forbidden-token',
+        originLabel,
         `[hook-body-extract] ${originLabel}: ${reason}\n` +
           `--- offending body source ---\n${block.source.slice(0, 400)}${block.source.length > 400 ? '…' : ''}`,
       );
@@ -167,11 +270,14 @@ export function extractHookBody(fn: (...a: unknown[]) => unknown, originLabel: s
   // included) is analyzed so parameters are correctly in scope.
   const { free, unparsed } = detectFreeIdentifiers(raw);
   if (!unparsed && free.length > 0) {
-    throw new Error(
+    throw new HookBodyExtractionError(
+      'free-identifiers',
+      originLabel,
       `[hook-body-extract] ${originLabel}: handler references identifier(s) not in scope at runtime: ` +
         `${free.join(', ')}. Module-scope helpers/imports aren't shipped with a metadata-only body, so ` +
         `this handler will be BUNDLED instead (no behavior change). To make it body-only, inline the ` +
         `helper(s) into the handler or move the logic behind \`ctx\` (e.g. \`ctx.api\`).`,
+      free,
     );
   }
 

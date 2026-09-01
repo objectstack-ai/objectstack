@@ -105,8 +105,9 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> =>
 
 /**
  * The permission-query bodies the installed vendor handler EVALUATES, and no
- * others (see the header for why both directions matter). Measured on
- * better-auth 1.7.1 (`dist/plugins/admin/routes.mjs`, `userHasPermission`):
+ * others (see the header for why both directions matter). Measured on the
+ * then-installed better-auth 1.7.1 (`dist/plugins/admin/routes.mjs`,
+ * `userHasPermission`):
  *
  *  - the zod body schema is `{ userId?: coerce.string, role?: string }`
  *    intersected with `xor(permission | permissions)`, each a

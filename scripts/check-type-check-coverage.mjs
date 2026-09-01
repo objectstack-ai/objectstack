@@ -677,15 +677,6 @@ const DEBT = {
       + 'metadata.test.ts (34) and register-notifies-watchers.test.ts (16) do still hold 50 of the 89, '
       + 'but that is over HALF -- the "two thirds" claimed here was true at neither 92 nor 89.',
   },
-  '@objectstack/metadata-protocol': {
-    errors: 63,
-    note: 'code-tier 40 (TS2322 x34, TS2532/TS2493 x2 each, TS2353, TS2339); config-tier 10 (TS2835 x9, '
-      + 'TS2550); noise 13 (TS7006). Re-measured 63 at 5ab08428 -- the 2.25x drift that opened #5278, and '
-      + 'the entry whose note was most misleading: it read "code-tier 9, the rest config-tier and noise", '
-      + 'while code-tier alone is now 40. 27 of the TS2322 are in protocol.stored-migration.test.ts and 10 '
-      + 'in seed-loader-multi-value-reference.test.ts, so this is concentrated debt in two files rather '
-      + 'than a package-wide drizzle -- read it as two repairs, not as forty.',
-  },
   '@objectstack/observability': {
     errors: 11,
     note: 'all code-tier (TS2554 wrong arity x10, TS2552).',
@@ -1898,9 +1889,12 @@ function workspacePackages() {
 //     "the workspace root itself: code-tier 4 ..." qualifies);
 //   * a tier counted twice, or a further `code-tier 9`-shaped count ANYWHERE
 //     later in the note, means the note is quoting its own history and the
-//     entry is skipped. metadata-protocol quotes the misleading note #5278
-//     found ("code-tier 9, the rest config-tier and noise") and is skipped for
-//     exactly that reason -- correct entry, no verdict;
+//     entry is skipped. metadata-protocol's entry quoted the misleading note
+//     #5278 found ("code-tier 9, the rest config-tier and noise") and was
+//     skipped for exactly that reason -- correct entry, no verdict. That entry
+//     has since GRADUATED (the package declares `typecheck` and its 63 errors
+//     are repaired), so the rule's live example is the self-test case below
+//     rather than a ledger row you can still read here;
 //   * per-code tallies (`TS2835 x72, TS7006 x49, ...`) are NOT summed. They are
 //     partial by construction, and the worked example this rule was written
 //     against says why: `@objectstack/rest`'s tally summed to 147 while saying
@@ -4206,9 +4200,11 @@ function selfTest() {
     },
     {
       // The false-positive guard, and the reason the rule abstains rather than
-      // reasons: metadata-protocol's real note quotes the misleading one #5278
-      // found. Reading either count as the entry's own would red a correct
-      // entry, which is worse than the silence this check replaces.
+      // reasons: metadata-protocol's real note quoted the misleading one #5278
+      // found (that entry has since graduated, which is why this synthetic case
+      // now carries the shape). Reading either count as the entry's own would
+      // red a correct entry, which is worse than the silence this check
+      // replaces.
       label: 'a note quoting its own history is SKIPPED, not guessed at',
       packages: [],
       root: { name: 'root', scripts: { typecheck: 'turbo run typecheck' } },

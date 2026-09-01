@@ -150,15 +150,35 @@
  * sharing is a #11705 ruled constraint ("⛔ do not author a second mechanism")
  * and it is also what makes a new register row reach this file for free.
  *
- * ⚠️ One measured limit, stated so a queue log is readable: the #11705 rows
- * (generator-owned files inside `skills/**`) recompute by running the
- * generator's own `--check`, and THIS JOB INSTALLS NO DEPENDENCIES. Here they
- * therefore fail closed — a spec PR carrying its regenerated
- * `references/_index.md` is still governed at merge-group time and needs the
- * approving review, even though the seat-side `--test` lifts it in a dev
- * container. Giving this job a dependency install would close that, at a cost
- * on every queue build, and no ruling covers that trade — it is filed, not
- * taken.
+ * ⭐ THE JOB INSTALLS DEPENDENCIES, and that is what makes the #11705 rows
+ * (generator-owned files inside `skills/**`) answerable here at all. They
+ * recompute by running the generator's own `--check` through `pnpm … exec tsx`,
+ * so with no toolchain they used to fail closed on EVERY run: a spec PR
+ * carrying its regenerated `references/_index.md` stayed governed at
+ * merge-group time and needed a pinned approval, while the seat-side `--test`
+ * lifted the very same diff in a dev container. Two tools, same register, two
+ * answers — the one shape #11705's "⛔ do not author a second mechanism" exists
+ * to prevent, arrived at through the ENVIRONMENT rather than through a second
+ * copy of the code. The header used to file the install as a trade nobody had
+ * ruled on. The maintainer ruled it (2026-09-01, verbatim):
+ *
+ *   > 纯生成的指针行(spec 源变更后再生成的 references/_index.md) 不需要我审核吧
+ *
+ * What the install does NOT do is soften anything. The exemption is still the
+ * register's own byte-exact recompute against this build's own tree, every
+ * error path still fail-closed, and hand-authored governed content — including
+ * a hand edit sitting in the same commit as a certified regeneration — still
+ * needs the pinned approval. The only thing that changed is that the recompute
+ * can now actually run.
+ *
+ * ⚠️ The degradation is deliberate and is the reason every toolchain step in
+ * the workflow is `continue-on-error`: a broken install (registry outage, cache
+ * miss, a PR that moves `pnpm-lock.yaml` out of sync) leaves this job in
+ * EXACTLY the state it was in before the install existed — the generator cannot
+ * spawn, the recompute answers "the generator toolchain is not available in
+ * this environment", and the path stays GOVERNED. A diff that touches nothing
+ * governed is still never blocked by any of it: the path test runs first and
+ * returns before provenance is consulted at all.
  *
  * ## Exit codes — the refusal is impossible to read as clean
  *
@@ -199,6 +219,7 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  GENERATED_SURFACE_EXCEPTIONS,
   GOVERNED_SURFACES,
   applyGeneratedExceptions,
   generatedExceptionFor,
@@ -722,9 +743,11 @@ export function enumerateRows(root, baseSha, headSha, fallbackPull = null) {
  * generator runs read the TREE, which is the same for every row in the range.
  * `recompute` is injectable for the self-test only — the default IS the shared
  * driver, so nothing in production reaches this file with a different one.
- * ⚠️ The #11705 rows recompute by running the generator's own `--check`, and
- * this job installs no dependencies — so there they fail closed and the path
- * stays governed, which the note below states in full rather than implying.
+ * ⚠️ The #11705 rows recompute by running the generator's own `--check`, which
+ * needs the workspace's dependencies; the job installs them (see the header),
+ * and when that install did not happen the recompute says so and the path stays
+ * GOVERNED — the note it pushes states the reason in full rather than implying
+ * it.
  */
 export async function liftGeneratedExceptions(root, baseSha, rows, notes, recompute = recomputeProvenanceFor) {
   const registered = (row) => row.paths.filter((p) => generatedExceptionFor(p) !== null);
@@ -754,6 +777,52 @@ export async function liftGeneratedExceptions(root, baseSha, rows, notes, recomp
     out.push({ ...row, paths: row.paths.filter((p) => generatedExceptionFor(p) === null || stillGoverned.has(p)) });
   }
   return out;
+}
+
+/**
+ * The workflow's toolchain wiring, as data — the #14063 half of the wiring pin.
+ *
+ * Pure and text-based, deliberately: this file has no YAML parser (it is
+ * dependency-free by contract, and so is the job that runs it), and the
+ * questions asked here are about the workflow's TEXT anyway. Every field is a
+ * fact the self-test turns into a named assertion, so a reader of a failure
+ * sees which one of them stopped holding.
+ *
+ * ⚠️ `toolchainSteps` is defined POSITIONALLY — the steps between the self-test
+ * and the live judgment — so a reordering that empties it would make "every
+ * toolchain step degrades instead of reddening" pass vacuously. The self-test
+ * therefore asserts the block is non-empty and contains the install, which is
+ * the only reading under which the emptiness could be honest.
+ */
+export function installStepAudit(source) {
+  const text = String(source ?? '');
+  const at = text.indexOf('\n    steps:\n');
+  const body = at === -1 ? '' : text.slice(at);
+  const blocks = body
+    .split(/\n {6}- (?=\S)/)
+    .slice(1)
+    .map((b) => `- ${b}`);
+  const nameOf = (b) => (/^- name: (.*)$/m.exec(b)?.[1] ?? /^- uses: (.*)$/m.exec(b)?.[1] ?? '(unnamed)').trim();
+  const selfTestIndex = blocks.findIndex((b) => /check-governed-queue-guard\.mjs --self-test/.test(b));
+  const judgmentIndex = blocks.findIndex((b) => /run: node scripts\/pm\/check-governed-queue-guard\.mjs\s*$/m.test(b));
+  const installIndex = blocks.findIndex((b) => /(?:^|[\s;&|])pnpm install\b/.test(b));
+  const installCommand = installIndex === -1 ? '' : (/pnpm install[^\n]*/.exec(blocks[installIndex])?.[0] ?? '').trim();
+  const toolchain =
+    selfTestIndex === -1 || judgmentIndex === -1 ? [] : blocks.filter((_b, i) => i > selfTestIndex && i < judgmentIndex);
+  return {
+    steps: blocks.map(nameOf),
+    selfTestIndex,
+    judgmentIndex,
+    installIndex,
+    installCommand,
+    // A `--filter` on the install is what would turn this workflow into a
+    // second, drifting copy of the register's `verify.pkg` set; an empty list
+    // is the register-agnostic install every row gets for free.
+    installFilters: [...installCommand.matchAll(/--filter[= ]\s*([^\s]+)/g)].map((m) => m[1].replace(/^['"]|['"]$/g, '')),
+    acquiresPnpm: /uses:\s*\.\/\.github\/actions\/setup-pnpm/.test(body),
+    toolchainSteps: toolchain.map(nameOf),
+    toolchainWithoutContinueOnError: toolchain.filter((b) => !/^\s*continue-on-error:\s*true\s*$/m.test(b)).map(nameOf),
+  };
 }
 
 // ── the GitHub reads (PR head + reviews — the only API surface) ─────────────
@@ -1306,9 +1375,11 @@ export async function selfTest() {
   const refusedRows = await liftGeneratedExceptions('/w', 'base', [{ ...row(3, [genIndex]) }], refusedNotes, refused());
   assert('a-refused-provenance-keeps-the-generated-path-governed-here-too',
     refusedRows[0].paths.join() === genIndex && refusedNotes.some((n) => n.includes('did NOT lift')), JSON.stringify(refusedNotes));
-  // The real environment this job runs in: no dependencies, so the #11705 rows
-  // cannot recompute. Fail-closed is the ruled answer, and it must be the one a
-  // reader sees stated.
+  // The DEGRADED environment — the job installs dependencies now (#14063), but
+  // every step of that install is `continue-on-error`, so "no toolchain" is a
+  // state a real run can still be in (registry outage, cold cache, a PR whose
+  // lockfile is out of sync). Fail-closed is the ruled answer there, and it must
+  // be the one a reader sees stated.
   const noToolNotes = [];
   const noToolRows = await liftGeneratedExceptions('/w', 'base', [{ ...row(4, [genIndex]) }], noToolNotes,
     refused('could not run `pnpm --filter @objectstack/spec gen:skill-refs` on this tree (spawn pnpm ENOENT) — the generator toolchain is not available in this environment'));
@@ -1320,6 +1391,100 @@ export async function selfTest() {
     throw new Error('the recompute must not run for a diff with no registered path');
   });
   assert('an-ordinary-governed-diff-never-pays-for-a-recompute', untouched[0].paths.join() === 'AGENTS.md');
+
+  // ── ⭐ #14063 END TO END: what the dependency install actually buys ────────
+  //
+  // The cases above pin the lift in isolation; these run the WHOLE decision —
+  // lift, then `runGuard`, then the exit code — over the diff shape that made
+  // the maintainer approve a pure regeneration by hand (2026-09-01: 「纯生成的
+  // 指针行(spec 源变更后再生成的 references/_index.md) 不需要我审核吧」): a spec
+  // source edit plus its four regenerated pointer files, in one commit.
+  //
+  // The recompute is injected rather than run, because this self-test is
+  // offline by contract and a real generator run needs the very toolchain the
+  // workflow installs. So what is pinned here is the DECISION each recompute
+  // answer produces — certified, un-run, drifted — and the workflow pins below
+  // assert the environment that makes the certified answer reachable at all.
+  // Neither half is worth much alone; together they are the claim.
+  const regenPaths = ['objectstack-ai', 'objectstack-api', 'objectstack-data', 'objectstack-query'].map(
+    (skill) => `skills/${skill}/references/_index.md`,
+  );
+  const regenRow = (extra = []) => ({
+    sha: 'd'.repeat(40),
+    subject: 'docs(spec): regenerate the skill reference indexes (#13794)',
+    pr: 13794,
+    paths: ['packages/spec/src/query/operators.zod.ts', ...regenPaths, ...extra],
+  });
+  const endToEnd = async (recompute, rows, { head = () => HEAD, reviews = () => [] } = {}) => {
+    const notes = [];
+    const lifted = await liftGeneratedExceptions('/w', 'base', rows, notes, recompute);
+    return { verdict: await runGuard({ event: 'merge_group', rows: lifted, fetchPullHead: head, fetchReviews: reviews }), notes };
+  };
+  // ⭐ Zero approvals AND zero API calls: once the row is lifted the diff
+  // touches nothing governed, so the guard returns before a request exists —
+  // measured with spies that throw, the same way the ordering guarantee is.
+  const apiSpy = () => {
+    throw new Error('the API must not be reached — the regeneration was lifted, so nothing governed remains');
+  };
+  const certified = await endToEnd(verified('byte-equal to the generator recomputed on this tree (fixture)'), [regenRow()], {
+    head: apiSpy,
+    reviews: apiSpy,
+  });
+  assert(
+    'with-the-toolchain-installed-a-PURE-REGENERATION-merge-group-CLEARS-with-zero-approvals-and-zero-api-calls',
+    certified.verdict.conclusion === 'clear' && certified.verdict.exitCode === EXIT_CLEAR && certified.verdict.apiCalls === 0,
+    JSON.stringify({ conclusion: certified.verdict.conclusion, exitCode: certified.verdict.exitCode, apiCalls: certified.verdict.apiCalls }),
+  );
+  assert(
+    'and-it-says-which-ruling-lifted-each-of-the-four-pointer-files',
+    regenPaths.every((p) => certified.notes.some((n) => n.includes(p) && n.includes('LIFTED') && n.includes('#11705'))),
+    JSON.stringify(certified.notes),
+  );
+  // The other direction, and the one requirement (2) of the card names: EVERY
+  // way the recompute can fail to certify still refuses the identical diff. A
+  // missing toolchain is a real environment (the install is continue-on-error);
+  // drift is a hand edit to a generated file, which is the case the exception
+  // exists to keep governed.
+  for (const [label, why] of [
+    [
+      'no-toolchain',
+      'could not run `pnpm --filter @objectstack/spec gen:skill-refs` on this tree (spawn pnpm ENOENT) — the generator toolchain is not available in this environment',
+    ],
+    ['drift', '`check:skill-refs` does not certify this tree (the generator\'s own --check exited 1) — fail closed: the path stays governed'],
+  ]) {
+    const failed = await endToEnd(refused(why), [regenRow()]);
+    assert(
+      `a-recompute-that-does-not-certify-still-REFUSES-the-same-merge-group-fail-closed: ${label}`,
+      failed.verdict.conclusion === 'refused' && failed.verdict.exitCode === EXIT_REFUSED_UNAPPROVED,
+      JSON.stringify({ label, conclusion: failed.verdict.conclusion, exitCode: failed.verdict.exitCode }),
+    );
+    assert(`and-the-log-states-the-reason-it-did-not-lift: ${label}`, failed.notes.some((n) => n.includes('did NOT lift') && n.includes(why.slice(0, 24))), JSON.stringify(failed.notes));
+  }
+  // Hand-authored governed content in the same commit as a certified
+  // regeneration: still refused, and the refusal names the hand-authored file
+  // WITHOUT naming the lifted ones — a reader must be able to see which path
+  // they are being asked about.
+  const mixedE2E = await endToEnd(verified(), [regenRow(['skills/objectstack-ai/SKILL.md'])]);
+  const mixedText = renderGuardVerdict(mixedE2E.verdict);
+  assert(
+    'a-hand-authored-skills-file-beside-a-certified-regeneration-is-still-REFUSED',
+    mixedE2E.verdict.exitCode === EXIT_REFUSED_UNAPPROVED && mixedText.includes('skills/objectstack-ai/SKILL.md'),
+    mixedText,
+  );
+  assert('and-the-refusal-does-not-name-the-paths-it-lifted', regenPaths.every((p) => !mixedText.includes(p)), mixedText);
+  // A recompute that THROWS (rather than answering) must never read as a lift.
+  // `liftGeneratedExceptions` deliberately does not catch: `main` wraps the
+  // whole decomposition and turns a throw into EXIT_CANNOT_RUN — red, and the
+  // one thing this file has no green for is "did not look".
+  let liftThrew = null;
+  try {
+    await liftGeneratedExceptions('/w', 'base', [regenRow()], [], async () => {
+      throw new Error('spawn pnpm EACCES');
+    });
+  } catch (error) {
+    liftThrew = String(error?.message ?? error);
+  }
+  assert('a-recompute-that-THROWS-never-lifts-it-propagates-into-CANNOT-RUN', liftThrew !== null && /EACCES/.test(liftThrew), String(liftThrew));
 
   // ── the PR-head reader: throws, never defaults (exit 4 at the caller) ────
   const fakeRes = (body, ok = true, status = 200) => async () => ({ ok, status, json: async () => body });
@@ -1355,6 +1520,45 @@ export async function selfTest() {
     assert('the-workflow-checks-out-full-history-a-truncated-diff-answers-with-silence', /fetch-depth:\s*0/.test(wf), 'fetch-depth: 0 absent');
     assert('the-workflow-declares-pull-requests-read-the-only-scope-the-review-read-needs', /pull-requests:\s*read/.test(wf), 'pull-requests: read absent');
     assert('the-workflow-carries-no-paths-filter-a-skipped-guard-counts-as-SUCCESS', !/^\s*paths(-ignore)?:/m.test(wf), 'a paths filter would make this guard skippable');
+
+    // ── ⭐ #14063: the environment the exemption needs, pinned to the YAML ───
+    //
+    // The end-to-end cases above prove what a CERTIFIED recompute decides; this
+    // block is the other half — that a certified recompute is reachable in the
+    // job at all. Without the install, `runSinkGenerator` cannot spawn the
+    // generator and every #11705 row fails closed, which is precisely the state
+    // the 2026-09-01 ruling ended. A green self-test over a workflow that had
+    // silently lost its install would be the loudest possible false negative.
+    const audit = installStepAudit(wf);
+    assert('the-job-installs-the-workspace-dependencies-the-recompute-runs-on', audit.installIndex !== -1 && /--frozen-lockfile/.test(audit.installCommand), audit.installCommand || '(no pnpm install step)');
+    assert('the-job-acquires-pnpm-through-the-shared-composite-not-a-second-spelling', audit.acquiresPnpm, JSON.stringify(audit.steps));
+    assert(
+      'the-toolchain-is-in-place-BEFORE-the-live-judgment-and-after-the-self-test',
+      audit.selfTestIndex !== -1 && audit.judgmentIndex !== -1 && audit.selfTestIndex < audit.installIndex && audit.installIndex < audit.judgmentIndex,
+      JSON.stringify({ selfTest: audit.selfTestIndex, install: audit.installIndex, judgment: audit.judgmentIndex }),
+    );
+    // The install must not restate the register. A `--filter` list here would
+    // be a second copy of `verify.pkg`, and it would go stale in the direction
+    // that reads as compliance: a new row's generator simply fails to spawn,
+    // the path stays governed, and nothing says the install was the reason.
+    for (const entry of GENERATED_SURFACE_EXCEPTIONS.filter((e) => e.verify?.pkg)) {
+      assert(
+        `the-install-covers-the-register-row-without-restating-it: ${entry.id}`,
+        audit.installFilters.length === 0 || audit.installFilters.includes(entry.verify.pkg),
+        `install filters ${JSON.stringify(audit.installFilters)} do not cover ${entry.verify.pkg}`,
+      );
+    }
+    // Every toolchain step degrades instead of reddening — otherwise a registry
+    // or cache outage would newly block merge groups that touch nothing
+    // governed, which is the promise the ordering guarantee above exists to
+    // keep. The non-emptiness assertion is what stops this passing vacuously if
+    // the steps are ever reordered out of the measured window.
+    assert('the-toolchain-block-is-non-empty-so-the-degradation-pin-below-is-not-vacuous', audit.toolchainSteps.length >= 2 && audit.toolchainSteps.length === new Set(audit.toolchainSteps).size, JSON.stringify(audit.toolchainSteps));
+    assert(
+      'every-toolchain-step-DEGRADES-instead-of-reddening-a-clear-diff-is-never-blocked-by-an-outage',
+      audit.toolchainWithoutContinueOnError.length === 0,
+      `missing continue-on-error: ${audit.toolchainWithoutContinueOnError.join(', ')}`,
+    );
   } catch (error) {
     assert('the-workflow-file-is-readable', false, String(error?.message ?? error).split('\n')[0]);
   }
@@ -1371,7 +1575,11 @@ export async function selfTest() {
       'none — with the PR leg byte-identical and head-read-free, multi-PR group decomposition, three replayed ' +
       'incidents, the zero-API ordering guarantee measured with throwing spies, the head-then-reviews read order with ' +
       'both unreadable refusals, the generated-artifact lift path — certified, refused, mixed with hand-authored skill ' +
-      'content, and the no-toolchain environment this job actually runs in — and the workflow wiring pin).',
+      'content, and the degraded no-toolchain environment — the #14063 end-to-end decision on a #13794-shaped pure ' +
+      'regeneration (clears with zero approvals and zero API calls; still refuses on an uncertified recompute, on ' +
+      'drift, on a hand-authored sibling, and on a recompute that throws), and the workflow wiring pin including the ' +
+      'dependency install the recompute needs, its register-agnostic filter-free form, and its continue-on-error ' +
+      'degradation).',
   );
   return 0;
 }
