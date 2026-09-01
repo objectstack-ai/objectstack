@@ -4,24 +4,30 @@
 //
 // An L2 body that writes a field the target object never declares —
 // `ctx.input.amout = 0`, `ctx.api.object('deal').update({ stag: 'won' })` —
-// runs clean in the QuickJS sandbox and reaches the driver UNFILTERED:
+// runs clean in the QuickJS sandbox and reaches the write path UNFILTERED:
 // `applyMutationsToInput` (runtime/src/sandbox/body-runner.ts) is a plain
 // `Object.assign`, and `validateRecord` walks declared fields on insert and
-// `continue`s past a key with no field def on update. What happens after that
-// is DRIVER-DEPENDENT, and neither half is acceptable:
+// `continue`s past a key with no field def on update.
 //
-//   • SQL — the stray column enters the knex statement and the WHOLE write
-//     fails with a driver-level error (`table deal has no column named
-//     stagee`). The write is lost, and the error surfaces far from the
-//     authoring mistake that caused it.
-//   • Schemaless (memory, MongoDB) — the driver spreads the payload, so the
-//     stray key IS persisted: an undeclared column nothing downstream reads.
+// [#13657] What happens after that used to be DRIVER-DEPENDENT, and neither
+// half was acceptable — SQL failed the whole write with an untyped
+// `SQLITE_ERROR` far from the authoring mistake, while schemaless drivers
+// (memory, MongoDB) spread the payload and PERSISTED the stray key as a column
+// nothing downstream reads. #13657 closed that: the declared-field door now
+// runs a second time over the payload the `before*` hooks produced, so the key
+// is refused `INVALID_FIELD` / 400 identically on every driver, before any
+// statement is built.
 //
-// Either way the mistake is invisible where it is MADE — the #4001 family, if
-// not literally its silent-no-op shape. Both runtime outcomes are pinned by
+// ⚠️ That does NOT retire this rule — it changes what it is worth. The runtime
+// refusal arrives at WRITE time, on whichever record first exercises the
+// branch; this rule arrives at AUTHOR time and names the field, the object and
+// the body. The mistake is still invisible where it is MADE, which is the
+// #4001 family and the whole reason for a build-time check.
+//
+// The runtime answer is pinned by
 // `runtime/src/sandbox/undeclared-field-write-driver-split.integration.test.ts`
-// so this rule's wording cannot drift from what the runtime does; the same
-// split is documented in `content/docs/automation/hook-bodies.mdx`.
+// so this rule's wording cannot drift from what the runtime does; the same is
+// documented in `content/docs/automation/hook-bodies.mdx`.
 //
 // The read side (`hook.condition`, ADR-0032) and the capability surface are
 // statically checked; until this rule, the write side was the one blind face
@@ -817,9 +823,12 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
           path,
           message:
             `body writes '${w.field}' to its input, but ${objDesc} ${declares}. The sandboxed script runs ` +
-            `clean and the value is copied back onto the record payload unfiltered — on a SQL driver the ` +
-            `stray column then fails the WHOLE write with a driver-level error far from here; on a ` +
-            `schemaless driver (memory, MongoDB) it is persisted as an undeclared key (#4271).`,
+            // The post-hook declared-field door (#13657) is what refuses it; the
+            // id stays in this comment rather than in the string, which reaches
+            // authors and operators who cannot resolve a tracker number.
+            `clean and the value is copied back onto the record payload unfiltered, so the write is then ` +
+            `REFUSED at run time — INVALID_FIELD / 400, identically on every driver (#4271). The ` +
+            `record is never written, and the refusal names the field far from the body that wrote it.`,
           hint: fixHint(w.field, unionCandidates(targetSets)),
         });
       } else {
