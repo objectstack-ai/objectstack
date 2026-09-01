@@ -795,12 +795,21 @@ export function selfTest() {
   // refuse MORE than the real covering rule, so it fails loudly for a pattern
   // the derivation would have accepted and never passes one it would refuse.
   const patternMatches = (pattern, path) => {
-    const rx = pattern
-      .split('/')
-      .map((seg) => (seg === '**' ? ' ' : seg.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')))
-      .join('/')
-      .replace(/ \//g, '(?:[^/]+/)*')
-      .replace(/\/? /g, '(?:/.*)?');
+    // Built segment by segment, with no sentinel character standing in for
+    // `**` at any point: a placeholder byte spliced into a string and replaced
+    // later is how a raw control byte gets into a source file
+    // (`scripts/check-nul-bytes.mjs` carries the argument), and the segment
+    // walk needs no placeholder anyway.
+    const segs = pattern.split('/');
+    let rx = '';
+    for (let i = 0; i < segs.length; i++) {
+      if (segs[i] === '**') {
+        rx += '(?:[^/]+/)*'; // zero or more WHOLE segments -- `**` crosses separators
+        continue;
+      }
+      rx += segs[i].replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*');
+      if (i < segs.length - 1) rx += '/';
+    }
     return new RegExp(`^${rx}$`).test(path);
   };
   const memberManifests = workspacePackages(ROOT).map((p) => `${p.dir}/${ROOT_MANIFEST_FILE}`);
