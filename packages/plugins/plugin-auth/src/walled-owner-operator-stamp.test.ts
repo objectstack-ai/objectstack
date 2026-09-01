@@ -32,9 +32,10 @@
  * Standing is derived PER REQUEST instead, and the implementation this file
  * covers says the same ([#11973] note in `walled-owner-operator-stamp.ts`:
  * "the invariant is enforced at the derivation site … rather than by an
- * elevation write; the stamp's value is unchanged"). One `it()` title below
- * still names the gate; correcting a title is an executable change, not a
- * comment fix, so it is left for the card that can price it.
+ * elevation write; the stamp's value is unchanged"). The one `it()` title that
+ * still named the gate now names the platform-admin derivation it actually
+ * mirrors — a title is a string literal, so correcting it was an executable
+ * change rather than a comment fix, and it was priced as one.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -267,7 +268,7 @@ describe('#12751 — shouldStampOwnerVerifiedAtCreation, the contract as a matri
     ).toBe(false);
   });
 
-  it('the email comparison MIRRORS the elevation gate: trimmed, case-insensitive, both sides', () => {
+  it('the email comparison MIRRORS the platform-admin derivation: trimmed, case-insensitive, both sides', () => {
     // The env declaration arrives padded and cased however the operator typed
     // it; `resolvePlatformOwnerEmail` trims, the comparison lowercases — the
     // exact treatment `bootstrapPlatformAdmin` gives the same pair.

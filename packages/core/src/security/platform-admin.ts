@@ -17,9 +17,13 @@
  *
  * - **Choice 1A — one variable.** `OS_PLATFORM_OWNER_EMAIL`
  *   ({@link PLATFORM_OWNER_EMAIL_ENV}), the name plugin-auth's walled boot
- *   refusal and plugin-security's elevation refusal already quote. A second
- *   spelling is a second door: generated configs and docs would carry both and
- *   one of them would silently do nothing.
+ *   refusal and plugin-security's `bootstrapPlatformAdmin` already quote — the
+ *   latter in its fail-closed backstop for an undeclared or refused config, and
+ *   in the config-derived standing it logs beside it. ⚠️ That second site is no
+ *   longer an ELEVATION refusal: since the #11663 platform-admin re-anchor
+ *   (leg L4) the walled `bootstrapPlatformAdmin` writes no grant row and
+ *   elevates nobody — it reports. A second spelling is a second door: generated
+ *   configs and docs would carry both and one of them would silently do nothing.
  * - **Choice 2B — a comma-separated LIST**, because a single configured address
  *   is a single point of human failure and losing that mailbox leaves a
  *   deployment with no administrator and no in-product recovery. One separator,
