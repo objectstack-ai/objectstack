@@ -231,33 +231,64 @@ const RAW_EXMEMBER_KEY = 'osk_exmember_key_fixture';
 const RAW_ORGLESS_KEY = 'osk_orgless_key_fixture';
 
 /**
+ * The fixture's ONE hand-written where-matcher: equality plus `$in` — the two
+ * shapes the shared resolver actually issues — and it REFUSES every other
+ * shape loudly instead of silently matching (the check:where-matcher
+ * convention: a combinator or operator this fixture does not implement must
+ * never read as a field that happened not to match).
+ */
+function matchesWhere(row: any, where: any): boolean {
+  for (const [field, cond] of Object.entries(where ?? {})) {
+    if (field.startsWith('$')) {
+      throw new Error(`fixture where-matcher: unsupported combinator '${field}'`);
+    }
+    if (cond !== null && typeof cond === 'object') {
+      const ops = Object.keys(cond as object);
+      if (ops.length !== 1 || ops[0] !== '$in' || !Array.isArray((cond as any).$in)) {
+        throw new Error(`fixture where-matcher: unsupported operator shape on '${field}'`);
+      }
+      if (!(cond as any).$in.includes(row[field])) return false;
+      continue;
+    }
+    if (row[field] !== cond) return false;
+  }
+  return true;
+}
+
+/**
  * A permission store with the SHIPPED aggregation shapes: API keys in
  * `sys_api_key`, memberships in `sys_member`, capabilities through
- * `sys_user_permission_set` → `sys_permission_set`. Filters honour the
- * `where` keys the resolver actually sends, so the two `sys_member` reads
- * (by user, by org) answer differently, as a real engine does.
+ * `sys_user_permission_set` → `sys_permission_set`. Every read filters
+ * through the one refusing matcher above, and the caller's `limit` bound is
+ * held BY PRESENCE (check:objectql-double-limit).
  */
 function qlWith(opts: { memberships: Array<{ user_id: string; organization_id: string }> }) {
-  const apiKeys = [
-    { key: hashApiKey(RAW_MEMBER_KEY), user_id: 'u_member', active_organization_id: 'org_A', revoked: false },
-    { key: hashApiKey(RAW_EXMEMBER_KEY), user_id: 'u_exmember', active_organization_id: 'org_A', revoked: false },
-    { key: hashApiKey(RAW_ORGLESS_KEY), user_id: 'u_orgless', revoked: false },
-  ];
+  const tables: Record<string, any[]> = {
+    sys_api_key: [
+      { key: hashApiKey(RAW_MEMBER_KEY), user_id: 'u_member', active_organization_id: 'org_A', revoked: false },
+      { key: hashApiKey(RAW_EXMEMBER_KEY), user_id: 'u_exmember', active_organization_id: 'org_A', revoked: false },
+      { key: hashApiKey(RAW_ORGLESS_KEY), user_id: 'u_orgless', revoked: false },
+    ],
+    sys_member: opts.memberships,
+    sys_user: [
+      { id: 'u_member', email: 'u_member@example.com' },
+      { id: 'u_exmember', email: 'u_exmember@example.com' },
+      { id: 'u_orgless', email: 'u_orgless@example.com' },
+      { id: 'u_gated', email: 'u_gated@example.com' },
+    ],
+    sys_user_permission_set: [
+      { user_id: 'u_member', permission_set_id: 'ps_pkg' },
+      { user_id: 'u_exmember', permission_set_id: 'ps_pkg' },
+      { user_id: 'u_orgless', permission_set_id: 'ps_pkg' },
+    ],
+    sys_permission_set: [
+      { id: 'ps_pkg', name: 'pkg_admin', system_permissions: ['manage_metadata', 'studio.access'] },
+    ],
+  };
   return {
     find: async (object: string, q: any = {}) => {
-      const where = q?.where ?? {};
-      if (object === 'sys_api_key') return apiKeys.filter((r) => r.key === where.key);
-      if (object === 'sys_member') {
-        if (where.user_id) return opts.memberships.filter((m) => m.user_id === where.user_id);
-        if (where.organization_id) return opts.memberships.filter((m) => m.organization_id === where.organization_id);
-        return [];
-      }
-      if (object === 'sys_user') return [{ id: where.id, email: `${where.id}@example.com` }];
-      if (object === 'sys_user_permission_set') return [{ permission_set_id: 'ps_pkg' }];
-      if (object === 'sys_permission_set') {
-        return [{ id: 'ps_pkg', name: 'pkg_admin', system_permissions: ['manage_metadata', 'studio.access'] }];
-      }
-      return [];
+      const rows = (tables[object] ?? []).filter((row: any) => matchesWhere(row, q?.where));
+      return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
   };
 }
