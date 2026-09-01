@@ -398,6 +398,20 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'same generator, same per-package ledger, same reason a merge must never recompute it.',
   },
   {
+    path: 'packages/objectql/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/objectql',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/client/test-typecheck-debt.json` above; same '
+      + 'generator, same per-package ledger, same reason a merge must never recompute it: the '
+      + 'half-merged tree is not the tree whose type errors this file records, so a file that '
+      + 'GAINED errors would enter the ledger as merge noise instead of as red. It is the FOURTH '
+      + 'manifest to define `gen:test-typecheck-debt` — the "three manifests" in the client entry '
+      + "above and in `reconcileGenerators`'s header is #13731's count of the ledgers that existed "
+      + 'then, never a bound, and the per-(owner, script) key is exactly what lets a fourth one '
+      + 'arrive needing nothing but this row.',
+  },
+  {
     path: 'packages/sdui-parser/objectui-lockstep.json',
     gen: 'gen:sdui-lockstep',
     owner: ROOT_OWNER,
