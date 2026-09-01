@@ -2260,7 +2260,7 @@ export const SearchAllResponseSchema = lazySchema(() => z.object({
     + 'exist beyond the cap. Produced ONLY on an unscoped sweep: a request that names `objects` '
     + 'asks for records of those objects and answers `pages: []`. The swept set is exactly what '
     + 'the caller\'s metadata read door (`GET /api/v1/meta/page`) serves — published state only, '
-    + 'never drafts (#13216).'
+    + 'never drafts.'
   ),
   totalObjects: z.number().describe(
     'Number of objects the sweep actually SCANNED (searchable, API-enabled, with a '
