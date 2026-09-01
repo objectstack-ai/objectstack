@@ -90,55 +90,64 @@
  * `examples/AGENTS.md` (an example-tree file) and not the
  * `create-objectstack` template copy (product content).
  *
- * ## The generated-artifact exception (#9866; maintainer 2026-08-20 + 2026-08-22)
+ * ## The generated-artifact exception (#9866) is RETIRED — its subject moved out
  *
- * Exactly one file under `.claude/**` is not instruction-tree prose but a
- * required gate's own `--write` artifact: `check:docs-audit-scope` keeps its
- * generated `ALL_HANDWRITTEN` page-scope block inside
- * `.claude/workflows/docs-accuracy-audit.js` (the workflow runs in a `node:vm`
- * sandbox that cannot read files, so the list must live inline). Adding a docs
- * page reddens that gate, the gate's own `--write` regenerates the block, and
- * the block sat inside this fence — so EVERY page-adding docs PR crossed the
- * governed surface (measured 5-for-5 on #9866), and three of the crossings
- * merged with nobody recording them. A fence that fires on routine traffic
- * trains every seat to read past it.
+ * History worth keeping, because the shape recurs. Exactly one file under
+ * `.claude/**` was not instruction-tree prose but a required gate's own
+ * `--write` artifact: `check:docs-audit-scope` kept its generated
+ * `ALL_HANDWRITTEN` page-scope block inside
+ * `.claude/workflows/docs-accuracy-audit.js`, because the workflow runs in a
+ * `node:vm` sandbox that cannot read files. Adding a docs page reddened that
+ * gate, the gate's `--write` regenerated the block, and the block sat inside
+ * this fence — so EVERY page-adding docs PR crossed the governed surface
+ * (measured 5-for-5 on #9866), and three of the crossings merged with nobody
+ * recording them. A fence that fires on routine traffic trains every seat to
+ * read past it.
  *
- * The maintainer ruled for the provenance-aware exception — #10277's Option C
- * = #9866's shape 2 — verbatim 「10277 同意 C」 (2026-08-20), re-confirmed over
- * the same day's earlier relocate-the-artifact ruling: 「A:按方案 2(最新裁
- * 定)」 (2026-08-22). Four load-bearing constraints, each pinned by
- * `--self-test`; drop one and the exception is a hole:
+ * The first remedy was a provenance-aware exception in this register — a row
+ * that lifted that one path when the tree's copy byte-equalled the generator's
+ * own recomputed splice (#10277 Option C, 「10277 同意 C」 2026-08-20, re-confirmed
+ * 「A:按方案 2(最新裁定)」 2026-08-22 over the same day's earlier
+ * relocate-the-artifact proposal).
  *
- *   1. RECOMPUTE, never compare to a stored baseline. The pass criterion is
- *      "the file's diff byte-equals what
- *      `node scripts/docs-audit/check-audit-scope.mjs --write` produces on the
- *      tree under test" — concretely, the tree's copy of the file must equal
- *      the generator's `replaceBlock(baseFile, docsDerivedFromThisTree)`. Any
- *      stored or cached comparison can be constructed against.
- *   2. BYTE-EXACT, no shape heuristics. There is no "only the ALL_HANDWRITTEN
- *      block changed, so allow it" — a reordered-but-equal list rejects too.
- *   3. A NAMED single-file exception, not a class mechanism.
- *      `GENERATED_SURFACE_EXCEPTIONS` is structurally a list, seeded with this
- *      one entry by ruling; every other governed-surface judgment — the rest
- *      of `.claude/**` included — is character-for-character unchanged.
- *   4. FAIL CLOSED, and the mixed-diff rule is untouched: provenance that
- *      cannot be recomputed (no base version, unreadable file, generator
- *      failure, empty derivation) keeps the path governed, and a hit on any
- *      OTHER governed path still forks the whole PR — 「混合 diff 一条命中即整
- *      PR 分叉」.
+ * ⚖️ On 2026-09-01 the maintainer ruled the other way, verbatim 「同意」 on
+ * #13591's option 2: MOVE THE LIST OFF THE GOVERNED SURFACE. It now lives in
+ * `scripts/docs-audit/handwritten-docs.json`, and the workflow's caller hands it
+ * to the sandbox as `args.handwritten` — the read happens outside the vm, so the
+ * inline copy that made the exception necessary no longer exists. The newer
+ * ruling supersedes the older, so the row is GONE rather than dormant. Keeping
+ * it would have been actively unsafe: with no generated artifact left at that
+ * path, a row still naming it could only ever be asked to certify hand-authored
+ * instruction prose, which is precisely what the fence exists to stop.
  *
- * ### The generator co-edit is fenced out (#11084) — a NARROWING, not a widening
+ * ⚠️ What did NOT change, in either direction: `GOVERNED_SURFACES` is
+ * character-for-character the same list — `.claude/**` included. #13591's option
+ * 3, carving `.claude/workflows/**` out of the register, was considered and
+ * explicitly REJECTED by the same ruling. Removing this row NARROWS what the
+ * exception machinery lifts; nothing that was governed became clear.
  *
- * Constraint 1 makes the recompute run the tree under test's OWN
- * `scripts/docs-audit/**` (it must — the derivation has to reflect the PR's
- * own docs). So a PR that edits the generator AND hand-edits the artifact in
- * one diff could in principle construct a derivation whose recomputed splice
- * byte-equals its hand-edited block: the tree would be certifying itself.
- * Cheap fence, `--test` only: if the submitted path list contains ANY
- * `scripts/docs-audit/**` path, the recompute is SKIPPED and the path stays
- * governed with that reason stated. This only ever moves verdicts toward
- * governed — the pure-regeneration path with an untouched generator lifts
- * exactly as it did before, and no path that was governed becomes clear.
+ * ### The generator co-edit fence (#11084) — a NARROWING, not a widening
+ *
+ * A recompute has to run the tree under test's OWN generator (it must — the
+ * derivation has to reflect the PR's own content). So a PR that edits the
+ * generator AND hand-edits its artifact in one diff could in principle construct
+ * a derivation whose recomputed output byte-equals its hand edit: the tree would
+ * be certifying itself. Cheap fence, `--test` only: if the submitted path list
+ * contains ANY path under that row's own trusted generator tree, the recompute is
+ * SKIPPED and the path stays governed with that reason stated. This only ever
+ * moves verdicts toward governed — a pure regeneration with an untouched
+ * generator lifts exactly as before, and no path that was governed becomes clear.
+ *
+ * The remaining constraints, each pinned by `--self-test`; drop one and an
+ * exception row is a hole:
+ *
+ *   1. RECOMPUTE, never compare to a stored baseline. Any stored or cached
+ *      comparison can be constructed against.
+ *   2. BYTE-EXACT, no shape heuristics — a reordered-but-equal artifact rejects.
+ *   3. Rows are NAMED and ruled, never a class mechanism.
+ *   4. FAIL CLOSED, and the mixed-diff rule is untouched: provenance that cannot
+ *      be recomputed keeps the path governed, and a hit on any OTHER governed
+ *      path still forks the whole PR — 「混合 diff 一条命中即整 PR 分叉」.
  *
  * The exception applies to the `--test` predicate only. The post-merge SWEEP
  * still lists a pure-regeneration merge: under-enumeration is the one
@@ -677,15 +686,17 @@ export const ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**', 'CLAUDE.md/**'];
  *
  * Row fields:
  *   `path`       — an exact repo-relative path, for a generator that owns
- *                  exactly one file the register can name (the #9866 row).
+ *                  exactly one file the register can name. No row uses this
+ *                  today; it is kept because `generatedExceptionFor` reads it
+ *                  and the shape is the cheaper one when it fits.
  *   `candidate`  — a NARROWING gate for a generator whose output set is
  *                  enumerated at run time: matching it earns a path the
  *                  question, never the answer. See the header — a candidate
  *                  cannot lift anything by itself, in either direction.
  *   `verify`     — the sink-generator recompute (#11705): run this package
  *                  script's `--check` on the tree under test and read the
- *                  output manifest it declares. Absent ⇒ the #9866 splice
- *                  recompute.
+ *                  output manifest it declares. REQUIRED: a row with no
+ *                  recompute cannot prove anything, so it fails closed.
  *   `generator`  — the command an operator runs to regenerate; rendered in
  *                  every verdict, lifted or not.
  *   `trustedGeneratorPrefixes` — the tree whose co-edit fences this row
@@ -693,15 +704,6 @@ export const ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**', 'CLAUDE.md/**'];
  *                  by it.
  */
 export const GENERATED_SURFACE_EXCEPTIONS = Object.freeze([
-  Object.freeze({
-    id: 'docs-audit-scope',
-    ruling: '#9866',
-    path: '.claude/workflows/docs-accuracy-audit.js',
-    surfaceId: 'claude-tree',
-    generator: 'node scripts/docs-audit/check-audit-scope.mjs --write',
-    trustedGeneratorPrefixes: Object.freeze(['scripts/docs-audit/']),
-    what: "the docs-audit workflow's generated ALL_HANDWRITTEN scope block (a gate-owned --write artifact, not instruction-tree prose)",
-  }),
   Object.freeze({
     id: 'spec-skill-refs',
     ruling: '#11705',
@@ -740,16 +742,6 @@ export function generatedExceptionFor(path) {
 }
 
 /**
- * The generator tree the #9866 row's recompute TRUSTS: constraint 1 executes
- * this directory's `affected-docs.mjs` and imports its `check-audit-scope.mjs`
- * `replaceBlock`, both from the tree under test. A PR that edits anything
- * here is editing the instrument the certificate is measured with. Kept as a
- * named export because it is that row's own prefix; every row carries its own
- * list in `trustedGeneratorPrefixes`.
- */
-export const TRUSTED_GENERATOR_PREFIX = 'scripts/docs-audit/';
-
-/**
  * The #11084 fence, pure so `--self-test` pins both directions offline. Given
  * the PR's submitted path list and the register row under consideration,
  * answer a fail-closed provenance verdict when the tree under test also
@@ -764,12 +756,24 @@ export const TRUSTED_GENERATOR_PREFIX = 'scripts/docs-audit/';
  * rather than left to `startsWith` alone.
  *
  * PER ROW, not global: the fence names the instrument that measures THIS row.
- * A docs PR that also edits the spec generator tree has not touched the
- * docs-audit generator, and fencing it there would refuse a regeneration the
- * ruling allows.
+ * A PR that edits some OTHER generator tree has not touched this row's, and
+ * fencing it there would refuse a regeneration the ruling allows. `entry` is
+ * therefore required — there is no "the" row to default to, and a default would
+ * silently measure one row's diff against another row's instrument.
  */
-export function generatorCoEditProvenance(paths, entry = GENERATED_SURFACE_EXCEPTIONS[0]) {
-  const prefixes = entry?.trustedGeneratorPrefixes ?? [TRUSTED_GENERATOR_PREFIX];
+export function generatorCoEditProvenance(paths, entry) {
+  const prefixes = entry?.trustedGeneratorPrefixes ?? [];
+  if (prefixes.length === 0) {
+    // No row, or a row that names no instrument tree: there is nothing to fence
+    // WITH, so the honest answer is not "no co-edit" (which would send the path on
+    // to be recomputed) but fail-closed — the one direction that cannot open a hole.
+    return {
+      pureRegeneration: false,
+      reason:
+        'the register row names no trusted generator tree, so a generator co-edit cannot be ruled out — ' +
+        'fail closed: the path stays governed',
+    };
+  }
   const coEdited = (Array.isArray(paths) ? paths : []).filter(
     (p) => typeof p === 'string' && prefixes.some((prefix) => p.startsWith(prefix) || p.startsWith(`./${prefix}`)),
   );
@@ -784,48 +788,8 @@ export function generatorCoEditProvenance(paths, entry = GENERATED_SURFACE_EXCEP
 }
 
 /**
- * The byte-exact provenance verdict, pure so `--self-test` pins all four
- * ruled cases offline. Inputs: the file at the PR's merge base
- * (`baseSource`), the file on the tree under test (`prSource`), the doc set
- * derived from that same tree (`derivedDocs`), and the generator's own
- * `replaceBlock`. Pass ⟺ `prSource === replaceBlock(baseSource, derivedDocs)`
- * — which is exactly "the PR's diff to this file equals the diff `--write`
- * produces on the PR's own tree": the generated block must be the recomputed
- * render (rejects in-block hand edits, reorderings included) AND everything
- * outside the block must be untouched relative to base (rejects out-of-block
- * hand edits, which `--write` itself would preserve and so cannot vouch for).
- * Every non-pass answers with a stated reason; there is no heuristic branch.
- */
-export function docsAuditRegenVerdict({ baseSource, prSource, derivedDocs, replaceBlock }) {
-  if (typeof prSource !== 'string') {
-    return { pureRegeneration: false, reason: 'the file could not be read from the tree under test — fail closed: the path stays governed' };
-  }
-  if (typeof baseSource !== 'string') {
-    return { pureRegeneration: false, reason: 'no base version to diff against (file added, or unreadable at the merge base) — a whole new workflow file is not a regeneration; fail closed' };
-  }
-  if (!Array.isArray(derivedDocs) || derivedDocs.length === 0) {
-    return { pureRegeneration: false, reason: 'the derived doc set is empty or unreadable — refusing to certify a regeneration of nothing (the generator itself refuses the same); fail closed' };
-  }
-  let expected;
-  try {
-    expected = replaceBlock(baseSource, derivedDocs);
-  } catch (error) {
-    return { pureRegeneration: false, reason: `the generator could not splice the base file (${String(error?.message ?? error).split('\n')[0]}) — fail closed` };
-  }
-  if (prSource === expected) {
-    return { pureRegeneration: true, reason: 'byte-equal to the generator output recomputed on this tree (no stored baseline consulted)' };
-  }
-  return {
-    pureRegeneration: false,
-    reason:
-      'differs from the generator output recomputed on this tree — byte-exact equality is the only pass, so a hand edit ' +
-      '(inside or outside the generated block, a reordering included) keeps the path governed',
-  };
-}
-
-/**
  * Apply the exception register to a `--test` verdict. Pure: provenance
- * arrives as a Map of path → `docsAuditRegenVerdict`-shaped result. A
+ * arrives as a Map of path → `{ pureRegeneration, reason }` result. A
  * registered path with verified pure-regeneration provenance is LIFTED from
  * the hit set (recorded under `exceptions`, never under `clearPaths` — it is
  * on the register, exempted, not absent); a registered path with failed or
@@ -1043,10 +1007,10 @@ export function renderExceptionLines(verdict) {
     exceptions
       .map((e) =>
         e.pureRegeneration
-          ? `  ℹ️  generated-surface exception (${e.ruling ?? '#9866'}): ${e.path} is a PURE REGENERATION —\n` +
+          ? `  ℹ️  generated-surface exception (${e.ruling ?? '(unruled row)'}): ${e.path} is a PURE REGENERATION —\n` +
             `      byte-equal to \`${e.generator}\` recomputed on THIS tree (never a stored baseline),\n` +
             `      so this path does not govern the PR by itself. Any other governed hit still forks the whole PR.`
-          : `  ⛔  generated-surface exception (${e.ruling ?? '#9866'}) did NOT lift ${e.path}:\n` +
+          : `  ⛔  generated-surface exception (${e.ruling ?? '(unruled row)'}) did NOT lift ${e.path}:\n` +
             `      ${e.reason}\n` +
             `      The path stays governed; a pure \`${e.generator}\` regeneration is the only thing the exception passes.`,
       )
@@ -1079,54 +1043,6 @@ export function renderTestVerdict(verdict) {
     `${lines.join('\n')}${clear}` +
     renderExceptionLines(verdict)
   );
-}
-
-/**
- * The real recompute behind the exception, on the local tree at `root` (the
- * tree under test — run the PR's own copy of this script from the PR's own
- * checkout, or point `--root` at it). Constraint 1 in code: the expected
- * bytes are produced HERE, from this tree's docs derivation spliced by the
- * generator's own exported `replaceBlock`, never read from anywhere stored.
- * Every failure path answers fail-closed with a stated reason. No network.
- */
-export async function recomputeDocsAuditProvenance(root, exception, { baseRef = null } = {}) {
-  const failClosed = (reason) => ({ pureRegeneration: false, reason: `${reason} — fail closed: the path stays governed` });
-  let replaceBlock;
-  try {
-    ({ replaceBlock } = await import('../docs-audit/check-audit-scope.mjs'));
-    if (typeof replaceBlock !== 'function') return failClosed('the generator module exports no replaceBlock');
-  } catch (error) {
-    return failClosed(`could not load the generator module (${String(error?.message ?? error).split('\n')[0]})`);
-  }
-  let prSource;
-  try {
-    prSource = readFileSync(join(root, exception.path), 'utf8');
-  } catch (error) {
-    return failClosed(`could not read ${exception.path} from the tree under test (${String(error?.message ?? error).split('\n')[0]})`);
-  }
-  let baseSource;
-  try {
-    // `baseRef` is how a merge-group build names its base (it has no reason to
-    // hold `origin/main`); a seat run resolves the merge base itself.
-    const base = baseRef ?? git(root, ['merge-base', 'origin/main', 'HEAD']).trim();
-    baseSource = git(root, ['show', `${base}:${exception.path}`]);
-  } catch (error) {
-    return failClosed(`could not read the base version of ${exception.path} (${String(error?.message ?? error).split('\n')[0]})`);
-  }
-  let derivedDocs;
-  try {
-    derivedDocs = JSON.parse(
-      execFileSync(process.execPath, [join(root, 'scripts/docs-audit/affected-docs.mjs'), '--all', '--json'], {
-        cwd: root,
-        encoding: 'utf8',
-        maxBuffer: 64 * 1024 * 1024,
-        stdio: ['ignore', 'pipe', 'ignore'],
-      }),
-    ).docs;
-  } catch (error) {
-    return failClosed(`could not derive the doc set on this tree (${String(error?.message ?? error).split('\n')[0]})`);
-  }
-  return docsAuditRegenVerdict({ baseSource, prSource, derivedDocs, replaceBlock });
 }
 
 /**
@@ -1281,7 +1197,17 @@ export async function recomputeProvenanceFor(root, hitsByEntry, { allPaths = [],
       for (const path of paths) provenance.set(path, sinkGeneratorVerdict({ path, entry, run }));
       continue;
     }
-    for (const path of paths) provenance.set(path, await recomputeDocsAuditProvenance(root, entry, { baseRef }));
+    // A row with no recompute cannot prove anything about its paths. There is no
+    // "trust the row" branch here — that would lift a governed path on the strength
+    // of a register entry alone, which is the one thing no row is allowed to do.
+    for (const path of paths) {
+      provenance.set(path, {
+        pureRegeneration: false,
+        reason:
+          `the register row \`${entry.id}\` declares no recompute (\`verify\`), so nothing can prove this ` +
+          'file matches its generator on the tree under test — fail closed: the path stays governed',
+      });
+    }
   }
   return provenance;
 }
@@ -3208,25 +3134,36 @@ async function selfTest() {
     assert(`--test-answers-governed-for-${surface.id}`, testVerdict([sample]).governed === true, sample);
   }
 
-  // ── the generated-artifact exception (#9866; rulings 2026-08-20 + -22) ───
+  // ── the generated-artifact exception register (#9866 · #11084 · #11705) ──
   //
   // Safety-relevant merge-gate code: a bug here waves real instruction edits
-  // past the fence. The four ruled cases are pinned against the GENERATOR'S
-  // OWN exported render/splice functions, not imitations, so the fixtures are
-  // real `--write` output; if the generator ever renames its block markers,
-  // `replaceBlock` stops splicing these fixtures and the pure-regen case goes
-  // red HERE — loud, which is the point.
-  const { renderBlock: genRender, replaceBlock: genReplace } = await import('../docs-audit/check-audit-scope.mjs');
-  // The register: every row is ruled, and the #9866 row is still the exact
-  // single file its ruling named. A row must also name a surface its own paths
-  // are actually governed by — an exception for an ungoverned path would be a
-  // register row nothing reads.
+  // past the fence. ⚖️ The #9866 docs-audit row RETIRED on 2026-09-01 (header
+  // section above): its subject — the audit workflow's inline page list — was
+  // moved off the governed surface by ruling, so there is no generated artifact
+  // under `.claude/**` for any row to certify, and a row still naming that path
+  // could only ever be asked to vouch for hand-authored instruction prose. The
+  // register's SEMANTICS are pinned exactly as before, against the rows that
+  // remain: the invariants, the lift / reject / fail-closed behaviour of
+  // `applyGeneratedExceptions`, the untouched mixed-diff rule, and the #11084
+  // co-edit fence in both directions.
+  //
+  // The register: every row is ruled, every row can actually prove something,
+  // and every row names a surface its own paths are governed by — an exception
+  // for an ungoverned path would be a register row nothing reads.
   assert('every-register-row-cites-the-ruling-that-put-it-there',
     GENERATED_SURFACE_EXCEPTIONS.every((e) => typeof e.ruling === 'string' && /^#\d+$/.test(e.ruling)),
     JSON.stringify(GENERATED_SURFACE_EXCEPTIONS.map((e) => [e.id, e.ruling])));
-  assert('the-9866-row-is-still-the-exact-single-file-its-ruling-named',
-    GENERATED_SURFACE_EXCEPTIONS[0].path === '.claude/workflows/docs-accuracy-audit.js' && GENERATED_SURFACE_EXCEPTIONS[0].ruling === '#9866',
-    JSON.stringify(GENERATED_SURFACE_EXCEPTIONS[0]));
+  // The retirement, asserted rather than remembered: nothing may quietly
+  // reinstate a lift over the instruction tree. Both row shapes are checked,
+  // because a `candidate` regexp could re-admit the path without a `path` field.
+  assert('no-row-lifts-anything-under-.claude-the-retired-9866-row-stays-retired',
+    GENERATED_SURFACE_EXCEPTIONS.every((e) =>
+      !(e.path ?? '').startsWith('.claude/') &&
+      !(e.candidate?.test('.claude/workflows/docs-accuracy-audit.js') ?? false)),
+    JSON.stringify(GENERATED_SURFACE_EXCEPTIONS.map((e) => [e.id, e.path ?? String(e.candidate)])));
+  assert('the-audit-workflow-is-plainly-governed-again-with-no-provenance-consulted',
+    testVerdict(['.claude/workflows/docs-accuracy-audit.js']).governed === true &&
+      generatedExceptionFor('.claude/workflows/docs-accuracy-audit.js') === null);
   assert('a-row-matches-either-an-exact-path-or-a-narrowing-candidate-never-neither-and-never-both',
     GENERATED_SURFACE_EXCEPTIONS.every((e) => (typeof e.path === 'string') !== (e.candidate instanceof RegExp)),
     JSON.stringify(GENERATED_SURFACE_EXCEPTIONS.map((e) => [e.id, typeof e.path, String(e.candidate)])));
@@ -3239,72 +3176,44 @@ async function selfTest() {
     }), JSON.stringify(GENERATED_SURFACE_EXCEPTIONS.map((e) => e.path ?? REGISTER_SAMPLES[e.id])));
   assert('every-row-names-its-generator-command-and-its-trusted-instrument-tree',
     GENERATED_SURFACE_EXCEPTIONS.every((e) => typeof e.generator === 'string' && e.generator !== '' && (e.trustedGeneratorPrefixes ?? []).length > 0));
-  assert('the-exception-names-its-generator-command',
-    GENERATED_SURFACE_EXCEPTIONS[0].generator.includes('check-audit-scope.mjs --write'));
+  // A row with no recompute can prove nothing, so it must not exist: the
+  // dispatcher fails such a row closed, and this refuses it one level earlier.
+  assert('every-row-declares-the-recompute-that-proves-its-paths',
+    GENERATED_SURFACE_EXCEPTIONS.every((e) => e.verify && typeof e.verify.gate === 'string' && typeof e.verify.pkg === 'string'),
+    JSON.stringify(GENERATED_SURFACE_EXCEPTIONS.map((e) => [e.id, e.verify ?? null])));
+  {
+    const noVerify = Object.freeze({ id: 'fixture-row', ruling: '#0', trustedGeneratorPrefixes: Object.freeze(['x/']) });
+    const answered = await recomputeProvenanceFor('/nonexistent', new Map([[noVerify, ['skills/x/references/_index.md']]]));
+    const only = [...answered.values()][0];
+    assert('a-row-that-declares-no-recompute-fails-closed-rather-than-lifting',
+      only?.pureRegeneration === false && /declares no recompute/.test(only?.reason ?? ''), JSON.stringify(only));
+  }
 
-  const oldDocs = ['content/docs/a.mdx'];
-  const newDocs = ['content/docs/a.mdx', 'content/docs/new-page.mdx'];
-  const baseWorkflow =
-    `// header prose\n// <generated:docs-audit-scope>${genRender(oldDocs)}// </generated:docs-audit-scope>\n` +
-    `const RELEASE_OWNED_PREFIX = 'content/docs/releases/'\n// footer\n`;
-  const pureRegen = genReplace(baseWorkflow, newDocs);
-  const regen = (prSource, over = {}) =>
-    docsAuditRegenVerdict({ baseSource: baseWorkflow, prSource, derivedDocs: newDocs, replaceBlock: genReplace, ...over });
-  assert('the-pure-regen-fixture-is-a-real-diff-not-a-no-op', pureRegen !== baseWorkflow && pureRegen.includes('new-page.mdx'));
-  // Ruled case 1: a pure regeneration passes.
-  const pureVerdict = regen(pureRegen);
-  assert('ruled-case-1-pure-regeneration-passes', pureVerdict.pureRegeneration === true, pureVerdict.reason);
-  assert('a-pass-says-it-recomputed-and-consulted-no-stored-baseline', /recomputed on this tree/.test(pureVerdict.reason) && /no stored baseline/.test(pureVerdict.reason), pureVerdict.reason);
-  // Ruled case 2: an in-block hand edit rejects.
-  const inBlockEdit = pureRegen.replace('  "content/docs/new-page.mdx",', '  "content/docs/new-page.mdx",\n  "content/docs/sneaked-in.mdx",');
-  assert('the-in-block-mutation-applied', inBlockEdit !== pureRegen);
-  assert('ruled-case-2-in-block-hand-edit-rejects', regen(inBlockEdit).pureRegeneration === false);
-  // Ruled case 3: an out-of-block edit rejects — `--write` itself would
-  // PRESERVE it, which is exactly why the compare runs from the base file.
-  const outOfBlockEdit = pureRegen.replace('// footer', '// footer, hand-edited');
-  assert('the-out-of-block-mutation-applied', outOfBlockEdit !== pureRegen);
-  assert('ruled-case-3-out-of-block-edit-rejects', regen(outOfBlockEdit).pureRegeneration === false);
-  // Ruled case 4: mixed regeneration + hand edit rejects.
-  const mixedEdit = inBlockEdit.replace('// footer', '// footer, hand-edited');
-  assert('ruled-case-4-mixed-regen-plus-hand-edit-rejects', regen(mixedEdit).pureRegeneration === false);
-  // Byte-exact means byte-exact: the same doc SET reordered is not a pass —
-  // the "only the block changed, and to equivalent content" heuristic is the
-  // shape the ruling forbids.
-  const reordered = pureRegen.replace(
-    '  "content/docs/a.mdx",\n  "content/docs/new-page.mdx",',
-    '  "content/docs/new-page.mdx",\n  "content/docs/a.mdx",',
-  );
-  assert('the-reorder-mutation-applied', reordered !== pureRegen);
-  assert('an-equal-set-in-a-different-order-rejects-no-shape-heuristics', regen(reordered).pureRegeneration === false);
-  // Fail-closed inputs, each with its own stated reason.
-  assert('no-base-version-rejects-an-added-workflow-file-is-not-a-regeneration', regen(pureRegen, { baseSource: null }).pureRegeneration === false);
-  assert('an-unreadable-tree-file-rejects', regen(null).pureRegeneration === false);
-  assert('an-empty-derivation-rejects-like-the-generator-itself-refuses-it', regen(pureRegen, { derivedDocs: [] }).pureRegeneration === false);
-  assert('a-generator-splice-failure-rejects', regen(pureRegen, { baseSource: 'no markers here at all' }).pureRegeneration === false);
-
-  // Applying the exception to a verdict — the fence semantics.
-  const wfPath = GENERATED_SURFACE_EXCEPTIONS[0].path;
-  const verified = new Map([[wfPath, { pureRegeneration: true, reason: 'byte-equal (fixture)' }]]);
-  const liftedVerdict = applyGeneratedExceptions(testVerdict(['content/docs/x.mdx', wfPath]), verified);
+  // Applying the exception to a verdict — the fence semantics, on a real
+  // registered path. Provenance is a fixture here on purpose: these cases pin
+  // what the register DOES with a verdict, not how a verdict is reached.
+  const regPath = REGISTER_SAMPLES['spec-skill-refs'];
+  const verified = new Map([[regPath, { pureRegeneration: true, reason: 'byte-equal (fixture)' }]]);
+  const liftedVerdict = applyGeneratedExceptions(testVerdict(['content/docs/x.mdx', regPath]), verified);
   assert('a-verified-pure-regen-lifts-the-only-hit-and-the-pr-is-not-governed',
     liftedVerdict.governed === false && liftedVerdict.hitPaths.length === 0 && liftedVerdict.matched.length === 0, JSON.stringify(liftedVerdict.hitPaths));
   assert('a-lifted-path-is-recorded-as-an-exception-never-as-a-clear-path',
-    !liftedVerdict.clearPaths.includes(wfPath) && liftedVerdict.exceptions.length === 1 && liftedVerdict.exceptions[0].pureRegeneration === true, JSON.stringify(liftedVerdict.exceptions));
-  const rejectedVerdict = applyGeneratedExceptions(testVerdict([wfPath]), new Map([[wfPath, { pureRegeneration: false, reason: 'differs (fixture)' }]]));
-  assert('a-failed-provenance-keeps-the-path-governed', rejectedVerdict.governed === true && rejectedVerdict.hitPaths.join() === wfPath);
-  const absentProvenance = applyGeneratedExceptions(testVerdict([wfPath]), new Map());
+    !liftedVerdict.clearPaths.includes(regPath) && liftedVerdict.exceptions.length === 1 && liftedVerdict.exceptions[0].pureRegeneration === true, JSON.stringify(liftedVerdict.exceptions));
+  const rejectedVerdict = applyGeneratedExceptions(testVerdict([regPath]), new Map([[regPath, { pureRegeneration: false, reason: 'differs (fixture)' }]]));
+  assert('a-failed-provenance-keeps-the-path-governed', rejectedVerdict.governed === true && rejectedVerdict.hitPaths.join() === regPath);
+  const absentProvenance = applyGeneratedExceptions(testVerdict([regPath]), new Map());
   assert('absent-provenance-fails-closed-never-open', absentProvenance.governed === true && /fail closed/.test(absentProvenance.exceptions[0].reason), JSON.stringify(absentProvenance.exceptions));
   // The mixed-diff rule is untouched: one hit on any OTHER governed path
   // still forks the whole PR, provenance verified or not.
-  const mixedGoverned = applyGeneratedExceptions(testVerdict([wfPath, '.claude/skills/x/SKILL.md']), verified);
+  const mixedGoverned = applyGeneratedExceptions(testVerdict([regPath, '.claude/skills/x/SKILL.md']), verified);
   assert('one-hit-on-any-OTHER-governed-path-still-forks-the-whole-pr',
     mixedGoverned.governed === true && mixedGoverned.hitPaths.join() === '.claude/skills/x/SKILL.md', JSON.stringify(mixedGoverned.hitPaths));
   assert('and-the-lifted-path-is-still-reported-as-lifted-on-a-mixed-diff', mixedGoverned.exceptions[0].pureRegeneration === true);
-  // A NAMED single file, not a class: a sibling workflow file never consults
+  // NAMED rows, not a class: a file the register does not cover never consults
   // provenance, even provenance that claims to be verified.
   const sibling = '.claude/workflows/some-other-workflow.js';
   const siblingVerdict = applyGeneratedExceptions(testVerdict([sibling]), new Map([[sibling, { pureRegeneration: true, reason: 'x' }]]));
-  assert('a-sibling-workflow-file-is-not-excepted-single-file-not-a-class',
+  assert('an-unregistered-file-is-not-excepted-named-rows-not-a-class',
     siblingVerdict.governed === true && siblingVerdict.exceptions.length === 0, JSON.stringify(siblingVerdict.exceptions));
   assert('a-verdict-that-never-consulted-the-exception-carries-no-exceptions-field', testVerdict(['AGENTS.md']).exceptions === undefined);
 
@@ -3312,48 +3221,53 @@ async function selfTest() {
   //
   // The fence decides whether `--test` recomputes at all, so a bug in either
   // direction is load-bearing: too loose re-opens the self-certification, too
-  // tight would break the ruled pure-regeneration lift. The register's own
-  // generator command must live under the fenced prefix — if the generator
-  // ever relocates, the fence must follow, and this goes red first.
-  assert('the-fence-covers-the-directory-the-registered-generator-actually-runs-from',
-    GENERATED_SURFACE_EXCEPTIONS[0].generator.includes(TRUSTED_GENERATOR_PREFIX), GENERATED_SURFACE_EXCEPTIONS[0].generator);
+  // tight would break the ruled pure-regeneration lift.
+  const fenceRow = GENERATED_SURFACE_EXCEPTIONS.find((e) => e.id === 'spec-skill-refs');
+  const fencePrefix = fenceRow.trustedGeneratorPrefixes[0];
   // Direction A — co-edit: the generator is touched, so no recompute happens
   // and the artifact stays governed, with the stated reason.
-  const coEditPaths = [wfPath, 'scripts/docs-audit/affected-docs.mjs'];
-  const coEdit = generatorCoEditProvenance(coEditPaths);
+  const coEditPaths = [regPath, `${fencePrefix}build-skill-references.ts`];
+  const coEdit = generatorCoEditProvenance(coEditPaths, fenceRow);
   assert('a-generator-co-edit-answers-fail-closed-before-any-recompute',
     coEdit !== null && coEdit.pureRegeneration === false, JSON.stringify(coEdit));
   assert('the-co-edit-reason-states-the-ruled-words-and-names-the-co-edited-file',
     /modifies the generator this exception trusts — the path stays governed/.test(coEdit?.reason ?? '') &&
-      (coEdit?.reason ?? '').includes('scripts/docs-audit/affected-docs.mjs'), String(coEdit?.reason));
+      (coEdit?.reason ?? '').includes(`${fencePrefix}build-skill-references.ts`), String(coEdit?.reason));
   // A neutered fence must fail LOUD and READABLE here, not crash the run: the
   // absent answer is itself the finding, so it is asserted, never dereferenced.
-  const coEditVerdict = applyGeneratedExceptions(testVerdict(coEditPaths), new Map(coEdit ? [[wfPath, coEdit]] : []));
+  const coEditVerdict = applyGeneratedExceptions(testVerdict(coEditPaths), new Map(coEdit ? [[regPath, coEdit]] : []));
   assert('a-generator-co-edit-keeps-the-artifact-governed-the-exception-does-not-lift',
-    coEditVerdict.governed === true && coEditVerdict.hitPaths.join() === wfPath && coEditVerdict.exceptions[0].pureRegeneration === false,
+    coEditVerdict.governed === true && coEditVerdict.hitPaths.join() === regPath && coEditVerdict.exceptions[0].pureRegeneration === false,
     JSON.stringify(coEditVerdict.hitPaths));
   const coEditRender = renderTestVerdict(coEditVerdict);
   assert('the-co-edit-render-stays-GOVERNED-and-tells-the-seat-why-it-did-not-lift',
     coEditRender.includes('GOVERNED') && coEditRender.includes('did NOT lift') &&
       coEditRender.includes('modifies the generator this exception trusts'), coEditRender);
   assert('the-dot-slash-spelling-of-a-generator-path-is-fenced-too-recognising-more-only-tightens',
-    generatorCoEditProvenance([wfPath, './scripts/docs-audit/check-audit-scope.mjs']) !== null);
+    generatorCoEditProvenance([regPath, `./${fencePrefix}build-skill-references.ts`], fenceRow) !== null);
   // Direction B — untouched generator: the fence abstains (`null`), the
   // recompute runs exactly as before, and a verified pure regeneration still
   // lifts. This is the narrowing's whole obligation: nothing else moves.
-  const regenOnlyPaths = [wfPath, 'content/docs/new-page.mdx'];
+  const regenOnlyPaths = [regPath, 'packages/spec/src/ui/responsive.zod.ts'];
   assert('an-untouched-generator-abstains-so-the-recompute-runs-exactly-as-before',
-    generatorCoEditProvenance(regenOnlyPaths) === null);
+    generatorCoEditProvenance(regenOnlyPaths, fenceRow) === null);
   const regenOnlyVerdict = applyGeneratedExceptions(testVerdict(regenOnlyPaths), verified);
   assert('a-pure-regen-with-an-untouched-generator-still-lifts-and-the-pr-is-not-governed',
     regenOnlyVerdict.governed === false && regenOnlyVerdict.hitPaths.length === 0 && regenOnlyVerdict.exceptions[0].pureRegeneration === true,
     JSON.stringify(regenOnlyVerdict));
   assert('a-docs-only-pr-that-never-hits-the-register-is-untouched-by-the-fence',
-    generatorCoEditProvenance(['content/docs/a.mdx']) === null && testVerdict(['content/docs/a.mdx']).governed === false);
+    generatorCoEditProvenance(['content/docs/a.mdx'], fenceRow) === null && testVerdict(['content/docs/a.mdx']).governed === false);
   // A prefix on the real directory, not a substring: a sibling directory whose
   // name merely starts the same way is not the trusted generator.
   assert('a-near-miss-sibling-directory-is-not-mistaken-for-the-generator-tree',
-    generatorCoEditProvenance(['scripts/docs-auditing/other.mjs']) === null);
+    generatorCoEditProvenance([`${fencePrefix.replace(/\/$/, '')}-x/other.ts`], fenceRow) === null);
+  // A row that names no instrument tree cannot rule a co-edit out, so it must
+  // fail closed rather than abstain — abstaining would send it on to recompute.
+  {
+    const unfenced = generatorCoEditProvenance([regPath], { id: 'fixture', trustedGeneratorPrefixes: [] });
+    assert('a-row-with-no-trusted-generator-tree-fails-closed-rather-than-abstaining',
+      unfenced !== null && unfenced.pureRegeneration === false && /names no trusted generator tree/.test(unfenced.reason), JSON.stringify(unfenced));
+  }
 
   // ── the #11705 generator-owned rows inside `skills/**` ───────────────────
   //
@@ -3433,9 +3347,16 @@ async function selfTest() {
   assert('and-the-shared-output-sink-counts-as-the-instrument-too',
     generatorCoEditProvenance([genIndex, 'packages/spec/scripts/lib/generated-output.ts'], skillRefs) !== null);
   assert('editing-spec-SOURCE-is-not-a-generator-co-edit', generatorCoEditProvenance([genIndex, 'packages/spec/src/ui/view.zod.ts'], skillRefs) === null);
-  assert('the-fences-are-per-row-neither-tree-fences-the-other-rows-generator',
-    generatorCoEditProvenance(['packages/spec/scripts/build-skill-references.ts'], GENERATED_SURFACE_EXCEPTIONS[0]) === null &&
-      generatorCoEditProvenance(['scripts/docs-audit/affected-docs.mjs'], skillRefs) === null);
+  // PER ROW, not global: a row is fenced by ITS OWN instrument tree and by no
+  // other. Pinned against a fixture row rather than a sibling register row,
+  // because the two live rows happen to share a prefix today — and a property
+  // that only holds while two rows differ is not the property being asserted.
+  {
+    const elsewhere = { id: 'fixture', trustedGeneratorPrefixes: ['tools/other-generator/'] };
+    assert('the-fences-are-per-row-neither-tree-fences-the-other-rows-generator',
+      generatorCoEditProvenance(['packages/spec/scripts/build-skill-references.ts'], elsewhere) === null &&
+        generatorCoEditProvenance(['tools/other-generator/gen.ts'], skillRefs) === null);
+  }
 
   // Applied to a verdict: the #11685 shape lifts, and the ruled limit holds.
   const specPr = applyGeneratedExceptions(testVerdict(['packages/spec/src/ui/responsive.zod.ts', genIndex]), new Map([[genIndex, genuine]]));
@@ -3482,7 +3403,7 @@ async function selfTest() {
   // The words a seat reads.
   const liftedRender = renderTestVerdict(liftedVerdict);
   assert('a-lifted-render-names-the-exception-the-generator-and-the-recompute',
-    liftedRender.includes('PURE REGENERATION') && liftedRender.includes('check-audit-scope.mjs --write') && liftedRender.includes('THIS tree'), liftedRender);
+    liftedRender.includes('PURE REGENERATION') && liftedRender.includes(generatedExceptionFor(regPath).generator) && liftedRender.includes('THIS tree'), liftedRender);
   assert('a-lifted-render-still-warns-that-any-other-governed-hit-forks', liftedRender.includes('forks the whole PR'), liftedRender);
   const rejectedRender = renderTestVerdict(rejectedVerdict);
   assert('a-rejected-render-stays-GOVERNED-and-says-why-the-exception-did-not-lift',
@@ -3494,7 +3415,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the four ruled cases against the generator's own splice, byte-exactness, fail-closed inputs, the untouched mixed-diff rule, single-file-not-a-class, the #11084 generator co-edit fence in both directions, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes).\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes).\n  ${liveNote}`);
 }
 
 /** The exit code `--test` would return for a path list — pinned without spawning. */
