@@ -85,6 +85,44 @@ import type { IObjectQLEngine } from '@objectstack/core';
 import { isWritablePackage } from './package-writability.js';
 
 /**
+ * Canonicalise a driver-materialised timestamp into the ISO-8601 string the
+ * declared output type of this adapter promises.
+ *
+ * [#13997] `sys_metadata`'s `created_at` / `updated_at` are BUILTIN audit
+ * columns; `sys_metadata_history`'s `recorded_at` is a declared
+ * `Field.datetime`. On the live dialects BOTH arrive out of the record read
+ * door as a JS `Date`: `SqlDriver#formatOutput` repairs the audit columns
+ * (`repairNaiveUtcAuditTimestamp`) and folds the declared datetime columns
+ * (`normalizeSqliteDatetimeOutput`) ONLY inside its `if (this.isSqlite)` arm,
+ * and `withPostgresCalendarDayAsText` leaves `timestamptz` / `timestamp`
+ * deliberately untouched because "those are instants, a `Date` is the right
+ * materialisation for them, and `Field.datetime` depends on it". Pinned in
+ * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`.
+ *
+ * `MetadataItem.authoredAt` is declared `z.string()` ('ISO-8601 timestamp',
+ * `packages/metadata-core/src/types.ts`) and `MetadataItem` is a `z.infer`, so
+ * the field is `string` to every consumer. The producer owes the canonical
+ * spelling, and this is the adapter boundary that asserts the declared type —
+ * hence here, and not at the driver's read door (which would reverse that
+ * deliberate driver decision and belongs to the whole census, not this fix).
+ *
+ * ⛔ NOT a tolerant fallback: it does not teach a consumer to accept an
+ * off-spec shape. It converts the one per-dialect materialisation the driver
+ * genuinely produces into the single declared spelling, at the producer. The
+ * `Date` arm is the SAME spelling `auditMetaItem` already applies to
+ * `sys_metadata_audit.occurred_at` in `protocol.ts` — one shape, not a third.
+ *
+ * Absent column -> `undefined`, so each caller's existing `?? <default>` chain
+ * keeps exactly its current meaning.
+ */
+function canonicalIsoInstant(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'string') return value;
+  return String(value);
+}
+
+/**
  * Overlay-row lifecycle state.
  *
  *  - `'active'`  → the published, live overlay. `getMetaItem` (the
@@ -414,7 +452,9 @@ export class SysMetadataRepository implements MetadataRepository {
       // that as the string 'unknown' invents an identity the column never
       // held, which is the same declared-≠-actual defect on the read side.
       authoredBy: ((row as any).recorded_by as string | null | undefined) ?? null,
-      authoredAt: (row as any).recorded_at ?? new Date(0).toISOString(),
+      // [#13997] `recorded_at` is a declared `Field.datetime`, so on Postgres
+      // and MySQL it materialises as a JS `Date` — see `canonicalIsoInstant`.
+      authoredAt: canonicalIsoInstant((row as any).recorded_at) ?? new Date(0).toISOString(),
       message: (row as any).change_note ?? undefined,
       seq: ((row as any).event_seq as number) ?? 0,
     };
@@ -1749,7 +1789,9 @@ export class SysMetadataRepository implements MetadataRepository {
       // #4556 — `updated_by` / `created_by` are lookup('sys_user') too;
       // absent means absent, not a user called 'unknown'.
       authoredBy: (row.updated_by as string | null | undefined) ?? (row.created_by as string | null | undefined) ?? null,
-      authoredAt: row.updated_at ?? row.created_at ?? new Date().toISOString(),
+      // [#13997] The builtin audit columns materialise as a JS `Date` on the
+      // live dialects; `authoredAt` is declared `z.string()`.
+      authoredAt: canonicalIsoInstant(row.updated_at ?? row.created_at) ?? new Date().toISOString(),
       message: undefined,
       seq: this.seqCounter,
     };
