@@ -47,7 +47,7 @@ nothing to do with elevation.
 | Declaration | What it is | This page? |
 |:---|:---|:---:|
 | `ExecutionContext.isSystem` — `packages/spec/src/kernel/execution-context.zod.ts:269` | The elevation flag on an operation's context | ✅ |
-| `Object.isSystem` — `packages/spec/src/data/object.zod.ts:1588` | Marks a **system object** (protected from deletion; defaults its org-wide sharing to `public` when no `sharingModel` is set) | ❌ |
+| `Object.isSystem` — `packages/spec/src/data/object.zod.ts:1595` | Marks a **system object** (protected from deletion; defaults its org-wide sharing to `public` when no `sharingModel` is set) | ❌ |
 | `EmailTemplate.isSystem` — `packages/spec/src/system/email-template.zod.ts:125` | Built-in template; tenants may override but should not delete | ❌ |
 | `Environment.isSystem` — `packages/spec/src/cloud/environment.zod.ts:137` | Platform-infrastructure environment, not user data | ❌ |
 
@@ -112,7 +112,7 @@ that silently does not happen.
 | 18 | **`readonly` strip bypassed — UPDATE, single row** | objectql | Get: a `readonly` field CAN be written. Lose: the protection that stops a caller seeding e.g. `approval_status` | `objectql/src/engine.ts:10787` |
 | 19 | **`readonly` strip bypassed — UPDATE, bulk/predicate** | objectql | Same, on the multi-row path | `objectql/src/engine.ts:10949` |
 | 20 | **`readonly` strip bypassed — INSERT (engine pass)** | objectql | Same, on create | `objectql/src/engine.ts:9680` |
-| 21 | **`readonly` strip bypassed — INSERT (protocol ingress)** | metadata-protocol | `isSystem` is the **only** exemption here. `preserveAudit` is deliberately not read on this path (#6640) — a non-system historical import is still stripped on create | `metadata-protocol/src/protocol.ts:1576` |
+| 21 | **`readonly` strip bypassed — INSERT (protocol ingress)** | metadata-protocol | `isSystem` is the **only** exemption here. `preserveAudit` is deliberately not read on this path (#6640) — a non-system historical import is still stripped on create | `metadata-protocol/src/protocol.ts:1664` |
 | 22 | Strict-drop refusal never fires | objectql | Lose: a caller that opted into loud refusal gets **silence** — strict refuses exactly what the strip would have taken, and the strip took nothing | `objectql/src/engine.ts:9717`, `readonly-strict-errors.ts:66` |
 | 23 | **Referential-integrity check skipped** | objectql | Get: writes proceed against unreachable/unresolvable targets. Lose: an `isSystem` caller can write a **dangling reference** | `objectql/src/engine.ts:5705` |
 | 24 | Tenant-audit warning silenced; `bypassTenantAudit` threaded to the driver | objectql | Get: unscoped system writes stop warning. Lose: the signal that would flag a genuine user-path scoping bug | `objectql/src/engine.ts:3574`, `:3584`, `:3611` |
@@ -135,7 +135,7 @@ The largest single consumer — **20 of the 109 sites**.
 | 34 | `revoke()` deletes directly, **before** the non-manual-source guard | Get: the evaluator can revoke its own grants. Lose: the `CONFLICT` guard that warns a rule-materialised grant will be silently re-granted on the next reconcile | `plugin-sharing/src/sharing-service.ts:1286` (guard at `:1311`) |
 | 35 | `listShares()` skips the management gate | Get: full enumeration of who can see a record | `plugin-sharing/src/sharing-service.ts:1338` |
 | 36 | `sys_record_share` reads are **not** self-scoped | Get: tenant-wide share listing without `manage_sharing` | `sharing-plugin.ts:1077` |
-| 37 | Share-link policy `enabled` check bypassed; system callers re-enter under a system context | Get: link creation/resolution while the policy is off | `plugin-sharing/src/share-link-service.ts:413`, `:467`, `:471`, `:544`, `:574` |
+| 37 | Share-link policy `enabled` check bypassed; system callers re-enter under a system context | Get: link creation/resolution while the policy is off | `plugin-sharing/src/share-link-service.ts:423`, `:477`, `:481`, `:554`, `:584` |
 | 38 | Sharing-rule provenance stamp skipped | Lose: the row is not marked as an admin customization — seeder / `defineRule` / boot reconcilers are "the package door" | `sharing-rule-provenance.ts:47` |
 | 39 | Sharing-rule service write + delete paths return early | Lose: the manage-rules gate on the service surface, and the platform-global-rule delete guard | `sharing-rule-service.ts:157`, `:382` |
 
@@ -196,7 +196,7 @@ assuming `isSystem` covers it is a documented source of bugs.
 | "It suppresses triggers / record-change automation" | **No.** Only `skipTriggers` does. A bare `{ isSystem: true }` on a seed write re-fired automation on freshly seeded rows and wedged first boot | `metadata-protocol/src/seed-loader.ts:1909` (rationale at `:1819`–`1821`, #3760), `flow.zod.ts:685` |
 | "It skips the state machine" | **No.** That is `skipStateMachine`, carried by seed replay and by `treatAsHistorical` imports | `objectql/src/engine.ts` FSM gate; see [State Machine](/docs/protocol/objectql/state-machine) |
 | "It skips validation rules" | **No.** Field shape, `format`, `script` and the rest still run. The `readonly` strip runs *before* validation precisely so a discarded value is not judged | `objectql/src/engine.ts:9663`–`9680` |
-| "It preserves a supplied `updated_at` / `updated_by`" | **No.** That is `preserveAudit`, a separate opt-in — and an UPDATE-path exemption only | `field.zod.ts:1514` (#3493 / #6640) |
+| "It preserves a supplied `updated_at` / `updated_by`" | **No.** That is `preserveAudit`, a separate opt-in — and an UPDATE-path exemption only | `field.zod.ts:1516` (#3493 / #6640) |
 | "It stamps `created_by`" | **No.** Audit stamping reads `userId` from the context. A user-less system write stamps nothing — that is today's behaviour, not an error | `runtime-identity.ts:280`–`281` |
 | "It bypasses every guard" | **No.** The last-admin guard applies to **every** context, `isSystem` included — the deprovision path that actually locks an org out is the system one | `last-admin-guard.ts:286` |
 | "A client can request it" | **No.** Never settable from inbound HTTP or from an action body | `rest-server.ts:1302`, `:1331`; `domains/actions.ts:404` |
@@ -306,7 +306,7 @@ still holds equal to the census on every pull request:
 | — in tests | 1013 | — |
 | — in non-test sources | 798 | — |
 | Appearances of the bare identifier `isSystem` in non-test sources | 813 | — |
-| — parsed as a declaration | 21 | ✅ |
+| — parsed as a declaration | 22 | ✅ |
 | — parsed as an object-literal / type key (producers and option objects) | 310 | — |
 | — parsed as a property **read** | 115 | ✅ |
 | — parsed in some other syntactic position (a local, a cast, a conditional) | 9 | ✅ |
@@ -335,6 +335,24 @@ whole argument of this section; they are unenforced because a count of lines in
 test files certifies nothing. ⛔ Do not re-add them to `DECLARED_COUNTS` — a
 self-test case in the gate refuses that by name. Re-measure them with
 `node scripts/isystem-census.mjs` when you want them current, and move the date.
+
+**What the enforced declarations row counts.** Not the four field declarations
+above — those are four *distinct fields* that happen to share a name, and only
+the first is elevation. This row counts every position where the parser puts the
+identifier in a **declaring** slot: those four, plus the structural type literals
+that restate `ExecutionContext.isSystem`'s shape inline rather than importing it
+(`{ isSystem: true; tenantId?: string }`, `context?: { isSystem?: boolean }`, and
+the `get isSystem()` accessor on the engine's context wrapper). A restatement is
+a producer's declaration of the shape it will build, never a read, so a new one
+moves this count and moves nothing else on this page — the census's read
+population, the anchored rows above, and the packages and files totals all stay
+where they are. The most recent arrival is the scoped
+seed context threaded into the org-admin permission-set lookup in
+`plugins/plugin-security/src/auto-org-admin-grant.ts`, so that read resolves
+against the granting organization's own catalog row rather than an
+organization-less one (#11670). ⛔ Cited without a line number deliberately: an
+anchor here would be refused, and rightly — this page anchors elevation
+**reads**, and a declaration is not one.
 
 Counting by hand is what made the previous edition wrong in two independent
 ways, so both are worth naming. Its headline said "80 distinct sites across 18
