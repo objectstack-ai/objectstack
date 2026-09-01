@@ -453,3 +453,157 @@ describe('ShareLinkService', () => {
     });
   });
 });
+
+// ── [#13856] declared `redactFields` survive the object opting OUT ──────────
+//
+// `getPolicy()` used to collapse to an EMPTY policy whenever
+// `publicSharing.enabled !== true` — `redactFields: []` included. So a link
+// minted while the object was opted IN, redeemed after it was opted OUT, kept
+// resolving and started serving MORE fields than it did while the feature was
+// on: turning the switch OFF widened what the anonymous endpoint serves.
+// Fail-open, and wrong under either answer to the standing-policy question:
+// the declared redaction set is now read from the declared block regardless
+// of `enabled`, so opting out can never widen what an existing token serves.
+//
+// ⛔ Deliberately NOT asserted here: whether the link should resolve AT ALL
+// once `enabled` is false. That is the deployment-visible ruling pending in
+// #14033. These tests take today's behaviour (it resolves) as a given and pin
+// only the redaction set served when it does; if #14033 rules that de-opt-in
+// kills standing links, the resolve-side readings here move with that card.
+describe('[#13856] declared redactFields survive publicSharing opt-out', () => {
+  /** An opt-in object whose schema object is LOCAL to the test, so `enabled` can be flipped. */
+  function makeOptOutHarness() {
+    const schemas: Record<string, any> = {
+      sys_share_link: { name: 'sys_share_link', fields: {} },
+      articles: {
+        name: 'articles',
+        publicSharing: { enabled: true, redactFields: ['owner_id', 'cost'] },
+        fields: { id: {}, title: {}, body: {}, owner_id: {}, cost: {} },
+      },
+      // Reverse control: never declared a publicSharing block at all.
+      plain_notes: { name: 'plain_notes', fields: { id: {}, text: {}, secret: {} } },
+    };
+    const engine = makeFakeEngine(schemas);
+    engine._tables.articles = [{ id: 'a1', title: 'T', body: 'B', owner_id: 'u9', cost: 42 }];
+    engine._tables.plain_notes = [{ id: 'n1', text: 'hi', secret: 's3' }];
+    const service = new ShareLinkService({ engine: engine as any });
+    return { schemas, engine, service };
+  }
+
+  /** Seed a pre-existing link directly (mint refuses for these paths — that gate is pinned below). */
+  function seedLink(engine: any, row: Record<string, any>) {
+    engine._tables.sys_share_link = [{
+      id: 'shl_seeded',
+      permission: 'view',
+      audience: 'link_only',
+      expires_at: null,
+      email_allowlist: null,
+      password_hash: null,
+      redact_fields: null,
+      revoked_at: null,
+      use_count: 0,
+      ...row,
+    }];
+  }
+
+  it('THE REPRO — opting out keeps the declared redactions applying', async () => {
+    const { schemas, service } = makeOptOutHarness();
+    const link = await service.createLink(
+      { object: 'articles', recordId: 'a1', audience: 'link_only', permission: 'view', redactFields: ['body'] },
+      { userId: 'u1' },
+    );
+
+    const on = await service.resolveToken(link.token);
+    expect(on).not.toBeNull();
+
+    schemas.articles.publicSharing.enabled = false;
+
+    // Today's behaviour, under ruling in #14033 — a given here, not a pin.
+    const off = await service.resolveToken(link.token);
+    expect(off).not.toBeNull();
+
+    // Positive: the declared fields are still stripped after opt-out.
+    expect(off!.redactFields).toContain('owner_id');
+    expect(off!.redactFields).toContain('cost');
+
+    // ⭐ The directional assertion — the field set served with the switch OFF
+    // is a SUBSET of the set served with it ON. Opting out may only ever
+    // narrow what an existing token serves, never widen it.
+    const allFields = Object.keys(schemas.articles.fields);
+    const servedOn = allFields.filter((f) => !on!.redactFields.includes(f));
+    const servedOff = allFields.filter((f) => !off!.redactFields.includes(f));
+    expect(
+      servedOff.filter((f) => !servedOn.includes(f)),
+      'fields served ONLY after opting out — must be none',
+    ).toEqual([]);
+  });
+
+  it('boundary — the per-link redact_fields union is unchanged when the switch is off', async () => {
+    const { schemas, service } = makeOptOutHarness();
+    const link = await service.createLink(
+      { object: 'articles', recordId: 'a1', audience: 'link_only', permission: 'view', redactFields: ['body'] },
+      { userId: 'u1' },
+    );
+    schemas.articles.publicSharing.enabled = false;
+
+    const off = await service.resolveToken(link.token);
+    expect(off).not.toBeNull();
+    // Exactly declared ∪ per-link — nothing dropped, nothing sprouted.
+    expect(new Set(off!.redactFields)).toEqual(new Set(['owner_id', 'cost', 'body']));
+  });
+
+  it('control — the enabled:true path serves exactly declared ∪ per-link, as before', async () => {
+    const { service } = makeOptOutHarness();
+    const link = await service.createLink(
+      { object: 'articles', recordId: 'a1', audience: 'link_only', permission: 'view', redactFields: ['body'] },
+      { userId: 'u1' },
+    );
+    const on = await service.resolveToken(link.token);
+    expect(on).not.toBeNull();
+    expect(new Set(on!.redactFields)).toEqual(new Set(['owner_id', 'cost', 'body']));
+  });
+
+  it('reverse control — an object with no publicSharing block sprouts NO redaction set', async () => {
+    const { engine, service } = makeOptOutHarness();
+    seedLink(engine, {
+      token: 'noblock-token-1234567890',
+      object_name: 'plain_notes',
+      record_id: 'n1',
+    });
+    const resolved = await service.resolveToken('noblock-token-1234567890');
+    expect(resolved).not.toBeNull();
+    expect(resolved!.redactFields).toEqual([]);
+  });
+
+  it('reverse control — per-link redactions still apply alone on a block-less object', async () => {
+    const { engine, service } = makeOptOutHarness();
+    seedLink(engine, {
+      token: 'noblock-token-0987654321',
+      object_name: 'plain_notes',
+      record_id: 'n1',
+      redact_fields: ['secret'],
+    });
+    const resolved = await service.resolveToken('noblock-token-0987654321');
+    expect(resolved).not.toBeNull();
+    expect(resolved!.redactFields).toEqual(['secret']);
+  });
+
+  // The rejection assertion, per the ADR-0112 envelope: `code` AND `status` —
+  // a bare `.toThrow()` could pass on a refusal for the wrong reason entirely.
+  it('the mint-time opt-in gate is untouched — enabled:false still refuses SHARING_NOT_ENABLED', async () => {
+    const { schemas, service } = makeOptOutHarness();
+    schemas.articles.publicSharing.enabled = false;
+    let caught: any;
+    try {
+      await service.createLink(
+        { object: 'articles', recordId: 'a1', audience: 'link_only', permission: 'view' },
+        { userId: 'u1' },
+      );
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught, 'expected a refusal, but the mint resolved').toBeDefined();
+    expect(caught.status).toBe(422);
+    expect(caught.code).toBe('SHARING_NOT_ENABLED');
+  });
+});
