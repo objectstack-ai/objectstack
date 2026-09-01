@@ -44,7 +44,13 @@ ruling did not move).
 `error` (flat `/data` doors) or `error.message` (nested record-share
 envelope) on these routes must read the `code` field instead — it has
 carried the same token all along, with unregistered spellings demoted to
-the `declaredCode` sibling (#9232). A cross-repo census (objectstack,
-objectui, hotcrm; re-run 2026-09-01) found zero consumers branching on the
-prefix; per #13347's precedent an error-envelope shape change ships as
-`minor` with this note.
+the `declaredCode` sibling (#9232). The consumer census behind this change
+covered `objectstack`, `objectui` and `hotcrm` (re-run 2026-09-01, each
+scope with a positive control) and found zero consumers branching on the
+prefix. `objectstack-ai/cloud` was NOT MEASURED — it was unreachable from
+the implementing session — and is deliberately not reported as clean: the
+zero above is a statement about the three repos named, not about every
+deployment. An operator whose code parses the leading token off these
+routes' error text should locate and update those reads before upgrading.
+Per #13347's precedent an error-envelope shape change ships as `minor`
+with this note.
