@@ -482,19 +482,41 @@ export class StorageServicePlugin implements Plugin {
           try {
             const payload = await settings.getNamespace('storage');
             const values: Record<string, any> = {};
+            const sources: Record<string, string> = {};
             for (const [k, v] of Object.entries(payload.values as Record<string, any>)) {
               values[k] = v?.value;
+              if (v?.source) sources[k] = String(v.source);
             }
-            // No persisted values yet → keep the constructor-built adapter.
-            const hasAny = Object.values(values).some((v) => v !== undefined && v !== null && v !== '');
-            if (!hasAny) return;
+            // [#5536] Only an AUTHORED value (an admin-saved row or an env
+            // override) may override the constructor-built adapter. The old
+            // gate asked "is any value non-empty?", but the manifest defaults
+            // (`adapter: 'local'`, `local_root: …`) are non-empty on every
+            // boot, so it answered "configured" for a settings page nobody
+            // ever opened. Same criterion, same reason as EmailServicePlugin:
+            // the manifest default (`source: 'default'`) is not a decision
+            // anyone made, and treating it as one would let a settings page
+            // nobody opened silently move the backing store the deployment
+            // declared. The keys consulted are exactly the inputs
+            // `resolveStorageTarget` below reads — an authored save that
+            // touched only, say, the upload limit must not open the door for
+            // the schema-default adapter to shadow the constructor's. A
+            // missing `source` (a non-conforming snapshot) reads as
+            // 'default': the conservative side is the one that does NOT move
+            // the backing store on unattributable authorship.
+            const adapterKeys = [
+              'adapter', 'local_root', 's3_bucket', 's3_region', 's3_endpoint',
+              's3_force_path_style', 's3_access_key_id', 's3_secret_access_key',
+            ];
+            const authored = adapterKeys.some((k) => (sources[k] ?? 'default') !== 'default');
+            if (!authored) return;
 
-            // #4096 — `hasAny` is true on every boot once the settings service
-            // has persisted its own defaults, so this used to rebuild and swap
-            // unconditionally, warning about stranded files on a swap from an
-            // adapter to an identically-configured one. Compare the resolved
-            // CONFIGURATIONS instead: skip entirely when nothing changed, and
-            // only call it a migration hazard when the backing store moved.
+            // #4096 — before the [#5536] gate above, this ran on every boot
+            // once an admin save had persisted the namespace's form values,
+            // so it used to rebuild and swap unconditionally, warning about
+            // stranded files on a swap from an adapter to an
+            // identically-configured one. Compare the resolved CONFIGURATIONS
+            // instead: skip entirely when nothing changed, and only call it a
+            // migration hazard when the backing store moved.
             const nextTarget = resolveStorageTarget({
               kind: values.adapter,
               rootDir: values.local_root,
