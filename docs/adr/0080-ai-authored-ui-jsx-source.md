@@ -146,3 +146,38 @@ Coupling: completed `inputs` → codegen `.d.ts` (author-time) **and** serialize
 1. Collapse the object collection-views into one `object-view` + `viewType` enum, or keep `object-kanban`/`object-calendar`/… as distinct named blocks (better AI recall vs. smaller vocabulary)?
 2. Converge objectui's `${}` evaluator onto the framework CEL (ADR-0058) for the JSX-source expression layer — required for typed expressions, or deferred?
 3. `compiledTree` persisted at save, or compiled lazily on read with a source-hash cache?
+
+---
+
+> **Amendment (2026-09-01 — the `type` attribute is refused on the html tier).** An
+> authored `type=` attribute on an `html`-tier element is a **name collision with the
+> envelope's own discriminator**, which on this tier the tag name sets, and the parser
+> **refuses it at parse time** with one diagnostic naming both the tag and the attribute.
+> Maintainer ruling of 2026-09-01, quoted verbatim and untranslated:
+>
+> > **(b) 裁「响亮拒绝」**:作者在元素上写 `type=` 属性 = 与信封判别符的名字冲突,parser 当场一条诊断**同时点名标签与属性**(两支合一…都被这条诊断替代);⛔ `specType` 别名不引入 html tier;⛔ 不设 warning 宽限期(不考虑渐进)
+>
+> That one diagnostic replaces two outcomes, and the **silent** one is why the ruling went
+> this way: when the authored value named another *registered* type (`<flex type="grid">`)
+> the tree carried the author's value as its discriminator, every manifest check passed,
+> and the page rendered a different component with **zero diagnostics** — on the one tier
+> whose stated premise (§2, §5) is that unreviewed, AI-authored source is safe to accept.
+> When it named nothing registered, the diagnostic was `unknown-component` naming the
+> *value*, which reads as a missing plugin rather than as an attribute that should not be
+> there.
+>
+> Three boundaries the ruling drew, recorded because each was a live alternative:
+> ⛔ the react tier's `specType` rescue (objectui#2880) is **not** carried over here — it
+> is consumer-side tolerance, and it would spread an alias concept to a second tier
+> (Prime Directive #12); the two tiers are two source formats, so refusing at the html
+> tier's door does not disturb that rescue where it lives. ⛔ **No warning grace period**
+> — the accept-set narrows in one payment. ⛔ The fix is **not** at the warning layer:
+> `type` sits in `validate.ts`'s `BASE_PROPS` deliberately (it is correct for every other
+> member) and stays there. Alongside the refusal, `parseElement` now builds the node as
+> `{ ...props, type: tag }` rather than `{ type: tag, ...props }` — defense in depth, and
+> correct **only** because the attribute is refused loudly: reversing the spread alone
+> would trade a silent overwrite for a silent discard.
+>
+> **Migration surface: none.** The census the ruling ordered first (scan `content/docs/**`
+> and the example apps for html-tier sources carrying `type=`) measured **zero**
+> occurrences; every `type=` in those trees is react-tier or plain-HTML illustration.
