@@ -79,8 +79,8 @@
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join, relative, resolve, sep } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { WORKSPACE_SCOPE, workspaceBuildFix } from './cli-build-prerequisite.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
@@ -251,6 +251,70 @@ function defaultEntryTarget(manifest) {
 function isWholePackage(pkg, fromDir) {
   const dir = findPackageDir(pkg, fromDir);
   return Boolean(dir) && entryPointOnDisk(dir).present === true;
+}
+
+/**
+ * The repo root at or above a directory: the nearest ancestor holding
+ * `pnpm-workspace.yaml`. '' when none does.
+ *
+ * ⚠️ The marker is the workspace manifest and NOT `.git`, which looks like the
+ * more obvious choice and is wrong for the exact checkout shape `CLAUDE.md`
+ * mandates. In a linked worktree — `git worktree add ../objectstack-<task>` —
+ * `.git` is a FILE containing a `gitdir:` pointer, not a directory (measured
+ * here: 70 bytes, ASCII). A walk testing `statSync('.git').isDirectory()`
+ * therefore steps straight PAST the worktree root, finds nothing above it, and
+ * reports no root at all — in the one tree every agent actually works in.
+ * `existsSync` on `.git` would survive that, but the workspace manifest is the
+ * marker this repo already publishes for "repo root" (AGENTS.md names
+ * `findUp(existsSync(join(dir, 'pnpm-workspace.yaml')))` as the spelling), so
+ * it is the one used here rather than a second convention.
+ *
+ * NEAREST wins, as node and pnpm resolve. The tree holds a second
+ * `pnpm-workspace.yaml`, under `packages/create-objectstack/src/templates/blank/`
+ * — a scaffold template, containing no gate and importing nothing, so no
+ * importer resolves through it. A "highest wins" walk would be the riskier rule:
+ * it can climb OUT of the repo when the checkout sits inside another workspace.
+ */
+export function repoRootFrom(dir) {
+  let d = resolve(dir);
+  for (;;) {
+    if (existsSync(join(d, 'pnpm-workspace.yaml'))) return d;
+    const parent = dirname(d);
+    if (parent === d) return '';
+    d = parent;
+  }
+}
+
+/**
+ * The importer spelled the way the reader can actually RUN it.
+ *
+ * The gate NAME is a basename and is correct as one (it is what the headline
+ * says, and what the gate is called). The COMMAND is not a name, it is a path,
+ * and interpolating the basename into a hard-coded `scripts/` directory was
+ * right for the 42 importers under `scripts/**` and wrong for the three under
+ * `packages/lint/scripts/**`: it printed `node scripts/check-doc-formula-
+ * expressions.mjs`, which does not exist. Copy-pasting it answered
+ * `Cannot find module` at exit 1 — so a banner whose whole purpose is to stop a
+ * reader misreading an exit code handed them a THIRD failure, wearing a
+ * finding's exit code, one level down from the defect this module removes.
+ *
+ * Falls back to the ABSOLUTE path when no root is found, never to the old
+ * basename guess. An absolute path always runs; a relative path invented
+ * against a root that was never located is the confident wrong answer this
+ * module exists to refuse.
+ *
+ * Emitted with POSIX separators: the result is a shell command, not a path for
+ * this process to open.
+ */
+export function importerCommandPath(importerUrl) {
+  const file = fileURLToPath(importerUrl);
+  const root = repoRootFrom(dirname(file));
+  if (!root) return file;
+  const rel = relative(root, file);
+  // A path that climbs out of the root is not repo-relative in any useful
+  // sense; print the absolute one rather than a `../..` chain.
+  if (!rel || rel.startsWith('..')) return file;
+  return rel.split(sep).join('/');
 }
 
 /**
@@ -493,6 +557,13 @@ export function reportPrerequisiteNotMet(importerUrl, verdict, measures) {
  */
 function prerequisiteNotMetText(importerUrl, verdict, measures) {
   const gate = fileURLToPath(importerUrl).split('/').pop().replace(/\.mjs$/, '');
+  // The path to RUN and the name to CALL IT BY are two different strings, and
+  // only the first moves. ⛔ The `/tmp/${gate}.log` sink below keeps the
+  // BASENAME on purpose: a repo-relative path there would spell
+  // `/tmp/packages/lint/scripts/….log`, whose parent directories do not exist,
+  // so the redirect fails and the reader is handed a broken command again —
+  // the same defect, relocated one token to the right.
+  const command = importerCommandPath(importerUrl);
   const subject = measures ? `whether ${measures}` : `what it gates`;
   return (
     `\n${gate}: PREREQUISITE NOT MET — ${verdict.headline}\n\n` +
@@ -502,7 +573,7 @@ function prerequisiteNotMetText(importerUrl, verdict, measures) {
       `  result says NOTHING about ${subject}. It is NOT a finding, and it is not\n` +
       `  evidence that anything in the tree is wrong.\n` +
       `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:\n` +
-      `  \`node scripts/${gate}.mjs > /tmp/${gate}.log 2>&1; echo "EXIT=$?"\`.\n` +
+      `  \`node ${command} > /tmp/${gate}.log 2>&1; echo "EXIT=$?"\`.\n` +
       `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
       `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
       `  this gate's own code: \`| tail\` reads to EOF and forwards it, while \`| head -N\` closes the\n` +
@@ -682,6 +753,87 @@ export function selfTest() {
       findPackageDir('whole-fixture', deep) === join(nm, 'whole-fixture'));
     t('a package that is nowhere on the path is not found',
       findPackageDir('totally-absent-fixture', deep) === '');
+
+    // ── the printed COMMAND: a path the reader can run, not a name ──────────
+    //
+    // A REAL tree again, for this module's standing reason: the derivation
+    // turns on files being on disk, and a model would agree with an
+    // implementation that never looked.
+    //
+    // The fixture is shaped like the checkout every agent actually works in —
+    // a LINKED WORKTREE, whose `.git` is a FILE holding a `gitdir:` pointer.
+    // That shape is the whole reason the marker is the workspace manifest, and
+    // the negative control below is what turns that from a preference into a
+    // measurement.
+    const wt = join(dir, 'objectstack-issue-fixture');
+    mkdirSync(join(wt, 'scripts'), { recursive: true });
+    mkdirSync(join(wt, 'packages', 'lint', 'scripts'), { recursive: true });
+    writeFileSync(join(wt, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
+    writeFileSync(join(wt, '.git'), `gitdir: ${join(dir, 'common', 'worktrees', 'wt')}\n`);
+
+    const advisoryFor = (abs) =>
+      prerequisiteNotMetText(pathToFileURL(abs).href, { headline: 'h', detail: ['d'], fix: 'f' }, undefined);
+    const lintGate = join(wt, 'packages', 'lint', 'scripts', 'check-doc-formula-expressions.mjs');
+    const rootGate = join(wt, 'scripts', 'check-ci-filter-parity.mjs');
+
+    // (a) THE DEFECT, in both directions. The negative is the load-bearing
+    // one: `node scripts/check-doc-formula-expressions.mjs` is the exact string
+    // this card exists to stop printing, and it names a file that has never
+    // existed.
+    t('a packages/lint/scripts importer prints its REAL repo-relative path',
+      advisoryFor(lintGate).includes('`node packages/lint/scripts/check-doc-formula-expressions.mjs > '),
+      advisoryFor(lintGate));
+    t('⛔ and NEVER the `scripts/` basename guess, which names no file on disk',
+      !advisoryFor(lintGate).includes('node scripts/check-doc-formula-expressions.mjs'));
+
+    // (b) The 42 importers under `scripts/**` inherit this line verbatim, so
+    // the spelling is pinned WHOLE — command, log sink and the `echo` that
+    // captures the code before any pipe.
+    t('a scripts/** importer still prints `scripts/NAME.mjs`, spelling unchanged',
+      advisoryFor(rootGate).includes(
+        '`node scripts/check-ci-filter-parity.mjs > /tmp/check-ci-filter-parity.log 2>&1; echo "EXIT=$?"`'),
+      advisoryFor(rootGate));
+
+    // (c) The marker choice, as a paired measurement rather than an assertion.
+    const gitIsDirectoryWalk = (from) => {
+      let d = resolve(from);
+      for (;;) {
+        try {
+          if (statSync(join(d, '.git')).isDirectory()) return d;
+        } catch { /* absent here; keep walking */ }
+        const parent = dirname(d);
+        if (parent === d) return '';
+        d = parent;
+      }
+    };
+    t('the workspace-manifest walk finds the worktree root',
+      repoRootFrom(join(wt, 'packages', 'lint', 'scripts')) === wt);
+    t('NEGATIVE CONTROL: a `.git`-isDirectory walk finds NO root in a worktree shape',
+      gitIsDirectoryWalk(join(wt, 'packages', 'lint', 'scripts')) === '' && statSync(join(wt, '.git')).isFile());
+
+    // (d) No locatable root: absolute, which always runs. ⛔ Never a relative
+    // path invented against a root that was never found.
+    const orphanGate = join(dir, 'no-marker', 'scripts', 'check-orphan-fixture.mjs');
+    mkdirSync(dirname(orphanGate), { recursive: true });
+    t('an importer with no locatable root prints an ABSOLUTE path, always runnable',
+      importerCommandPath(pathToFileURL(orphanGate).href) === orphanGate,
+      importerCommandPath(pathToFileURL(orphanGate).href));
+    t('⛔ and never a relative path invented against a root that was not found',
+      !advisoryFor(orphanGate).includes('`node scripts/check-orphan-fixture.mjs'));
+
+    // (e) Triage's explicit boundary on this card: the HEADLINE gate name is a
+    // basename and is CORRECT as one. Only the command was wrong.
+    t('the headline still names the gate by BASENAME, never by path',
+      advisoryFor(lintGate).includes('\ncheck-doc-formula-expressions: PREREQUISITE NOT MET')
+        && !advisoryFor(lintGate).includes('packages/lint/scripts/check-doc-formula-expressions: PREREQUISITE'),
+      advisoryFor(lintGate));
+
+    // (f) The log sink keeps the basename too — `/tmp/packages/lint/scripts/
+    // ….log` names directories that do not exist, so a blanket substitution
+    // would hand back a broken command one token to the right.
+    t('the /tmp log sink keeps the BASENAME — a repo-relative one names absent directories',
+      advisoryFor(lintGate).includes('> /tmp/check-doc-formula-expressions.log 2>&1')
+        && !advisoryFor(lintGate).includes('/tmp/packages/lint'));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -737,6 +889,18 @@ export function selfTest() {
   const controlLiteralAdvisory = () => `  (Exit code 1 — capture it BEFORE any pipe:`;
   t('NEGATIVE CONTROL: the literal-exit pin can still fail', hardcodesExitCall(controlHardcodedExit));
   t('NEGATIVE CONTROL: the literal-advisory pin can still fail', spellsALiteralCode(controlLiteralAdvisory));
+
+  // The same shape for the directory. The regression that costs something here
+  // is not a mistyped path: it is an author interpolating the gate NAME back
+  // into a hard-coded `scripts/` because the headline beside it does exactly
+  // that. It would read correct, stay green for the 42 gates under `scripts/`,
+  // and be wrong only for the three that are the whole point of this pin.
+  const hardcodesScriptsDir = (fn) => /`node scripts\//.test(fn.toString());
+  const controlHardcodedScriptsDir = () => `  \`node scripts/${'gate'}.mjs > /tmp/x.log\``;
+  t('the advisory INTERPOLATES the importer path rather than hard-coding `scripts/`',
+    !hardcodesScriptsDir(prerequisiteNotMetText));
+  t('NEGATIVE CONTROL: the hard-coded-directory pin can still fail',
+    hardcodesScriptsDir(controlHardcodedScriptsDir));
 
   t('the refusal class is 3 — the code four sibling gates answer these words with',
     EXIT_PREREQUISITE_NOT_MET === 3, String(EXIT_PREREQUISITE_NOT_MET));
