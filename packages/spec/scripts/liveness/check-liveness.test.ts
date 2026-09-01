@@ -907,7 +907,7 @@ describe('check:liveness — an unrecognized ledger `status` (#13083)', () => {
   // real statuses are the entire population today, so an unmutated run must be
   // green AND must show neither heading. "Exits 0" alone would also be satisfied
   // by a guard wired to nothing.
-  it('stays GREEN on the real ledgers, where every status is one of the four', () => {
+  it('stays GREEN on the real ledgers, where every status is one of the published names', () => {
     const { status, output } = runGate();
     expect(status, output).toBe(0);
     expect(output).not.toContain('whose `status` is not one of');

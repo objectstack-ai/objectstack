@@ -405,7 +405,7 @@ describe('reconcileStateCountTotals — the fold must not lose a property', () =
     classified: { object: 50, field: 66 },
   };
 
-  it('stays quiet when every property sits in one of the four published columns', () => {
+  it('stays quiet when every property sits in one of the published columns', () => {
     expect(reconcileStateCountTotals(HONEST)).toEqual([]);
   });
 

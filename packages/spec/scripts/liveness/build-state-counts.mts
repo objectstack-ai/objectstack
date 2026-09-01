@@ -113,7 +113,7 @@ const rows = foldStateCounts(Object.keys(types), Object.fromEntries(
 // The header's rule is that a RED gate is not fatal here — the gate is red
 // precisely when this artifact needs rewriting. This failure is the exception,
 // and it is the same exception the unparseable report above already carves out:
-// there is nothing to rewrite. The fold that produced `rows` reads four status
+// there is nothing to rewrite. The fold that produced `rows` reads the published status
 // names and drops everything else, so writing now would publish an understated
 // `classified` — and the gate's freshness leg would then compare those bytes
 // against a re-render of the SAME understated fold and call it current. A stale
