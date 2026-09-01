@@ -372,13 +372,20 @@ describe('[#12975] the share family: convergence, and the two exits still carryi
         expect(dataAnswer.body.code).toBe('FORBIDDEN');
     });
 
-    it('⚠️ MEASURED, NOT REPAIRED HERE — two exits still ship the prefix', async () => {
-        // Recorded rather than fixed: the ruling moved ONE arm, and both exits
-        // below are reached through `resolveErrorResponse`'s own declared-4xx
-        // passthrough, which it did not name. Filed for the maintainer as
-        // #13095; this case is the evidence, and it REDS the day either exit is
-        // converged, which is the point — the follow-up moves it deliberately
-        // instead of discovering the divergence a third time.
+    it('CONVERGENCE [#13095] — the two exits that used to ship the prefix no longer do', async () => {
+        // ⚠️ MOVED DELIBERATELY. Until #13095 this case was titled
+        // "MEASURED, NOT REPAIRED HERE" and pinned the OLD truth — both exits
+        // below are reached through `resolveErrorResponse`'s declared-4xx
+        // passthrough (checked BEFORE it delegates to `mapDataError`), which
+        // the #12975 ruling did not name, so both still shipped
+        // `FORBIDDEN: ${ZH}` while the by-id door had converged. That case
+        // existed to red the day either exit converged, so the follow-up
+        // would move it deliberately instead of discovering the divergence a
+        // third time. This is that day: the 2026-08-31 maintainer ruling on
+        // #13095 (option 1) put the same declared-code-anchored
+        // `withoutDeclaredCodePrefix` in the passthrough arm, and the
+        // record-share classified arm converges with it for free because it
+        // re-dresses that same classification.
         //
         //   (a) the record-share family's CLASSIFIED arm — a producer that
         //       declared `{ code, status }` AND used the prefix idiom;
@@ -388,13 +395,99 @@ describe('[#12975] the share family: convergence, and the two exits still carryi
             boot({}, throwingShareService(sharingWriteRefusal())),
             'GET', SHARES, { params: { object: 'showcase_inquiry', id: 'rec1' } },
         );
-        expect(classified.body.error.message).toBe(`FORBIDDEN: ${ZH}`);
+        expect(classified.body.error.message).toBe(ZH);
+        expect(classified.body.error.code).toBe('FORBIDDEN');
 
         const bulk = await call(
             boot({ batchData: vi.fn().mockRejectedValue(sharingWriteRefusal()) }),
             'POST', `${COLLECTION}/batch`,
             { params: { object: 'showcase_inquiry' }, body: { operation: 'update', records: [{ id: 'r1' }] } },
         );
-        expect(bulk.body.error).toBe(`FORBIDDEN: ${ZH}`);
+        expect(bulk.body.error).toBe(ZH);
+        expect(bulk.body.code).toBe('FORBIDDEN');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// §6 The passthrough arm's own controls — the strip stays ANCHORED (#13095)
+// ---------------------------------------------------------------------------
+
+describe('[#13095] the bulk door strips by declared code, never by pattern', () => {
+    const batchWith = (error: unknown) => call(
+        boot({ batchData: vi.fn().mockRejectedValue(error) }),
+        'POST', `${COLLECTION}/batch`,
+        { params: { object: 'showcase_inquiry' }, body: { operation: 'update', records: [{ id: 'r1' }] } },
+    );
+
+    it('⭐ a declared 4xx with NO `code` KEEPS its prefix — the token is nowhere else', async () => {
+        // §2's control, restated on the arm #13095 moved: `thrownCodeFields`
+        // answers `{}` for a producer that named no code, so stripping here
+        // would delete the only machine token in the response rather than
+        // move it to its axis.
+        const answer = await batchWith(thrown(`FORBIDDEN: ${ZH}`, { status: 403 }));
+        expect(answer.status).toBe(403);
+        expect(answer.body.error).toBe(`FORBIDDEN: ${ZH}`);
+        expect('code' in answer.body).toBe(false);
+    });
+
+    it('⭐ a prefix that does not name the declared code is left alone — driver prose stays', async () => {
+        const answer = await batchWith(
+            thrown('SQLITE_ERROR: no such table: showcase_inquiry', { code: 'FORBIDDEN', status: 400 }),
+        );
+        expect(answer.body.error).toBe('SQLITE_ERROR: no such table: showcase_inquiry');
+    });
+
+    it('a message that is nothing but the prefix degrades to the generic sentence', async () => {
+        const answer = await batchWith(thrown('FORBIDDEN:', { code: 'FORBIDDEN', status: 403 }));
+        expect(answer.body.error).toBe('Request failed');
+        expect(answer.body.code).toBe('FORBIDDEN');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// §7 The approvals door — the third strip point, converged onto the anchor
+// ---------------------------------------------------------------------------
+
+describe('[#13095] the approvals door strips the code it answers, never a blanket pattern', () => {
+    const APPROVE = '/api/v1/approvals/requests/:id/approve';
+
+    const approveWith = (error: unknown) => {
+        const protocol: any = {
+            getDiscovery: vi.fn().mockResolvedValue({
+                version: 'v0', routes: { data: '', metadata: '', ui: '', auth: '/auth' },
+            }),
+            getMetaTypes: vi.fn().mockResolvedValue([]),
+            getMetaItems: vi.fn().mockResolvedValue([]),
+            findData: vi.fn().mockResolvedValue([]),
+        };
+        const rest = new RestServer(
+            mockServer() as any, protocol, { api: { requireAuth: false } } as any,
+            undefined, undefined, undefined, undefined, undefined, undefined,
+            undefined, undefined,
+            (async () => ({ decide: vi.fn().mockRejectedValue(error) })) as any,
+        );
+        (rest as any).resolveExecCtx = async () => ({ userId: 'u1' });
+        rest.registerRoutes();
+        return call(rest, 'POST', APPROVE, { params: { id: 'req_1' } });
+    };
+
+    it('the well-formed idiom is unchanged: the answered code is stripped from the sentence', async () => {
+        const answer = await approveWith(thrown(`FORBIDDEN: ${ZH}`));
+        expect(answer.status).toBe(403);
+        expect(answer.body.code).toBe('FORBIDDEN');
+        expect(answer.body.error).toBe(ZH);
+    });
+
+    it('⭐ a LONGER token sharing the matched spelling is NOT eaten — the blanket regex would have', async () => {
+        // The distinguisher between the old `/^[A-Z_]+:\s*/` strip and the
+        // anchored one: `/^FORBIDDEN/` matches this message, so the row
+        // answers `code: 'FORBIDDEN'` — but the sentence opens with a
+        // DIFFERENT token, which the wire carries nowhere else. The blanket
+        // regex deleted it; the anchored strip removes only a duplicate of
+        // the code being answered (#12975's rule, spread by #13095).
+        const answer = await approveWith(thrown('FORBIDDEN_BY_POLICY: contact your administrator'));
+        expect(answer.status).toBe(403);
+        expect(answer.body.code).toBe('FORBIDDEN');
+        expect(answer.body.error).toBe('FORBIDDEN_BY_POLICY: contact your administrator');
     });
 });

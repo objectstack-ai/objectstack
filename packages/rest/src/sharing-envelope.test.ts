@@ -24,11 +24,18 @@
  *
  * `respondSharingError` recovers the verdict by parsing the service's message
  * text (`msg.startsWith(CODE)`) and then STRIPS that prefix before answering.
- * The prefix is a server-internal service→REST derivation that never reaches
- * the wire, so no consumer can read it — censused at claim. It is therefore
- * untouched here: this card moved the response SHAPE only. `stripsThePrefix`
- * below pins that the stripping still happens, so a future reader does not
- * "restore" a prefix the wire never carried.
+ * The prefix is a server-internal service→REST derivation. ⚠️ [#13095] This
+ * docblock used to say the mechanism guaranteed that ("never reaches the
+ * wire") — false for the CLASSIFIED limb #11683 later added beside this arm,
+ * which re-dressed `resolveErrorResponse`'s answer prefix and all until the
+ * 2026-08-31 ruling converged that arm onto the same declared-code-anchored
+ * strip. What holds is MEASURED, not guaranteed: no consumer branches on the
+ * prefix in the wire text (censused at #8111's claim; re-censused 2026-09-01
+ * over objectstack + objectui with zero wire readers; `cloud` unreachable,
+ * NOT measured). The prefix idiom itself is untouched here: #8111 moved the
+ * response SHAPE only. `stripsThePrefix` below pins that the stripping still
+ * happens, so a future reader does not "restore" a prefix the wire does not
+ * carry on this arm.
  *
  * ## What these cases assert, and why not `toThrow`
  *

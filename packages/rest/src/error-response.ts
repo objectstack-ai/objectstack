@@ -1762,11 +1762,44 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
         // means moving the STATUS this arm decided, which is the contract
         // question this card was fenced away from — filed separately.
         const businessMessage = sandboxBusinessMessage(error);
-        const safeMsg = businessMessage !== undefined
-            ? truncateClientMessage(businessMessage)
-            : typeof error.message !== 'string'
+        // [#13095] The sentence this arm hands the caller is the HUMAN half
+        // only — the same #12975 rule `classifyDataError`'s declared-4xx arm
+        // applies, spread here by the 2026-08-31 maintainer ruling (option 1:
+        // one envelope semantics on every `/data` exit). This arm is checked
+        // BEFORE it delegates to `mapDataError`, so every route that reports
+        // through `handleRouteError` / `sendThrownError` (batch, createMany,
+        // updateMany, deleteMany, clone, and the record-share classified arm,
+        // which re-dresses this very answer through `classifiedRefusalAnswer`)
+        // was still shipping the ADR-0111 `CODE:` prefix the by-id door had
+        // stopped shipping — one refusal, two readings, decided by which
+        // route caught it.
+        //
+        // Anchored to the DECLARED code ({@link withoutDeclaredCodePrefix} —
+        // ⛔ never a SCREAMING_SNAKE pattern; that function's docblock carries
+        // the safety argument), and run BEFORE the bound for #12975's reason:
+        // the prefix is not text addressed to the caller, so it must not
+        // spend the caller's #5423 budget. A message that is nothing but the
+        // prefix has no human half to ship and degrades to 'Request failed',
+        // the sibling arm's rule travelling WITH the strip.
+        //
+        // ⛔ What deliberately does NOT converge here: a genuinely EMPTY
+        // string message still ships as itself. This arm's degrade is keyed
+        // on the TYPE, unlike `classifyDataError`'s sibling which also checks
+        // length — a standing pin (`rest-hook-refusal-message-parity.test.ts`)
+        // this card's ruling did not authorise moving. The 'Request failed'
+        // limb below therefore fires only when the STRIP emptied a non-empty
+        // message, never for a message that arrived empty.
+        const addressed = businessMessage !== undefined
+            ? businessMessage
+            : typeof error.message === 'string' ? error.message : undefined;
+        const authored = addressed === undefined
+            ? undefined
+            : withoutDeclaredCodePrefix(addressed, error);
+        const safeMsg = authored === undefined
+            ? 'Request failed'
+            : authored.length === 0 && addressed !== undefined && addressed.length > 0
                 ? 'Request failed'
-                : truncateClientMessage(error.message);
+                : truncateClientMessage(authored);
         // [#9232] Narrowed, same as the three arms above.
         return withDeclaredUserMessage(error, {
             status: error.status,
