@@ -50,12 +50,16 @@
  * of which are `@objectstack/dogfood` devDependencies for exactly this reason.
  * TursoDriver was the outlier, and it is the outlier that closed the loop.
  *
- * ⚠️ One thing DID change with the move: `TursoDriver` now resolves through the
- * package's `exports` (its BUILT `dist`), not through a relative source import.
- * That matches how `driver-sqlite-wasm` is exercised next door — and the
- * comment there names the same property — but it means this suite needs
- * `@objectstack/driver-turso` built, which the dogfood gate already requires of
- * every package it imports.
+ * ⭐ The move is semantics-preserving on the one axis that could have changed
+ * silently. In its old home this suite imported `./turso-driver.js` — the
+ * driver's SOURCE — so its verdict was about the checkout. A bare
+ * `@objectstack/driver-turso` specifier would instead resolve through the
+ * package's `exports` map to the BUILT `dist`, turning a source pin into a
+ * verdict about the last `pnpm build`. Two declarations keep it a source pin,
+ * and each is enforced by its own gate: an anchored `resolve.alias` entry in
+ * this package's `vitest.config.ts` (`check:test-source-alias`) and a `paths`
+ * rule in its `tsconfig.json` (`check:type-source-resolution`). Both carry the
+ * reasoning at the site.
  */
 
 import { describe, it, expect } from 'vitest';
