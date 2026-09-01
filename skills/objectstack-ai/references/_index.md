@@ -9,7 +9,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 ## Core schemas
 
-- `node_modules/@objectstack/spec/src/ai/agent.zod.ts` — AI Model Configuration
+- `node_modules/@objectstack/spec/src/ai/agent.zod.ts` — Exports: AIModelConfigSchema, StructuredOutputFormatSchema, TransformPipelineStepSchema, StructuredOutputConfigSchema, AgentSchema
 - `node_modules/@objectstack/spec/src/ai/conversation.zod.ts` — AI Conversation Memory Protocol
 - `node_modules/@objectstack/spec/src/ai/embedding.zod.ts` — Embedding & Vector Store Primitives
 - `node_modules/@objectstack/spec/src/ai/knowledge-document.zod.ts` — Knowledge Document / Chunk / Hit — canonical shapes shared by every

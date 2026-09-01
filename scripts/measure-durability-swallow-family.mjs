@@ -104,14 +104,41 @@
 //     (its first parameter is `deps`; the call site passes `'get'`). The census
 //     reported a record READ as `write=insert@170`, in the exact class the
 //     header above forbids: a write that is not in the guarded block.
+//   - `engine.ts :: this.update(...)` PASSES BOTH of those -- a `this.foo` path
+//     is exactly what `sameFileCallee` admits, and no local binding shadows it
+//     -- and STILL reached the wrong body, because the third and last step was
+//     a lookup in a flat file-wide index keyed by BARE NAME and filled
+//     LAST-WINS. `engine.ts` declares `update`, `delete`, `find`, `findOne` on
+//     `class ObjectQL` and again on `class ObjectRepository` thousands of lines
+//     later, plus `transaction` on `ScopedContext`; every one of those calls
+//     written inside `ObjectQL` was answered with the OTHER class's method. 26
+//     reached call sites, on names that are in `WRITE_SHAPED_CALLEES`.
 //
-// So a bare identifier is resolved against the LEXICAL SCOPE CHAIN at the call
-// site (`resolveSameFileBody`), not against the file-wide body index: the
-// innermost binding of the name wins, and a binding that holds no function -- a
-// parameter, a destructured member, a plain `const`/`let`, a catch variable, an
-// import -- REFUSES the call rather than falling through to a same-named body
-// elsewhere in the file. The refusal count is printed on every run, for the same
-// reason the AWAITED drop count is.
+// So resolution is decided by SCOPE at both steps, and neither one is optional.
+//
+// A bare identifier is first resolved against the LEXICAL SCOPE CHAIN at the
+// call site (`resolveSameFileBody`): the innermost binding of the name wins, and
+// a binding that holds no function -- a parameter, a destructured member, a
+// plain `const`/`let`, a catch variable, an import -- REFUSES the call rather
+// than falling through to a same-named body elsewhere in the file. The refusal
+// count is printed on every run, for the same reason the AWAITED drop count is.
+//
+// Whatever reaches the body index -- a `this.foo` path, or a bare name the chain
+// did not bind -- is then resolved BY THE SCOPE THE BODY IS VISIBLE FROM
+// (`indexFunctionBodies`), never by file order: a method is keyed by the class
+// or object literal that owns it, a lexical form by its enclosing block. A name
+// declared exactly ONCE still resolves from anywhere, so this narrowing touches
+// only collisions; a name declared several times with none of them enclosing the
+// call site is REFUSED, because file order is not evidence. Both departures are
+// transferred from the sibling gate with their reasons -- see
+// `indexFunctionBodies`.
+//
+// ⚠️ MEMBERSHIP CANNOT SEE ANY OF THIS. When the repair above landed, the census
+// printed byte-identical output on both sides of it -- 56 members, 98 quiet, the
+// same stats -- while 27 reached call sites changed which body they resolved to.
+// A control that reads the output is green against the bug, which is what
+// `RESOLUTION_CONTROLS` exists for: it reads the resolver and pins what resolved
+// to what.
 //
 // This keys on SCOPE, which is what decides a bare identifier in JavaScript, and
 // it deliberately does not compare signatures. Once the innermost binding IS the
@@ -396,6 +423,119 @@ const REGRESSION_CONTROLS = [
   },
 ];
 
+/**
+ * RESOLUTION controls: a (call site -> body) pair that must not move.
+ *
+ * The other three families all read MEMBERSHIP, and membership cannot see this
+ * defect. Measured, on the tree the scope-aware index landed against: the flat
+ * last-wins index misresolved 27 reached call sites, and the census printed
+ * byte-identical output before and after the repair — 56 members, 98 quiet, the
+ * same stats. A control that reads the census output is therefore GREEN against
+ * the exact bug it would exist to catch, which is why these read the resolver
+ * directly and pin WHAT RESOLVED TO WHAT.
+ *
+ * Each control names a call site by `(file, callee)` plus `fromClass` and/or
+ * `enclosing`, and declares `resolvesIn`: the class that owns the body the call
+ * must reach, the named function the body must be declared inside, or `null`
+ * for "must refuse". Two properties are asserted, and the second is the one
+ * that keeps this family honest:
+ *
+ *   1. every matching call site resolves as declared;
+ *   2. at least ONE call site matches. A control whose site has been renamed
+ *      away stops matching, and a control that matches nothing would otherwise
+ *      pass VACUOUSLY — green because it asked nothing.
+ *
+ * Both directions are represented on purpose, because the mechanism has no safe
+ * direction: a control set that only pinned refusals would be satisfied by a
+ * resolver that refuses everything.
+ */
+const RESOLUTION_CONTROLS = [
+  {
+    file: 'packages/objectql/src/engine.ts',
+    callee: 'update',
+    fromClass: 'ObjectQL',
+    resolvesIn: 'ObjectQL',
+    why:
+      'INVENTED direction, and the live instance this repair was measured on. `engine.ts` declares '
+      + '`update()` on `class ObjectQL` (line ~9913) and again on `class ObjectRepository` (~13397), '
+      + 'some 3,500 lines later. The flat last-wins index answered EVERY `this.update(...)` written '
+      + 'inside `ObjectQL` with `ObjectRepository`\'s method — chosen for no reason but being last in '
+      + 'the file — and `update` is in `WRITE_SHAPED_CALLEES`, so the hop feeds conjunct 3 directly. '
+      + 'It cost nothing on that tree: both bodies bottom out in driver writes, so the census was '
+      + 'accidentally right. Accidentally right is not an invariant, and membership cannot tell the '
+      + 'two apart — which is the whole reason this family reads the resolver instead of the output.',
+  },
+  {
+    file: 'packages/objectql/src/engine.ts',
+    callee: 'delete',
+    fromClass: 'ObjectQL',
+    resolvesIn: 'ObjectQL',
+    why:
+      'The same collision on the sharpest name in the vocabulary. `delete` is the callee the AWAITED '
+      + 'discriminator exists to police, and `ObjectRepository.delete` is a different method from '
+      + '`ObjectQL.delete`; resolving one into the other is exactly the "invents a write" failure the '
+      + '`sameFileCallee` rule was written for, arriving one layer further in.',
+  },
+  {
+    file: 'packages/objectql/src/engine.ts',
+    callee: 'transaction',
+    fromClass: 'ObjectQL',
+    resolvesIn: 'ObjectQL',
+    why:
+      'Third class in the same file: `ScopedContext` (line ~13469) also declares `transaction()`, and '
+      + 'it is the LAST one, so the flat index handed `ObjectQL`\'s own `this.transaction(...)` to a '
+      + 'class it has no relationship with. Pinned separately from `update`/`delete` because it proves '
+      + 'the key is the OWNING CLASS and not "the second declaration".',
+  },
+  {
+    file: 'packages/runtime/src/app-plugin.ts',
+    callee: 'push',
+    enclosing: 'resolveMappedObjects',
+    resolvesIn: null,
+    why:
+      'REFUSAL direction — departure TWO, ambiguous and out of scope. The call is '
+      + '`(out[mapped] ??= []).push(name)`: an Array method, which `calleePath` reduces to the bare '
+      + 'name `push`. The file also declares two unrelated `const push = (arr) => {…}` helpers, local '
+      + 'to `collectBundleHooks` and `collectBundleActions`, and neither encloses this call. The flat '
+      + 'index answered with the later of the two and the census walked into a bundle-collection '
+      + 'helper from an array append. File order is not evidence: with several bodies and none in '
+      + 'scope, the hop is declined.',
+  },
+  {
+    file: 'packages/runtime/src/app-plugin.ts',
+    callee: 'push',
+    enclosing: 'collectBundleActions',
+    resolvesIn: 'collectBundleActions',
+    why:
+      'DROPPED direction, on the SAME collision as the control above — which is why the pair is worth '
+      + 'more than either half: one name, one file, one collision, REFUSED from outside and RESOLVED '
+      + 'from inside. `collectBundleActions` calls its OWN `const push`, and that hop must survive a '
+      + 'repair aimed at the refusal case.\n\n'
+      + '⚠️ Its sensitivity is MEASURED, not assumed, and it is narrower than it looks. This site is '
+      + 'answered by `resolveSameFileBody`\'s LEXICAL WALK, which binds the local `push` before the '
+      + 'body index is ever consulted — so ablating the index (last-wins, or refusing every ambiguous '
+      + 'name) leaves this control GREEN, and ablating the lexical walk turns it RED. What it pins is '
+      + 'that the #13459 bare-identifier rule still answers an in-scope binding, which is exactly the '
+      + 'half this change reaches past when it replaces what that walk falls back TO.',
+  },
+  {
+    file: 'packages/plugins/plugin-email/src/email-plugin.ts',
+    callee: 'update',
+    enclosing: 'upsertTemplate',
+    resolvesIn: 'EmailServicePlugin',
+    why:
+      'Departure ONE — one declaration, unchanged — and this site was CHOSEN BY MEASUREMENT, after an '
+      + 'ablation showed the two controls above stay green when that departure is removed. Exactly 7 '
+      + 'call sites in the scan root depend on it; this is one of the four whose callee is in '
+      + '`WRITE_SHAPED_CALLEES`. `update` has a single body in this file, declared as a method of an '
+      + 'object literal, so the object literal is its scope and is NOT on this call site\'s ancestor '
+      + 'chain — a strict lexical resolver DECLINES the hop. This control does not claim the hop is '
+      + 'semantically right (the call is `(engine as any).update(...)`, whose receiver `calleePath` '
+      + 'erases). It pins the INVARIANT that this repair touches only COLLISIONS: tighten past that '
+      + 'and this goes red, forcing the census delta to be re-measured instead of narrowed in silence.',
+  },
+];
+
 /* ------------------------------------------------------------------------- *
  *  AST helpers
  * ------------------------------------------------------------------------- */
@@ -475,26 +615,143 @@ function isLogCall(node) {
   return level;
 }
 
-/** Every function body in a file, keyed by the name a call can reach it through. */
+/**
+ * The scope a declaration is visible FROM — the key the body index resolves by.
+ *
+ * Transferred from `check-durability-degradation-log-level.mjs` (#13474), whose
+ * header carries the full argument. Two forms, because JavaScript has two:
+ *
+ *   LEXICAL (`function foo`, `const foo = () => {}`) — the enclosing block,
+ *   module block, `case` block, `for` head, or the `SourceFile`. Hoisting means
+ *   a `function` declaration is visible from the whole block, which is what this
+ *   returns; a `var` function binding is treated as block-scoped, which can only
+ *   make the resolver DECLINE a hop, never follow a wrong one — the direction of
+ *   error this census declares.
+ *
+ *   MEMBER (`foo() {}` in a class or object literal) — not a lexical binding at
+ *   all; it is reached through a receiver. Its key is the class or object
+ *   literal that OWNS it, so `this.foo(...)` written in a sibling member of the
+ *   same class resolves, and the same call in an unrelated class in the same
+ *   file does not.
+ *
+ * @param node The declaration node.
+ * @param member `true` for a method declaration, `false` for the lexical forms.
+ * @returns The scope node, or `undefined` when there is none (cannot happen for
+ *          a parsed file — `SourceFile` terminates every chain).
+ */
+function declarationScopeOf(node, member) {
+  for (let n = node.parent; n; n = n.parent) {
+    if (member) {
+      if (ts.isClassDeclaration(n) || ts.isClassExpression(n) || ts.isObjectLiteralExpression(n)) return n;
+      continue;
+    }
+    if (ts.isBlock(n) || ts.isSourceFile(n) || ts.isModuleBlock(n) || ts.isCaseBlock(n)
+      || ts.isForStatement(n) || ts.isForInStatement(n) || ts.isForOfStatement(n)) {
+      return n;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Every function body in a file, resolvable BY THE SCOPE IT IS VISIBLE FROM.
+ *
+ * Covers `function foo() {}`, `const foo = () => {}` / `= function () {}`, and
+ * class methods `foo() {}` — the three shapes the scan root uses.
+ *
+ * ## Why this is not keyed by bare name alone (#13785)
+ *
+ * It was, and it was LAST-WINS: one `Map<name, body>` filled in source order, so
+ * a file that declared the same name more than once resolved EVERY call to it
+ * to the LAST declaration, wherever the call was written. That is not an
+ * approximation with a direction — a collision where only SOME of the same-named
+ * bodies reach a write either INVENTS a member or DROPS a real one, and nothing
+ * in the output distinguishes either case from a correct resolution. It is the
+ * same defect #13474 recorded in the gate next door, and it was measured here
+ * over a wider corpus: 209 collision inserts across 73 names in 44 files.
+ *
+ * The live instance, measured on the tree this landed against:
+ * `packages/objectql/src/engine.ts` declares `find`, `findOne`, `update`,
+ * `delete` on BOTH `class ObjectQL` and — a few thousand lines later — `class
+ * ObjectRepository`, and `transaction` on both `ObjectQL` and `ScopedContext`.
+ * The flat index answered every `this.update(...)` written INSIDE `ObjectQL`
+ * with `ObjectRepository`'s method, chosen only because it is last in the file:
+ * 26 call sites, on four names that are in `WRITE_SHAPED_CALLEES` above. The
+ * census happened not to move — both bodies bottom out in driver writes, so
+ * conjunct 3 was satisfied either way — but "accidentally right" is not an
+ * invariant, and it is the property `RESOLUTION_CONTROLS` now pins directly,
+ * because membership cannot see it.
+ *
+ * ## What the resolver does, and what it deliberately leaves alone
+ *
+ * `get(name, from)` walks OUTWARD from the call site and returns the first
+ * declaration of `name` whose scope is one of the call site's ancestors —
+ * innermost wins, which is what the language does. Two deliberate departures
+ * from a strict lexical resolver, transferred from #13474 with its reasons:
+ *
+ *   ONE DECLARATION ⇒ UNCHANGED. When a name has exactly one body in the file
+ *   there is nothing to choose and no lexical information can improve on the
+ *   answer, so it is returned whatever the call site is. This confines the
+ *   change to exactly the collisions and keeps every hop the census already
+ *   depends on. Over-fixing here is as dangerous as under-fixing, for the same
+ *   reason: the mechanism has no safe direction.
+ *
+ *   AMBIGUOUS AND OUT OF SCOPE ⇒ REFUSE. When a name has several bodies and none
+ *   of them encloses the call site, the hop is NOT followed. File order is not
+ *   evidence, and declining is this census's declared direction of error.
+ *
+ * ⛔ This does NOT subsume `resolveSameFileBody`'s lexical walk, and must not be
+ * read as replacing it: this index knows only where a body is DECLARED, so it
+ * cannot see a call site where the name is bound to something that holds no
+ * function (`const { callData } = wiring;`). That refusal is the other half of
+ * the rule and is still decided there, before this index is consulted.
+ *
+ * @returns `{ has(name), get(name, from) }` — `has` is membership only (no call
+ *          site needed, and it is what the shadow-refusal counter keys on);
+ *          `get` needs the call site and returns `undefined` when it cannot
+ *          settle the name.
+ */
 function indexFunctionBodies(sf) {
-  const bodies = new Map();
+  const byName = new Map();
+  const record = (name, body, scope) => {
+    const declared = byName.get(name);
+    if (declared) declared.push({ body, scope });
+    else byName.set(name, [{ body, scope }]);
+  };
   walkAll(sf, (node) => {
     if (ts.isFunctionDeclaration(node) && node.name && node.body) {
-      bodies.set(node.name.text, node.body);
+      record(node.name.text, node.body, declarationScopeOf(node, false));
       return;
     }
-    if (ts.isMethodDeclaration(node) && node.name && ts.isIdentifier(node.name) && node.body) {
-      bodies.set(node.name.text, node.body);
+    if (ts.isMethodDeclaration(node) && ts.isIdentifier(node.name) && node.body) {
+      record(node.name.text, node.body, declarationScopeOf(node, true));
       return;
     }
     if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
       const init = node.initializer;
       if ((ts.isArrowFunction(init) || ts.isFunctionExpression(init)) && init.body) {
-        bodies.set(node.name.text, init.body);
+        record(node.name.text, init.body, declarationScopeOf(node, false));
       }
     }
   });
-  return bodies;
+  return {
+    has: (name) => byName.has(name),
+    get: (name, from) => {
+      const declared = byName.get(name);
+      if (!declared) return undefined;
+      if (declared.length === 1) return declared[0].body;
+      if (!from) return undefined;
+      for (let n = from; n; n = n.parent) {
+        // Last within ONE scope: two declarations sharing a scope are the only
+        // case file order was ever evidence for, and it is the tie-break the
+        // flat index already made.
+        let hit;
+        for (const d of declared) if (d.scope === n) hit = d;
+        if (hit) return hit.body;
+      }
+      return undefined;
+    },
+  };
 }
 
 /** Names in this file that hold a #12923 refusal accumulator. */
@@ -550,10 +807,14 @@ function isAwaited(node) {
  * inventing a write that is not in the guarded block, because that is a member
  * nobody can act on and it discredits the list it sits in.
  *
- * Passing this test is NECESSARY and not sufficient for a BARE identifier:
- * `foo(...)` reaches the file-scope `foo` only while no LOCAL binding shadows
- * the name at the call site. `resolveSameFileBody` decides that, and it is the
- * other half of this rule -- see "Same-file resolution is by SCOPE" above.
+ * Passing this test is NECESSARY and NOT SUFFICIENT, for either shape. A bare
+ * `foo(...)` reaches the file-scope `foo` only while no LOCAL binding shadows the
+ * name at the call site (`resolveSameFileBody`), and a `this.foo(...)` reaches a
+ * method only of the class that ENCLOSES the call -- `engine.ts` declares
+ * `update()` on two classes, and answering by name alone handed one class's call
+ * to the other's method. `indexFunctionBodies` decides that half. Together they
+ * are the other half of this rule -- see "Same-file resolution is by SCOPE"
+ * above.
  */
 function sameFileCallee(path) {
   if (path.length === 1) return path[0];
@@ -656,14 +917,18 @@ function bindingIntroducedBy(node, name) {
  *     } = wiring;` shadows the module-level `callData`, and following it turned a
  *     record READ into `write=insert@170`.
  *
- * Falling back to the file-wide index when NO binding is found keeps the census
- * collecting exactly what it collected before: the narrowing only ever removes a
- * resolution that JavaScript itself would not make.
+ * When NO binding is found the name is handed to the body index, which resolves
+ * it by the scope the body is VISIBLE FROM rather than by file order -- as is
+ * the `this.foo` path above, which this lexical walk never sees. Neither step
+ * can invent a body the language would not reach; both only ever REMOVE a
+ * resolution, which is this census's declared direction of error. See
+ * `indexFunctionBodies` for the two deliberate departures and their measured
+ * reasons.
  */
 function resolveSameFileBody(callNode, path, bodies, stats) {
   const name = sameFileCallee(path);
   if (!name) return null;
-  if (path.length > 1) return bodies.get(name) ?? null;
+  if (path.length > 1) return bodies.get(name, callNode) ?? null;
   for (let cursor = callNode.parent; cursor; cursor = cursor.parent) {
     const decl = bindingIntroducedBy(cursor, name);
     if (!decl) continue;
@@ -678,7 +943,7 @@ function resolveSameFileBody(callNode, path, bodies, stats) {
     }
     return null;
   }
-  return bodies.get(name) ?? null;
+  return bodies.get(name, callNode) ?? null;
 }
 
 /** Walk a block plus, transitively, the same-file helpers it calls. */
@@ -979,6 +1244,58 @@ function report({ sites = false } = {}) {
   return 0;
 }
 
+/**
+ * The class a call site is written inside, or null at module scope.
+ *
+ * Keyed on for `RESOLUTION_CONTROLS` because a class name outlives the method
+ * names around it, and because the defect these controls pin is precisely a
+ * resolution that CROSSES a class boundary.
+ */
+function enclosingClassName(node) {
+  for (let c = node.parent; c; c = c.parent) {
+    if (ts.isClassDeclaration(c) || ts.isClassExpression(c)) return c.name?.text ?? '(anonymous class)';
+  }
+  return null;
+}
+
+/** Where a resolved body was DECLARED: its owning class, else the function containing it. */
+function resolvedBodyLabel(body, sf) {
+  const decl = body.parent;
+  for (let c = decl.parent; c; c = c.parent) {
+    if (ts.isClassDeclaration(c) || ts.isClassExpression(c)) return c.name?.text ?? '(anonymous class)';
+  }
+  return enclosingFunctionName(decl, sf);
+}
+
+/**
+ * Run one `RESOLUTION_CONTROLS` entry against the real resolver.
+ *
+ * @returns `{ matched, wrong[] }` — `matched` is the non-vacuity count, `wrong`
+ *          the sites whose resolution disagrees with the declaration.
+ */
+function checkResolutionControl(control) {
+  const file = join(ROOT, control.file);
+  const sf = parseSourceFile(file, readFileSync(file, 'utf8'), scriptKindFor(file));
+  const bodies = indexFunctionBodies(sf);
+  let matched = 0;
+  const wrong = [];
+  walkAll(sf, (node) => {
+    if (!ts.isCallExpression(node)) return;
+    const path = calleePath(node.expression);
+    if (!path) return;
+    if (sameFileCallee(path) !== control.callee) return;
+    if (control.fromClass !== undefined && enclosingClassName(node) !== control.fromClass) return;
+    if (control.enclosing !== undefined && enclosingFunctionName(node, sf) !== control.enclosing) return;
+    matched += 1;
+    const body = resolveSameFileBody(node, path, bodies, null);
+    const actual = body ? resolvedBodyLabel(body, sf) : null;
+    if (actual !== control.resolvesIn) {
+      wrong.push({ line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1, actual });
+    }
+  });
+  return { matched, wrong };
+}
+
 function selfTest() {
   const problems = [];
   const { members } = census();
@@ -1015,6 +1332,20 @@ function selfTest() {
       problems.push(`negative control yielded ${hits.length} member(s): ${control.file}\n    ${control.why}`);
     }
   }
+  for (const control of RESOLUTION_CONTROLS) {
+    const { matched, wrong } = checkResolutionControl(control);
+    const target = control.resolvesIn === null ? 'REFUSAL' : `\`${control.resolvesIn}\``;
+    const site = `${control.file} :: ${control.fromClass ?? control.enclosing} :: ${control.callee}()`;
+    if (matched === 0) {
+      problems.push(`resolution control matched NO call site: ${site}\n    A control that matches `
+        + `nothing passes VACUOUSLY. Re-point it at a live site or delete it.\n    ${control.why}`);
+      continue;
+    }
+    if (wrong.length > 0) {
+      problems.push(`resolution control moved: ${site} -> expected ${target}, got `
+        + `${wrong.map((w) => `${w.actual ?? 'REFUSAL'}@${w.line}`).join(', ')}\n    ${control.why}`);
+    }
+  }
   // The durability filter must actually filter: the raw shape is ~3.5x this.
   if (members.length === 0) {
     problems.push('census found ZERO members — on this tree that is a broken matcher, not a clean repo.');
@@ -1028,6 +1359,7 @@ function selfTest() {
     `✓ measure-durability-swallow-family self-test: ${POSITIVE_CONTROLS.length} positive control(s) `
     + `yield members at their declared tier, ${NEGATIVE_CONTROLS.length} negative control(s) yield none, `
     + `${REGRESSION_CONTROLS.length} regression control(s) stay clear, `
+    + `${RESOLUTION_CONTROLS.length} resolution control(s) resolve as declared, `
     + `${members.length} member site(s) total\n`,
   );
   return 0;

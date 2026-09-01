@@ -18,7 +18,18 @@ import { SchemaRegistry, REGISTRY_LOG_LEVELS } from './registry';
 describe('SchemaRegistry log-level gating (#3420)', () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
-  beforeEach(() => { warn.mockClear(); debug.mockClear(); });
+  // This file's SUBJECT is `OS_REGISTRY_LOG`, so it owns that variable rather
+  // than inheriting it. The package's vitest harness declares
+  // `OS_REGISTRY_LOG=warn` for every worker (#13517), and without this
+  // `beforeEach` the FIRST case below ran at `'warn'` under a name that says
+  // `info` — green, because both of its expectations are negative. Measured,
+  // not reasoned: the premise assertion in that case fails with
+  // `expected 'warn' to be 'info'` when this line is removed.
+  beforeEach(() => {
+    delete process.env.OS_REGISTRY_LOG;
+    warn.mockClear();
+    debug.mockClear();
+  });
   afterEach(() => { delete process.env.OS_REGISTRY_LOG; });
 
   const reRegisterSameOwner = (r: SchemaRegistry) => {
@@ -28,6 +39,10 @@ describe('SchemaRegistry log-level gating (#3420)', () => {
 
   it('at the default (info) level, re-registering an owned object is silent — no warn, no debug', () => {
     const r = new SchemaRegistry({ multiTenant: false });
+    // The case's NAME is a premise about the level, so assert it rather than
+    // assume it: both expectations below are negative, so a quieter level
+    // satisfies them while measuring something this file never claimed.
+    expect(r.logLevel).toBe('info');
     reRegisterSameOwner(r);
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Re-registering owned object'));
     expect(debug).not.toHaveBeenCalledWith(expect.stringContaining('Re-registering owned object'));
@@ -44,6 +59,7 @@ describe('SchemaRegistry log-level gating (#3420)', () => {
     const manifest = { id: 'com.test', name: 'Test', namespace: 'test', version: '1.0.0' } as any;
 
     const info = new SchemaRegistry({ multiTenant: false });
+    expect(info.logLevel).toBe('info');
     info.installPackage(manifest);
     info.installPackage(manifest); // same-package reload → "Overwriting package"
     expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('Overwriting package'));

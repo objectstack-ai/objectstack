@@ -35,7 +35,7 @@
  * ## The measurement this shape rests on
  *
  * Whether better-auth 1.7.1 permits overriding a path another plugin registers
- * was explicitly UNMEASURED when this was ruled. Measured now, on the installed
+ * was explicitly UNMEASURED when this was ruled. Measured on the then-installed
  * `better-auth@1.7.1`:
  *
  *  - `checkEndpointConflicts` (`dist/api/index.mjs`) builds its registry by

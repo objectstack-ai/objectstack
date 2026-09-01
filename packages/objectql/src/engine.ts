@@ -5213,6 +5213,72 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * Evict a driver from the registry — the removal counterpart of
+   * {@link registerDriver} (#13578).
+   *
+   * ## Why the registry owns this rather than each lifecycle path
+   *
+   * #13578 named the fork explicitly: the delete path calling the registry, or
+   * the registry owning its own liveness. This is the second, and the reason is
+   * structural rather than stylistic — removing a driver is not one deletion
+   * but THREE pieces of private engine state that must move together, and a
+   * caller can reach none of them:
+   *
+   *  1. `drivers` — the Map {@link checkDriversHealth} iterates, and therefore
+   *     the one a readiness probe reports. This is the entry #13578 watched
+   *     survive a `DELETE /api/v1/datasources/:name` on every replica.
+   *  2. `defaultDriver` — a NAME, not a reference. Dropping the entry without
+   *     clearing it leaves the default pointing at a driver that is gone, and
+   *     {@link getDefaultDriverName} would answer with a name nothing backs.
+   *     `engine-primary-datasource.test.ts` wrote the required reading down
+   *     before this method existed: after an eviction that removes the default,
+   *     the primary verdict must read "cannot tell", never a name.
+   *  3. `datasourceDefs` — the declarative `schemaMode` / `external` record
+   *     {@link assertWriteAllowed} consults. It has a `registerDatasourceDef`
+   *     door and no removal door at all, so a def outliving its driver keeps
+   *     judging writes for a datasource that no longer exists.
+   *
+   * Only (1) is even visible from outside, and no public door removed it. So
+   * "every future lifecycle path remembers to clear three maps in the right
+   * order" is a rule with nowhere to live where it would be read — the shape
+   * this repo has already paid for. One primitive owns the invariant instead,
+   * and every path calls it exactly once.
+   *
+   * ⛔ Deliberately does NOT clear `unavailableDatasources`. That map already
+   * has its own door ({@link clearDatasourceUnavailable}) and its own caller,
+   * and the two acts are ordered OPPOSITELY on the failed-start path: a connect
+   * that fails after registering evicts the driver and then MARKS the
+   * datasource unavailable. Folding the clear in here would have eviction wipe
+   * the explanation the very next step writes.
+   *
+   * ⛔ Deliberately does NOT disconnect the driver. Eviction and teardown are
+   * separate acts: the pool's owner decides whether to close it — an ADOPTED
+   * host-owned instance outlives this kernel by design (ADR-0062 D5) — while
+   * the registry decides only whether this engine still routes to it. Folding
+   * them would make eviction close a pool the host still holds.
+   *
+   * @returns `true` when a driver entry was removed, `false` when the name held
+   *          none — so an idempotent caller (a retried delete, a teardown sweep
+   *          following a partial one) can tell a removal from a no-op.
+   */
+  unregisterDriver(name: string): boolean {
+    const removed = this.drivers.delete(name);
+    // Cleared regardless of `removed`: a datasource that never connected has a
+    // def and no driver, so keying this off the driver entry would strand
+    // exactly the rows a failed datasource leaves behind.
+    this.datasourceDefs.delete(name);
+    if (this.defaultDriver === name) {
+      this.defaultDriver = null;
+      this.logger.info(
+        'Evicted the DEFAULT driver — this engine has no default until one is registered',
+        { driverName: name },
+      );
+    }
+    if (removed) this.logger.info('Unregistered driver', { driverName: name });
+    return removed;
+  }
+
+  /**
    * Register a Datasource *definition* (ADR-0015).
    *
    * Distinct from {@link registerDriver}, which registers a live connection.
@@ -7783,6 +7849,15 @@ export class ObjectQL implements IObjectQLEngine {
         this.logger.error('Error disconnecting driver', e as Error, { driverName: name });
       }
     }
+
+    // #13578 — teardown is an eviction path too, and it used to disconnect
+    // every driver while leaving all of them REGISTERED. A destroyed engine
+    // therefore still answered `checkDriversHealth()` by pinging pools it had
+    // just closed, so a readiness probe racing shutdown read a list of drivers
+    // that were deliberately dead. Disconnect-then-evict, through the one
+    // primitive, so `defaultDriver` and the datasource defs go with them.
+    // Names are snapshotted first: `unregisterDriver` mutates the Map.
+    for (const name of [...this.drivers.keys()]) this.unregisterDriver(name);
     
     this.logger.info('ObjectQL engine destroyed');
   }
@@ -8644,7 +8719,7 @@ export class ObjectQL implements IObjectQLEngine {
 
   /**
    * ADR-0061: expand `search` into a server-resolved cross-field `$or` of
-   * `$contains`, AND it with any caller `where`, then strip the search keys off
+   * `$icontains`, AND it with any caller `where`, then strip the search keys off
    * the AST.
    *
    * Shared by `find` and `findOne` (#4419). It lived inline in `find` and
@@ -8661,7 +8736,7 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * Field resolution is server-side (declared `searchableFields` →
    * auto-default); the optional `searchFields` override is intersected with the
-   * allowed set, never widened. All drivers already execute `$or`/`$contains`,
+   * allowed set, never widened. All drivers already execute `$or`/`$icontains`,
    * so this needs no driver changes.
    *
    * The keys are deleted whether or not anything expanded — leaving them on

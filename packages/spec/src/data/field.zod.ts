@@ -1063,7 +1063,9 @@ export const FieldSchema = lazySchema(() => {
    * 
    * Used by `lookup` and `master_detail` field types to define cross-object references.
    * The `reference` property is **required** for these types — it identifies the target
-   * object whose records this field links to. The engine uses `reference` during $expand
+   * object whose records this field links to, and the superRefine below enforces it:
+   * a `lookup` / `master_detail` whose `reference` is missing or empty is refused at
+   * parse time. The engine uses `reference` during $expand
    * post-processing to resolve foreign key IDs into full related objects via batch queries.
    * 
    * For `master_detail` fields, the parent record controls the lifecycle of child records
@@ -1686,6 +1688,36 @@ export const FieldSchema = lazySchema(() => {
         'sibling column, the other a single static target object — both cannot be honest about where ' +
         'this field points. Keep `referenceVia` for a polymorphic pointer, or `reference` (on a ' +
         'lookup/master_detail field) for a fixed relationship.',
+    });
+  }
+
+  // [#13632] (ADR-0049 declared = enforced): the `reference` TSDoc above has
+  // always called the key REQUIRED on the relationship types, but the schema
+  // accepted a `lookup` / `master_detail` with the key missing or `''` — a
+  // relationship that points nowhere. Downstream nothing can act on it (the
+  // record picker has no object to query, `$expand` nothing to resolve, and
+  // since #13222 driver-mongodb silently skips the lookup index), and lint's
+  // `relationship/missing-reference` already calls the same hole an error —
+  // the publish seam was the one door left open, exactly where AI-authored
+  // metadata that omits the key would otherwise parse cleanly and fail far
+  // from the cause. `reference` has no schema default, so `undefined` here
+  // always means "not authored"; `''` is the same hole spelled out (both
+  // measured as accepted before this check). `Field.lookup()` /
+  // `Field.masterDetail()` take the target as their first positional
+  // argument, so helper-authored fields cannot miss it.
+  if (
+    (field.type === 'lookup' || field.type === 'master_detail') &&
+    (field.reference === undefined || field.reference === '')
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['reference'],
+      message:
+        `A \`${field.type}\` field requires a non-empty \`reference\` naming the target object its ` +
+        "records link to (snake_case, e.g. `reference: 'account'`). Without a target the relationship " +
+        'is not actionable: the record picker has no object to query, `$expand` has nothing to ' +
+        'resolve, and no relationship index can be built. Declare `reference`, or use a ' +
+        'non-relationship type if this field does not link records.',
     });
   }
 

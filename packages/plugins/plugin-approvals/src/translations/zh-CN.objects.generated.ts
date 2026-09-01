@@ -51,7 +51,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           approved: "已批准",
           rejected: "已拒绝",
           recalled: "已撤回",
-          returned: "已退回修改"
+          returned: "已退回修改",
+          cancelled: "已作废"
+        }
+      },
+      cancel_reason: {
+        label: "作废原因",
+        help: "平台作废该审批单的原因(仅在状态为「已作废」时写入)",
+        options: {
+          record_deleted: "关联记录已删除"
         }
       },
       current_step: {
@@ -232,7 +240,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           comment: "评论",
           revise: "退回修改",
           resubmit: "重新提交",
-          ooo_substitute: "不在岗改派"
+          ooo_substitute: "不在岗改派",
+          cancel: "作废"
         }
       },
       actor_id: {

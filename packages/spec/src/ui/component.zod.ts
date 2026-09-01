@@ -6,6 +6,18 @@ import { ViewFilterRuleSchema, ViewDataSchema } from './view.zod';
 import { InlineActionSchema, ActionLocationSchema } from './action.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
+import { lazySchema } from '../shared/lazy-schema';
+import { ExpressionInputSchema } from '../shared/expression.zod';
+import { retiredKey } from '../shared/retired-key';
+// `element:record_picker`'s flat `sort` shorthand is the SAME contract as
+// `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
+// shared source rather than re-spelled here (#6276).
+import { SortItemSchema } from '../shared/enums.zod';
+import { strictObject } from '../shared/strict-object';
+import type { KeySetGuidance } from '../shared/suggestions.zod';
+// [#13855] The section → field-group reference form, shared with
+// `FormSectionSchema` (view.zod.ts) so one mixing rule serves both escape hatches.
+import { SectionGroupKeySchema, sectionGroupReferenceRefinement } from '../shared/section-group-reference';
 
 // ---------------------------------------------------------------------------
 // CLOSED AGAINST UNKNOWN KEYS as of #4001 batch A -- all 31 object sites.
@@ -211,19 +223,6 @@ import { FeedItemType, FeedFilterMode } from '../data/feed.zod';
 
 
 /**
- * Empty Properties Schema
- */
-import { lazySchema } from '../shared/lazy-schema';
-import { ExpressionInputSchema } from '../shared/expression.zod';
-import { retiredKey } from '../shared/retired-key';
-// `element:record_picker`'s flat `sort` shorthand is the SAME contract as
-// `ElementDataSourceSchema.sort` (page.zod.ts) — one shape, imported from the
-// shared source rather than re-spelled here (#6276).
-import { SortItemSchema } from '../shared/enums.zod';
-import { strictObject } from '../shared/strict-object';
-import type { KeySetGuidance } from '../shared/suggestions.zod';
-
-/**
  * What silently happened to an undeclared prop before these shapes were closed
  * — the one sentence every rejection on this file carries.
  *
@@ -312,6 +311,10 @@ const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
   COMPONENT_NODE_VISIBILITY_GUIDANCE,
   COMPONENT_NODE_KEYS_GUIDANCE,
 ];
+
+/**
+ * Empty Properties Schema
+ */
 
 /**
  * A component that declares no props at all — `app:launcher`, `nav:menu`,
@@ -843,6 +846,13 @@ export const RecordDetailsProps = strictObject({
   sections: z.array(strictObject({
     surface: 'this `record:details` section',
     history: PROPS_HISTORY,
+    // Both are the author reaching for the #13855 reference form with the word
+    // the neighbouring surface uses: the object declares `fieldGroups`, and the
+    // field points back with `group`. Neither is a typo edit distance reaches.
+    aliases: {
+      fieldGroup: 'group',
+      groupKey: 'group',
+    },
   }, {
     /**
      * Stable section identifier, snake_case. This is the i18n anchor: the
@@ -867,8 +877,37 @@ export const RecordDetailsProps = strictObject({
      * #5611 is fixing, so the shape that documents itself truthfully wins.
      */
     columns: z.number().int().min(1).max(4).optional().describe('Field-grid columns for this section (1-4). Omitted → the renderer derives the width.'),
-    /** Field names shown in this section, in order. */
-    fields: z.array(z.string()).describe('Field names rendered in this section, in order'),
+    /**
+     * [#13855] Reference a declared field GROUP instead of enumerating members
+     * — the delta form ruled 2026-08-31 (maintainer: 「直接处理b」).
+     *
+     * `{ group: 'contact_info' }` inherits the object's `fieldGroups` entry with
+     * that key: its members (every visible field whose `Field.group` points at
+     * it, in field-declaration order) and its own presentation (label, icon,
+     * description, `collapse`, `visibleWhen`, and the drop when the group has no
+     * visible members) all come from `deriveFieldGroupLayout` (ADR-0085 §5).
+     * The section restates none of it — see
+     * {@link sectionGroupReferenceRefinement} for the mixing rule and why the
+     * keys the group owns are refused here rather than given a precedence.
+     *
+     * Existence is NOT a parse question: the key names something on a DIFFERENT
+     * schema, so it follows the `UserFilterFieldSchema.field` precedent — parse
+     * takes any well-formed key and `page-section-group-unknown` (`@objectstack/lint`)
+     * reports one that resolves to no declared group.
+     */
+    group: SectionGroupKeySchema.optional().describe(
+      'Field group key (snake_case) whose members and presentation this section inherits, from the object\'s `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `icon`, `description`, `collapsible`, `defaultCollapsed`). Must name a declared group — checked by reference diagnostics.',
+    ),
+    /**
+     * Field names shown in this section, in order.
+     *
+     * Optional since #13855 — and optional ONLY in the sense that `group` is the
+     * other way to declare the same fact. A section carrying neither is refused
+     * (see {@link sectionGroupReferenceRefinement}), so no section reaches a
+     * renderer without a member source, which is what the previously-required
+     * key guaranteed.
+     */
+    fields: z.array(z.string()).optional().describe('Field names rendered in this section, in order. Omit only when `group` supplies the members instead.'),
     /**
      * The three presentation keys the renderer has honoured all along,
      * declared at last (#11289, maintainer ruling 2026-08-23 — direction 1:
@@ -945,7 +984,19 @@ export const RecordDetailsProps = strictObject({
      * renderer's own fallback.
      */
     headerColor: z.enum(['muted', 'muted/50', 'accent', 'primary/10', 'secondary/10', 'destructive/10']).optional().describe('Section-header background tint, from the closed six-token vocabulary rendered by objectui\'s `record:details` header (`muted` | `muted/50` | `accent` | `primary/10` | `secondary/10` | `destructive/10`). A value outside the enum is refused at authoring time rather than silently not painting. Omit for an untinted header.'),
-  })).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder?, defaultCollapsed?, icon?, description?, headerColor? }`.'),
+  }).superRefine(sectionGroupReferenceRefinement({
+    surface: 'this `record:details` section',
+    // Exactly the keys `deriveFieldGroupLayout` fills from the group. `name` is
+    // in the list because the derived section's `key` IS the group key, and the
+    // group key is already this surface's i18n anchor
+    // (`objects.<object>._sections.<key>.label`) — a second name would give the
+    // same section two lookup identities.
+    //
+    // NOT in the list, deliberately: `columns`, `hideEmpty`, `showBorder`,
+    // `headerColor`. Those are how THIS page lays the section out and the group
+    // declares nothing about them, so there is no second source to create.
+    derivedKeys: ['name', 'label', 'icon', 'description', 'collapsible', 'defaultCollapsed'],
+  }))).optional().describe('Field groups rendered as the detail body, in order. Object form: `{ name?, label?, columns?, fields, hideEmpty?, collapsible?, showBorder?, defaultCollapsed?, icon?, description?, headerColor? }` — or the group-reference form `{ group, columns?, hideEmpty?, showBorder?, headerColor? }`, which inherits members and presentation from the object\'s `fieldGroups` entry (ADR-0085 §5).'),
   fields: z.array(z.string()).optional().describe('Explicit field list to display (optional, overrides highlightFields)'),
   /**
    * Field names to omit from the body, applied to both `fields` and every

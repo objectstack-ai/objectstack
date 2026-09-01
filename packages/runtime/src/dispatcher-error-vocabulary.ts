@@ -382,7 +382,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         door: 'none',
         verdict: 'foreign-vocabulary',
         why:
-            "better-auth 1.7.1's own admin-plugin vocabulary — verified in the installed vendor at " +
+            "better-auth 1.7.1's own admin-plugin vocabulary — verified in the then-installed vendor at " +
             '`dist/plugins/admin/error-codes`, spelled there exactly as it is here — and read at runtime ' +
             'off `plugin.$ERROR_CODES`, never retyped. The caller-side refusal, raised ' +
             "`APIError.from('FORBIDDEN', notAllowed)` inside a better-auth endpoint, so it leaves as the " +
@@ -622,6 +622,32 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'which catch it with `instanceof` and print a message — no HTTP boundary exists on that path, ' +
             'and grep finds no other consumer in `packages/`. Same class as the two rows above and ruled ' +
             'by the same #8035 reasoning: a runner refusal the CLI rethrows is not wire vocabulary.',
+    },
+    // [#13905] The async service-resolution discriminator; the pre-HTTP reasoning
+    // is #8035's, the same one the migration-journal rows above cite. If a
+    // transport ever answers with this fact it becomes pending-registration and
+    // joins #8846's ledger batch. Tracker ids live in this comment, never in the
+    // `why` string below — that string is runtime prose and reaches readers who
+    // cannot resolve them.
+    {
+        code: 'SERVICE_NOT_REGISTERED',
+        file: 'packages/core/src/service-not-registered.ts',
+        shape: 'assignconst',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'The discriminator that tells "nothing ever registered this service" from "the service IS ' +
+            'registered and could not be built", stamped on the ONE rejection `PluginLoader.getService` ' +
+            'raises for the first fact. Read in-process by the seam that catches the rejection and never ' +
+            'serialized: measured on this tree, the only references to the code are its own module and the ' +
+            '`@objectstack/core` re-export — no door reads it, and both seams that catch `getServiceAsync` ' +
+            'today (`seamOrUndefined` in packages/rest, `resolveService` in packages/runtime) use a bare ' +
+            '`catch` that inspects nothing. It carries no `status` on purpose: the whole point is that the ' +
+            'CONSUMER decides whether an unwired service degrades or refuses, so binding an HTTP status here ' +
+            'would presuppose that decision at the layer that must not make it. Same class as the ' +
+            'migration-journal runner refusals above — a composition fact caught in-process is not wire ' +
+            'vocabulary. If a transport ever ANSWERS with this fact, the verdict becomes ' +
+            'pending-registration and the code belongs in the ledger batch.',
     },
     // ── [#13233] field-level catalogs, reached by the OBJECT-LITERAL helper ──
     //

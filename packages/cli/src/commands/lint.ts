@@ -11,6 +11,7 @@ import { lintDataModel, runAuthoringRules } from '@objectstack/lint';
 import { resolveSduiManifest } from '../utils/sdui-manifest.js';
 import { collectAndLintDocs } from '../utils/collect-docs.js';
 import { scoreMetadata } from '../lint/score.js';
+import { checkHookBodyLowering } from '../lint/hook-body-lowering.js';
 import { runMetadataEval } from '../lint/metadata-eval.js';
 import { DEFAULT_METADATA_EVAL_CORPUS } from '../lint/corpus.js';
 import {
@@ -399,6 +400,19 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
       });
     }
   }
+
+  // ── Hook/action bodies that cannot be lowered to metadata (#13651) ──
+  // `os build` catches every extraction refusal, warns, and bundles the closure
+  // at exit 0 — so an app can stop being shippable as pure metadata with nothing
+  // red anywhere. This rule is the "no" to that recorded array. It runs the SAME
+  // `extractHookBody` the build runs, so the two cannot disagree, and it splits
+  // the accidental class (an `error`, which a gate can fail on) from the
+  // structural one (a `warning`, because bundling is its designed answer). It
+  // does NOT move what `os build` accepts; see the rule module's header.
+  //
+  // Reads FUNCTION values, so it must run on the normalized input before any
+  // Zod parse — which is where `lintConfig` already sits.
+  issues.push(...checkHookBodyLowering(config as Record<string, unknown>));
 
   // ── Data-model best practices (relationships / master-detail / roll-ups) ──
   // Cross-object rules that encode the conventions in ADR-0035 and the

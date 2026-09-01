@@ -6,7 +6,7 @@
 //
 //   • the pure normalizer, where the three narrowings are cheap to enumerate
 //     (empty body only · 401/403 only · `/admin/` only), and
-//   • the real `AuthManager.handleRequest` seam on the installed better-auth
+//   • the real `AuthManager.handleRequest` seam on the then-installed better-auth
 //     1.7.1, where the vendor's `adminMiddleware` actually produces the refusal.
 //
 // ⛔ A refusal-only suite is not enough here and the lane has paid for that
@@ -146,7 +146,7 @@ describe('#10349 — the normalizer fills in a bodyless vendor /admin/ refusal',
 });
 
 // ───────────────────────────────────────────────────────────────────────────
-// The real seam, on the installed better-auth 1.7.1
+// The real seam, on the then-installed better-auth 1.7.1
 // ───────────────────────────────────────────────────────────────────────────
 
 const SECRET = 'test-secret-at-least-32-chars-long!!';

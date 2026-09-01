@@ -29,8 +29,8 @@ pin 要防的失效 —— 而不是回退到本行。 -->
 
 ## 六条基本规则
 
-1. **Worktree-first。** 任何编辑之
-   前:`git worktree add ../<repo>-issue-<n> -b claude/issue-<n>-<slug> origin/main`,然后 `cd` 进去
+1. **Worktree-first。** 任何编辑之前:`git fetch origin main && git worktree add --no-track
+   ../<repo>-issue-<n> -b claude/issue-<n>-<slug> origin/main`,然后 `cd` 进去
    `pnpm install`,并在动笔前记下基点 `BASE=$(git rev-parse HEAD)`(「标准条款」家族规则的锚)。永
    不编辑共享检出(PreToolUse 钩子会拦);修复横跨姊妹仓时 **一仓一 worktree**。**建好分支后的
    第一个动作:先把空分支推上去**(任何编辑之前 `git push -u origin <branch>`)——它既是认领评

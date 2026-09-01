@@ -105,7 +105,7 @@ Appearance and visualization configuration
 | :--- | :--- | :--- | :--- |
 | **startDateField** | `string` | ✅ | Field providing the event start date/time |
 | **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
-| **titleField** | `string` | ✅ | Field displayed as the event title |
+| **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **colorField** | `string` | optional | Field whose value determines the event color |
 
 
@@ -336,7 +336,8 @@ View filter rule
 | **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional (default: `1`) |  |
 | **pane** | `Enum<'primary' \| 'secondary'>` | optional | Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'. |
-| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … })[]` | ✅ |  |
+| **group** | `string` | optional | Field group key (snake_case) whose members and presentation this section inherits, from the bound object's `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `collapsible`, `collapsed`, `visibleWhen`/`visibleOn`). Not valid on a wizard step. Must name a declared group — checked by reference diagnostics. |
+| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … })[]` | optional |  |
 
 ### Nested Shape: `FormSection.fields[number]`
 
@@ -467,7 +468,8 @@ Form-view select option — the object-field option shape minus the per-option `
 | **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional (default: `1`) |  |
 | **pane** | `Enum<'primary' \| 'secondary'>` | optional | Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'. |
-| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … })[]` | ✅ |  |
+| **group** | `string` | optional | Field group key (snake_case) whose members and presentation this section inherits, from the bound object's `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `collapsible`, `collapsed`, `visibleWhen`/`visibleOn`). Not valid on a wizard step. Must name a declared group — checked by reference diagnostics. |
+| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … })[]` | optional |  |
 
 ### Nested Shape: `FormView.groups[number]`
 
@@ -482,7 +484,8 @@ Form-view select option — the object-field option shape minus the per-option `
 | **visibleOn** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source?: string; ast?: any; meta?: object }` | optional | [DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse. |
 | **columns** | `Enum<'1' \| '2' \| '3' \| '4'> \| 1 \| 2 \| 3 \| 4` | optional (default: `1`) |  |
 | **pane** | `Enum<'primary' \| 'secondary'>` | optional | Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'. |
-| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … })[]` | ✅ |  |
+| **group** | `string` | optional | Field group key (snake_case) whose members and presentation this section inherits, from the bound object's `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `collapsible`, `collapsed`, `visibleWhen`/`visibleOn`). Not valid on a wizard step. Must name a declared group — checked by reference diagnostics. |
+| **fields** | `(string \| { field: string; type?: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; options?: object[]; reference?: string; … })[]` | optional |  |
 
 ### Nested Shape: `FormView.subforms[number]`
 
@@ -769,7 +772,7 @@ Map view configuration
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
-| **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
@@ -911,7 +914,7 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **startDateField** | `string` | ✅ | Field providing the event start date/time |
 | **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
-| **titleField** | `string` | ✅ | Field displayed as the event title |
+| **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **colorField** | `string` | optional | Field whose value determines the event color |
 
 ### Nested Shape: `ListView.gantt`
@@ -1164,7 +1167,7 @@ Tab configuration for multi-tab view interface
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
-| **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
@@ -1297,7 +1300,7 @@ View filter rule
 | :--- | :--- | :--- | :--- |
 | **startDateField** | `string` | ✅ | Field providing the event start date/time |
 | **endDateField** | `string` | optional | Field providing the event end date/time (defaults to a single-day event) |
-| **titleField** | `string` | ✅ | Field displayed as the event title |
+| **titleField** | `string` | optional | Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain) |
 | **colorField** | `string` | optional | Field whose value determines the event color |
 
 ### Nested Shape: `ObjectListView.gantt`
@@ -1750,7 +1753,7 @@ Tab configuration for multi-tab view interface
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
-| **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
@@ -1835,7 +1838,7 @@ Tab configuration for multi-tab view interface
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
-| **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
@@ -2076,7 +2079,7 @@ This schema accepts one of the following structures:
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
-| **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |
@@ -2252,7 +2255,7 @@ This schema accepts one of the following structures:
 | **navigation** | `{ mode?: Enum<'page' \| 'drawer' \| 'modal' \| 'split' \| 'popover' \| 'new_window' \| 'none'>; view?: string; preventNavigation?: boolean; openNewTab?: boolean; … }` | optional | Configuration for item click navigation (page, drawer, modal, etc.) |
 | **pagination** | `{ pageSize?: integer; pageSizeOptions?: integer[] }` | optional | Pagination configuration |
 | **kanban** | `{ groupByField: string; summarizeField?: string; columns: string[] }` | optional | Kanban-board configuration — applies when the view renders as a kanban layout |
-| **calendar** | `{ startDateField: string; endDateField?: string; titleField: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
+| **calendar** | `{ startDateField: string; endDateField?: string; titleField?: string; colorField?: string }` | optional | Calendar configuration — applies when the view renders as a calendar layout |
 | **gantt** | `{ startDateField: string; endDateField: string; titleField: string; progressField?: string; … } & Record<string, any>` | optional | Gantt-timeline configuration — applies when the view renders as a gantt layout |
 | **gallery** | `{ coverField?: string; coverFit?: Enum<'cover' \| 'contain'>; cardSize?: Enum<'small' \| 'medium' \| 'large'>; titleField?: string; … }` | optional | Gallery/card view configuration |
 | **timeline** | `{ startDateField: string; endDateField?: string; titleField: string; groupByField?: string; … }` | optional | Timeline view configuration |

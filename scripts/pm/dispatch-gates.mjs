@@ -1675,12 +1675,22 @@ export { maskComments };
  * comment convention: `function selfTest() {` at column 0, optionally `export`
  * and/or `async`, with any name that spells self-test (`selfTest`,
  * `fixtureSelfTest`, `selfTestReadSeams`, `prePushIsArmedSelfTest`,
- * `decisionTableSelfTest` — the five spellings this tree actually uses).
+ * `decisionTableSelfTest` — four of the 18 compound names this tree uses).
  *
- * Measured across the 61 scripts under `scripts/` that carry one: 53 write
- * `function selfTest() {`, 7 write `async function selfTest() {`, and the four
- * remaining names are the compound ones above — 61 of 61 at column 0, none of
- * them an arrow-function const. If a script ever spells one as
+ * Re-derived at 6193e576d across the 169 scripts under `scripts/` that carry
+ * one — 185 declarations: 111 `function selfTest(`, 28
+ * `export function selfTest(`, 19 `async function selfTest(`, 8
+ * `export async function selfTest(`, and 19 compound names — one of which is
+ * this module's own `maskSelfTests`, so this file's masker blanks its own body
+ * whenever it scans itself. That was true long before the helper follow below
+ * existed and it costs nothing today, because none of the functions it reaches
+ * spells a path; it is recorded because it is the kind of thing that stops
+ * being free the day one of them does. The load-bearing half holds: 185 of 185
+ * at column 0, and a column-0 scan for the const/arrow spelling finds ZERO.
+ * ⚠ The counts in this paragraph read 61/53/7/4 when it was written and had
+ * gone stale by a factor of three before anyone re-read them — re-derive them
+ * rather than quoting them; only the two PROPERTIES are what this pattern
+ * rests on. If a script ever spells one as
  * `const selfTest = () => {`, widen this pattern rather than reaching for a
  * comment marker; a declaration is a thing the language guarantees, a marker
  * comment is a thing an author has to remember.
@@ -1689,7 +1699,261 @@ const SELF_TEST_DECL =
   /^(?:export[ \t]+)?(?:async[ \t]+)?function[ \t]+[A-Za-z0-9_$]*[Ss]elf[_]?[Tt]est[A-Za-z0-9_$]*[ \t]*\(/gm;
 
 /**
- * The source with the BODY of every top-level self-test function blanked.
+ * Every TOP-LEVEL declaration in a module body: `export`ness, name, span, and
+ * whether it is CALLABLE (a `function`/`class`, whose body runs only when
+ * something calls it) or a VALUE (`const`/`let`/`var`, evaluated at module
+ * load). Anchored at column 0 for the same structural reason the self-test
+ * anchor above is, and measured on the same corpus.
+ *
+ * Destructuring binders (`const { a } = x`) are deliberately unmatched: the
+ * declaration below is only ever used to decide what NOT to read, so a binder
+ * this pattern cannot name stays in the module body, which is the direction
+ * that masks LESS.
+ */
+const TOP_LEVEL_DECL =
+  /^(export[ \t]+)?(?:(?:default[ \t]+)?(?:async[ \t]+)?function[ \t]*\*?[ \t]*([A-Za-z_$][\w$]*)[ \t]*\(|(?:default[ \t]+)?class[ \t]+([A-Za-z_$][\w$]*)[\s{]|(?:const|let|var)[ \t]+([A-Za-z_$][\w$]*)[ \t]*=)/gm;
+
+/** One JavaScript identifier. Read as a REFERENCE, wherever it stands. */
+const IDENTIFIER_TOKEN = /[A-Za-z_$][\w$]*/g;
+
+/**
+ * The end of a brace-balanced body, or -1 if the braces never close.
+ *
+ * `skipParams` walks the parameter list first, and it is not a refinement: a
+ * destructured default puts braces in the SIGNATURE, and counting those closes
+ * the body before it opens. `release-rehearsal-clone.mjs` writes two of them
+ * among its fixture builders — and, the half this docblock asserted backwards
+ * once, THREE self-test ENTRY POINTS in the `scripts/` tree carry one TODAY, so
+ * this repairs live files rather than guarding against a future spelling:
+ *
+ *   scripts/check-test-completeness.mjs:576
+ *   scripts/measure-position-name-fold-census.mjs:689
+ *       both `function selfTest({ quiet = false } = {})`
+ *   scripts/workspace-enumerator.mjs:328
+ *       `export function selfTest({ root = null } = {})`
+ *
+ * Measured at 6193e576d — bytes `maskSelfTests` changes in each file, this
+ * module against a staged copy of the one on `origin/main`: 30 -> 14848,
+ * 30 -> 3961, 34 -> 6294. Thirty bytes is the destructured parameter and
+ * nothing else; the entire self-test body was surviving the mask. The control
+ * that makes those three a reading rather than an artifact is a self-test with
+ * no brace in its signature, identical both ways —
+ * `check-empty-changeset.mjs`, 48044 -> 48044.
+ *
+ * It did not move the hint census, and that is LUCK rather than design: those
+ * three bodies happen to carry no path literal their module bodies do not
+ * already carry, so `extractWatchHints` returns the same set on both sides
+ * (`[]`, `[]`, and the same 8 hints). A fourth file with the same signature
+ * shape and one fixture path in it would have been a live fabricated lead.
+ */
+function bracedBodyEnd(source, scan, start, skipParams) {
+  let i = start;
+  if (skipParams) {
+    let parens = 0;
+    let openedParen = false;
+    for (; i < source.length; i++) {
+      if (scan.comment[i] || scan.literal[i]) continue;
+      if (source[i] === '(') {
+        parens++;
+        openedParen = true;
+      } else if (source[i] === ')') {
+        parens--;
+        if (openedParen && parens === 0) {
+          i++;
+          break;
+        }
+      }
+    }
+    if (!openedParen) return -1;
+  }
+  let depth = 0;
+  let opened = false;
+  for (; i < source.length; i++) {
+    if (scan.comment[i] || scan.literal[i]) continue;
+    if (source[i] === '{') {
+      depth++;
+      opened = true;
+    } else if (source[i] === '}') {
+      depth--;
+      if (opened && depth === 0) return i + 1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * The end of a value declaration — the first `;` at bracket depth 0 — or -1
+ * when the statement has none (ASI). Braces, brackets and parens are counted
+ * over CODE positions only, so a `;` inside a fixture string or a regex cannot
+ * end the statement early.
+ */
+function valueDeclEnd(source, scan, start) {
+  let depth = 0;
+  for (let i = start; i < source.length; i++) {
+    if (scan.comment[i] || scan.literal[i]) continue;
+    const c = source[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ';' && depth === 0) return i + 1;
+  }
+  return -1;
+}
+
+/**
+ * The module's top-level declarations, in source order and non-overlapping.
+ *
+ * A declaration whose span cannot be closed is DROPPED rather than run to end
+ * of file: one unterminated span would otherwise swallow every declaration
+ * after it, including the self-test the mask exists to find. Its text stays in
+ * the module body — again the direction that masks less. The mask-to-end-of-
+ * file behaviour a malformed self-test has always had is kept where it lives,
+ * in `maskSelfTests` itself.
+ */
+function topLevelDecls(source, scan, selfTestStarts) {
+  const decls = [];
+  let guard = 0;
+  for (const m of source.matchAll(TOP_LEVEL_DECL)) {
+    const start = m.index;
+    if (start < guard) continue;
+    if (scan.comment[start] || scan.literal[start]) continue;
+    const isFunction = m[2] !== undefined;
+    const callable = isFunction || m[3] !== undefined;
+    const end = callable ? bracedBodyEnd(source, scan, start, isFunction) : valueDeclEnd(source, scan, start);
+    if (end < 0) continue;
+    decls.push({
+      name: m[2] ?? m[3] ?? m[4],
+      start,
+      end,
+      callable,
+      exported: m[1] !== undefined,
+      selfTest: selfTestStarts.has(start),
+    });
+    guard = end;
+  }
+  return decls;
+}
+
+/**
+ * The top-level CALLABLES that only the self-test can reach.
+ *
+ * ## The defect this answers
+ *
+ * `SELF_TEST_DECL` finds the ENTRY POINT and nothing else. A helper the entry
+ * point calls is named for what it builds — `makeSource`, `buildFixtureTree`,
+ * `stampFor`, `fixtureCommit` — and no part of that name spells self-test, so
+ * its body survived the mask and its fixture literals were read as paths the
+ * gate opens. Measured on `scripts/pm/release-rehearsal-clone.mjs`, whose
+ * `makeSource` writes a fixture `.changeset` tree: the hint set carried
+ * `.changeset/one.md` and `.changeset/two.md`, and the residue printed a cause
+ * for them — "the tree stops at .changeset; the layout moved under it" — that
+ * describes a directory rename which never happened. A fabricated lead, from
+ * the same fixture family the entry-point mask was written to refuse.
+ *
+ * ## Why reachability, and not a banner comment
+ *
+ * The obvious alternative is to mask everything below the block-comment
+ * `self-test` banner these scripts write. `SELF_TEST_DECL`'s docblock argues
+ * against it directly, and that argument is adopted here rather than
+ * re-litigated: a declaration is a thing the language guarantees, a marker
+ * comment is a thing an author has to remember. The banner is also not
+ * load-bearing anywhere else, so nothing would go red when one is missing — the mask would simply
+ * stop reaching, silently, which is the failure family this whole module is
+ * built to refuse.
+ *
+ * ## The predicate, and which half is the safety half
+ *
+ * A callable is masked when it is reachable from a self-test body AND NOT
+ * reachable from anything else the module does. The second conjunct is the
+ * safety half: a helper shared by the self-test and the real gate body stays
+ * unmasked, or the mask would drop a population the gate really reads. The
+ * roots of "anything else" are the module-body statements outside every
+ * declaration (the `import`s, the top-level side effects, the `export { … }`
+ * lists, the entrypoint guard at the bottom) plus every `export`ed
+ * declaration, which is reachable from outside this file by definition. A
+ * self-test body is REACHED but never TRAVERSED — the bottom of these scripts
+ * calls `selfTest()` from module scope, so traversing it would make every
+ * helper root-reachable and the whole predicate vacuous.
+ *
+ * ## Why VALUE declarations are excluded, measured rather than assumed
+ *
+ * Extending the same predicate to `const`/`let`/`var` was implemented and
+ * REFUSED. A top-level constant that carries path literals and is referenced
+ * from no executing code is, in this tree, overwhelmingly a gate DECLARING its
+ * population for this very scanner to read — `ROOT_DIR_WATCH_HINTS`,
+ * `ROOT_FILE_WATCH_HINTS`, `ROOT_WATCH_HINTS`, the shape
+ * `scripts/check-watch-hint-literal.mjs` exists to enforce. Being unreferenced
+ * is what those declarations ARE. Measured over the 204 files this derivation
+ * scans: masking values as well takes 36 files and 175 hints instead of 9 and
+ * 104, and the 71 extra include the declared populations of eight gates
+ * (`.claude/**`, `content/**`, `docs/**`, `skills/**`, `packages/drivers/**`,
+ * `examples/**`, `scripts/**`, `ARCHITECTURE.md/**`) — the mask erasing
+ * exactly the declarations it is supposed to see. The fixture TABLES it would
+ * also have caught (`SELF_TEST_CASES` and friends) are left behind
+ * deliberately: keeping a false hint costs a CI round, dropping a declared
+ * population costs a gate.
+ *
+ * ## What counts as a reference
+ *
+ * Identifiers at CODE positions, plus identifiers inside `${…}`
+ * interpolations, which are code — `scan.interpolation` exists for exactly
+ * this and skipping it is not academic: `release-rehearsal-clone.mjs` names
+ * its own path constant only from inside template literals, so a scan that
+ * read `${SELF}` as string text would have found `SELF` unreferenced and
+ * masked away the one hint that file really declares. Prose is excluded (a
+ * docblock naming a helper is not a call), and so is plain string text;
+ * admitting string text too was measured over the same 204 files and moved
+ * nothing at all, so it buys no safety worth its cost.
+ *
+ * An identifier is counted wherever it stands, property accesses and shadowing
+ * locals included. That over-counts references, and over-counting can only
+ * keep a declaration unmasked.
+ */
+function selfTestOnlyCallables(source, scan, selfTestStarts) {
+  const decls = topLevelDecls(source, scan, selfTestStarts);
+  if (!decls.some((d) => d.selfTest)) return [];
+  const refs = decls.map(() => new Set());
+  const moduleBodyRefs = new Set();
+  let at = 0;
+  for (const m of source.matchAll(IDENTIFIER_TOKEN)) {
+    const i = m.index;
+    if (scan.comment[i]) continue;
+    if (scan.literal[i] && !scan.interpolation[i]) continue;
+    while (at < decls.length && decls[at].end <= i) at++;
+    if (at < decls.length && i >= decls[at].start) refs[at].add(m[0]);
+    else moduleBodyRefs.add(m[0]);
+  }
+  const byName = new Map();
+  for (let k = 0; k < decls.length; k++) {
+    const list = byName.get(decls[k].name);
+    if (list) list.push(k);
+    else byName.set(decls[k].name, [k]);
+  }
+  const reach = (seeds) => {
+    const seen = new Set();
+    const queue = [...seeds];
+    while (queue.length > 0) {
+      const name = queue.pop();
+      if (seen.has(name)) continue;
+      seen.add(name);
+      for (const k of byName.get(name) ?? []) {
+        // Reached, never traversed: what a self-test body calls is not part of
+        // what this module DOES.
+        if (decls[k].selfTest) continue;
+        for (const next of refs[k]) if (!seen.has(next)) queue.push(next);
+      }
+    }
+    return seen;
+  };
+  const roots = new Set(moduleBodyRefs);
+  for (const d of decls) if (d.exported) roots.add(d.name);
+  const live = reach(roots);
+  const fromSelfTest = reach(decls.flatMap((d, k) => (d.selfTest ? [...refs[k]] : [])));
+  return decls.filter((d) => d.callable && !d.selfTest && fromSelfTest.has(d.name) && !live.has(d.name));
+}
+
+/**
+ * The source with the BODY of every top-level self-test function blanked, and
+ * with it every top-level callable ONLY the self-test can reach.
  *
  * ## Why the self-test is not part of what a gate reads
  *
@@ -1703,38 +1967,40 @@ const SELF_TEST_DECL =
  * through `check:changeset-gate-self-tests`, which resolves to all three
  * changeset gates at once and inherits the union of their fixtures.
  *
+ * The fixture builders those self-tests CALL are the other half, and they are
+ * `selfTestOnlyCallables`' subject: the declaration's own name is what
+ * `SELF_TEST_DECL` reads, and a helper's name never spells self-test. Measured
+ * over the 204 scripts this derivation scans, adding them removes 104 hints
+ * from 9 files and adds none; every one of the 104 is attributable to a single
+ * fixture-building declaration, and no family loses coverage of a file it
+ * still opens.
+ *
  * The end of the body is found by counting braces over code positions only, so
  * a `}` inside a fixture string or a `{1,6}` inside a regex cannot close it
- * early. A declaration whose braces never balance masks to end of file: recall
- * loss on a malformed script, never a fabricated lead.
+ * early. A self-test declaration whose braces never balance masks to end of
+ * file: recall loss on a malformed script, never a fabricated lead.
  *
  * Compose comment masking FIRST — otherwise a `function selfTest() {` written
  * at column 0 inside a block comment (a docblock example, exactly the kind this
  * file is full of) would anchor a mask over real code.
+ *
+ * The result is a strict superset of the mask this function applied before the
+ * helper follow existed: the self-test spans are computed exactly as they were,
+ * and the helpers are added to them. Nothing that used to be blanked survives.
  */
 export function maskSelfTests(source) {
-  const { comment, literal } = scanSource(source);
+  const scan = scanSource(source);
   const flags = new Uint8Array(source.length);
+  const selfTestStarts = new Set();
   for (const m of source.matchAll(SELF_TEST_DECL)) {
     const start = m.index;
-    if (comment[start] || literal[start]) continue;
-    let depth = 0;
-    let opened = false;
-    let end = start;
-    for (; end < source.length; end++) {
-      if (comment[end] || literal[end]) continue;
-      if (source[end] === '{') {
-        depth++;
-        opened = true;
-      } else if (source[end] === '}') {
-        depth--;
-        if (opened && depth === 0) {
-          end++;
-          break;
-        }
-      }
-    }
-    for (let k = start; k < end; k++) flags[k] = 1;
+    if (scan.comment[start] || scan.literal[start]) continue;
+    selfTestStarts.add(start);
+    const end = bracedBodyEnd(source, scan, start, true);
+    for (let k = start; k < (end < 0 ? source.length : end); k++) flags[k] = 1;
+  }
+  for (const decl of selfTestOnlyCallables(source, scan, selfTestStarts)) {
+    for (let k = decl.start; k < decl.end; k++) flags[k] = 1;
   }
   return blank(source, flags);
 }
@@ -3486,7 +3752,13 @@ export function coveringKey(entry, inputPath) {
     // are different claims, so the label says which — the same reason the
     // trigger and the identity keys carry their own provenance above.
     const inherited = entry.hintOrigin?.get(hint);
-    return { key: hint, via: inherited ? `gate source via ${inherited}` : 'gate source' };
+    if (!inherited) return { key: hint, via: 'gate source' };
+    // WHICH edge carried it, not just that it was carried: a population a gate
+    // inherits by RUNNING a program is a different claim from one it inherits
+    // by importing a module, and a dev reading the line has to be able to go
+    // check the right thing (#13511).
+    const edge = entry.hintEdge?.get(hint) === 'run' ? 'the program it runs, ' : '';
+    return { key: hint, via: `gate source via ${edge}${inherited}` };
   }
   // LAST, and deliberately (#13000). The four keys above are all claims about a
   // POPULATION — a pattern or a literal that covers your path — and this one is
@@ -4048,6 +4320,60 @@ function withProbeTail(segs) {
 }
 
 /**
+ * The literal text of one path COMPONENT of a `join()`/`resolve()` — directly
+ * when it is written as a literal, or through ONE hop when it is a name bound
+ * to one (#13511).
+ *
+ * The base of a path expression already resolves through `ctx.names`; only the
+ * components after it were required to be written out. That asymmetry refused
+ * the idiom this tree actually writes for running a sibling program —
+ * `spawnSync(process.execPath, [join(ROOT, TOOL)])`, where `TOOL` is the
+ * module-body constant a gate declares its subject in — so the whole expression
+ * came back `unknown` and the edge contributed nothing.
+ *
+ * ONE hop, and only to a LITERAL: an initialiser that is itself an expression
+ * is left to the base resolver above, which is where multi-hop reasoning
+ * belongs and where its cycle guard lives. A name with more than one
+ * initialiser is refused rather than guessed at — a rebound name has no single
+ * reading, and `combineReadings`' preference for an in-tree answer is a rule
+ * about BASES, where the readings are path expressions, not about a component
+ * where they are raw text. Refusal here costs a lead; a wrong reading costs a
+ * fabricated one, which this file's header prices higher.
+ *
+ * Template literals are returned as written, `${}` included: `walkSegments`
+ * already reads one as a prefix and refuses it where a runtime part could
+ * introduce a separator, so this hop inherits that judgement instead of
+ * repeating it.
+ *
+ * ## What the hop costs its OTHER callers, measured (c0770d0b7)
+ *
+ * This resolver is shared, so widening it is not free by inspection. Every
+ * consumer, before -> after:
+ *
+ *   anchored read targets over the gate corpus      73 -> 101
+ *   ...of PROGRAM TEXT, which is what `entry.reads` takes    5 -> 15
+ *   (family, file) pairs those add through coveringKey            +3
+ *   in-tree scratch-dir sites                        17 -> 17  (unchanged)
+ *   unresolved scratch-dir expressions             154 -> 154  (unchanged)
+ *
+ * The scratch scan does not move at all: its bases are anchors, not named
+ * constants. The ten new read targets are gates opening the very file they
+ * grade at `join(<root>, <CONST>)` — `check:pm-label-desc-cap` reading
+ * `scripts/pm/ensure-pm-labels.sh` is the plainest of them — reads that were
+ * invisible only because the path was spelled through a name.
+ */
+function componentLiteral(expr, ctx) {
+  const direct = expr.match(QUOTED_LITERAL);
+  if (direct) return direct[2];
+  if (!PLAIN_IDENTIFIER.test(expr)) return null;
+  if (ctx.seen.has(expr)) return null;
+  const inits = ctx.names.get(expr);
+  if (!inits || inits.length !== 1) return null;
+  const lit = inits[0].trim().match(QUOTED_LITERAL);
+  return lit ? lit[2] : null;
+}
+
+/**
  * Where a path expression lands, relative to the repo root.
  *
  *   { kind: 'in-tree', segs }  — repo-relative segments
@@ -4102,9 +4428,9 @@ export function resolvePathExpression(expr, ctx, depth = 0) {
     }
     let segs = base.segs;
     for (let i = 1; i < args.length; i++) {
-      const lit = args[i].match(QUOTED_LITERAL);
-      if (!lit) return { kind: 'unknown', why: `a path component this scan cannot read: ${args[i]}` };
-      const walked = walkSegments(segs, lit[2], i === args.length - 1);
+      const lit = componentLiteral(args[i], ctx);
+      if (lit === null) return { kind: 'unknown', why: `a path component this scan cannot read: ${args[i]}` };
+      const walked = walkSegments(segs, lit, i === args.length - 1);
       if (!walked) return { kind: 'unknown', why: `a path component built at runtime or leaving the tree: ${args[i]}` };
       segs = walked;
     }
@@ -4336,6 +4662,153 @@ export function anchoredReadTargets(rel, source, isTracked) {
     const path = at.segs.join('/');
     if (path === rel || out.includes(path) || !isTracked(path)) continue;
     out.push(path);
+  }
+  return out;
+}
+
+/**
+ * ── The PROGRAM a gate RUNS: the third spelling of the same fact (#13511) ───
+ *
+ * `readProgramTargetsInSource` above draws the line this one is on the other
+ * side of. Its own docblock states it: "a gate that opens another file's
+ * PROGRAM TEXT depends on that PROGRAM, and the shapes that dependency takes —
+ * stage it, execute it, assert on it — are three spellings of the same fact."
+ * The scan there recognises ONE of the three, the `readFileSync`/`copyFileSync`
+ * spelling. This one recognises EXECUTE:
+ *
+ *     spawnSync(process.execPath, [join(ROOT, TOOL), '--self-test'])
+ *
+ * ## Why the missing spelling cost a CI round
+ *
+ * `check:pm-dispatch-gates` runs `scripts/pm/dispatch-gates.mjs --self-test`,
+ * and that run READS EVERY WORKFLOW FILE IN THE TREE. A PR adding exactly one
+ * `.github/workflows/*.yml` derived its families WITH THIS TOOL, ran every one
+ * of them green, and reddened `Lint & Repo Gates` on that gate — on an
+ * assertion about the new workflow file. The derivation had scored the family
+ * `silent`: the gate script declares three literals and all three are tracked
+ * FILES under `scripts/`, so nothing in it could cover a path under
+ * `.github/workflows/`. The gate's read surface was a strict superset of the
+ * surface it was derived for, and the tool's promise — "these are the gates
+ * your diff implicates" — was not kept for that surface.
+ *
+ * ⛔ The fix is NOT this gate's name in a table. Adding one gate name to a
+ * derivation is the repair this lane's triage has ruled against three times,
+ * on the ground that the same red keeps shipping under the next gate's name.
+ * What is added here is an EDGE, and the class closes with it: any gate that
+ * runs an in-tree program inherits that program's declared population, today
+ * and for every gate written after this one, with nothing to keep in step.
+ *
+ * ## The rule this completes, rather than a new one beside it
+ *
+ * The general rule already exists in this file — `firstPartyImportTargets` and
+ * `hintsOfModule` follow a gate to a module it IMPORTS and append that module's
+ * declared population to the gate's own. Exec is the same relation over a
+ * different edge, so it routes through the same three pieces and adds none:
+ * `declaredInheritedPopulation` narrows what a follower inherits (the target's
+ * own declaration, checked against what it really spells and unable to invent),
+ * `entry.hintOrigin` labels the inherited hint so it never travels as a claim
+ * the gate made itself, and the follow refuses a target that is itself a
+ * discovered gate file for the reason recorded there.
+ *
+ * That the pieces were already in place is measurable rather than lucky:
+ * `scripts/pm/dispatch-gates.mjs` has carried an `inherited-population`
+ * declaration naming `.github/workflows` — and nothing else of its nine
+ * literals — since #11556, written for importers. This edge is what lets a
+ * caller that spawns it read that declaration too.
+ *
+ * ## Narrowings, each one measured
+ *
+ * ARGV FORMS ONLY — `spawnSync`, `spawn`, `execFileSync`, `execFile`. The shell
+ * forms (`execSync`, `exec`) take a COMMAND STRING, and a command string is a
+ * quoted literal that `resolvePathExpression` refuses by construction, so
+ * admitting them would add a scan that cannot return a target: dead code that
+ * reads as coverage. Live specimens of the refused class in this tree, both
+ * shell-quoted: `pnpm -s ${script}` and `git rev-parse --show-toplevel`.
+ *
+ * THE PROGRAM POSITION ONLY — argument 0, plus the elements of an argv ARRAY
+ * LITERAL in argument 1. That is where a program path is; an options object is
+ * not scanned, and an argv passed as a BINDING (`spawnSync(execPath, args)`)
+ * contributes nothing rather than a guess. Missing lead, never a fabricated
+ * one — the direction this file errs in everywhere.
+ *
+ * RESOLVED, NEVER MATCHED, and TRACKED PROGRAM TEXT only: the same three
+ * refusals `anchoredReadTargets` documents, from the same primitive. A bare
+ * `'git'` is a quoted literal with no anchor and comes back `unknown`;
+ * `process.execPath` is a base this scan cannot read; a `tscBin` under
+ * `node_modules/` resolves but is not tracked.
+ *
+ * THE GATE'S OWN FILE IS DROPPED, for the reason stated one function up: the
+ * PROXY REARM idiom in this tree re-execs the running script (`SELF_PATH`,
+ * `fileURLToPath(import.meta.url)`), and a family that runs a copy of itself is
+ * already matched by identity.
+ *
+ * NEVER A TARGET THAT IS ITSELF A DISCOVERED GATE FILE, and a `--self-test`
+ * family follows no edge at all — the two refusals the import follow makes,
+ * applied here unchanged because their arguments are about the RELATION, not
+ * about how it was spelled. Both are live rather than theoretical: two families
+ * spawn `scripts/docs-audit/affected-docs.mjs`, which is a gate file, and
+ * neither inherits its four literals. The self-test refusal costs zero on this
+ * tree — no `--self-test` family reaches an in-tree program by spawn.
+ *
+ * ## Blast radius, measured before the change and after it (c0770d0b7)
+ *
+ * A rule that moves rows moves them for EVERY family, so the price is the
+ * deliverable and not a footnote. Over 196 discovered families and 7673 tracked
+ * files, counted through `coveringKey` — the same key the printed block renders
+ * from — and including the component hop `componentLiteral` adds:
+ *
+ *   (family, file) pairs the derivation covers   164087 -> 164119  (+32)
+ *   pairs LOST                                                          0
+ *   pairs RE-ATTRIBUTED (same pair, new via)                            0
+ *   families whose VERDICT changes                                      1
+ *
+ * The one verdict is `check:pm-dispatch-gates`, silent -> matched, and 29 of
+ * the 32 pairs are its: one per workflow file in the tree, which is the defect
+ * exactly. The other three arrive through the component hop, on the READ key
+ * next door. Nothing here names twenty gates for a diff — a derivation that did
+ * would be useless in a different way, and this file's header prices that
+ * direction as "22 leads is the same as none".
+ *
+ * @param {string} rel  repo-relative path of the gate script
+ * @param {string} source  its contents
+ * @param {(path: string) => boolean} isTracked
+ * @returns {string[]} repo-relative paths, in source order, deduped
+ */
+const SPAWN_CALL = /(?<![.\w$])(?:(?:cp|child_process)\.)?(?:spawnSync|spawn|execFileSync|execFile)\s*\(/g;
+
+export function spawnedProgramTargets(rel, source, isTracked) {
+  // Masked like `firstPartyImportTargets`, not like `anchoredReadTargets`: this
+  // follow inherits a POPULATION, and a spawn written inside a self-test body
+  // is a fixture the self-test drives rather than the gate's work. The read
+  // scan next door wants the opposite from the same bytes, and says so.
+  const masked = maskSelfTests(maskComments(String(source)));
+  const { literal } = scanSource(masked);
+  const ctx = {
+    fileSegs: rel.split('/'),
+    names: nameInitialisers(masked),
+    returns: singleReturnExpressions(masked),
+    seen: new Set(),
+  };
+  const out = [];
+  for (const m of masked.matchAll(SPAWN_CALL)) {
+    if (literal[m.index]) continue;
+    const { text } = balancedArgText(masked, m.index + m[0].length);
+    const args = splitArgList(text);
+    const positions = [(args[0] ?? '').trim()];
+    const argv = (args[1] ?? '').trim();
+    if (argv.startsWith('[') && argv.endsWith(']')) {
+      positions.push(...splitArgList(argv.slice(1, -1)).map((a) => a.trim()));
+    }
+    for (const expr of positions) {
+      if (!expr) continue;
+      ctx.seen.clear();
+      const at = resolvePathExpression(expr, ctx);
+      if (at.kind !== 'in-tree' || at.segs.length === 0) continue;
+      const path = at.segs.join('/');
+      if (path === rel || out.includes(path) || !isTracked(path)) continue;
+      if (!PROGRAM_TEXT_TARGET.test(path)) continue;
+      out.push(path);
+    }
   }
   return out;
 }
@@ -6866,9 +7339,11 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   };
   for (const entry of byCheck.values()) {
     entry.imports = [];
+    entry.runs = [];
     entry.reads = [];
     entry.readOrigin = new Map();
     entry.hintOrigin = new Map();
+    entry.hintEdge = new Map();
     for (const f of entry.files) {
       const abs = join(ROOT, f);
       if (!existsSync(abs)) continue;
@@ -6922,6 +7397,17 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
         if (gateFiles.has(mod) || entry.imports.includes(mod)) continue;
         entry.imports.push(mod);
       }
+      // The SECOND edge to another program, under the same two refusals as the
+      // first and for the same reasons (#13511). It sits BELOW the self-test
+      // guard deliberately: the narrowing above is invocation-shaped — an
+      // inherited population describes the gate's WORK — and that argument does
+      // not change with the edge it arrives over. One rule, not two. Cost of
+      // placing it here, measured on this tree: zero, because no `--self-test`
+      // family reaches an in-tree program by spawn at all.
+      for (const ran of spawnedProgramTargets(f, source, (t) => trackedSet.has(t))) {
+        if (gateFiles.has(ran) || entry.runs.includes(ran)) continue;
+        entry.runs.push(ran);
+      }
     }
     // The gate's OWN hints keep their order and their place at the FRONT, so
     // every path this derivation already matched keeps the exact key and via
@@ -6932,6 +7418,18 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
       for (const hint of hintsOfModule(mod)) {
         if (own.has(hint) || entry.hintOrigin.has(hint)) continue;
         entry.hintOrigin.set(hint, mod);
+        entry.hintEdge.set(hint, 'import');
+        entry.hints.push(hint);
+      }
+    }
+    // LAST, so every key an earlier edge already answered keeps the exact hint
+    // and via label it had — the widening adds leads, it never re-attributes
+    // one, and that is asserted in the self-test rather than argued here.
+    for (const ran of entry.runs) {
+      for (const hint of hintsOfModule(ran)) {
+        if (own.has(hint) || entry.hintOrigin.has(hint)) continue;
+        entry.hintOrigin.set(hint, ran);
+        entry.hintEdge.set(hint, 'run');
         entry.hints.push(hint);
       }
     }
@@ -8573,6 +9071,128 @@ function selfTest() {
     "const REAL = 'packages/ddd/src';",
   ].join('\n');
   t('a self-test declaration inside a comment anchors nothing', extractWatchHints(declInComment).includes('packages/ddd/src'));
+
+  // ── The helpers the self-test CALLS ──────────────────────────────────────
+  //
+  // `SELF_TEST_DECL` finds the ENTRY POINT by name, and a fixture builder is
+  // named for what it builds, so its body used to survive the mask whole.
+  // Measured specimen, live on this tree:
+  // `scripts/pm/release-rehearsal-clone.mjs` commits a fixture `.changeset`
+  // tree inside `makeSource`, and its two entries were read as paths that gate
+  // OPENS — the residue printed "the tree stops at .changeset; the layout moved
+  // under it" for them, a directory rename that never happened.
+  //
+  // The safety half is pinned beside it: a helper the module body can also
+  // reach is a path the gate really reads, and must survive.
+  const helperFixtures = [
+    "const REAL = 'packages/runtime/src';",
+    'function makeFixture(root) {',
+    "  write(root, 'packages/fixture-only/one.ts');",
+    '}',
+    'function shared() {',
+    "  return 'packages/shared/src';",
+    '}',
+    'function unreferenced() {',
+    "  return 'packages/dead/src';",
+    '}',
+    'export function alsoExported() {',
+    "  return 'packages/exported/src';",
+    '}',
+    'function selfTest() {',
+    '  makeFixture(tmp);',
+    '  shared();',
+    '  alsoExported();',
+    '}',
+    'function run() {',
+    '  return shared();',
+    '}',
+    'run();',
+  ].join('\n');
+  const helperHints = extractWatchHints(helperFixtures);
+  t(
+    'a fixture literal in a helper only the self-test calls is not a hint',
+    !helperHints.includes('packages/fixture-only/one.ts'),
+  );
+  t('…but a helper the module body also reaches keeps its literal', helperHints.includes('packages/shared/src'));
+  t('…and a declaration nothing references at all is left alone', helperHints.includes('packages/dead/src'));
+  t('…and an exported helper is reachable from outside this file, so it stays', helperHints.includes('packages/exported/src'));
+  t('the module body around them still hints', helperHints.includes('packages/runtime/src'));
+
+  // Transitive, and through a signature that carries braces. Counting the
+  // SIGNATURE's braces closes the body before it opens — the mask then covers
+  // 29 characters and reports success, which is how
+  // `function makeSource(root, name, { branch = 'main', … } = {})` reads.
+  const transitiveHelpers = [
+    'function writeOne(root, rel) {',
+    "  return rel === 'packages/leaf/fixture.ts';",
+    '}',
+    'function buildTree(root, { depth = 0 } = {}) {',
+    "  writeOne(root, 'packages/branch/fixture.ts');",
+    '}',
+    'function selfTest() {',
+    '  buildTree(root);',
+    '}',
+  ].join('\n');
+  const transitiveHints = extractWatchHints(transitiveHelpers);
+  t('a helper reached only THROUGH another helper is masked too', !transitiveHints.includes('packages/leaf/fixture.ts'));
+  t(
+    'a destructured default in the signature does not end the body early',
+    !transitiveHints.includes('packages/branch/fixture.ts'),
+  );
+
+  // A population DECLARED for this very scanner is referenced by no executing
+  // code — being unreferenced is what such a declaration IS. Extending the mask
+  // to value declarations was implemented and REFUSED on this evidence: over
+  // the 204 scripts this derivation scans it took 175 hints from 36 files
+  // instead of 104 from 9, and the 71 extra were the declared populations of
+  // eight gates (`ROOT_DIR_WATCH_HINTS` and its spellings).
+  const declaredPopulation = [
+    "const ROOT_DIR_WATCH_HINTS = ['packages/drivers/**'];",
+    'function selfTest() {',
+    '  return ROOT_DIR_WATCH_HINTS;',
+    '}',
+  ].join('\n');
+  t(
+    'a declaration constant only the self-test names is still a declaration',
+    extractWatchHints(declaredPopulation).includes('packages/drivers/**'),
+  );
+
+  // `${…}` is CODE, and reading it as string text is not academic: the live
+  // specimen names its own path only from inside template literals, so a scan
+  // blind to interpolations finds that constant unreferenced and masks the one
+  // hint the file really declares.
+  const interpolatedReference = [
+    'function banner() {',
+    "  return 'scripts/pm/thing.mjs';",
+    '}',
+    'function usage() {',
+    '  return `node ${banner()} --help`;',
+    '}',
+    'function selfTest() {',
+    '  banner();',
+    '}',
+    'usage();',
+  ].join('\n');
+  t(
+    'a reference from inside a template interpolation keeps a helper alive',
+    extractWatchHints(interpolatedReference).includes('scripts/pm/thing.mjs'),
+  );
+
+  // The specimen itself, on the live tree rather than in a fixture — both
+  // directions, so a future edit that deletes the file or empties its
+  // declaration cannot leave this green by vacuity.
+  const rehearsalPath = 'scripts/pm/release-rehearsal-clone.mjs';
+  const rehearsalAbs = join(ROOT, rehearsalPath);
+  t('the fixture-in-helper specimen is still on the tree', existsSync(rehearsalAbs));
+  if (existsSync(rehearsalAbs)) {
+    const rehearsalHints = extractWatchHints(readFileSync(rehearsalAbs, 'utf8'), rehearsalPath);
+    t(
+      'the fixture changesets it commits are not hints',
+      !rehearsalHints.some((h) => /^\.changeset\/(one|two)\.md$/.test(h)),
+    );
+    t('…while the population it really declares survives', rehearsalHints.includes('.changeset/*.md'));
+    t('…and so does its own path', rehearsalHints.includes(rehearsalPath));
+  }
   // Module-relative spellings: `new URL('../../x', import.meta.url)` is how
   // these scripts name a repo path, and the leading segments are the script's
   // own depth, not part of what it watches.
@@ -11323,7 +11943,7 @@ function selfTest() {
   const inheriting = [...liveDiscovery.byCheck].filter(([, e]) => (e.hintOrigin?.size ?? 0) > 0);
   const inheritedHints = inheriting.reduce((n, [, e]) => n + e.hintOrigin.size, 0);
   t(
-    `the live tree inherits hints through imports at all (${inheriting.length} famil(ies), ${inheritedHints} hint(s):` +
+    `the live tree inherits hints through a FOLLOWED program at all (${inheriting.length} famil(ies), ${inheritedHints} hint(s):` +
       ` ${inheriting.map(([c, e]) => `${c} +${e.hintOrigin.size}`).join(', ') || 'none'})`,
     inheriting.length > 0,
   );
@@ -11341,10 +11961,18 @@ function selfTest() {
         if (liveGateFiles.has(mod) || direct.includes(mod)) continue;
         direct.push(mod);
       }
+      // The second followed edge (#13511), reconstructed here for the same
+      // reason as the first: the invariant is "own PLUS what the gate reaches",
+      // and a reconstruction that models only one edge stops describing the
+      // derivation the moment the other one fires.
+      for (const ran of spawnedProgramTargets(f, source, (x) => liveTree.files.has(x))) {
+        if (liveGateFiles.has(ran) || direct.includes(ran)) continue;
+        direct.push(ran);
+      }
     }
-    // A `--self-test` family follows no import (#11404), so its expectation is
-    // its own hints and nothing else. Reconstructed from the same `selfTest`
-    // flag `discoverFamilies` reads, never from a list here.
+    // A `--self-test` family follows NEITHER edge (#11404, #13511), so its
+    // expectation is its own hints and nothing else. Reconstructed from the
+    // same `selfTest` flag `discoverFamilies` reads, never from a list here.
     const expected = new Set(
       entry.selfTest ? own : [...own, ...direct.flatMap(liveModuleHints)],
     );
@@ -11358,7 +11986,8 @@ function selfTest() {
   }
   t(
     "a family's hints are exactly those of the scripts its COMMAND names PLUS those of the first-party modules" +
-      ` those scripts import — so a shared enumerator CAN carry a population declaration for its callers (off: ${offReconstruction.join(', ') || 'none'})`,
+      ' those scripts import AND the in-tree programs they run — so a shared enumerator CAN carry a population' +
+      ` declaration for its callers (off: ${offReconstruction.join(', ') || 'none'})`,
     offReconstruction.length === 0,
   );
   t(
@@ -11415,6 +12044,10 @@ function selfTest() {
     .flatMap(([, entry]) => [...entry.hintOrigin].map(([hint, mod]) => [entry, hint, mod]))
     .find(
       ([entry, hint]) =>
+        // IMPORT-edge only. The run edge (#13511) renders a label of its own and
+        // is pinned in its own section below; letting the find drift onto it
+        // would silently turn this case into a test of the other edge.
+        entry.hintEdge?.get(hint) !== 'run' &&
         !(entry.files ?? []).some((f) => hintCovers(f, hint)) &&
         !coveringTrigger(entry, hint) &&
         !coveringJobFilter(entry, hint) &&
@@ -11555,6 +12188,195 @@ function selfTest() {
     `the program-text restriction is not vacuous: ${dataReads.length} anchored read(s) of tracked DATA are refused` +
       ` (${dataReads.slice(0, 4).join(' · ')}${dataReads.length > 4 ? ` · +${dataReads.length - 4} more` : ''})`,
     dataReads.length > 0 && dataReads.every((d) => !readEdges.some(([c, r]) => `${c} <- ${r}` === d)),
+  );
+
+  // ── The PROGRAM a gate RUNS (#13511) ──────────────────────────────────────
+  //
+  // The third of the three spellings the section above names — "stage it,
+  // execute it, assert on it" — and the one nothing recognised. Its live
+  // instance is this card's: `check:pm-dispatch-gates` RUNS this very tool, and
+  // running it reads every workflow file in the tree, but the derivation scored
+  // that family `silent` for a workflows-only diff. A dev derived with the tool,
+  // ran every family it named green, and reddened `Lint & Repo Gates` on the one
+  // gate that judges the file the PR added.
+  //
+  // ⛔ Every case below pins the FAMILY BEING PRESENT FOR THE SURFACE, never
+  // that a derivation ran. The defect does not crash and does not report
+  // nothing: it hands a dev a coherent, plausible, INCOMPLETE list, and every
+  // "it derived something" assertion passes straight through it.
+  const runFixture = [
+    "const ROOT = new URL('..', import.meta.url).pathname;", // the fixture sits one level down, so ONE hop up is the root
+    "const TOOL = 'scripts/pm/dispatch-gates.mjs';",
+    "const r1 = spawnSync(process.execPath, [join(ROOT, TOOL), '--self-test'], { stdio: 'inherit' });", // followed: argv array, component NAMED
+    "const r2 = execFileSync('node', [join(ROOT, 'scripts/invoked-as.mjs')]);", // followed: component written out
+    "const r3 = spawnSync('git', ['ls-files'], { cwd: ROOT });", // a program that is not in this tree
+    'const r4 = execSync(`pnpm -s ${script}`);', // shell form: a command STRING, never scanned
+    "const r5 = spawnSync(process.execPath, [join(ROOT, 'package.json')]);", // tracked, but not program text
+    "const r6 = spawnSync(process.execPath, [join(ROOT, 'scripts/does-not-exist.mjs')]);", // resolves, untracked
+    "const r7 = spawnSync(process.execPath, [join(ROOT, 'scripts/fixture.mjs')]);", // itself: the identity key owns it
+    'const r8 = spawnSync(process.execPath, args);', // argv is a binding, not an array literal
+    "let PICK = 'scripts/invoked-as.mjs';", // a REBOUND component has no single reading
+    "PICK = 'scripts/js-comment-mask.mjs';",
+    'const r9 = spawnSync(process.execPath, [join(ROOT, PICK)]);',
+    "// spawnSync(process.execPath, [join(ROOT, 'scripts/check-nul-bytes.mjs')]);", // a comment
+    'const src = "spawnSync(process.execPath, [join(ROOT, \'scripts/check-role-word.mjs\')])";', // inside a string
+  ].join('\n');
+  const runFixtureOut = spawnedProgramTargets('scripts/fixture.mjs', runFixture, (f) => liveTree.files.has(f));
+  t(
+    'the run scan follows an argv-array spawn whose program is a NAMED constant and one written out, and refuses the' +
+      ' shell form, data, untracked, self, a bound argv, a rebound component, commented and string-literal spellings',
+    runFixtureOut.join(' · ') === 'scripts/pm/dispatch-gates.mjs · scripts/invoked-as.mjs',
+    runFixtureOut.join(' · '),
+  );
+  // The hop READS a binding; it never invents one. The fixture above already
+  // isolates the hop itself — r1 names its program through a constant and r2
+  // writes it out, so removing the hop reds that case while leaving r2 — and
+  // this one pins the refusal side, which no count can show.
+  t(
+    'and an unbound component name is refused rather than guessed at',
+    spawnedProgramTargets(
+      'scripts/fixture.mjs',
+      "const ROOT = new URL('..', import.meta.url).pathname;\nspawnSync(process.execPath, [join(ROOT, NOT_BOUND_HERE)]);",
+      (f) => liveTree.files.has(f),
+    ).length === 0,
+  );
+  t(
+    'a spawn written inside a self-test body is a fixture the self-test drives, not the gate reaching a program',
+    spawnedProgramTargets(
+      'scripts/fixture.mjs',
+      [
+        "const ROOT = new URL('..', import.meta.url).pathname;",
+        'function selfTest() {',
+        "  spawnSync(process.execPath, [join(ROOT, 'scripts/invoked-as.mjs')]);",
+        '}',
+      ].join('\n'),
+      (f) => liveTree.files.has(f),
+    ).length === 0,
+  );
+
+  // ── LIVE: the card's own specimen, by name, on the surface that missed ─────
+  const PM_GATE = 'check:pm-dispatch-gates';
+  const pmEntry = liveDiscovery.byCheck.get(PM_GATE);
+  const PM_TOOL = 'scripts/pm/dispatch-gates.mjs';
+  const liveWorkflowFiles = [...liveTree.files].filter((f) => /^\.github\/workflows\/[^/]+\.ya?ml$/.test(f)).sort();
+  t(
+    `the tree has workflow files to derive for (${liveWorkflowFiles.length})`,
+    liveWorkflowFiles.length > 0 && Boolean(pmEntry),
+  );
+  t(
+    `${PM_GATE} reaches the tool it runs over the RUN edge (runs: ${(pmEntry?.runs ?? []).join(' · ') || 'none'})`,
+    (pmEntry?.runs ?? []).includes(PM_TOOL),
+  );
+  // ⭐ The regression itself. Not "a family matched" and not "the derivation
+  // produced 18 rows": THIS family, MATCHED, for a workflow file.
+  const pmSurface = liveWorkflowFiles.slice(0, 1);
+  t(
+    `⭐ a workflows-only surface derives ${PM_GATE} — the gate whose run reads that surface` +
+      ` (${classifyEntry(pmEntry, pmSurface).verdict} for ${pmSurface[0]})`,
+    classifyEntry(pmEntry, pmSurface).verdict === 'matched',
+  );
+  t(
+    'and for EVERY workflow file in the tree, not just the one sampled',
+    liveWorkflowFiles.every((f) => classifyEntry(pmEntry, [f]).verdict === 'matched'),
+  );
+  t(
+    `and it is derived RUNNABLY, which is what a dev pastes (${runnableInvocation(pmEntry)})`,
+    runnableInvocation(pmEntry) === 'pnpm check:pm-dispatch-gates',
+  );
+  t(
+    `and the via column names the program it runs, not a population this gate declares` +
+      ` (${coveringKey(pmEntry, pmSurface[0])?.via})`,
+    coveringKey(pmEntry, pmSurface[0])?.key === '.github/workflows' &&
+      coveringKey(pmEntry, pmSurface[0])?.via === `gate source via the program it runs, ${PM_TOOL}`,
+  );
+  // …and green for the RIGHT reason. Without this half the case above passes on
+  // any key at all, including one the gate already had — which is exactly the
+  // reading that would let someone "fix" this by widening an unrelated literal.
+  t(
+    'and no hint this gate spells ITSELF covers a workflow file, which is why the edge was needed',
+    pmEntry.hints.filter((h) => !pmEntry.hintOrigin.has(h)).every((h) => !liveWorkflowFiles.some((f) => hintCovers(h, f))) &&
+      !(pmEntry.files ?? []).some((f) => liveWorkflowFiles.includes(f)) &&
+      !coveringTrigger(pmEntry, pmSurface[0]) &&
+      !coveringJobFilter(pmEntry, pmSurface[0]),
+  );
+  // The narrowing on THIS edge, proven non-vacuous in both directions: the tool
+  // really does spell more than a follower inherits, and what it does inherit
+  // really does still reach every workflow file. A declaration that took the
+  // real population with it would read exactly like a working one — fewer
+  // pairs, every gate green.
+  t(
+    `the run target spells ${ownHints.length} literal(s) and a follower inherits ${ownPopulation.length} of them,` +
+      ' so the declaration narrows rather than waves through',
+    ownHints.length > ownPopulation.length && ownPopulation.length > 0,
+  );
+  t(
+    'and the narrowing is not a coverage cut — every workflow file stays reachable through what is inherited',
+    liveWorkflowFiles.every((f) => ownPopulation.some((h) => hintCovers(h, f))),
+  );
+
+  // Reconstruction: `entry.runs` is what the scan says over the family's own
+  // files, never a list kept here — the same invariant the two edges above hold.
+  const offRuns = [];
+  for (const [check, entry] of liveDiscovery.byCheck) {
+    const expected = [];
+    if (!entry.selfTest) {
+      for (const f of entry.files ?? []) {
+        if (!existsSync(join(ROOT, f))) continue;
+        for (const r of spawnedProgramTargets(f, liveSource(f), (x) => liveTree.files.has(x))) {
+          if (!liveGateFiles.has(r) && !expected.includes(r)) expected.push(r);
+        }
+      }
+    }
+    if (expected.join(' · ') !== (entry.runs ?? []).join(' · ')) offRuns.push(check);
+  }
+  t(
+    `a family's run targets are exactly what the scan finds in the scripts its COMMAND names (off: ${offRuns.join(', ') || 'none'})`,
+    offRuns.length === 0,
+  );
+
+  // The gate-file exclusion, on THIS edge, priced rather than assumed. It is
+  // the same refusal the import follow makes and it is live here: two families
+  // spawn `scripts/docs-audit/affected-docs.mjs`, which IS a discovered gate
+  // file, so its population is left to its own family instead of inherited
+  // twice under weaker provenance.
+  const runGateEdges = [];
+  for (const [check, entry] of liveDiscovery.byCheck) {
+    for (const f of entry.files ?? []) {
+      if (!existsSync(join(ROOT, f))) continue;
+      for (const r of spawnedProgramTargets(f, liveSource(f), (x) => liveTree.files.has(x))) {
+        if (liveGateFiles.has(r) && !(entry.files ?? []).includes(r)) runGateEdges.push([check, r]);
+      }
+    }
+  }
+  t(
+    `the live tree HAS a gate spawning another gate's file, so the exclusion is not vacuous (${runGateEdges.length}:` +
+      ` ${runGateEdges.map(([c, r]) => `${c} -> ${r}`).join(' · ') || 'none'})`,
+    runGateEdges.length > 0,
+  );
+  t(
+    'and not one of those edges is followed — a gate script is left to its OWN family, exactly as on the import edge',
+    runGateEdges.every(([check, r]) => !(liveDiscovery.byCheck.get(check)?.runs ?? []).includes(r)),
+  );
+
+  // Additive BY CONSTRUCTION, the claim the wiring comment makes: the run edge
+  // appends AFTER own and imported hints, so it can only fill a hole. Both
+  // halves again — "nothing was re-attributed" is satisfied perfectly by a
+  // derivation that answers nothing at all.
+  const runInherited = [...liveDiscovery.byCheck]
+    .flatMap(([check, e]) => [...(e.hintEdge ?? new Map())].filter(([, kind]) => kind === 'run').map(([h]) => [check, e, h]));
+  t(
+    `the run edge contributes ${runInherited.length} inherited hint(s), so the cases below are not vacuous` +
+      ` (${runInherited.map(([c, , h]) => `${c} <- ${h}`).join(' · ') || 'none'})`,
+    runInherited.length > 0,
+  );
+  const runReattributed = [];
+  for (const [check, entry, hint] of runInherited) {
+    const ownAnswer = (entry.hints ?? []).find((h) => !entry.hintOrigin.has(h) && hintCovers(h, hint));
+    if (ownAnswer) runReattributed.push(`${check}: ${hint} was already answered by ${ownAnswer}`);
+  }
+  t(
+    `and no run-edge hint duplicates a population the gate already declared (${runReattributed.join(' | ') || 'none'})`,
+    runReattributed.length === 0,
   );
 
   // ── A followed module's JOIN BASE is not a population (#12500) ─────────────
@@ -13352,10 +14174,16 @@ const invokedDirectly = isEntrypoint(import.meta.url);
  * running its own `--self-test` fired all of THIS file's assertions inside it,
  * printing a second summary line and putting an unrelated file's failures on
  * the importer's exit code. That is the same defect PR #9897 fixed in
- * `check-governed-merges.mjs` at 77 assertions; this file carries it at 334. A
- * self-test is a mode of the file being RUN, never a side effect of importing
- * it, and a shared module that exits on import is a shared module nobody can
- * share.
+ * `check-governed-merges.mjs`, which carried 77 assertions at that PR; this
+ * file carries it at more than ten times that many. That multiple is a FLOOR,
+ * and it is written as one on purpose. The live figure is whatever
+ * `--self-test` prints from `cases.length`; it moves on most edits to this
+ * file, and over this file's history it has never once gone down — so a floor
+ * stays true where a reading rots. A reading stood here before and had drifted
+ * by more than a factor of three before anyone repaired it, so do not
+ * "helpfully" refresh this back into one. A self-test is a mode of the file
+ * being RUN, never a side effect of importing it, and a shared module that
+ * exits on import is a shared module nobody can share.
  *
  * The guard is ONE site wrapping the whole chain, not a condition repeated per
  * branch: a branch added inside it later cannot forget to carry it.

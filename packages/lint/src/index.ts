@@ -206,6 +206,7 @@ export {
   validateFormLayout,
   FORM_FIELD_UNKNOWN,
   FORM_COLSPAN_ABSOLUTE,
+  FORM_SECTION_GROUP_UNKNOWN,
 } from './validate-form-layout.js';
 export type { FormLayoutFinding, FormLayoutSeverity } from './validate-form-layout.js';
 
@@ -429,8 +430,20 @@ export {
   validatePageFieldBindings,
   PAGE_FIELD_UNKNOWN,
   PAGE_FIELD_UNPROVISIONED,
+  PAGE_SECTION_GROUP_UNKNOWN,
 } from './validate-page-field-bindings.js';
 export type { PageFieldFinding, PageFieldSeverity } from './validate-page-field-bindings.js';
+
+// [#13855] The shared field-group reference half both layout surfaces resolve
+// against — exported so an out-of-repo consumer (cloud graph-lint, the AI
+// authoring path) can ask the same question of the same index rather than
+// rebuilding it from `objects[].fieldGroups` by hand.
+export {
+  indexObjectFieldGroups,
+  sectionGroupRefs,
+  checkSectionGroupRefs,
+} from './object-field-groups.js';
+export type { SectionGroupRef, SectionGroupFinding } from './object-field-groups.js';
 
 export {
   validateComponentProps,

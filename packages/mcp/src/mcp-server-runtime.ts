@@ -63,9 +63,36 @@ interface ObjectDef {
  * Every name here is a tool the cloud AI runtime registers statically
  * (`PLATFORM_TOOLS_BY_PACKAGE` in `@objectstack/spec/system`) and hands to
  * this bridge through the AI service's `ToolRegistry` carrying no
- * `requiresConfirmation`. A sibling pin holds both sets to that registry, so
- * the lists cannot drift back into folklore: a name the platform does not
- * register is a name this bridge knows nothing about.
+ * `requiresConfirmation`. Two sibling pins hold both sets to that registry —
+ * one per direction — so the lists cannot drift back into folklore: a name the
+ * platform does not register is a name this bridge knows nothing about.
+ *
+ * WHY BOTH SETS ARE EXPORTED, AND FOR WHAT. The older pin (`no tool outside
+ * PLATFORM_PROVIDED_TOOL_NAMES receives a hint it did not declare`) bridges
+ * `[...PLATFORM_PROVIDED_TOOL_NAMES]` and asserts every annotated name is in
+ * it. Its ITERATION SOURCE is the registry, so it can only ever see
+ * local-has → registry-lacks. The reverse — a name WITHDRAWN from
+ * `PLATFORM_TOOLS_BY_PACKAGE` while it stays in a set here — is not among the
+ * tools that pin bridges at all: nothing drives it, nothing is annotated, and
+ * the case stays green over exactly the drift it is named for.
+ *
+ * ⚠️ That silent direction is the dangerous one, and NOT because a tool the
+ * platform no longer registers keeps a hint. These sets annotate BY NAME. Once
+ * a name leaves the registry, a PLUGIN registering a tool of that name
+ * inherits a `readOnlyHint` it never declared — a read-only promise the plugin
+ * may not honour, handed to it by a stale literal in this file. So the second
+ * pin iterates the thing that can drift, which is these two sets, and that
+ * requires reaching them from outside this module. They are exported for that
+ * and are deliberately NOT re-exported from `index.ts`: the package's
+ * published surface is unchanged, and a new name-keyed set added here must be
+ * exported too or the pin's coverage guard goes red.
+ *
+ * ⛔ Do not "repair" this by filtering the literals through
+ * `PLATFORM_PROVIDED_TOOL_NAMES` at construction. That absorbs the drift
+ * instead of reporting it — the withdrawn name would simply stop annotating,
+ * nothing would go red, and the folklore would stay in this file forever. The
+ * pin exists to make a withdrawn name LOUD, in CI, at the one moment somebody
+ * can still delete it.
  *
  * ⛔ What the fallback must never do again is answer for tools it does NOT
  * contain. These two sets used to be the ONLY source of both hints, so the
@@ -80,7 +107,7 @@ interface ObjectDef {
  * registers it — annotated `readOnlyHint: true` — at its own registration site
  * in `mcp-http-tools.ts`, and never reaches this path.
  */
-const PLATFORM_READ_ONLY_TOOL_NAMES = new Set([
+export const PLATFORM_READ_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set([
   'list_objects',
   'describe_object',
   'query_records',
@@ -90,9 +117,10 @@ const PLATFORM_READ_ONLY_TOOL_NAMES = new Set([
 
 /**
  * The destructive half of the same platform-name fallback — see
- * {@link PLATFORM_READ_ONLY_TOOL_NAMES} for what it is and is not for.
+ * {@link PLATFORM_READ_ONLY_TOOL_NAMES} for what it is and is not for, and for
+ * why both halves are exported to a test rather than kept private.
  */
-const PLATFORM_DESTRUCTIVE_TOOL_NAMES = new Set([
+export const PLATFORM_DESTRUCTIVE_TOOL_NAMES: ReadonlySet<string> = new Set([
   'delete_field',
 ]);
 

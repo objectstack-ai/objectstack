@@ -334,10 +334,17 @@ interface MemoryTransaction {
  * — which made a caller's retry of the same array unsafe for reasons that had
  * nothing to do with constraints.
  *
- * ⚠️ That is a statement about those TWO doors, not about batches in general.
- * {@link bulkUpdate} and {@link bulkDelete} are still `Promise.all(map(...))`
- * and still leave the rows applied before a refusal standing — #13435. Do not
- * read the paragraph above as covering them.
+ * Since #13435 {@link bulkUpdate} and {@link bulkDelete} carry the same
+ * discipline, so all FOUR batch doors of this driver now agree that a batch
+ * is atomic. `bulkUpdate` builds and checks every pending row's post-image —
+ * each id keeps its OWN patch, so the check is against the untouched rows plus
+ * every other pending row's post-image, exceptId'd against its own id — before
+ * writing any of them; `bulkDelete` resolves every id to a table index first
+ * (refusing the whole batch under `strictMode` before touching the table if
+ * one is missing) and only then splices. Both used to be `Promise.all(map(...))`
+ * over `update`/`delete`, which write synchronously, so a refusal left every
+ * row processed before it mutated — the same defect #13340 measured on
+ * `bulkCreate`, on the two doors that stayed the pre-#13340 shape.
  *
  * Everything else is still unenforced. {@link syncSchema} allocates an array,
  * indexes temporal fields and records those unique constraints — and nothing
@@ -865,17 +872,155 @@ export class InMemoryDriver implements IDataDriver {
   }
 
   // Compatibility aliases
+  /**
+   * [#13435] All-or-nothing, generalized from {@link updateMany}'s posture
+   * (#13197) to a PER-ID patch. Used to be
+   * `Promise.all(updates.map(u => this.update(object, u.id, u.data, options)))`,
+   * and `update` writes into the table synchronously and calls
+   * {@link assertUnique}, so a mid-batch refusal left every row processed
+   * BEFORE it mutated — the same defect #13340 measured on `bulkCreate`.
+   *
+   * `updateMany` has no per-row pre-image to exclude (one shared `data` stamped
+   * onto every matched row); `bulkCreate` has no pre-image at all (new rows).
+   * `bulkUpdate` is neither: each id carries its OWN patch, so what transfers
+   * is the DISCIPLINE — build and check every pending row's post-image before
+   * mutating any of them — not the shape. The projected row set for each
+   * pending row's check is the untouched rows (`settled`, never touched by
+   * this batch) plus every ALREADY-VALIDATED pending row's post-image; a
+   * not-yet-processed row of the same batch needs no look-ahead entry, because
+   * whichever of two colliding rows is checked SECOND will always find the
+   * first already sitting in `pending` — the same incremental discipline
+   * `bulkCreate`/`updateMany` use, generalized to per-row patches rather than
+   * one shared patch or no pre-image at all.
+   *
+   * A missing id follows `update`'s OWN existing contract — never a third
+   * posture: refuse the WHOLE batch (before any row is touched) when
+   * `strictMode` is on, skip it when it is off. The returned array holds
+   * only the rows actually updated, in `updates` order, with no placeholder
+   * for a skipped id — `IDataDriver.bulkUpdate` is declared
+   * `Promise<Record<string, unknown>[]>`, no `null` member, and `SqlDriver`'s
+   * own `bulkUpdate` (`packages/drivers/driver-sql`) already resolves a
+   * missing id the same way (`if (updated) results.push(updated)`); this
+   * follows that established convention rather than inventing a second one.
+   */
   async bulkUpdate(object: string, updates: { id: string | number, data: Record<string, any> }[], options?: DriverOptions) {
     this.logger.debug('BulkUpdate operation', { object, count: updates.length });
-    const results = await Promise.all(updates.map(u => this.update(object, u.id, u.data, options)));
-    this.logger.debug('BulkUpdate completed', { object, count: results.length });
-    return results;
+
+    const table = this.getTable(object);
+
+    // [#13911] Resolve every id to its table row FIRST, then draw the touched
+    // set from the RESOLVED rows' OWN ids — never from caller input. Ids are
+    // resolved with a loose `==` (matching `update`, one method up), but a
+    // `Set` membership test is always strict, so a caller naming a stored `1`
+    // as `'1'` — which `IDataDriver.bulkUpdate` explicitly allows, `id` being
+    // `string | number` — used to satisfy the resolving lookup while failing
+    // the `settled` one. That row was then updated AND left in `settled`
+    // carrying its PRE-image, so it faced the uniqueness check twice and a
+    // batch merely HANDING a unique value from one row to another was refused
+    // with a false `UNIQUE_VIOLATION`. Both lookups now read the same stored
+    // value, so they cannot disagree — the property `updateMany` gets for free
+    // by drawing its `targetIds` from table rows.
+    const resolvedIndexes = updates.map((u) => table.findIndex((r) => r.id == u.id));
+    const touchedIds = new Set(
+      resolvedIndexes.filter((index) => index !== -1).map((index) => table[index].id),
+    );
+    const settled = table.filter((r) => !touchedIds.has(r.id));
+
+    const perUpdate: Array<{ index: number; row: Record<string, any> } | null> = [];
+    const pending: Record<string, any>[] = [];
+
+    // Indexed rather than `for…of`, to read each id's ALREADY-resolved index:
+    // resolving a second time here is what let the two lookups drift apart.
+    for (let position = 0; position < updates.length; position++) {
+      const u = updates[position];
+      const index = resolvedIndexes[position];
+      if (index === -1) {
+        if (this.config.strictMode) {
+          this.logger.warn('Record not found for bulk update', { object, id: u.id });
+          throw new Error(`Record with ID ${u.id} not found in ${object}`);
+        }
+        perUpdate.push(null);
+        continue;
+      }
+
+      const updatedRecord = this.toStoredRecord(object, {
+        ...table[index],
+        ...u.data,
+        id: table[index].id, // Preserve original ID
+        created_at: table[index].created_at, // Preserve created_at
+        updated_at: new Date().toISOString(),
+      });
+
+      // [#13435] Checked against the OTHER rows of the eventual write — settled
+      // rows plus every pending row already validated in this loop — and
+      // `exceptId` still excludes this row from colliding with itself, exactly
+      // as `update`'s own single-row check does.
+      this.assertUnique(object, updatedRecord, table[index].id, [...settled, ...pending]);
+
+      pending.push(updatedRecord);
+      perUpdate.push({ index, row: updatedRecord });
+    }
+
+    // Every pending row is CHECKED at this point — nothing above has written
+    // to `table` yet, so a refusal anywhere in the loop left it untouched.
+    // Only now do the validated rows land, all at once.
+    for (const entry of perUpdate) {
+      if (entry) table[entry.index] = entry.row;
+    }
+
+    if (pending.length > 0) this.markDirty();
+    this.logger.debug('BulkUpdate completed', { object, count: pending.length });
+    // `pending` already holds only the rows that were actually resolved and
+    // written — a skipped (non-strict missing) id never entered it — so this
+    // is `updates` order with no placeholder for the ones that were skipped.
+    return pending.map((row) => ({ ...row }));
   }
 
+  /**
+   * [#13435] All-or-nothing under `strictMode`. Used to be
+   * `Promise.all(ids.map(id => this.delete(object, id, options)))`, and
+   * `delete` splices out of the table synchronously and throws on a missing id
+   * when `strictMode` is on, so a refusal partway through left every id
+   * processed BEFORE it already removed — the same defect #13340 measured on
+   * `bulkCreate`, on the delete door.
+   *
+   * A missing id follows `delete`'s OWN existing contract — never a third
+   * posture: refuse the WHOLE batch (before any row is removed) when
+   * `strictMode` is on — `history-cleanup.ts` and `lifecycle-service.ts` both
+   * call this with id lists that can contain already-gone rows, so refusing on
+   * a missing id would break those live callers. `bulkDelete` still returns
+   * `void`: no current caller reads a per-row outcome, and widening the return
+   * type is out of scope for #13435.
+   */
   async bulkDelete(object: string, ids: (string | number)[], options?: DriverOptions) {
     this.logger.debug('BulkDelete operation', { object, count: ids.length });
-    await Promise.all(ids.map(id => this.delete(object, id, options)));
-    this.logger.debug('BulkDelete completed', { object, count: ids.length });
+
+    const table = this.getTable(object);
+
+    // Resolve every id to a table index BEFORE removing any of them, so a
+    // strict-mode refusal on a later id cannot leave an earlier one already
+    // spliced out. A `Set` absorbs a duplicate id naming the same index twice.
+    const indices = new Set<number>();
+    for (const id of ids) {
+      const index = table.findIndex((r) => r.id == id);
+      if (index === -1) {
+        if (this.config.strictMode) {
+          throw new Error(`Record with ID ${id} not found in ${object}`);
+        }
+        this.logger.warn('Record not found for bulk deletion', { object, id });
+        continue;
+      }
+      indices.add(index);
+    }
+
+    // Highest index first: splicing low-to-high would shift every later index
+    // out from under itself.
+    for (const index of [...indices].sort((a, b) => b - a)) {
+      table.splice(index, 1);
+    }
+
+    if (indices.size > 0) this.markDirty();
+    this.logger.debug('BulkDelete completed', { object, count: indices.size });
   }
 
   // ===================================

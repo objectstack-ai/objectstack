@@ -56,6 +56,10 @@ import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../share
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
 import { SELECT_OPTION_EDITABILITY_GUIDANCE, VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
+// [#13855] The section → field-group reference form, shared with the
+// `record:details` section shape (component.zod.ts) so one mixing rule serves
+// both layout escape hatches.
+import { SectionGroupKeySchema, sectionGroupReferenceRefinement } from '../shared/section-group-reference';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { ChartTypeSchema } from './chart.zod';
 import { SharingConfigSchema } from './sharing.zod';
@@ -1162,6 +1166,17 @@ export const ListChartConfigSchema = lazySchema(() => strictObject({
 
 /**
  * Calendar Settings
+ *
+ * [#13817] `startDateField` is the ONLY required key — measured against the
+ * one renderer (objectui `plugin-calendar/src/ObjectCalendar.tsx`): an explicit
+ * `titleField` wins when present, and in its absence the event title resolves
+ * through the ADR-0079 record display-name chain (`titleFormat` →
+ * `displayNameField` → type-aware derivation → `"Untitled"`). Requiring
+ * `titleField` here would demand more than the renderer reads — the exact
+ * shape the #13748 ruling forbids ("do not require more than the renderer
+ * actually needs"). The date has no such fallback: without `startDateField`
+ * there is nothing truthful to place events by, which is what
+ * {@link checkListViewCalendarVisualization} enforces cross-field.
  */
 export const CalendarConfigSchema = lazySchema(() => strictObject({
   surface: 'this calendar configuration',
@@ -1169,7 +1184,7 @@ export const CalendarConfigSchema = lazySchema(() => strictObject({
 }, {
   startDateField: z.string().describe('Field providing the event start date/time'),
   endDateField: z.string().optional().describe('Field providing the event end date/time (defaults to a single-day event)'),
-  titleField: z.string().describe('Field displayed as the event title'),
+  titleField: z.string().optional().describe('Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
   colorField: z.string().optional().describe('Field whose value determines the event color'),
 }));
 
@@ -1515,6 +1530,56 @@ function checkListViewPageMount(
   }
   if (isPageMount && Array.isArray(view.columns) && view.columns.length > 0) {
     ctx.addIssue({ code: 'custom', path: ['columns'], message: VIEW_PAGE_MOUNT_HAS_COLUMNS });
+  }
+}
+
+const VIEW_CALENDAR_ALLOWED_NEEDS_START_DATE =
+  "`appearance.allowedVisualizations` includes 'calendar', so end users can switch this view to a "
+  + 'calendar — but no `calendar:` block says which field supplies the event date. There is no '
+  + 'truthful fallback: a date guessed by the renderer lands every record without that field on '
+  + '"today", a plausible-looking, fully wrong screen. Declare `calendar: { startDateField: '
+  + "'<date_field>' }` — only `startDateField` is required; the event title falls back to the "
+  + "record display name (ADR-0079) — or remove 'calendar' from `allowedVisualizations`.";
+
+/**
+ * [#13817] The `appearance.allowedVisualizations` ⇄ `calendar` binding check —
+ * ruled on #13748 (2026-08-31, option A "fix both halves"; this is the spec
+ * half, objectui#7029 is the runtime half).
+ *
+ * A view declaring `appearance.allowedVisualizations: [... 'calendar']` with no
+ * `calendar:` block used to parse clean; the switcher then rendered a clickable
+ * calendar toggle, objectui invented `startDateField: 'due_date'`, and every
+ * record without that field piled onto "today" (measured on hotcrm pinned at
+ * `@objectstack/* 17.1.0` — all 9 leave requests on one cell). The renderer's
+ * own refusal screen was unreachable because the synthesized config always
+ * looked complete. Loud-over-silent: refuse at parse, naming the missing key.
+ *
+ * Only the block's `startDateField` is load-bearing — see the measurement note
+ * on {@link CalendarConfigSchema} (it is that schema's one required key, so
+ * requiring the block IS requiring `calendar.startDateField` and nothing more).
+ *
+ * ⚠️ Scope: `calendar` only — the measured defect. Whether `timeline` or
+ * another visualization has the same shape is a separate finding to measure
+ * first, not a rider here (the #13748 ruling says so in those words).
+ *
+ * Attached with `.superRefine` at the same three doors as
+ * {@link checkListViewPageMount}, for the same zod-4 reason (refinements block
+ * `.omit()`/key-overwriting `.extend()`, so derived shapes re-attach): the
+ * authoring terminal, `objects[].listViews.*`, and the flattened runtime
+ * overlay arm — the door a Studio tenant or an MCP/AI author writes through.
+ */
+function checkListViewCalendarVisualization(
+  view: { appearance?: { allowedVisualizations?: unknown } | null; calendar?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const allowed = view.appearance?.allowedVisualizations;
+  if (!Array.isArray(allowed) || !allowed.includes('calendar')) return;
+  if (view.calendar === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['calendar'],
+      message: VIEW_CALENDAR_ALLOWED_NEEDS_START_DATE,
+    });
   }
 }
 
@@ -1870,12 +1935,15 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
 
 /**
  * List View Schema (Expanded) — {@link ListViewShapeSchema} plus the
- * `type: 'page'` ⇄ `pageName` binding check. See that shape for why the two are
- * separate bindings, and {@link checkListViewPageMount} for what the check
- * refuses.
+ * `type: 'page'` ⇄ `pageName` binding check and the
+ * `allowedVisualizations` ⇄ `calendar` binding check. See that shape for why
+ * shape and checks are separate bindings, and {@link checkListViewPageMount} /
+ * {@link checkListViewCalendarVisualization} for what each check refuses.
  */
 export const ListViewSchema = lazySchema(() =>
-  ListViewShapeSchema.superRefine(checkListViewPageMount));
+  ListViewShapeSchema
+    .superRefine(checkListViewPageMount)
+    .superRefine(checkListViewCalendarVisualization));
 
 /**
  * [#12868] Form-view select option — {@link SelectOptionSchema} minus the
@@ -2422,6 +2490,16 @@ export const FormSectionSchema = lazySchema(() => strictObject({
   // to rename it in place. The reader can only tell which answer is theirs if
   // the rejection names the shape, so each of the three shapes names itself.
   surface: 'this form section',
+  // [#13855] Both are the author reaching for the field-group reference form
+  // with the word a neighbouring surface uses: the object declares
+  // `fieldGroups`, and a field points back with `group`. Neither is a typo edit
+  // distance reaches. Spread the inherited table first so nothing it carries is
+  // dropped by re-declaring the key.
+  aliases: {
+    ...VISIBILITY_ONLY_STRICT_OPTIONS.aliases,
+    fieldGroup: 'group',
+    groupKey: 'group',
+  },
 }, {
   /**
    * Stable identifier for translation lookup. snake_case convention.
@@ -2502,11 +2580,65 @@ export const FormSectionSchema = lazySchema(() => strictObject({
   pane: z.enum(['primary', 'secondary']).optional().describe(
     "Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'.",
   ),
+  /**
+   * [#13855] Reference a declared field GROUP instead of enumerating members —
+   * the delta form ruled 2026-08-31 (maintainer: 「直接处理b」).
+   *
+   * `{ group: 'contact_info' }` inherits the bound object's `fieldGroups` entry
+   * with that key: its members (every visible field whose `Field.group` points
+   * at it, in field-declaration order) and its own presentation (label,
+   * description, `collapse`, `visibleWhen`, and the drop when the group has no
+   * visible members) all come from `deriveFieldGroupLayout` (ADR-0085 §5). The
+   * section restates none of it — see {@link sectionGroupReferenceRefinement}
+   * for the mixing rule, and for why the keys the group owns are refused beside
+   * `group` rather than given a precedence.
+   *
+   * Existence is NOT a parse question: the key names something on a DIFFERENT
+   * schema, so it follows the `UserFilterFieldSchema.field` precedent — parse
+   * takes any well-formed key, and `form-section-group-unknown`
+   * (`@objectstack/lint`) reports one that resolves to no declared group.
+   *
+   * ⛔ Not on a wizard step — refused by the {@link FormViewSchema} refinement,
+   * for the reason #13704 refused the step keys themselves: a group carries
+   * `visibleWhen` and `collapse`, and a wizard step has no slot for either.
+   */
+  group: SectionGroupKeySchema.optional().describe(
+    'Field group key (snake_case) whose members and presentation this section inherits, from the bound object\'s `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `collapsible`, `collapsed`, `visibleWhen`/`visibleOn`). Not valid on a wizard step. Must name a declared group — checked by reference diagnostics.',
+  ),
+  /**
+   * The section's members, enumerated.
+   *
+   * Optional since #13855 — and optional ONLY in the sense that `group` is the
+   * other way to declare the same fact. A section carrying neither is refused
+   * (see {@link sectionGroupReferenceRefinement}), so no section reaches a
+   * renderer without a member source, which is what the previously-required key
+   * guaranteed.
+   */
   fields: z.array(z.union([
     z.string(), // Legacy: simple field name
     FormFieldSchema, // Enhanced: detailed field config
-  ])),
-}).transform(normalizeVisibleWhen));
+  ])).optional(),
+}).superRefine(sectionGroupReferenceRefinement({
+  surface: 'this form section',
+  // Exactly the keys `deriveFieldGroupLayout` fills from the group. `name` is
+  // in the list because the derived section's `key` IS the group key, which is
+  // already this surface's i18n anchor (`metadataForms.<type>.sections.<name>`)
+  // — a second name would give one section two lookup identities. `visibleOn`
+  // rides along because this refinement runs BEFORE the `.transform` that folds
+  // it onto `visibleWhen`, so the deprecated spelling must be named here or it
+  // would be the one way to smuggle a section-level predicate past the rule.
+  //
+  // NOT in the list, deliberately: `columns` and `pane`. Those are how THIS
+  // form lays the section out and the group declares nothing about them, so
+  // there is no second source to create.
+  derivedKeys: ['name', 'label', 'description', 'visibleWhen', 'visibleOn'],
+  // `collapsible` / `collapsed` carry `.default(false)`, so an authored `false`
+  // is already indistinguishable from the default by the time this runs — the
+  // same asymmetry #13704 records for the wizard step keys, and it costs
+  // nothing: `false` declares exactly what a group with `collapse: 'none'`
+  // delivers. Only `true` declares presentation the group owns.
+  trueOnlyDerivedKeys: ['collapsible', 'collapsed'],
+})).transform(normalizeVisibleWhen));
 
 /**
  * A single form action button (submit / cancel / reset): visibility + label.
@@ -3258,6 +3390,35 @@ export const FormViewSchema = lazySchema(() => strictObject({
             });
           }
         }
+        // [#13855] The field-group REFERENCE form is refused on a wizard step
+        // for the same reason the two refusals above exist, one layer back: a
+        // `fieldGroups` entry carries `visibleWhen` and `collapse`, and
+        // `deriveFieldGroupLayout` passes both through to the derived section.
+        // Accepting `group` here would hand a wizard step exactly the predicate
+        // and collapse state #13704 just finished refusing — reached through
+        // the object's declaration instead of the step's own keys, so the
+        // refusals above would report clean while the behaviour arrived anyway.
+        // The section schema cannot see the group (that is cross-schema), so
+        // the honest answer at parse is to refuse the reference on this form
+        // type, not to guess what the group declares.
+        //
+        // Deliberately the CONSERVATIVE direction: a wizard step whose group
+        // declares neither key is legal metadata this refuses today, and
+        // allowing it later (once the renderer half lands and a ruling covers a
+        // derived predicate on a step) is additive.
+        if (section.group != null) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key, index, 'group'],
+            message:
+              '`group` on a wizard step is refused: a field group carries `visibleWhen` and '
+              + '`collapse`, and `deriveFieldGroupLayout` passes both through to the section it '
+              + 'derives — neither of which a wizard step has a slot for (steps are entered in '
+              + 'array order behind the step gate, and the wizard shows exactly the current step). '
+              + 'Enumerate the step with `fields: [...]`, or use a `simple`/`tabbed` form to '
+              + 'inherit the group.',
+          });
+        }
       }
     });
   }
@@ -3358,11 +3519,13 @@ export const ObjectListViewSchema = lazySchema(() =>
   ListViewShapeSchema.omit({ userFilters: true })
     .extend({ userFilters: ObjectUserFiltersSchema.optional() })
     // Derived from the UNREFINED shape (zod 4 refuses `.omit()` on a refined
-    // object), so the binding check is re-attached here rather than inherited.
-    // Dropping this line would leave `objects[].listViews.*` — the ADR-0047
-    // authoring surface — as the one door where a `page` view with no
-    // `pageName` parses clean.
-    .superRefine(checkListViewPageMount));
+    // object), so the binding checks are re-attached here rather than
+    // inherited. Dropping these lines would leave `objects[].listViews.*` —
+    // the ADR-0047 authoring surface — as the one door where a `page` view
+    // with no `pageName`, or a calendar-enabled view with no `calendar:`
+    // block, parses clean.
+    .superRefine(checkListViewPageMount)
+    .superRefine(checkListViewCalendarVisualization));
 
 /**
  * [#4001/#7741] The wrap remedy, ONE prose source for two doors: the container's
@@ -4268,13 +4431,14 @@ const ListViewOverlayWireSchema = lazySchema(() =>
   // [#13216] Built from {@link ListViewShapeSchema}, not {@link ListViewSchema}:
   // `flattenedViewOverlayFields()` re-declares `name` and `label`, and zod 4
   // refuses to overwrite a key on an object that carries refinements. So the
-  // binding check is re-attached AFTER `.strip()` instead of inherited — this
+  // binding checks are re-attached AFTER `.strip()` instead of inherited — this
   // is the runtime write door (`PUT /api/v1/meta/view`), the one an MCP/AI
-  // author reaches, so it is the last place the refusal may go missing.
+  // author reaches, so it is the last place the refusals may go missing.
   // `viewDoorsCarryingPageMountCheck` in `view.test.ts` fails if any of the
   // three attachment points is dropped.
   ListViewShapeSchema.extend(flattenedViewOverlayFields()).strip()
-    .superRefine(checkListViewPageMount),
+    .superRefine(checkListViewPageMount)
+    .superRefine(checkListViewCalendarVisualization),
 );
 
 /**

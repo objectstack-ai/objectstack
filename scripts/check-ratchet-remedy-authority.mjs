@@ -756,6 +756,34 @@ const CONTROL = {
     why: 'PR for #13582. Its per-file, per-rule baseline is shrink-only; the author\'s remedy is to reword the sentence, and the baseline path that admits a genuinely true construction beside a pinned spelling is offered only as a maintainer\'s.',
   },
 
+  // The eleventh, and the third gate over the published catalog (#13678). It
+  // carries TWO offers on ONE ledger file and both are marked, which is why the
+  // row is worth reading rather than counting:
+  //
+  //   LEG 1 offers an EXEMPTION — "this identifier is live somewhere this repo
+  //   cannot index". That half is shrink-only BY CONSTRUCTION rather than by
+  //   policy: `--update` prunes entries the scan no longer reaches and there is
+  //   no code path that adds one, because the `kind`/`note` a row must carry are
+  //   human judgements nothing in the tree encodes. A hand edit is therefore the
+  //   only way in, and it is the maintainer's.
+  //
+  //   LEG 2 offers a GAP entry — a measured count of schema members a section
+  //   registered as exhaustive does not document. That half IS regenerated from
+  //   the tree, so its flag moves whichever way the tree moved and only policy
+  //   tells a ratchet-down from a weakening apart. Same treatment as the two
+  //   `--update` gates above.
+  //
+  // Both messages offer the author's own remedy first and unmarked (correct the
+  // row; document the member), which is the shape this convention wants.
+  //
+  // ⚠️ Recorded from the sweep's own verdict — this gate reported it as `marked`
+  // before the row was written, and the row was written because the sweep
+  // demanded it. Author intent and detector agreeing is the point of the corpus.
+  'check-skill-identifier-liveness.mjs': {
+    expect: 'marked',
+    why: 'PR for #13678. A two-legged liveness gate over skills/**: a row citing an identifier that greps to zero, and a section registered exhaustive that omits a live schema member. One ledger, two halves — the Leg 1 exemptions are shrink-only by construction (--update only prunes them), the Leg 2 gaps are a regenerated shrink-only ratchet — and both weakening paths are the maintainer\'s, offered after the author\'s own.',
+  },
+
   // ── Declaration registries and near-misses: recording the fact IS the fix ──
   'check-agent-model-declared.mjs': {
     expect: 'excluded',

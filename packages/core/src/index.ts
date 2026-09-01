@@ -14,6 +14,15 @@ export * from './lite-kernel.js';
 export * from './types.js';
 export * from './logger.js';
 export * from './plugin-loader.js';
+
+// [#13905] The async service-resolution discriminator — the two symbols a
+// CONSUMER needs to tell "nothing ever registered this service" from "the
+// service IS registered and could not be built", now that
+// `Kernel.getServiceAsync` no longer answers both with one bare `Error`.
+// Named rather than `export *` on purpose: the construction site is
+// `PluginLoader.getService` alone, so the factory stays package-internal and
+// the published increment is exactly this predicate and its code.
+export { SERVICE_NOT_REGISTERED_CODE, isServiceNotRegisteredError } from './service-not-registered.js';
 // `./api-registry.js` + `./api-registry-plugin.js` were RETIRED in #4939
 // (ADR-0049 enforce-or-remove). `createApiRegistryPlugin()` registered an
 // `api-registry` service that only `packages/core/examples/` ever composed —

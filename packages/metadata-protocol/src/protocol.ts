@@ -1371,6 +1371,84 @@ export class ConcurrentUpdateError extends Error {
 }
 
 /**
+ * [#13576] Thrown when a caller-supplied `expectedVersion` — the `If-Match`
+ * header or the body/query `expectedVersion` field — is a syntactically legal
+ * but semantically empty RFC-7232 entity-tag: the quoted-empty token `""`.
+ *
+ * ## Why this is refused rather than silently treated as "no token" (the
+ * pre-#13576 behaviour) or silently treated as a conflict (409)
+ *
+ * `""` is valid `entity-tag` grammar (RFC 7232 §2.3: `weak? DQUOTE *etagc
+ * DQUOTE`, and `*etagc` — zero or more — permits an EMPTY opaque-tag). But an
+ * empty tag can never equal any stored `updated_at`, quoted or not: it is not
+ * "the version I read", it is nothing. A client that sends it is asking for a
+ * guarded write and could not possibly have a real version in hand — RFC
+ * legality does not make it a meaningful concurrency token, and the platform
+ * makes an explicit contract choice to treat the shape itself as a client
+ * defect. Before this it fell through {@link normaliseVersionToken}'s
+ * quote-strip into the same falsy `''` that "caller sent nothing" produces,
+ * so the OPPOSITE of what `If-Match` requests happened: the guard was
+ * SKIPPED rather than evaluated, silently, on the one token shape that opts
+ * OUT of the check instead of failing it (unlike a garbage-but-nonempty token
+ * such as `v2`, which still normalises to a real, comparable token and fails
+ * toward `409 CONCURRENT_UPDATE` — the safe direction for a concurrency
+ * primitive, and unchanged by this fix).
+ *
+ * A `409` here (the alternative the maintainer ruling rejected, decision #20
+ * ①, 2026-08-31) would have been safer than the pre-#13576 behaviour but
+ * would still have collapsed two different facts into one answer: "you lost a
+ * race" (409, actionable by reloading and retrying) and "you sent something
+ * that can never carry a version" (this — a client-side bug, not a race). A
+ * `400` keeps that distinction legible, which is the entire reason option 3
+ * was chosen over option 2.
+ *
+ * `VALIDATION_FAILED`/400 is this package's own house code for a
+ * caller-request defect the engine never has to touch (mirrors
+ * {@link rowRequiredIdError}) — already registered in the ADR-0112
+ * error-code ledger under `@objectstack/metadata-protocol`, so this needs no
+ * new ledger entry.
+ */
+export class MalformedVersionTokenError extends Error {
+    readonly code = 'VALIDATION_FAILED';
+    readonly status = 400;
+    readonly fields: never[] = [];
+    constructor() {
+        super(
+            'expectedVersion (If-Match) is the empty entity-tag `""`. An empty version '
+            + 'token can never match any stored version, so this is almost certainly a '
+            + 'client defect rather than a real concurrency check — send the real version '
+            + 'token you read (e.g. the record\'s `updated_at`), or omit If-Match / '
+            + 'expectedVersion entirely to perform an unguarded write.',
+        );
+        this.name = 'MalformedVersionTokenError';
+    }
+}
+
+/**
+ * [#13576] Guard for the CLIENT-SUPPLIED half of an OCC token — never call
+ * this on `current.updated_at`, which is server-computed and must keep its
+ * existing "no check" fallback on any falsy normalisation.
+ *
+ * Detects exactly the RFC-7232 quoted-empty shape (`""`, any surrounding
+ * whitespace) and nothing wider: the raw value denotes SOMETHING (it is
+ * non-empty once trimmed — the "no token at all" cases, `undefined`/`null`/
+ * `''`/whitespace-only, are unaffected and keep opting out of the guard, per
+ * the ruling's clause ②), yet {@link normaliseVersionToken} reduces it to
+ * nothing. That combination — "the caller supplied a token" AND "it
+ * normalises to no token" — has exactly one source in
+ * {@link normaliseVersionToken}'s body: the post-quote-strip emptiness check.
+ * A garbage-but-nonempty token (`v2`) normalises to a REAL (if opaque) token,
+ * so it never matches this predicate and keeps failing toward 409 unchanged.
+ */
+function assertVersionTokenNotMalformed(expectedVersion: string | undefined): void {
+    if (expectedVersion === null || expectedVersion === undefined) return;
+    const raw = String(expectedVersion).trim();
+    if (!raw) return; // no token at all — unaffected, stays "opt out of the guard"
+    if (normaliseVersionToken(expectedVersion) !== null) return; // a real, comparable token
+    throw new MalformedVersionTokenError();
+}
+
+/**
  * An ISO-8601 date-time that denotes an ABSOLUTE instant — it carries an
  * explicit `Z` or a numeric `±HH:mm` offset, so reading it never consults the
  * process timezone.
@@ -1452,6 +1530,16 @@ function canonicalVersionInstant(value: unknown, token: string): string | null {
  * RFC-7232-style quotes (`"…"`) that an HTTP `If-Match` header may carry, trims
  * whitespace, and returns null for empty / nullish input — a null is the
  * caller's "no token supplied", which opts out of the check.
+ *
+ * [#13576] This function's OWN contract is deliberately unchanged: `""` still
+ * normalises to null here, exactly as #13382 left it (see the load-bearing
+ * comment on the post-strip check below) — that is what keeps this a pure,
+ * side-effect-free reader that the SERVER-COMPUTED `current.updated_at` call
+ * can keep using with its "no check" fallback. The client-facing call sites
+ * (`assertVersionOf`, `assertVersionMatch`) now call
+ * {@link assertVersionTokenNotMalformed} FIRST, which distinguishes "caller
+ * sent nothing" (stays opted out) from "caller sent the quoted-empty tag"
+ * (throws 400) before either ever reaches this function's uniform null.
  *
  * ## Why this returns two forms rather than one string (#13382)
  *
@@ -6512,6 +6600,41 @@ export class ObjectStackProtocolImplementation implements
                     );
                 });
 
+                // [#13407] Expand any aggregated `defineView` container this
+                // READ just merged in, INLINE into this response's own `items`
+                // — never into the SchemaRegistry. This is what actually closes
+                // the card: {@link hydrateExpandedViewItems} below is
+                // registry-mutating and is therefore gated off for exactly the
+                // rows the card's own repro used (an org-scoped write, on any
+                // kernel; ANY write on a real environment-scoped kernel) — see
+                // that method's "#13407 scope boundary" note for why widening
+                // those gates was rejected rather than attempted. This pass
+                // has no such gate to worry about: `overlays` is already this
+                // request's own correctly org/environment-scoped read (the
+                // `queryByOrg` merge above), so expanding it into the RETURNED
+                // list — and only the returned list — cannot leak one
+                // org/environment's container into another's.
+                //
+                // Upserted by name (not appended) so this stays idempotent
+                // against the registry-hydration path below: on an unscoped,
+                // env-wide kernel that path may have ALREADY registered the
+                // same expansion (from this or an earlier write's write-
+                // through), and re-deriving here from the row this call just
+                // read is a byte-identical, never-stale restatement of the
+                // same items — not a duplicate.
+                if (isView) {
+                    const byName = new Map<string, unknown>();
+                    for (const it of items as any[]) {
+                        if (it && typeof it === 'object' && typeof it.name === 'string') byName.set(it.name, it);
+                    }
+                    for (const { data, packageId: recPkg } of overlays) {
+                        for (const vi of this.expandRuntimeViewContainer(request.type, data, { packageId: recPkg })) {
+                            byName.set(vi.name as string, vi);
+                        }
+                    }
+                    items = Array.from(byName.values());
+                }
+
                 // Only hydrate the global registry for unscoped (control-plane)
                 // calls — scoped project entries must not leak process-wide.
                 // #4521 — this loop is no longer the ONLY way an overlay reaches
@@ -10126,6 +10249,13 @@ export class ObjectStackProtocolImplementation implements
      * Behaviour:
      *  - Empty/missing token → no check (opt-in semantics; existing callers
      *    that haven't yet adopted OCC are unaffected).
+     *  - [#13576] The one exception to "empty → no check": a token that is
+     *    PRESENT but is the quoted-empty RFC-7232 entity-tag (`""`) is a
+     *    malformed concurrency token, not an absent one — see
+     *    {@link assertVersionTokenNotMalformed} — and throws
+     *    `MalformedVersionTokenError` (400) instead of silently skipping the
+     *    guard. Every other falsy shape (no header/field at all, `''`,
+     *    whitespace-only) is untouched by this and still opts out.
      *  - Record not found → no check. We intentionally do not treat "missing
      *    record" as a concurrency conflict; `updateData` has already answered
      *    404 by this point, and `deleteData` lets the driver report it.
@@ -10147,6 +10277,7 @@ export class ObjectStackProtocolImplementation implements
         current: any,
         expectedVersion: string | undefined,
     ): void {
+        assertVersionTokenNotMalformed(expectedVersion);
         const expected = normaliseVersionToken(expectedVersion);
         if (!expected) return;
         if (!current) return;
@@ -10176,12 +10307,24 @@ export class ObjectStackProtocolImplementation implements
      * existence probe of its own: the driver's own `delete` return reports
      * whether a row matched (#4435). So this still probes ONLY when the caller
      * actually opted into OCC, keeping a plain DELETE at zero extra reads.
+     *
+     * [#13576] The malformed-token check runs FIRST, before the probe — a
+     * malformed client token is a request defect independent of whether the
+     * target record exists, and rejecting it costs nothing extra (no probe
+     * needed either way). This is a SEPARATE call from the one inside
+     * {@link assertVersionOf}, not a delegation to it: this function returns
+     * early on a well-formed-but-absent token (`if (!normaliseVersionToken(…))
+     * return`) BEFORE ever reaching `assertVersionOf`, so without its own
+     * check here a malformed token would take that same early return and the
+     * guard would stay silently skipped — exactly the two-doors shape the
+     * original defect had (measured, #13576 A2.2).
      */
     private async assertVersionMatch(
         object: string,
         id: string,
         expectedVersion: string | undefined,
     ): Promise<void> {
+        assertVersionTokenNotMalformed(expectedVersion);
         if (!normaliseVersionToken(expectedVersion)) return;
         const current = await this.probeRecord(object, id);
         this.assertVersionOf(object, id, current, expectedVersion);
@@ -12871,10 +13014,74 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#7736] Expand an aggregated `defineView` container that arrived through
-     * the RUNTIME door into the same independent ViewItems the two SOURCE
-     * registrars produce — at the one hydration choke point all three runtime
-     * callers already share.
+     * [#7736, #13407] Expand an aggregated `defineView` container that arrived
+     * through the RUNTIME door into the same independent, fully-enriched
+     * ViewItems the two SOURCE registrars produce — object binding, artifact-
+     * protection merge and package provenance all applied, but nothing
+     * REGISTERED. Returns `[]` (never throws) for a non-view type, a body that
+     * is not a container, or a container with no derivable object binding —
+     * exactly the "no expansion" outcomes the two callers below already
+     * decide on independently.
+     *
+     * Pure and side-effect-free on purpose: it is shared by two callers with
+     * DIFFERENT scope rules for what may be registered where —
+     * {@link hydrateExpandedViewItems} (registry-mutating, org/environment-
+     * gated) and `getMetaItems`' inline per-request expansion (registry-free,
+     * ungated) — see the #13407 note on {@link hydrateExpandedViewItems} for
+     * why the registry path could not simply be widened instead.
+     *
+     * ## Object-name derivation (#13407 fix)
+     *
+     * The container's OWN top-level `object` field — `ViewSchema.object`,
+     * documented there as "how a stack-level `views: [...]` entry says which
+     * object its views belong to; read by `getViewsByObject()` /
+     * `GET /meta/view?object=`" — is the authorial, explicit signal and is
+     * consulted FIRST. Before #13407 this walked only `list.data.object` →
+     * `form.data.object` → the row's own name (mirroring `plugin.ts`) and
+     * never read `container.object` at all, so a container that set the
+     * top-level field but not `list.data.object` (or whose save `name` is not
+     * the object it binds — the two are the same value only by convention)
+     * expanded under the WRONG key or not at all. The three-deep fallback is
+     * kept, unchanged, for every container written before this field was
+     * consulted here.
+     */
+    private expandRuntimeViewContainer(
+        type: string,
+        data: unknown,
+        options: { packageId?: string | null },
+    ): Record<string, unknown>[] {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return [];
+        if (!isAggregatedViewContainer(data)) return [];
+        const container = data as Record<string, any>;
+        const viewObject =
+            (typeof container.object === 'string' && container.object ? container.object : undefined)
+            ?? container?.list?.data?.object
+            ?? container?.form?.data?.object
+            ?? (typeof container.name === 'string' ? container.name : undefined);
+        if (!viewObject) return [];
+        const out: Record<string, unknown>[] = [];
+        for (const vi of expandViewContainer(viewObject, container)) {
+            // Carry the container's package provenance onto each expanded item
+            // so the package-disable filter and ADR-0048 artifact scoping judge
+            // them by the same owner the container has.
+            const item: Record<string, unknown> = { ...(vi as any) };
+            if (container._packageId !== undefined && item._packageId === undefined) {
+                item._packageId = container._packageId;
+            }
+            const viArtifact = this.lookupArtifactItem(
+                type,
+                vi.name,
+                (item._packageId as string | undefined) ?? options.packageId ?? undefined,
+            );
+            out.push(mergeArtifactProtection(item, viArtifact) as Record<string, unknown>);
+        }
+        return out;
+    }
+
+    /**
+     * [#7736] Register an aggregated `defineView` container's expansion
+     * ({@link expandRuntimeViewContainer}) into the SchemaRegistry — at the
+     * one hydration choke point all three runtime callers already share.
      *
      * "Object has-many View" (ADR-0017 §2, §3.2) makes container ingestion
      * DUAL-READ: register the container under the bare `<object>` key for
@@ -12894,27 +13101,41 @@ export class ObjectStackProtocolImplementation implements
      * items that WOULD match the switcher, and both object-bound exits answered
      * zero.
      *
-     * Here rather than at either read exit deliberately. There are two
-     * independent object-bound readers — the REST route reads through
-     * `getMetaItems`, while `getViewsByObject()` reads `MetadataManager.list`
-     * — so expanding at one of them fixes the card's literal repro and leaves
-     * its sibling exit answering empty. This function is the ONE place all
-     * three runtime hydration callers (boot `loadMetaFromDb`, read-side
-     * `getMetaItems`, write-through `applyRegistryWriteThrough`) already
-     * funnel through, so one expansion serves every reader, survives a restart,
-     * and keeps read-your-writes — the "single, universally-applied location"
-     * #7163 asked for after the same defect was fixed one seam further in.
-     *
      * The canonical-shape filter in `getMetaItems` is deliberately left alone:
      * its invariant ("a container's expanded items are also present") is what
      * was false here, and this restores it rather than loosening the filter —
      * which would surface the legacy wrapper shape to every list consumer and
      * still show the switcher nothing, since a container carries no `viewKind`.
      *
-     * Object-name derivation mirrors `plugin.ts` (`list.data.object` →
-     * `form.data.object`), falling back to the row's own name — for a container
-     * the metadata door's save name IS the object. No derivable object means no
-     * expansion, exactly as the artifact loader already decides.
+     * ## [#13407] This function's OWN scope boundary — the reason it is not
+     * ## the whole fix
+     *
+     * This is registry-MUTATING, and both its callers gate it off exactly
+     * where {@link hydrateOverlayIntoRegistry}'s own comments say why:
+     * write-through (`applyRegistryWriteThrough`) never calls it when
+     * `this.environmentId !== undefined` (a real per-environment kernel —
+     * `assembleMetadataProtocol`'s own comment: "per-project (cloud) kernels
+     * source metadata from the control plane"), and `hydrateOverlayIntoRegistry`
+     * itself refuses ANY org-scoped row before ever reaching this function
+     * ("[#6602] a per-org overlay is served on demand, never grafted into the
+     * registry every org in this process shares") — REGARDLESS of
+     * `environmentId`. Both gates are deliberate isolation boundaries (ADR-0005
+     * per-org isolation; the registry is shared by every org/request a given
+     * kernel serves) and #13407 does not touch either one.
+     *
+     * That is precisely why #7736's fix — this function, reached only through
+     * the registry-hydration callers — never helped the card's own repro ("a
+     * signed-in user with an ACTIVE ORG" on "a live multi-node EE deployment"):
+     * an org-scoped write NEVER reaches this function, on ANY kernel, container
+     * shape or object-derivation notwithstanding. #13407's actual fix is
+     * `getMetaItems`' separate, registry-free call to
+     * {@link expandRuntimeViewContainer} (below, in the overlay-merge section)
+     * — safe for org/environment isolation because it operates only on rows
+     * `getMetaItems` already read for THIS request's own scope, and never
+     * writes them anywhere shared. This function keeps serving the case it
+     * always did (env-wide rows on an unscoped/control-plane kernel — the ONLY
+     * combination #7736's own pin ever exercised), now with the corrected
+     * derivation chain.
      */
     private hydrateExpandedViewItems(
         type: string,
@@ -12922,28 +13143,8 @@ export class ObjectStackProtocolImplementation implements
         options: { packageId?: string | null; organizationId: string | null },
         registry: any,
     ): void {
-        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return;
-        if (!isAggregatedViewContainer(data)) return;
-        const container = data as Record<string, any>;
-        const viewObject =
-            container?.list?.data?.object
-            ?? container?.form?.data?.object
-            ?? (typeof container.name === 'string' ? container.name : undefined);
-        if (!viewObject) return;
-        for (const vi of expandViewContainer(viewObject, container)) {
-            // Carry the container's package provenance onto each expanded item
-            // so the package-disable filter and ADR-0048 artifact scoping judge
-            // them by the same owner the container has.
-            const item: Record<string, unknown> = { ...(vi as any) };
-            if (container._packageId !== undefined && item._packageId === undefined) {
-                item._packageId = container._packageId;
-            }
-            const viArtifact = this.lookupArtifactItem(
-                type,
-                vi.name,
-                (item._packageId as string | undefined) ?? options.packageId ?? undefined,
-            );
-            registry.registerItem(type, mergeArtifactProtection(item, viArtifact), 'name' as any);
+        for (const item of this.expandRuntimeViewContainer(type, data, options)) {
+            registry.registerItem(type, item, 'name' as any);
         }
     }
 

@@ -888,6 +888,7 @@
 
 import process from 'node:process';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 
@@ -2301,6 +2302,31 @@ export function buildBlockingIndex(issues, options = {}) {
 export const BLOCKING_DEPENDENT_LIST_CAP = 5;
 
 /**
+ * The `repo:*` labels a card carries — the SEAM predicate H14's stale
+ * direction declines on (#13975).
+ *
+ * Exported and pinned for the reason every scoping policy in this file is: a
+ * policy that decides what gets JUDGED AT ALL is where a silent hole would
+ * live. The spelling is `censusLanesOf`'s, deliberately — one reading of the
+ * `repo:*` family, so the two rows cannot come to disagree about what a repo
+ * lane is.
+ *
+ * ⚠️ SOUND, not COMPLETE, and the surviving rows say so. The ruled predicate
+ * (#13975) is "carries any `repo:*` label", which catches the cards whose
+ * off-repo audience is DECLARED. It is not a test for "has an off-repo
+ * audience": measured on the 2026-08-31 board, 67 open cards name a
+ * sibling-repo issue (`objectui#N` / `cloud#N` / `hotcrm#N`) and only 9 of
+ * them carry a `repo:*` label — and the two cards this row's own filing
+ * recorded off-repo waiters for (#13439, #13568) carry none. Widening it (to
+ * "the body mentions another repo", say) is a DIFFERENT predicate and needs
+ * its own ruling; narrowing it is one too. Both are why this is a named
+ * function rather than an inline `.some()`.
+ */
+export function seamRepoLabels(issue) {
+  return labelNames(issue ?? {}).filter((l) => /^repo:/u.test(l));
+}
+
+/**
  * H14 — null when the cache agrees with the index, else the finding sentence.
  *
  * ## The two directions do NOT owe the index the same completeness (#10061)
@@ -2340,10 +2366,53 @@ export const BLOCKING_DEPENDENT_LIST_CAP = 5;
  * and #7917 / objectui#4356 is a live one this row would otherwise have
  * instructed a reader to sever.
  *
+ * ## …and on a SEAM card it declines outright (#13975)
+ *
+ * Naming the scope was not enough. The row's instruction is still imperative,
+ * and the class it is most often wrong about is the one the protocol creates
+ * ON PURPOSE: a seam card is kept in THIS repo, carrying `repo:cloud` /
+ * `repo:objectui` / `repo:hotcrm`, precisely so a sibling repo's work can
+ * depend on it. For exactly those cards "no open card here points at me" is
+ * not weak evidence of absence — it is the reading the index is structurally
+ * unable to make, and the filing round measured the cost: 4 of 5 stale rows
+ * stood on cards other repos were, on the record, waiting for.
+ *
+ * So `seamRepoLabels(issue)` non-empty DECLINES: the row is still emitted, and
+ * it says it is declining and why. Emitted rather than suppressed, on two
+ * measurements rather than taste:
+ *
+ *   - Dropping it silently would make the seam cards INVISIBLE to the patrol —
+ *     a card that no row mentions reads as a coherent one, which is the second
+ *     defect, not the fix. H27 already holds this shape for the same reason
+ *     (an UNJUDGED dispatch is reported out loud, "not confirmed healthy").
+ *   - The finding COUNT is unchanged by the swap, so a decline cannot quiet
+ *     the summary sentence the way a suppression would.
+ *
+ * The row carries `UNJUDGED_MARKER`, which is the mechanical half of that
+ * visibility rather than a label on it: unjudged rows sort ahead of judged ones
+ * so the markdown body's size trim can never be what removes them (#11218,
+ * where the trim ate 199 rows while the header promised they were kept). An
+ * emitted decline the trim can drop is the suppression this row rejects,
+ * arriving one budget overrun later.
+ *
+ * ⚠️ H32's decline is the OTHER shape and this row deliberately does not copy
+ * it: there, a seat on a lane this board cannot count returns `null` and the
+ * summary's coverage pair carries the disclosure — correct, because the seat
+ * is out of the POPULATION. A seam card is in this row's population (it holds
+ * the label this row exists to judge); it is the EVIDENCE that is unreadable.
+ *
+ * ⛔ The decline is scoped to the stale direction alone. MISSING (the add
+ * direction) stays untouched on a seam card, and must: a cross-repo edge the
+ * index cannot see can only make that direction under-label, which is the
+ * status quo and harms nobody.
+ *
  * @param {object} issue — an OPEN issue.
  * @param {Map<number, number[]>} index — from `buildBlockingIndex`.
- * @param {{ indexComplete?: boolean }} [options] — `false` when any gated
- *   comment fetch failed, i.e. the index is known to be missing edges.
+ * @param {{ indexComplete?: boolean, ownerRepo?: string }} [options] —
+ *   `indexComplete` is `false` when any gated comment fetch failed, i.e. the
+ *   index is known to be missing edges. `ownerRepo` is the swept `owner/repo`,
+ *   defaulted like `buildBlockingIndex`'s and read for one purpose only: to
+ *   tell a seam label naming ANOTHER repo from one naming this one.
  */
 export function h14BlockingCacheIncoherent(issue, index, options = {}) {
   const carries = labelNames(issue).includes('pm:blocking');
@@ -2351,11 +2420,64 @@ export function h14BlockingCacheIncoherent(issue, index, options = {}) {
   const indexComplete = options.indexComplete ?? true;
   if (carries && dependents.length === 0) {
     if (!indexComplete) return null;
+    const seam = seamRepoLabels(issue);
+    if (seam.length > 0) {
+      const bareRepo = String(options.ownerRepo ?? OWNER_REPO)
+        .split('/')
+        .pop();
+      const named = seam.map((l) => `\`${l}\``).join(', ');
+      // The over-covered edge, named rather than narrowed away. `repo:objectstack`
+      // is not in the label ledger's seam family (`ensure-pm-labels.sh` creates
+      // `repo:objectui` / `repo:cloud` / `repo:hotcrm`, each described as 「Seam
+      // card: cross-repo ordering with X is the substance」) but it exists on the
+      // board and 4 open cards carried it on 2026-08-31. A label naming the SWEPT
+      // repo cannot make this sweep's index blind, so declining on it is
+      // conservative — and the row says that rather than asserting an off-repo
+      // audience it has no evidence for. Kept literal because the ruled predicate
+      // is "any `repo:*` label"; narrowing it is a predicate change and belongs to
+      // whoever rules on it, not to this function.
+      const conservative =
+        seam.every((l) => l.slice('repo:'.length) === bareRepo)
+          ? ` ⚠️ ${named} names the SWEPT repo, so this decline is CONSERVATIVE rather than ` +
+            'structural — the ruled predicate is "any `repo:*` label" (#13975) and this is its ' +
+            'over-covered edge, left literal rather than narrowed here.'
+          : '';
+      return (
+        // The UNJUDGED rank, not decoration: it is what keeps this row ahead of
+        // the markdown body's size trim (#11218). A decline the trim can eat is
+        // a seam card the patrol silently stops mentioning — the same defect as
+        // suppressing the row outright, arriving later and less visibly.
+        `${UNJUDGED_MARKER} ` +
+        '`pm:blocking` carried while no open card in THIS REPO targets it with a `Blocked-by:` line ' +
+        `— body OR comment — and this row DECLINES to judge the label: the card carries ${named}, a ` +
+        'seam label whose whole meaning is that the ordering this card belongs to lives in another ' +
+        'repo (label ledger: 「Seam card: cross-repo ordering with X is the substance」), and the ' +
+        'protocol keeps such a card HERE precisely so a sibling repo can depend on it.' +
+        conservative +
+        ' The strip this row would otherwise prescribe rests on ABSENCE of evidence, and for this ' +
+        'card the evidence is not absent, it is UNREADABLE (#4690): `buildBlockingIndex` scans this ' +
+        'repo\'s open listing only, `Blocked-by:` edges are protocol-legal across repos, and a ' +
+        'sibling repo\'s card waiting on this one is invisible to the index BY CONSTRUCTION, not by ' +
+        'any read failure — ⛔ no re-run resolves it, and there is no cross-repo `Blocked-by:` ' +
+        'reader in the fleet to resolve it with. ⇒ UNJUDGED: neither a coherent cache nor a stale ' +
+        'one. The stakes are why this declines rather than guessing — `pm:blocking` ranks second ' +
+        'only to `priority:p0` in lane selection, so a wrong strip starves the sibling that is ' +
+        'waiting, while a wrong KEEP only over-ranks one card. Report-only: the remedy is a ' +
+        'cross-repo `Blocked-by:` read by hand before the triage sweep\'s derivation pass touches ' +
+        'this card, never a label written from this script — and ⛔ never a hand-applied or ' +
+        'hand-stripped `pm:blocking` either, in any direction: the label is the sweep\'s derived ' +
+        'cache (「⛔ 不手工挂」).'
+      );
+    }
     return (
-      '`pm:blocking` carried while no open card\'s `Blocked-by:` line — body OR comment — targets ' +
-      'it, judged against the two-channel index — a stale derived cache, scoped to THIS REPO ONLY: ' +
+      '`pm:blocking` carried while no open card in THIS REPO — the only board this sweep indexes ' +
+      '— targets it with a `Blocked-by:` line, body OR comment, judged against the two-channel ' +
+      'index — a stale derived cache, scoped to THIS REPO ONLY: ' +
       'no dependent found in this repo; cross-repo dependents are not swept, so this is not a claim ' +
-      'of exhaustiveness over the population — `Blocked-by:` edges are legally cross-repo. The label ' +
+      'of exhaustiveness over the population — `Blocked-by:` edges are legally cross-repo. ' +
+      '⚠️ This card carries NO `repo:*` label, which is why the seam decline (#13975) did not ' +
+      'apply — and that absence is not evidence of an in-repo-only audience: measured 2026-08-31, ' +
+      '58 of the 67 open cards naming a sibling-repo issue carry no `repo:*` label. The label ' +
       'is not a state a seat sets: the triage sweep derives it from the `Blocked-by:` reverse index, ' +
       'and the lane selection order ranks it second only to `priority:p0`. So a stale one is worse ' +
       'than an absent one — it boosts a card nothing depends on, with authority. Report-only: verify ' +
@@ -7047,6 +7169,431 @@ export function renderClosedResidueCensus(census, { markdown = false } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// H40 — the `#` reference that no longer RESOLVES (#13634, A-half only).
+//
+// ## The incident, and why every existing instrument here was silent
+//
+// Between 2026-08-30T14:32Z and ~02:45Z the next morning, content authored by
+// one GitHub account became unreachable to every other seat: two issues
+// answered `Could not resolve to an Issue with the number of…`, and two ruling
+// COMMENTS vanished from a card that had carried at least four, while the same
+// card's comments by other accounts stayed intact. The signature is
+// account-level suppression, ⛔ not deletion — and this row asserts nothing
+// about the cause, then or now (the filing card's own boundary, kept verbatim:
+// no claim about WHY, and no claim that the loss is permanent).
+//
+// ⭐ The part that makes it a patrol rather than a lesson: a ruling's
+// durability turned out to be bounded by WHOSE CARD it happened to sit on. Two
+// of the unreachable cards carried rulings written by the maintainer — those
+// comments were not themselves suppressed, and they were unreachable anyway,
+// because they lived on someone else's card.
+//
+// Nothing here could see it. `assignee` still renders; a card referring to a
+// suppressed number keeps its text unchanged; no label moves and no check
+// turns red. Discovery was by ACCIDENT, at point of use — a seat reaching for
+// one specific card and getting a resolution error. Triage independently hit
+// three more the same way while doing ordinary work (#13178, #12924, #13456),
+// which is how a defect with no detector announces itself: repeatedly, to
+// whoever happens to be standing there.
+//
+// ⚠️ And the blast radius is not enumerable from inside: suppressed content is
+// invisible, so ⛔ no seat can list what is missing. Every count this row
+// prints is a LOWER BOUND over the corpus it read, and it says so.
+//
+// ## ⛔ closed ≠ unreachable — the distinction the whole row stands on
+//
+// A closed card resolves perfectly well. If the predicate confused the two it
+// would report the entire backlog and be switched off in a day, so the
+// separation is measured rather than assumed. Read 2026-08-31, one session,
+// one channel, one token:
+//
+//   #13398 #13399 #13178 #12924 #13456   HTTP 404 — do not resolve
+//   #13324 #13571 (closed) · #13592 (closed PR)   resolve normally
+//   #13438 #13440 #12775 #12708 (open)            resolve normally
+//
+// Twelve reads, same instrument, both verdicts present ⇒ the failures are
+// facts about those five NUMBERS, not about the channel. The closed control is
+// the load-bearing half: `state: "closed"` is a successful resolution and this
+// row is silent about it, forever.
+//
+// ## The four states, and why 404 alone means unresolvable
+//
+// Three-valued is not enough here (#4690, and H19/H20's own three-state folds):
+//
+//   resolvable    HTTP 200 — open OR closed, both healthy, both silent.
+//   unresolvable  HTTP 404 and ONLY 404 — the finding.
+//   unjudged      any other failure (403, 429, 5xx, transport). A rate-limited
+//                 read is not evidence a card is gone, and publishing it as one
+//                 would assert exactly the cause this card forbids.
+//   not attempted the budget below ran out before this number. Distinct from
+//                 unjudged — nothing was asked — and it must not read as clean.
+//
+// ## The two bounds, both measured, both stated in the report
+//
+// ① CORPUS — the LIVE BOARD: the open issues and open PRs this sweep already
+//    holds, plus the comment threads already in the comment cache. Zero extra
+//    requests: every byte scanned was fetched for some other item. Comment
+//    coverage is therefore the GATED subset (H2/H4/H9/H17/H32 candidates), not
+//    the whole board, and the report says so rather than implying a full read.
+//    ⛔ Merged PRs and closed cards are deliberately NOT referrers even though
+//    this sweep holds them: they are archive nobody re-reads, and every number
+//    they add competes for the finite resolution budget below with numbers on
+//    cards a seat will actually open.
+//
+// ② RESOLUTIONS — `H40_RESOLUTION_BUDGET`, spent NEWEST-FIRST over the numbers
+//    no listing in hand already answers. Measured 2026-08-31 on this board:
+//    445 live bodies carry 1,619 distinct `#` references, of which 260 are
+//    answered free from the open listings and 1,359 would each cost a request
+//    at ~366 ms — ~8.3 minutes, against a patrol whose whole job already
+//    measured 228 s inside a 15-minute `timeout-minutes`. So the budget is a
+//    wall-clock bound, not a quota one (400 reads is ~0.1% of one hour's core
+//    quota and ~146 s of that job).
+//
+//    Newest-first, for the same recency logic every window in this file uses:
+//    the measured population is recent, a dangling reference to a recent card
+//    still has live work hanging off it, and the tail is announced as NOT
+//    ATTEMPTED rather than skipped in silence.
+//
+// ## ⛔ Two cheaper shapes, measured and declined — do not re-derive them
+//
+// A bulk `state=all&sort=created&direction=asc` listing maps 100 consecutive
+// numbers per request (creation order IS number order, verified: page 1 is
+// #1–#100, page 5 is #401–#500), which would beat one-GET-per-number ten to
+// one. It cannot work: **the issues listing refuses deep pagination — page 99
+// answers 200 and page 100 answers HTTP 422** (measured 2026-08-31), so an
+// ascending pass reaches #9,900 and stops, and this repo is past #13,900. The
+// descending half that would cover the rest reorders under every new issue, so
+// a row shifting across a page boundary mid-pass would be published as a
+// dangling reference — a false accusation about a live card, which is the one
+// error this row must never make.
+//
+// A batched GraphQL alias query would resolve a hundred numbers per request.
+// Declined for a structural reason rather than a cost one: this file's entire
+// transport story — the prerequisite classifier, its verdict vocabulary, the
+// proxy re-exec — is REST-shaped, and a second transport would run outside all
+// of it, so a GraphQL-side failure would arrive as an unclassified throw in the
+// one script whose contract is that an unread input never reads as a clean one.
+//
+// ## Report-only, and rendered where a trim cannot reach it (#13947)
+//
+// ⛔ Never rewrites a reference, never closes a card, never names a cause. The
+// row hands a human two facts — this number does not resolve, and these cards
+// point at it — and stops.
+//
+// It renders as a RESERVED SECTION rather than as finding rows, and that is a
+// deliberate answer to a measured hazard: the anchor body's renderer drops rows
+// from the tail of one flat list to fit the issue-body limit (#13947 measured
+// 157 of 231 omitted on a live run), so a new family added as ordinary rows can
+// be computed and then silently dropped. A row family whose entire subject is a
+// defect that no instrument reports must not be droppable — so it takes the
+// reservation `renderTriggerIndex`, the census and the rate premise already
+// have (their length is subtracted from the budget BEFORE finding rows are laid
+// out), keeps its own `H40_ROW_CAP` so the reservation stays bounded, and
+// speaks unconditionally on the summary line — the one sentence that renders
+// above the fold on every run, clean or not.
+// ---------------------------------------------------------------------------
+
+/**
+ * The resolution budget: distinct referenced numbers this sweep will ask about
+ * when no listing in hand already answers them.
+ *
+ * ⚠️ It is a WALL-CLOCK bound and the number only means anything beside the two
+ * measurements that set it (both 2026-08-31): ~366 ms per resolution, and a
+ * baseline sweep of 228 s against `half-state-patrol.yml`'s 15-minute
+ * `timeout-minutes`. 400 reads ≈ 146 s, taking the patrol to ~6 minutes. Raise
+ * it against those two numbers re-measured, never against the quota — the quota
+ * has never been the binding constraint here.
+ */
+export const H40_RESOLUTION_BUDGET = 400;
+
+/** Dangling rows rendered in the reserved section before it announces omission. */
+export const H40_ROW_CAP = 25;
+
+/** Referrers named per dangling number — the `H19_TARGET_LIST_CAP` shape. */
+export const H40_REFERRER_LIST_CAP = 5;
+
+/** The measured cost of one resolution, and the corpus it was measured over. */
+export const MEASURED_REFERENCE_RESOLUTION_MS = 366;
+export const MEASURED_DISTINCT_REFERENCES = 1619;
+export const MEASURED_UNANSWERED_REFERENCES = 1359;
+export const MEASURED_REFERENCE_CORPUS_AT = '2026-08-31';
+
+/**
+ * One `#N` into the swept repo.
+ *
+ * Group 1 is the character before the reference (or the empty string at the
+ * start of the text), group 2 the optional `owner/repo` qualifier, group 3 the
+ * number. The preceding character is CAPTURED rather than expressed as a
+ * lookbehind so the shape stays the same kind of object as `closingKeywordRe`
+ * and `partOfRe` — one global regex a self-test can drive over raw strings.
+ *
+ * Three rejections are built in, each with a measured false positive behind it:
+ *
+ *   `[1-9]\d{0,5}`      — no leading zero, and a bound at six digits. GitHub
+ *                         itself would read `#0123` as nothing.
+ *   `(?![0-9A-Za-z_-])` — the reference ends at a non-word boundary, so
+ *                         `#13634-ish` and `#123abc` are not references.
+ *   preceding character — must not be a word character or `/`. The `/` is the
+ *                         load-bearing half: it is what keeps a URL fragment
+ *                         (`…/objectstack#123`) and a path segment from being
+ *                         read as a card reference.
+ */
+export function referenceRe() {
+  return /(^|[\s\S])(?:([A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*)#|#)([1-9]\d{0,5})(?![0-9A-Za-z_-])/g;
+}
+
+/**
+ * The distinct `#N` a text refers INTO this repo.
+ *
+ * ## Fences stripped, inline spans KEPT — the opposite call from H7/H21/H23
+ *
+ * Every other extractor in this file blanks inline code spans, and the reason
+ * is specific to what those rows are about: GitHub's closing-keyword parser
+ * does NOT fire inside a span, so a backticked keyword is genuinely inert and
+ * reporting it would flag the careful author (`stripMarkdownCode`, measured).
+ *
+ * That reason does not transfer here, and copying the call would delete the
+ * signal. A reference is not an instruction to GitHub — it is a POINTER A
+ * READER FOLLOWS — and 「`Blocked-by: #9612`」 is the natural markdown for a
+ * line meant to be grepped (H4's own note, and reading such a line as absent
+ * once left a card blocked in silence). A seat that opens `` `#13398` `` and
+ * gets a resolution error has hit exactly the defect this row exists to find,
+ * backticks or not.
+ *
+ * Fenced blocks still go, for H17's reason rather than H7's: a fence carries
+ * quoted logs, diffs and pasted `git log` output, and a number inside one is a
+ * citation of something that already happened, not a pointer anybody follows.
+ *
+ * @param {string} text
+ * @param {string} repo — `owner/name`; a qualifier naming any OTHER repo is
+ *   skipped, because each install reads its own board (H19's cross-repo rule).
+ * @returns {Set<number>}
+ */
+export function referencedNumbers(text, repo) {
+  const out = new Set();
+  const body = stripMarkdownCode(text, { inline: false });
+  const want = String(repo ?? '').toLowerCase();
+  for (const m of body.matchAll(referenceRe())) {
+    const [, before, qualifier, digits] = m;
+    if (qualifier) {
+      if (qualifier.toLowerCase() !== want) continue;
+    }
+    // The character before the whole reference — the qualifier's first
+    // character when one is present, the `#` otherwise.
+    if (before !== '' && /[A-Za-z0-9_/]/.test(before)) continue;
+    out.add(Number(digits));
+  }
+  return out;
+}
+
+/**
+ * The reference index: distinct referenced number -> the cards pointing at it.
+ *
+ * `ceiling` is the highest number this sweep actually observed, and numbers
+ * above it are held OUT of the resolution set rather than resolved. It is a
+ * measurement, never a guess — a number the board has not issued yet cannot be
+ * suppressed content, so asking about it would spend budget to manufacture a
+ * 404 and publish a typo as an incident. They are counted and disclosed
+ * (`beyond`), never silently dropped.
+ *
+ * @param {Array<{number: number, html_url?: string, texts: string[]}>} referrers
+ * @param {{ repo: string, ceiling?: number|null }} options
+ */
+export function buildReferenceIndex(referrers, { repo, ceiling = null } = {}) {
+  const refs = new Map();
+  const beyond = new Set();
+  let bodies = 0;
+  for (const referrer of referrers ?? []) {
+    for (const text of referrer?.texts ?? []) {
+      bodies++;
+      for (const n of referencedNumbers(text, repo)) {
+        // A card citing its own number is not a reference to anywhere.
+        if (n === referrer.number) continue;
+        if (ceiling !== null && Number.isFinite(ceiling) && n > ceiling) {
+          beyond.add(n);
+          continue;
+        }
+        if (!refs.has(n)) refs.set(n, new Map());
+        refs.get(n).set(referrer.number, { number: referrer.number, html_url: referrer.html_url });
+      }
+    }
+  }
+  return {
+    refs: new Map([...refs].map(([n, by]) => [n, [...by.values()].sort((a, b) => a.number - b.number)])),
+    beyond: [...beyond].sort((a, b) => a - b),
+    texts: bodies,
+  };
+}
+
+/**
+ * Which numbers this sweep will ASK about, and which it will not.
+ *
+ * Pure, and separated from the fetching on purpose: the cost-control clause of
+ * this row (「每个号码解析一次，不是每个引用方一次」) is a decision, and a
+ * decision the self-test can drive offline is one that cannot quietly stop
+ * holding when the sweep around it changes.
+ *
+ * @param {Iterable<number>} numbers — distinct referenced numbers.
+ * @param {Set<number>|Map<number, any>} known — numbers a listing already answers.
+ * @param {number} budget
+ * @returns {{ free: number[], attempt: number[], deferred: number[], floor: number|null }}
+ */
+export function h40ResolutionPlan(numbers, known, budget = H40_RESOLUTION_BUDGET) {
+  const has = (n) => Boolean(known?.has?.(n));
+  const all = [...(numbers ?? [])];
+  const free = all.filter(has).sort((a, b) => a - b);
+  // Newest first — see the bounds section. `slice` on a descending sort is the
+  // whole mechanism, so the deferred tail is always the OLDEST numbers and the
+  // floor the report states is exact rather than approximate.
+  const unanswered = all.filter((n) => !has(n)).sort((a, b) => b - a);
+  const cap = Number.isFinite(budget) && budget >= 0 ? budget : 0;
+  const attempt = unanswered.slice(0, cap);
+  return {
+    free,
+    attempt,
+    deferred: unanswered.slice(cap),
+    floor: attempt.length > 0 ? attempt[attempt.length - 1] : null,
+  };
+}
+
+/**
+ * One resolution observation -> one of the three READ states.
+ *
+ * ⛔ 404 and only 404 is `unresolvable`. Widening this to "any failure" is the
+ * one change that would turn this row from a patrol into an accusation
+ * generator: a 403 during a rate-limit window would publish every reference it
+ * touched as a vanished card, and the filing card's boundary — no cause
+ * asserted — cannot survive an instrument that cannot tell a refusal from an
+ * absence.
+ *
+ * @param {{ ok?: boolean, status?: number }} observation
+ */
+export function h40Verdict(observation) {
+  if (observation?.ok) return 'resolvable';
+  return observation?.status === 404 ? 'unresolvable' : 'unjudged';
+}
+
+/**
+ * The report this row renders from — assembled from the index and whatever the
+ * resolutions came back as.
+ *
+ * @param {{ refs: Map<number, object[]>, beyond: number[], texts: number }} index
+ * @param {{ free: number[], attempt: number[], deferred: number[], floor: number|null }} plan
+ * @param {Map<number, {ok?: boolean, status?: number}>} observations
+ * @param {{ threads?: number, cards?: number, ceiling?: number|null }} [context]
+ */
+export function h40Report(index, plan, observations, context = {}) {
+  const referrersOf = (n) => index?.refs?.get?.(n) ?? [];
+  const dangling = [];
+  const unjudged = [];
+  let resolved = 0;
+  for (const n of plan?.attempt ?? []) {
+    const verdict = h40Verdict(observations?.get?.(n));
+    if (verdict === 'resolvable') resolved++;
+    else if (verdict === 'unresolvable') dangling.push({ number: n, referrers: referrersOf(n) });
+    else {
+      const obs = observations?.get?.(n);
+      unjudged.push({
+        number: n,
+        referrers: referrersOf(n),
+        detail: obs?.status ? `HTTP ${obs.status}` : 'unreadable',
+      });
+    }
+  }
+  return {
+    distinct: index?.refs?.size ?? 0,
+    texts: index?.texts ?? 0,
+    threads: context.threads ?? 0,
+    cards: context.cards ?? 0,
+    ceiling: context.ceiling ?? null,
+    beyond: index?.beyond?.length ?? 0,
+    free: plan?.free?.length ?? 0,
+    attempted: plan?.attempt?.length ?? 0,
+    deferred: plan?.deferred?.length ?? 0,
+    floor: plan?.floor ?? null,
+    resolved,
+    dangling: dangling.sort((a, b) => b.number - a.number),
+    unjudged: unjudged.sort((a, b) => b.number - a.number),
+  };
+}
+
+/** `#N` referrers, capped and linked, in either medium. */
+function namedReferrers(referrers, markdown) {
+  const rows = referrers ?? [];
+  const shown = rows
+    .slice(0, H40_REFERRER_LIST_CAP)
+    .map((r) => (markdown && r.html_url ? `[#${r.number}](${r.html_url})` : `#${r.number}`));
+  const rest = rows.length - shown.length;
+  return `${shown.join(', ')}${rest > 0 ? ` (+${rest} more)` : ''}`;
+}
+
+/**
+ * The H40 section, in either medium.
+ *
+ * Returns `[]` only when no report was supplied at all, so every existing
+ * two-argument renderer call stays byte-identical. Once a report exists the
+ * section ALWAYS renders — including the clean state — for the reason the rate
+ * premise renders healthy: a check visible only when it fires cannot be told
+ * apart from a check that was removed, and this row's whole subject is a defect
+ * that nothing reported.
+ *
+ * @param {ReturnType<typeof h40Report>} [report]
+ * @param {{ markdown?: boolean }} [options]
+ */
+export function renderDanglingReferences(report, { markdown = false } = {}) {
+  if (!report) return [];
+  const coverage =
+    `${report.attempted} resolution(s) attempted of ${report.distinct} distinct \`#\` reference(s) ` +
+    `read off ${report.texts} live-board text(s) (${report.cards} open card(s)/PR(s) + ` +
+    `${report.threads} already-cached comment thread(s)); ${report.free} answered free from listings ` +
+    `in hand` +
+    `${report.deferred > 0 ? `, ${report.deferred} NOT ATTEMPTED at the ${H40_RESOLUTION_BUDGET}-resolution budget (attempted down to #${report.floor})` : ''}` +
+    `${report.beyond > 0 ? `, ${report.beyond} above #${report.ceiling}, the highest number this sweep saw` : ''}.`;
+
+  const head = markdown
+    ? ['### Dangling references (H40)', '']
+    : ['', 'Dangling references (H40)'];
+
+  if (report.dangling.length === 0 && report.unjudged.length === 0) {
+    const clean =
+      `No reference in the corpus failed to resolve. Every number above was READ — ⛔ a CLOSED card ` +
+      `resolves normally and is not a finding here, so this line is a clean reading rather than a ` +
+      `predicate that reports nothing. ${coverage} Lower bound by construction: suppressed content ` +
+      `is invisible, so ⛔ no sweep can enumerate what is missing.`;
+    return [...head, markdown ? `_${clean}_` : `  ${clean}`];
+  }
+
+  head.push(
+    `${report.dangling.length} number(s) referred to by the live board do NOT resolve, and ` +
+      `${report.unjudged.length} could not be judged. ⛔ Report-only, and ⛔ no cause is asserted: a ` +
+      `number can fail to resolve because it was deleted, transferred, or made unreachable, and this ` +
+      `sweep cannot tell those apart — a reference that fails is a fact, everything after it is a ` +
+      `question for a human. ⛔ Do not rewrite the referring text and do not close anything; if a ` +
+      `number returns, the reference was always correct. ${coverage}`,
+    '',
+  );
+
+  const rows = [
+    ...report.dangling.map((row) => ({ ...row, lead: `**#${row.number}** — HTTP 404, does not resolve` })),
+    ...report.unjudged.map((row) => ({
+      ...row,
+      lead: `${UNJUDGED_MARKER} **#${row.number}** — ${row.detail}, so it is UNJUDGED, not confirmed dangling`,
+    })),
+  ];
+  const shown = rows.slice(0, H40_ROW_CAP);
+  for (const row of shown) {
+    const lead = markdown ? row.lead : row.lead.replace(/\*\*/g, '');
+    const text = `${lead}; referred to by ${namedReferrers(row.referrers, markdown)}`;
+    head.push(markdown ? `- ${text}` : `  ${text}`);
+  }
+  if (rows.length > shown.length) {
+    const omitted = `… ${rows.length - shown.length} further number(s) omitted at the H40_ROW_CAP render budget; the full list is in the workflow run log.`;
+    head.push(markdown ? `- _${omitted}_` : `  ${omitted}`);
+  }
+  return head;
+}
+
+// ---------------------------------------------------------------------------
 // Report rendering — pure over (findings, counts), so `--self-test` pins both
 // media offline. The live sweep below picks a renderer and prints it; nothing
 // about WHAT is swept or WHICH predicates fire depends on the format.
@@ -7191,6 +7738,23 @@ export const SWEEP_COUNT_KEYS = [
   'commitWindowTruncated',
   'openListingPages',
   'openListingsTruncated',
+  // H40's coverage numbers (#13634). The pair that matters is
+  // `refAttempted`/`refDeferred`: a budget-bound pass that printed only what it
+  // FOUND would read as a complete sweep of the reference surface, which is the
+  // #4690 inversion in this row's own uniform. `refFloor` rides along because
+  // "attempted down to #N" is what makes the budget's reach checkable rather
+  // than merely stated.
+  'refDistinct',
+  'refCards',
+  'refThreads',
+  'refFree',
+  'refAttempted',
+  'refResolved',
+  'refDangling',
+  'refUnjudged',
+  'refDeferred',
+  'refFloor',
+  'refBeyond',
 ];
 
 /**
@@ -7290,6 +7854,18 @@ export function summaryLine(counts, findingCount) {
   const commits = counts.commits ?? 0;
   const commitBindings = counts.commitBindings ?? 0;
   const commitBindingMessages = counts.commitBindingMessages ?? 0;
+  // H40's numbers (#13634). Every one defaults, for `summaryLine({}, 0)`'s sake
+  // — the bare line is a pinned shape and must never render `undefined`.
+  const refDistinct = counts.refDistinct ?? 0;
+  const refCards = counts.refCards ?? 0;
+  const refThreads = counts.refThreads ?? 0;
+  const refFree = counts.refFree ?? 0;
+  const refAttempted = counts.refAttempted ?? 0;
+  const refResolved = counts.refResolved ?? 0;
+  const refDangling = counts.refDangling ?? 0;
+  const refUnjudged = counts.refUnjudged ?? 0;
+  const refDeferred = counts.refDeferred ?? 0;
+  const refBeyond = counts.refBeyond ?? 0;
   return (
     `check-half-states: swept ${counts.issues} open pm-/p0-labeled issue(s), ${counts.unscoped} open ` +
     `issue(s) in the unscoped pass (H13–H15, H18), ${counts.prs} open PR(s) ` +
@@ -7427,6 +8003,28 @@ export function summaryLine(counts, findingCount) {
           'landed.'
         : ''
     } ` +
+    // H40's disclosure (#13634). It is UNCONDITIONAL and it is here rather than
+    // only in the section for one reason: H40's findings do not enter the
+    // finding COUNT this sentence opens with (they render as a reserved
+    // section, see `renderDanglingReferences`), so without this clause a board
+    // carrying dangling references could print a small finding count and read
+    // as quiet. The `read X of Y` shape is the same duty every other pass owes:
+    // a budget-bound pass must never read as a complete one.
+    `Dangling references (H40): ${refResolved} of ${refAttempted} attempted resolution(s) answered, ` +
+    `over ${refDistinct} distinct \`#\` reference(s) read off the LIVE board — ${refCards} open ` +
+    `card(s)/PR(s) and ${refThreads} already-cached comment thread(s), so comment coverage is the ` +
+    `gated subset rather than the whole board, and merged/closed archive is out of the corpus by ` +
+    `design. ${refFree} number(s) were answered free from listings already in hand` +
+    `${
+      refDeferred > 0
+        ? `, and ${refDeferred} were NOT ATTEMPTED at the ${H40_RESOLUTION_BUDGET}-resolution budget ` +
+          `(newest-first; this pass reached down to #${counts.refFloor}) — not attempted is not clean`
+        : ''
+    }` +
+    `${refBeyond > 0 ? `; ${refBeyond} reference(s) name a number above the highest this sweep saw and were held out rather than resolved` : ''}. ` +
+    `${refDangling} do(es) not resolve and ${refUnjudged} could not be judged — ⛔ only HTTP 404 is ` +
+    'read as unresolvable, a CLOSED card resolves normally and is never a finding, and no cause is ' +
+    'asserted for any of them. Suppressed content is invisible, so every count here is a LOWER BOUND. ' +
     `Report-only: findings are patrol input, not a gate verdict.`
   );
 }
@@ -7472,6 +8070,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h35GatePatrol', 'Gate-removal patrol (H35): '],
   ['h36SharedFiles', 'Shared-file holds (H36): '],
   ['h37Folds', 'Family folds (H37): '],
+  ['h40References', 'Dangling references (H40): '],
   ['reportOnly', 'Report-only: '],
 ];
 
@@ -7636,6 +8235,7 @@ export function renderPlain(findings, counts, options = {}) {
   const lines = findings.map(
     ([issue, code, msg]) => `  ${code} #${issue.number} ${msg}\n     ${issue.html_url}`,
   );
+  lines.push(...renderDanglingReferences(options.references, { markdown: false }));
   lines.push(...renderTriggerIndex(options.triggerIndex, { markdown: false }));
   lines.push(...renderClosedResidueCensus(options.census, { markdown: false }));
   lines.push(...renderRatePremise(options.ratePremise, { markdown: false }));
@@ -7675,6 +8275,407 @@ export function normalizeProvenance(text) {
     .slice(0, 300);
 }
 
+// ---------------------------------------------------------------------------
+// The ROW-FAMILY REGISTRY and the trim's priority order (#13947)
+//
+// ## The defect this answers, in triage's words
+//
+// 「族内按重要性裁,族外按运气裁」 — the in-family caps are semantic, the
+// cross-family cut was positional. This file already carries a whole rank of
+// per-family ceilings — `BLOCKING_DEPENDENT_LIST_CAP`, `H19_TARGET_LIST_CAP`,
+// `H20_BRANCH_LIST_CAP`, `H36_SAMPLE_PATHS`, `H37_MEMBER_LIST_CAP`,
+// `H17_INDEX_ROW_CAP`, `H40_ROW_CAP` — and every one of them answers "which of
+// THIS family's rows matter most". The body trim answered a different question,
+// "which rows happened to be laid out first", and on the measured run that cost
+// 157 of 231 findings, including every H31 row on the board.
+//
+// Two mechanisms land here and they are not interchangeable:
+//
+//   1. `HALF_STATE_FAMILY_BAND` + `familyRank` — the trim now eats the tail of
+//      a list ordered by what a row IS.
+//   2. `familyLedger` + `renderFamilyLedger` — an UNCONDITIONAL per-family
+//      computed/rendered table, reserved out of the budget like the H17 index
+//      and the H40 section, so a family whose rows were all eaten is still
+//      legible AS a family with rows. Ordering alone cannot do this: it moves
+//      which rows are lost, never whether their loss is readable.
+//
+// ⚠️ The band assignment is a SEMANTIC JUDGMENT the file did not previously
+// hold, and it is written here — one table, greppable, beside the codes it
+// ranks — rather than scattered through the predicates, precisely so it can be
+// argued with. The ruling that seeds it is the lane's remedy ruling: gate-
+// semantic families outrank inventory/hygiene ones. Everything below that line
+// is this change's proposal, and moving a code between bands is a one-line edit
+// with a self-test that says what moved.
+// ---------------------------------------------------------------------------
+
+/**
+ * The bands, most-protected first. `rank` is the sort key; `what` is the
+ * question a band answers, and is what a future author should read before
+ * placing a new family.
+ *
+ * `unregistered` sits SECOND on purpose. A family nobody classified is the one
+ * whose severity is unknown, and this file's standing doctrine is that an
+ * unknown reading must never present as a clean one (#4690) — so an
+ * unclassified family is protected from the trim rather than sacrificed to it,
+ * and the ledger flags it so the protection is temporary by construction.
+ */
+export const HALF_STATE_FAMILY_BANDS = Object.freeze([
+  Object.freeze({
+    name: 'gate',
+    rank: 0,
+    what: 'the row\'s subject is a GATE that may have been stripped or split — its absence reads as a green light',
+  }),
+  Object.freeze({
+    name: 'unregistered',
+    rank: 1,
+    what: 'no band was declared for this code — severity unknown, so protected and flagged rather than trimmed',
+  }),
+  Object.freeze({
+    name: 'stall',
+    rank: 2,
+    what: 'a card or PR whose forward motion is STOPPED or misrouted, and which nothing else will move',
+  }),
+  Object.freeze({
+    name: 'state',
+    rank: 3,
+    what: 'contradictory or half-written label/claim state on a live card — readable and repairable from the board',
+  }),
+  Object.freeze({
+    name: 'inventory',
+    rank: 4,
+    what: 'a census, a cache or residue — an inventory of a population rather than an alarm about one card',
+  }),
+]);
+
+/** The band a family whose code carries no registry entry falls into. */
+export const UNREGISTERED_FAMILY_BAND = 'unregistered';
+
+/**
+ * Every row family this file emits, and the band that governs its survival.
+ *
+ * ⛔ NOT every `H` code: `H17` (the trigger-file index), `H39` (the closed-
+ * residue census) and `H40` (dangling references) render as reserved SECTIONS
+ * and never as finding rows, so the trim cannot reach them and they take no
+ * band. `familyRegistryCoverage` proves this list equals the codes the sweep
+ * actually pushes, read off this file's own source — a new family added
+ * without a band fails the self-test rather than inheriting one silently.
+ *
+ * The three anchors for the band calls, each traceable:
+ *
+ *   gate      H31/H35 — the two-carrier gate comparison and the gate-removal
+ *             event. Their own headers say why: 「闸门被剥不是红灯是放行」, and
+ *             「被剥」 and 「从未挂过」 are indistinguishable in the evidence.
+ *             A row that is the only reader able to tell a stripped gate from
+ *             an ungated card cannot be the row that arrival order eats.
+ *   stall     the card is stopped and no later sweep frees it: a block that
+ *             outlived or mis-names its blocker (H19/H26/H28), a dispatch that
+ *             never reached a branch or whose claimant is gone (H20/H27/H33),
+ *             a PR that cannot land (H12/H16/H36), a seat or lane not moving
+ *             (H32/H38), a `pm:blocked` card with no machine-readable line at
+ *             all (H4).
+ *   state     the board contradicts itself on a live card, and the repair is
+ *             on the board: label pairs, claim shapes, aged states.
+ *   inventory triage's own examples of the class gate rows outrank — the
+ *             `pm:blocking` cache (H14/H15), closed-card residue (H22), the
+ *             seat-sticker pair (H5/H6), the important-parked list (H11).
+ */
+export const HALF_STATE_FAMILY_BAND = Object.freeze({
+  H31: 'gate',
+  H35: 'gate',
+
+  H4: 'stall',
+  H12: 'stall',
+  H16: 'stall',
+  H19: 'stall',
+  H20: 'stall',
+  H26: 'stall',
+  H27: 'stall',
+  H28: 'stall',
+  H32: 'stall',
+  H33: 'stall',
+  H36: 'stall',
+  H38: 'stall',
+
+  H1: 'state',
+  H2: 'state',
+  H3: 'state',
+  H7: 'state',
+  H8: 'state',
+  H9: 'state',
+  H10: 'state',
+  H13: 'state',
+  H18: 'state',
+  H21: 'state',
+  H23: 'state',
+  H24: 'state',
+  H25: 'state',
+  H29: 'state',
+  H30: 'state',
+  H34: 'state',
+  H37: 'state',
+
+  H5: 'inventory',
+  H6: 'inventory',
+  H11: 'inventory',
+  H14: 'inventory',
+  H15: 'inventory',
+  H22: 'inventory',
+});
+
+const FAMILY_BAND_RANK = new Map(HALF_STATE_FAMILY_BANDS.map((b) => [b.name, b.rank]));
+
+/** The band a finding code belongs to; an unregistered code is named as such. */
+export function familyBand(code) {
+  return HALF_STATE_FAMILY_BAND[String(code ?? '')] ?? UNREGISTERED_FAMILY_BAND;
+}
+
+/** The trim's sort key for a finding code — lower survives longer. */
+export function familyRank(code) {
+  return FAMILY_BAND_RANK.get(familyBand(code)) ?? FAMILY_BAND_RANK.get(UNREGISTERED_FAMILY_BAND);
+}
+
+/** `H31` -> 31, for a stable secondary order; an unparseable code sorts last. */
+function familyNumber(code) {
+  const m = /^H(\d+)$/.exec(String(code ?? ''));
+  return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * The ledger's own render ceiling, in the tradition of every other cap in this
+ * file. The registry holds far fewer families than this, so the cap can only
+ * ever bite on a run carrying a crowd of UNREGISTERED codes — which sort into
+ * the protected band above and therefore render before the cap can reach them.
+ */
+export const FAMILY_LEDGER_ROW_CAP = 64;
+
+/** Families named inline in the trim callout before it degrades to a count. */
+export const FAMILY_LEDGER_CALLOUT_CAP = 12;
+
+/**
+ * The declared worst-case size of the rendered ledger, in bytes — the number
+ * the body-size argument rests on. It is PINNED by a self-test that BUILDS the
+ * worst case and measures it, never left as a claim. The arithmetic:
+ *
+ *   heading + intro prose         ~1.1 KB, fixed
+ *   table rows                    ≤ FAMILY_LEDGER_ROW_CAP (64) × ~48 B ≈ 3.1 KB
+ *   trim callout                  ≤ FAMILY_LEDGER_CALLOUT_CAP (12) × ~26 B + prose
+ *   unregistered callout          ≤ FAMILY_LEDGER_CALLOUT_CAP (12) × ~8 B + prose
+ *   computed-0 line               ≤ registry size (37) × ~8 B + prose
+ *
+ * Measured on the constructed worst case: 2,285 B with every one of the 37
+ * registered families carrying 999 rows, 3,754 B with enough unregistered
+ * codes on top to reach `FAMILY_LEDGER_ROW_CAP`. 6,000 is the declared ceiling
+ * above both, and it is under an EIGHTH of `MARKDOWN_BODY_BUDGET` (60,000) —
+ * and reserved out of that budget, so the 5,536-byte headroom between the
+ * budget and `ISSUE_BODY_LIMIT` (65,536) is untouched by it.
+ *
+ * ⚠️ The GUARANTEE is not this constant. `renderMarkdown` reserves the ledger's
+ * own exact upper bound for the run in hand (`familyLedgerReservation`) BEFORE
+ * it lays out a single finding row. The constant is the ceiling a reviewer can
+ * check by hand; the per-run reservation is what makes the body fit.
+ */
+export const FAMILY_LEDGER_WORST_CASE_BYTES = 6000;
+
+/**
+ * Which codes the sweep actually pushes as finding rows, read off this file's
+ * own source, and how that set compares with the registry.
+ *
+ * A source scan rather than a runtime hook, for the reason AGENTS.md gives for
+ * the cross-package-test-input detector: a detector with no dependencies cannot
+ * itself fail to resolve. The alternative — trusting a new family's author to
+ * remember a second edit — is exactly the "declared ≠ enforced" shape this file
+ * spends 16,000 lines refusing.
+ *
+ * @param {string} [source] — defaults to this file. Injectable so the self-test
+ *   can drive the parser over fixtures without writing to disk.
+ * @returns {{ emitted: string[], missing: string[], extra: string[] }}
+ */
+export function familyRegistryCoverage(source) {
+  const text =
+    typeof source === 'string' ? source : readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const emitted = new Set();
+  // Lazy, bounded, and anchored on the push itself: the first element is `issue`,
+  // `pr`, `card`, `removal.issue` or an inline object literal, so the code is
+  // found by scanning forward to the first quoted `H<digits>` inside the call.
+  const re = /findings\.push\(\[[\s\S]{0,400}?['"](H\d+)['"]/g;
+  let m;
+  while ((m = re.exec(text))) emitted.add(m[1]);
+  const registered = new Set(Object.keys(HALF_STATE_FAMILY_BAND));
+  const byNumber = (a, b) => familyNumber(a) - familyNumber(b);
+  return {
+    emitted: [...emitted].sort(byNumber),
+    missing: [...emitted].filter((c) => !registered.has(c)).sort(byNumber),
+    extra: [...registered].filter((c) => !emitted.has(c)).sort(byNumber),
+  };
+}
+
+/**
+ * The per-family accounting behind the ledger section.
+ *
+ * @param {Array} sortedRows — findings in the order `renderMarkdown` laid them
+ *   out, so `renderedCount` is a prefix length rather than a set membership
+ *   test. Passing the UNSORTED list would silently attribute the rendered rows
+ *   to the wrong families.
+ * @param {number} renderedCount — how many of those rows reached the body.
+ */
+export function familyLedger(sortedRows, renderedCount) {
+  const rows = Array.isArray(sortedRows) ? sortedRows : [];
+  const shown = Math.max(0, Math.min(rows.length, renderedCount ?? rows.length));
+  const seen = new Map();
+  for (let i = 0; i < rows.length; i++) {
+    const code = String(rows[i]?.[1] ?? '');
+    let entry = seen.get(code);
+    if (!entry) {
+      entry = { code, band: familyBand(code), computed: 0, rendered: 0 };
+      seen.set(code, entry);
+    }
+    entry.computed++;
+    if (i < shown) entry.rendered++;
+  }
+  const families = [...seen.values()].sort(
+    (a, b) =>
+      familyRank(a.code) - familyRank(b.code) ||
+      familyNumber(a.code) - familyNumber(b.code) ||
+      (a.code < b.code ? -1 : a.code > b.code ? 1 : 0),
+  );
+  const silent = Object.keys(HALF_STATE_FAMILY_BAND)
+    .filter((code) => !seen.has(code))
+    .sort((a, b) => familyNumber(a) - familyNumber(b));
+  return {
+    families,
+    silent,
+    trimmed: families.filter((e) => e.rendered < e.computed),
+    unregistered: families.filter((e) => e.band === UNREGISTERED_FAMILY_BAND).map((e) => e.code),
+    computed: rows.length,
+    rendered: shown,
+  };
+}
+
+/**
+ * An upper bound on the rendered ledger's length for THIS run, over every
+ * outcome the trim could produce.
+ *
+ * The circle to close: the ledger must be reserved out of the budget before the
+ * rows are laid out, but its `rendered` column and its trim callout are only
+ * known after. A bound resolves it, and the bound is exact rather than a
+ * padded guess, because only two things vary with the outcome:
+ *
+ *   the `rendered` cell — `0 ≤ rendered ≤ computed`, so its width never exceeds
+ *     `digits(computed)`; the widest it can be beyond the `0` rendered in the
+ *     probe is `digits(computed) - 1` per row, and again per callout entry.
+ *   the callout block — present only when something was trimmed, and LONGEST
+ *     when everything was: `rendered = 0` names the most families, carries the
+ *     largest `+N more`, and reports the largest family count.
+ *
+ * So the `rendered = 0` probe plus that digit slack bounds every intermediate
+ * outcome. The `rendered = computed` probe is taken too and the larger wins —
+ * it is provably the shorter of the two today (no callout), and taking the max
+ * keeps the bound correct if a later edit adds prose to only one branch.
+ *
+ * ⛔ Not a claim to be trusted on the strength of this comment: a self-test
+ * drives EVERY `shown` value from 0 to the row count and asserts the render
+ * fits the bound.
+ *
+ * @param {Array} rows — the sorted findings, as `renderMarkdown` laid them out.
+ * @param {(count: number) => string} ledgerText — the renderer, curried by the
+ *   caller so the bound and the real render can never drift apart.
+ */
+export function familyLedgerReservation(rows, ledgerText) {
+  const probe = familyLedger(rows, 0);
+  const widen = (e) => String(e.computed).length - 1;
+  const table = probe.families.slice(0, FAMILY_LEDGER_ROW_CAP).reduce((s, e) => s + widen(e), 0);
+  const callout = probe.families
+    .slice(0, FAMILY_LEDGER_CALLOUT_CAP)
+    .reduce((s, e) => s + widen(e), 0);
+  return Math.max(ledgerText(0).length, ledgerText(rows.length).length) + table + callout;
+}
+
+/**
+ * The ledger section — markdown only, and the asymmetry is the point: this
+ * section exists to make a TRIM legible, and `renderPlain` never trims. Adding
+ * a terminal half would print a table nobody's report needs and would change
+ * bytes every seat reads today.
+ *
+ * The load-bearing sentence is the last one. Without it a reader still cannot
+ * separate "H31 computed nothing" from "H31's rows were among the omitted" —
+ * the table answers it for families WITH rows, and that sentence answers it for
+ * families without.
+ */
+export function renderFamilyLedger(ledger) {
+  if (!ledger) return [];
+  const out = [
+    '### Family ledger — computed vs rendered, every row family (#13947)',
+    '',
+    'What each row family COMPUTED this sweep, and how much of it reached the list above.' +
+      ' `rendered` below `computed` means the body\'s size trim ate the difference; the full list is' +
+      ' in the workflow run log. This table is RESERVED out of the render budget BEFORE the finding' +
+      ' rows are laid out — the same reservation the H17 index, the H39 census and the H40 section' +
+      ' hold — so the trim can never be what removes it. Rows above are ordered by the same band' +
+      ' shown here (`HALF_STATE_FAMILY_BAND`), highest band first, so a row survives the trim on' +
+      ' what it IS rather than on how many unrelated rows were laid out before it.',
+    '',
+  ];
+
+  if (ledger.trimmed.length > 0) {
+    const named = ledger.trimmed
+      .slice(0, FAMILY_LEDGER_CALLOUT_CAP)
+      .map((e) => `\`${e.code}\` (${e.rendered}/${e.computed})`)
+      .join(', ');
+    const rest = ledger.trimmed.length - Math.min(ledger.trimmed.length, FAMILY_LEDGER_CALLOUT_CAP);
+    out.push(
+      `⚠️ **${ledger.trimmed.length} family(ies) had rows omitted by the body trim**: ${named}` +
+        `${rest > 0 ? `, +${rest} more in the table` : ''}.`,
+      '',
+    );
+  }
+
+  if (ledger.families.length === 0) {
+    out.push('_No row family computed a finding this sweep._');
+  } else {
+    const shown = ledger.families.slice(0, FAMILY_LEDGER_ROW_CAP);
+    out.push('| family | band | computed | rendered |', '|:--|:--|--:|--:|');
+    for (const e of shown) {
+      const flag = e.band === UNREGISTERED_FAMILY_BAND ? ' ⚠️' : '';
+      out.push(`| \`${e.code}\`${flag} | ${e.band} | ${e.computed} | ${e.rendered} |`);
+    }
+    if (ledger.families.length > shown.length) {
+      out.push(
+        `| … ${ledger.families.length - shown.length} further family(ies) | omitted at ` +
+          '`FAMILY_LEDGER_ROW_CAP` | | |',
+      );
+    }
+  }
+
+  if (ledger.unregistered.length > 0) {
+    const named = ledger.unregistered
+      .slice(0, FAMILY_LEDGER_CALLOUT_CAP)
+      .map((c) => `\`${c}\``)
+      .join(', ');
+    const rest =
+      ledger.unregistered.length - Math.min(ledger.unregistered.length, FAMILY_LEDGER_CALLOUT_CAP);
+    out.push(
+      '',
+      `⚠️ ${ledger.unregistered.length} family(ies) carry NO band in \`HALF_STATE_FAMILY_BAND\`:` +
+        ` ${named}${rest > 0 ? `, +${rest} more in the table` : ''}. They are sorted just below the` +
+        ' gate band so an unclassified severity is protected rather than trimmed — register them.',
+    );
+  }
+
+  out.push(
+    '',
+    ledger.silent.length > 0
+      ? `_Computed 0 row(s) this sweep, and therefore absent from the table (${ledger.silent.length}): ` +
+        `${ledger.silent.map((c) => `\`${c}\``).join(', ')}. These families were EVALUATED and found ` +
+        'nothing — they have no rows to omit. Every family that computed a row is IN the table with ' +
+        'its count, whether or not the trim left any of that row family in the body above, so a ' +
+        'family missing from the list of findings is never ambiguous between the two readings._'
+      : '_Every registered family computed at least one row this sweep, so none is absent from the ' +
+        'table. A family that had computed nothing would be named here instead of being silently ' +
+        'indistinguishable from one whose rows the trim removed._',
+  );
+  return out;
+}
+
 /**
  * The anchor-body report.
  *
@@ -7682,9 +8683,12 @@ export function normalizeProvenance(text) {
  * medium: this body is READ AT A FOLD and TRIMMED AT A CAP. A P0-SUSPECT row
  * sitting at position 38 of 40 — or trimmed off the end entirely — is exactly
  * the silence this sweeper's standing caller exists to end, so loud rows sort
- * first and are therefore the last things truncation could ever reach. Within
- * each band the issue-number order is preserved, so the list is still stable
- * run to run and diffable in the anchor's edit history.
+ * first and are therefore the last things truncation could ever reach. Below
+ * those two bands the order is the FAMILY BAND (#13947) and only then the issue
+ * number, so the trim eats the least gate-bearing rows rather than the ones
+ * that happened to be laid out last. Within one family the issue-number order
+ * is preserved, so the list is still stable run to run and diffable in the
+ * anchor's edit history.
  *
  * The header is deliberately restated every run rather than left as a
  * hand-written preamble the workflow must not clobber: the body is owned by
@@ -7704,6 +8708,7 @@ export function renderMarkdown(findings, counts, options = {}) {
     (a, b) =>
       Number(isLoudFinding(b[2])) - Number(isLoudFinding(a[2])) ||
       Number(isUnjudgedFinding(b[2])) - Number(isUnjudgedFinding(a[2])) ||
+      familyRank(a[1]) - familyRank(b[1]) ||
       a[0].number - b[0].number,
   );
   const loudCount = rows.filter(([, , msg]) => isLoudFinding(msg)).length;
@@ -7761,12 +8766,28 @@ export function renderMarkdown(findings, counts, options = {}) {
   // be able to truncate away. The census in particular is the leg that exists
   // because a population grew unobserved — losing it to a body trim would
   // reproduce that defect inside its own fix.
+  // H40 leads the reserved block (#13634): it is the only section here that can
+  // carry an ALARM, and the reservation is the whole point of putting it in a
+  // section rather than in the finding rows the trim eats (#13947).
   const indexBlock = [
+    ...renderDanglingReferences(options.references, { markdown: true }),
     ...renderTriggerIndex(options.triggerIndex, { markdown: true }),
     ...renderClosedResidueCensus(options.census, { markdown: true }),
     ...renderRatePremise(options.ratePremise, { markdown: true }),
   ];
   const indexText = indexBlock.length > 0 ? `\n\n${indexBlock.join('\n')}` : '';
+
+  // The family ledger is reserved the same way, and it poses a problem the
+  // other sections do not: its size depends on the trim's OUTCOME, which is not
+  // known until after the rows are laid out. `familyLedgerReservation` closes
+  // that circle with a bound rather than a guess — see its header — and
+  // reserving that bound BEFORE the first row is what makes this section
+  // unconditional by construction rather than by hope (#13947).
+  const ledgerText = (count) => {
+    const lines = renderFamilyLedger(familyLedger(rows, count));
+    return lines.length > 0 ? `\n\n${lines.join('\n')}` : '';
+  };
+  const ledgerReservation = familyLedgerReservation(rows, ledgerText);
 
   if (rows.length === 0) {
     head.push(
@@ -7774,13 +8795,14 @@ export function renderMarkdown(findings, counts, options = {}) {
         ' that could not RUN replaces this whole body with a prerequisite/failure report instead, so a' +
         ' green anchor is never the sound of a broken sweeper.',
     );
-    return `${head.join('\n')}${indexText}`;
+    return `${head.join('\n')}${ledgerText(0)}${indexText}`;
   }
 
   head.push('### Findings', '', '');
   const body = head.join('\n');
   const rendered = [];
-  let used = body.length + indexText.length;
+  let shown = rows.length;
+  let used = body.length + indexText.length + ledgerReservation;
   for (let i = 0; i < rows.length; i++) {
     const [issue, code, msg] = rows[i];
     const line = `- **${code}** [#${issue.number}](${issue.html_url}) — ${msg}`;
@@ -7789,12 +8811,13 @@ export function renderMarkdown(findings, counts, options = {}) {
     const notice = `\n- _… ${rows.length - i} further row(s) omitted to fit GitHub's issue-body limit; the full list is in the workflow run log._`;
     if (used + line.length + 1 + notice.length > MARKDOWN_BODY_BUDGET) {
       rendered.push(notice.slice(1));
+      shown = i;
       break;
     }
     rendered.push(line);
     used += line.length + 1;
   }
-  return `${body}${rendered.join('\n')}${indexText}`;
+  return `${body}${rendered.join('\n')}${ledgerText(shown)}${indexText}`;
 }
 
 /**
@@ -8717,13 +9740,31 @@ async function sweep(options = {}) {
     commitWindowTruncated: false,
     openListingPages: 0,
     openListingsTruncated: [],
+    // H40's numbers (#13634), initialised for the reason the window pairs are:
+    // a sweep that throws before the reference pass must render numbers, and a
+    // zero attempted beside a zero distinct is visibly a pass that did not run.
+    refDistinct: 0,
+    refCards: 0,
+    refThreads: 0,
+    refFree: 0,
+    refAttempted: 0,
+    refResolved: 0,
+    refDangling: 0,
+    refUnjudged: 0,
+    refDeferred: 0,
+    refFloor: null,
+    refBeyond: 0,
   };
   // H17's gathering rides out of the sweep the same way, because it has the
   // same per-row failure mode as H16's detail pass and therefore owes the
   // summary line the same `read X of Y`.
   const hold = { entries: [], candidates: 0, probed: 0 };
+  // H40's report rides out the same way and for the same reason: it is rendered
+  // as a reserved SECTION rather than as finding rows, so it cannot travel back
+  // on `findings` (#13634).
+  const references = { report: null };
   try {
-    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats, hold);
+    await sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats, hold, references);
   } catch (err) {
     err.sweptSoFar = seen.size + seenPrs.size + seenMerged.size + seenUnscoped.size + seenClosed.size;
     throw err;
@@ -8778,8 +9819,14 @@ async function sweep(options = {}) {
           triggerIndex,
           census,
           ratePremise,
+          references: references.report,
         })
-      : renderPlain(findings, counts, { triggerIndex, census, ratePremise }),
+      : renderPlain(findings, counts, {
+          triggerIndex,
+          census,
+          ratePremise,
+          references: references.report,
+        }),
   );
 }
 
@@ -9760,7 +10807,7 @@ async function listAllOpenIssues(stats = {}) {
   return out;
 }
 
-async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null) {
+async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seenClosed, stats = {}, hold = null, references = null) {
   // `pm:awaiting-maintainer` is listed like every other state label (#11196
   // fix 5). H25's exclusivity carriers would be reachable through the label
   // they wrongly coexist with, but a card in the state ALONE would otherwise be
@@ -10560,6 +11607,98 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // counted as probed and not as unreadable.
   stats.crossRepoProbed = repoReadCache.size;
   stats.crossRepoUnreadable = [...repoReadCache.values()].filter((v) => v === false).length;
+
+  // -- H40 — the dangling-reference patrol (#13634) --------------------------
+  //
+  // Runs LAST, deliberately. It is the only pass here whose cost is a budget
+  // rather than a population, so every other item's findings are already
+  // gathered before it spends a request: a reference pass that runs out of
+  // quota or wall clock costs this report its own section, never anyone else's
+  // rows. It is also why its corpus is free — every text it scans was fetched
+  // for some other item, and the comment threads it reads are the ones already
+  // in `commentCache`.
+  if (references) {
+    const referrers = [];
+    // The live board: open cards (label pages ∪ the unscoped inventory) and
+    // open PRs. ⛔ Not `seenMerged`/`seenClosed` — archive, see the section
+    // header's corpus bound.
+    const liveCards = new Map();
+    for (const [number, issue] of seenUnscoped) liveCards.set(number, issue);
+    for (const [number, issue] of seen) liveCards.set(number, issue);
+    for (const [number, pr] of seenPrs) liveCards.set(number, pr);
+    for (const [number, row] of liveCards) {
+      const texts = [row.body ?? ''];
+      // The comment channel, from the cache and ONLY from the cache: a thread
+      // this sweep already paid for is free, and buying one per card would be a
+      // second request on every open card — the cost this row's own clause
+      // forbids. The report states the gated coverage rather than implying more.
+      for (const comment of commentCache.get(number) ?? []) texts.push(comment?.body ?? '');
+      referrers.push({ number, html_url: row.html_url, texts });
+    }
+    const threads = [...liveCards.keys()].filter((n) => commentCache.has(n)).length;
+    // The ceiling is a MEASUREMENT: the highest number this sweep actually saw
+    // anywhere, archive included (a merged PR is perfectly good evidence that a
+    // number exists). Numbers above it are held out rather than resolved.
+    const ceiling = Math.max(
+      0,
+      ...[...liveCards.keys(), ...seenMerged.keys(), ...seenClosed.keys()],
+    );
+    const index = buildReferenceIndex(referrers, { repo: OWNER_REPO, ceiling: ceiling || null });
+
+    // Numbers a listing in hand already answers — the free half of the cost
+    // control. Archive counts HERE even though it is not a referrer: a merged
+    // PR in the window is proof its number resolves, and using it spends no
+    // request. `blockerCache` joins in for the same reason — H19 already paid
+    // for those resolutions, and 「每个号码解析一次」 is a claim about the whole
+    // sweep, not about this pass.
+    const known = new Set([
+      ...liveCards.keys(),
+      ...seenMerged.keys(),
+      ...seenClosed.keys(),
+    ]);
+    const observations = new Map();
+    for (const resolved of blockerCache.values()) {
+      if (!resolved?.local || !Number.isFinite(resolved.number)) continue;
+      if (resolved.state === 'unresolved') {
+        // Not put in `known`: H19 already asked and got no answer, so this
+        // number still owes a verdict — it is carried as an OBSERVATION so the
+        // plan can attempt it without paying twice.
+        observations.set(resolved.number, { status: resolved.detail === 'HTTP 404' ? 404 : 0 });
+      } else {
+        known.add(resolved.number);
+      }
+    }
+    const plan = h40ResolutionPlan(index.refs.keys(), known, H40_RESOLUTION_BUDGET);
+    for (const n of plan.attempt) {
+      if (observations.has(n)) continue;
+      try {
+        await rest(`/repos/${OWNER_REPO}/issues/${n}`);
+        observations.set(n, { ok: true });
+      } catch (err) {
+        // Per-number, never fatal — H19's reasoning, and one step further: the
+        // status is kept RAW so `h40Verdict` is the only place that decides
+        // what 404 means. A transport failure mid-budget leaves that number
+        // UNJUDGED and every earlier answer intact.
+        observations.set(n, { status: err?.status ?? 0 });
+      }
+    }
+    references.report = h40Report(index, plan, observations, {
+      threads,
+      cards: liveCards.size,
+      ceiling: ceiling || null,
+    });
+    stats.refDistinct = references.report.distinct;
+    stats.refCards = references.report.cards;
+    stats.refThreads = references.report.threads;
+    stats.refFree = references.report.free;
+    stats.refAttempted = references.report.attempted;
+    stats.refResolved = references.report.resolved;
+    stats.refDangling = references.report.dangling.length;
+    stats.refUnjudged = references.report.unjudged.length;
+    stats.refDeferred = references.report.deferred;
+    stats.refFloor = references.report.floor;
+    stats.refBeyond = references.report.beyond;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -11992,6 +13131,91 @@ function selfTest() {
   t('H14-B: missing SURVIVES an incomplete index', h14row(carded(9465, ['domain:devx']), unionIdx, { indexComplete: false }).includes('#9709'), true);
   t('H14-B: …and an earned label stays clean either way', h14BlockingCacheIncoherent(epic9465, unionIdx, { indexComplete: false }), null);
 
+  // -- H14: the SEAM DECLINE on the stale direction (#13975) -----------------
+  //
+  // ⚠️ NAMING, because the two vocabularies are inverted and a case written
+  // under the wrong one pins the wrong direction: the cases above call STALE
+  // "H14-A" and MISSING "H14-B", while the filing card #13975 calls the strip
+  // "direction B". The ruling is about the STRIP under either name, so these
+  // cases say `seam` and name the direction in words.
+  //
+  // The fixtures are the real cards the defect was measured on (2026-08-31, 5
+  // stale rows): #12931 carries `repo:cloud` and declines; #13439 sits in the
+  // SAME position carrying no `repo:*` label and still fires — which is the
+  // predicate's measured under-coverage, since that card's own filing records
+  // cloud#1451 waiting on it.
+  const seamIdx = idx([]);
+  const seamCard = carded(12931, ['pm:queue', 'repo:cloud', 'pm:blocking']);
+  const nonSeamCard = carded(13439, ['bug', 'priority:p1', 'pm:queue', 'domain:spec', 'pm:blocking']);
+  const swept = { ownerRepo: 'objectstack-ai/objectstack' };
+
+  // The predicate, alone: one reading of the `repo:*` family, `censusLanesOf`'s.
+  t('H14 seam: the predicate reads the repo:* family', seamRepoLabels(seamCard).join(','), 'repo:cloud');
+  t('H14 seam: …and is empty on a card carrying none', seamRepoLabels(nonSeamCard).length, 0);
+  t('H14 seam: …and a domain lane is not a repo lane', seamRepoLabels(carded(1, ['domain:spec', 'pm:blocking'])).length, 0);
+  t('H14 seam: …and more than one repo label is all of them', seamRepoLabels(carded(1, ['repo:cloud', 'domain:spec', 'repo:hotcrm'])).join(','), 'repo:cloud,repo:hotcrm');
+  t('H14 seam: …and a missing issue does not crash', seamRepoLabels(undefined).length, 0);
+
+  // The decline: EMITTED, never suppressed (the row is the seam card's only
+  // trace in the report — H32's silent `foreign` return is the other shape,
+  // and it belongs to a row whose POPULATION is out of scope, not one whose
+  // evidence is unreadable).
+  t('H14 seam: a seam card in the stale position still EMITS a row', typeof h14BlockingCacheIncoherent(seamCard, seamIdx, swept), 'string');
+  t('H14 seam: …and the row declines rather than accusing', h14row(seamCard, seamIdx, swept).includes('DECLINES to judge'), true);
+  t('H14 seam: …and names the label it declined on', h14row(seamCard, seamIdx, swept).includes('`repo:cloud`'), true);
+  t('H14 seam: …and says the evidence is UNREADABLE, not absent', h14row(seamCard, seamIdx, swept).includes('UNREADABLE'), true);
+  t('H14 seam: …and that no re-run resolves it', h14row(seamCard, seamIdx, swept).includes('no re-run resolves it'), true);
+  t('H14 seam: …and reads as UNJUDGED, never as a stale cache', h14row(seamCard, seamIdx, swept).includes('stale derived cache'), false);
+  t('H14 seam: …so it never prescribes the strip', h14row(seamCard, seamIdx, swept).includes('drops the label'), false);
+  t('H14 seam: …and forbids the hand-strip as well as the hand-apply', h14row(seamCard, seamIdx, swept).includes('hand-stripped'), true);
+  // The trim-order rank, which is what makes "emitted" mean "still there in the
+  // rendered body" (#11218). Without it a decline is a suppression on a delay.
+  t('H14 seam: …and the row carries the UNJUDGED rank', isUnjudgedFinding(h14row(seamCard, seamIdx, swept)), true);
+  t('H14 seam: …while the ordinary stale row does NOT (it made a determination)', isUnjudgedFinding(h14row(nonSeamCard, seamIdx, swept)), false);
+  // Report-only and never loud, the H14–H16 property the decline must not break.
+  t('H14 seam: …and the decline is not a loud finding', isLoudFinding(h14row(seamCard, seamIdx, swept)), false);
+  // The card's own re-check (`grep -E "H14 .*carried while no open"`) has to
+  // keep listing BOTH shapes, or the seam cards vanish from the one-liner the
+  // filing seat used to find them.
+  t('H14 seam: …and the row head still answers the card\'s re-check grep', /carried while no open/u.test(h14row(seamCard, seamIdx, swept)), true);
+
+  // The paired negative: the same position, no `repo:*` label -> still fires.
+  t('H14 seam: a NON-seam card in the same position still fires', h14row(nonSeamCard, seamIdx, swept).includes('stale derived cache'), true);
+  t('H14 seam: …and its row names its own scope', h14row(nonSeamCard, seamIdx, swept).includes('no dependent found in this repo'), true);
+  t('H14 seam: …and says the missing label is NOT evidence of an in-repo audience', h14row(nonSeamCard, seamIdx, swept).includes('58 of the 67'), true);
+
+  // An earned label is clean whether or not the card is a seam: the decline
+  // fires on the stale position only, never on the population.
+  t('H14 seam: a seam card with a real in-repo dependent -> clean', h14BlockingCacheIncoherent(seamCard, idx([carded(10, [], 'Blocked-by: #12931')]), swept), null);
+  // Suspension outranks the decline: an index known incomplete silences the
+  // whole direction, unchanged by this row.
+  t('H14 seam: an incomplete index still silences the direction outright', h14BlockingCacheIncoherent(seamCard, seamIdx, { ...swept, indexComplete: false }), null);
+
+  // ⛔ The ADD direction is untouched on a seam card, and byte-identically so:
+  // a cross-repo edge the index cannot see can only make THAT direction
+  // under-label, which is the status quo and starves nobody.
+  const addIdx = idx([carded(9249, ['pm:queue'], 'Blocked-by: #9919')]);
+  t('H14 seam: the ADD direction still fires on a seam card', h14row(carded(9919, ['pm:queue', 'repo:cloud']), addIdx, swept).includes('#9249'), true);
+  t(
+    'H14 seam: …and its sentence is byte-identical to the same card without the label',
+    h14row(carded(9919, ['pm:queue', 'repo:cloud']), addIdx, swept),
+    h14row(carded(9919, ['pm:queue']), addIdx, swept),
+  );
+
+  // The over-covered edge, pinned rather than narrowed. `repo:objectstack` is
+  // not in the label ledger's seam family but 4 open cards carried it on
+  // 2026-08-31, and the ruled predicate is "any `repo:*` label" — so it
+  // declines, and SAYS the decline is conservative rather than asserting an
+  // off-repo audience it cannot see.
+  const ownRepoCard = carded(1, ['pm:queue', 'repo:objectstack', 'pm:blocking']);
+  t('H14 seam: a label naming the swept repo declines too (the predicate is literal)', h14row(ownRepoCard, seamIdx, swept).includes('DECLINES to judge'), true);
+  t('H14 seam: …and says that decline is CONSERVATIVE', h14row(ownRepoCard, seamIdx, swept).includes('CONSERVATIVE'), true);
+  t('H14 seam: …while a sibling label claims nothing conservative', h14row(seamCard, seamIdx, swept).includes('CONSERVATIVE'), false);
+  // …and the reading follows the SWEPT repo rather than a hardcoded name, so a
+  // copy of this patrol installed in a sibling repo reads its own board.
+  t('H14 seam: …the conservative reading follows the swept repo', h14row(seamCard, seamIdx, { ownerRepo: 'objectstack-ai/cloud' }).includes('CONSERVATIVE'), true);
+  t('H14 seam: …and a seam label there is still structural', h14row(ownRepoCard, seamIdx, { ownerRepo: 'objectstack-ai/cloud' }).includes('CONSERVATIVE'), false);
+
   // The summary line carries the third `read X of Y` pair, and says out loud
   // when the shortfall cost H14 its stale direction.
   const fbCounts = (fallbackProbed, fallbackCandidates) => ({
@@ -13339,6 +14563,154 @@ function selfTest() {
   t('summaryLine: reports the H9 restart-comment reads', saidBy('h9Restart', summaryLine({ ...counts, restartCandidates: 7, restartProbed: 7 }, 0)).includes('`Restart-when:` hold comments read on 7 of 7 H9 candidate(s)'), true);
   t('summaryLine: …and a partial restart read says so', saidBy('h9Restart', summaryLine({ ...counts, restartCandidates: 7, restartProbed: 2 }, 0)).includes("read on 2 of 7 H9 candidate(s) — each unread thread fires its own card's H9 row"), true);
   t('summaryLine: absent H9 counts degrade to 0, never to undefined', saidBy('h9Restart', summaryLine(counts, 0)).includes('`Restart-when:` hold comments read on 0 of 0'), true);
+
+  // -- #13947: family legibility, and a trim that ranks by WHAT a row is ------
+  //
+  // The measured defect: on the 2026-08-31T13:42Z sweep the anchor computed 231
+  // findings and rendered 74, dropping 157 by POSITION in one flat list. H31 —
+  // the two-carrier gate comparison whose own header says 「闸门被剥不是红灯是
+  // 放行」 — rendered ZERO rows, and the page gave a reader no way to tell that
+  // from a board with no split. Triage's criterion for the fix, verbatim:
+  // 「族内按重要性裁,族外按运气裁」. Two mechanisms answer it and the cases
+  // below keep them apart, because only one of them is sufficient: ordering
+  // moves WHICH rows are lost, the ledger makes their loss READABLE.
+
+  // ① The registry is complete, proved against this file's own source rather
+  // than a hand-kept list. A new family pushed without a band fails HERE.
+  const coverage = familyRegistryCoverage();
+  t('#13947 registry: every emitted family carries a band', coverage.missing.join(','), '');
+  t('#13947 registry: …and no band names a family the sweep never emits', coverage.extra.join(','), '');
+  t('#13947 registry: the scan really found families (positive control)', coverage.emitted.length >= 30, true);
+  t('#13947 registry: …including the gate pair the ruling names', `${coverage.emitted.includes('H31')}/${coverage.emitted.includes('H35')}`, 'true/true');
+  t('#13947 registry: the SECTION families take no band — they are not rows', ['H17', 'H39', 'H40'].some((c) => c in HALF_STATE_FAMILY_BAND), false);
+  // ⚠️ The fixtures below are ASSEMBLED, never written literally: a literal
+  // push expression in this file would be found by the scan above and reported
+  // as a real unregistered family, breaking the very invariant these cases pin.
+  const PUSH = `findings${'.'}push([`;
+  t('#13947 registry: a single-line push is read', familyRegistryCoverage(`${PUSH}issue, 'H41', msg]);`).emitted.join(','), 'H41');
+  t('#13947 registry: …a multi-line push with an object first element too', familyRegistryCoverage(`${PUSH}\n  { number: 1, html_url: u },\n  "H42",\n  msg,\n]);`).emitted.join(','), 'H42');
+  t('#13947 registry: …and an unbanded code is reported as missing', familyRegistryCoverage(`${PUSH}pr, 'H41', m]);`).missing.join(','), 'H41');
+  t('#13947 registry: a source that pushes nothing reports nothing', familyRegistryCoverage('const x = 1;').emitted.length, 0);
+
+  // ② The bands themselves, and the ordering the trim now consults.
+  t('#13947 band: H31 is gate-semantic', familyBand('H31'), 'gate');
+  t('#13947 band: …and H35, the gate-REMOVAL event, with it', familyBand('H35'), 'gate');
+  t("#13947 band: H14/H22/H5 are inventory — triage's own examples", `${familyBand('H14')}/${familyBand('H22')}/${familyBand('H5')}`, 'inventory/inventory/inventory');
+  t('#13947 band: ⭐ a gate family outranks an inventory one', familyRank('H31') < familyRank('H14'), true);
+  t('#13947 band: …and outranks a stall family', familyRank('H31') < familyRank('H19'), true);
+  t('#13947 band: a stall family outranks an inventory one', familyRank('H19') < familyRank('H22'), true);
+  t('#13947 band: an unknown code is NAMED unregistered, never dropped', familyBand('H99'), UNREGISTERED_FAMILY_BAND);
+  t('#13947 band: …and is PROTECTED, sorting above the ordinary bands', familyRank('H99') < familyRank('H19'), true);
+  t('#13947 band: …but never above a declared gate row', familyRank('H31') < familyRank('H99'), true);
+  t('#13947 band: every band in the table is a declared band', Object.values(HALF_STATE_FAMILY_BAND).every((b) => HALF_STATE_FAMILY_BANDS.some((d) => d.name === b)), true);
+
+  // ③ The ledger's accounting, asserted directly — including the contract that
+  // `renderedCount` is a PREFIX of the SORTED rows, not a set membership test.
+  const led = familyLedger([finding(1, 'H22', 'a'), finding(2, 'H22', 'b'), finding(3, 'H31', 'c')], 2);
+  t('#13947 ledger: computed counts every row', led.computed, 3);
+  t('#13947 ledger: rendered counts the prefix that survived', led.rendered, 2);
+  t('#13947 ledger: the per-family split is exact, gate band first', led.families.map((e) => `${e.code}:${e.computed}/${e.rendered}`).join(','), 'H31:1/0,H22:2/2');
+  t('#13947 ledger: …and the trimmed set names only the short families', led.trimmed.map((e) => e.code).join(','), 'H31');
+  t('#13947 ledger: a family with rows is never in the computed-0 list', led.silent.includes('H22') || led.silent.includes('H31'), false);
+  t('#13947 ledger: …and one without rows always is', led.silent.includes('H19'), true);
+
+  // ④ ⭐ Severity beats arrival position — the case this card is about. The
+  // inventory flood arrives FIRST and carries the LOWER card numbers, so under
+  // the flat positional trim the gate row was among the omitted.
+  const inventoryFlood = Array.from({ length: 900 }, (_, i) => finding(1000 + i, 'H22', 'a CLOSED card still carries a `pm:*` state label — '.repeat(2)));
+  const lateGateRow = finding(99999, 'H31', 'the `needs:contract-review` gate is on the PR carrier and not the card');
+  const ranked = renderMarkdown([...inventoryFlood, lateGateRow], counts);
+  t('#13947 order: the flood really does trigger the trim', ranked.includes('further row(s) omitted'), true);
+  t('#13947 order: ⭐ the LAST-arriving gate row survives it', ranked.includes('#99999'), true);
+  // ⚠️ `> 0 &&` is load-bearing: a trimmed-away row yields indexOf === -1, which
+  // is less than every other index, so a bare `<` comparison passes VACUOUSLY on
+  // exactly the regression this case exists to catch (measured while ablating
+  // the sort key — the bare form stayed green with the gate row gone).
+  t('#13947 order: …and is laid out FIRST, above every inventory row', ranked.indexOf('#99999') > 0 && ranked.indexOf('#99999') < ranked.indexOf('#1000'), true);
+  t('#13947 order: …and the ledger records it as fully rendered', ranked.includes('| `H31` | gate | 1 | 1 |'), true);
+  t('#13947 order: …while the inventory family is the one that loses rows', ranked.includes('| `H22` | inventory | 900 |'), true);
+  t('#13947 order: the body still fits the render budget', ranked.length <= MARKDOWN_BODY_BUDGET, true);
+  t('#13947 order: …and the hard cap', ranked.length <= ISSUE_BODY_LIMIT, true);
+  // The loud and unjudged bands still outrank the family bands: an inventory
+  // row that is UNJUDGED is a gap in what was READ, and #11218's reservation
+  // must survive this change rather than be re-litigated by it.
+  const unjudgedInventory = finding(88888, 'H19', `${UNJUDGED_MARKER} a cross-repo target could not be resolved`);
+  const banded = renderMarkdown([...inventoryFlood, lateGateRow, unjudgedInventory], counts);
+  t('#13947 order: an UNJUDGED row still outranks a gate row', banded.indexOf('#88888') > 0 && banded.indexOf('#88888') < banded.indexOf('#99999'), true);
+  t('#13947 order: …and a loud row outranks both', renderMarkdown([lateGateRow, loudRow], counts).indexOf('#900') > 0 && renderMarkdown([lateGateRow, loudRow], counts).indexOf('#900') < renderMarkdown([lateGateRow, loudRow], counts).indexOf('#99999'), true);
+
+  // ⑤ ⭐⭐ The acceptance test: zero rendered H31 rows, read two ways. The loud
+  // band outranks every family band by design, so a P0 flood is the one shape
+  // that can still eat a gate family whole — and the ledger is what keeps that
+  // legible instead of indistinguishable from a clean board.
+  const loudFlood = Array.from({ length: 700 }, (_, i) => finding(30000 + i, 'H13', `${P0_SUSPECT_MARKER} the card self-declares P0. ${'x'.repeat(90)}`));
+  const h31Rows = Array.from({ length: 6 }, (_, i) => finding(40000 + i, 'H31', 'the gate is carried on one of its two carriers'));
+  const eaten = renderMarkdown([...loudFlood, ...h31Rows], counts);
+  t('#13947 H31: the flood trims the gate family away entirely', eaten.includes('#40000'), false);
+  t('#13947 H31: ⭐ …and the ledger says so, computed and rendered both', eaten.includes('| `H31` | gate | 6 | 0 |'), true);
+  t('#13947 H31: …and the callout names it above the table', eaten.includes('`H31` (0/6)'), true);
+  const noSplit = renderMarkdown([quietRow], counts);
+  t('#13947 H31: the OTHER reading — a family that computed nothing', noSplit.includes('Computed 0 row(s) this sweep'), true);
+  t('#13947 H31: …names H31 in that list', /Computed 0 row\(s\)[\s\S]*?`H31`/.test(noSplit), true);
+  t('#13947 H31: …and keeps it out of the table', noSplit.includes('| `H31` |'), false);
+  t('#13947 H31: ⭐⭐ so the two readings are textually distinct', eaten.includes('| `H31` | gate | 6 | 0 |') && !noSplit.includes('| `H31` |'), true);
+  t('#13947 H31: the disambiguating sentence states the contract in words', noSplit.includes('never ambiguous between the two readings'), true);
+
+  // ⑥ Unconditional by construction: reserved out of the budget BEFORE the
+  // rows are laid out, exactly as the H17 index and the H40 section are.
+  t('#13947 reserved: a TRIMMED body still carries the ledger', eaten.includes('### Family ledger'), true);
+  t('#13947 reserved: …a clean board carries it too', renderMarkdown([], counts).includes('### Family ledger'), true);
+  t('#13947 reserved: …saying nothing computed, rather than going silent', renderMarkdown([], counts).includes('No row family computed a finding this sweep'), true);
+  t('#13947 reserved: the ledger sits below the findings', eaten.indexOf('### Findings') < eaten.indexOf('### Family ledger'), true);
+  const withIdx = renderMarkdown(loudFlood, counts, { triggerIndex: triggerIdx });
+  t('#13947 reserved: …and above the other reserved sections', withIdx.indexOf('### Family ledger') < withIdx.indexOf('### On-hold trigger-file index'), true);
+  t('#13947 reserved: which still render under a flooded body', withIdx.includes('### On-hold trigger-file index'), true);
+  t('#13947 reserved: …with the whole body inside the render budget', withIdx.length <= MARKDOWN_BODY_BUDGET, true);
+  // Markdown only, and the asymmetry is deliberate: the terminal never trims.
+  t('#13947 plain: the ledger has no terminal half', renderPlain([quietRow], counts).includes('Family ledger'), false);
+  t('#13947 plain: …and the summary sentence is still the last line', renderPlain([quietRow], counts).endsWith('not a gate verdict.'), true);
+
+  // ⑦ Requirement three: this is a LEGIBILITY fix, not a silent-truncation
+  // fix. The omission notice and its three protecting cases above stay.
+  t('#13947 notice: the omission notice survives beside the ledger', eaten.includes("further row(s) omitted to fit GitHub's issue-body limit"), true);
+  t('#13947 notice: …and still points at the run log', eaten.includes('the full list is in the workflow run log'), true);
+  t('#13947 notice: …on the severity-ordered body too', ranked.includes('further row(s) omitted'), true);
+
+  // ⑧ The reservation is a BOUND, and it is PROVED rather than asserted: every
+  // outcome the trim could produce is rendered and measured against it.
+  const boundRows = [...inventoryFlood.slice(0, 40), ...h31Rows, ...loudFlood.slice(0, 12)].sort(
+    (a, b) => familyRank(a[1]) - familyRank(b[1]) || a[0].number - b[0].number,
+  );
+  const boundText = (n) => {
+    const lines = renderFamilyLedger(familyLedger(boundRows, n));
+    return lines.length > 0 ? `\n\n${lines.join('\n')}` : '';
+  };
+  const bound = familyLedgerReservation(boundRows, boundText);
+  let widest = 0;
+  for (let n = 0; n <= boundRows.length; n++) widest = Math.max(widest, boundText(n).length);
+  t('#13947 budget: ⭐ the reservation bounds EVERY trim outcome', widest <= bound, true);
+  t('#13947 budget: …and is tight, not vacuously large', bound - widest <= 64, true);
+  t('#13947 budget: the run-in-hand bound is under the declared ceiling', bound <= FAMILY_LEDGER_WORST_CASE_BYTES, true);
+  // The declared ceiling, built rather than claimed: every registered family
+  // computing 999 rows at once, then unregistered codes on top to the row cap.
+  const everyFamily = Object.keys(HALF_STATE_FAMILY_BAND).flatMap((code) => Array.from({ length: 999 }, (_, i) => finding(60000 + i, code, 'row')));
+  t('#13947 budget: a ledger over EVERY registered family fits the ceiling', renderFamilyLedger(familyLedger(everyFamily, 1)).join('\n').length <= FAMILY_LEDGER_WORST_CASE_BYTES, true);
+  const overCap = [...everyFamily, ...Array.from({ length: FAMILY_LEDGER_ROW_CAP + 5 - Object.keys(HALF_STATE_FAMILY_BAND).length }, (_, k) => k).flatMap((k) => Array.from({ length: 999 }, (_, i) => finding(70000 + i, `H${900 + k}`, 'row')))];
+  const overCapLedger = renderFamilyLedger(familyLedger(overCap, 1)).join('\n');
+  t('#13947 budget: …and one crowded to the row cap fits it too', overCapLedger.length <= FAMILY_LEDGER_WORST_CASE_BYTES, true);
+  t('#13947 budget: the ceiling is a small fraction of the render budget', FAMILY_LEDGER_WORST_CASE_BYTES * 8 <= MARKDOWN_BODY_BUDGET, true);
+
+  // ⑨ The ledger's own overflow announces itself — the in-family-cap tradition
+  // this whole change generalises, applied to the ledger itself.
+  t('#13947 cap: an over-cap ledger announces the omission', overCapLedger.includes('5 further family(ies)'), true);
+  t('#13947 cap: …and names the cap that produced it', overCapLedger.includes('FAMILY_LEDGER_ROW_CAP'), true);
+  t('#13947 cap: …and renders exactly the cap', overCapLedger.split('\n').filter((l) => /^\| `H\d/.test(l)).length, FAMILY_LEDGER_ROW_CAP);
+
+  // ⑩ An unregistered family is LOUD, in the table and beside it.
+  const strange = renderFamilyLedger(familyLedger([finding(1, 'H31', 'g'), finding(2, 'H99', 'x')], 2)).join('\n');
+  t('#13947 unregistered: the table flags it', strange.includes('| `H99` ⚠️ | unregistered | 1 | 1 |'), true);
+  t('#13947 unregistered: …and a callout asks for it to be registered', strange.includes('carry NO band in `HALF_STATE_FAMILY_BAND`'), true);
+  t('#13947 unregistered: …and it never lands in the computed-0 list', /Computed 0 row\(s\)[\s\S]*?`H99`/.test(strange), false);
 
   // Usage. A mistyped --format must be a loud non-zero exit, never a silent
   // fallback that lands terminal lines in an issue body looking like a report.
@@ -15129,6 +16501,171 @@ function selfTest() {
   t('H37: all three count keys ride the enumerated contract', ['liveFolds', 'memberReadCandidates', 'memberReadProbed'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
   // The markdown medium renders an H37 row like every other finding row.
   t('markdown: an H37 row links the card it names', renderMarkdown([[{ number: 11680, html_url: 'https://example.test/11680' }, 'H37', 'member pointer without the label']], { repo: 'r', issues: 1, unscoped: 0, prs: 0, merged: 0 }).includes('- **H37** [#11680](https://example.test/11680)'), true);
+
+  // -- H40 — the dangling-reference patrol (#13634 A-half, report-only) ------
+  //
+  // The four verdicts are the whole item, and two of them are the ones every
+  // naive version gets wrong: a CLOSED card resolves and is not a finding, and
+  // a failure that is not a 404 is UNJUDGED rather than a vanished card. Both
+  // are pinned as controls beside the positive case, because a predicate that
+  // reports the entire backlog and one that reports a rate-limit window as an
+  // incident are the two ways this row could ship broken.
+  const REPO_40 = 'objectstack-ai/objectstack';
+  const refs40 = (text) => [...referencedNumbers(text, REPO_40)].sort((a, b) => a - b).join(',');
+
+  // The extractor.
+  t('H40 refs: a bare reference is read', refs40('blocked on #13398 for now'), '13398');
+  t('H40 refs: several in one text, distinct', refs40('see #13398, #13399 and #13398 again'), '13398,13399');
+  t('H40 refs: a reference at the very start of the text is read', refs40('#13398 is unreachable'), '13398');
+  t('H40 refs: this repo\'s own qualifier is read', refs40(`waiting on ${REPO_40}#12924`), '12924');
+  t('H40 refs: …case-insensitively, as GitHub resolves it', refs40('OBJECTSTACK-AI/OBJECTSTACK#12924'), '12924');
+  t('H40 refs: ⛔ a SIBLING repo qualifier is out of scope', refs40('objectstack-ai/objectui#3430 is theirs'), '');
+  t('H40 refs: …and its bare-looking tail is not harvested either', refs40('objectstack-ai/cloud#77'), '');
+  // The `/` rejection: a URL fragment is not a card reference.
+  t('H40 refs: a repo URL fragment is not a reference', refs40('https://github.com/objectstack-ai/objectstack#13398'), '');
+  t('H40 refs: a path segment is not a reference', refs40('see docs/adr/0112#3 for the envelope'), '');
+  t('H40 refs: a comment permalink names no bare number', refs40('https://github.com/objectstack-ai/objectstack/issues/13634#issuecomment-5477064578'), '');
+  // Word-boundary and numeral rejections.
+  t('H40 refs: a word character before the hash rejects it', refs40('release v1.2#3'), '');
+  t('H40 refs: a trailing word character rejects it', refs40('#13398abc'), '');
+  t('H40 refs: a hyphenated tail rejects it', refs40('#13398-ish'), '');
+  t('H40 refs: a leading zero is not an issue number', refs40('#0123'), '');
+  t('H40 refs: #0 is not an issue number', refs40('#0'), '');
+  t('H40 refs: a markdown heading is not a reference', refs40('### 13398 things'), '');
+  t('H40 refs: a hash with a space is not a reference', refs40('# 13398'), '');
+  // ⭐ The deliberate divergence from H7/H21/H23: fences go, inline spans STAY.
+  t('H40 refs: ⭐ a BACKTICKED reference is still a reference', refs40('`Blocked-by: #9612` is the line'), '9612');
+  t('H40 refs: …which is the opposite call from the keyword extractors', closingKeywordTargets('`Fixes #9612`').size, 0);
+  t('H40 refs: a fenced block is a citation, not a pointer', refs40('text\n```\nsee #13398\n```\n'), '');
+  t('H40 refs: …and prose outside the fence still counts', refs40('see #13399\n```\nsee #13398\n```\n'), '13399');
+  t('H40 refs: a tilde fence is stripped too', refs40('~~~\n#13398\n~~~\n'), '');
+
+  // The index: distinct numbers, referrers, self-references, the ceiling.
+  const referrer40 = (number, ...texts) => ({ number, html_url: `https://example.test/${number}`, texts });
+  const index40 = buildReferenceIndex(
+    [
+      referrer40(13634, 'refs #13398 and #13399', 'a comment naming #13398 again'),
+      referrer40(13792, 'the 08-29 batch: #13398'),
+      referrer40(13766, 'this card refers to itself #13766 and to #12924'),
+    ],
+    { repo: REPO_40, ceiling: 13959 },
+  );
+  t('H40 index: distinct numbers, not occurrences', index40.refs.size, 3);
+  t('H40 index: ⭐ one number, every referrer that names it', index40.refs.get(13398).map((r) => r.number).join(','), '13634,13792');
+  t('H40 index: …counted once per referrer, not once per mention', index40.refs.get(13398).length, 2);
+  t('H40 index: a card citing its own number is not a referrer', index40.refs.has(13766), false);
+  t('H40 index: comments are referrer texts like bodies', index40.texts, 4);
+  t('H40 index: referrers carry their URL for the renderer', index40.refs.get(12924)[0].html_url, 'https://example.test/13766');
+  const beyond40 = buildReferenceIndex([referrer40(1, 'see #99999 and #13398')], { repo: REPO_40, ceiling: 13959 });
+  t('H40 index: a number above the measured ceiling is held OUT', beyond40.refs.has(99999), false);
+  t('H40 index: …and counted rather than dropped in silence', beyond40.beyond.join(','), '99999');
+  t('H40 index: …while a number under the ceiling is unaffected', beyond40.refs.has(13398), true);
+  t('H40 index: no ceiling means no holding out', buildReferenceIndex([referrer40(1, 'see #99999')], { repo: REPO_40 }).refs.has(99999), true);
+
+  // The plan — the cost-control decision, offline.
+  const plan40 = h40ResolutionPlan([13398, 13399, 12924, 13634], new Set([13634]), 2);
+  t('H40 plan: a number a listing already answers costs nothing', plan40.free.join(','), '13634');
+  t('H40 plan: …and is not attempted', plan40.attempt.includes(13634), false);
+  t('H40 plan: the budget is spent NEWEST-first', plan40.attempt.join(','), '13399,13398');
+  t('H40 plan: the rest is deferred, never silently dropped', plan40.deferred.join(','), '12924');
+  t('H40 plan: the floor is the lowest number actually attempted', plan40.floor, 13398);
+  t('H40 plan: a budget that covers everything defers nothing', h40ResolutionPlan([1, 2, 3], new Set(), 10).deferred.length, 0);
+  t('H40 plan: …and its floor is the lowest of the corpus', h40ResolutionPlan([1, 2, 3], new Set(), 10).floor, 1);
+  t('H40 plan: a zero budget attempts nothing and states no floor', h40ResolutionPlan([1, 2], new Set(), 0).floor, null);
+  t('H40 plan: …and defers all of it', h40ResolutionPlan([1, 2], new Set(), 0).deferred.length, 2);
+  t('H40 plan: ⛔ one resolution per DISTINCT number, never per referrer', h40ResolutionPlan(index40.refs.keys(), new Set(), 10).attempt.length, index40.refs.size);
+
+  // ⛔ The four verdicts — the item's whole correctness.
+  t('H40 verdict: an OPEN card resolves', h40Verdict({ ok: true }), 'resolvable');
+  t('H40 verdict: ⛔ a CLOSED card resolves too — 200 is 200', h40Verdict({ ok: true }), 'resolvable');
+  t('H40 verdict: only 404 is unresolvable', h40Verdict({ status: 404 }), 'unresolvable');
+  t('H40 verdict: ⛔ a 403 is UNJUDGED, never a vanished card', h40Verdict({ status: 403 }), 'unjudged');
+  t('H40 verdict: ⛔ a rate-limit 429 is UNJUDGED', h40Verdict({ status: 429 }), 'unjudged');
+  t('H40 verdict: a 5xx is UNJUDGED', h40Verdict({ status: 502 }), 'unjudged');
+  t('H40 verdict: a transport failure with no status is UNJUDGED', h40Verdict({ status: 0 }), 'unjudged');
+  t('H40 verdict: an absent observation is UNJUDGED, not clean', h40Verdict(undefined), 'unjudged');
+
+  // The report: what the section and the summary line both read from.
+  const obs40 = new Map([
+    [13398, { status: 404 }],
+    [13399, { status: 404 }],
+    [12924, { status: 403 }],
+  ]);
+  const plan40b = h40ResolutionPlan(index40.refs.keys(), new Set(), 10);
+  const report40 = h40Report(index40, plan40b, obs40, { threads: 1, cards: 3, ceiling: 13959 });
+  t('H40 report: dangling numbers are the 404s', report40.dangling.map((r) => r.number).join(','), '13399,13398');
+  t('H40 report: …carrying their referrers', report40.dangling.find((r) => r.number === 13398).referrers.map((r) => r.number).join(','), '13634,13792');
+  t('H40 report: ⛔ a non-404 failure lands in UNJUDGED, not in dangling', report40.unjudged.map((r) => r.number).join(','), '12924');
+  t('H40 report: …and is not counted as resolved either', report40.resolved, 0);
+  const clean40 = h40Report(index40, plan40b, new Map([[13398, { ok: true }], [13399, { ok: true }], [12924, { ok: true }]]), {});
+  t('H40 report: ⛔ an all-CLOSED board is CLEAN, not a backlog of findings', clean40.dangling.length, 0);
+  t('H40 report: …and says how many it actually answered', clean40.resolved, 3);
+  t('H40 report: the deferred tail reaches the report', h40Report(index40, h40ResolutionPlan(index40.refs.keys(), new Set(), 1), new Map(), {}).deferred, 2);
+
+  // The section renderer — the three states, and the report-only wording.
+  const rendered40 = (report, markdown = true) => renderDanglingReferences(report, { markdown }).join('\n');
+  t('H40 render: no report at all renders nothing', renderDanglingReferences(undefined).length, 0);
+  t('H40 render: ⭐ a CLEAN pass still renders — a silent check reads as a deleted one', rendered40(clean40).includes('No reference in the corpus failed to resolve'), true);
+  t('H40 render: …and says a closed card is not a finding', rendered40(clean40).includes('a CLOSED card'), true);
+  t('H40 render: …and states the coverage it actually had', rendered40(clean40).includes('3 resolution(s) attempted of 3 distinct'), true);
+  t('H40 render: …and calls its own numbers a lower bound', rendered40(clean40).includes('LOWER BOUND') || rendered40(clean40).includes('Lower bound'), true);
+  t('H40 render: a dangling number is named', rendered40(report40).includes('**#13398** — HTTP 404'), true);
+  t('H40 render: …with its referrers linked', rendered40(report40).includes('[#13634](https://example.test/13634)'), true);
+  t('H40 render: …and the plain medium names them without links', rendered40(report40, false).includes('#13634, #13792'), true);
+  t('H40 render: an unjudged number carries the marker', rendered40(report40).includes(`${UNJUDGED_MARKER} **#12924**`), true);
+  t('H40 render: …and says UNJUDGED, not confirmed', rendered40(report40).includes('UNJUDGED, not confirmed dangling'), true);
+  t('H40 render: ⛔ no cause is asserted', rendered40(report40).includes('no cause is asserted'), true);
+  t('H40 render: ⛔ it prescribes no rewrite and no close', rendered40(report40).includes('Do not rewrite the referring text and do not close anything'), true);
+  t('H40 render: report-only is stated in as many words', rendered40(report40).includes('Report-only'), true);
+  // The referrer and row caps.
+  const wide40 = { ...report40, dangling: [{ number: 1, referrers: Array.from({ length: 9 }, (_, i) => ({ number: 100 + i })) }], unjudged: [] };
+  t('H40 render: the referrer list is capped', rendered40(wide40).includes(`+${9 - H40_REFERRER_LIST_CAP} more`), true);
+  const many40 = { ...report40, dangling: Array.from({ length: H40_ROW_CAP + 4 }, (_, i) => ({ number: 9000 + i, referrers: [] })), unjudged: [] };
+  t('H40 render: the row list is capped', rendered40(many40).includes(`… 4 further number(s) omitted`), true);
+  t('H40 render: …and names the cap that produced the omission', rendered40(many40).includes('H40_ROW_CAP'), true);
+
+  // ⭐⭐ #13947 — the reservation. The anchor renderer trims finding rows from
+  // the TAIL of one flat list to fit the body limit (157 of 231 omitted on a
+  // measured run), so a family added as ordinary rows can be computed and then
+  // silently dropped. These two cases are the acceptance for the placement
+  // choice: the section survives a body whose findings ARE being trimmed.
+  const flood40 = Array.from({ length: 900 }, (_, i) => [
+    { number: 20000 + i, html_url: `https://example.test/${20000 + i}` },
+    'H10',
+    'a long enough finding sentence to push this body past its rendering budget and force the trim to fire',
+  ]);
+  const floodedBody = renderMarkdown(flood40, { repo: 'o/r', issues: 900, unscoped: 0, prs: 0, merged: 0 }, { references: report40 });
+  t('#13947: the flood really does trigger the row trim', floodedBody.includes('further row(s) omitted'), true);
+  t('#13947: ⭐ …and the H40 section is STILL rendered', floodedBody.includes('### Dangling references (H40)'), true);
+  t('#13947: …naming the dangling number itself, not just the heading', floodedBody.includes('**#13398** — HTTP 404'), true);
+  t('#13947: the body still fits the renderer budget it was trimmed for', floodedBody.length <= MARKDOWN_BODY_BUDGET, true);
+  t('#13947: a clean H40 section is rendered on a flooded body too', renderMarkdown(flood40, { repo: 'o/r', issues: 900, unscoped: 0, prs: 0, merged: 0 }, { references: clean40 }).includes('No reference in the corpus failed to resolve'), true);
+  // …and the SECTION is absent when no reference pass ran, so every existing
+  // caller of the two renderers keeps its byte-identical output. ⚠️ Asserted on
+  // the section's own heading and sentence, never on the anchor phrase: the
+  // summary CLAUSE is unconditional by design and carries that phrase on every
+  // run, so a bare `.includes('Dangling references (H40)')` here would be
+  // answered by the summary line and could never fail.
+  t('#13947: no reference report renders no section heading', renderMarkdown([], { repo: 'o/r', issues: 0, unscoped: 0, prs: 0, merged: 0 }).includes('### Dangling references (H40)'), false);
+  t('#13947: …and no section body', renderMarkdown([], { repo: 'o/r', issues: 0, unscoped: 0, prs: 0, merged: 0 }).includes('No reference in the corpus'), false);
+  t('#13947: …in the plain medium either', renderPlain([], { repo: 'o/r', issues: 0, unscoped: 0, prs: 0, merged: 0 }).includes('No reference in the corpus'), false);
+  t('#13947: …while the summary clause speaks on every run, section or not', renderPlain([], { repo: 'o/r', issues: 0, unscoped: 0, prs: 0, merged: 0 }).includes('Dangling references (H40): '), true);
+
+  // The summary clause — the second half of the anti-trim answer, and the one
+  // that renders above the fold whether the section is read or not.
+  t('H40 summary: the coverage pair is reported', saidBy('h40References', summaryLine({ refResolved: 380, refAttempted: 400 }, 0)).includes('380 of 400 attempted resolution(s)'), true);
+  t('H40 summary: …and the free half beside it', saidBy('h40References', summaryLine({ refFree: 260 }, 0)).includes('260 number(s) were answered free'), true);
+  t('H40 summary: a deferred tail is announced, with the floor it reached', saidBy('h40References', summaryLine({ refDeferred: 959, refFloor: 12874 }, 0)).includes('959 were NOT ATTEMPTED'), true);
+  t('H40 summary: …and says not-attempted is not clean', saidBy('h40References', summaryLine({ refDeferred: 1, refFloor: 2 }, 0)).includes('not attempted is not clean'), true);
+  t('H40 summary: …and names the floor the budget reached', saidBy('h40References', summaryLine({ refDeferred: 1, refFloor: 12874 }, 0)).includes('down to #12874'), true);
+  t('H40 summary: a fully-covered pass claims no deferral', saidBy('h40References', summaryLine({ refAttempted: 3 }, 0)).includes('NOT ATTEMPTED'), false);
+  t('H40 summary: ⛔ the closed/404 distinction is stated where a reader sees it', saidBy('h40References', summaryLine({}, 0)).includes('a CLOSED card resolves normally and is never a finding'), true);
+  t('H40 summary: ⛔ no cause is asserted, on the summary line too', saidBy('h40References', summaryLine({}, 0)).includes('no cause is asserted'), true);
+  t('H40 summary: the corpus bound is stated, not implied', saidBy('h40References', summaryLine({}, 0)).includes('comment coverage is the gated subset'), true);
+  t('H40 summary: …including what is deliberately OUT of it', saidBy('h40References', summaryLine({}, 0)).includes('merged/closed archive is out of the corpus'), true);
+  t('H40 summary: the lower-bound caveat survives into the sentence', saidBy('h40References', summaryLine({}, 0)).includes('LOWER BOUND'), true);
+  t('H40 summary: a bare line renders numbers, never `undefined`', saidBy('h40References', summaryLine({}, 0)).includes('undefined'), false);
+  t('H40 summary: every count key rides the enumerated contract', ['refDistinct', 'refCards', 'refThreads', 'refFree', 'refAttempted', 'refResolved', 'refDangling', 'refUnjudged', 'refDeferred', 'refFloor', 'refBeyond'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
 
   // -- The `[::]` collapse (#12090): behaviour-preserving, asserted as such ---
   // The class held U+003A TWICE, never the fullwidth U+FF1A its shape implied.

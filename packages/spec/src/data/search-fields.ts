@@ -45,9 +45,14 @@ export const SEARCH_AUTO_EXCLUDED_FIELDS: ReadonlySet<string> = new Set([
   'id', '_id', 'created', 'modified', 'created_at', 'updated_at',
   'created_by', 'updated_by', 'owner_id', 'organization_id', 'space', 'company_id',
 ]);
+// [#13716] 'object', 'grid', 'geometry' and 'encrypted' were dropped from this
+// set: none was a `FieldType` member at ANY commit (imported vocabulary, never
+// renamed spellings — 'location', 'secret' and 'json' were already in both the
+// enum and this set the day the set landed), so each could only ever match
+// nothing. The [#13695] pin now holds every member to `FieldType`.
 export const SEARCH_AUTO_EXCLUDED_TYPES: ReadonlySet<string> = new Set([
-  'json', 'object', 'grid', 'image', 'file', 'avatar', 'vector', 'location',
-  'geometry', 'secret', 'password', 'encrypted', 'boolean', 'lookup', 'master_detail',
+  'json', 'image', 'file', 'avatar', 'vector', 'location',
+  'secret', 'password', 'boolean', 'lookup', 'master_detail',
 ]);
 /**
  * [#6674] Field types with NO STORED COLUMN — the value is computed on read, so
@@ -117,8 +122,10 @@ function autoDefaultFields(fields: Record<string, SearchFieldMeta>, displayField
     // `SEARCH_AUTO_EXCLUDED_TYPES` is disjoint from both positive lists, so
     // every type it names already falls through the `return` below as `false`
     // — identically to a type in none of the three sets (`number`, `date`, …).
-    // Measured over the full 56-type domain (`FieldType` ∪ all three
-    // vocabularies), deleting this line moves not one resolution. So it is NOT
+    // Measured over the full domain of `FieldType` ∪ all three vocabularies
+    // (56 types when the guard landed; the union IS `FieldType` since #13716
+    // dropped the last ghost members), deleting this line moves not one
+    // resolution. So it is NOT
     // load-bearing: adding a type to `SEARCHABLE_TEXTUAL_TYPES` does not also
     // require keeping it out of this set for the auto-default to reject it.
     //
@@ -129,8 +136,8 @@ function autoDefaultFields(fields: Record<string, SearchFieldMeta>, displayField
     // it the positive list wins and the type enters the auto-default AND, one
     // layer up, the #4254 ingress allow-list — so `$searchFields=<that field>`
     // flips from refused to ACCEPTED, the same widening #4483 closed for `id`.
-    // This set names `secret`, `password`, `encrypted` and `vector`: failing
-    // open there means a `$contains` scan over a masked or heavy column.
+    // This set names `secret`, `password` and `vector`: failing open there
+    // means a `$contains` scan over a masked or heavy column.
     //
     // The disjointness is not left to coincidence. `search-fields.test.ts` pins
     // all three vocabularies pairwise disjoint AND pins both resolution

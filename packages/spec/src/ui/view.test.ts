@@ -180,13 +180,26 @@ describe('KanbanConfigSchema', () => {
 });
 
 describe('CalendarConfigSchema', () => {
-  it('should accept minimal calendar config', () => {
+  // [#13817] The minimal block is `startDateField` ALONE — `titleField` is
+  // optional because the renderer resolves a missing title through the
+  // ADR-0079 display-name chain (measured: objectui ObjectCalendar.tsx uses an
+  // explicit titleField only "when present"). The date has no such fallback,
+  // so it is the one required key.
+  it('should accept minimal calendar config — `startDateField` alone', () => {
     const config = {
       startDateField: 'start_date',
-      titleField: 'subject',
     };
 
     expect(() => CalendarConfigSchema.parse(config)).not.toThrow();
+  });
+
+  it('REFUSES a calendar config with no `startDateField`', () => {
+    const r = CalendarConfigSchema.safeParse({ titleField: 'subject' });
+    expect(r.success).toBe(false);
+    expect(
+      r.success === false
+        && r.error.issues.some((i) => i.path.join('.') === 'startDateField'),
+    ).toBe(true);
   });
 
   it('should accept full calendar config', () => {
@@ -3841,5 +3854,97 @@ describe("ListViewSchema — the `page` view type (#13216)", () => {
   // none. Pinned so the omission reads as a decision rather than an oversight.
   it('does NOT add `page` to the visualization switcher whitelist', () => {
     expect(VisualizationTypeSchema.safeParse('page').success).toBe(false);
+  });
+});
+
+// ============================================================================
+// [#13817] `allowedVisualizations` ⇄ `calendar` — calendar in the switcher
+// requires `calendar.startDateField` (ruled on #13748, option A; spec half)
+// ============================================================================
+
+describe("ListViewSchema — calendar in `appearance.allowedVisualizations` requires the `calendar:` block (#13817)", () => {
+  /** Walk `invalid_union` wrappers and return every issue, nested arms included. */
+  const flattenUnionIssues = (issues: z.ZodIssue[]): z.ZodIssue[] =>
+    issues.flatMap((i) => {
+      const nested = (i as unknown as { errors?: z.ZodIssue[][] }).errors;
+      return i.code === 'invalid_union' && Array.isArray(nested)
+        ? [i, ...flattenUnionIssues(nested.flat())]
+        : [i];
+    });
+
+  // The same three doors the page-mount check runs at — the check is attached
+  // at three separate points for the same zod-4 reason, and a missing
+  // re-attachment is invisible (the door keeps accepting, which reads as "no
+  // rule violated" rather than "no rule ran"). The overlay door is
+  // `PUT /api/v1/meta/view`, the one a Studio tenant or an MCP/AI author has.
+  describe.each(viewDoorsCarryingPageMountCheck)('%s', (_label, parse) => {
+    it("REFUSES 'calendar' in allowedVisualizations with no `calendar:` block, naming `calendar.startDateField`", () => {
+      const r = parse({
+        type: 'grid',
+        columns: ['name'],
+        appearance: { allowedVisualizations: ['grid', 'calendar'] },
+      });
+      expect(r.success).toBe(false);
+      const issue = (r as { error: z.ZodError }).error.issues
+        .find((i) => i.path.join('.').endsWith('calendar'));
+      expect(issue, JSON.stringify((r as { error: z.ZodError }).error.issues)).toBeDefined();
+      expect(issue!.message).toContain('calendar: { startDateField:');
+      expect(issue!.message).toContain('allowedVisualizations');
+    });
+
+    it('REFUSES a `calendar:` block that lacks `startDateField` when calendar is allowed', () => {
+      const r = parse({
+        type: 'grid',
+        columns: ['name'],
+        appearance: { allowedVisualizations: ['grid', 'calendar'] },
+        calendar: { titleField: 'subject' },
+      });
+      expect(r.success).toBe(false);
+      // The block schema itself owns this refusal (`startDateField` is its one
+      // required key), so the issue lands inside the block. At the overlay
+      // door the union wraps a shape failure in `invalid_union` with the
+      // per-arm truth nested one level down (a refinement-only failure
+      // surfaces flat, a shape failure does not — the documented behavior
+      // `diagnoseViewMetadata` exists to unwrap), so search nested arms too.
+      const flat = flattenUnionIssues((r as { error: z.ZodError }).error.issues);
+      const issue = flat.find((i) => i.path.join('.').endsWith('calendar.startDateField'));
+      expect(issue, JSON.stringify((r as { error: z.ZodError }).error.issues)).toBeDefined();
+    });
+
+    it('accepts calendar-in-switcher with `calendar: { startDateField }` — nothing more required', () => {
+      const r = parse({
+        type: 'grid',
+        columns: ['name'],
+        appearance: { allowedVisualizations: ['grid', 'calendar'] },
+        calendar: { startDateField: 'due_date' },
+      });
+      expect(r.success, r.success === false ? JSON.stringify((r as unknown as { error: z.ZodError }).error.issues) : '').toBe(true);
+    });
+
+    it("accepts a switcher WITHOUT 'calendar' and no block — unchanged", () => {
+      const r = parse({
+        type: 'grid',
+        columns: ['name'],
+        appearance: { allowedVisualizations: ['grid', 'kanban'] },
+      });
+      expect(r.success).toBe(true);
+    });
+
+    it('accepts a view with no `appearance` at all — unchanged', () => {
+      const r = parse({ type: 'grid', columns: ['name'] });
+      expect(r.success).toBe(true);
+    });
+  });
+
+  // ⚠️ Scope pin: `calendar` only — the measured defect (#13748). A timeline
+  // switcher entry with no `timeline:` block still parses; whether it has the
+  // same shape is a separate finding to measure first, not a rider here.
+  it("does NOT extend the requirement to 'timeline' — unmeasured, out of scope", () => {
+    const r = ListViewSchema.safeParse({
+      type: 'grid',
+      columns: ['name'],
+      appearance: { allowedVisualizations: ['grid', 'timeline'] },
+    });
+    expect(r.success).toBe(true);
   });
 });

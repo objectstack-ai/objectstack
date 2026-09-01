@@ -370,10 +370,25 @@ export function indexCurrencyFindings(major, newestVersion, line) {
 // ── Self-test ────────────────────────────────────────────────────────────────
 
 /**
- * The real v17 page heading set, trimmed to the lines that matter. Kept verbatim
- * so the matcher is judged against text that actually shipped.
+ * The real v17 page heading set as it stood between #10232 and #13754, trimmed to
+ * the lines that matter. HISTORICAL — a snapshot, like `PRE_10232_V17_HEADINGS`
+ * below, and no longer the page as it reads today: #13754 (merged 2026-08-31)
+ * cascaded the release-page headings, so this page's `# 17.0.0 in detail` is now
+ * `## 17.0.0 in detail` and NO page under `content/docs/releases/` carries a
+ * body-level h1 any more (measured on the merge commit: 0 such lines across the
+ * ten pages, against 54 `## ` lines in the same files — so the zero is a reading,
+ * not a broken query).
+ *
+ * Do NOT re-snapshot it from the live page. `headingsNamingMinor` is `^#{1,6}` by
+ * construction and its breadth is pinned directly by the `'# 16.1.0'` /
+ * `'###### 16.1.0'` case in the self-test below, which a re-snapshot would not
+ * touch. What a re-snapshot WOULD remove is the last h1 reaching the matcher
+ * through a whole-PAGE fixture — and it would remove it in silence: 17.0 is
+ * covered here twice over (`## Highlights — 17.0.0` matches it too), so every case
+ * in this file stays green with the `# ` demoted to `##`. Measured, not assumed.
+ * The ban is written here because nothing mechanical enforces it.
  */
-const REAL_V17_HEADINGS = [
+const PRE_13754_V17_HEADINGS = [
   '## Highlights — 17.0.0',
   '## Highlights — 17.1.0',
   '# 17.0.0 in detail',
@@ -544,13 +559,14 @@ export function selfTest() {
       .some((f) => f.includes('NO heading on this page names the 17.1 series')),
   );
   expect(
-    'coverage/GREEN — the real v17 headings AFTER #10232 cover 17.1 via "## Highlights — 17.1.0". A '
-    + 'check that reds on everything is not a check',
-    coverageFindings(17, 1, 'v17.mdx', REAL_V17_HEADINGS).length === 0,
+    'coverage/GREEN — the real v17 headings between #10232 and #13754 cover 17.1 via "## Highlights '
+    + '— 17.1.0". A check that reds on everything is not a check',
+    coverageFindings(17, 1, 'v17.mdx', PRE_13754_V17_HEADINGS).length === 0,
   );
   expect(
-    'coverage/GREEN — and they cover 17.0 via "# 17.0.0 in detail"',
-    coverageFindings(17, 0, 'v17.mdx', REAL_V17_HEADINGS).length === 0,
+    'coverage/GREEN — and they cover 17.0 TWICE OVER, via "## Highlights — 17.0.0" and "# 17.0.0 in '
+    + 'detail". Neither is load-bearing alone, so this case cannot catch a re-snapshot of the h1',
+    coverageFindings(17, 0, 'v17.mdx', PRE_13754_V17_HEADINGS).length === 0,
   );
   expect(
     'coverage — TRAP 1: `## What\'s new in 11.10.0` does NOT cover minor 11.1. Major 11 published '
