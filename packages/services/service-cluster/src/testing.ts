@@ -4,7 +4,8 @@
  * Generic contract tests for cluster primitives.
  *
  * These are written once and run against any driver. The memory driver
- * suite calls them directly; future postgres/redis driver packages will
+ * suite calls them directly; driver packages (the redis driver today,
+ * any future ones)
  * `import { runPubSubContract } from '@objectstack/service-cluster/testing'`
  * to get the same coverage for free.
  */

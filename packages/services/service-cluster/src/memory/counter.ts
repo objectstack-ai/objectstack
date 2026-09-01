@@ -4,7 +4,7 @@ import type { ICounter, CounterIncrOptions } from '@objectstack/spec/contracts';
 
 /**
  * In-memory monotonic counter. Single-process only — for cross-node id
- * allocation, use the postgres or redis driver.
+ * allocation, use the redis driver.
  */
 export class MemoryCounter implements ICounter {
     private readonly counters = new Map<string, bigint>();

@@ -8,8 +8,9 @@ import { lazySchema } from '../shared/lazy-schema';
  *
  * Defines the runtime semantics required for ObjectStack to behave correctly
  * when more than one Node.js process is involved. The protocol layer codifies
- * **intent** (scope, delivery, leadership); concrete implementations
- * (`memory`, `redis`, `postgres`, `nats`) live in `@objectstack/service-cluster`.
+ * **intent** (scope, delivery, leadership); concrete implementations live in
+ * `@objectstack/service-cluster` (`memory`) and
+ * `@objectstack/service-cluster-redis` (`redis`).
  *
  * The full design rationale is in
  * `content/docs/kernel/cluster.mdx`. Read it before changing
@@ -202,16 +203,21 @@ export type ServiceClusterAnnotationsParsed = z.infer<typeof ServiceClusterAnnot
  * Cluster driver identifier.
  *
  * Selects which transport implements the four primitives (PubSub, Lock,
- * KV, Counter). The protocol enumerates the drivers we expect to ship;
- * additional drivers can be registered at runtime by plugins.
+ * KV, Counter). The protocol enumerates only the drivers that actually
+ * ship; additional drivers can be registered at runtime by plugins and
+ * selected via `custom`.
+ *
+ * The formerly declared `postgres` and `nats` values were removed: no
+ * package implemented them, so a schema-valid config was an unconditional
+ * runtime throw (maintainer ruling on objectstack-ai/cloud#1626,
+ * 2026-08-24 — a value returns only together with an implementation
+ * behind it).
  *
  * @see content/docs/kernel/cluster.mdx §8
  */
 export const ClusterDriverSchema = z.enum([
   'memory',    // single-process; in-EventEmitter + Map + mutex + int
   'redis',     // Redis Pub/Sub + SETNX-with-TTL + GET/SET + INCR
-  'postgres',  // LISTEN/NOTIFY + advisory locks + KV table + sequence
-  'nats',      // NATS subjects + KV bucket lock + KV bucket + KV INCR
   'custom',    // Plugin-provided driver; runtime looks it up by name.
 ]).describe('Cluster transport driver.');
 
@@ -243,8 +249,8 @@ export type ClusterTenantIsolation = z.input<typeof ClusterTenantIsolationSchema
  * ```ts
  * defineStack({
  *   cluster: {
- *     driver: 'postgres',
- *     useExistingPool: true,
+ *     driver: 'redis',
+ *     url: 'redis://cache.internal:6379',
  *     nodeId: process.env.NODE_ID,
  *   },
  * })
@@ -260,21 +266,21 @@ export const ClusterCapabilityConfigSchema = lazySchema(() => z.object({
     .describe('Cluster transport driver. Defaults to in-memory single-process.'),
 
   /**
-   * Driver-specific connection string. Required for `redis` and `nats`,
-   * optional for `postgres` (defaults to the main DB pool when
-   * `useExistingPool` is true).
+   * Driver-specific connection string. Required for `redis`; a `custom`
+   * driver reads it as its factory defines.
    */
   url: z.string().url().optional()
     .describe('Driver-specific connection URL.'),
 
   /**
-   * When `driver === 'postgres'`, reuse the main application database
-   * pool instead of opening a dedicated one. Recommended for small/medium
-   * deployments — zero new infrastructure.
+   * Reuse the main application database pool instead of opening a
+   * dedicated one. Forwarded verbatim to the registered driver factory;
+   * meaningful only for database-backed `custom` drivers — the built-in
+   * `memory` and `redis` drivers ignore it.
    * @default true
    */
   useExistingPool: z.boolean().optional().default(true)
-    .describe('Reuse the main DB pool for the postgres driver.'),
+    .describe('Reuse the main DB pool for database-backed custom drivers.'),
 
   /**
    * Stable identifier for this node. Used by leader election and trace
