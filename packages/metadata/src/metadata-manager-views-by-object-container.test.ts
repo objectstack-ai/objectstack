@@ -57,6 +57,14 @@
  * the PR body as measured: reverting `getViewsByObject` to its pre-#13913 body
  * turns the four container/expansion cases RED and leaves all three of the
  * remaining cases GREEN.
+ *
+ * `answers with EXPANDED items and never the container itself (#7163)` is one
+ * of those three, and it is green under that reversion only VACUOUSLY — the
+ * pre-fix answer is empty, so nothing can be a container. It is a guard against
+ * a DIFFERENT mutation, and it was ablated separately against exactly that one:
+ * dropping `v.viewKind &&` from the filter (the tempting one-line "fix", which
+ * makes the container answer as a view) turns it RED. Measured, so the guard is
+ * known to fire rather than assumed to.
  */
 
 import { describe, it, expect, vi } from 'vitest';
