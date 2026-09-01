@@ -23,11 +23,44 @@
  *
  * What each mode is worth is stated explicitly below, because the honest answer
  * differs per mode and a vacuous pass must not read as coverage.
+ *
+ * ## Why this suite lives in `packages/qa/dogfood` and not in the driver (#13513)
+ *
+ * It used to be `packages/drivers/driver-turso/src/date-bucket-parity.test.ts`,
+ * and the `@objectstack/verify` devDependency it needed was the ONE edge that
+ * made this workspace's manifest graph cyclic:
+ *
+ *     runtime --peerDependencies(optional)--> driver-turso
+ *     driver-turso --devDependencies--------> verify
+ *     verify --dependencies-----------------> runtime
+ *
+ * pnpm walks all four declaration classes when it computes a `PKG^...` /
+ * `PKG...` closure, so that cycle left `pnpm --filter '<pkg>^...' build` with no
+ * topological order to build in. pnpm does not refuse a cyclic selection — it
+ * schedules the members CONCURRENTLY, so `verify`'s DTS leg reads a `dist` that
+ * a sibling is still emitting, and the run dies with `TS2307`/`TS7016` naming a
+ * module the author never touched. Seven seats paid for that misattribution on
+ * unmodified trees before it was traced. Measured on 78 workspace manifests,
+ * this was the ONLY single edge whose removal makes the whole graph acyclic.
+ *
+ * Nothing about this suite wanted to live in the driver: the repo's convention
+ * for `@objectstack/verify`-based cross-package conformance is already this
+ * package — `date-bucket-parity-conformance.test.ts` next door runs the very
+ * same `checkDateBucketParity` over `driver-sql` and `driver-sqlite-wasm`, both
+ * of which are `@objectstack/dogfood` devDependencies for exactly this reason.
+ * TursoDriver was the outlier, and it is the outlier that closed the loop.
+ *
+ * ⚠️ One thing DID change with the move: `TursoDriver` now resolves through the
+ * package's `exports` (its BUILT `dist`), not through a relative source import.
+ * That matches how `driver-sqlite-wasm` is exercised next door — and the
+ * comment there names the same property — but it means this suite needs
+ * `@objectstack/driver-turso` built, which the dogfood gate already requires of
+ * every package it imports.
  */
 
 import { describe, it, expect } from 'vitest';
 import { checkDateBucketParity } from '@objectstack/verify';
-import { TursoDriver } from './turso-driver.js';
+import { TursoDriver } from '@objectstack/driver-turso';
 
 describe('TursoDriver date-bucket parity (framework#3773)', () => {
   describe('local mode — the real check', () => {
