@@ -1,12 +1,23 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { readFileSync } from 'node:fs';
-
 import { describe, it, expect } from 'vitest';
 import { SCOPE_ROOTS } from '@objectstack/formula';
-import { FlowSchema, FlowVariableSchema } from '@objectstack/spec/automation';
+import {
+  FlowSchema,
+  FlowVariableSchema,
+  FlowNodeSchema,
+  LoopConfigSchema,
+  TryCatchConfigSchema,
+} from '@objectstack/spec/automation';
 
-import { collectFlowVariableNames, shadowedFieldReads, shadowedFieldMessage } from './flow-variable-scope.js';
+import {
+  collectFlowVariableNames,
+  shadowedFieldReads,
+  shadowedFieldMessage,
+  VARIABLE_NAME_CONFIG_KEYS,
+  ASSIGNMENT_NODE_TYPE,
+  ASSIGNMENT_ENTRY_NAME_KEYS,
+} from './flow-variable-scope.js';
 
 /**
  * Unit coverage for the #14089 collection surface. The end-to-end behaviour
@@ -194,21 +205,20 @@ describe('shadowedFieldMessage (#14089)', () => {
  * in a different file: the collection surface is exactly where an undeclared
  * key would go unnoticed, since a key nobody declares simply collects nothing
  * and the diagnostic stays silent — a green gate over a surface nothing read.
+ *
+ * It is asserted against the module's EXPORTED constants rather than a scan of
+ * its source text. That is the stronger of the two: a source scan pins the
+ * spelling someone typed, while these pin the values the collection walk
+ * actually indexes with — and it needs no private comment-stripper, the class
+ * `check:comment-mask-adoption` exists to keep out of this tree.
  */
-const MODULE_SOURCE = readFileSync(new URL('./flow-variable-scope.ts', import.meta.url), 'utf8');
-const MODULE_CODE = MODULE_SOURCE.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-
-function keysReadOff(receiver: string): string[] {
-  const re = new RegExp(`\\b${receiver}\\??\\.([A-Za-z_$][\\w$]*)`, 'g');
-  return [...new Set([...MODULE_CODE.matchAll(re)].map((m) => m[1]))].sort();
-}
 
 /**
- * Declared keys of a schema, unwrapping the optional / lazy layers both of
- * these schemas are built with. Mirrors `validate-expressions.test.ts`'s helper
- * of the same name; `lazySchema` proxies a FUNCTION target, so the `typeof`
- * guard has to admit both or every lazily-built schema answers "declares
- * nothing" and the guard goes vacuous.
+ * Declared keys of a schema, unwrapping the optional / lazy layers these
+ * schemas are built with. Mirrors `validate-expressions.test.ts`'s helper of the
+ * same name; `lazySchema` proxies a FUNCTION target, so the `typeof` guard has
+ * to admit both or every lazily-built schema answers "declares nothing" and the
+ * guard goes vacuous.
  */
 function shapeKeysOf(schema: unknown, depth = 0): string[] {
   const s = schema as { shape?: Record<string, unknown>; _def?: Record<string, unknown>; unwrap?: () => unknown };
@@ -225,41 +235,43 @@ function shapeKeysOf(schema: unknown, depth = 0): string[] {
 }
 
 describe('flow-variable-scope reads only keys the spec declares (meta-test)', () => {
-  it('the flow receiver reads only `variables`', () => {
-    expect(keysReadOff('flow')).toEqual(['variables']);
-    const declared = shapeKeysOf(FlowSchema);
-    expect(declared.length, 'FlowSchema resolved to no keys — the guard would be vacuous').toBeGreaterThan(0);
-    expect(declared).toContain('variables');
+  it('the flow-level keys it reads are declared by `FlowSchema` / `FlowVariableSchema`', () => {
+    const flowKeys = shapeKeysOf(FlowSchema);
+    expect(flowKeys.length, 'FlowSchema resolved to no keys — the guard would be vacuous').toBeGreaterThan(0);
+    expect(flowKeys).toContain('variables');
+
+    const variableKeys = shapeKeysOf(FlowVariableSchema);
+    expect(variableKeys.length, 'FlowVariableSchema resolved to no keys — the guard would be vacuous').toBeGreaterThan(0);
+    expect(variableKeys).toContain('name');
   });
 
-  it('the flow-variable receiver reads only `name`', () => {
-    expect(keysReadOff('flowVar')).toEqual(['name']);
-    const declared = shapeKeysOf(FlowVariableSchema);
-    expect(declared.length, 'FlowVariableSchema resolved to no keys — the guard would be vacuous').toBeGreaterThan(0);
-    expect(declared).toContain('name');
+  it('the node keys it reads are declared by `FlowNodeSchema`', () => {
+    const nodeKeys = shapeKeysOf(FlowNodeSchema);
+    expect(nodeKeys.length, 'FlowNodeSchema resolved to no keys — the guard would be vacuous').toBeGreaterThan(0);
+    for (const key of ['id', 'type', 'config']) expect(nodeKeys).toContain(key);
   });
 
-  it('the node receiver reads only `id` / `type` / `config`', () => {
-    expect(keysReadOff('flowNode')).toEqual(['config', 'id', 'type']);
+  it('the config-key list is exactly the four declared name-valued keys', () => {
+    expect([...VARIABLE_NAME_CONFIG_KEYS])
+      .toEqual(['iteratorVariable', 'indexVariable', 'errorVariable', 'outputVariable']);
+    // ⛔ The alias `control-flow.zod.ts` rejects BY NAME must not be here — reading
+    // it would be consumer-side tolerance of a shape the schema refuses (Prime
+    // Directive #12), and it cannot arrive on the parsed path this rule runs on.
+    expect([...VARIABLE_NAME_CONFIG_KEYS]).not.toContain('itemVariable');
+    // Every one of them is a key some node-config schema really declares — a
+    // list of keys nothing declares would collect nothing, silently.
+    const declaredAnywhere = new Set([
+      ...shapeKeysOf(LoopConfigSchema),
+      ...shapeKeysOf(TryCatchConfigSchema),
+    ]);
+    expect(declaredAnywhere.size, 'the node-config schemas resolved to no keys — the guard would be vacuous').toBeGreaterThan(0);
+    for (const key of ['iteratorVariable', 'indexVariable']) expect(declaredAnywhere).toContain(key);
+    expect(declaredAnywhere).toContain('errorVariable');
   });
 
-  /**
-   * The config-key list is a COMPUTED read the scan above cannot see, so the
-   * word list it indexes with is checked here instead — and against the
-   * declaring schemas, not a copy. `assignments` is checked separately because
-   * it is the one config key this module names literally.
-   */
-  it('the config-key list is spelled from the declaring schemas', () => {
-    const declaration = /const VARIABLE_NAME_CONFIG_KEYS = \[([^\]]*)\] as const/.exec(MODULE_CODE);
-    expect(declaration, 'the config-key list moved — update this guard').not.toBeNull();
-    const keys = [...declaration![1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
-    expect(keys).toEqual(['iteratorVariable', 'indexVariable', 'errorVariable', 'outputVariable']);
-    // The rejected alias must not be here — reading it would be consumer-side
-    // tolerance of a spelling `control-flow.zod.ts` refuses by name.
-    expect(keys).not.toContain('itemVariable');
-  });
-
-  it('the assignment node type is the one the executor dispatches on', () => {
-    expect(/const ASSIGNMENT_NODE_TYPE = 'assignment'/.test(MODULE_CODE)).toBe(true);
+  it('the assignment surface is spelled the way the executor dispatches', () => {
+    expect(ASSIGNMENT_NODE_TYPE).toBe('assignment');
+    // `logic-nodes.ts` reads these three, in this precedence order.
+    expect([...ASSIGNMENT_ENTRY_NAME_KEYS]).toEqual(['variable', 'name', 'key']);
   });
 });

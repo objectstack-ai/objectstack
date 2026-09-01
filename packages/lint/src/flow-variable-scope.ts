@@ -109,7 +109,7 @@ export interface FlowVariableHost {
  * would be a consumer-side tolerance of a shape the schema refuses (Prime
  * Directive #12).
  */
-const VARIABLE_NAME_CONFIG_KEYS = ['iteratorVariable', 'indexVariable', 'errorVariable', 'outputVariable'] as const;
+export const VARIABLE_NAME_CONFIG_KEYS = ['iteratorVariable', 'indexVariable', 'errorVariable', 'outputVariable'] as const;
 
 /**
  * The node type whose `config` names variables *structurally* rather than
@@ -118,7 +118,14 @@ const VARIABLE_NAME_CONFIG_KEYS = ['iteratorVariable', 'indexVariable', 'errorVa
  * and catastrophic over-collection for any other (a `start` node would donate
  * `objectName` and `condition`, an `http` node its `url`).
  */
-const ASSIGNMENT_NODE_TYPE = 'assignment';
+export const ASSIGNMENT_NODE_TYPE = 'assignment';
+
+/**
+ * The keys an `assignments` ARRAY entry may name its target with — the three
+ * `logic-nodes.ts` reads, in its precedence order. Exported so the guard can
+ * assert the list rather than re-derive it from the source text.
+ */
+export const ASSIGNMENT_ENTRY_NAME_KEYS = ['variable', 'name', 'key'] as const;
 
 /**
  * Variable names an `assignment` node binds — **three shapes**, mirroring the
@@ -140,8 +147,10 @@ function assignmentTargets(config: AnyRec): string[] {
     for (const item of raw) {
       if (!item || typeof item !== 'object') continue;
       const entry = item as AnyRec;
-      const name = entry.variable ?? entry.name ?? entry.key;
-      if (typeof name === 'string' && name) out.push(name);
+      for (const nameKey of ASSIGNMENT_ENTRY_NAME_KEYS) {
+        const name = entry[nameKey];
+        if (typeof name === 'string' && name) { out.push(name); break; }
+      }
     }
     return out;
   }
