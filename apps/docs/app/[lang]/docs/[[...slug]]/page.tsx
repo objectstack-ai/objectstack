@@ -30,8 +30,24 @@ type DocPage = NonNullable<ReturnType<typeof source.getPage>>;
 
 /**
  * Ancestor chain for a doc page, read out of `source.pageTree` — the same tree
- * `app/[lang]/docs/layout.tsx` hands to the sidebar, so a crumb and its sidebar
- * entry are the same node with the same label.
+ * `app/[lang]/docs/layout.tsx` hands to the sidebar, so an ANCESTOR crumb and
+ * its sidebar entry are the same node with the same label.
+ *
+ * ⚠️ The LEAF is deliberately not taken from that tree — `includePage` is off
+ * below and the page's own crumb is pushed from `page.data.title`. Since
+ * `apps/docs/lib/nav-title.ts` a page may carry a short `navTitle` that
+ * replaces its page-tree label, and the tree is the one place that label
+ * reaches. Reading the leaf off the tree would let the short sidebar label into
+ * this `BreadcrumbList`, which is structured data a crawler reads — the exact
+ * leak the nav-label mechanism exists to prevent, arriving on the one surface
+ * the mechanism was built to protect. Ancestors are unaffected: they are
+ * FOLDERS, labelled from their own `meta.json` `title`, and all 35 `meta.json`
+ * under `content/docs` declare one.
+ *
+ * The flip is behaviour-preserving on today's corpus and was checked as such:
+ * with `includePage: true` the leaf came from the page node, whose name was
+ * `page.data.title`; the tail push below now supplies the same pair
+ * unconditionally. `scripts/check-docs-nav-label.mjs` pins it.
  *
  * `getBreadcrumbItems()` is fumadocs' own tree walk (`fumadocs-core/breadcrumb`),
  * not a path split: it locates the page node and returns the folders above it,
@@ -61,10 +77,12 @@ type DocPage = NonNullable<ReturnType<typeof source.getPage>>;
  * - the site root and the docs root, which sit above the tree rather than in it
  *   (`getBreadcrumbItems`' own `includeRoot` fires only for folders marked
  *   `root: true` in `meta.json`, which this tree has none of);
- * - the page itself as the final crumb, if the walk did not end there — the leaf
- *   is the one entry a `BreadcrumbList` must not be missing, and `page.data.title`
- *   with the page's canonical URL is the same pair the `<title>` and the canonical
- *   link are built from.
+ * - the page itself as the final crumb — the leaf is the one entry a
+ *   `BreadcrumbList` must not be missing, and `page.data.title` with the page's
+ *   canonical URL is the same pair the `<title>` and the canonical link are
+ *   built from. With `includePage` off the walk never ends at the canonical
+ *   URL, so this push is now the only source of the leaf rather than a
+ *   fallback for the walk missing it.
  *
  * Names are `ReactNode` in fumadocs' type; anything that is not a plain string is
  * dropped rather than stringified, because `[object Object]` in a crumb is worse
@@ -81,7 +99,7 @@ function docsTrail(
   const trail: Crumb[] = [SITE_CRUMB, { name: rootName, url: absoluteUrl('/docs') }];
 
   if (tree) {
-    for (const item of getBreadcrumbItems(page.url, tree, { includePage: true })) {
+    for (const item of getBreadcrumbItems(page.url, tree, { includePage: false })) {
       if (typeof item.name !== 'string' || !item.url) continue;
       const url = absoluteUrl(item.url);
       // The docs root is already the second crumb; the tree's own entry for
