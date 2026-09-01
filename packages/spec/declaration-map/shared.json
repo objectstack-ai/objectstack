@@ -2,8 +2,6 @@
   "description": "TS declaration name → spec registry name (def key) for the schemas @objectstack/spec publishes: entries['ObjectSchemaBase'] === 'data/Object'. Composed from json-schema.manifest/ (the def keys), export-origins/ (which declaration each export resolves to), and a syntactic unwinding of wrapper initializers that recovers module-private base declarations (the ObjectSchemaBase case — see scripts/build-declaration-map.ts). A name that maps to two different def keys is DROPPED into `collisions` rather than guessed, so a lookup miss means \"not known to be an authorable container\". Consumers hold a changed line’s enclosing declaration name and ask which authorable container it declares (docs-audit anchor qualification is the funding one). Generated — never hand-edited; regenerate with `pnpm --filter @objectstack/spec gen:declaration-map` and read the diff.",
   "category": "shared",
   "entries": {
-    "AppName": "shared/AppName",
-    "AppNameSchema": "shared/AppName",
     "BaseMetadataRecord": "shared/BaseMetadataRecord",
     "BaseMetadataRecordSchema": "shared/BaseMetadataRecord",
     "CorsConfig": "shared/CorsConfig",
@@ -21,10 +19,6 @@
     "ExpressionSchema": "shared/Expression",
     "FieldMapping": "shared/FieldMapping",
     "FieldMappingSchema": "shared/FieldMapping",
-    "FieldName": "shared/FieldName",
-    "FieldNameSchema": "shared/FieldName",
-    "FlowName": "shared/FlowName",
-    "FlowNameSchema": "shared/FlowName",
     "HttpMethod": "shared/HttpMethod",
     "HttpMethodSubset": "shared/HttpMethodSubset",
     "HttpMethodSubsetSchema": "shared/HttpMethodSubset",
@@ -36,8 +30,6 @@
     "MetadataItemName": "shared/MetadataItemName",
     "MetadataItemNameSchema": "shared/MetadataItemName",
     "MutationEventEnum": "shared/MutationEventEnum",
-    "ObjectName": "shared/ObjectName",
-    "ObjectNameSchema": "shared/ObjectName",
     "Predicate": "shared/Predicate",
     "PredicateInput": "shared/PredicateInput",
     "PredicateInputSchema": "shared/PredicateInput",
@@ -46,8 +38,6 @@
     "ProtectionSchema": "shared/Protection",
     "RateLimitConfig": "shared/RateLimitConfig",
     "RateLimitConfigSchema": "shared/RateLimitConfig",
-    "RoleName": "shared/RoleName",
-    "RoleNameSchema": "shared/RoleName",
     "SnakeCaseIdentifier": "shared/SnakeCaseIdentifier",
     "SnakeCaseIdentifierSchema": "shared/SnakeCaseIdentifier",
     "SortDirectionEnum": "shared/SortDirectionEnum",
@@ -58,9 +48,7 @@
     "SystemIdentifier": "shared/SystemIdentifier",
     "SystemIdentifierSchema": "shared/SystemIdentifier",
     "TemplateExpressionInput": "shared/TemplateExpressionInput",
-    "TemplateExpressionInputSchema": "shared/TemplateExpressionInput",
-    "ViewName": "shared/ViewName",
-    "ViewNameSchema": "shared/ViewName"
+    "TemplateExpressionInputSchema": "shared/TemplateExpressionInput"
   },
   "collisions": []
 }

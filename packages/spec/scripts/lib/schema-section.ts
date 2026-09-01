@@ -562,7 +562,7 @@ export function renderSchemaSection(schemaName: string, schema: any, ctx: Sectio
     //
     // ONE LINE, and it is `formatType`'s rendering, not a second one. That is
     // what every property row on the page already prints for the same node, so
-    // `ObjectName`'s own section and a property typed `ObjectName` cannot
+    // `SystemIdentifier`'s own section and a property typed `SystemIdentifier` cannot
     // disagree about what it is. It is also why the line does NOT spell
     // `pattern` / `minLength` / `minimum`: this renderer has never printed a
     // constraint in any position, and inventing constraint prose here alone

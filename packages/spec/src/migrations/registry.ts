@@ -5511,6 +5511,52 @@ const step18: MigrationStep = {
         'and that anonymous sign-up now answers 403 SELF_REGISTRATION_CLOSED.',
     },
     {
+      id: 'branded-identifier-schemas-retired',
+      surface:
+        'the six branded identifier schemas of `@objectstack/spec/shared` '
+        + '(`shared/branded-types.zod.ts`, removed whole): `ObjectNameSchema`, '
+        + '`FieldNameSchema`, `ViewNameSchema`, `AppNameSchema`, `FlowNameSchema`, '
+        + '`RoleNameSchema`, and their type exports (`ObjectName`/`ObjectNameParsed` '
+        + 'through `RoleName`/`RoleNameParsed`).',
+      replacement:
+        '(removed — no replacement brand layer. Parse an identifier through the '
+        + 'schema of the surface that stores it: object and field names through '
+        + '`ObjectSchema`/`FieldSchema` (inline snake_case regex), flow names '
+        + 'through `FlowSchema`, app names through `AppSchema` '
+        + '(`SnakeCaseIdentifierSchema`), position/role names through '
+        + '`PositionSchema`. A caller that wants a standalone identifier check '
+        + 'uses `SnakeCaseIdentifierSchema` or `SystemIdentifierSchema` from '
+        + '`@objectstack/spec/shared` directly — both stay published.)',
+      reason:
+        'Maintainer ruling 2026-09-01 on #13612 (director decision batch C, '
+        + 'verbatim 「同意」: retire) — ADR-0049 enforce-or-remove. The brands '
+        + 'promised compile-time safety ("you cannot pass an ObjectName where a '
+        + 'FieldName is expected") that no consumer could obtain: no schema in '
+        + 'either repository ever composed a brand, so nothing produced or '
+        + 'accepted a branded value, while the surfaces the brands were named for '
+        + 'are validated by inline regexes or bare `SnakeCaseIdentifierSchema` '
+        + 'three files away. Binding was weighed and not adopted: zero consumers '
+        + 'exist, binding would silently change five surfaces\' accept sets (the '
+        + 'inline regexes admit a leading underscore the brand base does not), '
+        + 'and a future real need for centralized identifier grammar re-opens '
+        + 'freely against actual pull.',
+      acceptanceCriteria:
+        'No code imports any of the six schemas or their types from '
+        + '`@objectstack/spec/shared` (TS2305 after upgrade — the module is '
+        + 'removed, not stubbed); the five surfaces\' validators are byte-for-byte '
+        + 'untouched (inline regexes at `data/object.zod.ts`, `data/field.zod.ts`, '
+        + '`automation/flow.zod.ts`; bare `SnakeCaseIdentifierSchema` at '
+        + '`ui/app.zod.ts`, `identity/position.zod.ts`); '
+        + '`SnakeCaseIdentifierSchema` and `SystemIdentifierSchema` themselves '
+        + 'remain published and unchanged; the six def keys (`shared/ObjectName`, '
+        + '`shared/FieldName`, `shared/ViewName`, `shared/AppName`, '
+        + '`shared/FlowName`, `shared/RoleName`) leave '
+        + '`json-schema.manifest/shared.json` in the same change that registers '
+        + 'this entry. No authored metadata document ever embedded a branded '
+        + 'value, so no source rewrite ships and `objectstack migrate meta` has '
+        + 'nothing to visit.',
+    },
+    {
       id: 'cbp-master-detail-required-forced',
       surface: 'object.fields.<master>.required on a `master_detail` reference under '
         + '`sharingModel: \'controlled_by_parent\'` — authored via `ObjectSchema.create()`',
@@ -9843,6 +9889,73 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // the production-posture hard-refusal as the first-landed half (#11846 ruling
     // record).
     'kernel/PreviewModeConfig',
+    // #13612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
+    // batch C: retire; binding was weighed and not adopted). One of the six
+    // branded identifier schemas of `shared/branded-types.zod.ts`, removed whole
+    // with the module. No schema in either repo ever composed `AppNameSchema`,
+    // so the promised brand safety was unobtainable. The real app-name contract
+    // is the bare `SnakeCaseIdentifierSchema` at `ui/app.zod.ts` — untouched by
+    // this retirement. No tombstone and no D2 conversion (no authored document
+    // ever embedded a branded value); this table plus the D3 semantic entry
+    // `branded-identifier-schemas-retired` are the declaration.
+    'shared/AppName',
+    // #13612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
+    // batch C: retire; binding was weighed and not adopted). One of the six
+    // branded identifier schemas of `shared/branded-types.zod.ts`, removed whole
+    // with the module. No schema in either repo ever composed `FieldNameSchema`,
+    // so the promised brand safety was unobtainable. The real field-name contract
+    // is the inline `z.string().regex(/^[a-z_][a-z0-9_]*$/)` at
+    // `data/field.zod.ts` — untouched by this retirement. No tombstone and no D2
+    // conversion (no authored document ever embedded a branded value); this table
+    // plus the D3 semantic entry `branded-identifier-schemas-retired` are the
+    // declaration.
+    'shared/FieldName',
+    // #13612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
+    // batch C: retire; binding was weighed and not adopted). One of the six
+    // branded identifier schemas of `shared/branded-types.zod.ts`, removed whole
+    // with the module. No schema in either repo ever composed `FlowNameSchema`,
+    // so the promised brand safety was unobtainable. The real flow-name contract
+    // is the inline `z.string().regex(/^[a-z_][a-z0-9_]*$/)` at
+    // `automation/flow.zod.ts` — untouched by this retirement. No tombstone and
+    // no D2 conversion (no authored document ever embedded a branded value); this
+    // table plus the D3 semantic entry `branded-identifier-schemas-retired` are
+    // the declaration.
+    'shared/FlowName',
+    // #13612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
+    // batch C: retire; binding was weighed and not adopted). One of the six
+    // branded identifier schemas of `shared/branded-types.zod.ts`, removed whole
+    // with the module. The brand promised compile-time safety no consumer could
+    // obtain: no schema in either repo ever composed `ObjectNameSchema`, so
+    // nothing produced or accepted a branded value. The real object-name contract
+    // is the inline `z.string().regex(/^[a-z_][a-z0-9_]*$/)` at
+    // `data/object.zod.ts` — untouched by this retirement (the ruling keeps the
+    // five surfaces' real validators as the contract of record). No authored
+    // document ever embedded a branded value, so no tombstone and no D2
+    // conversion — this table plus the D3 semantic entry
+    // `branded-identifier-schemas-retired` are the declaration (the #8715
+    // route-3 shape).
+    'shared/ObjectName',
+    // #13612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
+    // batch C: retire; binding was weighed and not adopted). One of the six
+    // branded identifier schemas of `shared/branded-types.zod.ts`, removed whole
+    // with the module. No schema in either repo ever composed `RoleNameSchema`,
+    // so the promised brand safety was unobtainable. The real role/position-name
+    // contract is the bare `SnakeCaseIdentifierSchema` at
+    // `identity/position.zod.ts` — untouched by this retirement. No tombstone and
+    // no D2 conversion (no authored document ever embedded a branded value); this
+    // table plus the D3 semantic entry `branded-identifier-schemas-retired` are
+    // the declaration.
+    'shared/RoleName',
+    // #13612 — ADR-0049 enforce-or-remove (maintainer ruling 2026-09-01, director
+    // batch C: retire; binding was weighed and not adopted). One of the six
+    // branded identifier schemas of `shared/branded-types.zod.ts`, removed whole
+    // with the module. No schema in either repo ever composed `ViewNameSchema`,
+    // so the promised brand safety was unobtainable. View names are validated
+    // where views are declared, not through a brand. No tombstone and no D2
+    // conversion (no authored document ever embedded a branded value); this table
+    // plus the D3 semantic entry `branded-identifier-schemas-retired` are the
+    // declaration.
+    'shared/ViewName',
     // #10485 — `ui/BorderRadius` (the border-radius scale sub-block) left with `ui/Theme`:
     // its ONLY consumer was the retired `ThemeSchema` (the #3950 rule — an
     // exported value schema with no consumer reads as a capability). See
