@@ -7,6 +7,7 @@ import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { AutomationEngine, StepLogEntry } from '../engine.js';
 import { interpolate } from './template.js';
 import { parseNodeConfig } from './parse-config.js';
+import { attachPartialSteps } from '../partial-steps.js';
 
 /**
  * `loop` built-in node — a **structured iteration container** (ADR-0031).
@@ -120,18 +121,39 @@ export function registerLoopNode(engine: AutomationEngine, ctx: PluginContext): 
 
       let iterations = 0;
       const childSteps: StepLogEntry[] = [];
-      for (let i = 0; i < collection.length; i++) {
-        variables.set(iteratorVariable, collection[i]);
-        if (indexVariable) variables.set(indexVariable, i);
-        // Body runs in the shared scope; iterator var + mutations are visible.
-        // #1479: collect each iteration's body steps, tagged with the index.
-        const iterSteps = await engine.runRegion(body, variables, context ?? ({} as AutomationContext), {
-          parentNodeId: node.id,
-          iteration: i,
-          regionKind: 'loop-body',
-        });
-        childSteps.push(...iterSteps);
-        iterations++;
+      try {
+        for (let i = 0; i < collection.length; i++) {
+          variables.set(iteratorVariable, collection[i]);
+          if (indexVariable) variables.set(indexVariable, i);
+          // Body runs in the shared scope; iterator var + mutations are visible.
+          // #1479: collect each iteration's body steps, tagged with the index.
+          // #13803: `childSteps` doubles as the #7546 `partialSteps` sink, so a
+          // FAILING iteration's steps land here too — `runRegion` tags them and
+          // pushes them in before it rethrows. Success returns them instead, so
+          // nothing is counted twice.
+          const iterSteps = await engine.runRegion(
+            body,
+            variables,
+            context ?? ({} as AutomationContext),
+            {
+              parentNodeId: node.id,
+              iteration: i,
+              regionKind: 'loop-body',
+            },
+            childSteps,
+          );
+          childSteps.push(...iterSteps);
+          iterations++;
+        }
+      } catch (err) {
+        // #13803 — the sweep is dying, but the iterations that already
+        // completed really did write. Hand their steps to the engine's catch
+        // path so the run log keeps the record and the summary's `acted`
+        // counts the writes that happened. The error itself is rethrown
+        // UNCHANGED: same identity, same message, same guard-refusal marking,
+        // so failure propagation is byte-for-byte what it was.
+        if (err !== null && typeof err === 'object') attachPartialSteps(err, childSteps);
+        throw err;
       }
 
       return { success: true, output: { iterations }, childSteps };
