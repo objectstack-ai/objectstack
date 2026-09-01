@@ -1,0 +1,154 @@
+# Opt-in pre-merge pack smoke (#14214, derived from the #14000 ruling).
+#
+# ## The gap this closes
+#
+# `publish-smoke.yml` owns the pack smoke, and it runs on `workflow_run` AFTER a
+# Release run — it resolves the changesets release branch and reports its verdict
+# as a commit status on that branch head. That is the right place for a release
+# verdict and the wrong place for a PR author: #11767 (audience default flipped
+# to `invite_only`, a breaking auth change) merged with ZERO packed-install
+# coverage on its own PR, and the smoke then sat red on the release candidate for
+# ~7 days because the only surface carrying the verdict was one no PR author
+# looks at (measured in #14000).
+#
+# This workflow adds the missing TRIGGER — and only the trigger. The driver, the
+# probes and every assertion stay exactly as `scripts/publish-smoke.sh` defines
+# them; re-pinning those to the declared first-run contract was #14000's own
+# deliverable (PR #14255) and is deliberately untouched here. What is new is
+# WHEN the smoke runs and WHERE its verdict lands: on the pull request, before
+# the merge, as an ordinary check run the author already reads.
+#
+# ## Opt-in, by ruling — and what that buys and costs
+#
+# Maintainer ruling 2026-09-01 (director batch #23, 「同意」) approved the
+# LABEL-GATED OPT-IN shape: the cost stays in opt-in. A full build + pack +
+# clean install is ~45 minutes, so putting it in the default inner loop would
+# tax every PR in the repo to cover the handful that can break a fresh install.
+#
+# ⛔ Therefore this workflow must never grow a `paths:` filter that runs it by
+# default, and must never be added to `.github/labeler.yml`. Auto-applying the
+# label from changed paths would be a DIFFERENT design (auto-detect), not the
+# one that was ruled, and it would reintroduce the default-inner-loop cost the
+# ruling removed.
+#
+# The residual risk is stated rather than hidden: self-declaration only covers
+# the author who RECOGNISES their change as breaking. An author who does not
+# realise they widened the unauthenticated surface still gets no pre-merge pack
+# coverage — the release-time leg in `publish-smoke.yml` remains the backstop for
+# that case. Closing that gap would require a detection rule, which is a
+# different card and a different ruling.
+#
+# ## When to apply the label
+#
+# Apply `needs:pack-smoke` to your own PR when it changes the auth/audience
+# DEFAULTS or the accept/reject behaviour of the unauthenticated surface. The
+# same criterion is written where PR authors meet it, in CONTRIBUTING.md.
+#
+# ## Wiring decisions
+#
+# `types:` restates GitHub's three defaults alongside `labeled`, because naming
+# `types:` REPLACES the default set rather than extending it (#8304) — dropping
+# one produces no run on that activity, which is an absence rather than a skip.
+# `opened` is in the list so a PR created via the API already carrying the label
+# is smoked; `synchronize` is the load-bearing one, because the thing under test
+# is the MERGE PREVIEW and every push changes it.
+#
+# The guard has two limbs and both are needed:
+#
+#   1. the PR must CURRENTLY carry the label — this is what makes an unlabelled
+#      PR cost nothing;
+#   2. on a `labeled` event the label just added must be OURS. Without this limb
+#      every unrelated label the size labeler adds (`size/l`, `ci/cd`, …) to an
+#      already-labelled PR would start another 45-minute smoke of a tree that
+#      has not changed.
+#
+# `concurrency` sits at JOB level, not workflow level, and that is deliberate.
+# At workflow level the group is taken by every run this workflow starts,
+# including the runs whose job then skips — so an unrelated `labeled` event
+# would CANCEL a smoke that was still running and then skip, leaving the PR with
+# no verdict at all. That is the #14000 silence shape (a missing answer reading
+# as a green one) rebuilt inside its own fix. A skipped job never enters a
+# job-level group, so only a real smoke can supersede a real smoke.
+#
+# ⛔ No `merge_group:` trigger, and this is not the oversight it resembles. A
+# `merge_group` event carries no `pull_request` context, so neither limb of the
+# guard above can be evaluated there; and the ruling puts this cost pre-merge and
+# opt-in, not in the queue. This job is correspondingly NOT a required context
+# (`scripts/check-required-contexts.mjs` holds that registry) — it is advisory by
+# design, and a PR that never opts in simply never produces it.
+
+name: Pack Smoke (opt-in)
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  pack-smoke:
+    # ~45 minutes of build + pack + clean install. Opt-in only — see the header.
+    name: Packed-tarball smoke (opt-in)
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'needs:pack-smoke')
+      && (github.event.action != 'labeled' || github.event.label.name == 'needs:pack-smoke')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: pack-smoke-optin-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      # No `ref:` — on `pull_request` the default checkout is `refs/pull/N/merge`,
+      # the MERGE PREVIEW, which is the tree the ruling names: what `main` will
+      # actually contain, not what the branch contains in isolation. The driver
+      # packs from the checkout root (`REPO_ROOT` in scripts/publish-smoke.sh),
+      # so the preview is what gets packed, installed and probed.
+      - name: Checkout the merge preview
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Setup turbo cache
+        uses: actions/cache@v6
+        with:
+          path: .turbo/cache
+          key: ${{ runner.os }}-turbo-${{ github.job }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-${{ github.job }}-
+            ${{ runner.os }}-turbo-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The driver's own prerequisite, asserted by the script itself: pack mode
+      # fails fast unless packages/cli/dist and the create-objectstack bin exist.
+      - name: Build
+        run: pnpm run build
+
+      # SMOKE_MODE defaults to `pack`, so this is the same invocation
+      # publish-smoke.yml's pack-smoke job makes. ⛔ Do not add flags or env here
+      # to make a red go away: the assertions are #14000's deliverable and a
+      # refusal this script reports is a refusal a user would get.
+      - name: Publish smoke (packed tarballs)
+        run: bash scripts/publish-smoke.sh
