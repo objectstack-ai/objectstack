@@ -2422,8 +2422,19 @@ export default class Serve extends Command {
       const __clusterDriver = process.env.OS_CLUSTER_DRIVER?.trim();
       if (__clusterDriver && __clusterDriver !== 'memory') {
         // Multi-node authorization gate (open mechanism): a distribution (e.g.
-        // an EE license) may deny multi-node. On denial, downgrade to
-        // single-node rather than fail — multi-node is an add-on, never brick.
+        // an EE license) may deny multi-node. On denial this file drops the
+        // remote driver and leaves `clusterConfig` unset, so the Runtime falls
+        // back to the in-process driver.
+        //
+        // ⛔ That is NOT the same as "the boot survives", and this comment used
+        // to say it was ("never brick"). Measured on #14116: when the operator
+        // ALSO declared a multi-node topology (`OS_CLUSTER_REPLICAS > 1` /
+        // `OS_EXPECT_MULTI_NODE=true`), the in-process fallback then trips the
+        // split-brain guard in `ClusterServicePlugin.init` and the boot is
+        // REFUSED. The refusal is correct — N replicas on per-process locks is
+        // exactly the silent corruption that guard exists to stop — but a
+        // denial and a declared topology together mean refuse, not degrade.
+        // The warning below says so.
         // Dynamic, non-literal specifier so the CLI does not statically depend
         // on the cluster package (mirrors the remote-driver import below).
         //
@@ -2443,8 +2454,32 @@ export default class Serve extends Command {
           checkMultiNodeAllowed: (requested?: number) => MultiNodeGateVerdict;
           /** Optional: an app on a pre-#13330 `service-cluster` does not have it. */
           listClusterDrivers?: () => string[];
+          // Optional: an app may pin an older service-cluster that predates
+          // the mount helper (#13537); `?.` below keeps that boot walking.
+          mountMultiNodeGateFromHost?: (
+            importer: (specifier: string) => Promise<unknown>,
+          ) => Promise<unknown>;
         };
-        const { checkMultiNodeAllowed } = __clusterModule;
+        const { checkMultiNodeAllowed, mountMultiNodeGateFromHost } = __clusterModule;
+        // [#13537] Mount the distribution's gate on EVERY boot route, BEFORE
+        // consulting it. Registration used to depend on one app config file
+        // executing (the EE config calling `registerMultiNodeGate`), so the
+        // thin-extension and artifact-direct routes booted with no gate at
+        // all — and the gate then defaulted to allow. The helper imports the
+        // gate-carrying distribution packages through this file's own
+        // host-anchored importer (passed as a value, so every carrier load
+        // resolves from the served app per #4719 — same guarantee as the
+        // `importFromHost` call above, just exercised inside the package that
+        // owns the carrier list). Best-effort: with no distribution installed
+        // nothing mounts, and the gate's fail-closed default answers below.
+        //
+        // ⚠️ Resolved against #13330's namespace read on main: the mount helper
+        // is destructured from THE SAME `__clusterModule`, so the instance that
+        // registers is provably the instance `checkMultiNodeAllowed` and
+        // `listClusterDrivers` are read from. Re-importing the package for the
+        // mount would have re-opened the split this file just closed.
+        try { await mountMultiNodeGateFromHost?.(importFromHost); }
+        catch { /* never brick the boot for an add-on — the check below fails closed */ }
         // Ask the gate about the topology the operator actually DECLARED.
         // Calling zero-arg leaves `requested` undefined, which a cap-aware gate
         // has nothing to clamp against — so the licensed-overflow verdict was
@@ -2468,7 +2503,11 @@ export default class Serve extends Command {
         if (!__gate.allowed) {
           console.warn(
             `[cluster] multi-node not authorized (${__gate.reason ?? 'denied'}) — ` +
-            `downgrading to single-node (in-memory cluster). Remove OS_CLUSTER_DRIVER to silence.`,
+            `falling back to the in-process cluster driver. If this deployment ALSO ` +
+            `declared a multi-node topology (OS_CLUSTER_REPLICAS>1 / OS_EXPECT_MULTI_NODE=true), ` +
+            `the split-brain guard refuses the boot rather than run replicas on per-process ` +
+            `locks — drop the declaration to run single-node, or license the capability. ` +
+            `Remove OS_CLUSTER_DRIVER to silence.`,
           );
         } else {
           // Licensed-overflow advisory: the cluster IS entitled to run, it just

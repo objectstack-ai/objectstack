@@ -177,12 +177,52 @@ const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
  *
  * `package.json/**` names the ROOT manifest and only it -- measured:
  * `hintCovers('package.json/**', 'packages/spec/package.json')` is false. The
- * MEMBER manifests stay undeclared on purpose (the enumerator owns them and
- * declares none); this hint is here because the `//#` arm opens the root
- * manifest DIRECTLY, from this file, and a bare `'package.json'` literal builds
- * no hint at all -- the same trap documented above for turbo.json.
+ * MEMBER manifests are declared separately, in `DECLARED_WATCH_HINTS` below;
+ * this hint is here because the `//#` arm opens the root manifest DIRECTLY,
+ * from this file, and a bare `'package.json'` literal builds no hint at all --
+ * the same trap documented above for turbo.json.
  */
 export const ROOT_FILE_WATCH_HINTS = ['turbo.json/**', 'package.json/**'];
+
+/**
+ * The MEMBER manifests this gate opens, one per workspace package, as patterns.
+ *
+ * ## Why they used to be undeclared, and why that reading was wrong
+ *
+ * This block used to say the member manifests "stay undeclared on purpose (the
+ * enumerator owns them and declares none)". The enumerator really does declare
+ * none -- but its header states WHY, and the reason is the opposite of a
+ * licence for its callers to declare nothing:
+ *
+ *   "each gate keeps declaring its OWN population in its OWN module body [...]
+ *    What is consolidated here is the PARSE, never the DECLARATION."
+ *
+ * The refusal there is priced against the SUBTREE claim: a `'packages/*'`-shaped
+ * literal in the enumerator would hand the whole workspace population -- ~5400
+ * files -- to all nine callers at once, measured at +41725 (gate, file) pairs.
+ * That argument is about the enumerator and about subtrees. It says nothing
+ * against the narrow claim this gate can make from its own side, which is the
+ * manifests and only the manifests: 79 files on this tree, every one of which
+ * `readWorkspaceScripts` really opens and reads a `scripts` table out of.
+ *
+ * The cost of leaving them undeclared was the ordinary one: a card adding or
+ * renaming a script in `packages/<pkg>/package.json` -- the change that makes a
+ * `<package>#<task>` key inert, which is precisely what this gate judges --
+ * derived no lead to this gate at all.
+ *
+ * ## Why three patterns and not eleven
+ *
+ * `pnpm-workspace.yaml` lists eleven member globs, nine of them under
+ * `packages/`. `packages/**` + one glob for each of the two roots outside it
+ * covers every member manifest and nothing else; `--self-test` holds that
+ * against the enumerator's live answer in BOTH directions, so a twelfth glob in
+ * the workspace file reds here rather than going quiet.
+ */
+export const DECLARED_WATCH_HINTS = [
+  'packages/**/package.json',
+  'apps/*/package.json',
+  'examples/*/package.json',
+];
 
 /** The file this gate judges, as the reader spells it on disk. */
 const TURBO_CONFIG_FILE = 'turbo.json';
@@ -738,6 +778,74 @@ export function selfTest() {
     'the declaration names exactly the two root files this gate opens',
     ROOT_FILE_WATCH_HINTS.map((h) => h.replace(/\/\*+$/, '')).join(',') ===
       `${TURBO_CONFIG_FILE},${ROOT_MANIFEST_FILE}`,
+  );
+
+  // ── The MEMBER manifests, held against the enumerator's live answer ──
+  //
+  // Both directions, because either alone is satisfied by the defect this
+  // declaration repairs. A pattern that covers nothing is a fabricated lead
+  // pasted into every card it happens to brush; a member manifest no pattern
+  // covers is the undeclared read the gate shipped with. Stated over
+  // `workspacePackages(ROOT)` -- the same call `readWorkspaceScripts` makes --
+  // so a twelfth glob in `pnpm-workspace.yaml` reds HERE, in the gate that
+  // opens the file, rather than going quiet in a dispatch brief.
+  //
+  // The matcher is local and deliberately narrower than `hintCovers`: `*` stops
+  // at a separator, `**` crosses them, and nothing else is special. It can only
+  // refuse MORE than the real covering rule, so it fails loudly for a pattern
+  // the derivation would have accepted and never passes one it would refuse.
+  const patternMatches = (pattern, path) => {
+    // Built segment by segment, with no sentinel character standing in for
+    // `**` at any point: a placeholder byte spliced into a string and replaced
+    // later is how a raw control byte gets into a source file
+    // (`scripts/check-nul-bytes.mjs` carries the argument), and the segment
+    // walk needs no placeholder anyway.
+    const segs = pattern.split('/');
+    let rx = '';
+    for (let i = 0; i < segs.length; i++) {
+      if (segs[i] === '**') {
+        rx += '(?:[^/]+/)*'; // zero or more WHOLE segments -- `**` crosses separators
+        continue;
+      }
+      rx += segs[i].replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*');
+      if (i < segs.length - 1) rx += '/';
+    }
+    return new RegExp(`^${rx}$`).test(path);
+  };
+  const memberManifests = workspacePackages(ROOT).map((p) => `${p.dir}/${ROOT_MANIFEST_FILE}`);
+  t(
+    `the enumerator finds member manifests to declare (${memberManifests.length})`,
+    memberManifests.length > 0,
+  );
+  const undeclaredManifests = memberManifests.filter(
+    (m) => !DECLARED_WATCH_HINTS.some((h) => patternMatches(h, m)),
+  );
+  t(
+    `every member manifest this gate opens is covered by a declared pattern (uncovered: ${undeclaredManifests.join(', ') || 'none'})`,
+    undeclaredManifests.length === 0,
+  );
+  const emptyPatterns = DECLARED_WATCH_HINTS.filter(
+    (h) => !memberManifests.some((m) => patternMatches(h, m)),
+  );
+  t(
+    `and no declared pattern covers zero of them (empty: ${emptyPatterns.join(', ') || 'none'})`,
+    emptyPatterns.length === 0,
+  );
+  // The matcher itself, pinned in both directions on this tree's own shapes --
+  // a nested member, a top-level one, and the ROOT manifest, which must NOT be
+  // swept up by the member patterns (it is `ROOT_FILE_WATCH_HINTS`' claim, and
+  // a member pattern that also matched it would make the two declarations
+  // disagree about who owns it).
+  t(
+    'the pattern matcher crosses separators for `**` and stops at them for `*`',
+    patternMatches('packages/**/package.json', 'packages/plugins/knowledge-memory/package.json') &&
+      patternMatches('packages/**/package.json', 'packages/spec/package.json') &&
+      patternMatches('apps/*/package.json', 'apps/docs/package.json') &&
+      !patternMatches('apps/*/package.json', 'apps/docs/nested/package.json'),
+  );
+  t(
+    'and the member patterns do not claim the ROOT manifest',
+    !DECLARED_WATCH_HINTS.some((h) => patternMatches(h, ROOT_MANIFEST_FILE)),
   );
 
   // ── Refusals must refuse (#4690) ──
