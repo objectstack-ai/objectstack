@@ -7,13 +7,18 @@
 // `HookBodySchema` union, parsed by the same `HookBodySchema.safeParse` in
 // `actionBodyRunnerFactory` (packages/runtime/src/sandbox/body-runner.ts), run
 // in the same QuickJS sandbox. So it fails the same way — an action body that
-// writes a field the target object never declares reaches the driver
-// unfiltered, and the outcome is DRIVER-DEPENDENT: on SQL the stray column
-// fails the whole call with a driver-level error far from the authoring
-// mistake, on a schemaless driver the stray key is persisted. Same #4271
-// split as the hook side (see that file's header for the measured chain, and
-// `undeclared-field-write-driver-split.integration.test.ts` for the pin); the
-// hook rule alone left half the surface uncovered.
+// writes a field the target object never declares is refused at run time, far
+// from the authoring mistake. [#13858] That refusal is NOT driver-dependent,
+// and the message says so: this rule judges exactly one shape,
+// `ctx.api.object('<literal>').insert|create|update|updateById(…)`, and
+// `ctx.api` is a ScopedContext over the running engine, so the payload is
+// CALLER-supplied and the declared-field door (#8682 insert, #8738 update)
+// refuses it — `INVALID_FIELD` / 400, identically on driver-sql and
+// driver-memory, before any statement is built. Measured on both families
+// through the real sandbox and the real engine; the caller-payload half of
+// that door is pinned in
+// `undeclared-field-write-driver-split.integration.test.ts`. The hook rule
+// alone left half the surface uncovered, which is why this file exists.
 //
 // ─── What does NOT carry over ───────────────────────────────────────────────
 //
@@ -429,9 +434,14 @@ export function validateActionBodyWrites(stack: AnyRec): ActionBodyWriteFinding[
         path: site.path,
         message:
           `body calls ctx.api.object('${w.object}').${w.method ?? 'update'}(…) writing '${w.field}', but ` +
-          `object '${w.object}' declares no such field. The write-path validator skips the unknown key — ` +
-          `on a SQL driver the whole action then fails with a driver-level error far from here; on a ` +
-          `schemaless driver (memory, MongoDB) the stray key is persisted (#4271).`,
+          // [#13858] Same door, same measurement as the hook sibling — ctx.api
+          // is a ScopedContext over the running engine, so this payload is
+          // CALLER-supplied and #8682/#8738 refuse it before any driver.
+          `object '${w.object}' declares no such field. ctx.api is a scoped handle on the running ` +
+          `engine, so the payload arrives as an ordinary CALLER write and the declared-field door ` +
+          `REFUSES it at run time — INVALID_FIELD / 400, identically on every driver (#4271), before ` +
+          `any statement is built. The write lands nothing, and the refusal escapes the body and ` +
+          `fails the action.`,
         hint: fixHint(w.field, [...known]),
       });
     }
