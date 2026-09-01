@@ -278,6 +278,16 @@ describe('live-dialect matrix — the driver can SEE its own isolated schema (#9
     driver = undefined;
   });
 
+  // ── Why the two it() blocks below carry an explicit 60_000 budget (#14100) ──
+  // Both construct a FRESH `new SqlDriver(PG_CELL.config())` against the live
+  // Postgres cell inside their own body and then drive `initObjects(...)`, so
+  // the connect cycle plus schema-sync DDL and catalog read-back are paid PER
+  // TEST rather than once in a beforeAll. With no third argument vitest applies
+  // its own 5000ms default — a number nobody chose for that work, and one that
+  // reddens unrelated PRs when the runner is merely a bit slow. Sized to match
+  // this package's live-DDL siblings (#13902 / #13688). ⛔ NOT a claim that
+  // these tests are known to be slow: they were found by an AST walk over the
+  // package, never by a measured timeout here.
   it.skipIf(!PG_CELL.available)(
     'postgres: index introspection reports the indexes that exist in the file’s schema',
     async () => {
@@ -309,6 +319,7 @@ describe('live-dialect matrix — the driver can SEE its own isolated schema (#9
       expect(seen.some((i: any) => i.primary)).toBe(true);
       expect(seen.some((i: any) => i.unique && !i.primary)).toBe(true);
     },
+    60_000,
   );
 
   it.skipIf(!PG_CELL.available)(
@@ -320,5 +331,6 @@ describe('live-dialect matrix — the driver can SEE its own isolated schema (#9
       const introspected = await driver.introspectSchema();
       expect(Object.keys(introspected.tables ?? {})).toContain(TABLE);
     },
+    60_000,
   );
 });

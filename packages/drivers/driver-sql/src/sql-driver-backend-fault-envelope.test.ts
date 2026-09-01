@@ -157,6 +157,23 @@ function declareSweep(cell: DialectCell): void {
 describe(`[#8931] driver-sql — the terminal backend-fault envelope (${cell.label})`, () => {
   let driver: SqlDriver;
 
+  // ── Why this beforeAll carries an explicit 60_000 budget (#14100) ──
+  // The it() blocks in this file are deliberately NOT budgeted: each only sends
+  // a query or two down a connection this hook already opened, so their cost
+  // model really is the fast one. But the live cost did not disappear — it
+  // lives HERE: a full connect cycle, two drops, `initObjects(...)` schema-sync
+  // DDL and two inserts, all against the cell's live server. ⚠️ A hook inherits
+  // `hookTimeout`, NOT `testTimeout` — measured in this package's config, an
+  // unbudgeted hook dies at 10000ms ("Hook timed out in 10000ms"), not at the
+  // 5000ms an unbudgeted it() gets. Ten seconds is still the wrong ceiling for
+  // this much live work, and the third argument does lift it (measured).
+  // Budgeting the it() blocks would have been wrong;
+  // leaving the hook unbudgeted just moved the exposure one scope outward.
+  // Budgeting hooks is established practice in this package (see the beforeAll
+  // hooks in sql-driver-diagnostic-value-probe, sql-driver-12380-json-roundtrip,
+  // sql-driver-13567-audit-stamp-materialisation and
+  // sql-driver-value-roundtrip-conformance). ⛔ NOT a claim that this hook is
+  // known to time out: it was found by an AST walk, never by a measured red.
   beforeAll(async () => {
     driver = new SqlDriver(cell.config());
     await driver.execute(`drop table if exists ${TABLE}`).catch(() => {});
@@ -166,7 +183,7 @@ describe(`[#8931] driver-sql — the terminal backend-fault envelope (${cell.lab
     ]);
     await driver.create(TABLE, { id: 't1', title: 'Design', rank: 1 }, { bypassTenantAudit: true });
     await driver.create(TABLE, { id: 't2', title: 'Build', rank: 2 }, { bypassTenantAudit: true });
-  });
+  }, 60_000);
 
   afterAll(async () => {
     await driver.execute(`drop table if exists ${TABLE}`).catch(() => {});
@@ -340,6 +357,11 @@ declareDialectCell(PG, 'backend-fault envelope — the pg-only rows', (cell) => 
 describe('[#8931] postgres — the dotted route and the value-bearing diagnostic', () => {
   let driver: SqlDriver;
 
+  // ── Why this beforeAll carries an explicit 60_000 budget (#14100) ──
+  // Same reasoning as the hook in `declareSweep` above, on the Postgres-only
+  // pair: a live connect, a drop, `initObjects(...)` DDL and an insert, none of
+  // which the two it() blocks below repeat. ⛔ NOT a claim that this hook is
+  // known to time out — found structurally, not by a measured red.
   beforeAll(async () => {
     driver = new SqlDriver(cell.config());
     await driver.execute(`drop table if exists ${TABLE}_pg`).catch(() => {});
@@ -347,7 +369,7 @@ describe('[#8931] postgres — the dotted route and the value-bearing diagnostic
       { name: `${TABLE}_pg`, fields: { title: { type: 'string' }, rank: { type: 'integer' } } },
     ]);
     await driver.create(`${TABLE}_pg`, { id: 't1', title: 'Design', rank: 1 }, { bypassTenantAudit: true });
-  });
+  }, 60_000);
 
   afterAll(async () => {
     await driver.execute(`drop table if exists ${TABLE}_pg`).catch(() => {});

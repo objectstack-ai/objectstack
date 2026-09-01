@@ -317,7 +317,7 @@ describe('[#12974] audit — the ruled floor', () => {
   });
 });
 
-describe('[#12974] the shared row predicate (the elevation gate’s twin)', () => {
+describe('[#12974] the shared row predicate (the per-request derivation’s twin)', () => {
   it('matchesDeclaredOwnerEmail — canonical comparison: trimmed, case-insensitive', () => {
     expect(matchesDeclaredOwnerEmail({ email: 'Operator@Corp.Example' }, SOLO)).toBe(true);
     expect(matchesDeclaredOwnerEmail({ email: '  operator@corp.example  ' }, SOLO)).toBe(true);

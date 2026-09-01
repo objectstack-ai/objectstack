@@ -352,6 +352,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.cluster-mutation-fanout.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.cluster-mutation-fanout.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.cluster-mutation-fanout.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.code-only-types.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3239,6 +3254,16 @@
     {
       "file": "packages/services/service-messaging/src/template-renderer.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-queue/src/db-queue-adapter-13993-idempotency-window-materialisation.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-queue/src/db-queue-adapter-13993-idempotency-window-materialisation.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
