@@ -519,6 +519,15 @@ export class QuickJSScriptRunner implements ScriptRunner {
     if (ctx.result !== undefined) {
       setObjectJson(vm, ctxObj, 'result', ctx.result);
     }
+    // [#13644] The declared referential-cleanup marker — installed only in its
+    // declared shape (`true`), absent otherwise, so a body reads
+    // `ctx.referentialFieldClear === true` with the spec's own back-compatible
+    // absence semantics. A plain boolean: no freeze/graft ceremony needed —
+    // a VM-side reassignment cannot travel anywhere (the write-back channel
+    // reads only `ctx.input`).
+    if (ctx.referentialFieldClear === true) {
+      vm.setProp(ctxObj, 'referentialFieldClear', vm.true);
+    }
 
     const apiObj = vm.newObject();
     const objectFn = vm.newFunction('object', (nameH) => {
