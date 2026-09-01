@@ -607,11 +607,9 @@
  * with no governed merges the sweep costs ZERO lookups. `--test` never
  * touches the network, and spends anything at all in exactly one case: a hit
  * on a `GENERATED_SURFACE_EXCEPTIONS` row recomputes that generator's output
- * on the local tree under test (the #9866 row reads the file, `git
- * merge-base`/`git show` for the base version and the docs derivation; a
- * #11705 row runs that generator's own `--check` once, ~3 s, for every path it
- * owns in the diff) — still zero API calls; every other `--test` run reads
- * only the register in this file.
+ * on the local tree under test (a #11705 row runs that generator's own
+ * `--check` once, ~3 s, for every path it owns in the diff) — still zero API
+ * calls; every other `--test` run reads only the register in this file.
  */
 
 import { execFileSync, spawnSync } from 'node:child_process';
