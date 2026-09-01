@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, readFileSync, symlinkSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -489,6 +489,220 @@ describe('a host that brings its OWN ObjectQL engine (#13028 — cloud\'s measur
       const k = (stack.driver as any).knex;
       const exists = await k.schema.hasTable('sys_permission_set');
       expect(exists, 'a plan must not create a table on its way to a coverage number').toBe(false);
+    } finally {
+      await stack.shutdown();
+    }
+  }, 60_000);
+});
+
+/**
+ * #13332 — the same guarantee, end to end, against a real SQL driver.
+ *
+ * The unit half
+ * (`schema-migration-plugins.declaration-boot-write-guard.test.ts`) pins the
+ * mechanism on a recording driver. This half proves the property the operator
+ * actually depends on: `os migrate plan`'s boot, with a host plugin that
+ * registers a writing hook from `init()`, leaves the DATABASE unchanged — on a
+ * database whose tables already exist, which is the condition under which the
+ * measured inserts SUCCEED instead of failing.
+ *
+ * The positive control comes first and is load-bearing. The identical plugin,
+ * on a boot that composes no host stack (so no declaration composition and no
+ * write guard), lands its rows. Without that leg the assertion below would be
+ * green over a fixture that could not have written.
+ */
+describe('a plan writes nothing even when the host writes from init() (#13332)', () => {
+  let dir: string;
+  let dbFile: string;
+  let hookLog: string;
+  const savedEnv: Record<string, string | undefined> = {};
+
+  const PHASES = ['kernel:ready', 'kernel:bootstrapped', 'kernel:listening'] as const;
+
+  /**
+   * cloud's measured shape, as a plugin this file can hand to either boot: the
+   * writing hooks are registered from `init()`, so `composeForDeclarations`'s
+   * `start()` suppression never sees them, and they fire on each of the three
+   * phases `kernel.ts` triggers unconditionally after the suppressed pass.
+   *
+   * The driver is found by scanning `driver.*` — the same surface
+   * `ObjectQLPlugin`'s discovery loop reads — rather than by naming one, so the
+   * fixture does not depend on what the standalone stack calls its default.
+   */
+  const initWritingPlugin = (tag: string): any => ({
+    name: `com.example.writes-from-init.${tag}`,
+    version: '1.0.0',
+    init: async (ctx: any) => {
+      for (const phase of PHASES) {
+        ctx.hook(phase, async () => {
+          appendFileSync(hookLog, `${tag}|log-only|${phase}\n`);
+        });
+        ctx.hook(phase, async () => {
+          const services: Map<string, any> = ctx.getServices();
+          const entry = [...services.entries()].find(([n]) => n.startsWith('driver.'));
+          if (!entry) return;
+          await entry[1].create('sys_metadata', {
+            id: `os13332-${tag}-${phase}`,
+            name: `os13332-${tag}-${phase}`,
+            type: 'os13332_probe',
+          });
+          appendFileSync(hookLog, `${tag}|write|${phase}\n`);
+        });
+      }
+    },
+  });
+
+  const probeRows = async (driver: any): Promise<number> => {
+    const rows: any = await driver.knex('sys_metadata')
+      .where({ type: 'os13332_probe' })
+      .count({ c: '*' });
+    return Number((Array.isArray(rows) ? rows[0] : rows)?.c ?? -1);
+  };
+
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'os-13332-'));
+    dbFile = join(dir, 'control.db');
+    hookLog = join(dir, 'hooks.log');
+    writeFileSync(hookLog, '');
+
+    // A host config carrying the SAME plugin shape, so the composed path is
+    // exercised as an operator would hit it — the plugin comes out of
+    // `objectstack.config.ts`, through `composeForDeclarations`.
+    writeFileSync(
+      join(dir, 'objectstack.config.ts'),
+      [
+        "import { appendFileSync } from 'node:fs';",
+        '',
+        `const LOG = ${JSON.stringify(hookLog)};`,
+        "const PHASES = ['kernel:ready', 'kernel:bootstrapped', 'kernel:listening'];",
+        '',
+        'export default {',
+        '  plugins: [{',
+        "    name: 'com.example.host-writes-from-init',",
+        "    version: '1.0.0',",
+        '    init: async (ctx: any) => {',
+        '      for (const phase of PHASES) {',
+        "        ctx.hook(phase, async () => { appendFileSync(LOG, `host|log-only|${phase}\\n`); });",
+        '        ctx.hook(phase, async () => {',
+        '          const entry = [...ctx.getServices().entries()]',
+        "            .find(([n]: [string, unknown]) => n.startsWith('driver.'));",
+        '          if (!entry) return;',
+        "          await entry[1].create('sys_metadata', {",
+        '            id: `os13332-host-${phase}`,',
+        '            name: `os13332-host-${phase}`,',
+        "            type: 'os13332_probe',",
+        '          });',
+        "          appendFileSync(LOG, `host|write|${phase}\\n`);",
+        '        });',
+        '      }',
+        '    },',
+        '  }],',
+        '};',
+        '',
+      ].join('\n'),
+    );
+
+    savedEnv.NODE_ENV = process.env.NODE_ENV;
+    savedEnv.OS_ARTIFACT_PATH = process.env.OS_ARTIFACT_PATH;
+    process.env.NODE_ENV = 'production';
+    process.env.OS_ARTIFACT_PATH = join(dir, 'dist', 'objectstack.json');
+
+    // Materialize the tables the way `os migrate apply` does. The measured
+    // defect is precisely that on a database whose tables EXIST the inserts
+    // succeed rather than fail, so the cases below must not run against an
+    // empty schema.
+    const boot = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${dbFile}`,
+      deferSchemaDdl: true,
+      composeHostStack: true,
+      projectRoot: dir,
+    });
+    try {
+      await boot.flushSchemaDdl();
+    } finally {
+      await boot.shutdown();
+    }
+    writeFileSync(hookLog, '');
+  }, 60_000);
+
+  afterAll(() => {
+    if (savedEnv.NODE_ENV === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = savedEnv.NODE_ENV;
+    if (savedEnv.OS_ARTIFACT_PATH === undefined) delete process.env.OS_ARTIFACT_PATH;
+    else process.env.OS_ARTIFACT_PATH = savedEnv.OS_ARTIFACT_PATH;
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('POSITIVE CONTROL: the same plugin lands three rows on a boot with no declaration composition', async () => {
+    const stack = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${dbFile}`,
+      deferSchemaDdl: true,
+      // No host composition ⇒ no declaration wrapper and no write guard. This
+      // is the leg that proves the fixture can write at all.
+      composeHostStack: false,
+      extraPlugins: [initWritingPlugin('control')],
+      projectRoot: dir,
+    });
+    try {
+      expect(await probeRows(stack.driver)).toBe(3);
+      const log = readFileSync(hookLog, 'utf8');
+      for (const phase of PHASES) expect(log).toContain(`control|write|${phase}`);
+    } finally {
+      await stack.shutdown();
+    }
+  }, 60_000);
+
+  it('THE FIX: the declaration boot lands none of them — from the host config or from anywhere else', async () => {
+    const before = await (async () => {
+      const s = await bootSchemaStack({
+        jsonOutput: false,
+        databaseUrl: `file:${dbFile}`,
+        deferSchemaDdl: true,
+        composeHostStack: false,
+        projectRoot: dir,
+      });
+      try { return await probeRows(s.driver); } finally { await s.shutdown(); }
+    })();
+    // The control's three rows are still there — this case measures a DELTA,
+    // not an empty table, so a fixture that silently stopped writing cannot
+    // pass it.
+    expect(before).toBe(3);
+
+    writeFileSync(hookLog, '');
+    const stack = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${dbFile}`,
+      deferSchemaDdl: true,
+      composeHostStack: true,
+      // Both routes at once: the host config's own plugin (composed through
+      // `composeForDeclarations`) and one handed straight to the kernel. The
+      // guard sits at the driver, so neither reaches the database.
+      extraPlugins: [initWritingPlugin('extra')],
+      projectRoot: dir,
+    });
+    try {
+      expect(await probeRows(stack.driver)).toBe(before);
+
+      const log = readFileSync(hookLog, 'utf8');
+
+      // The property (b) was chosen for: the hooks RAN — the log-only ones
+      // included — on the path an operator reads before a production apply.
+      for (const phase of PHASES) {
+        expect(log).toContain(`host|log-only|${phase}`);
+        expect(log).toContain(`extra|log-only|${phase}`);
+        // …and the writing hooks got all the way to their `create()` call,
+        // which returned instead of throwing: the line after it was reached.
+        expect(log).toContain(`host|write|${phase}`);
+        expect(log).toContain(`extra|write|${phase}`);
+      }
+
+      // The refusals are REPORTED, not swallowed — this is the line the plan
+      // prints and `--json` carries.
+      const notes = stack.composition.notes.join(' ');
+      expect(notes).toContain('Refused 6 write(s) during the declaration boot');
+      expect(notes).toContain('create() on sys_metadata');
     } finally {
       await stack.shutdown();
     }
