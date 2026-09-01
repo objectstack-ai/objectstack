@@ -641,6 +641,8 @@ export const CrmApp = App.create({
 | `report`    | `reportName`, `label`, `icon`                 | Link to a report |
 | `page`      | `pageName`, `label`, `icon`                   | Link to a custom Page (`type: 'home' | 'list' | ...`) |
 | `url`       | `url`, `label`, `icon`                        | External or custom URL |
+| `action`    | `actionDef` (`{ actionName, params? }`), `label`, `icon` | Run an action instead of navigating |
+| `component` | `componentRef`, `params?`, `label`, `icon`    | Built-in platform component; `componentRef` is a colon-joined registry key (`metadata:resource`), `params` become props |
 | `separator` | —                                             | Visual separator |
 
 > **`requiresObject` / `requiresService`:** Use these on any item that
@@ -2053,23 +2055,15 @@ the selected row in `list_item` contexts.
 
 ## Common Pitfalls
 
-1. **Using `provider: 'api'` when `provider: 'object'` is available.**
-   Object provider gives you free filtering, sorting, pagination, and
-   real-time updates.
-
-2. **Putting too many columns in a grid view.**
+1. **Putting too many columns in a grid view.**
    Users rarely need more than 6–8 columns visible by default. Use `hidden`
    for secondary columns.
 
-3. **Forgetting `link: true` on the primary column.**
+2. **Forgetting `link: true` on the primary column.**
    The first meaningful column (usually the name/subject) should be the
    navigation link to the record detail.
 
-4. **Not setting quick filters.**
-   Quick filters dramatically improve usability. Always add at least a
-   "My Records" filter using `$currentUser`.
-
-5. **Putting widget grid placement in `position`.**
+3. **Putting widget grid placement in `position`.**
    The grid-placement field is `layout: { x, y, w, h }` — `position` is not a
    widget key and the closed schema REJECTS it by name (it was silently
    dropped before protocol 17). `layout` is optional: omit it and the widget

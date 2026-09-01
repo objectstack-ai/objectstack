@@ -27,6 +27,7 @@ import type { RuntimeAuthoringIssue } from './runtime-authoring-gate.js';
 // [#6418] `sys_metadata`'s overlay-uniqueness indexes: probe-first DDL plus the
 // ADR-0120 D4 reporting that replaced this file's empty `catch` blocks.
 import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
+import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
 import {
     metaOverlayCacheTtlMs,
@@ -5202,9 +5203,23 @@ export class ObjectStackProtocolImplementation implements
      * See that module's header for why the order is now probe-first and why the
      * dialect fallback must stay NON-unique.
      *
-     * Kept in this package (rather than imported from
-     * `@objectstack/metadata/migrations`) to avoid a circular dependency:
-     * metadata already depends on objectql.
+     * The raw-SQL surface is resolved by `./migrations/driver-exec.ts`:
+     * `execute()` first — the member `IDataDriver` declares non-optionally —
+     * then `raw()` as the fallback for a host or third-party driver that
+     * defines it. This method used to try `raw` first, disagreeing with
+     * `seed-tenancy-backfill.ts`; that module's header carries the argument for
+     * the order and the measurement showing the flip changes nothing on any
+     * driver this repo ships.
+     *
+     * Kept in this package rather than imported from
+     * `@objectstack/metadata/migrations`. ⚠️ The reason recorded here used to be
+     * a circular dependency ("metadata already depends on objectql") — that is
+     * STALE: `@objectstack/metadata` does not depend on `@objectstack/objectql`,
+     * and `@objectstack/metadata` is already a declared dependency of this
+     * package. The live reasons are that `driver-exec.ts` is internal to
+     * `metadata`'s migrations directory rather than part of its published
+     * surface, and that this method runs on EVERY boot, so importing the
+     * `./migrations` barrel would put it on the boot path.
      */
     private overlayIndexEnsured = false;
     private async ensureOverlayIndex(): Promise<void> {
@@ -5215,25 +5230,22 @@ export class ObjectStackProtocolImplementation implements
             let driver: any = engineAny?.driver ?? engineAny?.getDriver?.();
             if (!driver && engineAny?.drivers instanceof Map) {
                 for (const candidate of engineAny.drivers.values()) {
-                    if (
-                        candidate &&
-                        (typeof (candidate as any).raw === 'function' ||
-                            typeof (candidate as any).execute === 'function')
-                    ) {
+                    if (driverCanRunSql(candidate)) {
                         driver = candidate;
                         break;
                     }
                 }
             }
             if (!driver) return;
+            const resolved = resolveDriverExec(driver);
+            // The refusal stays INSIDE the seam rather than becoming an early
+            // return: a driver taken from `engineAny?.driver` is not
+            // capability-checked above, and when it offers neither surface it is
+            // the migration that classifies and reports the failure — an early
+            // return here would put that back into the silent `catch` below.
             const exec = async (sql: string): Promise<void> => {
-                if (typeof (driver as any).raw === 'function') {
-                    await (driver as any).raw(sql);
-                } else if (typeof (driver as any).execute === 'function') {
-                    await (driver as any).execute(sql);
-                } else {
-                    throw new Error('driver has neither raw nor execute');
-                }
+                if (!resolved) throw new Error('driver has neither raw nor execute');
+                await resolved(sql);
             };
             // `console` satisfies the logger surface structurally; this class
             // carries no injected logger, and its own diagnostics go to

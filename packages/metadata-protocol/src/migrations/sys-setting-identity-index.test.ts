@@ -562,7 +562,11 @@ describe('sys_setting row-identity uniqueness (#8629)', () => {
             await resolved?.('SELECT 1');
 
             expect(engine.getDriverForObject).toHaveBeenCalledWith(SYS_SETTING_TABLE);
-            expect(owner.raw).toHaveBeenCalledWith('SELECT 1');
+            // Both doubles offer only `raw`, so the fallback limb is the one
+            // that runs and the OWNER-vs-default question this case exists for
+            // is unaffected by the execute-first flip. Bindings are now passed
+            // positionally to `raw` too (`./driver-exec.ts`), hence the `[]`.
+            expect(owner.raw).toHaveBeenCalledWith('SELECT 1', []);
             expect(engine.driver.raw).not.toHaveBeenCalled();
         });
 

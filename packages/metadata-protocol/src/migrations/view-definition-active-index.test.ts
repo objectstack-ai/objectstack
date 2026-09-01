@@ -563,16 +563,29 @@ describe('sys_view_definition active-row uniqueness (#5839) on a NULL-safe key (
         }
     });
 
-    it('resolveIndexExec prefers raw(), falls back to execute(), else undefined', async () => {
+    /**
+     * The order flipped: this used to assert `raw()` first. `IDataDriver`
+     * declares `execute` non-optionally and has never declared `raw`, so the
+     * declared surface is the one tried first; `raw` stays as the fallback for a
+     * host or third-party driver that defines it. See `./driver-exec.ts`, and
+     * `driver-exec.test.ts` for the four-shape pin. The assertion below is the
+     * half that actually changed — a driver offering BOTH surfaces.
+     */
+    it('resolveIndexExec prefers execute(), falls back to raw(), else undefined', async () => {
         const raw = vi.fn(async () => undefined);
         const execute = vi.fn(async () => undefined);
 
         await resolveIndexExec({ driver: { raw, execute } })!('SELECT 1');
-        expect(raw).toHaveBeenCalledWith('SELECT 1');
-        expect(execute).not.toHaveBeenCalled();
+        expect(execute).toHaveBeenCalledWith('SELECT 1', []);
+        expect(raw).not.toHaveBeenCalled();
 
+        execute.mockClear();
         await resolveIndexExec({ driver: { execute } })!('SELECT 2');
-        expect(execute).toHaveBeenCalledWith('SELECT 2');
+        expect(execute).toHaveBeenCalledWith('SELECT 2', []);
+
+        // The fallback limb still resolves for a driver that has only `raw`.
+        await resolveIndexExec({ driver: { raw } })!('SELECT 3');
+        expect(raw).toHaveBeenCalledWith('SELECT 3', []);
 
         // getDriver() and the drivers Map, the two other shapes the paradigm walks.
         expect(resolveIndexExec({ getDriver: () => ({ raw }) })).toBeTypeOf('function');
