@@ -45,10 +45,10 @@
     }
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.4.0",
     "better-sqlite3": "^13.0.3",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "author": "ObjectStack",
   "repository": {

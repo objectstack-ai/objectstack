@@ -39,8 +39,8 @@
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/driver-turso": "workspace:*",
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.4.0",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }
