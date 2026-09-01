@@ -102,7 +102,7 @@ function recordingLogger() {
     logger: {
       info: (message: string, meta?: any) => { infos.push({ message, meta }); },
       warn: (message: string, meta?: any) => { warns.push({ message, meta }); },
-      error: (_m: string, _meta?: any) => { /* the walled elevation refusal; not this card's subject */ },
+      error: (_m: string, _meta?: any) => { /* the walled "ZERO config-derived platform administrators" backstop — over CONFIGURATION, not elevation; not this card's subject */ },
     },
   };
 }
