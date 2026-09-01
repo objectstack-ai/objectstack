@@ -46,6 +46,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
+// The read options below are DECLARED rather than erased to `any` (#4674 /
+// #4918). None of these queries is deliberately off-contract — they are plain
+// `where` + `context` reads — so the contract type is the right instrument and
+// `as unknown as EngineQueryOptions` (the sanctioned spelling for input a test
+// means to be invalid) would be a false claim here.
+import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ApprovalService } from './approval-service.js';
 import { bindRecordDeleteCancelHook } from './lifecycle-hooks.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
@@ -116,17 +122,17 @@ describe('a deleted record auto-cancels its pending approvals (#13568)', () => {
     engine.find('sys_approval_request', {
       where: { object_name: 'crm_leave_request', record_id: recordId },
       context: SYSTEM,
-    } as any) as Promise<any[]>;
+    } satisfies EngineQueryOptions) as Promise<any[]>;
 
   const actionsFor = (requestId: string) =>
     engine.find('sys_approval_action', {
       where: { request_id: requestId }, context: SYSTEM,
-    } as any) as Promise<any[]>;
+    } satisfies EngineQueryOptions) as Promise<any[]>;
 
   const approverIndexFor = (requestId: string) =>
     engine.find('sys_approval_approver', {
       where: { request_id: requestId }, context: SYSTEM,
-    } as any) as Promise<any[]>;
+    } satisfies EngineQueryOptions) as Promise<any[]>;
 
   const openOn = (recordId: string, runId: string) => svc.openNodeRequest({
     object: 'crm_leave_request', recordId, runId, nodeId: 'manager_review',
@@ -316,8 +322,9 @@ describe('a deleted record auto-cancels its pending approvals (#13568)', () => {
     await expect(
       engine.delete('crm_leave_request', { where: { id: 'LR6' }, context: SYSTEM } as any),
     ).resolves.toBeDefined();
-    expect(await engine.find('crm_leave_request', { where: { id: 'LR6' }, context: SYSTEM } as any))
-      .toEqual([]);
+    expect(await engine.find('crm_leave_request', {
+      where: { id: 'LR6' }, context: SYSTEM,
+    } satisfies EngineQueryOptions)).toEqual([]);
     boom.mockRestore();
   });
 });
@@ -358,7 +365,7 @@ describe('#13568 control — without the linkage the same delete strands the req
 
     const rows = await engine.find('sys_approval_request', {
       where: { object_name: 'crm_leave_request', record_id: 'LR6' }, context: SYSTEM,
-    } as any) as any[];
+    } satisfies EngineQueryOptions) as any[];
     // The card's screenshot, in one assertion: the record is gone and the
     // request is still waiting for a decision about it.
     expect(rows).toHaveLength(1);
