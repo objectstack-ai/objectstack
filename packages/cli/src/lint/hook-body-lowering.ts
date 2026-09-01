@@ -52,8 +52,15 @@
  *                       (the refusal text says "declare a Connector recipe
  *                       instead"). Reporting it is right; failing on it would
  *                       punish the legitimate path. => `warning`.
- *   `unparseable`       An instrument limit, not a verdict about the author.
+ *   `unparseable`       An instrument LIMIT: the extractor found no body it
+ *                       could judge. Not a verdict about the author — reported
+ *                       under its own rule, with prose that names the
+ *                       instrument, never as the author choosing a bundle.
  *                       => `warning`.
+ *   `unknown`           An instrument FAILURE (a non-`HookBodyExtractionError`
+ *                       throw — the extractor itself broke). Same discipline,
+ *                       its own rule; kept distinct from `unparseable` on
+ *                       purpose. => `warning`.
  *
  * An author who deliberately wants a bundled closure for the ACCIDENTAL class
  * is not cornered: two declarative channels already exist and are already
@@ -95,6 +102,10 @@ export interface HookBodyLintIssue {
 export const NOT_LOWERABLE_RULE = 'hook-body/not-lowerable';
 /** The rule name for a refusal whose designed answer is the bundle. */
 export const BUNDLED_FALLBACK_RULE = 'hook-body/bundled-fallback';
+/** The rule name when the extractor found no body it could judge (`unparseable`). */
+export const UNPARSEABLE_BODY_RULE = 'hook-body/unparseable';
+/** The rule name when the extraction instrument itself threw (kind `unknown`). */
+export const EXTRACTION_FAILED_RULE = 'hook-body/extraction-failed';
 
 const DELIBERATE_BUNDLE_REMEDY =
   'If a bundled closure is what you want, say so: give the hook an explicit `body`, ' +
@@ -138,6 +149,34 @@ function judge(fn: AnyFn, originLabel: string, path: string): HookBodyLintIssue 
       };
     }
 
+    if (kind === 'unparseable' || kind === 'unknown') {
+      // An instrument LIMIT (`unparseable`: the extractor found no body it
+      // could judge) or an instrument FAILURE (`unknown`: the extractor itself
+      // threw something that is not a refusal). In both cases the tool is what
+      // fell short — the event says nothing about what the author chose, so it
+      // must not borrow the bundled-fallback prose below ("the body uses
+      // something the sandbox cannot provide"), which asserts a verdict about
+      // the handler. Kept distinct on purpose (#13651): an instrument failure
+      // must not read as a verdict about the author.
+      const [rule, instrument] =
+        kind === 'unparseable'
+          ? ([UNPARSEABLE_BODY_RULE, 'the extractor found no function body it could judge'] as const)
+          : ([EXTRACTION_FAILED_RULE, 'the extraction instrument itself failed'] as const);
+      return {
+        severity: 'warning',
+        rule,
+        message:
+          `${originLabel} could not be analysed: ${instrument}. ${firstLine} ` +
+          `This is a limit of the instrument, not a verdict about the handler — it does NOT mean ` +
+          `a bundled closure was chosen; whether this body could ship as pure metadata is ` +
+          `undetermined. \`os build\` still bundles it via the designed fallback.`,
+        path,
+      };
+    }
+
+    // `forbidden-token` — the only kind left, and the only one whose prose may
+    // assert the author's choice: the sandbox genuinely cannot provide what the
+    // body uses, so the bundle is the designed answer.
     return {
       severity: 'warning',
       rule: BUNDLED_FALLBACK_RULE,
