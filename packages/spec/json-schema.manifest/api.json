@@ -315,6 +315,7 @@
     "api/PresenceStatus",
     "api/PresenceUpdate",
     "api/PresignedUrlResponse",
+    "api/ProvenanceWaiver",
     "api/PublishMetaItemRequest",
     "api/PublishMetaItemResponse",
     "api/PublishPackageDraftsResponse",

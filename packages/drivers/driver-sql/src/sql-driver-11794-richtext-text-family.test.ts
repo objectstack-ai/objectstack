@@ -236,6 +236,17 @@ for (const liveCell of [PG_CELL, MYSQL_CELL]) {
         await driver?.disconnect().catch(() => {});
       });
 
+      // ── Why the 3 it() blocks below carry an explicit 60_000 budget (#13902) ──
+      // Each constructs a FRESH `new SqlDriver(...)` against this cell's live
+      // server inside their own body — so the live connect cycle, and the
+      // schema-sync DDL and catalog read-back that all but the cheapest of these
+      // drive through it, are paid PER TEST rather than once in a beforeAll.
+      // With no third argument vitest applies its own 5000ms default — a number
+      // nobody chose for that work, and one that reddens unrelated PRs when the
+      // runner is merely a bit slow (#13688 measured exactly this shape: a timeout,
+      // no MySQL error in the logs, on a diff that touched no driver). Sized like
+      // this package's siblings — 60_000 is 7 of its 9 explicit budgets — and NOT
+      // an assertion that these tests are normally anywhere near that slow.
       it('accepts a >255-char richtext body, and the column really is TEXT (information_schema)', async () => {
         driver = new SqlDriver(cell.config());
         await driver.execute(`drop table if exists ${T}`).catch(() => {});
@@ -280,7 +291,7 @@ for (const liveCell of [PG_CELL, MYSQL_CELL]) {
         expect(refusal).toBeInstanceOf(Error);
         const said = `${String((refusal as { code?: string })?.code ?? '')} ${String((refusal as Error).message)}`;
         expect(said).toMatch(/ER_DATA_TOO_LONG|22001|too long/i);
-      });
+      }, 60_000);
 
       it('closes the formerly-open half (#11875): an oversized data-URI signature/qrcode is accepted and round-trips', async () => {
         // The #11794 version of this case asserted the COST of leaving
@@ -299,7 +310,7 @@ for (const liveCell of [PG_CELL, MYSQL_CELL]) {
         const [row] = await driver.find(T, { where: { id: 's1' } }, OPTS);
         expect(row.body_sig).toBe(DATA_URI);
         expect(row.body_qr).toBe(DATA_URI);
-      });
+      }, 60_000);
 
       it('keeps #11374 keyed-and-bounded semantics live for the new members (#11875)', async () => {
         // A KEYED bounded signature/qrcode column is varchar(maxLength) — the
@@ -348,7 +359,7 @@ for (const liveCell of [PG_CELL, MYSQL_CELL]) {
         const said = `${String((refusal as { code?: string })?.code ?? '')} ${String((refusal as Error).message)}`;
         expect(said).toMatch(/ER_DATA_TOO_LONG|22001|too long/i);
         await driver.execute(`drop table if exists ${KT}`).catch(() => {});
-      });
+      }, 60_000);
     });
   });
 }

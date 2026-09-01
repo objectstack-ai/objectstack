@@ -286,6 +286,7 @@
     "gen:liveness-counts": "tsx scripts/liveness/build-state-counts.mts",
     "check:empty-state": "tsx scripts/liveness/check-empty-state.mts",
     "check:variant-docs": "tsx scripts/check-variant-docs.mts",
+    "check:error-code-provenance": "tsx scripts/check-error-code-provenance.ts --self-test && tsx scripts/check-error-code-provenance.ts",
     "gen:strictness-ledger": "tsx scripts/build-strictness-ledger-counts.mts",
     "check:strictness-ledger": "tsx scripts/check-strictness-ledger.mts",
     "gen:react-blocks": "tsx scripts/build-react-blocks-contract.ts",

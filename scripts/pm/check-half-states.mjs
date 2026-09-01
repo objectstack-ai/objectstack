@@ -435,9 +435,13 @@
  *       the stated boundary and it is load-bearing here: a 2026-08-22 re-measure
  *       paged past 500 closed `pm:dispatched` carriers repo-wide, so an
  *       unbounded read would bury every other item under one-time historical
- *       residue. Recent residue is a live duty; the deep tail is a backfill
- *       question. Report-only like the rest — the remedy is a label write a
- *       seat performs, never one this script performs.
+ *       residue.
+ *       ⚖️ NO LONGER A ROW FAMILY (#14072): since 批 #13 this item is COUNTED
+ *       into the H39 census line and files nothing. It keeps its predicate,
+ *       its window and its floor — they are what compute the count — and it
+ *       has no band in `HALF_STATE_FAMILY_BAND`, the same as the other
+ *       reserved-section legs (H17, H39, H40). See its own section header for
+ *       the ruling and for the counter-argument the ruling overruled.
  *   H23 a SQUASH COMMIT MESSAGE on the default branch carrying `Part of #N`
  *       and a closing keyword bound to that same `#N` — H7's contradiction on
  *       the SECOND surface GitHub closes cards from, and the only item here
@@ -4001,6 +4005,58 @@ export function h21NegatedClosingKeyword(pr) {
 // defect worth a named rule. If that is a defect at 09:00 while the card is
 // open and not a defect at 09:01 once it closes, the rule is about the board's
 // tidiness rather than about the duty, and H8's text says otherwise.
+//
+// ## ⚖️ RULED — that counter-argument was overruled, and this is its record
+//
+// The paragraph above is kept WORD FOR WORD, and it is no longer this row's
+// warrant. Maintainer ruling, 2026-08-31, 第 6 场总监席决裁批 #13, verbatim and
+// untranslated: 「13605 已关卡 为什么要清理。普查时不应该只看open的卡片吗，其他
+// 同意」. Recorded operative reason, same thread: 已关卡上的 `pm:*` 残留由读者侧
+// 消化 — every census, patrol, candidate and mutex query forces `state:open`,
+// and 「标签即状态机」的语义只须对 open 集合成立,closed 卡是档案不是状态.
+//
+// ⇒ The answer the counter-argument asked for, stated plainly rather than left
+// for a reader to infer: YES — the ruling's effect is precisely that this is
+// about the board's TIDINESS rather than about the duty, AND that tidiness is
+// NOT OWED. The argument was right that the two cases differ only in tidiness;
+// it assumed tidiness was the thing worth a row, and the ruling says it is not.
+// That is a defeat on the merits, not a change of subject, so the argument
+// stays here with its defeat attached instead of being deleted — the next
+// author is owed the whole exchange, not the winning half.
+//
+// ## Why the 3-day window could not survive as a row boundary (#14072)
+//
+// The ruling's reason is 「readers scope `pm:*` queries to open cards」. That
+// reason holds for a card closed two HOURS ago exactly as it holds for one
+// closed on 2026-08-02: neither is visible to a query that filters `is:open`.
+// So under the ruling's own reason the 3-day window is not a principled line
+// between "a defect" and "an archive" — it is one archive cut into a part that
+// got ninety-four rows and a part that got a number. One rendered body cannot
+// say both, and it was saying both: the H39 census clause told the reader no
+// cleanup is owed while this row filed 94 of the sweep's 247 findings (38%)
+// against members of that same population. The fold removes the contradiction
+// in the direction the ruling points.
+//
+// ⛔ NOT a claim that the predicate was wrong. Every one of those 94 rows was
+// correctly computed, and the classifier below is unchanged in what it selects:
+// the closed gate, the dated floor and `PM_RESIDUE_LABELS` all still decide
+// exactly the same cards. What changed is the DISPOSITION of a positive
+// verdict — it becomes a tick in the census count instead of a finding row —
+// and, with it, the imperative sentence this predicate used to return. That
+// sentence prescribed "Strip the `pm:*` state label(s)", which is the write the
+// ruling refused by name (⛔ 不为存量补写), so it could not be left in the file
+// as prose nobody renders.
+//
+// ## What SURVIVES the fold, and why the window is still read
+//
+// Close-time hygiene (strip `pm:*` in the same stroke as the close) stays the
+// convention — ruling item ③ kept it, at zero incremental cost. The window and
+// the floor stay too, because they are now what separates the FRESH edge of the
+// residue from the deep tail: the census counts a whole population and cannot
+// say how much of it is being produced right now, and that rate is the only
+// part of this reading a seat can still act on by changing its own habit. So
+// the closed pass is still read (it also feeds H37 and H40), the count is
+// rendered inside the census section, and no row is filed for it.
 // ---------------------------------------------------------------------------
 
 /**
@@ -4048,12 +4104,21 @@ export const PM_RESIDUE_LABELS = [
 ];
 
 /**
- * H22 — null when the closed card is clean, else the finding sentence.
+ * H22 — null when the closed card is clean, else the residue labels it carries.
+ *
+ * ⚖️ A CLASSIFIER, not a row builder (#14072). It used to return the finding
+ * sentence; since 批 #13 the positive verdict is COUNTED into the H39 census
+ * line rather than filed, so what a caller needs from it is which labels were
+ * found, not a sentence prescribing a strip the ruling refused. ⛔ The
+ * SELECTION is byte-for-byte the decision it always made — closed gate, dated
+ * floor, `PM_RESIDUE_LABELS` — because that selection was never wrong; only the
+ * disposition of a hit changed. Returning the labels rather than a boolean is
+ * what lets the census line state the per-label breakdown a bare count hides.
  *
  * Gated on the card being CLOSED: handed an open issue it returns null, so the
- * predicate cannot double-report the population every other item already reads.
+ * predicate cannot double-count the population every other item already reads.
  * That gate is the predicate's own, not the caller's, because it is the one
- * thing separating this row from a restatement of H3.
+ * thing separating this reading from a restatement of H3.
  *
  * `floor` is the optional dated closure floor (see `resolveClosureFloor`): a
  * `Date` before which a closed card is out of scope, or null for "judge every
@@ -4069,26 +4134,58 @@ export const PM_RESIDUE_LABELS = [
  *
  * @param {any} issue
  * @param {Date | null} [floor]
+ * @returns {string[] | null} the residue labels, in `PM_RESIDUE_LABELS` order
  */
 export function h22ClosedCardPmResidue(issue, floor = null) {
   if (issue?.state !== 'closed') return null;
   if (floor) {
     const closedAt = Date.parse(issue.closed_at ?? '');
     // Strictly BEFORE the floor is out of scope; a card closed ON the cutover
-    // date is the first day the convention applies and is judged.
+    // date is the first day the convention applies and is counted.
     if (!Number.isNaN(closedAt) && closedAt < floor.getTime()) return null;
   }
   const residue = labelNames(issue ?? {}).filter((l) => PM_RESIDUE_LABELS.includes(l));
-  if (residue.length === 0) return null;
-  const list = residue.map((l) => `\`${l}\``).join(', ');
-  const reason = issue.state_reason ? ` (closed \`${issue.state_reason}\`)` : '';
-  return (
-    `card is CLOSED${reason} but still carries ${list} — a state label is a claim that work ` +
-    `is in flight, and the card left the board without the paired write that clears it. ` +
-    `H8 would have flagged this while the card was open; it closed first, which is the ` +
-    `normal path rather than the rare one. Strip the \`pm:*\` state label(s); no other ` +
-    `write is owed, the card is already closed.`
-  );
+  return residue.length === 0 ? null : residue;
+}
+
+/**
+ * H22's FOLD (#14072) — the closed-card residue in the window, as a COUNT.
+ *
+ * The whole of what H22 emits since 批 #13: how many cards the closed pass read,
+ * how many of them carry residue, and the per-label breakdown. It files nothing
+ * and it writes nothing; `renderClosedResidueCensus` renders it as one clause
+ * inside the census section, which is the reserved block a body trim cannot
+ * reach.
+ *
+ * ⚠️ `read` is carried beside `cards` on purpose, and it is the load-bearing
+ * half: a bare `cards: 0` cannot be told apart from a pass that read nothing at
+ * all, and publishing an unread zero as a clean population is #4690 — the
+ * defect this file's own census leg exists because of. A reader who sees
+ * `0 of 0` knows the instrument said nothing; `0 of 396` is a real reading.
+ *
+ * @param {any[]} closedIssues — the closed cards the sweep already holds. No
+ *   request of its own: this is the same population `seenClosed` was filled
+ *   from, so the fold costs the sweep nothing it was not already paying.
+ * @param {Date | null} [floor]
+ * @returns {{ read: number, cards: number, labels: Array<[string, number]> }}
+ */
+export function h22FreshResidueTally(closedIssues, floor = null) {
+  const rows = Array.isArray(closedIssues) ? closedIssues : [];
+  const byLabel = new Map();
+  let cards = 0;
+  for (const issue of rows) {
+    const residue = h22ClosedCardPmResidue(issue, floor);
+    if (!residue) continue;
+    cards++;
+    for (const label of residue) byLabel.set(label, (byLabel.get(label) ?? 0) + 1);
+  }
+  return {
+    read: rows.length,
+    cards,
+    // Biggest first, ties alphabetical — the census rows' own ordering, so the
+    // two halves of one line cannot disagree about how a breakdown is sorted.
+    labels: [...byLabel.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -4308,8 +4405,10 @@ export function h23CommitMessageContradiction(commit) {
  * H24 — null when clean, else the finding sentence.
  *
  * Gated on the card being OPEN (like H22's gate, in mirror image): a closed
- * card carrying `pm:queue` is H22's residue row, and reporting it here too
- * would double-count one card under two items that prescribe different writes.
+ * card carrying `pm:queue` is H22's residue, counted into the census clause
+ * since #14072, and reporting it here too would file a row about a card the
+ * ruling put beyond this report's reach — the gate is now load-bearing in a
+ * second way, not merely anti-double-counting.
  * `state` is absent from some fixtures and every live open listing sets it, so
  * only an explicit `closed` declines — an unknown state is judged, never used
  * as a silent exemption.
@@ -6957,16 +7056,22 @@ export function h38SeatPostStale(seat, seatAt, claim) {
 // H39 — the CLOSED `pm:*` RESIDUE CENSUS (#13526). An inventory, not a
 // predicate: H17's register, and deliberately not H22's.
 //
-// ## Why a census when H22 already reports closed residue
+// ## Why a census, and why H22's window now rides inside it (#14072)
 //
-// H22 judges the closed cards inside a bounded, UPDATE-ordered window (four
-// pages ≈ 1.7 days of update-recency) and reports them one row each. That is
-// the right shape for a patrol — recent residue, while the paired write is
-// still a live duty someone remembers — and it is the wrong shape for the
-// question #13526 asks, which is about the SIZE and AGE of the whole
-// population. The filing seat measured ≥100 closed carriers per lane per label
-// across at least three lanes, back to 2026-08-05, and could not say more,
-// because a first page is not a count.
+// H22 judges the closed cards inside a bounded, CLOSURE-horizon window and used
+// to report them one row each. That was the wrong shape for the question
+// #13526 asks, which is about the SIZE and AGE of the whole population: the
+// filing seat measured ≥100 closed carriers per lane per label across at least
+// three lanes, back to 2026-08-05, and could not say more, because a first page
+// is not a count.
+//
+// Since 批 #13 it is also the wrong shape for H22 — a row per member of a
+// population the same ruling calls archive is one report contradicting itself,
+// which is exactly what a live sweep showed (94 of 247 rows, 38%, filed against
+// members of the population the clause below calls owed-no-cleanup). So H22's
+// verdict now arrives HERE, as one clause of this line: the census counts the
+// whole population, H22's window counts its fresh edge, and the two are one
+// sentence rather than two dispositions of one fact.
 //
 // So this leg counts rather than lists: fully paginated, per lane, per label.
 //
@@ -7009,8 +7114,15 @@ export function h38SeatPostStale(seat, seatAt, claim) {
 // finding row — a patrol that keeps shouting a number after the number has
 // been ruled harmless trains its readers to stop reading the whole report.
 // Close-time hygiene (strip `pm:*` in the same stroke as the close) stays the
-// convention, and H22 — bounded to a 3-day closure window, where the paired
-// write is still a live duty — stays the leg that observes it.
+// convention — ruling item ③ kept it, at zero incremental cost. What does NOT
+// survive is a row per carrier for observing it: H22 was bounded to a 3-day
+// closure window, and under the ruling's own reason (readers scope `pm:*`
+// queries to open cards) that window is not a principled line — the reason
+// reaches a two-hour-old residue exactly as it reaches an August one. So H22 is
+// FOLDED into this line as a count (#14072): same predicate, same window, same
+// floor, no rows, no imperative, no label write. The fresh-edge figure is what
+// a seat can still act on by changing its own habit, and it is stated as a
+// number beside the population it belongs to.
 //
 // ⛔ NO relabelling remains true and is now doubly settled: this file writes no
 // label anywhere, and the write it might have been tempted into has been
@@ -7130,17 +7242,49 @@ export function censusIsCountable(census) {
  * it did not license quoting an unread zero. Both are now one qualifier on the
  * same line instead of two blocks, and `censusIsCountable` stays the predicate
  * a caller consults before repeating any figure.
+ *
+ * ## ⚖️ `fresh` — H22's fold, in the same sentence (#14072)
+ *
+ * The card this fold answers was not about budget: it was about ONE RENDERED
+ * BODY SAYING BOTH THINGS. This clause told a reader the residue is archive and
+ * owed no cleanup while H22 filed a row per member of that same population —
+ * 94 of a 247-row sweep. Putting H22's verdict inside this sentence is what
+ * makes the report say one thing: the census counts the population, the fold
+ * counts its fresh edge, the ruling sentence explains why neither is filed.
+ *
+ * ⚠️ The fold renders even when the census does not. They are two passes, and
+ * dropping a reading that WAS taken because a different leg failed is #4690 in
+ * the section that exists to refuse it. ⛔ Still one line, still informational,
+ * still no glyph and no imperative — the fold inherits every constraint above
+ * rather than negotiating its own.
  */
-export function renderClosedResidueCensus(census, { markdown = false } = {}) {
-  if (!census) return [];
+export function renderClosedResidueCensus(census, { markdown = false, fresh = null } = {}) {
   const line = (text) => ['', markdown ? `_${text}_` : `  ${text}`];
   const LEAD = 'Closed-card `pm:*` residue (H39 census, informational)';
+  const fold = renderFreshResidueClause(fresh);
+  // The ruling, and — since #14072 — the reason IN the ruling that decides
+  // H22's disposition too. One story: the reader is told the population is
+  // archive, and told in the same breath why its fresh edge is archive as well,
+  // so the two clauses can never be read as disagreeing.
+  const RULED =
+    ' Archive, not state — no cleanup is owed and none is planned (ruled 2026-08-31, 批 #13); ' +
+    'readers scope `pm:*` queries to open cards, and that reason reaches a residue two hours ' +
+    'old exactly as it reaches one from August, which is why the window above is counted here ' +
+    'rather than filed as rows (#14072).';
   // Ruled harmless, so a census that could not run is a missing reading rather
   // than an alarm — but it must still never read as a clean population (#4690).
-  if (census.failed) {
-    return line(`${LEAD}: not read this run — ${census.failed}. No figure, and none is owed.`);
+  if (census?.failed) {
+    return line(
+      `${LEAD}: not read this run — ${census.failed}. No figure, and none is owed.${fold}`,
+    );
   }
-  if (!Array.isArray(census.rows) || census.rows.length === 0) return [];
+  // ⚠️ The fold is rendered even when the CENSUS has nothing: the two readings
+  // come from two different passes, and dropping H22's count because the census
+  // leg was empty would lose a reading that WAS taken — the #4690 shape, in the
+  // one place this section exists to refuse it.
+  if (!census || !Array.isArray(census.rows) || census.rows.length === 0) {
+    return fold ? line(`${LEAD}:${fold}${RULED}`) : [];
+  }
 
   const figures = census.rows
     .map((row) => `${row.label} ${row.truncated ? `≥${row.total}` : row.total}`)
@@ -7162,9 +7306,36 @@ export function renderClosedResidueCensus(census, { markdown = false } = {}) {
       ? ` (lower bounds — a label hit the ${CENSUS_PAGE_CEILING}-page cap; not counts)`
       : ' (not read — the control query returned no rows; not counts)';
 
-  return line(
-    `${LEAD}: ${figures}${since}; ${pairs}${caveat}. Archive, not state — no cleanup is owed ` +
-      `and none is planned (ruled 2026-08-31, 批 #13); readers scope \`pm:*\` queries to open cards.`,
+  return line(`${LEAD}: ${figures}${since}; ${pairs}${caveat}.${fold}${RULED}`);
+}
+
+/**
+ * H22's fold, as one clause of the census line (#14072) — `''` when the closed
+ * pass handed nothing in, so a caller that has no reading renders no claim.
+ *
+ * ⚠️ `read` is stated on every shape, including the clean one. "0 carriers" and
+ * "nothing was read" are different facts and this is the only place a report
+ * reader can tell them apart; a clean-looking clause over an unread pass is
+ * #4690 wearing the census's own uniform.
+ *
+ * ⛔ No glyph, no heading, no imperative — this clause lives inside a line the
+ * ruling made informational, and the self-test pins the absence of an alarm and
+ * of the word the old finding sentence used to prescribe.
+ */
+export function renderFreshResidueClause(fresh) {
+  if (!fresh || typeof fresh !== 'object') return '';
+  const read = Number(fresh.read ?? 0);
+  const cards = Number(fresh.cards ?? 0);
+  const window = `H22's ${CLOSED_ISSUE_WINDOW_DAYS}-day closure window`;
+  if (cards === 0) {
+    return ` ${window}, read separately, found no carrier among the ${read} closed card(s) it read.`;
+  }
+  const breakdown = (Array.isArray(fresh.labels) ? fresh.labels : [])
+    .map(([label, count]) => `${label} ${count}`)
+    .join(', ');
+  return (
+    ` ${window}, read separately, holds ${cards} of ${read} closed card(s) still carrying ` +
+    `residue${breakdown ? ` (${breakdown})` : ''}.`
   );
 }
 
@@ -7884,9 +8055,15 @@ export function summaryLine(counts, findingCount) {
           'the merge rate has outgrown the ceiling and it needs raising'
         : ' (horizon reached: a delivery inside the window was seen, not merely the first N rows)'
     }. ` +
-    `H22 read ${counts.closed ?? 0} recently-closed issue(s) for \`pm:*\` state residue (older closed ` +
-    `carriers are outside the window by design` +
-    `${counts.closedFloor ? `, and only cards closed on/after ${counts.closedFloor} are judged — ` +
+    // H22's disposition is stated in the clause that reports its read (#14072).
+    // A reader who sees a pass costing 8 pages and no rows anywhere must be able
+    // to tell "counted into the census line" from "found nothing" without
+    // leaving this sentence — that ambiguity is the whole reason the clause
+    // names the fold rather than just the page count.
+    `H22 read ${counts.closed ?? 0} recently-closed issue(s) for \`pm:*\` state residue, COUNTED into ` +
+    `the census line above and filed as no row at all (ruled 2026-08-31, 批 #13; folded #14072) ` +
+    `(older closed carriers are outside the window by design` +
+    `${counts.closedFloor ? `, and only cards closed on/after ${counts.closedFloor} count — ` +
       'earlier closures predate the strip-on-close convention and are NOT a reading about them' : ''}). ` +
     // H22's window disclosure (#13606). The divisor is named here as well as in
     // the docblock, because the summary is the only half a report reader sees
@@ -8237,7 +8414,12 @@ export function renderPlain(findings, counts, options = {}) {
   );
   lines.push(...renderDanglingReferences(options.references, { markdown: false }));
   lines.push(...renderTriggerIndex(options.triggerIndex, { markdown: false }));
-  lines.push(...renderClosedResidueCensus(options.census, { markdown: false }));
+  lines.push(
+    ...renderClosedResidueCensus(options.census, {
+      markdown: false,
+      fresh: options.freshResidue,
+    }),
+  );
   lines.push(...renderRatePremise(options.ratePremise, { markdown: false }));
   lines.push(summaryLine(counts, findings.length));
   return lines.join('\n');
@@ -8353,12 +8535,22 @@ export const UNREGISTERED_FAMILY_BAND = 'unregistered';
 /**
  * Every row family this file emits, and the band that governs its survival.
  *
- * ⛔ NOT every `H` code: `H17` (the trigger-file index), `H39` (the closed-
- * residue census) and `H40` (dangling references) render as reserved SECTIONS
- * and never as finding rows, so the trim cannot reach them and they take no
- * band. `familyRegistryCoverage` proves this list equals the codes the sweep
- * actually pushes, read off this file's own source — a new family added
- * without a band fails the self-test rather than inheriting one silently.
+ * ⛔ NOT every `H` code: `H17` (the trigger-file index), `H22` (closed-card
+ * `pm:*` residue), `H39` (the closed-residue census) and `H40` (dangling
+ * references) render as reserved SECTIONS and never as finding rows, so the
+ * trim cannot reach them and they take no band. `familyRegistryCoverage` proves
+ * this list equals the codes the sweep actually pushes, read off this file's
+ * own source — a new family added without a band fails the self-test rather
+ * than inheriting one silently, and a band left behind for a family that no
+ * longer pushes fails it from the other side.
+ *
+ * ⚖️ H22 was an `inventory` band member until #14072. It left the registry in
+ * the same edit that stopped it filing rows, because the two facts are one
+ * fact: a band is the trim's answer to "how long does this family's ROW
+ * survive", and a family that emits no row has no such question. Its count now
+ * rides the H39 census clause, inside the reserved block the trim cannot reach
+ * — which is a stronger guarantee than the `inventory` band it gave up, where
+ * it was first in line to be trimmed.
  *
  * The three anchors for the band calls, each traceable:
  *
@@ -8376,8 +8568,11 @@ export const UNREGISTERED_FAMILY_BAND = 'unregistered';
  *   state     the board contradicts itself on a live card, and the repair is
  *             on the board: label pairs, claim shapes, aged states.
  *   inventory triage's own examples of the class gate rows outrank — the
- *             `pm:blocking` cache (H14/H15), closed-card residue (H22), the
- *             seat-sticker pair (H5/H6), the important-parked list (H11).
+ *             `pm:blocking` cache (H14/H15), the seat-sticker pair (H5/H6),
+ *             the important-parked list (H11). ⚖️ Closed-card residue (H22)
+ *             was triage's fourth example and is no longer here at all: since
+ *             #14072 it files no row, so it is a reserved-section reading
+ *             rather than the lowest-ranked row family.
  */
 export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H31: 'gate',
@@ -8419,7 +8614,6 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H11: 'inventory',
   H14: 'inventory',
   H15: 'inventory',
-  H22: 'inventory',
 });
 
 const FAMILY_BAND_RANK = new Map(HALF_STATE_FAMILY_BANDS.map((b) => [b.name, b.rank]));
@@ -8460,10 +8654,12 @@ export const FAMILY_LEDGER_CALLOUT_CAP = 12;
  *   table rows                    ≤ FAMILY_LEDGER_ROW_CAP (64) × ~48 B ≈ 3.1 KB
  *   trim callout                  ≤ FAMILY_LEDGER_CALLOUT_CAP (12) × ~26 B + prose
  *   unregistered callout          ≤ FAMILY_LEDGER_CALLOUT_CAP (12) × ~8 B + prose
- *   computed-0 line               ≤ registry size (37) × ~8 B + prose
+ *   computed-0 line               ≤ registry size (36) × ~8 B + prose
  *
- * Measured on the constructed worst case: 2,285 B with every one of the 37
- * registered families carrying 999 rows, 3,754 B with enough unregistered
+ * Measured on the constructed worst case: 2,285 B with every one of the
+ * registered families carrying 999 rows (37 of them when measured; 36 since
+ * #14072 removed H22, so the measurement is an upper bound on today's set),
+ * 3,754 B with enough unregistered
  * codes on top to reach `FAMILY_LEDGER_ROW_CAP`. 6,000 is the declared ceiling
  * above both, and it is under an EIGHTH of `MARKDOWN_BODY_BUDGET` (60,000) —
  * and reserved out of that budget, so the 5,536-byte headroom between the
@@ -8772,7 +8968,7 @@ export function renderMarkdown(findings, counts, options = {}) {
   const indexBlock = [
     ...renderDanglingReferences(options.references, { markdown: true }),
     ...renderTriggerIndex(options.triggerIndex, { markdown: true }),
-    ...renderClosedResidueCensus(options.census, { markdown: true }),
+    ...renderClosedResidueCensus(options.census, { markdown: true, fresh: options.freshResidue }),
     ...renderRatePremise(options.ratePremise, { markdown: true }),
   ];
   const indexText = indexBlock.length > 0 ? `\n\n${indexBlock.join('\n')}` : '';
@@ -9810,6 +10006,11 @@ async function sweep(options = {}) {
   } catch (err) {
     census = { failed: err?.status ? `HTTP ${err.status}` : (err?.message ?? 'unreadable') };
   }
+  // H22's fold (#14072) — computed from the closed cards the sweep ALREADY
+  // holds, so the count costs no request. It is gathered here rather than
+  // inside `sweepInto` for the same reason the census is: it is a reading about
+  // the sweep's population, not another pass over the board.
+  const freshResidue = h22FreshResidueTally([...seenClosed.values()], CLOSED_FLOOR.floor);
   // The rate premise, checked against what this very sweep observed (#13499).
   const ratePremise = classifyRatePremise({ observed: stats.mergedRateObserved });
   console.log(
@@ -9818,12 +10019,14 @@ async function sweep(options = {}) {
           provenance: options.provenance,
           triggerIndex,
           census,
+          freshResidue,
           ratePremise,
           references: references.report,
         })
       : renderPlain(findings, counts, {
           triggerIndex,
           census,
+          freshResidue,
           ratePremise,
           references: references.report,
         }),
@@ -10306,11 +10509,17 @@ async function listRecentlyMergedPullRequests(stats = {}, nowMs = Date.now()) {
  * 2026-08-22 re-measure paged past 500 closed `pm:dispatched` carriers alone
  * and was still going, because the label has been applied since the protocol
  * began and dropped only sporadically). Reporting all of them would drown every
- * other item in one-time historical residue. So this window deliberately
- * reports the RECENT residue — the population where the paired write is still
- * a live duty someone remembers — and the deep tail is a backfill question,
- * not a patrol question. `state=closed` is the ONLY closed-issue read in this
- * file; every other collector stays open-only by construction.
+ * other item in one-time historical residue. So this window deliberately reads
+ * the RECENT residue and leaves the deep tail to the H39 census, which counts
+ * rather than lists. `state=closed` is the ONLY closed-issue read in this file;
+ * every other collector stays open-only by construction.
+ *
+ * ⚖️ Since #14072 the window bounds a COUNT rather than a row set: it is what
+ * separates the residue being produced right now from the whole archive the
+ * census totals, and that separation is the only part of this reading a seat
+ * can act on by changing its own habit. The window is therefore still worth
+ * paying for, and it is no longer the thing that decides whether a card gets
+ * ninety-four siblings in the findings list.
  *
  * ## The boundary, re-derived — and the surprise in it (#11118)
  *
@@ -10386,6 +10595,11 @@ async function listRecentlyMergedPullRequests(stats = {}, nowMs = Date.now()) {
  *             that install shipped with this reader switched OFF entirely. A
  *             horizon that turns this row into the report is not a wider window,
  *             it is a disabled patrol.
+ *             ⚖️ Since #14072 the horizon can no longer drown the report — the
+ *             window feeds a COUNT — so the ceiling now protects QUOTA rather
+ *             than the body budget. ⛔ Not a licence to widen it: the pages are
+ *             still paid for, and a number computed over a horizon nobody chose
+ *             is a number nobody can interpret.
  *
  * 3 days is the largest horizon that stays in the same order of magnitude as
  * what the row already produces (96 rows against today's 77, +25%) while
@@ -10476,21 +10690,26 @@ export function issueClosedWithinWindow(issue, horizonMs) {
  * The floor is the third option both readings omit. `pm:*` on a card closed
  * before the convention was written is inert history: nothing queries it as a
  * claim of in-flight-ness, because the loop reads state on OPEN cards only
- * (`is:open` is in every one of its inventory queries). Judging only cards
- * closed on/after a cutover date therefore buys the row's whole value — the
- * residue produced from now on, while the paired write is still a live duty
- * someone remembers — at zero backfill and zero historical noise. ⛔ The
- * alternative this file must never grow is a bulk label rewrite of closed
- * cards: 815 mutating writes to make a report quieter is machinery serving the
- * instrument, and no code path here writes a label at all.
+ * (`is:open` is in every one of its inventory queries). Counting only cards
+ * closed on/after a cutover date therefore buys this reading's whole value —
+ * the residue produced from now on — at zero backfill and zero historical
+ * noise. ⛔ The alternative this file must never grow is a bulk label rewrite
+ * of closed cards: 815 mutating writes to make a report quieter is machinery
+ * serving the instrument, and no code path here writes a label at all. 批 #13
+ * refused exactly that write on this board, by name (⛔ 不为存量补写).
+ *
+ * ⚖️ #14072 makes the floor cheaper to get wrong in one direction and no
+ * cheaper in the other: an over-wide floor now inflates a NUMBER instead of
+ * flooding the report with rows, but an over-narrow one still silently shrinks
+ * a reading nobody can see is short. It is still refused when malformed.
  *
  * ## Default: unset, which is exactly today's behaviour
  *
- * An install that wants every card in the window judged sets nothing, and this
+ * An install that wants every card in the window counted sets nothing, and this
  * resolver returns a null floor that the predicate ignores. That keeps this
- * repo's own patrol byte-identical across this change — it measured 26% and
- * treats recent closed residue as a live duty — and makes the floor a
- * per-install adaptation rather than a policy shipped to everyone.
+ * repo's own patrol byte-identical across the change that introduced the floor
+ * — it measured 26% — and makes the floor a per-install adaptation rather than
+ * a policy shipped to everyone.
  *
  * ## Malformed is REFUSED, never defaulted
  *
@@ -11165,10 +11384,16 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
   // collection for the same reason H13's unscoped listing is: the open-only
   // default of every other collector stays exactly as it was, and the summary
   // line can say what this pass covered on its own terms.
+  //
+  // ⚖️ ⛔ NO `findings.push` HERE, by ruling (#14072). Since 批 #13 the verdict
+  // is COUNTED into the census section instead — `h22FreshResidueTally` over
+  // this same population, rendered by `renderClosedResidueCensus`. The read
+  // itself stays: it feeds H37's fold drift and H40's corpus, and it is what
+  // the fold counts. ⚠️ Re-adding a push here would also fail the self-test
+  // rather than pass silently — `familyRegistryCoverage` scans this file's
+  // source for pushes and H22 no longer carries a band to justify one.
   for (const issue of await listRecentlyClosedIssues(stats)) {
     seenClosed.set(issue.number, issue);
-    const residue = h22ClosedCardPmResidue(issue, CLOSED_FLOOR.floor);
-    if (residue) findings.push([issue, 'H22', residue]);
   }
   stats.closedFloor = CLOSED_FLOOR.raw;
 
@@ -11764,7 +11989,8 @@ function selfTest() {
   const h16row = (...args) => String(h16StuckMergeConflict(...args) ?? '');
   const h18row = (...args) => String(h18RetriageAged(...args) ?? '');
   const h19row = (...args) => String(h19BlockOutlivedBlocker(...args) ?? '');
-  const h22row = (...args) => String(h22ClosedCardPmResidue(...args) ?? '');
+  // ⚖️ #14072: H22 returns LABELS, not a sentence, so its helper joins them.
+  const h22labels = (...args) => (h22ClosedCardPmResidue(...args) ?? []).join(',');
   const h24row = (...args) => String(h24QueuedWithAssignee(...args) ?? '');
   const h25row = (...args) => String(h25AwaitingMaintainerExclusivity(...args) ?? '');
   const h26row = (...args) => String(h26BlockOnIndefiniteTarget(...args) ?? '');
@@ -12456,22 +12682,23 @@ function selfTest() {
     state_reason,
   });
 
-  t('H22: closed + pm:dispatched -> finding', typeof h22ClosedCardPmResidue(closedCard(['pm:dispatched'])), 'string');
-  t('H22: …and names the residue label', h22row(closedCard(['pm:dispatched'])).includes('`pm:dispatched`'), true);
-  t('H22: …and names the close reason', h22row(closedCard(['pm:dispatched'])).includes('closed `completed`'), true);
-  t(
-    'H22: …and prescribes only the label strip, no other write',
-    h22row(closedCard(['pm:dispatched'])).includes('already closed'),
-    true,
-  );
-  t('H22: a not_planned close is residue too', typeof h22ClosedCardPmResidue(closedCard(['pm:queue'], 'not_planned')), 'string');
-  t('H22: a missing state_reason still renders a sentence', typeof h22ClosedCardPmResidue({ ...closedCard(['pm:queue']), state_reason: null }), 'string');
-  t(
-    'H22: …and never prints the string undefined',
-    h22row({ ...closedCard(['pm:queue']), state_reason: null }).includes('undefined'),
-    false,
-  );
-  t('H22: several residue labels are all named', h22row(closedCard(['pm:blocked', 'pm:blocking'])).includes('`pm:blocking`'), true);
+  // ⚖️ #14072 — the classifier, not a row builder. The SELECTION cases below
+  // are the ones that were here before the fold, re-expressed against the
+  // labels instead of against the sentence: same fixtures, same verdicts, so a
+  // regression in what H22 selects still fails here even though nothing it
+  // selects is filed any more.
+  t('H22: closed + pm:dispatched -> residue', h22labels(closedCard(['pm:dispatched'])), 'pm:dispatched');
+  t('H22: …returned as a label array, never a sentence', Array.isArray(h22ClosedCardPmResidue(closedCard(['pm:dispatched']))), true);
+  t('H22: a not_planned close is residue too', h22labels(closedCard(['pm:queue'], 'not_planned')), 'pm:queue');
+  t('H22: a missing state_reason changes nothing it selects', h22labels({ ...closedCard(['pm:queue']), state_reason: null }), 'pm:queue');
+  t('H22: …and can no longer print the string undefined, having no prose to print it in', h22labels({ ...closedCard(['pm:queue']), state_reason: null }).includes('undefined'), false);
+  t('H22: several residue labels are all returned', h22labels(closedCard(['pm:blocked', 'pm:blocking'])), 'pm:blocked,pm:blocking');
+  // ⛔ The strip imperative is GONE, and this is the pin that keeps a
+  // well-meaning restoration from bringing it back: 批 #13 refused that write by
+  // name (⛔ 不为存量补写), so the predicate must not be able to prescribe it.
+  t('H22 fold: the classifier carries no prose at all', typeof h22ClosedCardPmResidue(closedCard(['pm:dispatched'])), 'object');
+  t('H22 fold: …so no strip imperative can survive inside it', /Strip/u.test(JSON.stringify(h22ClosedCardPmResidue(closedCard(['pm:dispatched'])))), false);
+  t('H22 fold: …nor any in-flight-ness claim it used to argue from', /in flight/u.test(JSON.stringify(h22ClosedCardPmResidue(closedCard(['pm:dispatched'])))), false);
 
   // The gate that keeps this from restating H3: an OPEN card is never this
   // row's, whatever it carries — every other item here already reads it.
@@ -12487,8 +12714,8 @@ function selfTest() {
   t('H22: `pm:epic` likewise', h22ClosedCardPmResidue(closedCard(['pm:epic'])), null);
   t('H22: `pm:retriage` is deliberately out of the measured set', h22ClosedCardPmResidue(closedCard(['pm:retriage'])), null);
   // …but a seat card ALSO carrying a state label is still residue.
-  t('H22: `pm:seat` + a state label is residue for the state label', h22row(closedCard(['pm:seat', 'pm:dispatched'])).includes('`pm:dispatched`'), true);
-  t('H22: …and does not name the identity sticker', h22row(closedCard(['pm:seat', 'pm:dispatched'])).includes('`pm:seat`'), false);
+  t('H22: `pm:seat` + a state label is residue for the state label', h22labels(closedCard(['pm:seat', 'pm:dispatched'])), 'pm:dispatched');
+  t('H22: …and the identity sticker is not among the labels returned', h22labels(closedCard(['pm:seat', 'pm:dispatched'])).includes('pm:seat'), false);
 
   // The census's five plus the state ruled in on 2026-08-23, each pinned — the
   // set is the item's scope, so a silent edit to it should break a test rather
@@ -12505,7 +12732,7 @@ function selfTest() {
   t('H22: …and this one does not', PM_RESIDUE_LABELS.includes('finding'), false);
   t('H22: …while `pm:blocking` is residue here and absent from H13\'s', PM_RESIDUE_LABELS.includes('pm:blocking') && !PM_STATE_LABELS.includes('pm:blocking'), true);
   for (const label of PM_RESIDUE_LABELS) {
-    t(`H22: \`${label}\` on a closed card is residue`, typeof h22ClosedCardPmResidue(closedCard([label])), 'string');
+    t(`H22: \`${label}\` on a closed card is residue`, h22labels(closedCard([label])), label);
   }
 
   // -- H22's DATED CLOSURE FLOOR (objectui#5985) ------------------------------
@@ -12523,12 +12750,11 @@ function selfTest() {
   // miniature: it carries real residue and is deliberately NOT a finding.
   t('H22 floor: a card closed BEFORE the floor is out of scope', h22ClosedCardPmResidue(closedOn(['pm:dispatched'], '2026-08-01T09:00:00Z'), FLOOR), null);
   t('H22 floor: …however much residue it carries', h22ClosedCardPmResidue(closedOn(['pm:dispatched', 'pm:queue', 'pm:blocked'], '2026-01-01T00:00:00Z'), FLOOR), null);
-  t('H22 floor: a card closed AFTER the floor is judged', typeof h22ClosedCardPmResidue(closedOn(['pm:dispatched'], '2026-08-29T09:00:00Z'), FLOOR), 'string');
-  t('H22 floor: …and the row still names the residue label', h22row(closedOn(['pm:dispatched'], '2026-08-29T09:00:00Z'), FLOOR).includes('`pm:dispatched`'), true);
+  t('H22 floor: a card closed AFTER the floor is counted', h22labels(closedOn(['pm:dispatched'], '2026-08-29T09:00:00Z'), FLOOR), 'pm:dispatched');
   // The boundary is inclusive: the cutover date is the first day the convention
   // applies, so a card closed within it is the convention's own population.
-  t('H22 floor: a card closed ON the floor date is judged', typeof h22ClosedCardPmResidue(closedOn(['pm:queue'], '2026-08-28T00:00:00Z'), FLOOR), 'string');
-  t('H22 floor: …and later the same day too', typeof h22ClosedCardPmResidue(closedOn(['pm:queue'], '2026-08-28T23:59:59Z'), FLOOR), 'string');
+  t('H22 floor: a card closed ON the floor date is counted', h22labels(closedOn(['pm:queue'], '2026-08-28T00:00:00Z'), FLOOR), 'pm:queue');
+  t('H22 floor: …and later the same day too', h22labels(closedOn(['pm:queue'], '2026-08-28T23:59:59Z'), FLOOR), 'pm:queue');
   t('H22 floor: one second before the floor is out', h22ClosedCardPmResidue(closedOn(['pm:queue'], '2026-08-27T23:59:59Z'), FLOOR), null);
   // The floor narrows scope; it never invents findings. A clean recent card is
   // still clean, and an OPEN card is still not this row's.
@@ -12536,13 +12762,13 @@ function selfTest() {
   t('H22 floor: the closed gate still outranks the floor', h22ClosedCardPmResidue({ ...issue(['pm:dispatched']), state: 'open', closed_at: null }, FLOOR), null);
   // Fail-OPEN on an unreadable closure date: the floor cannot be applied, so
   // the card stays visible rather than being dropped on unread data (#4690).
-  t('H22 floor: a card with no closed_at is judged, not dropped', typeof h22ClosedCardPmResidue(closedOn(['pm:dispatched'], null), FLOOR), 'string');
-  t('H22 floor: …and an unparseable one likewise', typeof h22ClosedCardPmResidue(closedOn(['pm:dispatched'], 'not-a-date'), FLOOR), 'string');
+  t('H22 floor: a card with no closed_at is counted, not dropped', h22labels(closedOn(['pm:dispatched'], null), FLOOR), 'pm:dispatched');
+  t('H22 floor: …and an unparseable one likewise', h22labels(closedOn(['pm:dispatched'], 'not-a-date'), FLOOR), 'pm:dispatched');
 
   // Floor ABSENT — the default, and the property that makes this change a
   // no-op for the install that wants every card in the window judged.
-  t('H22 floor: absent floor judges an old closed card exactly as before', typeof h22ClosedCardPmResidue(closedOn(['pm:dispatched'], '2026-01-01T00:00:00Z')), 'string');
-  t('H22 floor: …an explicit null is the same as omitting it', typeof h22ClosedCardPmResidue(closedOn(['pm:dispatched'], '2026-01-01T00:00:00Z'), null), 'string');
+  t('H22 floor: absent floor counts an old closed card exactly as before', h22labels(closedOn(['pm:dispatched'], '2026-01-01T00:00:00Z')), 'pm:dispatched');
+  t('H22 floor: …an explicit null is the same as omitting it', h22labels(closedOn(['pm:dispatched'], '2026-01-01T00:00:00Z'), null), 'pm:dispatched');
   t('H22 floor: …and a clean old card is still clean', h22ClosedCardPmResidue(closedOn(['domain:cli'], '2026-01-01T00:00:00Z'), null), null);
 
   // resolveClosureFloor — the env reading, including the loud refusal.
@@ -12574,7 +12800,7 @@ function selfTest() {
   // …and when a floor is in force the line SAYS so: "read 200" with a floor
   // silently applied would overstate what was judged, which is the same
   // unread-reads-as-clean defect the count itself exists to prevent.
-  t('summary: a floored pass names the floor date', saidBy('h22Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200, closedFloor: '2026-08-28' }, 0)).includes('only cards closed on/after 2026-08-28 are judged'), true);
+  t('summary: a floored pass names the floor date', saidBy('h22Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200, closedFloor: '2026-08-28' }, 0)).includes('only cards closed on/after 2026-08-28 count'), true);
   t('summary: …and says the earlier closures are not a reading about them', saidBy('h22Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200, closedFloor: '2026-08-28' }, 0)).includes('NOT a reading about them'), true);
   t('summary: an unfloored pass adds no floor clause', saidBy('h22Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 200 }, 0)).includes('are judged'), false);
 
@@ -14582,7 +14808,11 @@ function selfTest() {
   t('#13947 registry: …and no band names a family the sweep never emits', coverage.extra.join(','), '');
   t('#13947 registry: the scan really found families (positive control)', coverage.emitted.length >= 30, true);
   t('#13947 registry: …including the gate pair the ruling names', `${coverage.emitted.includes('H31')}/${coverage.emitted.includes('H35')}`, 'true/true');
-  t('#13947 registry: the SECTION families take no band — they are not rows', ['H17', 'H39', 'H40'].some((c) => c in HALF_STATE_FAMILY_BAND), false);
+  t('#13947 registry: the SECTION families take no band — they are not rows', ['H17', 'H22', 'H39', 'H40'].some((c) => c in HALF_STATE_FAMILY_BAND), false);
+  // ⚖️ #14072: the coverage scan is the mechanism that makes the fold stick.
+  // H22 must be absent from BOTH sides of it — no push in the source, no band
+  // in the table — and `extra`/`missing` are what catch a half-done reversal.
+  t('#13947 registry: ⚖️ the sweep pushes no H22 row any more', familyRegistryCoverage().emitted.includes('H22'), false);
   // ⚠️ The fixtures below are ASSEMBLED, never written literally: a literal
   // push expression in this file would be found by the scan above and reported
   // as a real unregistered family, breaking the very invariant these cases pin.
@@ -14595,10 +14825,16 @@ function selfTest() {
   // ② The bands themselves, and the ordering the trim now consults.
   t('#13947 band: H31 is gate-semantic', familyBand('H31'), 'gate');
   t('#13947 band: …and H35, the gate-REMOVAL event, with it', familyBand('H35'), 'gate');
-  t("#13947 band: H14/H22/H5 are inventory — triage's own examples", `${familyBand('H14')}/${familyBand('H22')}/${familyBand('H5')}`, 'inventory/inventory/inventory');
+  t("#13947 band: H14/H15/H5 are inventory — triage's own examples", `${familyBand('H14')}/${familyBand('H15')}/${familyBand('H5')}`, 'inventory/inventory/inventory');
+  // ⚖️ #14072: H22 was triage's fourth inventory example and has left the
+  // registry entirely, because it emits no row for a band to govern. Pinned in
+  // BOTH directions — unregistered here, and absent from the table below — so
+  // that re-banding it without restoring a push fails, and so does the reverse.
+  t('#13947 band: ⚖️ H22 carries NO band since the fold', familyBand('H22'), UNREGISTERED_FAMILY_BAND);
+  t('#13947 band: …and is not in the table at all', 'H22' in HALF_STATE_FAMILY_BAND, false);
   t('#13947 band: ⭐ a gate family outranks an inventory one', familyRank('H31') < familyRank('H14'), true);
   t('#13947 band: …and outranks a stall family', familyRank('H31') < familyRank('H19'), true);
-  t('#13947 band: a stall family outranks an inventory one', familyRank('H19') < familyRank('H22'), true);
+  t('#13947 band: a stall family outranks an inventory one', familyRank('H19') < familyRank('H14'), true);
   t('#13947 band: an unknown code is NAMED unregistered, never dropped', familyBand('H99'), UNREGISTERED_FAMILY_BAND);
   t('#13947 band: …and is PROTECTED, sorting above the ordinary bands', familyRank('H99') < familyRank('H19'), true);
   t('#13947 band: …but never above a declared gate row', familyRank('H31') < familyRank('H99'), true);
@@ -14606,18 +14842,21 @@ function selfTest() {
 
   // ③ The ledger's accounting, asserted directly — including the contract that
   // `renderedCount` is a PREFIX of the SORTED rows, not a set membership test.
-  const led = familyLedger([finding(1, 'H22', 'a'), finding(2, 'H22', 'b'), finding(3, 'H31', 'c')], 2);
+  const led = familyLedger([finding(1, 'H14', 'a'), finding(2, 'H14', 'b'), finding(3, 'H31', 'c')], 2);
   t('#13947 ledger: computed counts every row', led.computed, 3);
   t('#13947 ledger: rendered counts the prefix that survived', led.rendered, 2);
-  t('#13947 ledger: the per-family split is exact, gate band first', led.families.map((e) => `${e.code}:${e.computed}/${e.rendered}`).join(','), 'H31:1/0,H22:2/2');
+  t('#13947 ledger: the per-family split is exact, gate band first', led.families.map((e) => `${e.code}:${e.computed}/${e.rendered}`).join(','), 'H31:1/0,H14:2/2');
   t('#13947 ledger: …and the trimmed set names only the short families', led.trimmed.map((e) => e.code).join(','), 'H31');
-  t('#13947 ledger: a family with rows is never in the computed-0 list', led.silent.includes('H22') || led.silent.includes('H31'), false);
+  t('#13947 ledger: a family with rows is never in the computed-0 list', led.silent.includes('H14') || led.silent.includes('H31'), false);
+  // ⚖️ #14072: a code with no band is not silent either — it is not a row
+  // family at all, so the ledger must never list it as "computed 0 rows".
+  t('#13947 ledger: ⚖️ a folded family is absent from the ledger entirely', led.silent.includes('H22'), false);
   t('#13947 ledger: …and one without rows always is', led.silent.includes('H19'), true);
 
   // ④ ⭐ Severity beats arrival position — the case this card is about. The
   // inventory flood arrives FIRST and carries the LOWER card numbers, so under
   // the flat positional trim the gate row was among the omitted.
-  const inventoryFlood = Array.from({ length: 900 }, (_, i) => finding(1000 + i, 'H22', 'a CLOSED card still carries a `pm:*` state label — '.repeat(2)));
+  const inventoryFlood = Array.from({ length: 900 }, (_, i) => finding(1000 + i, 'H14', 'the `pm:blocking` cache disagrees with the live blocker set — '.repeat(2)));
   const lateGateRow = finding(99999, 'H31', 'the `needs:contract-review` gate is on the PR carrier and not the card');
   const ranked = renderMarkdown([...inventoryFlood, lateGateRow], counts);
   t('#13947 order: the flood really does trigger the trim', ranked.includes('further row(s) omitted'), true);
@@ -14628,7 +14867,7 @@ function selfTest() {
   // the sort key — the bare form stayed green with the gate row gone).
   t('#13947 order: …and is laid out FIRST, above every inventory row', ranked.indexOf('#99999') > 0 && ranked.indexOf('#99999') < ranked.indexOf('#1000'), true);
   t('#13947 order: …and the ledger records it as fully rendered', ranked.includes('| `H31` | gate | 1 | 1 |'), true);
-  t('#13947 order: …while the inventory family is the one that loses rows', ranked.includes('| `H22` | inventory | 900 |'), true);
+  t('#13947 order: …while the inventory family is the one that loses rows', ranked.includes('| `H14` | inventory | 900 |'), true);
   t('#13947 order: the body still fits the render budget', ranked.length <= MARKDOWN_BODY_BUDGET, true);
   t('#13947 order: …and the hard cap', ranked.length <= ISSUE_BODY_LIMIT, true);
   // The loud and unjudged bands still outrank the family bands: an inventory
@@ -15024,7 +15263,7 @@ function selfTest() {
   t('H24: …and names both contradicting readers', h24row(queued(['pm:queue'], ['os-elon'])).includes('dispatchable NOW'), true);
   // The closed gate, in mirror image to H22's open gate: one card, one row.
   t('H24: a CLOSED queued+assigned card is H22 residue, not this row', h24QueuedWithAssignee(queued(['pm:queue'], ['os-elon'], { state: 'closed' })), null);
-  t('H24: …and H22 does fire on that same card', typeof h22ClosedCardPmResidue(queued(['pm:queue'], ['os-elon'], { state: 'closed', state_reason: 'completed' })), 'string');
+  t('H24: …and H22 does count that same card', (h22ClosedCardPmResidue(queued(['pm:queue'], ['os-elon'], { state: 'closed', state_reason: 'completed' })) ?? []).join(','), 'pm:queue');
   // An absent `state` is JUDGED — an unknown field must never act as a silent
   // exemption (#4690 direction).
   t('H24: an absent state field is judged, not exempted', typeof h24QueuedWithAssignee({ ...queued(['pm:queue'], ['os-elon']), state: undefined }), 'string');
@@ -15066,7 +15305,7 @@ function selfTest() {
   // the vocabulary cannot be half-added (the defect class this family is about).
   t('vocabulary: H13 treats awaiting as a real state -> clean', h13DomainWithoutPmState(domainCard(['domain:skills', AWAITING_MAINTAINER_LABEL], hoursAgo(200)), NOW), null);
   t('vocabulary: …while the same card without it is still H13', typeof h13DomainWithoutPmState(domainCard(['domain:skills'], hoursAgo(200)), NOW), 'string');
-  t('vocabulary: H22 counts awaiting as residue on a closed card', h22row(closedCard([AWAITING_MAINTAINER_LABEL])).includes(`\`${AWAITING_MAINTAINER_LABEL}\``), true);
+  t('vocabulary: H22 counts awaiting as residue on a closed card', h22labels(closedCard([AWAITING_MAINTAINER_LABEL])), AWAITING_MAINTAINER_LABEL);
   t('vocabulary: …and an open card carrying it is not H22 residue', h22ClosedCardPmResidue(queued([AWAITING_MAINTAINER_LABEL])), null);
   t('vocabulary: H11 sees awaiting as a PARKED state', typeof h11ImportantParked(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW), 'string');
   t('vocabulary: …and names it as the parked state', h11row(parkedCard(['bug', AWAITING_MAINTAINER_LABEL]), NOW).includes(`\`${AWAITING_MAINTAINER_LABEL}\``), true);
@@ -16350,6 +16589,91 @@ function selfTest() {
   ]);
   t('批 #13: the oldest closure is the GLOBAL one, not the biggest label\'s', censusText(oldestElsewhere).includes('oldest closed 2026-08-02'), true);
   t('批 #13: …so the larger label\'s later date is not presented as the floor', censusText(oldestElsewhere).includes('oldest closed 2026-08-20'), false);
+
+  // -- #14072 — H22 FOLDED INTO THE CENSUS AS A COUNT ------------------------
+  //
+  // ⚖️ 批 #13's operative reason is 「readers scope `pm:*` queries to open
+  // cards」, and that reason does not distinguish a card closed two hours ago
+  // from one closed on 2026-08-02: neither is visible to a query filtering
+  // `is:open`. So the 3-day window stopped being a principled line between "a
+  // defect worth a row" and "an archive worth a number", and H22 now contributes
+  // its verdict to the census clause instead of filing 94 of a 247-row sweep
+  // against members of the population that clause calls owed-no-cleanup.
+  //
+  // ⛔ Nothing here claims the predicate was wrong. The selection cases above
+  // are the ORIGINAL ones, re-expressed; these cases are about the DISPOSITION.
+  const freshCard = (number, labels, closed_at = '2026-08-31T12:00:00Z') =>
+    censusCard(number, labels, closed_at);
+  const tally = (rows, floor = null) => h22FreshResidueTally(rows, floor);
+
+  t('#14072 tally: a closed carrier is counted', tally([freshCard(1, ['pm:dispatched'])]).cards, 1);
+  t('#14072 tally: …and the pass it was read in is reported beside it', tally([freshCard(1, ['pm:dispatched'])]).read, 1);
+  t('#14072 tally: the per-label breakdown is carried, not just a total', tally([freshCard(1, ['pm:dispatched']), freshCard(2, ['pm:queue']), freshCard(3, ['pm:dispatched'])]).labels.map((l) => l.join(' ')).join(', '), 'pm:dispatched 2, pm:queue 1');
+  // A card carrying two residue labels is ONE card and TWO label ticks — the
+  // same asymmetry the census's own row totals carry, so the two halves of the
+  // rendered line cannot be read as disagreeing about what they count.
+  const doubleCarrier = tally([freshCard(1, ['pm:dispatched', 'pm:queue'])]);
+  t('#14072 tally: a double carrier is one CARD', doubleCarrier.cards, 1);
+  t('#14072 tally: …and two LABEL ticks', doubleCarrier.labels.map((l) => l.join(' ')).join(', '), 'pm:dispatched 1, pm:queue 1');
+  // ⚠️ The #4690 half: a clean pass and an unread pass are different facts.
+  t('#14072 tally: a clean closed pass reports 0 carriers', tally([freshCard(1, ['domain:cli']), freshCard(2, [])]).cards, 0);
+  t('#14072 tally: …while still reporting what it READ, so 0 is a reading', tally([freshCard(1, ['domain:cli']), freshCard(2, [])]).read, 2);
+  t('#14072 tally: an empty pass reports 0 read, which is NOT the same fact', tally([]).read, 0);
+  t('#14072 tally: a missing population does not crash', tally(undefined).cards, 0);
+  // The predicate's own gates still decide membership — the fold changed the
+  // disposition of a hit, never which cards are hits.
+  t('#14072 tally: an OPEN card is never counted', tally([{ ...freshCard(1, ['pm:dispatched']), state: 'open' }]).cards, 0);
+  t('#14072 tally: the dated floor is honoured by the count too', tally([freshCard(1, ['pm:dispatched'], '2026-08-01T00:00:00Z')], FLOOR).cards, 0);
+  t('#14072 tally: …and a card on/after the floor still counts', tally([freshCard(1, ['pm:dispatched'], '2026-08-29T00:00:00Z')], FLOOR).cards, 1);
+
+  // The clause, alone.
+  const clause = (fresh) => renderFreshResidueClause(fresh);
+  const someFresh = tally([freshCard(1, ['pm:dispatched']), freshCard(2, ['pm:dispatched']), freshCard(3, ['domain:cli'])]);
+  t('#14072 clause: names H22\'s window in days', clause(someFresh).includes(`H22's ${CLOSED_ISSUE_WINDOW_DAYS}-day closure window`), true);
+  t('#14072 clause: states carriers over cards read', clause(someFresh).includes('holds 2 of 3 closed card(s)'), true);
+  t('#14072 clause: …and carries the per-label breakdown', clause(someFresh).includes('(pm:dispatched 2)'), true);
+  t('#14072 clause: a clean window says so without implying nothing was read', clause(tally([freshCard(1, ['domain:cli'])])).includes('found no carrier among the 1 closed card(s) it read'), true);
+  t('#14072 clause: an EMPTY pass renders 0 read rather than going silent', clause(tally([])).includes('among the 0 closed card(s) it read'), true);
+  t('#14072 clause: no reading at all makes no claim', clause(null), '');
+  t('#14072 clause: …and neither does a non-object', clause('nope'), '');
+  // The census line is informational by ruling, and the clause lives inside it.
+  t('#14072 clause: carries no alarm glyph', /[⚠⛔]/u.test(clause(someFresh)), false);
+  t('#14072 clause: …and no strip imperative', /\bStrip\b/u.test(clause(someFresh)), false);
+
+  // ⭐ ONE STORY, TOLD ONCE — the card's actual complaint. The census clause and
+  // H22's disposition sit in the SAME sentence, and it is still one line.
+  const folded = renderClosedResidueCensus(baseCensus, { fresh: someFresh });
+  const foldedText = folded.join('\n');
+  t('#14072 one story: the census and the fold render as ONE line', folded.length, 2);
+  t('#14072 one story: …carrying the census figures', foldedText.includes('pm:dispatched 3'), true);
+  t('#14072 one story: …and the fresh-edge count in the same sentence', foldedText.includes('holds 2 of 3 closed card(s)'), true);
+  t('#14072 one story: …and saying the window is counted, not filed', foldedText.includes('counted here rather than filed as rows (#14072)'), true);
+  t('#14072 one story: …because the ruling\'s reason reaches a fresh residue too', foldedText.includes('two hours old exactly as it reaches one from August'), true);
+  t('#14072 one story: the archive verdict is unchanged and still stated', foldedText.includes('Archive, not state'), true);
+  t('#14072 one story: …still citing the ruling', foldedText.includes('批 #13'), true);
+  t('#14072 one story: …and still free of alarm glyphs', /[⚠⛔]/u.test(foldedText), false);
+  t('#14072 one story: …and of any strip imperative', /\bStrip\b/u.test(foldedText), false);
+  t('#14072 one story: markdown keeps it italic, like the rest of the line', renderClosedResidueCensus(baseCensus, { markdown: true, fresh: someFresh })[1].startsWith('_'), true);
+  // ⚠️ The two readings come from two passes. Losing H22's because the census
+  // leg failed would drop a measurement that WAS taken — #4690 inside the very
+  // section that exists to refuse it.
+  t('#14072 one story: a FAILED census still carries the fold', renderClosedResidueCensus({ failed: 'HTTP 403' }, { fresh: someFresh }).join('\n').includes('holds 2 of 3 closed card(s)'), true);
+  t('#14072 one story: …and still says the census itself was not read', renderClosedResidueCensus({ failed: 'HTTP 403' }, { fresh: someFresh }).join('\n').includes('not read this run'), true);
+  t('#14072 one story: an absent census still carries the fold', renderClosedResidueCensus(null, { fresh: someFresh }).join('\n').includes('holds 2 of 3 closed card(s)'), true);
+  t('#14072 one story: …but with nothing to say, nothing is rendered', renderClosedResidueCensus(null, { fresh: null }).length, 0);
+
+  // ⛔ And the whole point: no row anywhere. A board whose ONLY finding-shaped
+  // input is closed residue renders zero finding rows and one census line.
+  const foldedReport = renderPlain([], {}, { census: baseCensus, freshResidue: someFresh });
+  t('#14072 no rows: the folded report manufactures no finding row', /^ {2}H\d\d #/mu.test(foldedReport), false);
+  t('#14072 no rows: …and still summarises ZERO findings', foldedReport.includes(summaryLine({}, 0)), true);
+  t('#14072 no rows: …while the count itself is present in the body', foldedReport.includes('holds 2 of 3 closed card(s)'), true);
+  // The summary's own clause states the disposition, so a reader seeing an
+  // 8-page closed pass with no rows is not left to guess which fact that is.
+  const foldedSummary = saidBy('h22Read', summaryLine({ repo: 'r', issues: 1, unscoped: 1, prs: 0, merged: 0, closed: 396 }, 0));
+  t('#14072 summary: the H22 clause says the pass is COUNTED', foldedSummary.includes('COUNTED into'), true);
+  t('#14072 summary: …and filed as no row at all', foldedSummary.includes('filed as no row at all'), true);
+  t('#14072 summary: …naming the ruling and the fold', foldedSummary.includes('批 #13; folded #14072'), true);
 
   // -- 批 #13 item ① — the open-state scoping that MAKES the residue harmless -
   //

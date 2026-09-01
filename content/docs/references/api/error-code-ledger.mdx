@@ -97,6 +97,18 @@ registration is a recorded waiver, never drift. A code registered NOWHERE
 A code emitted by several packages is listed once per emitting package —
 the union dedupes; the per-package rows are provenance, not identity.
 
+Since #13353 that sentence has a mechanical half: the provenance gate
+(`check:error-code-provenance`, `packages/spec/scripts/`) sweeps every
+stamp site of a REGISTERED code in `packages/**` non-test source and fails
+when the stamping package's own owner key does not list it. The admission
+rules below never ask WHO emits, so before that gate an unlisted emitter was
+invisible to every gate the repo has (three hand sweeps found the same class
+three times: #7504, #13254, #13353). Two deliberate shapes are NOT rows and
+are recorded in `PROVENANCE_WAIVERS` instead: a DOOR in another
+package that names the wire vocabulary itself (`FLOW_DISABLED`,
+`UPDATE_ID_MISMATCH` — see their rows' comments), and a shared constructor
+package whose throw is served under another package's registration.
+
 ## Retiring a code
 
 A row whose last EMITTER is deleted comes out with it. The admission rules
@@ -129,8 +141,8 @@ SEPARATE vocabulary and do not belong here — see #3977 (ADR-0112 D6).
 ## TypeScript Usage
 
 ```typescript
-import { ErrorCode, StandardSynonymWaiverSchema } from '@objectstack/spec/api';
-import type { ErrorCode, StandardSynonymWaiver } from '@objectstack/spec/api';
+import { ErrorCode, ProvenanceWaiverSchema, StandardSynonymWaiverSchema } from '@objectstack/spec/api';
+import type { ErrorCode, ProvenanceWaiver, StandardSynonymWaiver } from '@objectstack/spec/api';
 
 // Validate data
 const result = ErrorCode.parse(data);
@@ -440,6 +452,20 @@ const result = ErrorCode.parse(data);
 * `VERSION_NOT_RESTORABLE`
 * `WRITABLE_PACKAGE_REQUIRED`
 * `WRONG_PASSWORD`
+
+
+---
+
+## ProvenanceWaiver
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **package** | `string` | ✅ | The package whose source stamps the code without an owner-key row |
+| **code** | `string` | ✅ | The registered code the package stamps |
+| **registeredUnder** | `string` | ✅ | The owner key that deliberately carries the row instead |
+| **reason** | `string` | ✅ | Why the stamping package carries no row — recorded so provenance is a decision, not drift |
 
 
 ---

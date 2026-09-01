@@ -123,15 +123,46 @@ export const GLOBAL_TENANT = '__global__';
 export const DEFAULT_TENANT_FIELD = 'organization_id';
 
 /**
- * Platform namespaces whose rows are deliberately global / cross-organization
- * and must never be adopted into one.
+ * The platform-namespace NAME SHAPE — `sys_` / `cloud_` / `ai_`.
  *
- * The seed loader's rule verbatim (`/^(sys_|cloud_|ai_)/` in `seed-loader.ts`),
- * re-spelled here rather than imported for the reason `seed-tenancy-backfill.ts`
- * records about its own copy: the layers differ, the rule must not. This is the
- * third write path to carry it, and the three have to stay in step — a runtime
- * stamp that adopted a namespace the loader deliberately leaves global would
- * reopen the seed/runtime disagreement from the other end.
+ * ⚠️ Since #13491 this is a name test, NOT a tenancy rule, and it is no longer
+ * a write-path cut at all. Its only reader is
+ * {@link isPlatformNamespaceObject}, which
+ * {@link isPlatformObjectOutOfTenantAuditScope} (`platform-object-tenancy.ts`)
+ * uses as a cheap pre-filter before consulting the per-object verdict. ⛔ Never
+ * reach for it to decide whether a row stays org-less.
+ *
+ * ## The three copies, and why they no longer agree
+ *
+ * The history is kept because the divergence below is DELIBERATE, and a reader
+ * who finds three near-identical regexps with no explanation will read it as
+ * drift and "repair" it. Until 2026-08-31 this file WAS the third write path to
+ * carry the seed loader's rule verbatim, re-spelled rather than imported for the
+ * reason `seed-tenancy-backfill.ts` records about its own copy (the layers
+ * differ, the rule must not) — and all three did have to stay in step, because
+ * all three cut the same decision: does this write get the install's
+ * organization stamped onto it?
+ *
+ * #13491's re-ruling (2026-08-31, 联案 #13497) withdrew the wholesale namespace
+ * reading — but its scope was the RUNTIME control only. So today:
+ *
+ *  - **the runtime write path** cuts PER OBJECT, by the hand-adjudicated
+ *    classification in `platform-object-tenancy.ts` — the
+ *    `PLATFORM_OBJECT_TENANCY` ledger, read through
+ *    {@link classifyPlatformObjectTenancy} and
+ *    {@link isPlatformObjectOutOfTenantAuditScope}, which is what
+ *    `Engine.resolveSystemInsertOrganization` calls.
+ *  - **`seed-loader.ts`** still cuts by the namespace regexp
+ *    (`/^(sys_|cloud_|ai_)/`, at its `fallbackOrgId` decision).
+ *  - **`seed-tenancy-backfill.ts`** still cuts by the namespace regexp (its own
+ *    `PLATFORM_NAMESPACE`).
+ *
+ * ⛔ Do NOT restore the coupling by re-cutting the seed paths per object, and
+ * ⛔ do not re-stamp anything to match. Whether those two should follow is a
+ * separate decision about rows they have ALREADY WRITTEN, and the re-ruling's
+ * execution point 3 (⛔ never silently rewrite behaviour) governs every answer
+ * to it — including "leave them as they are". Read the three together before
+ * changing any of them.
  */
 const PLATFORM_NAMESPACE = /^(sys_|cloud_|ai_)/;
 

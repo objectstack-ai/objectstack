@@ -5819,8 +5819,11 @@ export class SecurityPlugin implements Plugin {
    *  4. The authoritative answer is the `sys_user` ROW (system-context by-id
    *     read, memoized per request-context like `__rlsMembershipStaged` /
    *     `__preImage`): {@link isVerifiedPlatformOwnerRow} = the canonical
-   *     declared-owner email match (the elevation gate's twin,
-   *     `platform-owner-wall-bypass.ts`) AND the #11343 verified-email
+   *     declared-owner email match (`platform-owner-wall-bypass.ts`, shared
+   *     with the platform-admin standing surface — it was extracted as the
+   *     elevation gate's twin, and since the #11663 re-anchor retired that
+   *     gate its opposite number is the per-request derivation at
+   *     `resolve-authz-context.ts` §6b-config) AND the #11343 verified-email
    *     allow-list (`isEmailVerifiedUserRow` — absent-means-unverified).
    *     Missing row / unreadable store ⇒ `false`.
    *

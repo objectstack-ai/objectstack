@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, readFileSync, symlinkSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -489,6 +489,298 @@ describe('a host that brings its OWN ObjectQL engine (#13028 — cloud\'s measur
       const k = (stack.driver as any).knex;
       const exists = await k.schema.hasTable('sys_permission_set');
       expect(exists, 'a plan must not create a table on its way to a coverage number').toBe(false);
+    } finally {
+      await stack.shutdown();
+    }
+  }, 60_000);
+});
+
+/**
+ * #13332 — the same guarantee, end to end, against a real SQL driver.
+ *
+ * The unit half
+ * (`schema-migration-plugins.declaration-boot-write-guard.test.ts`) pins the
+ * mechanism on a recording driver. This half proves the property the operator
+ * actually depends on: `os migrate plan`'s boot, with a host plugin that
+ * registers a writing hook from `init()`, leaves the DATABASE unchanged — on a
+ * database whose tables already exist, which is the condition under which the
+ * measured inserts SUCCEED instead of failing.
+ *
+ * The positive control comes first and is load-bearing. The identical plugin,
+ * on a boot that composes no host stack (so no declaration composition and no
+ * write guard), lands its rows. Without that leg the assertion below would be
+ * green over a fixture that could not have written.
+ */
+describe('a plan writes nothing even when the host writes from init() (#13332)', () => {
+  let dir: string;
+  let dbFile: string;
+  let hookLog: string;
+  const savedEnv: Record<string, string | undefined> = {};
+
+  const PHASES = ['kernel:ready', 'kernel:bootstrapped', 'kernel:listening'] as const;
+
+  /**
+   * cloud's measured shape, as a plugin this file can hand to either boot: the
+   * writing hooks are registered from `init()`, so `composeForDeclarations`'s
+   * `start()` suppression never sees them, and they fire on each of the three
+   * phases `kernel.ts` triggers unconditionally after the suppressed pass.
+   *
+   * The driver is found by scanning `driver.*` — the same surface
+   * `ObjectQLPlugin`'s discovery loop reads — rather than by naming one, so the
+   * fixture does not depend on what the standalone stack calls its default.
+   */
+  const initWritingPlugin = (tag: string): any => ({
+    name: `com.example.writes-from-init.${tag}`,
+    version: '1.0.0',
+    init: async (ctx: any) => {
+      for (const phase of PHASES) {
+        ctx.hook(phase, async () => {
+          appendFileSync(hookLog, `${tag}|log-only|${phase}\n`);
+        });
+        ctx.hook(phase, async () => {
+          const services: Map<string, any> = ctx.getServices();
+          const entry = [...services.entries()].find(([n]) => n.startsWith('driver.'));
+          if (!entry) return;
+          await entry[1].create('sys_metadata', {
+            id: `os13332-${tag}-${phase}`,
+            name: `os13332-${tag}-${phase}`,
+            type: 'os13332_probe',
+          });
+          appendFileSync(hookLog, `${tag}|write|${phase}\n`);
+        });
+      }
+    },
+  });
+
+  const probeRows = async (driver: any): Promise<number> => {
+    const rows: any = await driver.knex('sys_metadata')
+      .where({ type: 'os13332_probe' })
+      .count({ c: '*' });
+    return Number((Array.isArray(rows) ? rows[0] : rows)?.c ?? -1);
+  };
+
+  beforeAll(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'os-13332-'));
+    dbFile = join(dir, 'control.db');
+    hookLog = join(dir, 'hooks.log');
+    writeFileSync(hookLog, '');
+
+    savedEnv.NODE_ENV = process.env.NODE_ENV;
+    savedEnv.OS_ARTIFACT_PATH = process.env.OS_ARTIFACT_PATH;
+    process.env.NODE_ENV = 'production';
+    process.env.OS_ARTIFACT_PATH = join(dir, 'dist', 'objectstack.json');
+
+    // Materialize `sys_metadata` FIRST, with no host config on disk yet. The
+    // measured defect is precisely that on a database whose tables EXIST the
+    // inserts succeed rather than fail, so neither case below may run against
+    // an empty schema — and the fixture must not depend on the fix to build
+    // itself: with the guard ablated, a writing hook against a table that does
+    // not exist yet THROWS, and boot hooks dispatch propagating, so the whole
+    // bootstrap dies. Setting the schema up before the writer exists keeps an
+    // ablation landing on the assertions below instead of on this hook.
+    const boot = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${dbFile}`,
+      deferSchemaDdl: true,
+      composeHostStack: false,
+      projectRoot: dir,
+    });
+    try {
+      await boot.flushSchemaDdl();
+    } finally {
+      await boot.shutdown();
+    }
+
+    // A host config carrying the SAME plugin shape, so the composed path is
+    // exercised as an operator would hit it — the plugin comes out of
+    // `objectstack.config.ts`, through `composeForDeclarations`.
+    writeFileSync(
+      join(dir, 'objectstack.config.ts'),
+      [
+        "import { appendFileSync } from 'node:fs';",
+        '',
+        `const LOG = ${JSON.stringify(hookLog)};`,
+        "const PHASES = ['kernel:ready', 'kernel:bootstrapped', 'kernel:listening'];",
+        '',
+        'export default {',
+        '  plugins: [{',
+        "    name: 'com.example.host-writes-from-init',",
+        "    version: '1.0.0',",
+        '    init: async (ctx: any) => {',
+        '      for (const phase of PHASES) {',
+        "        ctx.hook(phase, async () => { appendFileSync(LOG, `host|log-only|${phase}\\n`); });",
+        '        ctx.hook(phase, async () => {',
+        '          const entry = [...ctx.getServices().entries()]',
+        "            .find(([n]: [string, unknown]) => n.startsWith('driver.'));",
+        '          if (!entry) return;',
+        "          await entry[1].create('sys_metadata', {",
+        '            id: `os13332-host-${phase}`,',
+        '            name: `os13332-host-${phase}`,',
+        "            type: 'os13332_probe',",
+        '          });',
+        "          appendFileSync(LOG, `host|write|${phase}\\n`);",
+        '        });',
+        '      }',
+        '    },',
+        '  }],',
+        '};',
+        '',
+      ].join('\n'),
+    );
+
+    writeFileSync(hookLog, '');
+  }, 60_000);
+
+  afterAll(() => {
+    if (savedEnv.NODE_ENV === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = savedEnv.NODE_ENV;
+    if (savedEnv.OS_ARTIFACT_PATH === undefined) delete process.env.OS_ARTIFACT_PATH;
+    else process.env.OS_ARTIFACT_PATH = savedEnv.OS_ARTIFACT_PATH;
+    try { rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+  });
+
+  it('POSITIVE CONTROL: the same plugin lands three rows on a boot with no declaration composition', async () => {
+    const stack = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${dbFile}`,
+      deferSchemaDdl: true,
+      // No host composition ⇒ no declaration wrapper and no write guard. This
+      // is the leg that proves the fixture can write at all.
+      composeHostStack: false,
+      extraPlugins: [initWritingPlugin('control')],
+      projectRoot: dir,
+    });
+    try {
+      expect(await probeRows(stack.driver)).toBe(3);
+      const log = readFileSync(hookLog, 'utf8');
+      for (const phase of PHASES) expect(log).toContain(`control|write|${phase}`);
+    } finally {
+      await stack.shutdown();
+    }
+  }, 60_000);
+
+  it('THE FIX: the declaration boot lands none of them — from the host config or from anywhere else', async () => {
+    const before = await (async () => {
+      const s = await bootSchemaStack({
+        jsonOutput: false,
+        databaseUrl: `file:${dbFile}`,
+        deferSchemaDdl: true,
+        composeHostStack: false,
+        projectRoot: dir,
+      });
+      try { return await probeRows(s.driver); } finally { await s.shutdown(); }
+    })();
+    // The control's three rows are still there — this case measures a DELTA,
+    // not an empty table, so a fixture that silently stopped writing cannot
+    // pass it.
+    expect(before).toBe(3);
+
+    writeFileSync(hookLog, '');
+    const stack = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${dbFile}`,
+      deferSchemaDdl: true,
+      composeHostStack: true,
+      // Both routes at once: the host config's own plugin (composed through
+      // `composeForDeclarations`) and one handed straight to the kernel. The
+      // guard sits at the driver, so neither reaches the database.
+      extraPlugins: [initWritingPlugin('extra')],
+      projectRoot: dir,
+    });
+    try {
+      expect(await probeRows(stack.driver)).toBe(before);
+
+      const log = readFileSync(hookLog, 'utf8');
+
+      // The property (b) was chosen for: the hooks RAN — the log-only ones
+      // included — on the path an operator reads before a production apply.
+      for (const phase of PHASES) {
+        expect(log).toContain(`host|log-only|${phase}`);
+        expect(log).toContain(`extra|log-only|${phase}`);
+        // …and the writing hooks got all the way to their `create()` call,
+        // which returned instead of throwing: the line after it was reached.
+        expect(log).toContain(`host|write|${phase}`);
+        expect(log).toContain(`extra|write|${phase}`);
+      }
+
+      // The refusals are REPORTED, not swallowed — this is the line the plan
+      // prints and `--json` carries. No raw execute() went through on this
+      // boot, so the outcome claim HELD and is printed with the report.
+      const notes = stack.composition.notes.join(' ');
+      expect(notes).toContain('Refused 6 write(s) during the declaration boot — a plan writes nothing');
+      expect(notes).toContain('create() on sys_metadata');
+    } finally {
+      await stack.shutdown();
+    }
+  }, 60_000);
+
+  it('R1 (#14053): a raw execute() is FORWARDED — the row lands — and the run reports it instead of claiming it wrote nothing', async () => {
+    // The at-tier review's own control shape, pinned: in one guarded boot, a
+    // hook issues a contract write (refused — the in-run control) and a raw
+    // `execute("INSERT …")`. `execute()` is a REQUIRED member of `IDataDriver`
+    // (`packages/spec/src/contracts/data-driver.ts`, "Raw Execution (Escape
+    // Hatch)"), and the guard cannot classify a raw command as read-vs-write,
+    // so the row LANDS — that is the documented behaviour, not the defect.
+    // The defect was the SILENT half: before this case's fix, the same run
+    // printed "a plan writes nothing" and a refusal list that looked
+    // complete. Now the notes name the forwarded call and drop the claim.
+    const rawWritingPlugin: any = {
+      name: 'com.example.raw-execute-from-init',
+      version: '1.0.0',
+      init: async (ctx: any) => {
+        ctx.hook('kernel:ready', async () => {
+          const entry = [...ctx.getServices().entries()]
+            .find(([n]: [string, unknown]) => n.startsWith('driver.'));
+          if (!entry) return;
+          const driver = entry[1];
+          // In-run control: the guarded surface refuses this one.
+          await driver.create('sys_metadata', {
+            id: 'os14053-create-probe',
+            name: 'os14053-create-probe',
+            type: 'os14053_create_probe',
+          });
+          // The escape hatch: forwarded, so this one LANDS.
+          await driver.execute(
+            "INSERT INTO sys_metadata (id, name, type) VALUES "
+            + "('os14053-exec-probe', 'os14053-exec-probe', 'os14053_exec_probe')",
+          );
+        });
+      },
+    };
+
+    const stack = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${dbFile}`,
+      deferSchemaDdl: true,
+      composeHostStack: true,
+      extraPlugins: [rawWritingPlugin],
+      projectRoot: dir,
+    });
+    try {
+      const countByType = async (type: string) => {
+        const rows: any = await (stack.driver as any).knex('sys_metadata')
+          .where({ type }).count({ c: '*' });
+        return Number((Array.isArray(rows) ? rows[0] : rows)?.c ?? -1);
+      };
+      // The control half: the contract write was refused.
+      expect(await countByType('os14053_create_probe')).toBe(0);
+      // The escape hatch half: the raw INSERT landed — forwarded on purpose.
+      expect(await countByType('os14053_exec_probe')).toBe(1);
+
+      // …and the run SAYS so. The refusal line drops the flat claim (the
+      // colon directly after "boot" is the dropped phrase), the forwarded
+      // call is named with its count, and no note in the run claims the
+      // plan wrote nothing. 4 refusals: the host config's plugin on three
+      // phases, plus this fixture's in-run control.
+      const notes = stack.composition.notes.join(' ');
+      expect(notes).toContain('Refused 4 write(s) during the declaration boot:');
+      expect(notes).toContain('Raw execute() was called 1 time(s) during the declaration boot');
+      expect(notes).not.toContain('a plan writes nothing');
+
+      // The guard's structural surface carries it too, for `--json` consumers.
+      expect(stack.composition.writeGuard?.rawExecutions).toEqual([
+        expect.objectContaining({ count: 1 }),
+      ]);
     } finally {
       await stack.shutdown();
     }

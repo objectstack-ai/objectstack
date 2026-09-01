@@ -350,6 +350,18 @@ export async function bootSchemaStack(
   }
   await runtime.start();
 
+  // #13332 — the kernel bootstrap is over, and with it the window the
+  // declaration boot's write guard covers. `composeForDeclarations` suppresses
+  // a host plugin's `start()`, but `kernel.ts` fires `kernel:ready`,
+  // `kernel:bootstrapped` and `kernel:listening` unconditionally afterwards, so
+  // a hook REGISTERED from `init()` runs on a plan; the guard refuses those
+  // writes at the driver instead of at a list of phase names. Everything from
+  // this line on is work the command was ASKED for — `apply`'s confirmed DDL
+  // flush, the #13028 coverage pass — so the guard comes off here and reports
+  // whatever it refused, which the plan prints and `--json` carries.
+  const refusalNote = composition.writeGuard?.disarm() ?? null;
+  if (refusalNote) composition.notes.push(refusalNote);
+
   const driver = findSqlDriver(kernel);
 
   // #13028 — the composed host declared its objects in `init()`; the pass that

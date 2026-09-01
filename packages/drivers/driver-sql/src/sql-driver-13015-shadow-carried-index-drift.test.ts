@@ -266,6 +266,17 @@ declareDialectCell(MYSQL_CELL, 'shadow-carried index drift (#13015)', (cell) => 
       );
     };
 
+    // ── Why the 4 it() blocks below carry an explicit 60_000 budget (#13902) ──
+    // Each constructs a FRESH `new SqlDriver(...)` against this cell's live
+    // server inside their own body — so the live connect cycle, and the
+    // schema-sync DDL and catalog read-back that all but the cheapest of these
+    // drive through it, are paid PER TEST rather than once in a beforeAll.
+    // With no third argument vitest applies its own 5000ms default — a number
+    // nobody chose for that work, and one that reddens unrelated PRs when the
+    // runner is merely a bit slow (#13688 measured exactly this shape: a timeout,
+    // no MySQL error in the logs, on a diff that touched no driver). Sized like
+    // this package's siblings — 60_000 is 7 of its 9 explicit budgets — and NOT
+    // an assertion that these tests are normally anywhere near that slow.
     it('a freshly synced shadow-carried unique reports no destructive index drift', async () => {
       driver = new SqlDriver(cell.config());
       const obj = orgUniqueOn('os13015_fresh');
@@ -281,7 +292,7 @@ declareDialectCell(MYSQL_CELL, 'shadow-carried index drift (#13015)', (cell) => 
       // And the shadow COLUMN is still protected from the orphan-column pass —
       // the half of the vocabulary that was already taught.
       expect(drift.filter((d) => d.kind === 'unmapped_column')).toEqual([]);
-    });
+    }, 60_000);
 
     /**
      * The remedy pin. Even on a second boot — the runtime ledger empty again,
@@ -312,7 +323,7 @@ declareDialectCell(MYSQL_CELL, 'shadow-carried index drift (#13015)', (cell) => 
       await expect(
         knex('os13015_apply').insert({ id: 'b', v: V, organization_id: null }),
       ).rejects.toThrow(/duplicate/i);
-    });
+    }, 60_000);
 
     /**
      * The surviving generated column, isolated: drop the index by name (exactly
@@ -335,7 +346,7 @@ declareDialectCell(MYSQL_CELL, 'shadow-carried index drift (#13015)', (cell) => 
 
       await driver.initObjects([obj]);
       expect(await carriedUniquePresent('os13015_survive', indexName)).toBe(true);
-    });
+    }, 60_000);
 
     /**
      * The direction a blind skip would have lost: a shadow hashing the RAW
@@ -376,6 +387,6 @@ declareDialectCell(MYSQL_CELL, 'shadow-carried index drift (#13015)', (cell) => 
       const after = await catalog('os13015_stale');
       const fixed = after.cols.find((c: any) => c.COLUMN_NAME === shadow);
       expect(String(fixed.GENERATION_EXPRESSION).toLowerCase()).toContain('coalesce');
-    });
+    }, 60_000);
   });
 });

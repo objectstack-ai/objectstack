@@ -79,6 +79,30 @@ import { isAppPluginLike } from './graft-runtime-hooks.js';
  * SUPPRESSED ({@link composeForDeclarations}). Same measurement with the
  * suppression in place: the same 16 managed tables, and **0** insert attempts.
  *
+ * ## …and why suppressing `start()` was never the whole guarantee (#13332)
+ *
+ * That suppression was scoped to the shape of the ONE plugin that had been
+ * measured. `composeForDeclarations` overrides `start` and nothing else, while
+ * `packages/core/src/kernel.ts` fires `kernel:ready` (Phase 3),
+ * `kernel:bootstrapped` (Phase 3.5) and `kernel:listening` (Phase 4)
+ * unconditionally after the suppressed start pass. A writing hook REGISTERED
+ * from `init()` survives on all three — so "a plan writes nothing" was a
+ * property of plugins that happen to seed from `start()`, an unwritten
+ * convention nothing checked. Measured downstream: a control plane whose
+ * plugin created and updated `sys_ai_model` rows from an `init()`-registered
+ * `kernel:ready` hook, on the `apply=false` run that is its mandatory human
+ * review gate before a production schema apply.
+ *
+ * The fix refuses the WRITE rather than the hook
+ * ({@link createDeclarationBootWriteGuard}): for the length of the kernel
+ * bootstrap, the row-write members of the data-driver contract are refused on
+ * every `driver.*` instance the kernel publishes. Phase-agnostic by
+ * construction — a fourth phase is covered on the day it ships — and
+ * read/log-only hooks still run, which is what an operator reading a plan
+ * before a production apply needs them to do. Neutralising `init()`-registered
+ * hooks instead would have been neither necessary (a log-only hook violates
+ * nothing) nor sufficient (a write arriving by any other path still lands).
+ *
  * ⚠️ **The residue, stated rather than hidden:** a host plugin that registers
  * its objects in `start()` instead of `init()` is invisible to this
  * composition — its tables stay out of the plan. That is the same class of
@@ -86,6 +110,46 @@ import { isAppPluginLike } from './graft-runtime-hooks.js';
  * the alternative measured worse (a dry run that writes). The composition says
  * out loud what it did, so a missing table is diagnosable instead of being
  * indistinguishable from "in sync".
+ *
+ * ⚠️ **The write guard's own residue, likewise stated** — each boundary named
+ * here so a future reader can tell a deliberate one from an oversight:
+ *
+ *  - **`execute()` — the contract's own raw-execution escape hatch.** A
+ *    REQUIRED member of `IDataDriver` (`packages/spec/src/contracts/`
+ *    `data-driver.ts`, under "Raw Execution (Escape Hatch)") — on every
+ *    driver, not a driver-sql extension. It is NOT refused, because a raw
+ *    command is opaque to this guard: the contract admits "SQL string, shell
+ *    command, or API payload", and classifying SQL text as read-vs-write is
+ *    unreliable in both directions (a `SELECT` can quote the word `INSERT` in
+ *    a literal; a CTE can write) — while the framework's own boot-legitimate
+ *    work runs through this very seam (`metadata-protocol`'s
+ *    `ensureOverlayIndex` issues its index DDL here). So a boot-window
+ *    `execute()` is FORWARDED and REPORTED instead: one stderr warning per
+ *    driver, a line in the composition notes, and the notes stop claiming
+ *    "a plan writes nothing" for that run. `getKnex()` (a driver-sql
+ *    extension, genuinely off-contract) is not intercepted; it was not the
+ *    path any measured instance of this defect took.
+ *  - **DDL — and its members split.** `deferSchemaDdl` holds back the
+ *    `initObjects`/`syncSchema` path, which `os migrate apply` FLUSHES on
+ *    purpose once the operator confirms. `dropTable` (and driver-sql's
+ *    `rotateShards`) are NOT held back by that deferral: they run
+ *    `assertSchemaMutable` — a schemaMode/dialect gate, not a deferral check —
+ *    and then execute immediately, so a hook calling `driver.dropTable(...)`
+ *    on a managed datasource during a declaration boot executes, today as
+ *    before this guard. A genuinely open boundary, stated.
+ *  - **Engine-held drivers for non-default datasources.** The guard's scan
+ *    covers the `driver.*` services the kernel publishes, and the only such
+ *    registration repo-wide is the DEFAULT datasource's
+ *    (`packages/runtime/src/default-datasource-plugin.ts`).
+ *    `DatasourceConnectionService.connect()` hands every OTHER datasource's
+ *    driver straight to `engine.registerDriver`, never through `driver.*` —
+ *    so a host stack that connects a second datasource during a composed boot
+ *    holds an engine-side driver this guard cannot see, and objectql-mediated
+ *    writes to objects bound to it would land.
+ *  - writes a plugin makes outside the database entirely (filesystem,
+ *    network).
+ *  - work a hook defers past the end of the bootstrap; the guard covers the
+ *    boot window.
  *
  * `PlatformObjectsPlugin` is deliberately NOT suppressed: it is platform
  * infrastructure this CLI already boots fully under the sibling DATA
@@ -144,6 +208,13 @@ async function suppressedStart(): Promise<void> {
  *
  * `destroy()` is forwarded: it is the symmetric teardown of `init()`, and a
  * plugin that connected something during Phase 1 must still be able to close it.
+ *
+ * ⚠️ **This suppression is not, on its own, the "writes nothing" guarantee**
+ * (#13332). `init()` runs, and every hook it registers fires on the phases
+ * `kernel.ts` triggers unconditionally after the suppressed start pass. What
+ * makes the sentence true is {@link createDeclarationBootWriteGuard}, which
+ * refuses the write itself; this Proxy keeps Phase 2 out of a dry run, which is
+ * a different and narrower job.
  */
 export function composeForDeclarations<T extends object>(plugin: T): T {
   return new Proxy(plugin, {
@@ -157,6 +228,394 @@ export function composeForDeclarations<T extends object>(plugin: T): T {
       return value;
     },
   }) as T;
+}
+
+/**
+ * The row-write surface of the data-driver contract
+ * ({@link @objectstack/spec/contracts.IDataDriver}, declared in
+ * `packages/spec/src/contracts/data-driver.ts`) — what
+ * {@link createDeclarationBootWriteGuard} refuses.
+ *
+ * Derived from the CONTRACT rather than from a survey of which plugins write
+ * today, and that is the point of the choice. A list of lifecycle phase names
+ * goes stale silently — this card started as "`kernel:ready` fires after the
+ * suppressed start pass" and was three phases before a line was written
+ * (`kernel:ready`, `kernel:bootstrapped`, `kernel:listening`), and a fourth
+ * would re-open the hole with nothing turning red. A list of contract members
+ * goes stale LOUDLY: adding a write to `IDataDriver` is a spec diff, and
+ * every driver in the repo has to implement it.
+ *
+ * Two contract members that can write are deliberately NOT in this list, and
+ * both are stated in the module header's residue census rather than silently
+ * excluded: `execute()` — the contract's raw-execution escape hatch, which is
+ * forwarded and REPORTED ({@link DRIVER_RAW_EXECUTION_METHODS}) because a raw
+ * command cannot be classified as read-vs-write reliably — and DDL, whose
+ * members split: `deferSchemaDdl` holds back the `initObjects`/`syncSchema`
+ * path (which `os migrate apply` FLUSHES once the operator confirms — guarding
+ * it here would refuse the one write these commands exist to make), while
+ * `dropTable`/`rotateShards` are NOT deferred and stay a stated open boundary.
+ */
+const DRIVER_ROW_WRITE_METHODS = [
+  'create',
+  'update',
+  'upsert',
+  'delete',
+  'bulkCreate',
+  'bulkUpdate',
+  'bulkDelete',
+  'updateMany',
+  'deleteMany',
+] as const;
+
+/**
+ * The contract's raw-execution escape hatch — `IDataDriver.execute()`, a
+ * REQUIRED member on every driver (`packages/spec/src/contracts/`
+ * `data-driver.ts`, "Raw Execution (Escape Hatch)").
+ *
+ * FORWARDED and REPORTED during the boot window, never refused, and the
+ * reason is stated because it was weighed (#14053 review, R1): the command is
+ * `unknown` by contract — "SQL string, shell command, or API payload" — and
+ * classifying SQL text as read-vs-write is unreliable in both directions (a
+ * `SELECT` can quote the word `INSERT` inside a literal; a CTE can write), so
+ * a refusal would either break boot-legitimate reads and the framework's own
+ * index DDL (`ensureOverlayIndex` runs through this seam) or rest on a guess.
+ * What must never happen instead is the SILENT half: an `execute()` that
+ * landed a write while the run printed an unqualified "a plan writes
+ * nothing". So every boot-window call is counted per driver, warned once per
+ * driver on stderr, and named in the composition notes — which drop the
+ * "writes nothing" claim for that run ({@link DeclarationBootWriteGuard}).
+ */
+const DRIVER_RAW_EXECUTION_METHODS = ['execute'] as const;
+
+/** One refused write, as the plan reports it. */
+export interface RefusedDeclarationWrite {
+  /** The `driver.*` kernel service the call was made on. */
+  driver: string;
+  /** The contract method the caller reached for. */
+  method: string;
+  /** The object named in the call, or `(unknown)` when the call carried none. */
+  object: string;
+  /** How many times this exact driver/method/object triple was refused. */
+  count: number;
+}
+
+/**
+ * One driver's boot-window `execute()` traffic, as the plan reports it.
+ * Forwarded, not refused — see {@link DRIVER_RAW_EXECUTION_METHODS} for why —
+ * and counted per driver rather than per statement: the command is `unknown`
+ * by contract, so there is no object name to key on and echoing raw command
+ * text into an operator-facing note would leak whatever the caller inlined.
+ */
+export interface ForwardedRawExecution {
+  /** The `driver.*` kernel service the call was made on. */
+  driver: string;
+  /** How many `execute()` calls this driver saw during the guarded window. */
+  count: number;
+}
+
+/**
+ * The declaration boot's write guard — the mechanism behind the sentence the
+ * plan's notes print when the boot is over and it held, "a plan writes
+ * nothing" (#13332). The sentence is an OUTCOME, so {@link disarm} owns it:
+ * it is claimed when every write the boot attempted was refused, and dropped
+ * when a raw `execute()` was forwarded (#14053 review, R1 — a claim printed
+ * over a write the guard let through is the defect this module exists to
+ * close).
+ *
+ * ## Why the guard sits at the DRIVER, not at the plugin
+ *
+ * {@link composeForDeclarations} suppresses a host plugin's `start()`, and that
+ * is where every seeder this repo had measured wrote from. It does NOT touch
+ * `init()`, and `packages/core/src/kernel.ts` fires `kernel:ready`,
+ * `kernel:bootstrapped` and `kernel:listening` unconditionally after the
+ * suppressed start pass. A hook REGISTERED from `init()` therefore runs on a
+ * plan, on all three — measured downstream as `driver.create` /
+ * `driver.update` against `sys_ai_model` on the `apply=false` run that is a
+ * control plane's mandatory human review gate.
+ *
+ * Neutralising `init()`-registered hooks instead would enforce a proxy for the
+ * guarantee, and the proxy is neither necessary nor sufficient: a log-only
+ * hook violates nothing yet would go silent exactly when an operator is
+ * reading the plan before a production apply, while a write reaching the
+ * driver by any other path still lands. The guarantee is about WRITES, so the
+ * refusal belongs where a write happens. One choke point, phase-agnostic:
+ * a phase added to the kernel tomorrow is covered on the day it ships.
+ *
+ * ## Why the driver INSTANCE, and not the `driver.*` service entry
+ *
+ * The instance is shared. `ObjectQLPlugin.start()` walks the kernel's
+ * `driver.*` services (`packages/objectql/src/plugin.ts` — the discovery loop
+ * lives in `start`, not `init`) and hands each one to the engine, which keys
+ * its registry by `driver.name` and DISCARDS a second instance under a name it
+ * already holds. So a wrapper registered in place of the service would be
+ * refused by the engine and every `objectql`-mediated write would go straight
+ * to the raw driver. Guarding the object itself covers both callers — the
+ * plugin that resolves `driver.*` directly and the engine that writes through
+ * it — because there is only ever one object, and the engine's write path is a
+ * call-time property lookup on it.
+ *
+ * ## What a refusal does, and why it does not throw
+ *
+ * `context.trigger()` dispatches boot hooks PROPAGATING
+ * (`packages/core/src/hook-dispatch.ts`): a handler that throws aborts the
+ * bootstrap. Throwing here would turn "your plugin wrote during a dry run"
+ * into "you cannot get a plan at all" — on the command whose whole job is to
+ * be read before a production apply. So a refused write returns a benign,
+ * contract-shaped value, and the run says so out loud: one `console.warn` per
+ * driver/method/object triple, plus a line in the composition `notes` the plan
+ * prints and the `--json` payload carries. Nothing is hidden; the operator
+ * gets both the plan and the list of writes their stack attempted.
+ */
+export interface DeclarationBootWriteGuard {
+  /**
+   * Compose this into the boot's plugin list. It arms in Phase 1 — ordered
+   * after `DefaultDatasourcePlugin`, which is what registers `driver.*` — and
+   * re-scans in Phase 2 so a driver registered by a later `init()` is covered
+   * before any hook phase can fire.
+   */
+  readonly plugin: unknown;
+  /** Every refusal recorded so far. */
+  readonly refusals: readonly RefusedDeclarationWrite[];
+  /**
+   * Every boot-window `execute()` call seen so far, per driver — forwarded
+   * and reported rather than refused ({@link DRIVER_RAW_EXECUTION_METHODS}).
+   * Non-empty means the run's notes must not (and do not) claim an
+   * unqualified "a plan writes nothing".
+   */
+  readonly rawExecutions: readonly ForwardedRawExecution[];
+  /**
+   * Restore every guarded driver to the methods it had, and return the line
+   * for {@link SchemaMigrationComposition.notes} — or `null` when there is
+   * nothing to report, so a boot in which nothing tried to write renders
+   * byte-identically to before this existed.
+   *
+   * Called once, by `bootSchemaStack`, the moment the kernel bootstrap
+   * returns: everything after that point is work the command was asked for
+   * (`apply`'s confirmed DDL flush, the #13028 coverage pass), and it must not
+   * meet a guard meant for the boot.
+   */
+  disarm(): string | null;
+}
+
+/** What a refused call hands back — shaped like the contract's return value. */
+function refusalValue(method: string, args: readonly unknown[]): unknown {
+  const copy = (v: unknown): Record<string, unknown> =>
+    (v && typeof v === 'object' ? { ...(v as Record<string, unknown>) } : {});
+  switch (method) {
+    // Echo the caller's own payload rather than inventing an identity: a
+    // fabricated id is a second untruth, and a caller that reads one back
+    // gets nothing from a database that was never written.
+    case 'create':
+    case 'upsert':
+      return copy(args[1]);
+    case 'update':
+      return { ...copy(args[2]), id: args[1] };
+    case 'delete':
+      return false; // the contract's "not found"
+    case 'bulkCreate':
+      return Array.isArray(args[1]) ? args[1].map(copy) : [];
+    case 'bulkUpdate':
+      return Array.isArray(args[1])
+        ? args[1].map((u: any) => ({ ...copy(u?.data), id: u?.id }))
+        : [];
+    case 'updateMany':
+    case 'deleteMany':
+      return 0; // rows affected
+    case 'bulkDelete':
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Build the guard. See {@link DeclarationBootWriteGuard} for the seam and the
+ * reasoning; this function only assembles it.
+ */
+export function createDeclarationBootWriteGuard(): DeclarationBootWriteGuard {
+  const refusals = new Map<string, RefusedDeclarationWrite>();
+  const rawExecutions = new Map<string, ForwardedRawExecution>();
+  /** Guarded instance -> method -> the own descriptor it had, `undefined` when it had none. */
+  const armed = new Map<object, Map<string, PropertyDescriptor | undefined>>();
+  /** Instances a runtime refused to let us guard — reported, never swallowed. */
+  const unguardable = new Set<string>();
+  const warned = new Set<string>();
+  const warnedExec = new Set<string>();
+
+  const refuse = (driverName: string, method: string) =>
+    async function refusedWrite(...args: unknown[]): Promise<unknown> {
+      const object = typeof args[0] === 'string' ? args[0] : '(unknown)';
+      const key = `${driverName}|${method}|${object}`;
+      const seen = refusals.get(key);
+      if (seen) seen.count += 1;
+      else refusals.set(key, { driver: driverName, method, object, count: 1 });
+      if (!warned.has(key)) {
+        warned.add(key);
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[migrate] ⚠ Refused ${method}() on ${object} via ${driverName}: a declaration `
+          + 'boot refuses row writes. The plugin that issued it registers a writing hook '
+          + 'outside start() — move the write into start(), or out of the boot path.',
+        );
+      }
+      return refusalValue(method, args);
+    };
+
+  /**
+   * The escape hatch is forwarded, never refused — see
+   * {@link DRIVER_RAW_EXECUTION_METHODS} for the weighed reason — but it is
+   * COUNTED and SAID: the one unacceptable outcome is a write landing through
+   * `execute()` while the run prints an unqualified "a plan writes nothing".
+   */
+  const forwardRawExecution = (
+    driverName: string,
+    original: (...args: unknown[]) => unknown,
+    target: object,
+  ) =>
+    function forwardedExecute(this: unknown, ...args: unknown[]): unknown {
+      const seen = rawExecutions.get(driverName);
+      if (seen) seen.count += 1;
+      else rawExecutions.set(driverName, { driver: driverName, count: 1 });
+      if (!warnedExec.has(driverName)) {
+        warnedExec.add(driverName);
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[migrate] ⚠ Raw execute() called via ${driverName} during the declaration boot. `
+          + 'A raw command cannot be classified as read or write, so it was FORWARDED, not '
+          + 'refused — if it wrote, this boot wrote, and the plan\'s notes say so. Issue row '
+          + 'writes through the contract methods (which a declaration boot refuses and '
+          + 'reports), or move raw commands out of the boot path.',
+        );
+      }
+      return Reflect.apply(original, this ?? target, args);
+    };
+
+  const armDriver = (serviceName: string, driver: unknown): void => {
+    if (!driver || typeof driver !== 'object') return;
+    const target = driver as Record<string, unknown>;
+    let existing = armed.get(target);
+    if (!existing) {
+      existing = new Map<string, PropertyDescriptor | undefined>();
+      armed.set(target, existing);
+    }
+    const saved = existing;
+    const shadow = (method: string, value: (...args: unknown[]) => unknown): void => {
+      if (saved.has(method)) return;                        // already guarded
+      if (typeof target[method] !== 'function') return;      // member this driver lacks
+      const original = Object.getOwnPropertyDescriptor(target, method);
+      try {
+        Object.defineProperty(target, method, {
+          value,
+          writable: true,
+          configurable: true,
+          // Prototype methods are non-enumerable; an own property that shadows
+          // one must not start showing up in `for…in` / spread.
+          enumerable: original?.enumerable ?? false,
+        });
+      } catch {
+        // A frozen or non-configurable driver. The guarantee cannot be made
+        // for it, and saying so beats a silent hole.
+        unguardable.add(`${serviceName}.${method}`);
+        return;
+      }
+      saved.set(method, original);
+    };
+    for (const method of DRIVER_ROW_WRITE_METHODS) {
+      shadow(method, refuse(serviceName, method));
+    }
+    for (const method of DRIVER_RAW_EXECUTION_METHODS) {
+      const original = target[method];
+      if (typeof original !== 'function') continue;
+      shadow(method, forwardRawExecution(serviceName, original as (...args: unknown[]) => unknown, target));
+    }
+  };
+
+  const scan = (ctx: any): void => {
+    const services: Map<string, unknown> | undefined = ctx?.getServices?.();
+    if (!services || typeof services.entries !== 'function') return;
+    for (const [name, service] of services.entries()) {
+      if (typeof name === 'string' && name.startsWith('driver.')) armDriver(name, service);
+    }
+  };
+
+  const plugin = {
+    name: 'com.objectstack.cli.declaration-boot-write-guard',
+    version: '1.0.0',
+    /**
+     * Ordering, not optionality — the same reason `DeferSchemaDdlPlugin`
+     * declares it. `resolvePluginOrder` is a DFS in registration order, so
+     * naming the plugin that registers `driver.*` puts our `init()` after it
+     * and (because this guard is composed ahead of every host plugin) before
+     * any host `init()` can reach a driver. `optionalDependencies` rather than
+     * `dependencies` so a stack assembled without that plugin still boots.
+     */
+    optionalDependencies: ['com.objectstack.runtime.default-datasource'],
+    init: async (ctx: any): Promise<void> => { scan(ctx); },
+    /**
+     * Re-scan in Phase 2. Host `start()`s are suppressed and the hook phases
+     * are still ahead, so this is the last point before any host code can run
+     * — and it catches a driver registered by an `init()` ordered after ours.
+     */
+    start: async (ctx: any): Promise<void> => { scan(ctx); },
+  };
+
+  const describe = (): string | null => {
+    const parts: string[] = [];
+    // The flat claim is made only when it is TRUE of this run: with any raw
+    // execute() forwarded, whether the boot wrote is not this guard's to
+    // assert, and the sentence must not print over a write it let through
+    // (#14053 review, R1).
+    const writesNothingHeld = rawExecutions.size === 0;
+    if (refusals.size > 0) {
+      const total = [...refusals.values()].reduce((n, r) => n + r.count, 0);
+      const detail = [...refusals.values()]
+        .map((r) => `${r.method}() on ${r.object}${r.count > 1 ? ` x${r.count}` : ''}`)
+        .join(', ');
+      parts.push(
+        `Refused ${total} write(s) during the declaration boot`
+        + `${writesNothingHeld ? ' — a plan writes nothing' : ''}: ${detail}. `
+        + 'A plugin in this stack registers a writing hook outside start(); the plan below is '
+        + 'unaffected, but that write WOULD have landed on a served boot of the same stack.',
+      );
+    }
+    if (rawExecutions.size > 0) {
+      const total = [...rawExecutions.values()].reduce((n, r) => n + r.count, 0);
+      const detail = [...rawExecutions.values()]
+        .map((r) => `${r.count} via ${r.driver}`)
+        .join(', ');
+      parts.push(
+        `Raw execute() was called ${total} time(s) during the declaration boot (${detail}) and `
+        + 'FORWARDED, not refused: a raw command is opaque to this guard — the contract admits '
+        + 'any native shape, and SQL text cannot be classified as read-vs-write reliably — so '
+        + 'whether this boot wrote is NOT verified, and this run does NOT claim to have '
+        + 'written nothing. If those commands only read, nothing was written; if one wrote, it '
+        + 'landed. Issue row writes through the contract methods (refused and reported here), '
+        + 'or move raw commands out of the boot path.',
+      );
+    }
+    if (unguardable.size > 0) {
+      parts.push(
+        `Could NOT guard ${[...unguardable].sort().join(', ')} — the driver refused the override, `
+        + 'so calls through those members were neither refused nor reported on this run.',
+      );
+    }
+    return parts.length > 0 ? parts.join(' ') : null;
+  };
+
+  return {
+    plugin,
+    get refusals(): readonly RefusedDeclarationWrite[] { return [...refusals.values()]; },
+    get rawExecutions(): readonly ForwardedRawExecution[] { return [...rawExecutions.values()]; },
+    disarm(): string | null {
+      for (const [target, saved] of armed) {
+        for (const [method, original] of saved) {
+          if (original) Object.defineProperty(target, method, original);
+          else delete (target as Record<string, unknown>)[method];
+        }
+      }
+      armed.clear();
+      return describe();
+    },
+  };
 }
 
 /** Whether `plugins` already carries a `PlatformObjectsPlugin` — `serve` 5c's test. */
@@ -244,6 +703,14 @@ export interface SchemaMigrationComposition {
    * run renders byte-identically to before any of this existed.
    */
   coverage: SchemaMigrationCoverage | null;
+  /**
+   * The declaration boot's write guard (#13332), when this composition armed
+   * one — `undefined` on a boot that composed nothing, so an artifact-less,
+   * config-less run is untouched. `bootSchemaStack` calls
+   * {@link DeclarationBootWriteGuard.disarm} the moment the kernel bootstrap
+   * returns and appends the line it hands back to {@link notes}.
+   */
+  writeGuard?: DeclarationBootWriteGuard;
 }
 
 const NOTHING_COMPOSED: SchemaMigrationComposition = Object.freeze({
@@ -281,7 +748,12 @@ export async function buildSchemaMigrationPlugins(opts: {
   // artifact-less, config-less run byte-identical to the one before this card.
   if (!hostConfigPath && !hasArtifactApp) return NOTHING_COMPOSED;
 
-  const plugins: unknown[] = [];
+  // #13332 — armed FIRST, so its `init()` is ordered ahead of every host
+  // plugin's: `resolvePluginOrder` is a DFS in registration order, and a host
+  // `init()` that writes directly is only refused if the guard is already on
+  // the driver by the time it runs. See {@link DeclarationBootWriteGuard}.
+  const writeGuard = createDeclarationBootWriteGuard();
+  const plugins: unknown[] = [writeGuard.plugin];
   const notes: string[] = [];
   let hostConfigLoaded = false;
   let hostConfigError: string | null = null;
@@ -313,10 +785,15 @@ export async function buildSchemaMigrationPlugins(opts: {
       }
 
       hostConfigLoaded = true;
+      // The mechanism, not the outcome: whether "a plan writes nothing" HELD
+      // is only known once the boot is over, so that sentence belongs to the
+      // guard's disarm() note — which drops it if a raw execute() went
+      // through (#14053 review, R1) — and must not be pre-claimed here.
       notes.push(
         `Composed the host stack from ${path.relative(cwd, hostConfigPath) || hostConfigPath}: `
         + `${hostPlugins.length} plugin(s), registered for their declarations only `
-        + '(init runs, start does not — a plan writes nothing).',
+        + '(init runs, start does not), with the contract\'s row writes refused at the '
+        + 'driver for the whole boot.',
       );
     } catch (error: any) {
       // Loud, and on stderr in both modes (`--json` reserves stdout, and the
@@ -359,7 +836,7 @@ export async function buildSchemaMigrationPlugins(opts: {
     notes.push('Composed PlatformObjectsPlugin (the platform floor `os serve` composes unconditionally).');
   }
 
-  return { plugins, hostConfigPath, hostConfigLoaded, hostConfigError, notes, coverage: null };
+  return { plugins, hostConfigPath, hostConfigLoaded, hostConfigError, notes, coverage: null, writeGuard };
 }
 
 /**

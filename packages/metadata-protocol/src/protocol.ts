@@ -1598,6 +1598,78 @@ function versionTokensAgree(current: NormalisedVersion, expected: NormalisedVers
     return current.token === expected.token;
 }
 
+/** The verbatim spelling the ADR-0067 timeline compared before #13995 - `String(v ?? '')`. */
+function auditInstantToken(value: unknown): string {
+    return value === null || value === undefined ? '' : String(value);
+}
+
+/**
+ * Epoch milliseconds for a DRIVER-stamped audit column, or null when the value
+ * does not denote an instant.
+ *
+ * The input domain is {@link canonicalVersionInstant}'s, and it is delegated to
+ * rather than re-spelled: that domain (`Date` / epoch `number` / canonical ISO
+ * text / opaque) was measured off the drivers for #13382 and is the same set a
+ * `created_at` arrives in. Its canonical answer round-trips through `Date.parse`
+ * exactly, and it has already bounded the value to a finite, `toISOString`-able
+ * time, so the number below is always finite.
+ */
+function auditInstantMs(value: unknown): number | null {
+    if (value === null || value === undefined) return null;
+    const canonical = canonicalVersionInstant(value, auditInstantToken(value).trim());
+    return canonical === null ? null : Date.parse(canonical);
+}
+
+/**
+ * Compare two engine-stamped audit instants, OLDEST-FIRST (`< 0` when `a` is
+ * older than `b`) - the shape both a `sort` comparator and a "strictly newer
+ * than" filter need.
+ *
+ * ## Why this exists (#13995)
+ *
+ * `created_at` is an engine-injected audit column: it is not in `datetimeFields`,
+ * and `SqlDriver#formatOutput` repairs it only inside `if (this.isSqlite)`, so
+ * the live dialects hand it out of the record read door as a JS `Date` and the
+ * SQLite family as canonical ISO-Z text (pinned by driver-sql's
+ * `sql-driver-13567-audit-stamp-materialisation.test.ts`). `String(aDate)` is
+ * `"Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)"`, whose LEADING
+ * token is the weekday NAME - so a lexicographic compare over those strings
+ * orders `Fri < Mon < Sat < Sun < Thu < Tue < Wed`, which has nothing to do with
+ * chronology. It is stable across the whole set, so the failure is systematic
+ * rather than intermittent: there is never an "it worked once" to warn anyone.
+ * Both ADR-0067 commit-timeline consumers compared exactly that way, and one of
+ * them - {@link ObjectStackProtocolImplementation.rollbackToPackageCommit} -
+ * chooses the set of commits to UNDO with it.
+ *
+ * ## Why a sibling of {@link canonicalVersionInstant} rather than a reuse of
+ * {@link versionTokensAgree}
+ *
+ * The canonicalisation IS reused (see {@link auditInstantMs}). What is not is
+ * `versionTokensAgree`: it answers EQUALITY between two client-facing version
+ * TOKENS, and ordering needs `<`/`>`, not `===`. It also takes the pre-tidied
+ * {@link NormalisedVersion} pair an HTTP `If-Match` header produces - RFC-7232
+ * quote stripping, the "no token supplied" opt-out - none of which applies to a
+ * column a driver stamped and no client ever sends.
+ *
+ * The opaque limb is deliberately the one `versionTokensAgree` documents: when
+ * either side does not denote an instant, the two are compared VERBATIM, exactly
+ * as this seam did before. So the only verdicts that change are pairs that denote
+ * instants - the defect - and nothing a host stamps into the column starts
+ * ordering differently. This is not a tolerant fallback over a mis-spelled key
+ * (#13973's standing prohibition): no alternative spelling is accepted anywhere
+ * here, and an unparseable value is not repaired, only left where it was.
+ */
+function compareAuditInstants(a: unknown, b: unknown): number {
+    const aMs = auditInstantMs(a);
+    const bMs = auditInstantMs(b);
+    if (aMs !== null && bMs !== null) {
+        return aMs < bMs ? -1 : aMs > bMs ? 1 : 0;
+    }
+    const aToken = auditInstantToken(a);
+    const bToken = auditInstantToken(b);
+    return aToken < bToken ? -1 : aToken > bToken ? 1 : 0;
+}
+
 // Lifecycle columns the engine always owns; the clone path drops them by NAME
 // so the insert re-stamps fresh values instead of copying the source's. Mirrors
 // record-validator's SKIP_FIELDS (system-injected, never author-supplied).
@@ -18351,8 +18423,17 @@ export class ObjectStackProtocolImplementation implements
                 ...(r.created_at ? { createdAt: r.created_at } : {}),
             }));
             // Newest-first; tolerate drivers that don't order by returning
-            // insertion order, then sort by the ISO timestamp.
-            mapped.sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
+            // insertion order, then sort by the audit instant.
+            //
+            // [#13995] The comparison is on INSTANTS, not on the raw column's
+            // `String()` spelling.
+            // The comment here used to say "sort by the ISO timestamp" - an
+            // assumption written down and never verified, and false on the
+            // production default driver: Postgres and MySQL materialise this
+            // column as a JS `Date`, whose string spelling LEADS WITH THE WEEKDAY
+            // NAME, so this timeline was ordered `Fri < Mon < Sat < ...` while
+            // claiming newest-first. See {@link compareAuditInstants}.
+            mapped.sort((a, b) => compareAuditInstants(b.createdAt, a.createdAt));
             return mapped;
         } catch (error) {
             // [#5980] Benign (the table has not been provisioned) falls through;
@@ -18933,9 +19014,19 @@ export class ObjectStackProtocolImplementation implements
         // listCommits is newest-first; revert every `apply` commit strictly newer
         // than the target (by created_at). Revert commits are skipped (their
         // effect is already captured by re-reverting the apply they undid).
-        const targetCreatedAt = String(target.created_at ?? '');
+        //
+        // [#13995] "Strictly newer" is an INSTANT comparison. This site both
+        // CONSUMES {@link listCommits}' ordering and re-derives the same
+        // comparison itself, so neither site could correct the other: with
+        // the raw column's `String()` spelling over a `Date`-materialising driver
+        // the predicate
+        // ranked by weekday NAME, and this rollback then reverted `apply` commits
+        // OLDER than the target while skipping the newer ones it exists to undo -
+        // a destructive operation planning off a wrong predicate, on every run and
+        // in the same way. See {@link compareAuditInstants}.
+        const targetCreatedAt = target.created_at;
         const toRevert = all.filter(
-            (c) => String(c.createdAt ?? '') > targetCreatedAt && c.operation === 'apply',
+            (c) => compareAuditInstants(c.createdAt, targetCreatedAt) > 0 && c.operation === 'apply',
         );
         const revertedCommits: string[] = [];
         const failed: Array<{ commitId: string; error: string }> = [];

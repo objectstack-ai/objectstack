@@ -157,6 +157,11 @@ describe('standard-synonym detection (#8211)', () => {
     const withoutForbidden = STANDARD_SYNONYM_WAIVERS.filter((w) => w.code !== 'FORBIDDEN');
     const violations = standardSynonymViolations(ERROR_CODE_LEDGER, withoutForbidden);
     expect(violations.map((v) => v.package).sort()).toEqual([
+      // cloud-connection joined with #13353's provenance row for the same
+      // pre-existing wire value (the marketplace-install plugin-route 403) —
+      // the waiver admits the (code, shadows) pair, so a new emitter listing
+      // widens this reverse pin, never the waiver table.
+      '@objectstack/cloud-connection',
       '@objectstack/plugin-approvals',
       '@objectstack/plugin-sharing',
       '@objectstack/rest',

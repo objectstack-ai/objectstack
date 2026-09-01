@@ -2262,6 +2262,23 @@ jobs:
       - name: Dispatcher error-code vocabulary guard
         run: pnpm check:dispatcher-error-vocabulary
 
+      # #13353: the PROVENANCE half of the same ledger. The gate above reports
+      # codes the vocabulary does not contain; this one reports REGISTERED codes
+      # stamped by a package whose own owner key does not list them — the drift
+      # the ledger's admission rules structurally cannot see (they check casing,
+      # duplication and shadowing, never who emits), re-found by hand three
+      # times (#7504, #13254, #13353). Deliberate "the door, not the producer,
+      # names the wire vocabulary" splits are recorded in PROVENANCE_WAIVERS
+      # inside the ledger file and held live by the gate in both directions.
+      # Same placement rationale as its sibling above — no `paths:` filter,
+      # deliberately: the producers live in any package, and the rows live in
+      # packages/spec. It CANNOT ride the spec vitest suite instead: turbo
+      # hashes only per-package inputs, so a cached spec `test` run would stay
+      # green on exactly the PR that adds an unlisted stamper elsewhere.
+      # Runs its own --self-test first (wired into the package script).
+      - name: Error-code provenance guard
+        run: pnpm --filter @objectstack/spec check:error-code-provenance
+
       # #10534 follow-up 4: a `rawApp` mount under the auth basePath with no ledger
       # row. `auth-plugin.ts` mounts routes DIRECTLY on the raw Hono app, ahead of
       # the better-auth catch-all, so the vendor's route table cannot account for

@@ -619,20 +619,27 @@ describe('DatabaseLoader schema-sync failure reporting (#4728)', () => {
     });
 
     it('still runs the post-sync migrations (the table exists, so they apply)', async () => {
+      // #14023 — this used to bolt a `raw` method onto the mock through an
+      // `as unknown as { raw: unknown }` cast, because that was the only
+      // surface the migration accepted. The cast was the tell: it reached PAST
+      // the declared contract. `IDataDriver` declares `execute` non-optionally
+      // and has never declared `raw`, which is why `createMockDriver` already
+      // carries `execute` and needed no cast to carry it. The migration now
+      // drives the declared surface, so this case observes the mock's own
+      // `execute` and the cast is gone.
       const driver = createMockDriver();
       driver.syncSchema = vi.fn().mockRejectedValue(alreadyExists());
-      const raw = vi.fn().mockResolvedValue(undefined);
-      (driver as unknown as { raw: unknown }).raw = raw;
+      const execute = driver.execute as ReturnType<typeof vi.fn>;
       const loader = new DatabaseLoader({ driver });
 
       await loader.list('object');
 
       // The `project_id` → `environment_id` forward migration still runs; it
       // probes the column list before touching anything.
-      expect(raw).toHaveBeenCalled();
-      expect(raw.mock.calls.some(([sql]) => /table_info|information_schema/i.test(String(sql)))).toBe(
-        true,
-      );
+      expect(execute).toHaveBeenCalled();
+      expect(
+        execute.mock.calls.some(([sql]) => /table_info|information_schema/i.test(String(sql))),
+      ).toBe(true);
     });
 
     /**
@@ -646,15 +653,20 @@ describe('DatabaseLoader schema-sync failure reporting (#4728)', () => {
     it('issues NO overlay-index DDL — this package is not a producer of that name', async () => {
       const driver = createMockDriver();
       driver.syncSchema = vi.fn().mockRejectedValue(alreadyExists());
-      const raw = vi.fn().mockResolvedValue(undefined);
-      (driver as unknown as { raw: unknown }).raw = raw;
+      const execute = driver.execute as ReturnType<typeof vi.fn>;
       const loader = new DatabaseLoader({ driver });
 
       await loader.list('object');
 
-      const overlayDdl = raw.mock.calls
+      // Non-vacuity FIRST (#14023). This assertion is "no statement matched a
+      // pattern", which a run that issued NO statements at all satisfies just
+      // as well — and that is exactly the state this file was in while the
+      // migration refused every driver. Observe that SQL really flowed before
+      // reading anything into the absence of that one statement.
+      expect(execute, 'nothing ran — the emptiness below would prove nothing').toHaveBeenCalled();
+      const overlayDdl = execute.mock.calls
         .map(([sql]) => String(sql))
-        .filter((sql) => /idx_sys_metadata_overlay_active/i.test(sql));
+        .filter((sql: string) => /idx_sys_metadata_overlay_active/i.test(sql));
       expect(overlayDdl).toEqual([]);
     });
   });

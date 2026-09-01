@@ -116,6 +116,29 @@ export function registerClusterDriver(
     driverRegistry.set(name, factory);
 }
 
+/**
+ * The driver names currently in this module instance's registry.
+ *
+ * Exported so a boot sequence can READ whether a driver package's load-time
+ * `registerClusterDriver()` actually landed, instead of assuming it did.
+ * `defineCluster()` consults this same `Map`, so an answer from here is an
+ * answer about the call that comes next — which is the whole point (#13330:
+ * `os serve` loaded a driver that registered into a SECOND, CommonJS instance
+ * of this module and then failed one line later in `defineCluster` with
+ * "not registered", with nothing between the two to say so).
+ *
+ * `memory` is deliberately absent: it is not registered, it is special-cased
+ * inside `defineCluster`. This lists what the REGISTRY holds, so an empty array
+ * is a true and useful reading rather than a misleading one.
+ *
+ * A list rather than a `has()` predicate because the caller that needs the
+ * boolean also needs to print what WAS there when the answer is no — one call,
+ * both readings, no way for the two to drift.
+ */
+export function listClusterDrivers(): string[] {
+    return [...driverRegistry.keys()];
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
