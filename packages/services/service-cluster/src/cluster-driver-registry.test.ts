@@ -50,11 +50,15 @@ describe('the driver registry can be read, not only written (#13330)', () => {
   });
 
   it('agrees with defineCluster — unlisted means the documented throw', () => {
-    // The other direction. `postgres` is accepted by the schema and shipped by
-    // nobody, which is exactly the "requested but not registered" case.
-    expect(listClusterDrivers()).not.toContain('postgres');
-    expect(() => defineCluster({ driver: 'postgres' })).toThrow(
-      /Cluster driver "postgres" is not registered/,
+    // The other direction. `redis` is accepted by the schema, but this suite
+    // never imports the driver package whose load-time side effect registers
+    // it, so in THIS module instance it is exactly the "requested but not
+    // registered" case — the same shape as the EE boot in the header. (The
+    // original sample value `postgres` left the schema in #13393: it now
+    // fails parse inside defineCluster before the registry is consulted.)
+    expect(listClusterDrivers()).not.toContain('redis');
+    expect(() => defineCluster({ driver: 'redis' })).toThrow(
+      /Cluster driver "redis" is not registered/,
     );
   });
 });
