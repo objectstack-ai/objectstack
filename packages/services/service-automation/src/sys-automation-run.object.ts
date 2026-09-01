@@ -121,11 +121,14 @@ export const SysAutomationRun = ObjectSchema.create({
       group: 'State',
     }),
 
+    // [#13909] The terminal-row carve-out in this description: the restore
+    // verb re-arms the resume authorization gate from this column, so the one
+    // terminal-row class that stays restorable keeps it.
     node_type: Field.text({
       label: 'Node Type',
       required: false,
       maxLength: 255,
-      description: 'Registry type of the node a suspended run paused at (approval / screen / wait / …). Keys the resume authorization gate (#3801) — captured at suspend time rather than re-read from a flow that may have been republished since. Null on rows written before the gate shipped, and on terminal history rows — except (since #13909) the one class of terminal row that carries a restorable consumed suspension (a run whose resume consumed its pause and then failed downstream), which keeps the paused node\'s type so a restore re-arms the gate.',
+      description: 'Registry type of the node a suspended run paused at (approval / screen / wait / …). Keys the resume authorization gate (#3801) — captured at suspend time rather than re-read from a flow that may have been republished since. Null on rows written before the gate shipped, and on terminal history rows — except the one class of terminal row that carries a restorable consumed suspension (a run whose resume consumed its pause and then failed downstream), which keeps the paused node\'s type so a restore re-arms the gate.',
       group: 'State',
     }),
 
@@ -230,10 +233,13 @@ export const SysAutomationRun = ObjectSchema.create({
       group: 'Trigger',
     }),
 
+    // [#13909] The presence-discriminator named in this description lives in
+    // ObjectStoreSuspendedRunStore.deserializeConsumedSuspension — one writer,
+    // one reader, this column is the key for both.
     variables_json: Field.textarea({
       label: 'Variables',
       required: false,
-      description: 'JSON snapshot of the flow variable map at suspend time. On a terminal row its PRESENCE is the discriminator (#13909): nothing but the consumed-suspension path writes it there, so variables_json present on a completed/failed row ⇔ the row carries a restorable suspension — the store\'s deserializer keys off exactly this.',
+      description: 'JSON snapshot of the flow variable map at suspend time. On a terminal row its PRESENCE is the discriminator: nothing but the consumed-suspension path writes it there, so variables_json present on a completed/failed row ⇔ the row carries a restorable suspension — the store\'s deserializer keys off exactly this.',
       group: 'State',
     }),
 
