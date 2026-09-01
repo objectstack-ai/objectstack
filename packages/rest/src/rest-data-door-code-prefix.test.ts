@@ -76,6 +76,40 @@
  * revert and every OTHER case in both files stayed green — which is the check
  * that exactly the two the ruling authorised moved, and nothing else was
  * loosened to make room.
+ *
+ * ---------------------------------------------------------------------------
+ * [#13095] §5's pin MOVED — 2026-08-31 maintainer ruling, option 1
+ * ---------------------------------------------------------------------------
+ * Everything above this line is the #12975-era record, kept as history.
+ * #13095 spread the same declared-code-anchored strip to
+ * `resolveErrorResponse`'s declared-4xx passthrough (and, through the one
+ * classification the share family re-dresses, its classified arm), and
+ * converged the approvals door's blanket `/^[A-Z_]+:\s*/` strip onto the
+ * code the row answers — so §5's "MEASURED, NOT REPAIRED HERE" case, written
+ * to red the day either exit converged, was MOVED deliberately to the
+ * CONVERGENCE pin it announced, and §6/§7 pin the moved arms' own anchoring
+ * controls.
+ *
+ * #13095 ablation (two legs, predictions written before running; mutation
+ * AND restore each proven on disk by blob-hash equality against the named
+ * rev plus single-occurrence anchor counts both ways; no rebuild between
+ * legs — every subject is reached by RELATIVE in-package imports vitest
+ * transforms from source, the same argument as above):
+ *
+ *   Leg A — `error-response.ts` at pre-fix bytes: predicted exactly 2 red,
+ *   §5's CONVERGENCE pin and §6's nothing-but-prefix case; measured 2 red /
+ *   50 green across this file + `rest-hook-refusal-message-parity.test.ts`,
+ *   which stayed ALL green — the empty-string TYPE-keyed degrade pinned
+ *   there (deliberately NOT converged; that pin was not this ruling's to
+ *   move) measurably did not move. §6's no-code and non-matching-prefix
+ *   cases are controls and stayed green on BOTH sides: they red under a
+ *   pattern-anchored strip, not under the missing fix.
+ *
+ *   Leg B — `rest-server.ts` at pre-fix bytes: predicted exactly 1 red,
+ *   §7's longer-token case (the blanket regex eats `FORBIDDEN_BY_POLICY:`);
+ *   measured 1 red / 25 green across this file +
+ *   `rest-approvals-wire-codes.test.ts`, which stayed ALL green — the
+ *   anchored strip answers the well-formed idiom byte-identically.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
