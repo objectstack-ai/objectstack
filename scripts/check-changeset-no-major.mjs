@@ -28,6 +28,37 @@
  * of tribal, so an over-strict `major` marker can never again turn an ordinary
  * PR into a whole-stack major release by accident.
  *
+ * ## END CONDITION: the convention above expires at GA (#14043)
+ *
+ * The convention applies during the LAUNCH WINDOW ONLY. It is recorded here,
+ * with its expiry, because a window-period convention carrying no written end
+ * condition erodes into a permanent exception — the reader two years from now
+ * finds a guard that forbids `major` and no statement that it was ever meant to
+ * stop.
+ *
+ * **End condition: at GA — the fixed group's first general-availability major —
+ * the group returns to STRICT SEMVER.** From that point a required member on a
+ * published interface, an accept-set narrowing, or any compile-breaking change
+ * to implementers grades `major`, and grades it for the reason semver says so:
+ * the bump level is the carrier again.
+ *
+ * Until then it is NOT the carrier, and that is the whole cost of the window:
+ * a breaking change ships as `minor`, so the bump level tells a consumer
+ * nothing about whether the release breaks them. The mandatory information
+ * carriers for breaking-ness in the meantime are the **BREAKING** banner the
+ * author writes in the changeset body and the ADR-0087 migration-ledger
+ * disposition (`check-adr-0087-registration.mjs` refuses a declared breaking
+ * change that states neither). They are not documentation niceties — during the
+ * window they are the only signal there is.
+ *
+ * ⇒ **THIS GUARD IS WHAT GETS DISARMED AT GA.** The end condition lives in the
+ * file that enforces the convention, rather than in a prose home elsewhere, so
+ * that declared = enforced stays in one place: whoever closes the launch window
+ * retires this check (and with it the `allow-major` escape hatch, whose error
+ * message — "a whole-stack major release is genuinely intended" — becomes
+ * ordinarily true again). Reaching GA without touching this file means the
+ * window did not actually close.
+ *
  * Exits with code 1 (and a clear list of offenders) if the diff introduces a
  * changeset that bumps a package `major`.
  *

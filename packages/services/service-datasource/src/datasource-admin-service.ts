@@ -32,6 +32,7 @@
 
 import { validateDriverConfig } from '@objectstack/spec/data';
 import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
+import { datasourceConnectivityChanged } from './datasource-connectivity-change.js';
 import { redactDatasourceConfig, restoreRedactedConfig } from './datasource-config-redaction.js';
 import { planCredentialMigration } from './datasource-credential-migration.js';
 import type {
@@ -139,6 +140,17 @@ export interface DatasourceAdminServiceConfig {
   registerPool?: (record: StoredDatasource) => Promise<void> | void;
   /** Tear down a runtime datasource's pool on remove. */
   unregisterPool?: (name: string) => Promise<void> | void;
+  /**
+   * Rebuild a runtime datasource's pool after an update that changed its
+   * connectivity-bearing fields (#13804): evict the pool built from
+   * `previous`, build + register a new one from `next`, and on failure KEEP
+   * the previous pool live with a loud degraded verdict (never pool-less).
+   *
+   * Optional: a host that wired only `registerPool` falls back to it, whose
+   * idempotency guard retains the old pool — the pre-#13804 behaviour, and
+   * the safe direction for a host that cannot express a swap.
+   */
+  reregisterPool?: (previous: StoredDatasource, next: StoredDatasource) => Promise<void> | void;
   /**
    * Last connect verdict per datasource, from `DatasourceConnectionService`
    * (framework#3827). Absent (a host without the connection service) means the
@@ -378,7 +390,12 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     }
 
     await this.config.putDatasourceRecord(record);
-    await this.tryRegisterPool(record);
+    // [#13804] A record born `active: false` gets no live pool. Every other
+    // lifecycle path already reads the flag this way — `connectDeclared` skips
+    // `active === false` at boot, and boot rehydration filters on
+    // `active ?? true` — so this door was the one place a deliberately
+    // disabled datasource still came up serving.
+    if (record.active !== false) await this.tryRegisterPool(record);
     return this.toSummary(record);
   }
 
@@ -464,7 +481,41 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     }
 
     await this.config.putDatasourceRecord(merged);
-    await this.tryRegisterPool(merged);
+
+    // [#13804] What "Save" means for the LIVE pool, decided by what actually
+    // changed — never unconditionally. The old tail called `registerPool` on
+    // every update, and the connect path's idempotency guard turned that into
+    // `already-registered` while a driver held the name: the merged record was
+    // persisted, the pool built from the OLD record kept serving, and
+    // `toSummary` reported the ORIGINAL connect's retained `connected` — a
+    // successful save describing a pool the record no longer declares.
+    //
+    // Ruled decision tree (triage on the card):
+    //  - a connectivity-bearing field changed (`driver` / `config` /
+    //    `external` incl. `credentialsRef` / `pool` / `schemaMode` / `active`
+    //    — the reading behind the set lives on
+    //    `datasourceConnectivityChanged`) → rebuild
+    //    in place, keeping the old pool if the rebuild fails;
+    //  - `active: false` → tear the pool down: an explicitly disabled
+    //    datasource must stop serving (matching boot, where it is never
+    //    connected at all);
+    //  - nothing connectivity-bearing changed (a label edit) → the plain
+    //    idempotent register, exactly as before: no eviction, no rebuild, no
+    //    connection churn — and its retry-a-broken-pool side effect (a no-op
+    //    edit re-attempting a pool that failed at boot) is preserved.
+    //
+    // A supplied `secret` counts as a connectivity change the record diff
+    // cannot see: a rewrap-in-place keeps the `credentialsRef` string while
+    // changing the credential it dereferences to, and the pool reads the
+    // credential only at build time.
+    const rebuildNeeded = secret !== undefined || datasourceConnectivityChanged(existing, merged);
+    if (merged.active === false) {
+      if (rebuildNeeded) await this.tryUnregisterPool(name);
+    } else if (rebuildNeeded) {
+      await this.tryReregisterPool(existing, merged);
+    } else {
+      await this.tryRegisterPool(merged);
+    }
     return this.toSummary(merged);
   }
 
@@ -765,6 +816,26 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       await this.config.registerPool?.(record);
     } catch (err) {
       this.logger?.warn(`registerPool('${record.name}') failed`, err);
+    }
+  }
+
+  /**
+   * [#13804] The in-place rebuild, degrade-not-throw like its siblings. A host
+   * without the `reregisterPool` seam falls back to the plain register: its
+   * idempotency guard keeps the incumbent pool, which is the pre-#13804
+   * behaviour and the safe direction — a fallback that instead tore down and
+   * re-registered would honour the rebuild but lose the "keep the old pool on
+   * failure" half of the ruling.
+   */
+  private async tryReregisterPool(previous: StoredDatasource, next: StoredDatasource): Promise<void> {
+    if (!this.config.reregisterPool) {
+      await this.tryRegisterPool(next);
+      return;
+    }
+    try {
+      await this.config.reregisterPool(previous, next);
+    } catch (err) {
+      this.logger?.warn(`reregisterPool('${next.name}') failed`, err);
     }
   }
 
