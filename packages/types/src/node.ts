@@ -682,7 +682,12 @@ function esmEntryForDeclared(
  *   - no walk above `hostRoot` (CJS resolution climbs every parent's
  *     `node_modules`; a package that exists only up there is someone else's);
  *   - no bare `require`/`import` of the specifier (a second resolver would
- *     re-import every looseness one call at a time).
+ *     re-import every looseness one call at a time);
+ *   - Node's invalid-segment refusal, mirrored BEFORE exports resolution
+ *     ({@link hasInvalidExportsSubpathSegments}): a subpath carrying `''`,
+ *     `.`, `..` or `node_modules` segments is refused exactly as both of
+ *     Node's resolvers refuse it — the one validation the specifier has NOT
+ *     already passed by the time it reaches this catch (#14271 review).
  *
  * `import.meta.resolve` with a parent URL is NOT the mechanism, on the same
  * measurement the #10943 note below records: without
@@ -715,7 +720,47 @@ type DeclaredCjsResolveFallback =
   /** Present, and its manifest names a runtime target — the FILES are the problem. */
   | { outcome: 'install-broken' }
   /** Present, and its manifest names nothing loadable — the PACKAGE is the problem. */
-  | { outcome: 'no-loadable-entry'; packageDir: string };
+  | { outcome: 'no-loadable-entry'; packageDir: string }
+  /**
+   * The SPECIFIER is the problem: its subpath carries segments Node's own
+   * resolvers refuse (see {@link hasInvalidExportsSubpathSegments}). Never
+   * rescued and never re-worded — it keeps exactly the hard failure and the
+   * `declared-unresolvable` kind these specifiers get on the CJS path today.
+   */
+  | { outcome: 'invalid-specifier' };
+
+/**
+ * Mirror of Node's `PACKAGE_TARGET_RESOLVE` invalid-segment refusal, applied
+ * to the requested subpath BEFORE any exports resolution in the fallback
+ * (#14271 contract review).
+ *
+ * Both of Node's resolvers refuse an exports subpath whose segments include
+ * `''`, `.`, `..` or `node_modules` (case-insensitive) —
+ * `ERR_INVALID_MODULE_SPECIFIER`, or `ERR_PACKAGE_PATH_NOT_EXPORTED` when an
+ * import-only condition map refuses first. On the resolve-SUCCEEDED path
+ * (#13330) the specifier has therefore already been validated by the real
+ * resolver before the exports walk here ever sees it. Inside the fallback's
+ * catch it has NOT: without this mirror, a pattern key (`./deep/*`) would
+ * substitute a traversal span (`../../secret/hidden`) into its target and
+ * resolve a NON-EXPORTED file inside the package — the byte-containment check
+ * on the resolved entry permits any `..` traversal that lands back inside the
+ * package root, by design (it guards escape, not encapsulation). Measured on
+ * Node v22.22.2: `require.resolve` of such a specifier throws on both an
+ * import-only and a dual-published pattern map, so refusing here keeps the
+ * fallback strictly tighter than the CJS resolution it backs up on the
+ * VALIDATION axis, exactly as it is on the location axes.
+ */
+function hasInvalidExportsSubpathSegments(subpath: string): boolean {
+  if (subpath === '.') return false;
+  // `exportsSubpathOf` yields `./…`; validate every segment after that prefix.
+  return subpath
+    .slice(2)
+    .split(/[/\\]/)
+    .some((raw) => {
+      const segment = raw.toLowerCase();
+      return segment === '' || segment === '.' || segment === '..' || segment === 'node_modules';
+    });
+}
 
 /**
  * The one directory the fallback finder consults, verified to hold the
@@ -766,6 +811,10 @@ function declaredCjsResolveFallback(
   if (exportsField === undefined || exportsField === null) return { outcome: 'install-broken' };
 
   const subpath = exportsSubpathOf(specifier, packageName);
+  // Refused BEFORE exports resolution — the specifier reaches this walk
+  // unvalidated by any real resolver, unlike the #13330 path (see
+  // hasInvalidExportsSubpathSegments).
+  if (hasInvalidExportsSubpathSegments(subpath)) return { outcome: 'invalid-specifier' };
 
   const importTarget = resolveExportsSubpath(exportsField, subpath, ESM_IMPORT_CONDITIONS);
   if (typeof importTarget === 'string' && importTarget.indexOf('./') === 0) {

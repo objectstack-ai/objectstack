@@ -1119,4 +1119,127 @@ describe('the declared leg loads an ESM-only package via a hostRoot node_modules
     expect((err as Error).message).toMatch(/esm-only fixture exploded on import/);
     expect(hostImportFailureKind(err)).toBeUndefined();
   });
+
+  /**
+   * TIGHTNESS, third axis (#14271 contract review): specifier VALIDATION.
+   *
+   * Node's resolvers — CJS and ESM alike — refuse an exports subpath whose
+   * pattern-matched span contains `.` / `..` / `node_modules` / empty
+   * segments (`ERR_INVALID_MODULE_SPECIFIER`; an import-only pattern refuses
+   * as `ERR_PACKAGE_PATH_NOT_EXPORTED` before ever validating the span). On
+   * the resolve-SUCCEEDED path (#13330) the specifier has therefore already
+   * been validated by the real resolver; inside the fallback's catch it has
+   * NOT — so without its own mirror of that refusal, a pattern key would
+   * substitute a traversal span into its target and reach a NON-EXPORTED file
+   * inside the package. Both cases below assert the real resolver's refusal
+   * first, so the pin proves its precondition rather than assuming it.
+   */
+  it('TIGHTNESS: a traversal span in an ESM-only pattern subpath is refused, not resolved', async () => {
+    const TRAVERSAL = '@fixture/esm-sub-traversal';
+    const root = app('traversal-esm', { [TRAVERSAL]: '1' });
+    writeShapedPackage(
+      root,
+      TRAVERSAL,
+      { exports: { '.': { import: './dist/index.js' }, './deep/*': { import: './dist/deep/*.js' } } },
+      {
+        'dist/index.js': "export const WHERE = 'root';\n",
+        'dist/deep/leaf.js': "export const WHERE = 'leaf';\n",
+        // Deliberately NOT exported — the file the traversal would reach.
+        'secret/hidden.js': 'export const SECRET = true;\n',
+      },
+    );
+    const speller = `${TRAVERSAL}/deep/../../secret/hidden`;
+    let code: string | undefined;
+    try {
+      createHostRequire(root).resolve(speller);
+    } catch (e) {
+      code = (e as { code?: string }).code;
+    }
+    // The real CJS resolver refuses (import-only pattern: the condition is
+    // refused before the span is even validated).
+    expect(code).toBe('ERR_PACKAGE_PATH_NOT_EXPORTED');
+    // And so does the fallback — never loading node_modules/…/secret/hidden.js.
+    const err = await createHostImporter(root)(speller).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+
+    // The pattern key itself still answers a VALID subpath — the segment
+    // refusal must not over-refuse legitimate pattern loads.
+    expect((await createHostImporter(root)(`${TRAVERSAL}/deep/leaf`)).WHERE).toBe('leaf');
+  });
+
+  it('TIGHTNESS: a traversal span in a DUAL pattern subpath stays the hard failure it is on main', async () => {
+    // The widening the review measured: for a dual-published package the CJS
+    // resolve throws ERR_INVALID_MODULE_SPECIFIER — a hard failure today — so
+    // the throw enters the fallback's catch, and an unvalidated pattern match
+    // would load the package's non-exported internal file. Strictly-additive
+    // means this specifier must keep FAILING, with the same kind as main.
+    const TRAVERSAL = '@fixture/dual-sub-traversal';
+    const root = app('traversal-dual', { [TRAVERSAL]: '1' });
+    writeShapedPackage(
+      root,
+      TRAVERSAL,
+      {
+        exports: {
+          '.': { import: './dist/index.js', require: './dist/index.cjs' },
+          './deep/*': { import: './dist/deep/*.js', require: './dist/deep/*.cjs' },
+        },
+      },
+      {
+        'dist/index.js': "export const WHERE = 'root';\n",
+        'dist/index.cjs': "exports.WHERE = 'root-cjs';\n",
+        'dist/deep/leaf.js': "export const WHERE = 'leaf';\n",
+        'dist/deep/leaf.cjs': "exports.WHERE = 'leaf-cjs';\n",
+        'secret/hidden.js': 'export const SECRET = true;\n',
+      },
+    );
+    const speller = `${TRAVERSAL}/deep/../../secret/hidden`;
+    let code: string | undefined;
+    try {
+      createHostRequire(root).resolve(speller);
+    } catch (e) {
+      code = (e as { code?: string }).code;
+    }
+    // The real CJS resolver validates the matched span and refuses it.
+    expect(code).toBe('ERR_INVALID_MODULE_SPECIFIER');
+    const err = await createHostImporter(root)(speller).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+  });
+
+  it('the fallback trusts only a directory whose manifest NAMES the declared package', async () => {
+    // Pin of the manifest-name check (previously unpinned): a directory at the
+    // declared path whose package.json carries a different name is not the
+    // declared package's install, and must not be rescued from.
+    const WRONG_NAME = '@fixture/wrong-name';
+    const root = app('wrong-name', { [WRONG_NAME]: '1' });
+    writeShapedPackage(
+      root,
+      WRONG_NAME,
+      { name: 'some-other-package', exports: ESM_ONLY_EXPORTS },
+      { 'dist/index.js': "export const BUILD = 'imposter';\n" },
+    );
+    const err = await createHostImporter(root)(WRONG_NAME).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+  });
+
+  it('the fallback refuses an exports target that ESCAPES its package', async () => {
+    // Pin of the containment check (previously unpinned): a `./`-prefixed
+    // target that resolves above the package root must not be loaded, exactly
+    // as Node refuses an escaping exports target on its own paths.
+    const ESCAPER = '@fixture/escaping-target';
+    const root = app('escaper', { [ESCAPER]: '1' });
+    writeShapedPackage(root, ESCAPER, { exports: { '.': { import: './../escaped-entry.js' } } }, {});
+    // The file the escape WOULD reach, one level above the package dir.
+    writeFileSync(
+      join(root, 'node_modules', '@fixture', 'escaped-entry.js'),
+      'export const ESCAPED = true;\n',
+      'utf8',
+    );
+    const err = await createHostImporter(root)(ESCAPER).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect((err as Error).message).toMatch(/INSTALL problem/);
+  });
 });

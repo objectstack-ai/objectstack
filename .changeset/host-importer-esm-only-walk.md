@@ -20,11 +20,16 @@ transitive imports resolve from its real location exactly as on the succeeding
 path). If that package's `exports` names an existing `import`-condition target
 for the requested subpath, it is imported. The fallback is **strictly
 tighter** than the CJS resolution it backs up — no `NODE_PATH`, no walk above
-`hostRoot`, no bare `require` — so it cannot reopen the #4719 declaration-gate
-hole: a package reachable only through a hoisted store or a parent directory
-stays refused, even though CJS resolution can see it there. And because it
-runs only inside a catch that was a hard failure before, no
-currently-succeeding load changes behaviour.
+`hostRoot`, no bare `require`, and Node's invalid-segment refusal mirrored
+before exports resolution (a subpath carrying `''`, `.`, `..` or
+`node_modules` segments is refused exactly as both of Node's resolvers refuse
+it, so a pattern key can never substitute a traversal span into its target) —
+so it cannot reopen the #4719 declaration-gate hole and cannot bypass the
+package encapsulation Node's resolvers enforce: a package reachable only
+through a hoisted store or a parent directory stays refused, even though CJS
+resolution can see it there, and a traversal specifier keeps the hard failure
+it has today. And because the fallback runs only inside a catch that was a
+hard failure before, no currently-succeeding load changes behaviour.
 
 **The split.** When the fallback cannot help either, the failure kind is
 decided by whether any install action could: a package absent from the host's
@@ -40,3 +45,8 @@ and an operator is no longer sent to re-run `pnpm install` against a correct
 install. The new error still carries `code: 'MODULE_NOT_FOUND'`, so every
 existing caller's missing-vs-crashed classification is unchanged, and an
 evaluation crash still propagates untouched with no kind.
+
+Consumers that branch on `HostImportFailureKind` should add an arm for
+`declared-no-loadable-entry`: a two-way branch written against the old
+two-member union will fall into its else leg for the new kind, whose wording
+("declare it") is wrong for a package that is declared and installed.
