@@ -202,6 +202,22 @@ const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|POPULATION|[
  * re-measured on the 2026-08-29 tree and NOT carried from its sibling, which this
  * docblock forbids by name.
  *
+ * ⭐ A NINETEENTH row was re-decided on 2026-09-01 under that same authorisation
+ * sentence and no wider one: `check:ratchet-remedy-authority SCRIPTS_DIR scripts`.
+ * Its refusal rested on the deletion-collapse too, in the variant that splices
+ * WITHIN a final segment rather than across a separator — `scripts/*.mjs` became
+ * `scripts/.mjs`, a string no tree can hold — so "the idiom has no non-recursive
+ * spelling" was true of the derivation that wrote it and false of this one.
+ * #13448 retired that collapse for the shape, which `dispatch-gates.mjs` states
+ * in its own docblock as "the same defect as the non-final case one level
+ * finer". So this is the identical retired mechanism, not a new licence, and it
+ * is a RE-DECISION rather than a repair for the same reason the eighteen before
+ * it were. Its consumer is #13813 and it is MEASURED: the family sat in the
+ * residue's undetermined bucket, outside the matched list a brief prints, and a
+ * PR that ran its whole derived family green locally lost a CI round to this
+ * gate. ⛔ Its numbers are re-measured on the 2026-09-01 tree in BOTH terms and
+ * NOT carried from the row they replace, which this docblock forbids by name.
+ *
  * ⚠️ One row of that seventeen was re-measured into a DIFFERENT population, not
  * merely fresher digits: #12392 (PR #12423, `69d0e18`) made
  * `check-skills-token-ratchet`'s walk RECURSIVE over whole skill directories, so
@@ -393,6 +409,33 @@ const TRIAGE = new Map([
       + 'missed defect. The row STAYS in the sweep because the bare root is still not covered — '
       + 'no arbitrary file at the top of packages/ is reached — which is what this verdict says',
   }],
+  ['check:ratchet-remedy-authority SCRIPTS_DIR scripts', {
+    verdict: 'DECLARED-NARROWER',
+    why: 'RE-DECIDED 2026-09-01 (#13813) from REFUSE-UNSPELLABLE, whose stated reason — "the idiom '
+      + 'has no non-recursive spelling" — was TRUE when written and is FALSE of this tree. It '
+      + 'rested on the deletion-collapse: a glob carrying a literal SUFFIX in the final segment '
+      + 'was spliced WITHIN the segment, so the only non-recursive spelling reduced to a string no '
+      + 'tree can hold and reached nothing. #13448 retired that collapse for exactly this shape — '
+      + 'judgedAsPattern routes it to triggerCovers now — which is the same retired collapse the '
+      + 'seventeen rows of 2026-08-26 and the eighteenth of 2026-08-29 were re-decided under, one '
+      + 'refinement finer, and this row is re-decided under that authorisation sentence and no '
+      + 'wider one. Both terms re-measured together on this tree, never refreshed apart: the gate '
+      + 'own corpusFiles() walk admits 183 files, against 310 tracked under the bare root (59%). '
+      + 'The gate now declares ONE hint per admitted extension beside SCRIPTS_DIR under the '
+      + 'ROOT_DIR_WATCH_HINTS idiom, and the pair is SET-EQUAL to that walk in both directions — '
+      + '183 of 183, nothing read left uncovered, nothing covered left unread — so 100% precise '
+      + 'and complete. ⛔ NO `spelling` is recorded and that is deliberate, not an omission: '
+      + 'SPELLINGS holds ONE hint per entry and this population needs one per extension, the same '
+      + 'shape as the check:logger-receiver-detach and check:dual-build-cjs-loads rows above, so '
+      + 'the liveness-and-precision coupling is held in the gate own --self-test, which pins the '
+      + 'hints against SCRIPTS_DIR and CORPUS_EXTENSIONS and refuses both the subtree spelling and '
+      + 'the brace form its own messages print. The consumer is MEASURED, not argued: before this, '
+      + 'the derivation placed this family in the residue undetermined bucket, absent from the '
+      + 'matched list a brief prints, and a PR that ran its whole derived family green locally '
+      + 'lost a CI round to this gate. The row STAYS in the sweep because the bare root is still '
+      + 'not covered — no arbitrary file at the top of the root is reached, and no nested script '
+      + 'at any depth — which is what this verdict says and is correct, not outstanding debt',
+  }],
   // ── Refused: the population is the whole root, and the root is saturated ──
   ['check:skill-identifier-liveness IMPL_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
@@ -489,12 +532,6 @@ const TRIAGE = new Map([
     why: '162 of 238 (68%), refused with its packages half for the reason above',
   }],
   // ── Refused: the population is a filter the idiom cannot spell ────────────
-  ['check:ratchet-remedy-authority SCRIPTS_DIR scripts', {
-    verdict: 'REFUSE-UNSPELLABLE',
-    why: 'reads the TOP LEVEL of the root only, and only two extensions (`.mjs` and `.mts`) — 144 '
-      + 'of 261 (55%), re-derived from the gate own corpusFiles() walk. The idiom has no '
-      + 'non-recursive spelling: a subtree hint claims every nested directory too',
-  }],
   ['scripts/check-declaration-mirrors.mjs SCRIPTS_DIR scripts', {
     verdict: 'REFUSE-UNSPELLABLE',
     why: 'a RECURSIVE walk admitted by EXTENSION — every `scripts/**/*.d.mts`, 2 of 261 (0.77%), '
