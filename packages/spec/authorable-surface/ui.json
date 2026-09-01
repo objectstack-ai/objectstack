@@ -442,6 +442,7 @@
     "ui/FormSection:columns",
     "ui/FormSection:description",
     "ui/FormSection:fields",
+    "ui/FormSection:group",
     "ui/FormSection:label",
     "ui/FormSection:name",
     "ui/FormSection:pane",

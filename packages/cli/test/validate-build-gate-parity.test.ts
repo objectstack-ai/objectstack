@@ -135,17 +135,26 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
   /**
    * The same drift, one layer down and easier to miss: not "does this command
    * run the gate" but "does it LISTEN to what the gate says". The ADR-0087 D2
-   * conversion pass runs inside `normalizeStackInput` on both commands, so both
-   * always converted — but only `os validate` passed an `onConversionNotice`
-   * sink, so `os build` silently discarded every deprecation notice. A notice
-   * is the one warning an old-shape author gets before the conversion retires
-   * and their metadata stops loading, and five conversions are live today.
+   * conversion pass runs inside `normalizeStackInput` on ALL THREE authoring
+   * commands, so all three always converted — but only `os validate` passed an
+   * `onConversionNotice` sink, so the others silently discarded every
+   * deprecation notice. A notice is the one warning an old-shape author gets
+   * before the conversion retires and their metadata stops loading, and five
+   * conversions are live today.
+   *
+   * ⭐ [#12297] `lint.ts` was MISSING FROM THIS LOOP, and that is why the gap
+   * survived #11772: the loop named the two commands the card in hand was
+   * about, so closing `os build` left `os lint` — the third command the #4409
+   * registry holds to this same bar, and the one whose docblock above already
+   * claims "it covers `os lint` too" — unguarded and, as measured, unwired.
+   * A guard that enumerates a subset of the class it describes reports green
+   * for the members it forgot. The list is the class now, not the card.
    *
    * Source-level for the same reason as the gate check above: it fails when the
    * sink is dropped, which is the moment it is cheap to fix.
    */
-  it('both commands pass a conversion-notice sink to normalizeStackInput', () => {
-    for (const file of ['compile.ts', 'validate.ts']) {
+  it('all three authoring commands pass a conversion-notice sink to normalizeStackInput', () => {
+    for (const file of ['compile.ts', 'validate.ts', 'lint.ts']) {
       const src = sourceOf(file);
       const call = src.match(/normalizeStackInput\([\s\S]{0,400}?\)\s*;/);
       expect(call, `${file} must call normalizeStackInput`).not.toBeNull();

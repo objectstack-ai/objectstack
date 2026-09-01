@@ -25,13 +25,41 @@
 //       // <- no worker.on('error'), no worker.on('exit')
 //     });
 //
-// There is no `error` handler and no `exit` handler. If the worker dies without
-// posting a message -- OOM under memory pressure, a hard `process.exit`, a
-// terminated thread -- neither branch ever runs, the promise NEVER SETTLES, the
-// event loop drains, and **Node exits 0**. tsup's `Promise.all([dtsTask(),
-// mainTasks()])` never resolves either, so nothing prints and nothing throws:
-// the JS pass has already written `dist/`, so the run leaves a dist with
-// `index.js` / `index.mjs` / maps and ZERO `.d.ts` files, and reports success.
+// There is no `error` handler and no `exit` handler. What that leaves silent is
+// a CLASS, not any one trigger: a worker that ends WITHOUT POSTING A MESSAGE and
+// without emitting an `error` event -- a hard `process.exit` inside the worker,
+// a terminated thread, any other message-less end -- runs neither branch, so the
+// promise NEVER SETTLES, the event loop drains, and **Node exits 0**. tsup's
+// `Promise.all([dtsTask(), mainTasks()])` never resolves either, so nothing
+// prints and nothing throws: the JS pass has already written `dist/`, so the run
+// leaves a dist with `index.js` / `index.mjs` / maps and ZERO `.d.ts` files, and
+// reports success.
+//
+// !! OOM IS THE LOUD SIBLING -- IT IS NOT THIS SHAPE. If you got here after a
+// memory-starved build, you are looking at a different failure. Node delivers
+// worker heap exhaustion as an `error` event (`ERR_WORKER_OUT_OF_MEMORY`), and
+// an `error` event with no listener is rethrown by EventEmitter -- so an OOM'd
+// DTS pass exits NON-ZERO and prints a stack. A non-zero build is never cached
+// by turbo, which is precisely the property this section used to say OOM lacked.
+// Measured on Node v22.22.2 / linux x64, against a harness carrying the promise
+// shape above (only `message` registered):
+//
+//   worker death mode                        event    process outcome
+//   ---------------------------------------------------------------------------
+//   `process.exit()`, CJS caller             exit     exit 0, ZERO output
+//   `process.exit()`, ESM caller (top-level   exit    exit 13 + "unsettled
+//     await)                                            top-level await" warning
+//   heap OOM, per-worker `resourceLimits`    error    exit 1
+//   heap OOM, process-wide max-old-space     error    exit 1
+//
+// Only the first row is the defect this guard closes. The caller's module system
+// is load-bearing: the SAME message-less death exits 13 with a warning under an
+// ESM top-level `await` and 0 in silence under CJS. tsup's CLI is CJS, which is
+// why the shape that was observed was a silent one.
+//
+// What actually killed the worker in the original observation is NOT established
+// here -- only that it ended without an `error` event, because that run exited 0,
+// and therefore that memory pressure is not a demonstrated cause of this shape.
 //
 // That is a correctness problem for the build CACHE, not just for one build.
 // `OS_SKIP_DTS` is declared in turbo.json `globalEnv` and it works: measured on
@@ -165,14 +193,27 @@ function run(dir) {
       `  '${manifest.name ?? ''}'\" - and it reads as though THEIR change broke this package.\n` +
       '\n  Most likely cause (#11907): tsup runs DTS generation in a worker thread and\n' +
       "  settles its promise only on the worker's `message` events - it registers no\n" +
-      '  `error` and no `exit` handler. A worker that dies (OOM under memory pressure\n' +
-      '  is the observed one) posts neither "success" nor "error", so the promise never\n' +
-      '  settles, the event loop drains, and node exits 0 with the JS already written.\n' +
+      '  `error` and no `exit` handler. A worker that ends without posting a message\n' +
+      '  AND without an `error` event - a hard `process.exit`, a terminated thread -\n' +
+      '  settles neither branch, so the promise never settles, the event loop drains,\n' +
+      '  and node exits 0 with the JS pass already written.\n' +
+      '\n  It is NOT an out-of-memory build, and more heap will not help. Node delivers\n' +
+      '  worker heap exhaustion as an `error` event (ERR_WORKER_OUT_OF_MEMORY) which,\n' +
+      '  with no listener registered, is rethrown - so an OOM DTS pass exits NON-ZERO\n' +
+      '  and prints a stack, the build stops at `tsup`, and this guard never runs.\n' +
+      '  Reaching this text is itself evidence the DTS pass exited 0.\n' +
       '\n  This guard is what stops that exit 0 from becoming a CACHED artifact: turbo\n' +
       '  caches only successful tasks, and a skip-DTS run already hashes differently,\n' +
       '  so failing here keeps a DTS-less dist from ever being served as a full build.\n' +
-      '\n  Re-run the build. If it keeps failing here, build with more headroom:\n' +
-      '    NODE_OPTIONS=--max-old-space-size=8192 pnpm --filter <pkg> build\n' +
+      '\n  WHICH SHAPE ARE YOU IN? Count the declarations actually on disk:\n' +
+      '    ls dist/*.d.ts dist/*.d.mts dist/*.d.cts 2>/dev/null | wc -l\n' +
+      '\n  0 - the DTS pass produced nothing, so read what it printed:\n' +
+      '        pnpm --filter <pkg> build 2>&1 | grep -i dts\n' +
+      '    A "DTS Build start" with no success and no error line after it is the\n' +
+      '    message-less death above.\n' +
+      '\n  1 or more - nothing died. package.json promises a declaration path that this\n' +
+      "    package's tsup entries never emit, so every rebuild fails here the same way;\n" +
+      '    line the `types` conditions up with the entry points that are really built.\n' +
       '\n  If a poisoned entry was cached before this guard existed, a plain rebuild is a\n' +
       '  cache HIT that restores it - clear it with:\n' +
       '    pnpm exec turbo run build --filter <pkg> --force\n',

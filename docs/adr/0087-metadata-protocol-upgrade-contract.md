@@ -584,6 +584,7 @@ gate's log and its `--list` output.
 <!-- adr-0087: not-required (already-registered <id>[, <id>...]) <why> -->
 <!-- adr-0087: not-required (no-migration-prescription) <why> -->
 <!-- adr-0087: not-required (runtime-interface-only <path>#<Symbol>[, ...]) <why> -->
+<!-- adr-0087: not-required (type-surface-only <path>#<Symbol>[, ...]) <why> -->
 ```
 
 **The vocabulary is closed, and every exemption is re-verified on every run** — an
@@ -592,8 +593,9 @@ avoid. `registered` must name ids that resolve *and* are new in the diff;
 `unpublished` requires every bumped package to be `private: true`;
 `already-registered` requires the named ids to pre-date the merge base;
 `no-migration-prescription` is refused by a body that carries a migration
-prescription; and `runtime-interface-only` is the subject of the rest of this
-addendum. The checks live in
+prescription; `runtime-interface-only` is the subject of the rest of this
+addendum; and `type-surface-only` — the sixth, added 2026-08-30 — is the subject of
+the addendum after it. The checks live in
 [`scripts/check-adr-0087-registration.mjs`](../../scripts/check-adr-0087-registration.mjs),
 which is also where each one's measured history is written down.
 
@@ -667,3 +669,133 @@ a verdict unless the categories listed above and the categories it accepts are t
 same set, checked in both directions. A category added to the gate and described
 nowhere is an exemption an author cannot look up; a category described here that the
 gate rejects is an exemption nobody can claim. Both are red.
+
+## Addendum (2026-08-30) — the sixth category: a published TYPE-surface narrowing (#13080)
+
+The vocabulary above gained a sixth answer:
+
+```text
+<!-- adr-0087: not-required (type-surface-only <path>#<Symbol>[, ...]) <why> -->
+```
+
+### The dead end it closes
+
+A **published TYPE-surface narrowing** — a published SDK method whose declared
+return moves off `any` onto the contract it always answered — declares
+`**BREAKING**` truthfully. `any` is assignable to everything and admits every
+property read, so a consumer's code really can stop compiling. The gate then asks
+for a disposition, and every one of the five is closed to it. Measured on the real
+#12104 shape, driven through the shipping gate:
+
+| disposition | outcome |
+|---|---|
+| `registered` | refused — no id is new in the diff, and writing one would put a prescription in the ledger that `objectstack migrate meta`, `spec-changes.json` and the upgrade guide cannot project. False data in the one ledger this whole mechanism keeps true. |
+| `not-required (unpublished)` | refused — `@objectstack/client` publishes to npm. |
+| `not-required (already-registered <id>)` | the gate *admits* it, and that is the problem: it verifies the id RESOLVES and PRE-DATES the base, never that the entry COVERS this change. The only thing closing this door is the author's honesty, which is not a mechanism. |
+| `not-required (no-migration-prescription)` | refused — the body carries a FROM/TO block. |
+| `not-required (runtime-interface-only …)` | refused — it inherits that same refusal. |
+
+So the exit the gate names in its own refusal text — *"use a category that can be
+verified (`unpublished`, `already-registered`)"* — is factually false here, and the
+only move left is to **drop the `**BREAKING**` token**.
+
+### ⛔ The four changesets that took that move are a COUNTER-EXAMPLE, not a precedent
+
+`#8140`, `#11925`, `#12034` and `#12104` are all `@objectstack/client` return-type
+narrowings, all shipped `minor`, all recording the no-entry disposition in prose,
+none carrying the token — each one consistent with the one before it. Read
+individually every one of those calls was reasonable. Read together they are the
+finding: a whole recurring class of genuinely compile-breaking change was nudged
+away from this repo's breaking-change marker, purely because the marker routed it
+into a ledger it does not belong in. The erosion is invisible — every gate stayed
+green throughout.
+
+**With the category in place the prose flips back.** A published TYPE-surface
+narrowing resumes honestly carrying `**BREAKING**` and answers the gate with
+`type-surface-only`. ⛔ Dropping the token is no longer an available exit, and those
+four are cited here so the next author reads them as the shape to stop repeating.
+
+### D8 — the affected party is a TypeScript consumer, and the compiler is the channel
+
+The ADR-0087 ledger serves **metadata upgraders**: `objectstack migrate meta`
+rewrites stored metadata, and it has nothing to reach when the only thing that moved
+is a type annotation. The affected party here is a **TypeScript consumer** and the
+delivery channel is the **compiler at their own call site** — strictly more precise
+than a ledger line, and it reaches every affected consumer rather than the subset
+who read release notes.
+
+`no-migration-prescription` is not wrong in general — #6048 is exactly the shape it
+was built to catch — it simply cannot tell *a prescription for a metadata upgrader*
+from *a prescription for a source-code consumer*, and only the first is the ledger's
+business.
+
+An author may claim this category when **all four** of these hold, and the gate
+checks all four by name (`published`, `no-spec-diff`, `no-metadata-surface-diff`,
+`narrowed-from-erased`):
+
+1. **the package really publishes** — the exact inverse of `unpublished`, read from
+   the same workspace manifests. A private package's break reaches no consumer, so
+   the compiler is not the channel that makes this honest; `unpublished` is.
+2. **the diff does not touch `packages/spec/**`** — that package *is* the contract
+   between metadata producers and the runtime, and both ADR-0087 registries live
+   inside it.
+3. **no ADR-0087 shape surface moved in the diff** — no `*.zod.ts`, no
+   `packages/spec/src/contracts/**` entry, no object definition. Those are exactly
+   what `objectstack migrate meta` reaches; when one of them moved, the ledger *is*
+   a channel that can carry the change.
+4. **the named symbol was erased at the merge base and is concrete at HEAD** — for
+   each `<path>#<Symbol>` the author names, the gate reads its declared type at
+   *both* revs and requires `any` / `unknown` / no annotation at base, and a
+   concrete type at HEAD.
+
+### ⭐ Predicate 4 is what makes this a narrowing rather than a hole
+
+This is the **only** category exempt from the `no-migration-prescription` refusal.
+The exemption is necessary — measured on the card, without it the gate still refuses
+the exact class the category was created for — and it is also the only place in the
+vocabulary where something the prescription detector refuses today becomes
+claimable. That is not free, and predicate 4 is what pays for it.
+
+Predicates 1–3 alone were measured against the case this gate was **founded** on and
+they do not separate it: on reconstructed diffs the #12104 shipping half and the
+**#6048** shape come out identical on all three — published, no `packages/spec`
+movement, no metadata surface — so both would be admitted. And the prescription
+refusal is the only guard currently holding #6048 out. Exempting a category from it
+while checking only 1–3 would hand the founding case a green exit: a measured
+regression, not a hypothetical.
+
+Predicate 4 refuses it on a **positive, re-runnable reading** rather than on a
+detector miss — the same method D7 used. #6048's symbol
+(`packages/runtime/src/security/actor-user.ts#ActorUser`) is a concretely typed
+exported interface at the merge base that *lost* a runtime member; the class this
+category serves starts from `any` / `unknown` / no annotation at all. The base-side
+type is the reading that separates them.
+
+⛔ **Never weaken predicate 4 to make something else pass.** It is not one check of
+four; it is the reason the other three are allowed to skip the prescription refusal
+at all. A regression pin in the gate's `--self-test` asserts that the #6048 shape is
+refused by predicate 4 specifically, so the founding case can never become
+claimable.
+
+#### What this does not decide
+
+**Whether the HEAD type is the *right* type.** Whether the bound contract is what
+the route actually answers is a question about a producer, settled by driving it —
+which is what the changesets in this class do. This category asks only whether the
+surface moved *off* an erased type.
+
+**Whether the awaited type resolves to `any` through a chain.** Predicate 4 is a
+source-text reading of what the author wrote at two revs, which is what *"was it
+narrowed in this diff"* means. Its neighbour `check:exported-any-returns` judges the
+complementary question — *does it still resolve to `any`* — against the **built
+dist**, precisely because the erasure is invisible in source when a method carries
+no annotation. The division is deliberate.
+
+**The completeness of the claim.** Like `registered` and `runtime-interface-only`,
+the gate judges the claim that was made, not whether the author named every symbol
+their PR touched.
+
+**The dispositions of the four live instances.** Those are backfilled after this
+lands, per the ruling, and one of them (`declare-search-clone-response-contracts`)
+fails predicates 2 and 3 outright — it bumps `@objectstack/spec` and adds
+`packages/spec/src/api/protocol.zod.ts`, so it is not a member of this class.

@@ -15,7 +15,7 @@
  * `adminMiddleware`, which is `getAuthoritativeSessionFromCtx(ctx)` followed by
  * `APIError.fromStatus('UNAUTHORIZED')` — no body argument at all.
  *
- * Measured on the installed better-auth 1.7.1, anonymous, through
+ * Measured on the then-installed better-auth 1.7.1, anonymous, through
  * `AuthManager.handleRequest`, ten vendor-lane routes answered:
  *
  *     POST /admin/impersonate-user     -> 401 content-type: application/json  body ''

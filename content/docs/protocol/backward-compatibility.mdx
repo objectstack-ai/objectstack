@@ -174,11 +174,29 @@ The `@objectstack/spec` package provides additional stability guarantees:
 
 ---
 
-## Pre-1.0 Disclaimer
+## Launch Window: MINOR Releases Can Contain Breaking Changes
 
 <Callout type="warn">
-During the **0.x** development phase, MINOR versions may contain breaking changes. The full backward compatibility policy takes effect starting with version **1.0.0**.
+**This exception overrides the MAJOR/MINOR mapping above — read it before you plan an upgrade.** Every published `@objectstack/*` package versions in **lockstep**, and while the launch window is open a breaking change ships as a **MINOR** release rather than burning a MAJOR. The current release, **17.2.0**, is a MINOR and it contains a documented breaking change.
 </Callout>
+
+### Which surfaces this covers
+
+**All of them.** This is not scoped to an experimental corner or a pre-release channel: all **69** packages published from this repository belong to a single Changesets `fixed` group, so they share one version number and one policy. No published surface is exempt.
+
+The convention is enforced rather than informal — `scripts/check-changeset-no-major.mjs` fails any pull request that introduces a `major` bump, because under lockstep a single `major` on one package would promote the entire stack.
+
+### What this means for an upgrade
+
+- **Do not read a MINOR bump as safe to take unattended.** Read the [release notes](/docs/releases) for the version you are moving to: they lead with breaking changes and carry the migration steps.
+- **Pin exact versions** instead of caret ranges if you cannot review each MINOR before it lands.
+- **Diff your own metadata** across the upgrade with `os diff <before> <after> --breaking-only`.
+
+MAJOR releases do still happen — 17.0.0 was cut precisely because its breaking density was too high to carry `^16.x` consumers across on a caret range — but an individual breaking change does not, on its own, force one.
+
+### When it stops applying
+
+The versioning tables and deprecation timeline above describe the policy in its settled form; they take full effect when the launch window closes and a breaking change once again requires a MAJOR. Until then, **this section is the operative rule wherever the two disagree.**
 
 ---
 

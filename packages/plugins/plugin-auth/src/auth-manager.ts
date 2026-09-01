@@ -3815,7 +3815,7 @@ export class AuthManager {
    *
    * The scan existed to make the match case-insensitive, on the stated belief
    * that invitation addresses are stored as the inviter typed them while
-   * better-auth lowercases the registrant's. Measured on the installed
+   * better-auth lowercases the registrant's. Measured on the then-installed
    * better-auth 1.7.1, that belief is wrong on BOTH halves — the vendor
    * normalizes each side before this gate ever sees it:
    *

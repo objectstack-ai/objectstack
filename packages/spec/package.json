@@ -264,6 +264,8 @@
     "check:api-surface": "tsx scripts/build-api-surface.ts --check",
     "gen:export-origins": "tsx scripts/build-export-origins.ts",
     "check:export-origins": "tsx scripts/build-export-origins.ts --self-test && tsx scripts/build-export-origins.ts --check",
+    "gen:declaration-map": "tsx scripts/build-declaration-map.ts",
+    "check:declaration-map": "tsx scripts/build-declaration-map.ts --self-test && tsx scripts/build-declaration-map.ts --check",
     "check:exported-any": "tsx scripts/check-exported-any.ts --self-test && tsx scripts/check-exported-any.ts",
     "check:dual-source-exports": "tsx scripts/check-dual-source-exports.ts --self-test && tsx scripts/check-dual-source-exports.ts",
     "check:entry-nameability": "tsx scripts/check-entry-nameability.ts",

@@ -143,7 +143,7 @@ write state only through these signals:
 | label `pm:dispatched` | dispatched by this loop (the claim comment records the round) |
 | label `needs-user-decision` | waiting on the maintainer — **never dispatch**, never auto-answer |
 | open PR referencing the issue | implemented, in review |
-| merged PR with `Fixes #n` | done (GitHub closes the issue) |
+| merged PR with `Fixes #n` | done — GitHub closes it, same repo only |
 
 **One-time label setup** (idempotent — run at the start of the first round for
 every entry in `repos`):
@@ -406,8 +406,7 @@ Non-negotiables for this dispatch:
   in a DEDICATED worktree of that repository.
 - {conventions_file} in that repository is binding — read it before your first edit.
 - The issue is already claimed; do not touch its assignee.
-- Deliver a DRAFT PR in {target_repo} whose body starts with
-  "Fixes {backlog_repo}#{n}". Never merge anything.
+- Deliver a DRAFT PR in {target_repo}. Never merge anything.
 - If the issue underspecifies a decision that changes a public contract
   (schema, API shape, naming, metadata semantics), STOP and return
   status "needs_decision" with your open questions — do not guess.
@@ -466,8 +465,8 @@ that is absent, say so and fall back to `mode:subagent`.
 An independent session cannot return a message to the PM, so the dispatch
 prompt must be **fully standalone** (it starts with zero conversation context)
 and must instruct the agent to **post the JSON report as a comment on the
-issue**, prefixed with a machine-findable marker such as
-`<!-- dev-report -->`, in addition to opening the draft PR.
+issue**, prefixed with a machine-findable PLAIN-TEXT marker such as
+`dev-report`, in addition to opening the draft PR.
 
 ### 6. Collect
 
@@ -521,7 +520,7 @@ PR, over a handful of comparable cards — and treat it as local. Two same-day
 samples from this repo's loop show why no single number can be inherited: four
 text-only documentation cards landed at 93 / 96 / ~95 / ~110 min, while four
 mixed cards from the same day spanned ~64 min to ~2 h 50 min (the two long ones
-waiting on CI). Nine cards, one day, one toolchain, a spread from about an hour
+waiting on CI). Eight cards, one day, one toolchain, a spread from about an hour
 to nearly three. **Silence inside the baseline is not evidence**, and a check-in
 threshold having passed twice is evidence only that time passed. This is the
 same failure as inferring an abort from symptoms: until you know the baseline,
@@ -738,7 +737,7 @@ first edit. It overrides this template wherever they disagree. The rules that
 most often get missed:
 
 1. Worktree-first. Before any edit:
-     git worktree add ../<repo>-issue-<n> -b claude/issue-<n>-<slug> origin/{default_branch}
+     git worktree add --no-track ../<repo>-issue-<n> -b claude/issue-<n>-<slug> origin/{default_branch}
    then cd there and install dependencies. Never edit a shared checkout —
    other agents switch its HEAD under you. One worktree PER REPOSITORY if the
    change spans siblings.
@@ -800,8 +799,8 @@ Definition of done, in order:
   user-visible change (e.g. a changeset entry).
 - Pushed: git push -u origin claude/issue-<n>-<slug> (retry on network failure
   with backoff).
-- A DRAFT PR to the default branch, body starting "Fixes {backlog_repo}#<n>",
-  written in the language the repository's PRs use.
+- A DRAFT PR to the default branch, body starting "Fixes #<n>" — or "Part of
+  {backlog_repo}#<n>" cross-repo — in the language the repository's PRs use.
 - Tear down anything you started (dev servers, temporary processes) by PID.
 
 Rejection-class tests assert the envelope, not the throw. For any test whose
@@ -873,9 +872,9 @@ Final message — exactly this JSON, no prose around it:
 Use "rework" for a partial result you know is incomplete (say why in summary).
 
 Practical trap when filing issues or PRs through the GitHub API: the body
-sanitizer strips "<" followed by a letter as an HTML tag AT REST, which
-destroys TypeScript generics. Write a space after each "<" and read the stored
-body back to verify when a snippet is load-bearing.
+sanitizer deletes tag-shaped spans AT REST — "<" plus a letter (killing
+TypeScript generics) and HTML comments alike. Write a space after each "<"
+and read the stored body back when a snippet is load-bearing.
 ````
 
 ---
@@ -1068,7 +1067,7 @@ them into every dispatch:
 | Test / typecheck / lint commands per package | conventions file |
 | How the shared heavy-verify lock is taken (wrapper, lock path, acquisition budget) | conventions file |
 | Merge policy (merge queue, serial merge, maintainer-only) | conventions file |
-| Capability-expansion stance the business-need axis reads (tight by default, or permissive) | conventions file |
+| Capability-expansion stance axis ④ reads (tight by default, or permissive) | conventions file |
 | Which repositories exist and which is the backlog | `.claude/pm-dispatch.json` |
 | Recorded architecture decisions the escalation bar defers to | the project's ADR directory |
 

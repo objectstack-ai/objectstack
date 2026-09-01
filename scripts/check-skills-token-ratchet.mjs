@@ -272,7 +272,21 @@ export const CEILINGS = new Map([
   // minimal anchor form; the raising PR's body carries the arithmetic.
   ['skills/objectstack-pm-dispatch/SKILL.md', 14391],
   ['skills/objectstack-query/SKILL.md', 5552], //       -17 (was 5569)
-  ['skills/objectstack-ui/SKILL.md', 25125], //         -29 (was 25154)
+  // 25125 -> 25143: the CRM UI Blueprint — the catalog's module-completeness
+  // list, and the only place an agent is told what a finished module contains —
+  // priced `src/views/**`, `src/apps/**`, dashboards and reports but never the
+  // DATASET those last two bind, so an agent grew the app face and left the
+  // analytics face silently empty (a module shipped with views, nav, approvals
+  // and permissions was simply absent from the report builder). Maintainer
+  // ruling 2026-08-31, director seat batch #15, verbatim and untranslated:
+  // 「同意」 — accepting option C, whose text is: 「发布技能与文档的「长模块」路径
+  // 必须把 dataset 声明列为模块完整性的一部分」. Arithmetic, in bytes because that
+  // is what this convention divides: +204 for the new blueprint row, -7 for the
+  // Reports row it lets shrink, and -77 for a sentence deleted in the same file
+  // that restated report binding a second time inside its own paragraph — +120
+  // net, 25113 -> 25143 tokens. The row's 12 tokens of headroom absorb part of
+  // it, so the CEILING moves 18. The raising PR's body carries the same numbers.
+  ['skills/objectstack-ui/SKILL.md', 25143],
   ['skills/objectstack-upgrade/SKILL.md', 8333], //      -2 (was 8335)
 
   // ── the #12392 extension: the rest of the AUTHORED bundle ────────────────

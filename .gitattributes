@@ -93,6 +93,30 @@
 # 18 anchors stale, 5 marked). The driver removes hand-merge rounds; it is never
 # the only signal.
 
+#
+# #13731 enumerated this file's blind spot and closed it: `check:merge-driver` now
+# also reconciles the GENERATORS. Every `gen:*` script in every workspace manifest
+# (and the root) must be accounted for — named as a row's `gen` below, or carrying a
+# recorded disposition in NOT_DRIVER_MANAGED. Until then the gate was green over an
+# artifact that was in NEITHER list, which is how #13646 and #13335 were each found
+# by hand, during a merge. Eleven generators were unaccounted; each now has one.
+#
+# The three rows added here are the ones whose answer was "route": the per-skill
+# reference indexes (#13335) and both halves of the react-blocks contract. Their
+# neighbours got the other answer for reasons recorded per path — the skill docs and
+# the AI skills guide are MIXED (a spliced block in hand-written prose, so a deferral
+# would launder the prose), the two per-package test-typecheck ledgers are shrink-only
+# ratchets, the sdui lockstep record cannot be regenerated without an objectui
+# checkout, and the openapi/sbom outputs are gitignored so git never merges them.
+#
+# ⚠️ The same LOCAL-facility bound applies to all three: routing removes hand-merge
+# rounds, it does NOT protect them in the merge queue. What protects them is
+# server-side — `check:skill-refs` and `check:react-blocks` run in `lint.yml` on
+# `pull_request` and `merge_group` with no `paths:` filter, and both RE-DERIVE their
+# artifact from source rather than reading it back, so they also catch the silent
+# case where two branches' rows do not overlap and the text merge exits 0 describing
+# neither side.
+
 packages/spec/spec-changes.json                              merge=os-regen
 packages/spec/liveness/state-counts.md                       merge=os-regen
 packages/spec/authorable-surface/**                          merge=os-regen
@@ -102,8 +126,12 @@ packages/spec/json-schema.manifest/**                        merge=os-regen
 packages/spec/api-surface/**                                 merge=os-regen
 packages/spec/src/meta-spelling/meta-url-data.generated.ts   merge=os-regen
 packages/spec/export-origins/**                              merge=os-regen
+packages/spec/declaration-map/**                             merge=os-regen
 packages/spec/api-surface-signatures.json                    merge=os-regen
 docs/protocol-upgrade-guide.md                               merge=os-regen
 docs/audits/2026-07-unknown-key-strictness-ledger.counts.md  merge=os-regen
 content/docs/references/**                                   merge=os-regen
 content/docs/permissions/system-context.mdx                  merge=os-regen
+skills/*/references/_index.md                                merge=os-regen
+skills/objectstack-ui/contracts/react-blocks.contract.json   merge=os-regen
+skills/objectstack-ui/references/react-blocks.md             merge=os-regen

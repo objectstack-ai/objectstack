@@ -57,7 +57,12 @@ describe('FieldSchema.autonumberFormat — the declared contract default (#6555)
     // metadata loaders, the metadata API and the drivers' `initObjects`, so
     // that shift would be visible far outside autonumber.
     for (const type of ['text', 'number', 'lookup', 'boolean'] as const) {
-      const parsed = FieldSchema.parse({ type, label: 'X' }) as Record<string, unknown>;
+      // #13632: `lookup` requires a non-empty `reference` at parse — the type
+      // stays in this sample set for its key-absence behavior, in legal shape.
+      const fixture = type === 'lookup'
+        ? { type, label: 'X', reference: 'company' }
+        : { type, label: 'X' };
+      const parsed = FieldSchema.parse(fixture) as Record<string, unknown>;
       expect(parsed).not.toHaveProperty('autonumberFormat');
     }
     const auto = FieldSchema.parse({ type: 'autonumber', label: 'No.' }) as Record<string, unknown>;
