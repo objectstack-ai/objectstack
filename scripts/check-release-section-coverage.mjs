@@ -108,6 +108,45 @@
 // CLI at module load, which is why it is in KNOWN_IMPORT_UNSAFE), so moving one
 // without the other fails here rather than drifting silently.
 //
+// ## Exit codes — and why a could-not-read has one of its own
+//
+//   0  the corpus (or the self-test battery) was measured and came back clean.
+//   1  a FINDING: an uncovered minor or a stale index entry under --strict, a
+//      broken instrument, or a self-test case that actually failed. A claim
+//      about the tree.
+//   3  PREREQUISITE NOT MET. Something a measurement needed was not there, so
+//      NOTHING was measured and this says nothing about the tree. ⛔ NOT a
+//      finding. Same number, same words and same frame as
+//      `check-test-completeness.mjs` and `import-prerequisite.mjs`, which is
+//      where the argument for a code of its own is written out at length.
+//
+// The self-test READS the sibling gate to pin the two floors equal, and that
+// read used to sit behind a repo-root-relative path inside a swallowing
+// `catch`. Started from any cwd but the repo root, the read failed, the floor
+// stayed null, and the case rendered a CONTENT VERDICT ABOUT THE OTHER GATE —
+// "the floor is READ from … and equals this gate's (sibling: …, here: 16)" —
+// in the exact prose a real cross-gate floor drift would produce. Exit 1, on a
+// clean tree, at the same commit that exits 0 from the repo root. A reader who
+// hit it went looking for drift in check-release-page-status.mjs that was not
+// there, and one ablation cycle elsewhere was scored against it: that reading
+// was VOID, not a measurement.
+//
+// Both halves are closed, because either alone leaves the defect reachable:
+//
+//   1. The sibling is resolved from `import.meta.url`, so the read no longer
+//      depends on where the process was started. The self-test OBSERVES that
+//      from an unrelated cwd rather than arguing it.
+//   2. The `catch` no longer feeds `null` into the comparison. An unreadable
+//      sibling — or one that no longer declares a floor to inherit — REFUSES:
+//      exit 3, the shared PREREQUISITE NOT MET frame, and the battery stops
+//      before its first case. "Cannot read" can no longer be rendered as "the
+//      floors disagree", whatever makes the read fail next time.
+//
+// Doing only the first would leave a `catch` that still turns every OTHER read
+// failure into a false verdict about a different gate; doing only the second
+// would turn today's ordinary non-root invocation into a loud refusal instead
+// of a pass. Two halves of one repair.
+//
 // ## Corpus at the time of writing (2026-08-21, base 699132f259)
 //
 // IN SCOPE: 4 GA minors — 16.0.0, 16.1.0, 17.0.0, 17.1.0 — all covered; both
@@ -143,12 +182,44 @@
 // the process itself sanctions the other branch, and no gate should hard-fail a
 // state its own process document permits.
 import { readFileSync, existsSync, appendFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, isAbsolute, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 
 const SPEC_CHANGELOG = 'packages/spec/CHANGELOG.md';
 const RELEASES_DIR = 'content/docs/releases';
 const INDEX_PATH = `${RELEASES_DIR}/index.mdx`;
+
+/**
+ * The sibling gate, as the repo-relative name every MESSAGE in this file names
+ * it by — a reader is told where to look in the tree, not where this process
+ * happens to have been started.
+ */
 const SIBLING_GATE = 'scripts/check-release-page-status.mjs';
+
+/**
+ * …and the path the self-test actually READS, resolved from THIS FILE.
+ *
+ * `import.meta.url` was already load-bearing here (the entry guard at the
+ * bottom); this is the same seed used one step earlier. An absolute path cannot
+ * depend on `process.cwd()`, which is the whole of the cwd repair — see the
+ * header's exit-code section for what the bare relative spelling cost.
+ */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const SIBLING_GATE_PATH = resolve(REPO_ROOT, SIBLING_GATE);
+
+/**
+ * The exit-code contract, NAMED rather than spelled inline at each site, so the
+ * self-test pins the value each path actually returns instead of a comment
+ * about it. `check-test-completeness.mjs`'s shape and
+ * `import-prerequisite.mjs`'s numbers — 3 is what every gate in this repo
+ * already means by PREREQUISITE NOT MET, so a sixth spelling would be the
+ * novelty, not the reuse.
+ */
+export const EXIT_OK = 0;
+export const EXIT_FINDINGS = 1;
+export const EXIT_PREREQUISITE_NOT_MET = 3;
 
 /** Inherited from check-release-page-status.mjs; the self-test pins them equal. */
 const SCOPE_FLOOR_MAJOR = 16;
@@ -367,6 +438,127 @@ export function indexCurrencyFindings(major, newestVersion, line) {
   ];
 }
 
+// ── The inherited floor: read it, or refuse ──────────────────────────────────
+
+/**
+ * The sibling's `SCOPE_FLOOR_MAJOR`, or WHY it could not be read.
+ *
+ * Two shapes and no third. There is deliberately no "no floor, carry on" value:
+ * that value is exactly what used to reach the comparison and come back out of
+ * it wearing the vocabulary of a verdict about the other gate.
+ *
+ * The reader is a PARAMETER so the self-test can pin both failure branches
+ * without arranging an unreadable file on disk; the default reads the absolute
+ * path above, so it answers the same from every working directory.
+ *
+ * @param {() => string} [read]
+ * @returns {{ floor: number, unmet: null }
+ *           | { floor: null, unmet: { headline: string, detail: string[], fix: string } }}
+ */
+export function readSiblingFloor(read = () => readFileSync(SIBLING_GATE_PATH, 'utf8')) {
+  let src;
+  try {
+    src = read();
+  } catch (e) {
+    return {
+      floor: null,
+      unmet: {
+        headline: 'the sibling gate this self-test inherits its floor from could not be read.',
+        detail: [
+          `Looked for:  ${SIBLING_GATE_PATH}`,
+          `Reason:      ${e && e.message ? e.message : String(e)}`,
+          '',
+          'That path is resolved from this file rather than from the working directory, so a',
+          'non-root cwd is no longer a way to arrive here — something really is absent,',
+          'renamed or unreadable.',
+        ],
+        fix: `restore ${SIBLING_GATE}. The floor is INHERITED from it, so this gate must not `
+          + 'answer by restating a number of its own.',
+      },
+    };
+  }
+  const m = /const\s+SCOPE_FLOOR_MAJOR\s*=\s*(\d+)\s*;/.exec(src);
+  if (m === null) {
+    return {
+      floor: null,
+      unmet: {
+        headline: `${SIBLING_GATE} was read but declares no SCOPE_FLOOR_MAJOR to inherit.`,
+        detail: [
+          `Read:  ${SIBLING_GATE_PATH} (${src.length} bytes)`,
+          '',
+          'The floor is pinned by reading the sibling as TEXT — importing it would run its',
+          'whole CLI at module load, which is why it sits in KNOWN_IMPORT_UNSAFE. A renamed',
+          'declaration, or a spelling this pattern no longer matches, leaves nothing to',
+          'compare — which is NOT evidence that the two floors disagree.',
+        ],
+        fix: `re-point the declaration pattern at whatever ${SIBLING_GATE} now calls its floor, `
+          + 'in the same edit that renames it.',
+      },
+    };
+  }
+  return { floor: Number(m[1]), unmet: null };
+}
+
+/**
+ * The refusal, as a VALUE — its exit code and its lines — so the self-test pins
+ * the code each branch really returns rather than a comment claiming one.
+ *
+ * The frame is `check-test-completeness.mjs`'s and `import-prerequisite.mjs`'s,
+ * clause for clause: what is unmet, why, the way out, and — load-bearing —
+ * that nothing was measured, so the code says nothing about the tree. One
+ * clause is this gate's own, and it is the reason the card exists: the refusal
+ * states in words that it is NOT the claim that the two gates disagree.
+ *
+ * @param {{ floor: number|null, unmet: object|null }} reading
+ * @returns {{ exit: number, lines: string[] } | null} null when a floor was read
+ */
+export function siblingFloorRefusal(reading) {
+  if (reading.unmet === null) return null;
+  const { headline, detail, fix } = reading.unmet;
+  return {
+    exit: EXIT_PREREQUISITE_NOT_MET,
+    lines: [
+      '',
+      `check-release-section-coverage --self-test: PREREQUISITE NOT MET — ${headline}`,
+      '',
+      ...detail.map((l) => (l ? `  ${l}` : '')),
+      '',
+      `  Fix:  ${fix}`,
+      '',
+      '  Nothing was measured: this self-test refused before running a single case, so this',
+      '  result says NOTHING about the floors, about the coverage assertions, or about the',
+      '  tree. ⛔ It is NOT a finding — and in particular it is NOT the claim that the two',
+      '  gates floor at different majors. A read that did not happen cannot disagree with',
+      '  anything, and rendering it as a verdict about the sibling gate is the defect this',
+      '  branch exists to end.',
+      `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:`,
+      '  `node scripts/check-release-section-coverage.mjs --self-test > /tmp/coverage.log 2>&1; echo "EXIT=$?"`.',
+      "  Piped, `$?` is the LAST command's status, and `head`/`tail` essentially never fail —",
+      '  that is the false green, and no pipe shape repairs it.)',
+    ],
+  };
+}
+
+/**
+ * The two source-level shapes the pins below forbid, and the ONE fixture that
+ * carries both so each pin is proven able to fail.
+ *
+ * `RENDERS_UNREAD_PLACEHOLDER` is the defect in one word: the token the old
+ * `catch` interpolated into the SCOPE case when the read failed, which is how a
+ * could-not-read came to wear the vocabulary of a content verdict. Written as a
+ * pattern at module scope on purpose — a regex literal spelled INSIDE
+ * `selfTest` would appear in its own `toString()` and fail the pin it defines.
+ */
+const RENDERS_UNREAD_PLACEHOLDER = /UNREADABLE/;
+const SPELLS_A_LITERAL_EXIT_CODE = /Exit code \d/;
+
+/**
+ * ⛔ NEVER CALLED. It exists to be read by `toString()` as the NEGATIVE CONTROL
+ * for both pins: without it a typo in either pattern passes forever, and a pin
+ * that cannot fail is not a pin.
+ */
+const controlFalseVerdictShapes = () => "(sibling: UNREADABLE, here: 16) … (Exit code 1, distinct from";
+
 // ── Self-test ────────────────────────────────────────────────────────────────
 
 /**
@@ -417,6 +609,20 @@ const NO_PARENTHETICAL_INDEX_V13 =
   '- [v13.0.0](/docs/releases/v13) — Permission Model v2 (ADR-0090): Roles and Profiles converge.';
 
 export function selfTest() {
+  // ⛔ FIRST, and it RETURNS rather than recording a case. The floor lives in
+  // another file; a read that did not happen measured nothing — least of all
+  // the sibling's floor — so it refuses with a code of its own instead of
+  // entering the comparison below. Reading the sibling as TEXT is deliberate:
+  // importing it would run its entire CLI at module load (no entry guard, which
+  // is why it sits in KNOWN_IMPORT_UNSAFE), so a text read is the only way to
+  // pin the two floors together at all.
+  const reading = readSiblingFloor();
+  const refusal = siblingFloorRefusal(reading);
+  if (refusal !== null) {
+    for (const line of refusal.lines) console.error(line);
+    return refusal.exit;
+  }
+
   const failures = [];
   let cases = 0;
   const expect = (label, cond) => {
@@ -425,24 +631,102 @@ export function selfTest() {
   };
 
   // ── Scope: the floor is INHERITED, and that inheritance is enforced ────────
+  expect(
+    `scope — the floor is READ from ${SIBLING_GATE} and equals this gate's (sibling: `
+    + `${reading.floor}, here: ${SCOPE_FLOOR_MAJOR}). Two gates reading the same pages under `
+    + 'different floors is two answers to one question, so the inheritance is pinned rather than '
+    + 'declared in a comment',
+    reading.floor === SCOPE_FLOOR_MAJOR,
+  );
+
+  // ── The READ itself: cwd-independent, and a failed read REFUSES ────────────
+  expect(
+    'scope/read — the sibling path is ABSOLUTE, resolved from this file. An absolute path cannot '
+    + 'depend on the working directory, which is the whole of the cwd repair: the bare relative '
+    + 'spelling it replaces addressed a different file — usually none — from every other cwd',
+    isAbsolute(SIBLING_GATE_PATH) && SIBLING_GATE_PATH === resolve(REPO_ROOT, SIBLING_GATE),
+  );
   {
-    // Read the sibling as TEXT. Importing it would run its entire CLI at module
-    // load (it has no entry guard, which is why it sits in KNOWN_IMPORT_UNSAFE),
-    // so a text read is the only way to pin the two floors together.
-    let siblingFloor = null;
+    // THE DEFECT, OBSERVED rather than argued: same process, same tree, a
+    // working directory that is not the repo root. That invocation used to fail
+    // the read, keep a null floor, and report a content verdict about the
+    // sibling gate — exit 1 on a clean tree.
+    const cwd = process.cwd();
+    let elsewhere;
     try {
-      const src = readFileSync(SIBLING_GATE, 'utf8');
-      const m = /const\s+SCOPE_FLOOR_MAJOR\s*=\s*(\d+)\s*;/.exec(src);
-      if (m) siblingFloor = Number(m[1]);
-    } catch { /* reported by the expect below */ }
+      process.chdir(tmpdir());
+      elsewhere = readSiblingFloor();
+    } finally {
+      process.chdir(cwd);
+    }
     expect(
-      `scope — the floor is READ from ${SIBLING_GATE} and equals this gate's (sibling: `
-      + `${siblingFloor === null ? 'UNREADABLE' : siblingFloor}, here: ${SCOPE_FLOOR_MAJOR}). Two `
-      + 'gates reading the same pages under different floors is two answers to one question, so the '
-      + 'inheritance is pinned rather than declared in a comment',
-      siblingFloor === SCOPE_FLOOR_MAJOR,
+      'scope/cwd — the floor reads the SAME from an unrelated working directory. This is the exact '
+      + 'invocation that produced a confidently wrong verdict about a different gate, on a clean '
+      + 'tree, at a commit that passed from the repo root',
+      elsewhere.unmet === null && elsewhere.floor === SCOPE_FLOOR_MAJOR,
     );
   }
+  expect(
+    'scope/refusal — a read that THROWS is an unmet prerequisite, never a floor. The branch that '
+    + 'swallowed it left the comparison holding null, and null is the one input that cannot be a '
+    + 'disagreement',
+    (() => {
+      const r = readSiblingFloor(() => {
+        throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' });
+      });
+      return r.floor === null && r.unmet !== null && r.unmet.detail.some((l) => l.includes('ENOENT'));
+    })(),
+  );
+  expect(
+    'scope/refusal — a sibling that is READABLE but declares no floor is the same class: there is '
+    + 'nothing to compare, so it refuses rather than reporting a mismatch it never measured',
+    (() => {
+      const r = readSiblingFloor(() => 'const SOME_OTHER_NAME = 16;\n');
+      return r.floor === null && r.unmet !== null && r.unmet.headline.includes('no SCOPE_FLOOR_MAJOR');
+    })(),
+  );
+  expect(
+    'scope/refusal — the refusal exits 3, distinct from a finding\'s 1 and from a pass. The exit '
+    + 'CODE is what a reader and a script both act on, so a could-not-read that kept the finding '
+    + 'number would still read as a finding however carefully its text was worded',
+    siblingFloorRefusal(readSiblingFloor(() => { throw new Error('x'); })).exit === EXIT_PREREQUISITE_NOT_MET
+    && EXIT_PREREQUISITE_NOT_MET !== EXIT_FINDINGS
+    && EXIT_PREREQUISITE_NOT_MET !== EXIT_OK,
+  );
+  expect(
+    'scope/refusal — a floor that WAS read produces no refusal, so this branch cannot swallow a '
+    + 'healthy run. A refusal that fires always is not a refusal',
+    siblingFloorRefusal({ floor: SCOPE_FLOOR_MAJOR, unmet: null }) === null,
+  );
+  expect(
+    'scope/refusal — the refusal says nothing was measured, says it is NOT a finding, DENIES the '
+    + 'floor-disagreement reading by name, and names both its own code and the finding code it is '
+    + 'distinct from',
+    (() => {
+      const text = siblingFloorRefusal(readSiblingFloor(() => { throw new Error('x'); })).lines.join('\n');
+      return text.includes('PREREQUISITE NOT MET')
+        && text.includes('Nothing was measured')
+        && text.includes('NOT a finding')
+        && text.includes('floor at different majors')
+        && text.includes(`Exit code ${EXIT_PREREQUISITE_NOT_MET}`)
+        && text.includes(`a finding's ${EXIT_FINDINGS}`);
+    })(),
+  );
+  expect(
+    'scope/verdict — no case in this battery can render a could-not-read as a verdict any more: the '
+    + 'placeholder the old catch fed into the scope comparison appears nowhere in it, and the '
+    + 'control fixture proves the pin can still fail',
+    !RENDERS_UNREAD_PLACEHOLDER.test(selfTest.toString())
+    && RENDERS_UNREAD_PLACEHOLDER.test(controlFalseVerdictShapes.toString()),
+  );
+  expect(
+    'scope/verdict — the refusal INTERPOLATES its exit codes rather than spelling them, so a '
+    + 'renumbering can never leave the advisory claiming the old one while the branch returns the '
+    + 'new one',
+    !SPELLS_A_LITERAL_EXIT_CODE.test(siblingFloorRefusal.toString())
+    && SPELLS_A_LITERAL_EXIT_CODE.test(controlFalseVerdictShapes.toString()),
+  );
+
   expect(
     'scope — SCOPE_NOTE carries the verbatim ruling and says the floor is INHERITED, so a reader of '
     + 'the output learns both the cutoff and that it is not this gate\'s to move',
@@ -674,16 +958,18 @@ export function selfTest() {
   if (failures.length > 0) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-release-section-coverage --self-test: ${failures.length} failure(s).\n`);
-    return 1;
+    return EXIT_FINDINGS;
   }
   console.log(
     `OK  self-test: ${cases} cases pass — the pre-#10232 v17 state goes RED on both `
     + 'assertions and the post-#10232 state stays GREEN, minor 11.1 is told apart from 11.10 and an '
     + 'RC heading from a release, the newest-of-major compare is immune to the `sort -V` prerelease '
     + 'trap, findings are advisory while a broken instrument is fatal in every mode, and the v16 '
-    + 'floor is READ from the sibling gate rather than restated.',
+    + 'floor is READ from the sibling gate rather than restated — from any working directory, and '
+    + 'with a read that could not happen refusing as PREREQUISITE NOT MET instead of rendering as a '
+    + 'verdict about that gate.',
   );
-  return 0;
+  return EXIT_OK;
 }
 
 // ── Scope, exit policy, rendering ────────────────────────────────────────────
@@ -699,13 +985,18 @@ export function inScope(major) {
 /**
  * The whole severity policy, in one place so the self-test can pin it.
  *
+ * ⛔ Only the PREREQUISITE branch has a code of its own. A verdict this gate
+ * really reached is still its own `EXIT_FINDINGS`, and nothing here returns 3:
+ * a broken instrument is a measurement that WAS attempted over the corpus and
+ * came back impossible, which is this gate's own claim to make.
+ *
  * @param {{ instrument: string[], findings: string[], strict: boolean }} input
- * @returns {0 | 1}
+ * @returns {EXIT_OK | EXIT_FINDINGS}
  */
 export function exitCodeFor({ instrument, findings, strict }) {
-  if (instrument.length > 0) return 1;
-  if (strict && findings.length > 0) return 1;
-  return 0;
+  if (instrument.length > 0) return EXIT_FINDINGS;
+  if (strict && findings.length > 0) return EXIT_FINDINGS;
+  return EXIT_OK;
 }
 
 function renderInstrumentFailure(problems) {
