@@ -29,6 +29,26 @@
  * this tool's own count. See `spellingSplit` for the measurement, and for why
  * the COUNT alone would have signed off on the wrong list.
  *
+ * ## The OTHER axis a harvest is lost on: the SECTION (#13642)
+ *
+ * The paragraph above is about two SPELLINGS inside one block. The harvest is
+ * lost a second way, across the block boundary: this card's runnable answer
+ * lives in a path-derived block AND a differently-shaped convention block, and
+ * a consumer who pattern-matches one section's shape takes a strict subset.
+ * Measured twice in one night by two independent devs, on
+ * `check:system-context-census` and `check:engine-double-contract`, both times
+ * after the header above already said never to harvest this prose — and a
+ * third reader, the dispatching PM, misread the same output a third way. It
+ * defeats the discipline built to stop it: both devs re-derived from the tree
+ * rather than from memory, which is the correct practice, and still under-ran.
+ *
+ * ⛔ Not fixed with another output mode — `--commands` IS the flat list and it
+ * already existed on both nights. Fixed by making a partial harvest
+ * DETECTABLE: `familyReconciliation` states the union's total in the human
+ * rendering with the arithmetic tying it to both sections, and
+ * `spellingFooterLines` no longer spells its matched-block subtotal in the
+ * vocabulary of a total. See those two for the measurements.
+ *
  * ## This tool answers about the tree it RUNS IN, and says so on every run
  *
  * It lives in one repo and derives from that repo's workflows and check
@@ -2689,12 +2709,39 @@ export const HARVEST_SNIPPET = [
  * The ⛔ line, by contrast, is conditional — on a card with no direct row a
  * one-spelling grep really does lose nothing, and a warning that fires anyway
  * would be training the reader on a claim this run just measured as false.
+ *
+ * ## Why the heading says `matched families` and not `families` (#13642)
+ *
+ * This footer counts the MATCHED block and nothing else, and for a long time it
+ * opened with a bare `N families` — a SUBTOTAL spelled in the vocabulary of a
+ * total, printed immediately under the rows a consumer harvests. That is the
+ * shape #13642 was filed on. Measured on this tree at 24b66352, for the card
+ * `packages/spec/src/foo.test.ts`: the matched block prints 40 rows, this
+ * footer said `40 families`, and the card's real runnable answer is 44. A
+ * reader who harvested the block, counted 40 and read the footer got a
+ * reconciliation that AGREED — on the wrong list. Both the incidents on that
+ * card lost the convention block specifically, and this line is the number they
+ * would have checked against.
+ *
+ * The count is not wrong; its SCOPE was unsaid. Naming the scope costs nothing
+ * a consumer had, and it makes the total below the only line in the human
+ * rendering that claims to be a total. See `familyReconciliation` for that
+ * total and for the arithmetic tying it back to these rows.
+ *
+ * `recon` is optional and the whole forward-pointer is conditional on
+ * `conventionOnly > 0`, for the reason the ⛔ line above is conditional: on a
+ * card whose convention block is empty, a warning that this block is a part of
+ * the answer would be training the reader on a claim this run measured as
+ * false. It is passed IN rather than recomputed so the footer and the
+ * reconciliation cannot disagree about how many families sit outside this
+ * block — one structure, two renderings, which is the rule the rest of this
+ * file's output already follows.
  */
-export function spellingFooterLines(split) {
+export function spellingFooterLines(split, recon = null) {
   if (split.total === 0) return [];
   const parts = [`${split.pnpm} pnpm`, `${split.node} direct node`];
   if (split.other > 0) parts.push(`${split.other} neither (${split.otherCommands.join(', ')})`);
-  const lines = [`${split.total} families — ${parts.join(', ')}.`];
+  const lines = [`${split.total} matched families — ${parts.join(', ')}.`];
   if (split.pnpm < split.total) {
     lines.push(
       `  ⛔ Two spellings, deliberately (the GATE INVOCATION IDIOM in lint.yml). A harvest that greps 'pnpm check:' out of` +
@@ -2706,6 +2753,14 @@ export function spellingFooterLines(split) {
     '  Holding captured text already? This form takes the whole block and strips only the annotation:',
     ...HARVEST_SNIPPET.map((line) => `      ${line}`),
   );
+  if (recon && recon.conventionOnly > 0) {
+    lines.push(
+      `  ⛔ ...and a harvest of this block is ${split.total} of the ${recon.total} this card owes, whichever spelling it takes:` +
+        ` ${recon.conventionOnly} more famil(ies) are named by change KIND and print under their own heading below,` +
+        ' outside every harvest of THIS block — the published snippet above included.',
+      `    The Reconciliation line under that heading carries the ${recon.total}. Assert your list against THAT number, never against this one.`,
+    );
+  }
   return lines;
 }
 
@@ -7767,6 +7822,163 @@ export function commandsFor({ matchedRows = [], kindGroups = [] } = {}) {
 }
 
 /**
+ * The count reconciliation — ONE number a consumer can assert a harvest
+ * against, and the arithmetic that ties it back to the sections above it
+ * (#13642).
+ *
+ * ## The defect this answers, and why it is not a reading problem
+ *
+ * The human rendering places this card's runnable answer in TWO differently
+ * shaped sections: the matched block (path-derived, `  - ` rows carrying a
+ * `matched via` column) and the convention block (kind-derived, `    - ` rows
+ * under a per-kind heading). Twice in one night, on two cards, two independent
+ * devs harvested one section, ran it green, and reddened CI on a family the
+ * other section had named — `check:system-context-census` once,
+ * `check:engine-double-contract` once. Both classified it as their own error.
+ * A third reader, the dispatching PM, misread the same output a third way and
+ * nearly filed a derivation bug that would have been false.
+ *
+ * ⛔ The remedy is NOT another output mode. `--commands` and `--json` already
+ * exist and already carry the union; #13462 put "never harvest this prose" in
+ * this file's own header, with its 8-of-12 measurement, and the prose was
+ * harvested twice more afterwards. What was missing is the half that makes a
+ * partial harvest DETECTABLE: nothing in the human rendering stated the total.
+ * The nearest thing to it was the spelling footer's `N families`, which counts
+ * the matched block alone — so a consumer who dropped the convention block
+ * reconciled successfully against a subtotal. See spellingFooterLines for that
+ * measurement and for why its heading now names its scope.
+ *
+ * ## Why the parts are computed from the SAME sets `commandsFor` unions
+ *
+ * A count computed independently of the sections it claims to reconcile can
+ * drift from them, and an instrument that cannot fail toward its own target is
+ * the recurring defect this repo keeps finding one level up — a reconciliation
+ * line that says 44 while the sections hold 45 is worse than no line, because
+ * it is assertable and wrong. So the two parts below are built with the SAME
+ * two expressions `commandsFor` unions, not with a second traversal of
+ * `matched`/`CHANGE_KIND_GATES`: add a family to either input and both the
+ * section and its term here move together, because they are readings of one
+ * structure. The identity `matched + convention − both === total` then holds by
+ * set algebra rather than by care, and it is ASSERTED anyway — a mismatch means
+ * the union and its parts came from different places, which is a broken
+ * instrument, and #4690's rule is that a broken instrument refuses rather than
+ * prints a number that looks like an answer.
+ *
+ * ## What the total deliberately does NOT cover
+ *
+ * The pending-changeset families, the unreachable listing and the always-runs
+ * tail are each outside it, each with its own count printed under its own
+ * heading. That is the same disclosure `machineReadableOutput` makes on stderr,
+ * and it is made here for the same reason: a new number that reads as "the
+ * complete account of what CI runs" would reproduce this card's own defect one
+ * layer up.
+ *
+ * `staleRows` and the row/family gap are surfaced rather than smoothed. A
+ * consumer counting PRINTED rows in the convention block and comparing them
+ * with `convention` here would otherwise find a discrepancy with no
+ * explanation — a STALE row prints and contributes no command, and one family
+ * hit by two kinds prints twice. Both are stated in the rendering.
+ */
+export function familyReconciliation({ matchedRows = [], kindGroups = [] } = {}) {
+  const commands = commandsFor({ matchedRows, kindGroups });
+  // The SAME expression commandsFor uses for its matched half. Written as a
+  // second traversal it would be a second answer to a question this file
+  // already answers once.
+  const matchedCommands = new Set(matchedRows.map((row) => row.command));
+  const conventionCommands = new Set();
+  let conventionRows = 0;
+  let staleRows = 0;
+  for (const group of kindGroups) {
+    for (const gate of group.gates) {
+      conventionRows += 1;
+      if (gate.command) conventionCommands.add(gate.command);
+      else staleRows += 1;
+    }
+  }
+  const both = [...conventionCommands].filter((command) => matchedCommands.has(command)).length;
+  const recon = {
+    total: commands.length,
+    matched: matchedCommands.size,
+    matchedRows: matchedRows.length,
+    convention: conventionCommands.size,
+    conventionRows,
+    conventionOnly: conventionCommands.size - both,
+    both,
+    staleRows,
+  };
+  if (recon.matched + recon.convention - recon.both !== recon.total) {
+    throw new Error(
+      'dispatch-gates: the family reconciliation does not close — ' +
+        `${recon.matched} matched + ${recon.convention} convention − ${recon.both} both ≠ ${recon.total} distinct. ` +
+        'The parts and the union came from different structures, which is the drift this line exists to detect. ' +
+        'Refusing rather than printing a total that cannot be trusted (#4690).',
+    );
+  }
+  return recon;
+}
+
+/**
+ * The reconciliation, rendered. Printed on EVERY completed derivation, hit or
+ * not — including at zero.
+ *
+ * That is deliberate and it is the OPPOSITE of the neighbouring rule for
+ * `spellingFooterLines`, which returns nothing on an empty block. The two
+ * answer different questions and the divergence is the point rather than an
+ * oversight. That footer warns about a shortfall INSIDE a block, so with no
+ * block there is nothing to warn about and a zero heading would only invite a
+ * hunt for rows that do not exist. This line is a NUMBER A CONSUMER ASSERTS
+ * AGAINST, and an absent number is not assertable: printing it only on a hit
+ * would make its absence mean two things at once — "this card owes no gates"
+ * and "this build has no reconciliation" — which is exactly the argument
+ * `derive` already makes for printing the tier verdict on every run.
+ */
+export function familyReconciliationLines(recon) {
+  if (recon.total === 0) {
+    return [
+      'Reconciliation — 0 famil(ies): this card\'s whole runnable answer, and the derivation COMPLETED to reach it.',
+      '  0 named by PATH (the matched block) + 0 named by change KIND (the convention block). An empty answer, not a missing one.',
+      '  ⇒ --commands prints nothing for these paths and exits 0. The always-runs tail below still applies and is NOT covered by this number.',
+    ];
+  }
+  const lines = [
+    `Reconciliation — ${recon.total} famil(ies): this card's WHOLE runnable answer, and the number to assert a harvest against.`,
+    `  ${recon.matched} named by PATH (the matched block) + ${recon.convention} named by change KIND (the convention block)` +
+      `${recon.both ? `, ${recon.both} of them the same family reached both ways` : ''} ⇒ ${recon.total} distinct.`,
+  ];
+  if (recon.conventionOnly > 0) {
+    lines.push(
+      `  ⛔ A harvest that ends at ONE section is SHORT and reports nothing missing: the matched block alone is` +
+        ` ${recon.matched} of the ${recon.total}, the convention block alone is ${recon.convention} of the ${recon.total}.` +
+        ' Two cards lost the convention block exactly this way, hours apart, and CI found it both times.',
+    );
+  }
+  lines.push(
+    `  ⇒ Skip the arithmetic: --commands prints exactly these ${recon.total}, one runnable command per line, nothing else on stdout.` +
+      ' It cannot drop a section or a spelling; this line exists so a harvest of the PROSE can be caught when it does.',
+  );
+  if (recon.matchedRows !== recon.matched) {
+    lines.push(
+      `  (the matched block prints ${recon.matchedRows} rows for those ${recon.matched} — the surplus rows render the same runnable command.)`,
+    );
+  }
+  if (recon.conventionRows !== recon.convention) {
+    const notes = [];
+    if (recon.staleRows > 0) notes.push(`${recon.staleRows} STALE, contributing no command`);
+    if (recon.conventionRows - recon.staleRows > recon.convention) {
+      notes.push(`${recon.conventionRows - recon.staleRows - recon.convention} a repeat of a family another kind already hit`);
+    }
+    lines.push(
+      `  (the convention block prints ${recon.conventionRows} rows for those ${recon.convention}: ${notes.join('; ')}.)`,
+    );
+  }
+  lines.push(
+    `  ⛔ ${recon.total} is what THIS CARD owes by path and kind — NOT a complete account of what CI runs on the PR.` +
+      ' The pending-changeset families, the unreachable listing and the always-runs tail below are each OUTSIDE it, each with its own count.',
+  );
+  return lines;
+}
+
+/**
  * `--json`, as one document. Everything the human rendering places, placed the
  * same way, so a consumer never has to choose between a machine-readable answer
  * and a complete one.
@@ -7925,6 +8137,13 @@ function derive(paths, { showResidue = false, mode = 'human' } = {}) {
     return;
   }
 
+  // Computed ONCE, above the rendering, and handed to both readers of it: the
+  // matched block's footer (which needs to know how many families sit outside
+  // the block it counts) and the reconciliation line below. Recomputing it in
+  // either place would be two readings of one derivation, which is the drift
+  // this card is about.
+  const recon = familyReconciliation({ matchedRows, kindGroups });
+
   console.log(`dispatch-gates: ${byCheck.size} check famil(ies) discovered across ${workflows.length} workflow file(s) — derived at runtime, nothing listed in this script.\n`);
   // The tier verdict prints on EVERY run, hit or not. Printing it only on a hit
   // would make its absence mean two things at once — "no mandate" and "this
@@ -7942,7 +8161,7 @@ function derive(paths, { showResidue = false, mode = 'human' } = {}) {
     // the block at the first empty line, so a footer butted against the rows
     // would be harvested AS rows. See spellingFooterLines.
     console.log('');
-    for (const line of spellingFooterLines(spellingSplit(matchedRows.map((r) => r.command)))) {
+    for (const line of spellingFooterLines(spellingSplit(matchedRows.map((r) => r.command)), recon)) {
       console.log(line);
     }
   } else {
@@ -7953,6 +8172,14 @@ function derive(paths, { showResidue = false, mode = 'human' } = {}) {
     console.log('\nConvention-triggered gates (this change KIND moves them; no path derivation can name them):');
     for (const line of kindLines) console.log(line);
   }
+
+  // Directly BELOW the last section that feeds it, and above everything the
+  // total deliberately excludes. Placed at the top it would state a figure
+  // before the sections it reconciles had been printed; placed under the
+  // residue it would sit past the point a harvesting consumer stops reading.
+  // Here it closes the runnable answer and the section boundary is the claim.
+  console.log('');
+  for (const line of familyReconciliationLines(recon)) console.log(line);
 
   const pendingOut = pendingChangesetLines(pending);
   if (pendingOut.length) {
@@ -14593,7 +14820,14 @@ function selfTest() {
   // ⭐ CONTROL 3, as a pin: the footer must not hardcode "there is always a
   // direct form". On an all-pnpm block it has to SAY `0 direct node`.
   const pureFooter = spellingFooterLines(spellingSplit(['pnpm check:a', 'pnpm check:b', 'pnpm check:c']));
-  t('the footer prints the direct-node term at ZERO on a pure-pnpm block', pureFooter[0] === '3 families — 3 pnpm, 0 direct node.');
+  t('the footer prints the direct-node term at ZERO on a pure-pnpm block', pureFooter[0] === '3 matched families — 3 pnpm, 0 direct node.');
+  // ⭐ #13642: the heading names its SCOPE. This count is the matched block
+  // alone, and spelled as a bare `N families` it was a subtotal in the
+  // vocabulary of a total, printed directly under the rows a consumer
+  // harvests — the line the two devs who dropped the convention block
+  // reconciled against, successfully, on the wrong list.
+  t('and it names the block it counts rather than claiming to be the total', pureFooter[0].startsWith('3 matched families'));
+  t('and no line of it claims a bare `N families` total any more', !pureFooter.some((l) => /^\d+ families /.test(l)));
   // ...and the ⛔ warning is the half that must NOT fire there: on a block with
   // no direct row a one-spelling grep really does lose nothing, and a warning
   // that fires anyway trains the reader on a claim this run measured as false.
@@ -14613,6 +14847,101 @@ function selfTest() {
   t('and deduplicates a family reached BOTH ways rather than listing it twice', cfOut.filter((c) => c === 'pnpm check:b').length === 1);
   t('and emits NOTHING for a STALE kind entry no workflow runs — never a fabricated command', !cfOut.some((c) => c.includes('gone')));
   t('and sorts, so two harvests of one tree are byte-comparable', cfOut.join('\n') === [...cfOut].sort().join('\n'));
+
+  // ── The count reconciliation (#13642) ────────────────────────────────────
+  //
+  // The card: the human rendering places this answer in TWO differently shaped
+  // sections, and two independent devs each harvested one of them, ran it
+  // green, and reddened CI on a family the other section named. The remedy is
+  // a total a consumer can ASSERT against — so what has to be pinned is not
+  // that a line prints, but that its numbers cannot drift from the sections
+  // they claim to reconcile. A count computed independently of those sections
+  // would be an instrument that cannot fail toward its own target.
+  {
+    const rRows = [{ command: 'pnpm check:b' }, { command: 'node scripts/check-a.mjs' }];
+    const rKinds = [
+      { kind: 'k', hits: ['f'], gates: [{ name: 'check:b', why: 'w', command: 'pnpm check:b' }, { name: 'check:k1', why: 'w', command: 'pnpm check:k1' }] },
+    ];
+    const r = familyReconciliation({ matchedRows: rRows, kindGroups: rKinds });
+    // ⭐ THE identity: the total is commandsFor's own answer, not a second count.
+    t('the reconciliation total IS the commandsFor union, not a recount of it', r.total === commandsFor({ matchedRows: rRows, kindGroups: rKinds }).length);
+    t('and its parts close against that total', r.matched + r.convention - r.both === r.total && r.total === 3);
+    t('and a family reached BOTH ways is disclosed rather than double-counted', r.both === 1 && r.conventionOnly === 1);
+
+    // ⭐ BOTH DIRECTIONS, which is what makes this a reconciliation rather than
+    // a decoration: a family added to either input must move the section's own
+    // term AND the total together. Pinned by moving one input at a time.
+    const plusKind = familyReconciliation({
+      matchedRows: rRows,
+      kindGroups: [{ kind: 'k', hits: ['f'], gates: [...rKinds[0].gates, { name: 'check:k2', why: 'w', command: 'pnpm check:k2' }] }],
+    });
+    t('adding a convention family moves the convention term AND the total', plusKind.convention === r.convention + 1 && plusKind.total === r.total + 1);
+    const plusMatched = familyReconciliation({ matchedRows: [...rRows, { command: 'pnpm check:m2' }], kindGroups: rKinds });
+    t('adding a matched family moves the matched term AND the total', plusMatched.matched === r.matched + 1 && plusMatched.total === r.total + 1);
+    // ...and SUPPRESSING a section is the direction the card was filed on.
+    const noKinds = familyReconciliation({ matchedRows: rRows, kindGroups: [] });
+    t('suppressing the convention section moves the convention term AND the total', noKinds.convention === 0 && noKinds.total === 2);
+    const noMatched = familyReconciliation({ matchedRows: [], kindGroups: rKinds });
+    t('suppressing the matched section moves the matched term AND the total', noMatched.matched === 0 && noMatched.total === 2);
+
+    // A STALE kind row prints and contributes no command. The gap between rows
+    // printed and families counted is DISCLOSED, because a consumer counting
+    // printed rows against this total would otherwise find a discrepancy with
+    // no explanation — which is the failure mode this line exists to remove.
+    const staleRecon = familyReconciliation({
+      matchedRows: [],
+      kindGroups: [{ kind: 'k', hits: ['f'], gates: [{ name: 'check:live', why: 'w', command: 'pnpm check:live' }, { name: 'check:gone', why: 'w', command: null }] }],
+    });
+    t('a STALE convention row is counted in rows but not in families', staleRecon.conventionRows === 2 && staleRecon.convention === 1 && staleRecon.staleRows === 1);
+    t('and the rendering DISCLOSES that gap rather than leaving the reader to find it', familyReconciliationLines(staleRecon).some((l) => l.includes('prints 2 rows for those 1') && l.includes('STALE')));
+
+    // The invariant is meant to be unreachable by construction — the parts are
+    // built from the SAME two expressions commandsFor unions. This drives that
+    // claim over every shape the two inputs can take rather than asserting it
+    // once: any future refactor that replaces either set with a second
+    // traversal reddens here, which is the only way this line can go wrong.
+    const pool = ['pnpm check:x', 'pnpm check:y', 'node scripts/check-z.mjs'];
+    let closures = 0;
+    for (let m = 0; m < 8; m += 1) {
+      for (let k = 0; k < 8; k += 1) {
+        const rows = pool.filter((_, i) => m & (1 << i)).map((command) => ({ command }));
+        const gates = pool.filter((_, i) => k & (1 << i)).map((command) => ({ name: command, why: 'w', command }));
+        const got = familyReconciliation({ matchedRows: rows, kindGroups: gates.length ? [{ kind: 'k', hits: ['f'], gates }] : [] });
+        if (got.matched + got.convention - got.both === got.total && got.total === commandsFor({ matchedRows: rows, kindGroups: gates.length ? [{ kind: 'k', hits: ['f'], gates }] : [] }).length) closures += 1;
+      }
+    }
+    t('the total and its parts close over EVERY overlap of the two inputs — 64 of 64', closures === 64);
+
+    // The line's SPELLING, pinned because a consumer may come to assert against
+    // it — the very migration this line is asking readers to make.
+    const rl = familyReconciliationLines(r);
+    t('the reconciliation line leads with the total in an assertable shape', /^Reconciliation — 3 famil\(ies\): this card's WHOLE runnable answer/.test(rl[0]));
+    t('and spells the arithmetic that ties it to both sections', /^ {2}2 named by PATH \(the matched block\) \+ 2 named by change KIND \(the convention block\), 1 of them the same family reached both ways ⇒ 3 distinct\.$/.test(rl[1]));
+    t('and names the machine-readable escape hatch inline, where a harvesting consumer is looking', rl.some((l) => l.includes('--commands prints exactly these 3')));
+    // ⛔ The new number must not become a second "complete account of what CI
+    // runs" — that would reproduce this card's own defect one layer up. Same
+    // disclosure machineReadableOutput already makes on stderr.
+    t('and disclaims the three sections it deliberately excludes', rl.some((l) => l.includes('NOT a complete account of what CI runs') && l.includes('always-runs tail')));
+    // ...and the SHORT-harvest warning is conditional, on the rule the ⛔
+    // spelling warning already follows: on a card with no convention-only
+    // family, a warning that one section is short is a claim this run measured
+    // as false.
+    t('the short-harvest warning fires where a section really is droppable', rl.some((l) => l.includes('A harvest that ends at ONE section')));
+    t('and NOT on a card whose whole answer is one section', !familyReconciliationLines(noKinds).some((l) => l.includes('A harvest that ends at ONE section')));
+
+    // ⭐ Printed at ZERO, deliberately unlike spellingFooterLines. An absent
+    // number is not assertable, and its absence would mean two things at once:
+    // "this card owes no gates" and "this build has no reconciliation line".
+    const zero = familyReconciliationLines(familyReconciliation({ matchedRows: [], kindGroups: [] }));
+    t('the reconciliation prints at ZERO rather than falling silent', zero.length > 0 && zero[0].startsWith('Reconciliation — 0 famil(ies)'));
+    t('and says the derivation COMPLETED, so an empty answer cannot read as a missing one', zero[0].includes('COMPLETED'));
+
+    // The footer's forward pointer is fed the SAME structure, so the two
+    // renderings cannot disagree about how many families sit outside the block.
+    const fwd = spellingFooterLines(spellingSplit(['pnpm check:b', 'node scripts/check-a.mjs']), r);
+    t('the matched footer names the whole total and the families outside its block', fwd.some((l) => l.includes('is 2 of the 3 this card owes') && l.includes('1 more famil(ies)')));
+    t('and stays silent about a convention block that this card does not have', !spellingFooterLines(spellingSplit(['pnpm check:b']), noKinds).some((l) => l.includes('this card owes')));
+  }
 
   // changeKindLines must be a RENDERING of changeKindGates, not a second walk.
   {
@@ -14637,7 +14966,7 @@ function selfTest() {
     t('the seam card still derives at all', humanRun.status === 0 && humanOut.trim().length > 0);
     // 形 2, in the DEFAULT output. No flag: the footer is the control for
     // consumers who have not migrated, so it is worth nothing behind a flag.
-    const footerLine = humanOut.split('\n').find((l) => /^\d+ families — \d+ pnpm, \d+ direct node\.$/.test(l));
+    const footerLine = humanOut.split('\n').find((l) => /^\d+ matched families — \d+ pnpm, \d+ direct node\.$/.test(l));
     t('the DEFAULT run prints the spelling distribution in its own footer', Boolean(footerLine));
     t('and the distribution is a SPLIT, not a bare count — the count alone signs off on the wrong list', /\d+ pnpm, \d+ direct node/.test(footerLine ?? ''));
 
@@ -14691,6 +15020,47 @@ function selfTest() {
     t('a convention-triggered card is really convention-triggered', /^Convention-triggered gates/m.test(convHuman));
     t('--commands carries the convention gates the block-only harvest drops', convCmd.length > convBlock.length);
     t('and every one of the extra rows is runnable', convCmd.every((l) => /^(pnpm|node) \S/.test(l)));
+
+    // ── The reconciliation, END TO END on that same card (#13642) ───────────
+    //
+    // Everything in the unit half stays green if the call site in `derive` is
+    // dropped, printed behind a flag, or fed a structure the sections did not
+    // come from. Only a real run can tell those apart, and this is the card
+    // shape the two incidents happened on: a matched block AND a convention
+    // block, with the answer split across them.
+    const reconLine = convHuman.split('\n').find((l) => l.startsWith('Reconciliation — '));
+    t('the DEFAULT run prints the reconciliation — no flag, because a control behind a flag is worth nothing', Boolean(reconLine));
+    const reconTotal = Number((reconLine ?? '').match(/^Reconciliation — (\d+) famil/)?.[1] ?? NaN);
+    // ⭐ THE assertion the card asks for: the stated total is the SAME number
+    // --commands answers with. If the human block and the machine-readable
+    // mode can disagree, the line is a second answer rather than a control.
+    t('and its total is exactly what --commands returns for the same card', reconTotal === convCmd.length);
+    // ...and each term is the section it names, counted off the REAL rendering.
+    const reconParts = (convHuman.split('\n').find((l) => /named by PATH \(the matched block\)/.test(l)) ?? '').match(
+      /^ {2}(\d+) named by PATH .* \+ (\d+) named by change KIND/,
+    );
+    t('the PATH term equals the rows the published snippet harvests from the matched block', Number(reconParts?.[1]) === convBlock.length);
+    const convSectionCommands = new Set(
+      convHuman
+        .slice(convHuman.indexOf('Convention-triggered gates'))
+        .split('\n')
+        .filter((l) => /^ {4}- (pnpm|node) /.test(l))
+        .map((l) => l.replace(/^ {4}- (.*?) {3}— .*$/, '$1')),
+    );
+    t('and the change-KIND term equals the distinct runnable rows the convention block really printed', Number(reconParts?.[2]) === convSectionCommands.size);
+
+    // ⭐ CONTROL: the defect is STILL THERE and the line is what detects it.
+    // A one-section harvest of this card is short — that is the untouched
+    // defect — and the number a consumer would now assert against does not
+    // match it. Both halves on one input: without the first, the second proves
+    // nothing; without the second, the first is only a restatement of the bug.
+    t('CONTROL: a matched-block-only harvest of this card is STILL short — the defect is real and untouched', convBlock.length < convCmd.length);
+    t('CONTROL: and the reconciliation total DETECTS that harvest as short rather than agreeing with it', reconTotal !== convBlock.length);
+    // The same detection offered at the harvest SITE, where a consumer who
+    // never scrolls past the matched block still meets it.
+    t('the matched footer forward-points to that total from inside the block being harvested', convHuman.includes(`this card owes`) && convHuman.includes(`carries the ${reconTotal}`));
+    // ⛔ ...and the footer must no longer spell its own subtotal as a total.
+    t('and the footer no longer prints a bare `N families` line for a harvest to reconcile against', !/^\d+ families /m.test(convHuman));
 
     // --json: one document, and the omission it makes is DISCLOSED rather than
     // silent — which is the card's own subject matter.
