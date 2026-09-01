@@ -422,7 +422,9 @@ function unresolvableMessage(declaration: HostDeclaration, cause: unknown): stri
  * CONDITION is re-decided here: the CJS-resolved file locates the package on
  * disk, and the `import` entry of THAT package is what gets imported.
  *
- * Deliberately narrow, so this cannot regress a load that works today:
+ * Deliberately narrow at the RESOLUTION level — no load that works today
+ * resolves differently unless the package itself publishes a valid, existing
+ * import-condition target:
  *
  *   - a package with no `exports` map is untouched — CJS resolution already
  *     returned `main`, which is the only entry it publishes;
@@ -430,6 +432,14 @@ function unresolvableMessage(declaration: HostDeclaration, cause: unknown): stri
  *     untouched, and so is one whose two conditions name the same file;
  *   - anything unreadable, unresolvable or absent on disk falls back to the
  *     CJS-resolved path, i.e. to exactly the pre-#13330 behaviour.
+ *
+ * That narrowness does NOT extend to EVALUATION: every fallback above keys on
+ * the `import` target being absent, unreadable or escaping the package root,
+ * so none of them catches an `import` target that is present and broken. A
+ * dual-published package whose `import` build throws while its `require` build
+ * works used to mask that break by silently loading the CJS build; it now
+ * surfaces it. Surfacing a broken published build is arguably the correct
+ * reading, but it is a behaviour change, not a no-op.
  *
  * A residual split is still possible above this seam — an app and a framework
  * package holding two PHYSICAL copies of the same package are two instances in

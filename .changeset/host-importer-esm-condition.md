@@ -27,11 +27,16 @@ same defect; the cluster driver is the instance that shipped.
 names. The host anchor is untouched — the CJS resolver still answers *where*
 the package is, because no flagless Node API resolves a bare specifier against
 an arbitrary parent; only the *condition* is re-decided, by reading that
-package's own `exports` map. Deliberately narrow, so no load that works today
-can regress: a package with no `exports` map is untouched (CJS resolution
-already returned `main`), a package publishing no import-condition target is
-untouched, and anything unreadable or absent on disk falls back to the
-CJS-resolved path.
+package's own `exports` map. Deliberately narrow at the **resolution** level —
+no load that works today resolves differently unless the package itself
+publishes a valid, existing import-condition target: a package with no
+`exports` map is untouched (CJS resolution already returned `main`), a package
+publishing no import-condition target is untouched, and anything unreadable or
+absent on disk falls back to the CJS-resolved path. That narrowness does not
+extend to **evaluation**: a dual-published package whose `import` build exists
+but throws while its `require` build works used to mask that break by silently
+loading the CJS build, and now surfaces it — arguably the correct reading of a
+broken published build, but a behaviour change, not a no-op.
 
 **The reading.** A residual split is still possible above the seam — two
 *physical* copies of one package are two instances in any module system, and no
@@ -42,7 +47,8 @@ load. The silent `catch` is gone: a driver that loaded but stayed invisible, one
 that could not be resolved, and one that resolved and then crashed now read as
 three different diagnoses instead of arriving as `not registered` one line
 later. An app on an older `@objectstack/service-cluster` has no accessor to
-call, and that case reports as unmeasured rather than as either answer.
+call; that case is silent — `serve` declines to claim either answer rather
+than printing one.
 
 No behaviour downstream of the diagnosis changed: an absent driver still reaches
 `defineCluster()`'s documented error (`cluster.mdx` §8.1) rather than silently
