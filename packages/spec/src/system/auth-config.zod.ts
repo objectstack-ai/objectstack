@@ -119,6 +119,55 @@ export const AuthPluginConfigSchema = lazySchema(() => z.object({
   phoneNumber: z.boolean().default(false).describe(
     'Enable phone-number sign-in (phone + password; OTP sign-in/reset when an SMS service is configured)',
   ),
+  /**
+   * Enable the SCIM 2.0 Service Provider (`@better-auth/scim`) so an external
+   * IdP (Okta, Entra, …) can auto-provision and deprovision this
+   * environment's users.
+   *
+   * Tri-state on purpose (#13439): when left UNSET, the `OS_SCIM_ENABLED`
+   * env var decides (absent ⇒ off), preserving the operator's ability to
+   * toggle SCIM per environment without touching the application bundle. An
+   * EXPLICIT value here wins over the env var — this is the declared way for
+   * the code that constructs the auth plugin to state a value the deployment
+   * env cannot silently outrank (maintainer ruling 2026-08-31; note this is
+   * the opposite precedence from `dynamicClientRegistration`'s documented
+   * env-wins behaviour, deliberately).
+   *
+   * Enabling SCIM (from either source) also forces the better-auth `admin`
+   * plugin on when `admin` is left unset — SCIM's `active:false` →
+   * ban/unban runs through it (ADR-0071).
+   */
+  scim: z.boolean().optional().describe(
+    'Enable the SCIM 2.0 provisioning surface. Unset: OS_SCIM_ENABLED decides (absent = off); ' +
+    'an explicit value wins over the env var. Effective SCIM forces the admin plugin on unless admin is set.',
+  ),
+  /**
+   * Enable enterprise SSO (`@better-auth/sso`): domain-routed sign-in against
+   * operator-registered OIDC/SAML identity providers (`/sign-in/sso`,
+   * `sys_sso_provider`).
+   *
+   * Tri-state on purpose (#13439): when left UNSET, the `OS_SSO_ENABLED` env
+   * var decides (absent ⇒ off). An EXPLICIT value here wins over the env var
+   * (maintainer ruling 2026-08-31 — see `scim` for the precedence rationale).
+   */
+  sso: z.boolean().optional().describe(
+    'Enable enterprise SSO (domain-routed OIDC/SAML sign-in). Unset: OS_SSO_ENABLED decides ' +
+    '(absent = off); an explicit value wins over the env var.',
+  ),
+  /**
+   * Enable opt-in DNS domain-verification for external SSO providers
+   * (ADR-0024 ②): mounts `/sso/{request-domain-verification,verify-domain}`
+   * and enforces the hard "provider domain must be DNS-verified to log in"
+   * gate. Only honored when the SSO plugin itself is enabled (see `sso`).
+   *
+   * Tri-state on purpose (#13439): when left UNSET, the
+   * `OS_SSO_DOMAIN_VERIFICATION` env var decides (absent ⇒ off). An EXPLICIT
+   * value here wins over the env var (maintainer ruling 2026-08-31).
+   */
+  ssoDomainVerification: z.boolean().optional().describe(
+    'Enable DNS domain-verification for SSO providers (requires sso). Unset: OS_SSO_DOMAIN_VERIFICATION ' +
+    'decides (absent = off); an explicit value wins over the env var.',
+  ),
 }));
 
 /**
