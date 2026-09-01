@@ -6646,6 +6646,31 @@ export class AutomationEngine implements IAutomationService {
                     ...(result.metrics ? { metrics: result.metrics } : {}),
                 });
 
+                // #14184 — the returned-failure half of #13803's fold. A
+                // container that RETURNS its failure (rather than throwing it)
+                // never reached the splice below, because that one runs only
+                // after a successful result. `try_catch` with no `catch` region
+                // is exactly that shape: it catches the try region's failure and
+                // returns it, so its completed try-region steps were dropped on
+                // the floor and the #4354 summary reported `acted: 0` over rows
+                // that had genuinely been written.
+                //
+                // Same position as the throw arm's fold and the success path's
+                // splice: right behind the container's own step, ahead of any
+                // `fault` handler's steps. #13803 left this branch alone because
+                // no executor then returned `childSteps` on a failing result;
+                // `try_catch` is that producer, and it is still the only one.
+                //
+                // Additive to the record only — the failure step above, the
+                // `$error` write below, the guard-refusal routing rule and the
+                // rethrow are all untouched. Every folded step carries a
+                // `parentNodeId` (set by `runRegion`'s tagger), so the ADR-0044
+                // runaway guard, which counts only top-level visits, cannot see
+                // them either.
+                if (result.childSteps?.length) {
+                    steps.push(...result.childSteps);
+                }
+
                 // Write error output to variable context for downstream nodes
                 variables.set('$error', { nodeId: node.id, message: errMsg, output: result.output });
                 this.setNodeError(variables, node.id, errMsg);

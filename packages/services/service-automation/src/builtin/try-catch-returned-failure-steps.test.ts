@@ -227,7 +227,10 @@ describe('#14184 a no-catch try_catch keeps the record of the writes its try reg
       const { record } = await run({ try: WRITE_WRITE_BOOM }, { faultEdge: true });
       const order = (record?.steps ?? []).map(s => s.nodeId);
 
-      expect(order).toEqual(['start', 'query', 'guard', 'w1', 'w2', 'bang', 'rescue', 'end']);
+      // The folded steps sit between the container's own step and the fault
+      // handler's. (`end` is absent because a routed fault ends traversal
+      // there — pre-existing engine behaviour, unchanged by this card.)
+      expect(order).toEqual(['start', 'query', 'guard', 'w1', 'w2', 'bang', 'rescue']);
     });
 
     it('per-node breakdown lists the try-region nodes that ran, not just the container', async () => {
