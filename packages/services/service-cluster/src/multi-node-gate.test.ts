@@ -7,6 +7,11 @@ import {
     MULTI_NODE_NO_GATE_REASON,
     __resetMultiNodeGate,
 } from './multi-node-gate.js';
+// #14116 — the boot-outcome block at the bottom of this file needs the two
+// pieces `os serve` reaches after a denial, so it can pin the real chain
+// instead of restating the doc.
+import { defineCluster } from './cluster.js';
+import { assertClusterDriverSafeForTopology } from './split-brain-guard.js';
 
 afterEach(() => __resetMultiNodeGate());
 
@@ -256,5 +261,52 @@ describe('multi-node gate: existing boolean-shaped provider', () => {
         const verdict = checkMultiNodeAllowed(3);
         expect(verdict.allowed).toBe(false);
         expect(verdict.reason).toBe('license does not include clustering');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// #14116 — what a denial ACTUALLY does at boot.
+//
+// The module doc used to promise "the caller downgrades to single-node — never
+// bricks". It does not, and this block pins the corrected statement so the
+// promise cannot quietly come back. The fail-closed default's trigger
+// (`requested > 1`) is the SAME operator declaration the split-brain guard
+// keys off, so on the deployment shape that can reach the new refusal at all,
+// the boot outcome is a REFUSAL — which is correct, because the alternative is
+// N replicas each holding a per-process lock.
+//
+// Composed from the real pieces `os serve` leaves behind on a denial:
+// `clusterConfig` unset ⇒ `Runtime` builds `ClusterServicePlugin({})` ⇒
+// `defineCluster({})` ⇒ the `memory` driver ⇒ the guard is asked about it.
+describe('#14116 — the boot outcome of a no-gate denial', () => {
+    it('the fail-closed refusal and the split-brain guard fire on the SAME declaration', () => {
+        // Gate side: refused, because a multi-node topology was declared.
+        expect(checkMultiNodeAllowed(3).allowed).toBe(false);
+        // Guard side: the in-process driver serve falls back to is refused for
+        // that same declaration ⇒ the boot stops. Not a silent degrade.
+        expect(() =>
+            assertClusterDriverSafeForTopology(defineCluster({}).driver, {
+                OS_CLUSTER_REPLICAS: '3',
+            }),
+        ).toThrow(/multi-node deployment declared/);
+    });
+
+    it('one replica is the genuine downgrade case — gate allows, guard stays quiet', () => {
+        // With nothing declared there is no topology to gate and nothing for
+        // the guard to refuse, so a denial here really would degrade rather
+        // than refuse. Pinned so the two cases are never conflated again.
+        expect(checkMultiNodeAllowed(1).allowed).toBe(true);
+        expect(() =>
+            assertClusterDriverSafeForTopology(defineCluster({}).driver, {
+                OS_CLUSTER_REPLICAS: '1',
+            }),
+        ).not.toThrow();
+    });
+
+    it('the in-process driver serve falls back to is the one the guard refuses', () => {
+        // Pins the link in the chain that makes the two blocks above one story:
+        // `Runtime`'s default cluster options are `{}`, and `defineCluster({})`
+        // resolves the `memory` driver.
+        expect(defineCluster({}).driver).toBe('memory');
     });
 });
