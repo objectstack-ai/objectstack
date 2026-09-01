@@ -638,7 +638,7 @@ describe('DatabaseLoader schema-sync failure reporting (#4728)', () => {
       // probes the column list before touching anything.
       expect(execute).toHaveBeenCalled();
       expect(
-        execute.mock.calls.some(([sql]: [unknown]) => /table_info|information_schema/i.test(String(sql))),
+        execute.mock.calls.some(([sql]) => /table_info|information_schema/i.test(String(sql))),
       ).toBe(true);
     });
 
@@ -665,7 +665,7 @@ describe('DatabaseLoader schema-sync failure reporting (#4728)', () => {
       // reading anything into the absence of that one statement.
       expect(execute, 'nothing ran — the emptiness below would prove nothing').toHaveBeenCalled();
       const overlayDdl = execute.mock.calls
-        .map(([sql]: [unknown]) => String(sql))
+        .map(([sql]) => String(sql))
         .filter((sql: string) => /idx_sys_metadata_overlay_active/i.test(sql));
       expect(overlayDdl).toEqual([]);
     });
