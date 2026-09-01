@@ -249,6 +249,89 @@ export function resolveFieldPath(
 }
 
 /**
+ * The relationship prefixes a document declared as joinable.
+ *
+ * ADR-0021: *"Declaring `a.b` implicitly includes the intermediate `a`."* So
+ * every PREFIX of every declared path is joinable, not only the paths as
+ * written — which is why this expands rather than reading `include` verbatim.
+ *
+ * Here rather than in a rule because the SAME `include` governs positions two
+ * different rules judge: a dataset's own `dimensions[].field` / `measures[].field`
+ * / filter keys (#14105), and a dashboard widget's `filter` keys (#14148), whose
+ * condition is ANDed into that same dataset's compiled query as `runtimeFilter`.
+ * Two copies of the prefix expansion would let the two positions drift apart on
+ * a clause that is one sentence of one ADR.
+ */
+export function joinablePrefixes(include: unknown): ReadonlySet<string> {
+  const prefixes = new Set<string>();
+  if (!Array.isArray(include)) return prefixes;
+  for (const entry of include) {
+    if (typeof entry !== 'string' || !entry) continue;
+    const segments = entry.split('.');
+    for (let i = 1; i <= segments.length; i++) {
+      prefixes.add(segments.slice(0, i).join('.'));
+    }
+  }
+  return prefixes;
+}
+
+/** The two halves of a rendered verdict: the finding's message, and its detail. */
+export interface FieldPathAccount {
+  /** What is wrong, in prose, carrying the "did you mean" when there is one. */
+  message: string;
+  /** The supporting field list, for the finding's hint. */
+  detail: string;
+}
+
+/**
+ * Turn a resolution verdict into the message half of an existence finding, or
+ * `undefined` when the verdict is one no rule may report.
+ *
+ * Shared by every position that resolves a field PATH — a dataset dimension, a
+ * measure, a dataset filter key (#14105), a widget filter key (#14148) — so
+ * they cannot drift into N different accounts of the same miss. The caller
+ * supplies `subject` (how the position is named in prose) and owns the rule id,
+ * the severity, the path and the hint's prescription; this function holds none
+ * of them, matching the rest of this module.
+ */
+export function describeFieldPathVerdict(
+  verdict: FieldPathVerdict,
+  path: string,
+  subject: string,
+): FieldPathAccount | undefined {
+  switch (verdict.kind) {
+    case 'ok':
+    case 'unknowable':
+    case 'hop-untargeted':
+      return undefined;
+    case 'hop-unknown':
+      return {
+        message:
+          `${subject} "${path}" traverses "${verdict.segment}", which is not a field on object ` +
+          `"${verdict.object}".${suggestName(verdict.segment, verdict.candidates)}`,
+        detail: `Fields on "${verdict.object}": ${listNames(verdict.candidates)}.`,
+      };
+    case 'hop-not-relationship':
+      return {
+        message:
+          `${subject} "${path}" traverses "${verdict.segment}", which is a` +
+          `${verdict.type ? ` \`${verdict.type}\`` : 'n ordinary'} field on object ` +
+          `"${verdict.object}" and not a relationship — there is nothing to join through.`,
+        detail:
+          `Only ${[...RELATIONSHIP_FIELD_TYPES].sort().join(' / ')} fields are traversable ` +
+          `(ADR-0021 derives every join from the object graph; you never write an ON clause).`,
+      };
+    case 'field-unknown':
+      return {
+        message:
+          `${subject} "${path}" is not a field on object "${verdict.object}".` +
+          `${suggestName(verdict.field, verdict.candidates)}`,
+        detail: `Fields on "${verdict.object}": ${listNames(verdict.candidates)}.`,
+      };
+  }
+}
+
+/**
  * True when the verdict is one no rule may report — the graph could not answer.
  * Callers spell the skip through this predicate rather than re-listing the
  * kinds, so a future verdict added to the union defaults to being reported

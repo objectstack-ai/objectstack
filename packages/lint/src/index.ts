@@ -24,6 +24,13 @@ export {
   WIDGET_LEGACY_ANALYTICS_UNRENDERABLE,
   DASHBOARD_FILTER_FIELD_UNKNOWN,
   DASHBOARD_FILTER_FIELD_UNPROVISIONED,
+  // [#14148] The widget's OWN two references, at the same site: the keys of its
+  // presentation-scope `filter` (resolved on the #14105 object-graph seam, with
+  // the ADR-0021 `include` clause its `runtimeFilter` really is subject to) and
+  // `options.sortBy` against what the widget selects.
+  WIDGET_FILTER_FIELD_UNKNOWN,
+  WIDGET_FILTER_FIELD_NOT_INCLUDED,
+  WIDGET_SORTBY_UNSELECTED,
 } from './validate-widget-bindings.js';
 export type { WidgetBindingFinding, WidgetBindingSeverity } from './validate-widget-bindings.js';
 
@@ -485,16 +492,26 @@ export type { DatasetRefFinding, DatasetRefSeverity } from './validate-dataset-r
 // positions) must reuse ONE mechanism rather than growing a second hop-walker
 // and a second filter-key reader. Both hold mechanism only — no rule ids, no
 // severities, no findings; the judgement stays with the rule that asks.
+// [#14148] `joinablePrefixes` and `describeFieldPathVerdict` joined them when
+// the widget limb landed: both were local to the dataset rule, and both are
+// answers to questions the widget position asks identically — how ADR-0021
+// expands an `include` into joinable prefixes, and how one verdict reads in
+// prose. Copying either would have been the second implementation this seam
+// exists to prevent, one release after it was written to prevent it.
 export {
   indexObjectGraph,
   resolveFieldPath,
   isUnjudgeable,
+  joinablePrefixes,
+  describeFieldPathVerdict,
   nearestName,
   suggestName,
   listNames,
   RELATIONSHIP_FIELD_TYPES,
 } from './object-graph.js';
-export type { ObjectGraph, GraphObject, GraphField, FieldPathVerdict } from './object-graph.js';
+export type {
+  ObjectGraph, GraphObject, GraphField, FieldPathVerdict, FieldPathAccount,
+} from './object-graph.js';
 export { walkFilterFieldKeys } from './filter-walk.js';
 export type { FilterFieldKey } from './filter-walk.js';
 
