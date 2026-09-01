@@ -140,6 +140,7 @@ import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { DATA_MIGRATION_FLAG_OBJECT, type DataMigrationFlag } from '@objectstack/spec/system';
 import type { IndexMigrationLogger } from './partial-index-probe.js';
+import { driverCanRunSql, resolveDriverExec } from './driver-exec.js';
 
 /** The driver-private counter table (`SqlDriver.SEQUENCES_TABLE`). */
 export const SEQUENCES_TABLE = '_objectstack_sequences';
@@ -298,10 +299,13 @@ export interface SeedTenancySeam {
 /**
  * Resolve a row-returning raw-SQL seam, together with the dialect it speaks.
  *
- * `execute` is probed BEFORE `raw` — the opposite order to
- * `resolveIndexExecForTable` — because `execute(sql, params)` carries bound
- * parameters and `raw(sql)` does not. Every probe is individually guarded so
- * this returns `undefined` rather than throwing into a boot hook.
+ * `execute` is probed BEFORE `raw`, via `./driver-exec.ts`. This module argued
+ * for that order first — `execute(sql, params)` carries bound parameters and
+ * `raw(sql)`, as this package was calling it, did not — and it is now the order
+ * `resolveIndexExecForTable` and `ensureOverlayIndex` use too, on the stronger
+ * ground that `IDataDriver` declares `execute` non-optionally and has never
+ * declared `raw`. See that module's header. Every probe is individually guarded
+ * so this returns `undefined` rather than throwing into a boot hook.
  *
  * Unlike its sibling this does not ask `getDriverForObject`: the target table is
  * `_objectstack_sequences`, which is driver-private and not a registered object,
@@ -322,8 +326,7 @@ export function resolveSeedTenancySeam(engine: unknown): SeedTenancySeam | undef
       return undefined;
     }
   };
-  const canRun = (d: any): boolean =>
-    !!d && (typeof d.execute === 'function' || typeof d.raw === 'function');
+  const canRun = (d: any): boolean => driverCanRunSql(d);
 
   let driver: any = attempt(() => engineAny?.driver);
   if (!canRun(driver)) driver = attempt(() => engineAny?.getDefaultDriver?.());
@@ -344,14 +347,11 @@ export function resolveSeedTenancySeam(engine: unknown): SeedTenancySeam | undef
   // timestamps), never as raw SQL against a table this module would then have
   // to spell for three dialects.
   const ledger = resolveSeedTenancyLedger(engine);
-  if (typeof driver.execute === 'function') {
-    return {
-      exec: (sql: string, params?: unknown[]) => driver.execute(sql, params ?? []),
-      client,
-      ledger,
-    };
-  }
-  return { exec: (sql: string) => driver.raw(sql), client, ledger };
+  const exec = resolveDriverExec(driver);
+  // `canRun` above is defined AS this resolution succeeding, so `exec` is
+  // present here; the guard is for the type, not for a reachable state.
+  if (!exec) return undefined;
+  return { exec, client, ledger };
 }
 
 /**
