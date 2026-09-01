@@ -13,12 +13,12 @@
     "typecheck": "fumadocs-mdx && next typegen && tsc --noEmit"
   },
   "dependencies": {
-    "fumadocs-core": "16.14.4",
-    "fumadocs-mdx": "15.2.3",
-    "fumadocs-ui": "16.14.4",
-    "lucide-react": "^1.31.0",
-    "mermaid": "^11.16.0",
-    "next": "16.3.1",
+    "fumadocs-core": "16.15.4",
+    "fumadocs-mdx": "15.4.0",
+    "fumadocs-ui": "16.15.4",
+    "lucide-react": "^1.37.0",
+    "mermaid": "^11.17.2",
+    "next": "16.3.3",
     "next-themes": "^0.4.6",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
@@ -37,7 +37,7 @@
     "postcss": "^8.5.26",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
-    "zod": "4.4.3"
+    "zod": "4.5.2"
   },
   "engines": {
     "node": ">=22.0.0"

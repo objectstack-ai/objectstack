@@ -34,7 +34,7 @@
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "nanoid": "^6.0.1",
-    "zod": "^4.4.3"
+    "zod": "^4.5.2"
   },
   "peerDependencies": {
     "better-sqlite3": "^13.0.3"
