@@ -104,13 +104,16 @@ describe('[#8896] searchAll — an object that could not be READ is not an objec
     const acct = objectFixture('acct');
     const lead = objectFixture('lead');
 
-    /** `acct` always answers with one matching row; `lead`'s read is the variable. */
+    /** `acct` always answers with one matching row; `lead`'s read is the variable.
+     *  ([#13216] `sys_metadata` — the page sweep's overlay read — answers
+     *  empty, so the record seam stays the only variable.) */
     function engineWhereLeadFails(error: unknown) {
         const readCalls: string[] = [];
         const engine = {
             registry: fixtureRegistry([acct, lead]),
             find: vi.fn(async (object: string) => {
                 readCalls.push(object);
+                if (object === 'sys_metadata') return [];
                 if (object === 'lead') throw error;
                 return [{ id: 'a1', name: 'Acme' }];
             }),
@@ -123,7 +126,8 @@ describe('[#8896] searchAll — an object that could not be READ is not an objec
         const engine = {
             registry: fixtureRegistry([acct, lead]),
             find: vi.fn(async (object: string) => (
-                object === 'acct' ? [{ id: 'a1', name: 'Acme' }] : [{ id: 'l1', name: 'Acme Lead' }]
+                object === 'sys_metadata' ? []
+                    : object === 'acct' ? [{ id: 'a1', name: 'Acme' }] : [{ id: 'l1', name: 'Acme Lead' }]
             )),
             findOne: vi.fn(async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return null; }),
         };
@@ -278,7 +282,9 @@ describe('[#11754] searchAll — a registry that cannot ENUMERATE is not a regis
 
         const result = await protocol.searchAll({ q: 'Acme' });
 
-        expect(result).toEqual({ query: 'Acme', hits: [], totalObjects: 0, totalHits: 0, truncated: false });
+        // [#13216] `pages: []` joined the body when the published-page sweep
+        // landed — updated in place, the emptiness claims are unchanged.
+        expect(result).toEqual({ query: 'Acme', hits: [], pages: [], totalObjects: 0, totalHits: 0, truncated: false });
         // Proof the emptiness was SAID by the registry, not invented past it.
         expect(engine.registry.getAllObjects).toHaveBeenCalledTimes(1);
     });
@@ -300,7 +306,9 @@ describe('[#11754] searchAll — a registry that cannot ENUMERATE is not a regis
 
         const result = await protocol.searchAll({ q: '   ' });
 
-        expect(result).toEqual({ query: '', hits: [], totalObjects: 0, totalHits: 0, truncated: false });
+        // [#13216] `pages: []` joined the short-circuit body too — same
+        // no-scan claim, one more empty member.
+        expect(result).toEqual({ query: '', hits: [], pages: [], totalObjects: 0, totalHits: 0, truncated: false });
     });
 });
 

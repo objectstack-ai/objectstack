@@ -28,7 +28,7 @@
 // drops the undefined-valued key on the wire.
 
 import { describe, it, expect, vi } from 'vitest';
-import { CloneDataResponseSchema, SearchAllHitSchema, SearchAllResponseSchema } from '@objectstack/spec/api';
+import { CloneDataResponseSchema, SearchAllHitSchema, SearchAllPageHitSchema, SearchAllResponseSchema } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
@@ -51,6 +51,13 @@ const text = (name: string) => ({ name, type: 'text' });
  * A protocol over a fixed object set, rows served verbatim by `find` (the
  * engine double filters nothing — recall is the engine's contract, pinned in
  * `protocol.search-case-fold.test.ts`; this file is about the emitted SHAPE).
+ *
+ * [#13216] The registry also serves one published PAGE matching the query
+ * (and one that does not), so the body's `pages` member is measured as
+ * produced — both `snippet` branches of the page hit included: the matching
+ * page's description contains the term (excerpt present), and a page hit
+ * whose match is name/label-only serializes the key away (covered in the
+ * page-hit key test below via `acme_home`).
  */
 function makeSearchProtocol() {
     const lead = {
@@ -63,12 +70,24 @@ function makeSearchProtocol() {
         // No searchable column contains the term → `snippet` key serializes away.
         { id: 'lead_2', name: 'Beta Corp', notes: 'no matching text here' },
     ];
+    const pages = [
+        // Description contains the term → page `snippet` present.
+        { name: 'acme_portal', label: 'Acme Portal', description: 'acme rollout portal', type: 'app' },
+        // Match on name/label only → page `snippet` serializes away.
+        { name: 'acme_home', label: 'Acme Home', type: 'app' },
+        // No match at all → not a hit.
+        { name: 'ops_board', label: 'Operations Board', type: 'app' },
+    ];
     const engine = {
         registry: {
             getObject: (n: string) => (n === 'lead' ? lead : undefined),
             getAllObjects: () => [lead],
+            listItems: (type: string) => (type === 'page' ? pages : []),
+            getItem: () => undefined,
+            applyNavContributions: (x: unknown) => x,
+            isPackageDisabled: () => false,
         },
-        find: vi.fn(async () => rows),
+        find: vi.fn(async (object: string) => (object === 'sys_metadata' ? [] : rows)),
     };
     return new ObjectStackProtocolImplementation(engine as never);
 }
@@ -91,6 +110,8 @@ describe('[#11924] searchAll conforms to SearchAllResponseSchema', () => {
         expect(body.totalObjects).toBe(1);
         expect(body.totalHits).toBe(body.hits.length);
         expect(body.truncated).toBe(false);
+        // [#13216] …including the published-page sibling array, as produced.
+        expect(body.pages.map((h) => h.name)).toEqual(['acme_portal', 'acme_home']);
     });
 
     it('emits no top-level key the spec does not declare', async () => {
@@ -120,12 +141,30 @@ describe('[#11924] searchAll conforms to SearchAllResponseSchema', () => {
         expect(Object.keys(withoutSnippet!)).not.toContain('snippet');
     });
 
+    it('emits no PAGE-hit key the spec does not declare — and the page `snippet` is genuinely conditional (#13216)', async () => {
+        const body = overTheWire(await makeSearchProtocol().searchAll({ q: 'acme' }));
+        const declared = declaredKeys(SearchAllPageHitSchema);
+        for (const hit of body.pages) {
+            const undeclared = Object.keys(hit).filter((k) => !declared.has(k));
+            expect(undeclared, `keys on page hit ${hit.name} that SearchAllPageHitSchema never declares`).toEqual([]);
+        }
+        // Both branches of the optional member, measured on one body: the page
+        // whose DESCRIPTION contains the term carries the excerpt; the page
+        // matched on name/label alone serializes the key away (the title
+        // already shows the match).
+        const withSnippet = body.pages.find((h: { name: string }) => h.name === 'acme_portal');
+        const withoutSnippet = body.pages.find((h: { name: string }) => h.name === 'acme_home');
+        expect(withSnippet?.snippet?.toLowerCase()).toContain('acme rollout');
+        expect(withoutSnippet).toBeDefined();
+        expect(Object.keys(withoutSnippet!)).not.toContain('snippet');
+    });
+
     it('the blank-query short-circuit parses too — the one body built by a different return', async () => {
         // `searchAll` has exactly two return statements; this is the other one.
         const body = await makeSearchProtocol().searchAll({ q: '   ' });
         const parsed = SearchAllResponseSchema.safeParse(body);
         expect(parsed.error?.issues ?? []).toEqual([]);
-        expect(body).toEqual({ query: '', hits: [], totalObjects: 0, totalHits: 0, truncated: false });
+        expect(body).toEqual({ query: '', hits: [], pages: [], totalObjects: 0, totalHits: 0, truncated: false });
     });
 });
 

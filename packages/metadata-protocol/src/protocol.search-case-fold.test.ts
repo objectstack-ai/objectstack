@@ -66,12 +66,15 @@ function makeProtocol(): {
 } {
     // No filtering and no `$search` expansion: this double stands in for the
     // engine BOUNDARY, not for the engine. What is under test is what the
-    // protocol hands across it.
-    const find = vi.fn(async (_object: string, _opts: FindOptions = {}) => ROWS);
+    // protocol hands across it. ([#13216] `sys_metadata` answers empty — the
+    // page sweep's overlay read — so the record delegation stays the only
+    // thing measured; the registry lists no pages either.)
+    const find = vi.fn(async (object: string, _opts: FindOptions = {}) => (object === 'sys_metadata' ? [] : ROWS));
     const engine = {
         registry: {
             getObject: (n: string) => (n === 'contact' ? CONTACT : undefined),
             getAllObjects: () => [CONTACT],
+            listItems: () => [],
         },
         find,
     };

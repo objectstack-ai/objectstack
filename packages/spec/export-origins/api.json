@@ -914,6 +914,8 @@
     "ScheduledExportSchema": "src/api/export.zod.ts#ScheduledExportSchema (const)",
     "SearchAllHit": "src/api/protocol.zod.ts#SearchAllHit (type)",
     "SearchAllHitSchema": "src/api/protocol.zod.ts#SearchAllHitSchema (const)",
+    "SearchAllPageHit": "src/api/protocol.zod.ts#SearchAllPageHit (type)",
+    "SearchAllPageHitSchema": "src/api/protocol.zod.ts#SearchAllPageHitSchema (const)",
     "SearchAllResponse": "src/api/protocol.zod.ts#SearchAllResponse (type)",
     "SearchAllResponseSchema": "src/api/protocol.zod.ts#SearchAllResponseSchema (const)",
     "ServiceInfo": "src/api/discovery.zod.ts#ServiceInfo (type)",

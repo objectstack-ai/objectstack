@@ -62,8 +62,13 @@ function createEngine() {
       getObject: (n: string) => (n === 'widget' ? widget : undefined),
       getAllObjects: () => [widget],
       getRegisteredTypes: () => [],
+      // [#13216] The published-page sweep's registry read — no pages here;
+      // capability/route agreement is the only thing under test.
+      listItems: () => [],
     },
-    find: async () => [{ id: 'w1', title: 'audit trail' }],
+    // [#13216] `sys_metadata` (the page sweep's overlay read) answers empty
+    // so the record hit stays the only content on this host.
+    find: async (object: string) => (object === 'sys_metadata' ? [] : [{ id: 'w1', title: 'audit trail' }]),
   };
 }
 

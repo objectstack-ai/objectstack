@@ -376,6 +376,7 @@
     "api/ScheduleExportResponse",
     "api/ScheduledExport",
     "api/SearchAllHit",
+    "api/SearchAllPageHit",
     "api/SearchAllResponse",
     "api/ServiceInfo",
     "api/ServiceSelfInfo",

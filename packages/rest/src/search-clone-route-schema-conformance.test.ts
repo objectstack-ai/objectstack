@@ -59,6 +59,17 @@ const SEARCH_BODY = {
             record: { id: 'lead_2', name: 'Beta Corp' },
         },
     ],
+    // [#13216] The published-page sibling array — produced by the same
+    // `searchAll` and relayed by the same bare `res.json(result)`.
+    pages: [
+        {
+            kind: 'page' as const,
+            name: 'acme_portal',
+            title: 'Acme Portal',
+            snippet: 'acme rollout portal',
+            pageType: 'app',
+        },
+    ],
     totalObjects: 1,
     totalHits: 2,
     truncated: false,
