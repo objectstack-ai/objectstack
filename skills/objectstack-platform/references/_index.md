@@ -38,7 +38,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/kernel/metadata-loader.zod.ts` — Metadata Manager Configuration
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
 - `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
-- `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — Exports: SystemIdentifierSchema, SnakeCaseIdentifierSchema, MetadataItemNameSchema, EventNameSchema
+- `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — Exports: SystemIdentifierSchema, SnakeCaseIdentifierSchema, MetadataItemNameSchema
 - `node_modules/@objectstack/spec/src/shared/metadata-types.zod.ts` — Exports: MetadataFormatSchema, BaseMetadataRecordSchema
 - `node_modules/@objectstack/spec/src/shared/protection.zod.ts` — Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities

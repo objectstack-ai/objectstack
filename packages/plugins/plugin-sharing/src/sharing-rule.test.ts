@@ -13,7 +13,7 @@ import { BusinessUnitGraphService } from './business-unit-graph.js';
 // ruling can be pinned in the same suite as the positive half: the filter
 // belongs to the sharing CALL SITE, never to the expansion helper.
 import { PositionGraphService } from './position-graph.js';
-import { celToFilter } from './bootstrap-declared-sharing-rules.js';
+import { celToFilter, celToFilterOutcome, bootstrapDeclaredSharingRules } from './bootstrap-declared-sharing-rules.js';
 import { isMatchAllCriteria } from './rule-criteria.js';
 import { bindRuleCriteriaGuard } from './rule-hooks.js';
 
@@ -614,6 +614,113 @@ describe('#1887 — compound sharing condition compiled + enforced (ADR-0058 D3)
       .filter((sh: any) => sh.recipient_id === 'alice')
       .map((sh: any) => sh.record_id);
     expect(shared).toEqual(['opp1']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #13943 — the seeder's skip WARN carries the compiler's reason AND detail
+//
+// `compileCelToFilter` returns `{ ok: false, reason, detail }` on every
+// refusal; `celToFilter` used to collapse the whole thing to `null` one line
+// before the only WARN that could surface it, so the operator learned THAT
+// the condition did not translate but never WHY. `celToFilterOutcome` is the
+// sibling that keeps the cause (`compileExpressionOutcome` in
+// plugin-security's rls-compiler, #13942, is the same shape one seam over);
+// `celToFilter` stays exactly as published (`Record | null`) and delegates.
+// The skip DECISION is unchanged either way — an unlowerable condition is
+// never seeded as a permissive match-all (ADR-0049).
+// ---------------------------------------------------------------------------
+describe('#13943 — sharing-rule seeder skip WARN names the compiler’s reason and detail', () => {
+  const SKIP_WARN =
+    '[sharing-rule] skipped (missing or untranslatable CEL condition — never seeded as match-all) [experimental]';
+
+  /** Registry-backed seeder harness: declared rules in, defineRule + log lines out. */
+  function seedHarness(declared: any[]) {
+    const engine = { _registry: { listItems: (type: string) => (type === 'sharing_rule' ? declared : []) } };
+    const defineRule = vi.fn(async (input: any) => ({ id: `id_${input.name}` }));
+    const warns: Array<{ msg: string; meta: any }> = [];
+    const logger = {
+      warn: (msg: string, meta?: any) => { warns.push({ msg, meta }); },
+      info: () => {},
+    };
+    return { engine, ruleService: { defineRule } as any, logger, warns, defineRule };
+  }
+
+  const RULE_BASE = {
+    object: 'opportunity',
+    sharedWith: { type: 'user', value: 'alice' },
+    accessLevel: 'read',
+  };
+
+  it('celToFilterOutcome carries the compiler’s { reason, detail } instead of collapsing to null', () => {
+    // Refusal: a function call is not pushdown-able — the cause survives.
+    const refused = celToFilterOutcome('size(record.tags) > 0');
+    expect(refused.filter).toBeNull();
+    expect(refused.cause?.reason).toBe('unsupported');
+    expect(refused.cause?.detail).toEqual(expect.any(String));
+    expect(refused.cause?.detail.length).toBeGreaterThan(0);
+    // Missing / empty condition: the compiler's own empty-expression refusal.
+    const missing = celToFilterOutcome(undefined);
+    expect(missing).toEqual({ filter: null, cause: { reason: 'parse-error', detail: 'empty expression' } });
+    // Success: same filter celToFilter returns, and no cause at all.
+    const ok = celToFilterOutcome('record.amount >= 100000');
+    expect(ok.filter).toEqual({ amount: { $gte: 100000 } });
+    expect(ok.cause).toBeUndefined();
+    // The published wrapper delegates: byte-identical answers on both paths.
+    expect(celToFilter('size(record.tags) > 0')).toBeNull();
+    expect(celToFilter('record.amount >= 100000')).toEqual(ok.filter);
+  });
+
+  it('an untranslatable condition is skipped WITH the why: reason + detail land in the WARN meta', async () => {
+    const { engine, ruleService, logger, warns, defineRule } = seedHarness([
+      { ...RULE_BASE, name: 'r_unsupported', condition: 'size(record.tags) > 0' },
+    ]);
+    const res = await bootstrapDeclaredSharingRules(ruleService, null, engine, logger);
+    expect(res).toEqual({ seeded: 0, skipped: 1 });
+    expect(defineRule).not.toHaveBeenCalled();
+    const skips = warns.filter((w) => w.msg === SKIP_WARN);
+    expect(skips).toHaveLength(1);
+    // The fact (rule, condition) is still there; the why (reason, detail) now is too.
+    expect(skips[0].meta).toMatchObject({
+      rule: 'r_unsupported',
+      condition: 'size(record.tags) > 0',
+      reason: 'unsupported',
+    });
+    expect(skips[0].meta.detail).toEqual(expect.any(String));
+    expect(skips[0].meta.detail.length).toBeGreaterThan(0);
+  });
+
+  it('NEGATIVE: a rule whose condition lowers cleanly emits no skip line and seeds as before', async () => {
+    const { engine, ruleService, logger, warns, defineRule } = seedHarness([
+      { ...RULE_BASE, name: 'r_clean', condition: 'record.amount >= 100000' },
+    ]);
+    const res = await bootstrapDeclaredSharingRules(ruleService, null, engine, logger);
+    expect(res).toEqual({ seeded: 1, skipped: 0 });
+    // No new log line of any kind on the clean path — not just "no skip WARN".
+    expect(warns).toHaveLength(0);
+    expect(defineRule).toHaveBeenCalledTimes(1);
+    expect(defineRule.mock.calls[0][0]).toMatchObject({
+      name: 'r_clean',
+      criteria: { amount: { $gte: 100000 } },
+    });
+  });
+
+  it('NEGATIVE: a MISSING condition takes the path it takes today — skipped via the same WARN, never seeded', async () => {
+    const { engine, ruleService, logger, warns, defineRule } = seedHarness([
+      { ...RULE_BASE, name: 'r_missing' /* no condition at all */ },
+    ]);
+    const res = await bootstrapDeclaredSharingRules(ruleService, null, engine, logger);
+    expect(res).toEqual({ seeded: 0, skipped: 1 });
+    expect(defineRule).not.toHaveBeenCalled();
+    const skips = warns.filter((w) => w.msg === SKIP_WARN);
+    expect(skips).toHaveLength(1);
+    // Same branch, same message string as before; the cause names the
+    // compiler's own empty-expression refusal rather than being absent.
+    expect(skips[0].meta).toMatchObject({
+      rule: 'r_missing',
+      reason: 'parse-error',
+      detail: 'empty expression',
+    });
   });
 });
 

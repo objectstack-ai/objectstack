@@ -89,7 +89,8 @@ fire 附带一次:
 出处原话逐字住主文件「两级盘点」条。实测全量四仓 ~50k token/轮,
 `since` 等价 ~8k。小时层三读法:sweep 析取①②③ = `list_issues` + `since`(标签变更刷新 `updated_at`,
 半标注照样入窗);解锁扫描反演 = 逐仓 `state=CLOSED` + `since` 与 `Blocked-by:` 反向索引求交,
-命中走既有回队双查;健康指标 = 逐标签 `perPage: 1` 只读 `totalCount`。
+命中走既有回队双查;健康指标 = 逐标签 `perPage: 1` 只读 `totalCount` ——
+裸卡数例外(标签缺席无计数可读),取本轮析取①枚举,⛔ 不另发查询。
 每日层(当日首 fire)= 四仓全量对账 + 归集本就日频的职责(finding 集中轮、
 `Restart-when:` 判据批扫、决策箱回填)。成本靶:干活轮 ≤50k,
 空转轮守既有探针预算。每条枚举都比对返回数与 `totalCount`:不等 ⇒ 本轮没读完,

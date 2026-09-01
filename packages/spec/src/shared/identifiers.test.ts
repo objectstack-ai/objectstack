@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   SystemIdentifierSchema,
   SnakeCaseIdentifierSchema,
-  EventNameSchema,
 } from './identifiers.zod';
 
 describe('SystemIdentifierSchema', () => {
@@ -184,60 +183,3 @@ describe('SnakeCaseIdentifierSchema', () => {
   });
 });
 
-describe('EventNameSchema', () => {
-  describe('valid event names', () => {
-    it('should accept lowercase with dots', () => {
-      const validEventNames = [
-        'user.created',
-        'order.paid',
-        'user.login_success',
-        'alarm.high_cpu',
-        'order.created',
-        'user.login',
-      ];
-
-      validEventNames.forEach((name) => {
-        expect(() => EventNameSchema.parse(name)).not.toThrow();
-      });
-    });
-
-    it('should accept lowercase with underscores', () => {
-      const validEventNames = [
-        'user_created',
-        'order_paid',
-        'login_success',
-      ];
-
-      validEventNames.forEach((name) => {
-        expect(() => EventNameSchema.parse(name)).not.toThrow();
-      });
-    });
-  });
-
-  describe('invalid event names', () => {
-    it('should reject uppercase', () => {
-      const invalidEventNames = [
-        'User.Created',
-        'Order.Paid',
-        'UserCreated',
-        'OrderPaid',
-      ];
-
-      invalidEventNames.forEach((name) => {
-        expect(() => EventNameSchema.parse(name)).toThrow();
-      });
-    });
-
-    it('should reject camelCase', () => {
-      const invalidEventNames = [
-        'userCreated',
-        'orderPaid',
-        'loginSuccess',
-      ];
-
-      invalidEventNames.forEach((name) => {
-        expect(() => EventNameSchema.parse(name)).toThrow();
-      });
-    });
-  });
-});

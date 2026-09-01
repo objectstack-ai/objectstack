@@ -1,7 +1,6 @@
 {
   "title": "Shared Protocol",
   "pages": [
-    "branded-types",
     "enums",
     "expression",
     "http",

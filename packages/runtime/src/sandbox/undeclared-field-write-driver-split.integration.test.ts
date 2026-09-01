@@ -21,17 +21,26 @@
  *      It neither rejects the unknown key nor strips it.
  *   3. `engine.ts` hands the row to `driver.create` / the driver's update.
  *
- * So the driver decides, and the two families disagree:
+ * ...and, until #13657, the driver decided — so the two families disagreed:
  *
- *   • SQL — the stray column reaches the statement and the WHOLE write fails.
- *     Nothing is stored, and the error names a column, not a field, far from
+ *   • SQL — the stray column reached the statement and the WHOLE write failed.
+ *     Nothing was stored, and the error named a column, not a field, far from
  *     the body that wrote it.
  *   • Schemaless (memory, and MongoDB on the same `...data` spread) — the key
- *     IS persisted, as an undeclared column nothing downstream reads.
+ *     WAS persisted, as an undeclared column nothing downstream reads.
+ *
+ * [#13657] That divergence is CLOSED. The declared-field door now has a
+ * POST-hook half (`undeclaredWriteFieldErrors`, run again over the payload the
+ * `before*` hooks produced, before any statement is built), so a body-written
+ * undeclared key is refused by the object's FIELD MAP — `INVALID_FIELD` / 400,
+ * identically on both families, with no driver reached and therefore none left
+ * to disagree. Link 3 above is the one that changed; links 1 and 2 are intact
+ * and this file still proves them, because the door sits BELOW them.
  *
  * The lint messages, the `ScriptBodySchema` / `ActionSchema.body` notes and
- * `content/docs/automation/hook-bodies.mdx` all describe this split; if any of
- * them drifts back to "silently never lands", one half of this file fails.
+ * `content/docs/automation/hook-bodies.mdx` all describe what happens here; if
+ * any of them drifts back to "silently never lands" — or forward to "the
+ * answer depends on your driver" — this file fails.
  *
  * Every case runs the FULL chain — real QuickJS sandbox, real hook body, real
  * engine, real driver — so link 1 is proved rather than assumed: if
@@ -74,15 +83,19 @@
  * sentences fail until they are rewritten — which is the half a sentence could
  * never do for itself (#6664, ruling C).
  *
- * Why it has to stay: the whole point of this file is a PRODUCT divergence
- * between two driver families — writing an undeclared field is rejected as a
- * WHOLE statement by the SQL family, and accepted verbatim by the schemaless
- * family. Pinning a divergence needs both arms. The SQL arm is `SqlDriver`; the
- * schemaless arm needs a backend that has no schema to check the key against,
- * and `InMemoryDriver` is the cheapest honest one (MongoDB behaves the same on
- * the same `...data` spread, but would put a real database in CI's path).
- * Delete this arm and the guardrail silently becomes a one-sided assertion
- * about SQL — the divergence stops being pinned at all.
+ * Why it has to stay — and the reason survives #13657 intact, one word over.
+ * This file used to pin a PRODUCT DIVERGENCE between two driver families
+ * (rejected as a whole statement by SQL, accepted verbatim by the schemaless
+ * family); it now pins the CONVERGENCE that replaced it. Either way the claim
+ * is about both families at once, so it needs both arms. The SQL arm is
+ * `SqlDriver`; the schemaless arm needs a backend that has no schema to check
+ * the key against, and `InMemoryDriver` is the cheapest honest one (MongoDB
+ * behaves the same on the same `...data` spread, but would put a real database
+ * in CI's path). Delete this arm and the guardrail silently becomes a one-sided
+ * assertion about SQL — and "identical on every driver", the whole point of
+ * #13657, stops being pinned at all. ⚠️ If anything, the schemaless arm matters
+ * MORE now: it is the family that used to accept the key, so it is the arm that
+ * would witness a regression first.
  *
  * Why the freeze does not forbid it: #5499 froze *investment* in driver-memory
  * (defect fixes, feature work). Using it as a reference implementation is not
@@ -202,11 +215,13 @@ const CORRECT_HOOK = {
  * never exercised.
  *
  * The subject is unchanged and still measured on both families: a key a BODY
- * writes is added AFTER the door and still reaches the driver verbatim, so
- * `applyMutationsToInput` → `validateRecord`'s `if (!def) continue` → the
- * driver is intact, and it is what `content/docs/automation/hook-bodies.mdx`
- * ("What still happens at runtime") and the two lint messages describe. The
- * caller-payload half now has its own cases below, pinning the door.
+ * writes is added AFTER the PRE-hook door, so `applyMutationsToInput` →
+ * `validateRecord`'s `if (!def) continue` is still intact and still proved
+ * here. [#13657] What it reaches is no longer the driver: the POST-hook half of
+ * the door refuses it first, on both families. The caller-payload half has its
+ * own cases below, pinning the pre-hook door — which #13657 deliberately did
+ * NOT move, since #8737 put it ahead of the hooks so a refused payload consumes
+ * no autonumber.
  */
 const UPDATE_TYPO_HOOK = {
   name: 'deal_stage_typo_update',
@@ -228,7 +243,7 @@ const UPDATE_TYPO_HOOK = {
  */
 const ABSENT_TENANCY_TABLE = 'sys_organization';
 
-describe('#4271 an undeclared field written by an L2 body — the real runtime split', () => {
+describe('#4271 / #13657 an undeclared field written by an L2 body — one answer on both families', () => {
   let engine: ObjectQL | null = null;
   let dir: string | null = null;
   /** [#10629] The expected-noise capture belonging to the latest boot. */
@@ -242,7 +257,18 @@ describe('#4271 an undeclared field written by an L2 body — the real runtime s
     // failure here can never leave the engine running. Unconditional on purpose:
     // a memory boot declares an EMPTY expectation, so this still fails loudly if
     // a boot ever forgets to install a capture at all.
-    expect(noise?.silentChannels() ?? ['no capture was installed']).toEqual([]);
+    //
+    // [#13657] `required` is narrowed to nothing — the documented remedy for
+    // "a table read on only SOME of a file's paths", which is what
+    // `sys_organization` became here. The single-tenant probe runs on the way
+    // to the STATEMENT, and the post-hook door now refuses the body-written
+    // typo before that: the refusal paths never read the table, while the
+    // control and the pre-image read on update still do. Requiring it would
+    // redden the refusal cases for a read they are correct not to perform.
+    // ⛔ Narrowed, NOT relaxed: the capture still withholds the refusal
+    // wherever it does fire, and a capture that was never installed still
+    // fails through the `??` branch below.
+    expect(noise?.silentChannels([]) ?? ['no capture was installed']).toEqual([]);
     noise = null;
   });
 
@@ -283,73 +309,106 @@ describe('#4271 an undeclared field written by an L2 body — the real runtime s
     return engine;
   }
 
-  // ─── SQL: a loud failure that loses the whole write ────────────────────────
+  // ─── [#13657] Both families, one answer ───────────────────────────────────
 
-  describe('SQL driver (better-sqlite3, real table)', () => {
-    it('fails the WHOLE insert at the driver — it is not a silent no-op', async () => {
-      const e = await bootSql(TYPO_HOOK);
-      // The body runs clean in the sandbox; the throw comes from the database.
-      await expect(e.insert('deal', { stage: 'open', amount: 10 }))
-        .rejects.toThrow(/stagee/);
+  /**
+   * [#13657] What this block used to pin, and why it does not any more.
+   *
+   * Until #13657 these were two arms because the runtime gave two answers to
+   * one question. A key an L2 body wrote was added AFTER the declared-field
+   * door (#8682 / #8738, moved ahead of the hooks by #8737), so nothing between
+   * `applyMutationsToInput` and the driver judged it, and the DRIVER decided:
+   *
+   *   SQL          the stray column entered the statement and the WHOLE write
+   *                failed — a raw `SQLITE_ERROR`, no `status`, and the bound
+   *                statement AND its values quoted back in the message;
+   *   schemaless   `InMemoryDriver.create` spread `...data`, so the key was
+   *                PERSISTED as an undeclared column nothing downstream reads —
+   *                and, because `fieldPermissions` is keyed by declared field
+   *                name, one that field-level security can never gate.
+   *
+   * One app, one body, two meanings decided by which driver a deployment
+   * happened to run — and nothing in the app could tell which. #13657 added the
+   * POST-hook half of the door, so the key is now refused by the object's FIELD
+   * MAP before any statement is built. There is no driver left to disagree.
+   *
+   * ⚠️ The file's purpose is unchanged: it still exists to stop one sentence
+   * from drifting, and it still runs the FULL chain — real QuickJS sandbox,
+   * real body, real engine, real driver — on BOTH families. What changed is the
+   * sentence. `it.each` over the two boots is deliberate: writing the assertion
+   * ONCE and running it on both is what makes "identical on every driver" a
+   * property this file can state, rather than two arms a reader has to compare
+   * by eye.
+   */
+  const FAMILIES: Array<[string, (hook?: unknown) => Promise<ObjectQL>]> = [
+    ['SQL (better-sqlite3, real table)', (h) => bootSql(h)],
+    ['schemaless (memory)', (h) => bootMemory(h)],
+  ];
+
+  describe('an L2 BODY-written undeclared key — refused identically on both families', () => {
+    it.each(FAMILIES)('%s: insert answers the ADR-0112 envelope', async (_name, bootFamily) => {
+      const e = await bootFamily(TYPO_HOOK);
+
+      const err: any = await e.insert('deal', { stage: 'open', amount: 10 }).catch((x: unknown) => x);
+
+      // The caller path's answer, on both families. Before #13657 this read
+      // `code: 'SQLITE_ERROR', status: undefined` on SQL and no error at all on
+      // memory.
+      expect(err?.code).toBe('INVALID_FIELD');
+      expect(err?.status).toBe(400);
+      expect(err?.field).toBe('stagee');
+      expect(err?.message).toBe("Unknown field 'stagee' on object 'deal'");
     }, 30000);
 
-    it('stores NOTHING — the declared columns of that row are lost too', async () => {
-      const e = await bootSql(TYPO_HOOK);
+    it.each(FAMILIES)('%s: insert stores NOTHING — no row, and no shadow column', async (_name, bootFamily) => {
+      const e = await bootFamily(TYPO_HOOK);
+
       await expect(e.insert('deal', { stage: 'open', amount: 10 })).rejects.toThrow();
-      // The half that makes "silently never lands" actively misleading: an
-      // author told the column vanishes would expect a row with `amount: 10`.
+
+      // Both halves the old wording got wrong, now one fact: SQL loses the
+      // write (as it always did) and memory no longer keeps the stray key.
       expect(await e.find('deal', { where: {} } as any)).toHaveLength(0);
     }, 30000);
 
-    it('fails an UPDATE the same way, and leaves the row untouched', async () => {
-      const e = await bootSql(UPDATE_TYPO_HOOK);
+    it.each(FAMILIES)('%s: update is refused too, and the row is untouched', async (_name, bootFamily) => {
+      const e = await bootFamily(UPDATE_TYPO_HOOK);
       const row = await e.insert('deal', { stage: 'open', amount: 10 });
-      // The caller's payload is entirely DECLARED, so the door passes it; the
-      // body then adds the typo, and `validateRecord`'s update branch
-      // `continue`s past the unknown key rather than rejecting it, so the
-      // driver is still what refuses the write.
-      await expect(e.update('deal', { id: row.id, stage: 'negotiating' } as any))
-        .rejects.toThrow(/stagee/);
-      const after: any = (await e.find('deal', { where: { id: row.id } } as any))[0];
+
+      // The caller's payload is entirely DECLARED, so the PRE-hook door passes
+      // it; the body then adds the typo, and the POST-hook door is what refuses
+      // it — on both families, before any driver is consulted.
+      const err: any = await e.update('deal', { id: row.id, stage: 'negotiating' } as any)
+        .catch((x: unknown) => x);
+
+      expect(err?.code).toBe('INVALID_FIELD');
+      expect(err?.status).toBe(400);
+      const after: any = (await e.find('deal', rowById(row.id)))[0];
       expect(after.stage).toBe('open');
       expect(after).not.toHaveProperty('stagee');
     }, 30000);
 
-    it('control: the same body with the field spelled right writes normally', async () => {
-      const e = await bootSql(CORRECT_HOOK);
-      const row = await e.insert('deal', { stage: 'open', amount: 10 });
-      // Proves the failures above are about the undeclared column and not a
-      // broken fixture — and that `applyMutationsToInput` does reach the driver.
-      expect((await e.find('deal', { where: { id: row.id } } as any))[0].stage).toBe('won');
-    }, 30000);
-  });
+    it.each(FAMILIES)('%s: the refusal quotes no statement and no values', async (_name, bootFamily) => {
+      const e = await bootFamily(TYPO_HOOK);
 
-  // ─── Schemaless: the stray key is persisted, not dropped ───────────────────
+      const err: any = await e.insert('deal', { stage: 'open', amount: 10 }).catch((x: unknown) => x);
 
-  // `InMemoryDriver.create` spreads `...data`; `MongoDbDriver.create` spreads
-  // `...toStorageForms(object, rest)`. Neither consults the declared field set,
-  // so memory stands in for the whole schemaless family here.
-  describe('schemaless driver (memory)', () => {
-    it('accepts the insert and PERSISTS the undeclared key', async () => {
-      const e = await bootMemory(TYPO_HOOK);
-      const row = await e.insert('deal', { stage: 'open', amount: 10 });
-      const stored: any = (await e.find('deal', { where: { id: row.id } } as any))[0];
-      // The other direction the old wording got wrong: it lands.
-      expect(stored.stagee).toBe('won');
-      expect(stored.stage).toBe('open');
-      expect(stored.amount).toBe(10);
+      // #8682's Half B survived on this path: the SQL refusal carried the full
+      // bound INSERT with its values in the message. Refusing pre-statement is
+      // what puts it out of reach — pinned on both families so the property is
+      // about the ENGINE's answer, not about one driver's error string.
+      expect(String(err?.message)).not.toMatch(/insert into/i);
+      expect(String(err?.message)).not.toMatch(/\bvalues\b/i);
     }, 30000);
 
-    it('persists it on UPDATE too', async () => {
-      const e = await bootMemory(UPDATE_TYPO_HOOK);
+    it.each(FAMILIES)('%s: CONTROL — the same body spelled right writes normally', async (_name, bootFamily) => {
+      const e = await bootFamily(CORRECT_HOOK);
+
       const row = await e.insert('deal', { stage: 'open', amount: 10 });
-      await e.update('deal', { id: row.id, stage: 'negotiating' } as any);
-      const stored: any = (await e.find('deal', { where: { id: row.id } } as any))[0];
-      expect(stored.stagee).toBe('won');
-      // The declared key of the same write landed as well — the body's typo
-      // costs the schemaless family nothing, which is the half of the split
-      // that makes "it fails" the wrong thing to tell an author here.
-      expect(stored.stage).toBe('negotiating');
+
+      // Proves the refusals above are about the undeclared column and not a
+      // broken fixture — and that `applyMutationsToInput` still reaches the
+      // driver, which is the link the whole file exists to keep proved.
+      expect((await e.find('deal', rowById(row.id)))[0].stage).toBe('won');
     }, 30000);
   });
 
