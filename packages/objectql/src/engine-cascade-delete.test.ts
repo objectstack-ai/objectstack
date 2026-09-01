@@ -702,6 +702,11 @@ describe('cascadeDeleteRelations — [#13644] every reference-cleanup write carr
         // The user's hand-clear of the SAME lookup, under the SAME identity.
         await engine.update('note', { id: n.id, account: null }, { context: { ...CALLER } } as any);
         const hand = seen.splice(0);
+        // Restore the reference (and drop that restore's own dispatches) so
+        // the cascade below has a dependent to clear — a nulled slot matches
+        // no probe and the cleanup write would never be issued.
+        await engine.update('note', { id: n.id, account: a.id }, { context: { ...CALLER } } as any);
+        seen.splice(0);
         // The engine's cascade when the referenced record is deleted.
         await engine.delete('acct', { where: { id: a.id }, context: { ...CALLER } } as any);
         const cascade = seen.splice(0);
@@ -722,12 +727,14 @@ describe('cascadeDeleteRelations — [#13644] every reference-cleanup write carr
             expect((o.data as any)?.account, 'and this really is the cleanup write').toBeNull();
         }
         // Consistency: the declared face is true exactly where the envelope
-        // carries the operation-private marker, write for write.
-        expect(ops.length).toBe(2);
-        const handOp = ops.find((o) => (o.data as any)?.account !== null);
-        const cascadeOp = ops.find((o) => (o.data as any)?.account === null);
-        expect(handOp?.marker).toBeUndefined();
-        expect(cascadeOp?.marker).toBe(true);
+        // carries the operation-private marker, write for write. Three update
+        // ops reached the middleware, in order: the hand-clear, the restore,
+        // and the engine's cleanup — only the last rides the marked envelope.
+        expect(ops.length).toBe(3);
+        expect(ops.map((o) => o.marker)).toEqual([undefined, undefined, true]);
+        expect((ops[0].data as any)?.account, 'op 1 is the hand-clear').toBeNull();
+        expect((ops[1].data as any)?.account, 'op 2 is the restore').toBe(a.id);
+        expect((ops[2].data as any)?.account, 'op 3 is the cleanup').toBeNull();
         // And the cleanup landed.
         expect((await engine.findOne('note', { where: { id: n.id } }) as any).account).toBeNull();
     });
