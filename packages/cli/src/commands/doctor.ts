@@ -9,7 +9,7 @@ import path from 'path';
 import { normalizeStackInput } from '@objectstack/spec';
 import { printHeader, printSuccess, printWarning, printError, printStep, printInfo } from '../utils/format.js';
 import { loadConfig, configExists } from '../utils/config.js';
-import { checkSpecVersionGap } from '../utils/spec-version.js';
+import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
 // #5644 — "the optional package is not installed" and "it is installed and
 // will not load" are two facts, and one `catch` around `import()` cannot tell
 // them apart. That classification lives in one place, with the measurements
@@ -1927,7 +1927,7 @@ export default class Doctor extends Command {
     // Here the honest report is no row at all. An application consumes
     // `@objectstack/spec` from `node_modules`, where "built" is not a state it
     // can be in — that dependency is covered by the `Dependencies` row above
-    // and by `checkSpecVersionGap()`. Inside the monorepo nothing changes: the
+    // and by `checkProtocolVersionGap()`. Inside the monorepo nothing changes: the
     // workspace is present, and an unbuilt `dist/` is still the real warning
     // it always was.
     const specWorkspaceDir = path.join(cwd, 'packages/spec');
@@ -2097,15 +2097,15 @@ export default class Doctor extends Command {
         const { config: rawConfig } = await withDotenvOverlayAsync(dotenvReading, () => loadConfig());
         const config: any = normalizeStackInput(rawConfig as Record<string, unknown>);
 
-        // Spec-version drift: installed platform newer than the app declares.
-        printStep('Checking platform spec version...');
-        const specGap = checkSpecVersionGap(config.manifest);
-        if (specGap) {
+        // Protocol drift: installed platform outside the range the app declares.
+        printStep('Checking platform protocol version...');
+        const protocolGap = checkProtocolVersionGap(config.manifest);
+        if (protocolGap) {
           hasWarnings = true;
-          printWarning(`Platform spec         ${specGap.message}`);
-          console.log(chalk.dim(`      → ${specGap.hint}`));
+          printWarning(`Platform protocol     ${protocolGap.message}`);
+          console.log(chalk.dim(`      → ${protocolGap.hint}`));
         } else {
-          printSuccess('Platform spec         Declared specVersion is current with the installed platform');
+          printSuccess('Platform protocol     Declared engines.protocol covers the installed platform');
         }
 
         // Circular dependency detection

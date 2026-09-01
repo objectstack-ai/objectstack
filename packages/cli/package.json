@@ -66,6 +66,7 @@
     "@objectstack/lint": "workspace:*",
     "@objectstack/mcp": "workspace:*",
     "@objectstack/metadata": "workspace:*",
+    "@objectstack/metadata-core": "workspace:*",
     "@objectstack/metadata-protocol": "workspace:*",
     "@objectstack/objectql": "workspace:^",
     "@objectstack/observability": "workspace:^",
