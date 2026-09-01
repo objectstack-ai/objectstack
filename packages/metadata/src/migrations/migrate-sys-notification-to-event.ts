@@ -27,12 +27,16 @@
  *   await migrateSysNotificationToEvent({ driver, data });
  *
  * `driver` provides raw access to read legacy columns the re-modeled schema no
- * longer projects and to clear them; `data` (IDataEngine) performs the
+ * longer projects and to clear them — through the surface `IDataDriver`
+ * declares, `execute(sql, bindings?)`, falling back to `raw(sql, bindings?)`
+ * (see `./driver-exec.ts`); `data` (IDataEngine) performs the
  * structured inbox/receipt writes and the event rewrite so ids, JSON fields and
  * tenant stamping are handled uniformly across drivers.
  */
 
 import type { IDataDriver, IDataEngine } from '@objectstack/spec/contracts';
+
+import { type DriverExec, driverExecRefusal, resolveDriverExec } from './driver-exec.js';
 
 const EVENT_OBJECT = 'sys_notification';
 const INBOX_OBJECT = 'sys_inbox_message';
@@ -67,32 +71,32 @@ export interface SysNotificationMigrationOptions {
 export async function migrateSysNotificationToEvent(
     opts: SysNotificationMigrationOptions,
 ): Promise<SysNotificationMigrationResult> {
-    const driver = opts.driver as any;
     const { data } = opts;
     const now = opts.now ?? (() => new Date().toISOString());
 
-    if (typeof driver?.raw !== 'function') {
+    const exec = resolveDriverExec(opts.driver);
+    if (!exec) {
         return {
             status: 'error',
             migrated: 0,
-            error: 'migrateSysNotificationToEvent: driver must expose a .raw(sql, bindings?) method.',
+            error: driverExecRefusal('migrateSysNotificationToEvent'),
         };
     }
 
     // No legacy `recipient_id` column → the table never held the inbox shape.
-    if (!(await columnExists(driver, EVENT_OBJECT, 'recipient_id'))) {
+    if (!(await columnExists(exec, EVENT_OBJECT, 'recipient_id'))) {
         return { status: 'not_applicable', migrated: 0 };
     }
 
     // Only null-out columns that actually exist on this deployment.
     const presentLegacy: string[] = [];
     for (const col of LEGACY_COLUMNS) {
-        if (await columnExists(driver, EVENT_OBJECT, col)) presentLegacy.push(col);
+        if (await columnExists(exec, EVENT_OBJECT, col)) presentLegacy.push(col);
     }
 
     let migrated = 0;
     try {
-        const rows = await selectLegacyRows(driver);
+        const rows = await selectLegacyRows(exec);
         if (rows.length === 0) return { status: 'already_done', migrated: 0 };
 
         for (const row of rows) {
@@ -154,7 +158,7 @@ export async function migrateSysNotificationToEvent(
             // migration filter (idempotency) and carries no stale recipient.
             if (presentLegacy.length > 0) {
                 const setClause = presentLegacy.map((c) => `"${c}" = NULL`).join(', ');
-                await driver.raw(`UPDATE "${EVENT_OBJECT}" SET ${setClause} WHERE id = ?`, [id]);
+                await exec(`UPDATE "${EVENT_OBJECT}" SET ${setClause} WHERE id = ?`, [id]);
             }
 
             migrated += 1;
@@ -170,8 +174,8 @@ export async function migrateSysNotificationToEvent(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-async function selectLegacyRows(driver: any): Promise<any[]> {
-    const result: any[] = await driver.raw(
+async function selectLegacyRows(exec: DriverExec): Promise<any[]> {
+    const result: any[] = await exec(
         `SELECT id, recipient_id, type, title, body, url, actor_name, is_read, read_at, created_at, organization_id ` +
             `FROM "${EVENT_OBJECT}" WHERE recipient_id IS NOT NULL`,
     );
@@ -182,13 +186,13 @@ async function selectLegacyRows(driver: any): Promise<any[]> {
     return Array.isArray(result) ? result : [];
 }
 
-async function columnExists(driver: any, table: string, column: string): Promise<boolean> {
+async function columnExists(exec: DriverExec, table: string, column: string): Promise<boolean> {
     // SQLite path: PRAGMA table_info. On Postgres/others this raises a syntax
     // error — swallow it *locally* and fall through to information_schema (the
     // outer-catch version of this would never reach the fallback, making the
     // migration silently no-op on every non-SQLite DB).
     try {
-        const rows: any = await driver.raw(`PRAGMA table_info("${table}")`);
+        const rows: any = await exec(`PRAGMA table_info("${table}")`);
         const list: any[] = Array.isArray(rows)
             ? (Array.isArray(rows[0]) ? rows[0] : rows)
             : [];
@@ -200,7 +204,7 @@ async function columnExists(driver: any, table: string, column: string): Promise
     }
     // Postgres / others.
     try {
-        const result: any = await driver.raw(
+        const result: any = await exec(
             `SELECT column_name FROM information_schema.columns WHERE table_name = ? AND column_name = ?`,
             [table, column],
         );

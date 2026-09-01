@@ -57,6 +57,8 @@
  */
 
 import type { IDataDriver } from '@objectstack/spec/contracts';
+
+import { type DriverExec, driverExecRefusal, resolveDriverExec } from './driver-exec.js';
 import { SysMetadataObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
 
 /** The column this migration RENAMES AWAY FROM. */
@@ -106,21 +108,20 @@ export interface ProjectIdToEnvironmentIdResult {
  * Rename `project_id` → `environment_id` on all metadata tables that still
  * declare `environment_id`.
  *
- * @param driver  An IDataDriver with access to the target database.
- *                Must expose a raw query method: `driver.raw(sql, bindings?)`.
+ * @param driver  An IDataDriver with access to the target database. Raw SQL is
+ *                issued through the surface `IDataDriver` declares —
+ *                `execute(sql, bindings?)` — falling back to
+ *                `raw(sql, bindings?)`; see `./driver-exec.ts`.
  * @returns       Per-table migration results — one entry per candidate table,
  *                including the ones skipped for lacking the declared target.
  */
 export async function migrateProjectIdToEnvironmentId(
     driver: IDataDriver,
 ): Promise<ProjectIdToEnvironmentIdResult[]> {
-    const driverAny = driver as any;
+    const exec = resolveDriverExec(driver);
 
-    if (typeof driverAny.raw !== 'function') {
-        throw new Error(
-            'migrateProjectIdToEnvironmentId: driver must expose a .raw(sql, bindings?) method. ' +
-            'SqlDriver (better-sqlite3/knex) supports this; cloud-side TursoDriver also conforms.'
-        );
+    if (!exec) {
+        throw new Error(driverExecRefusal('migrateProjectIdToEnvironmentId'));
     }
 
     const results: ProjectIdToEnvironmentIdResult[] = [];
@@ -135,8 +136,8 @@ export async function migrateProjectIdToEnvironmentId(
         }
 
         try {
-            const hasColumn = await _columnExists(driverAny, table, SOURCE_COLUMN);
-            const alreadyMigrated = await _columnExists(driverAny, table, TARGET_COLUMN);
+            const hasColumn = await _columnExists(exec, table, SOURCE_COLUMN);
+            const alreadyMigrated = await _columnExists(exec, table, TARGET_COLUMN);
 
             if (alreadyMigrated && !hasColumn) {
                 results.push({ table, status: 'already_done' });
@@ -148,7 +149,7 @@ export async function migrateProjectIdToEnvironmentId(
                 continue;
             }
 
-            await driverAny.raw(
+            await exec(
                 `ALTER TABLE "${table}" RENAME COLUMN ${SOURCE_COLUMN} TO ${TARGET_COLUMN}`,
             );
 
@@ -165,15 +166,15 @@ export async function migrateProjectIdToEnvironmentId(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-async function _columnExists(driver: any, table: string, column: string): Promise<boolean> {
+async function _columnExists(exec: DriverExec, table: string, column: string): Promise<boolean> {
     try {
-        const rows: any[] = await driver.raw(`PRAGMA table_info("${table}")`);
+        const rows: any[] = await exec(`PRAGMA table_info("${table}")`);
         if (Array.isArray(rows) && rows.length > 0) {
             const list: any[] = Array.isArray(rows[0]) ? rows[0] : rows;
             return list.some((r: any) => r?.name === column);
         }
 
-        const result: any[] = await driver.raw(
+        const result: any[] = await exec(
             `SELECT column_name FROM information_schema.columns WHERE table_name = ? AND column_name = ?`,
             [table, column],
         );

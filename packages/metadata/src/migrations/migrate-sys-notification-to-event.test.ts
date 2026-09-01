@@ -145,10 +145,50 @@ describe('migrateSysNotificationToEvent', () => {
         expect(result.status).toBe('not_applicable');
     });
 
-    it('errors cleanly when the driver has no raw()', async () => {
+    it('errors cleanly when the driver has NEITHER raw() nor execute()', async () => {
+        // The totality floor. A driver offering no raw-SQL surface at all must
+        // still be refused — that half of the guard is not what was wrong with
+        // it. What was wrong is that `raw` was the ONLY surface it accepted, so
+        // it also refused every driver this repo ships; see
+        // `real-driver-exec-surface.test.ts` for the other half.
         const e = fakeEngine();
         const result = await migrateSysNotificationToEvent({ driver: {} as any, data: e.engine });
         expect(result.status).toBe('error');
-        expect(result.error).toContain('.raw');
+        expect(result.error).toContain('.execute(sql, bindings?)');
+        expect(result.error).toContain('.raw(sql, bindings?)');
+    });
+
+    it('drives a driver that offers only execute(), passing bindings positionally', async () => {
+        // A double deliberately shaped like the DECLARED contract
+        // (`IDataDriver.execute(command, parameters?, options?)`) rather than
+        // like the helper's old assumption. The real-driver coverage lives in
+        // `real-driver-exec-surface.test.ts`; this case additionally pins that
+        // the second argument arrives as the bindings ARRAY, which is the part a
+        // mechanical `raw`->`execute` rename could get wrong silently.
+        const seen: Array<{ sql: string; bindings: unknown }> = [];
+        const executeOnly = {
+            async execute(sql: string, bindings?: unknown[]) {
+                seen.push({ sql, bindings });
+                if (sql.startsWith('PRAGMA table_info')) {
+                    return LEGACY_TABLE_COLUMNS.map((name) => ({ name }));
+                }
+                if (sql.startsWith('SELECT id, recipient_id')) {
+                    return [{ id: 'n1', recipient_id: 'u1', type: 'mention', title: 't', body: null, url: null, actor_name: null, is_read: 0, read_at: null, created_at: '2026-01-01T00:00:00.000Z', organization_id: 'org_1' }];
+                }
+                return [];
+            },
+        } as any;
+        expect(typeof executeOnly.raw, 'the double must NOT carry a raw()').not.toBe('function');
+        const e = fakeEngine();
+
+        const result = await migrateSysNotificationToEvent({ driver: executeOnly, data: e.engine });
+
+        expect(result.status).toBe('migrated');
+        expect(result.migrated).toBe(1);
+        const update = seen.find((c) => c.sql.startsWith('UPDATE'));
+        expect(update?.bindings).toEqual(['n1']);
+        // An unbound statement gets an empty array, never `undefined` — the
+        // shape `SqlDriver.execute` and TursoDriver both normalize to anyway.
+        expect(seen.find((c) => c.sql.startsWith('PRAGMA'))?.bindings).toEqual([]);
     });
 });
