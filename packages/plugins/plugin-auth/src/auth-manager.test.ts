@@ -554,6 +554,160 @@ describe('AuthManager', () => {
       }
     });
 
+    // #13816 (maintainer ruling 2026-09-01) — `admin` is tri-state, and the
+    // one incoherent corner is REFUSED at construction: effective SCIM with an
+    // explicit `plugins.admin: false` contradicts ADR-0071 (SCIM's
+    // active:false deprovisioning runs through the admin plugin), so the
+    // manager throws a documented conflict instead of silently honouring the
+    // decline and mounting SCIM with a broken deprovisioning path.
+    it('REFUSES construction when plugins.scim=true and plugins.admin=false (documented ADR-0071 conflict)', () => {
+      const prev = process.env.OS_SCIM_ENABLED;
+      delete process.env.OS_SCIM_ENABLED;
+      try {
+        expect(() => new AuthManager({
+          secret: 'test-secret-at-least-32-chars-long',
+          baseUrl: 'http://localhost:3000',
+          plugins: { scim: true, admin: false },
+        })).toThrow(/plugins\.admin[\s\S]*ADR-0071[\s\S]*plugins\.scim: false/);
+      } finally {
+        if (prev === undefined) delete process.env.OS_SCIM_ENABLED;
+        else process.env.OS_SCIM_ENABLED = prev;
+      }
+    });
+
+    it('REFUSES construction when OS_SCIM_ENABLED makes SCIM effective beside plugins.admin=false', () => {
+      const prev = process.env.OS_SCIM_ENABLED;
+      process.env.OS_SCIM_ENABLED = 'true';
+      try {
+        expect(() => new AuthManager({
+          secret: 'test-secret-at-least-32-chars-long',
+          baseUrl: 'http://localhost:3000',
+          plugins: { admin: false },
+        })).toThrow(/OS_SCIM_ENABLED[\s\S]*ADR-0071/);
+      } finally {
+        if (prev === undefined) delete process.env.OS_SCIM_ENABLED;
+        else process.env.OS_SCIM_ENABLED = prev;
+      }
+    });
+
+    it('accepts plugins.admin=false beside plugins.scim=false despite OS_SCIM_ENABLED (declining both is coherent)', async () => {
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((config: any) => {
+        capturedConfig = config;
+        return { handler: vi.fn(), api: {} };
+      });
+      const prev = process.env.OS_SCIM_ENABLED;
+      process.env.OS_SCIM_ENABLED = 'true';
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const manager = new AuthManager({
+          secret: 'test-secret-at-least-32-chars-long',
+          baseUrl: 'http://localhost:3000',
+          plugins: { scim: false, admin: false },
+        });
+        await manager.getAuthInstance();
+        const ids = capturedConfig.plugins.map((p: any) => p.id);
+        expect(ids).not.toContain('scim');
+        expect(ids).not.toContain('admin');
+        expect(manager.getPublicConfig().features.admin).toBe(false);
+      } finally {
+        if (prev === undefined) delete process.env.OS_SCIM_ENABLED;
+        else process.env.OS_SCIM_ENABLED = prev;
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('honours an explicit plugins.admin=false when SCIM is not effective (tri-state decline)', async () => {
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((config: any) => {
+        capturedConfig = config;
+        return { handler: vi.fn(), api: {} };
+      });
+      const prev = process.env.OS_SCIM_ENABLED;
+      delete process.env.OS_SCIM_ENABLED;
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const manager = new AuthManager({
+          secret: 'test-secret-at-least-32-chars-long',
+          baseUrl: 'http://localhost:3000',
+          plugins: { admin: false },
+        });
+        await manager.getAuthInstance();
+        expect(capturedConfig.plugins.map((p: any) => p.id)).not.toContain('admin');
+        expect(manager.getPublicConfig().features.admin).toBe(false);
+      } finally {
+        if (prev === undefined) delete process.env.OS_SCIM_ENABLED;
+        else process.env.OS_SCIM_ENABLED = prev;
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('honours an explicit plugins.admin=true without SCIM (tri-state enable)', async () => {
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((config: any) => {
+        capturedConfig = config;
+        return { handler: vi.fn(), api: {} };
+      });
+      const prev = process.env.OS_SCIM_ENABLED;
+      delete process.env.OS_SCIM_ENABLED;
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const manager = new AuthManager({
+          secret: 'test-secret-at-least-32-chars-long',
+          baseUrl: 'http://localhost:3000',
+          plugins: { admin: true },
+        });
+        await manager.getAuthInstance();
+        expect(capturedConfig.plugins.map((p: any) => p.id)).toContain('admin');
+        expect(manager.getPublicConfig().features.admin).toBe(true);
+      } finally {
+        if (prev === undefined) delete process.env.OS_SCIM_ENABLED;
+        else process.env.OS_SCIM_ENABLED = prev;
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('REFUSES an applyConfigPatch that smuggles admin=false into a SCIM-enabled config — the standing config keeps ruling', () => {
+      const prev = process.env.OS_SCIM_ENABLED;
+      delete process.env.OS_SCIM_ENABLED;
+      try {
+        const manager = new AuthManager({
+          secret: 'test-secret-at-least-32-chars-long',
+          baseUrl: 'http://localhost:3000',
+          plugins: { scim: true },
+        });
+        expect(() => manager.applyConfigPatch({ plugins: { admin: false } }))
+          .toThrow(/ADR-0071/);
+        // The refused patch never became current: the advertised admin flag
+        // still reflects the SCIM-forced coupling.
+        expect(manager.getPublicConfig().features.admin).toBe(true);
+      } finally {
+        if (prev === undefined) delete process.env.OS_SCIM_ENABLED;
+        else process.env.OS_SCIM_ENABLED = prev;
+      }
+    });
+
+    it('REFUSES the lazy better-auth build when OS_SCIM_ENABLED appears only after construction', async () => {
+      const prev = process.env.OS_SCIM_ENABLED;
+      delete process.env.OS_SCIM_ENABLED;
+      try {
+        // Coherent at boot: no SCIM anywhere, admin declined.
+        const manager = new AuthManager({
+          secret: 'test-secret-at-least-32-chars-long',
+          baseUrl: 'http://localhost:3000',
+          plugins: { admin: false },
+        });
+        // The env var is actually read at buildPluginList() time — a value
+        // appearing between construction and the lazy build must not mount
+        // SCIM with its deprovisioning path silently declined.
+        process.env.OS_SCIM_ENABLED = 'true';
+        await expect(manager.getAuthInstance()).rejects.toThrow(/ADR-0071/);
+      } finally {
+        if (prev === undefined) delete process.env.OS_SCIM_ENABLED;
+        else process.env.OS_SCIM_ENABLED = prev;
+      }
+    });
+
     it('blocks slug change when the org has active environments', async () => {
       let capturedConfig: any;
       (betterAuth as any).mockImplementation((config: any) => {
