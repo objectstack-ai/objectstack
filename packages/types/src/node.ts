@@ -95,12 +95,18 @@
  *     broken/pruned/unbuilt. Remedy: fix the install. Re-reading the
  *     `package.json` is wasted effort; the declaration is right there.
  *
+ * #14041 adds a third, split OUT of the second: **declared, installed, and the
+ * package publishes no entry Node can load** — a shape problem in the package
+ * itself, which no install action can ever fix (the `HostImportFailureKind`
+ * doc carries the split; the "#14041" section note below carries the finder
+ * that makes an ESM-only publish load instead of failing at all).
+ *
  * {@link hostImportFailureKind} exposes that classification to callers so their
  * fail-fast text can say which one it is (`packages/cli` ADR-0093 D5,
  * `packages/verify` `bootStack`, `packages/qa/dogfood`'s enterprise probe).
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -288,10 +294,22 @@ export function isDeclaredByHost(specifier: string, hostRoot?: string): boolean 
  *   in the app and install.
  * - `declared-unresolvable` — the app declares it and it still would not
  *   resolve. Remedy: fix the INSTALL. Re-reading the manifest is wasted effort.
+ * - `declared-no-loadable-entry` (#14041) — the app declares it, the install
+ *   delivered it, and the package's own `exports` names NO entry Node can load
+ *   for the requested subpath — no `require`-condition target (which is why the
+ *   CJS resolution refused) and no `import`-condition one for the fallback
+ *   either (a `types`-only or `browser`-only publish, or a subpath the map
+ *   never names). Remedy: change the PACKAGE — neither the app's manifest nor
+ *   its install can ever fix this, which is exactly why it must not share the
+ *   `declared-unresolvable` INSTALL wording.
  *
- * An evaluation crash is neither: it propagates untouched and carries no kind.
+ * An evaluation crash is none of these: it propagates untouched and carries no
+ * kind.
  */
-export type HostImportFailureKind = 'undeclared' | 'declared-unresolvable';
+export type HostImportFailureKind =
+  | 'undeclared'
+  | 'declared-unresolvable'
+  | 'declared-no-loadable-entry';
 
 /**
  * Property carrying {@link HostImportFailureKind} on a thrown error.
@@ -306,7 +324,11 @@ export const HOST_IMPORT_FAILURE_KIND = 'objectstackHostImportFailureKind';
 /** The classification on an error thrown by a {@link HostImporter}, if any. */
 export function hostImportFailureKind(err: unknown): HostImportFailureKind | undefined {
   const kind = (err as Record<string, unknown> | null | undefined)?.[HOST_IMPORT_FAILURE_KIND];
-  return kind === 'undeclared' || kind === 'declared-unresolvable' ? kind : undefined;
+  return kind === 'undeclared' ||
+    kind === 'declared-unresolvable' ||
+    kind === 'declared-no-loadable-entry'
+    ? kind
+    : undefined;
 }
 
 function hostImportError(
@@ -464,25 +486,41 @@ const ESM_IMPORT_CONDITIONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Pick a target from one `exports` node under {@link ESM_IMPORT_CONDITIONS}.
+ * The conditions a CommonJS `require()` matches — what `hostRequire.resolve`
+ * itself answers. Used by the #14041 failure-kind split ONLY as a manifest
+ * READ, never as a second resolution: when the CJS resolver has already
+ * thrown, "does the map name a `require`-condition target at all?" is what
+ * separates a broken install (it names one, the files are missing) from a
+ * package that publishes no CommonJS entry in the first place.
+ */
+const CJS_REQUIRE_CONDITIONS: ReadonlySet<string> = new Set([
+  'node-addons',
+  'node',
+  'require',
+  'default',
+]);
+
+/**
+ * Pick a target from one `exports` node under the given active conditions
+ * (membership, not priority — see {@link ESM_IMPORT_CONDITIONS}).
  *
  * A string is a target; an array is a fallback list (first resolvable wins);
  * `null` blocks the subpath; an object is a condition map. Nesting is arbitrary
  * (`{ import: { types: …, default: … } }` is the shape `tsup` emits).
  */
-function selectImportTarget(node: unknown): string | undefined {
+function selectConditionTarget(node: unknown, conditions: ReadonlySet<string>): string | undefined {
   if (typeof node === 'string') return node;
   if (Array.isArray(node)) {
     for (const alternative of node) {
-      const hit = selectImportTarget(alternative);
+      const hit = selectConditionTarget(alternative, conditions);
       if (hit !== undefined) return hit;
     }
     return undefined;
   }
   if (node === null || typeof node !== 'object') return undefined;
   for (const entry of Object.entries(node as Record<string, unknown>)) {
-    if (!ESM_IMPORT_CONDITIONS.has(entry[0])) continue;
-    const hit = selectImportTarget(entry[1]);
+    if (!conditions.has(entry[0])) continue;
+    const hit = selectConditionTarget(entry[1], conditions);
     if (hit !== undefined) return hit;
   }
   return undefined;
@@ -497,7 +535,11 @@ function selectImportTarget(node: unknown): string | undefined {
  * test Node applies, and the reason `{ "import": …, "require": … }` needs no
  * special case here.
  */
-function resolveExportsSubpath(exportsField: unknown, subpath: string): string | undefined {
+function resolveExportsSubpath(
+  exportsField: unknown,
+  subpath: string,
+  conditions: ReadonlySet<string> = ESM_IMPORT_CONDITIONS,
+): string | undefined {
   if (exportsField === undefined) return undefined;
 
   const keys =
@@ -507,10 +549,14 @@ function resolveExportsSubpath(exportsField: unknown, subpath: string): string |
   const isSubpathMap =
     keys !== undefined && keys.length > 0 && keys.every((key) => key === '.' || key.indexOf('./') === 0);
 
-  if (!isSubpathMap) return subpath === '.' ? selectImportTarget(exportsField) : undefined;
+  if (!isSubpathMap) {
+    return subpath === '.' ? selectConditionTarget(exportsField, conditions) : undefined;
+  }
 
   const map = exportsField as Record<string, unknown>;
-  if (Object.prototype.hasOwnProperty.call(map, subpath)) return selectImportTarget(map[subpath]);
+  if (Object.prototype.hasOwnProperty.call(map, subpath)) {
+    return selectConditionTarget(map[subpath], conditions);
+  }
 
   // Pattern keys (`"./*": "./dist/*.js"`). Node takes the key with the longest
   // static prefix, breaking ties on the longest suffix, and substitutes the
@@ -535,8 +581,13 @@ function resolveExportsSubpath(exportsField: unknown, subpath: string): string |
   }
   if (best === undefined) return undefined;
   const matched = subpath.slice(best.prefix.length, subpath.length - best.suffix.length);
-  const target = selectImportTarget(best.target);
+  const target = selectConditionTarget(best.target, conditions);
   return target === undefined ? undefined : target.split('*').join(matched);
+}
+
+/** The `exports` subpath a specifier addresses (`.`, `./plugin`, `./deep/x`). */
+function exportsSubpathOf(specifier: string, packageName: string): string {
+  return specifier === packageName ? '.' : `.${specifier.slice(packageName.length)}`;
 }
 
 /**
@@ -599,8 +650,7 @@ function esmEntryForDeclared(
   // package publishes and CJS resolution already returned it.
   if (exportsField === undefined || exportsField === null) return undefined;
 
-  const subpath =
-    specifier === packageName ? '.' : `.${specifier.slice(packageName.length)}`;
+  const subpath = exportsSubpathOf(specifier, packageName);
   const target = resolveExportsSubpath(exportsField, subpath);
   if (typeof target !== 'string' || target.indexOf('./') !== 0) return undefined;
 
@@ -608,6 +658,216 @@ function esmEntryForDeclared(
   // Node refuses an exports target that escapes its package; so does this.
   if (entry.indexOf(root + sep) !== 0) return undefined;
   return existsSync(entry) ? entry : undefined;
+}
+
+/**
+ * ── #14041: an ESM-only package needs a finder the CJS resolver is not ───────
+ *
+ * The #13330 note above re-decides the CONDITION for a package the CJS
+ * resolver already LOCATED. A package publishing only an `import` condition —
+ * `{"exports": {".": {"import": "./dist/index.js"}}}`, ordinary outside this
+ * workspace — never gets that far: `hostRequire.resolve` throws
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED`, and the declared leg classified EVERY
+ * resolver throw as `declared-unresolvable` — an INSTALL-problem message about
+ * an install that is fine, prescribing remedies (`pnpm install`, un-prune,
+ * rebuild) none of which can ever help.
+ *
+ * The fallback finder is a `node_modules` lookup anchored at `hostRoot`, and
+ * it is deliberately STRICTLY TIGHTER than the CJS resolution it backs up:
+ *
+ *   - ONE directory — `<hostRoot>/node_modules/<name>` — the single place a
+ *     dependency the host declares and installs must physically appear;
+ *   - no `NODE_PATH` (the #4719 hole; honouring it here would reopen the
+ *     declaration gate from the fallback side);
+ *   - no walk above `hostRoot` (CJS resolution climbs every parent's
+ *     `node_modules`; a package that exists only up there is someone else's);
+ *   - no bare `require`/`import` of the specifier (a second resolver would
+ *     re-import every looseness one call at a time);
+ *   - Node's invalid-segment refusal, mirrored BEFORE exports resolution
+ *     ({@link hasInvalidExportsSubpathSegments}): a subpath carrying `''`,
+ *     `.`, `..` or `node_modules` segments is refused exactly as both of
+ *     Node's resolvers refuse it — the one validation the specifier has NOT
+ *     already passed by the time it reaches this catch (#14271 review).
+ *
+ * `import.meta.resolve` with a parent URL is NOT the mechanism, on the same
+ * measurement the #10943 note below records: without
+ * `--experimental-import-meta-resolve` the parent argument is SILENTLY
+ * IGNORED, so it answers from the WRONG base with full confidence — the exact
+ * failure class this card removes.
+ *
+ * It fires ONLY inside `hostRequire.resolve`'s catch — a path that was a hard
+ * failure before — so no currently-succeeding load can change behaviour.
+ *
+ * When even this finder cannot produce an entry, the failure KIND is split on
+ * one criterion: **can any install action ever help?**
+ *
+ *   - the package is not in the host's `node_modules`, or its manifest NAMES a
+ *     runtime target whose file is missing (a dist never built, a partial
+ *     publish) → `declared-unresolvable`, the existing INSTALL wording,
+ *     unchanged — it is right for both;
+ *   - the package is installed and its manifest names NO runtime entry for the
+ *     requested subpath under either the `require` or the `import` conditions
+ *     (`types`-only, `browser`-only, an unexported subpath) →
+ *     `declared-no-loadable-entry`, a message about the PACKAGE's own shape —
+ *     no edit to the app and no install action can change what the package
+ *     publishes.
+ */
+type DeclaredCjsResolveFallback =
+  /** Not present in the host's own `node_modules` — the install really is the problem. */
+  | { outcome: 'absent' }
+  /** Rescued: the `import`-condition entry to load. */
+  | { outcome: 'entry'; entry: string }
+  /** Present, and its manifest names a runtime target — the FILES are the problem. */
+  | { outcome: 'install-broken' }
+  /** Present, and its manifest names nothing loadable — the PACKAGE is the problem. */
+  | { outcome: 'no-loadable-entry'; packageDir: string }
+  /**
+   * The SPECIFIER is the problem: its subpath carries segments Node's own
+   * resolvers refuse (see {@link hasInvalidExportsSubpathSegments}). Never
+   * rescued and never re-worded — it keeps exactly the hard failure and the
+   * `declared-unresolvable` kind these specifiers get on the CJS path today.
+   */
+  | { outcome: 'invalid-specifier' };
+
+/**
+ * Mirror of Node's `PACKAGE_TARGET_RESOLVE` invalid-segment refusal, applied
+ * to the requested subpath BEFORE any exports resolution in the fallback
+ * (#14271 contract review).
+ *
+ * Both of Node's resolvers refuse an exports subpath whose segments include
+ * `''`, `.`, `..` or `node_modules` (case-insensitive) —
+ * `ERR_INVALID_MODULE_SPECIFIER`, or `ERR_PACKAGE_PATH_NOT_EXPORTED` when an
+ * import-only condition map refuses first. On the resolve-SUCCEEDED path
+ * (#13330) the specifier has therefore already been validated by the real
+ * resolver before the exports walk here ever sees it. Inside the fallback's
+ * catch it has NOT: without this mirror, a pattern key (`./deep/*`) would
+ * substitute a traversal span (`../../secret/hidden`) into its target and
+ * resolve a NON-EXPORTED file inside the package — the byte-containment check
+ * on the resolved entry permits any `..` traversal that lands back inside the
+ * package root, by design (it guards escape, not encapsulation). Measured on
+ * Node v22.22.2: `require.resolve` of such a specifier throws on both an
+ * import-only and a dual-published pattern map, so refusing here keeps the
+ * fallback strictly tighter than the CJS resolution it backs up on the
+ * VALIDATION axis, exactly as it is on the location axes.
+ */
+function hasInvalidExportsSubpathSegments(subpath: string): boolean {
+  if (subpath === '.') return false;
+  // `exportsSubpathOf` yields `./…`; validate every segment after that prefix.
+  return subpath
+    .slice(2)
+    .split(/[/\\]/)
+    .some((raw) => {
+      const segment = raw.toLowerCase();
+      return segment === '' || segment === '.' || segment === '..' || segment === 'node_modules';
+    });
+}
+
+/**
+ * The one directory the fallback finder consults, verified to hold the
+ * declared package (a `package.json` whose `name` matches) and then
+ * realpath'd — under pnpm the link target is
+ * `.pnpm/<pkg>@<version>/node_modules/<pkg>`, the directory the package's own
+ * transitive imports resolve against, exactly as the CJS resolver's realpath
+ * answer behaves on the succeeding path.
+ */
+function hostInstalledPackageDir(packageName: string, hostRoot: string): string | undefined {
+  const linked = join(hostRoot, 'node_modules', ...packageName.split('/'));
+  try {
+    const manifest = JSON.parse(readFileSync(join(linked, 'package.json'), 'utf8')) as {
+      name?: unknown;
+    };
+    if (manifest.name !== packageName) return undefined;
+  } catch {
+    return undefined;
+  }
+  try {
+    return realpathSync(linked);
+  } catch {
+    // The manifest read above already succeeded through this path; an exotic
+    // realpath failure does not un-install the package.
+    return linked;
+  }
+}
+
+/** The #14041 fallback: see the section note above for the shape and the split. */
+function declaredCjsResolveFallback(
+  specifier: string,
+  packageName: string,
+  hostRoot: string,
+): DeclaredCjsResolveFallback {
+  const packageDir = hostInstalledPackageDir(packageName, hostRoot);
+  if (packageDir === undefined) return { outcome: 'absent' };
+
+  let exportsField: unknown;
+  try {
+    exportsField = (
+      JSON.parse(readFileSync(join(packageDir, 'package.json'), 'utf8')) as { exports?: unknown }
+    ).exports;
+  } catch {
+    return { outcome: 'absent' };
+  }
+  // No `exports` map ⇒ CJS resolution already tried everything such a package
+  // publishes (`main`, the index files) and still threw: missing files.
+  if (exportsField === undefined || exportsField === null) return { outcome: 'install-broken' };
+
+  const subpath = exportsSubpathOf(specifier, packageName);
+  // Refused BEFORE exports resolution — the specifier reaches this walk
+  // unvalidated by any real resolver, unlike the #13330 path (see
+  // hasInvalidExportsSubpathSegments).
+  if (hasInvalidExportsSubpathSegments(subpath)) return { outcome: 'invalid-specifier' };
+
+  const importTarget = resolveExportsSubpath(exportsField, subpath, ESM_IMPORT_CONDITIONS);
+  if (typeof importTarget === 'string' && importTarget.indexOf('./') === 0) {
+    const entry = resolve(packageDir, importTarget);
+    // Node refuses an exports target that escapes its package; so does this.
+    if (entry.indexOf(packageDir + sep) === 0 && existsSync(entry)) {
+      return { outcome: 'entry', entry };
+    }
+    // The manifest names an `import` target and the file is not there — a
+    // dist never built or a partial publish. An install/build problem, with
+    // the existing wording's remedies intact.
+    return { outcome: 'install-broken' };
+  }
+
+  const requireTarget = resolveExportsSubpath(exportsField, subpath, CJS_REQUIRE_CONDITIONS);
+  if (typeof requireTarget === 'string' && requireTarget.indexOf('./') === 0) {
+    // The package DOES publish a CommonJS entry for this subpath; the CJS
+    // resolver threw over the files behind it, not over the shape.
+    return { outcome: 'install-broken' };
+  }
+
+  return { outcome: 'no-loadable-entry', packageDir };
+}
+
+function noLoadableEntryMessage(
+  declaration: HostDeclaration,
+  packageDir: string,
+  subpath: string,
+  cause: unknown,
+): string {
+  const { packageName, hostRoot, field, specifier } = declaration;
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  const subpathNote = subpath === '.' ? 'its main entry (".")' : `the subpath '${subpath}'`;
+  return (
+    `Cannot load module '${packageName}': the host app DECLARES it ` +
+    `(${field}: ${JSON.stringify(specifier)}) and it IS installed, but the package ` +
+    'publishes no entry that Node can load.\n' +
+    `  host app: ${hostRoot}\n` +
+    `  installed at: ${packageDir}\n` +
+    "\n  This is a problem with the PACKAGE's own published shape, not with the app or\n" +
+    '  its install — the declaration is right and the package is on disk, so neither\n' +
+    '  re-reading package.json nor re-running `pnpm install` can change anything.\n' +
+    '  Measured from its manifest:\n' +
+    `    • its "exports" map names no \`require\`-condition entry for ${subpathNote},\n` +
+    '      so a CommonJS resolution cannot see it at all\n' +
+    '    • and no `import`-condition entry either, so there is nothing for the ESM\n' +
+    '      fallback to load\n' +
+    '  The remedy lives in the package: it must publish a runtime entry for this\n' +
+    '  subpath (an `import` condition suffices here; a dual build adds `require`).\n' +
+    '  A publish carrying only `types` / `browser`-style conditions cannot be loaded\n' +
+    '  by a Node host at all.\n' +
+    `  (resolver: ${detail})`
+  );
 }
 
 /**
@@ -714,6 +974,27 @@ export function createHostImporter(
       try {
         resolved = hostRequire.resolve(pkg);
       } catch (cause) {
+        // #14041: the CJS resolver cannot see an ESM-only publish at all. Try
+        // the strictly-tighter hostRoot node_modules finder before concluding
+        // anything — this catch was a hard failure before, so the fallback is
+        // strictly additive — and when it cannot help either, report the kind
+        // the walk actually measured (see the #14041 section note).
+        const fallback = declaredCjsResolveFallback(pkg, declaration.packageName, hostRoot);
+        if (fallback.outcome === 'entry') {
+          return import(pathToFileURL(fallback.entry).href);
+        }
+        if (fallback.outcome === 'no-loadable-entry') {
+          throw hostImportError(
+            'declared-no-loadable-entry',
+            noLoadableEntryMessage(
+              declaration,
+              fallback.packageDir,
+              exportsSubpathOf(pkg, declaration.packageName),
+              cause,
+            ),
+            cause,
+          );
+        }
         throw hostImportError(
           'declared-unresolvable',
           unresolvableMessage(declaration, cause),
