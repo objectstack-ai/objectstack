@@ -15055,7 +15055,16 @@ function selfTest() {
     // match it. Both halves on one input: without the first, the second proves
     // nothing; without the second, the first is only a restatement of the bug.
     t('CONTROL: a matched-block-only harvest of this card is STILL short — the defect is real and untouched', convBlock.length < convCmd.length);
-    t('CONTROL: and the reconciliation total DETECTS that harvest as short rather than agreeing with it', reconTotal !== convBlock.length);
+    // `Number.isInteger` is not decoration. Measured while ablating the call
+    // site out of `derive`: with no line printed `reconTotal` is NaN, and
+    // `NaN !== convBlock.length` is TRUE — so this case passed while the
+    // remedy was absent, which is the instrument-cannot-fail-toward-its-target
+    // shape the whole card is about. The detector has to have READ a number
+    // before it can claim to have detected anything with it.
+    t(
+      'CONTROL: and the reconciliation total DETECTS that harvest as short rather than agreeing with it',
+      Number.isInteger(reconTotal) && reconTotal !== convBlock.length,
+    );
     // The same detection offered at the harvest SITE, where a consumer who
     // never scrolls past the matched block still meets it.
     t('the matched footer forward-points to that total from inside the block being harvested', convHuman.includes(`this card owes`) && convHuman.includes(`carries the ${reconTotal}`));
