@@ -79,6 +79,23 @@ describe('an authored `type` attribute is refused (the discriminator collision)'
   });
 });
 
+/**
+ * ⚠️ Read this before trusting the block below as coverage of the spread order.
+ *
+ * The order fix is DEFENSE IN DEPTH, which means the refusal makes it
+ * unobservable through the public API: measured by ablation on the committed
+ * tree, restoring `{ type: tag, ...props }` while LEAVING the refusal in place
+ * keeps all eight of these tests GREEN, because the refused attribute never
+ * reaches `props` to be spread. What turns them red is removing the refusal
+ * (5 red) and, additionally, the two spread-order assertions here when BOTH
+ * halves are removed together (6 red).
+ *
+ * So these tests pin the discriminator's identity, not the statement that
+ * produces it. That is not a gap to paper over with a stronger-sounding
+ * assertion — it is the ruled relationship between the two halves («拒绝使覆盖
+ * 不可达,顺序修复是防御纵深»), and it is stated here so the next author does
+ * not read a green suite as proof the order is load-bearing on its own.
+ */
 describe('spread order — defense in depth behind the refusal', () => {
   it('keeps the TAG as the discriminator even when a `type` attribute was authored', () => {
     // Parser-level, with no manifest: the refusal is a diagnostic, and the tree
