@@ -91,10 +91,18 @@ const runtimeContainer = {
       kanban: { groupByField: 'status' },
     },
   },
+  // Deliberately NOT keyed `default`: the container's default `list` already
+  // claims `<object>.default`, and a form competing for that name is renamed
+  // to `…_2` with a diagnostic. That rename is real expansion behaviour, but
+  // pinning it here would make this file a test of collision handling rather
+  // than of the exit under repair.
   formViews: {
-    default: { type: 'simple', sections: [{ label: 'Info', fields: [{ field: 'name' }] }] },
+    edit: { type: 'simple', sections: [{ label: 'Info', fields: [{ field: 'name' }] }] },
   },
 };
+
+/** What `runtimeContainer` expands to, sorted — the whole expected answer. */
+const EXPANDED = ['crm_lead.default', 'crm_lead.edit', 'crm_lead.pipeline'];
 
 /** An already-independent ViewItem — the shape a source registrar produces. */
 const independentViewItem = {
@@ -142,7 +150,7 @@ describe('#13913 getViewsByObject() expands aggregated view containers', () => {
     // Pre-fix this was `[]`: the container carries no `viewKind`, so the filter
     // rejected the only row in the store.
     expect(views.length).toBeGreaterThan(0);
-    expect(names(views)).toEqual(['crm_lead.default', 'crm_lead.pipeline']);
+    expect(names(views)).toEqual(EXPANDED);
   });
 
   it('answers with EXPANDED items and never the container itself (#7163)', async () => {
@@ -168,7 +176,7 @@ describe('#13913 getViewsByObject() expands aggregated view containers', () => {
     // Nothing binds to the container's registry KEY by accident: ask for an
     // object the container does not name and the answer stays empty.
     expect(await manager.getViewsByObject('crm_account')).toEqual([]);
-    expect((await manager.getViewsByObject('crm_lead')).length).toBe(2);
+    expect(names(await manager.getViewsByObject('crm_lead'))).toEqual(EXPANDED);
   });
 
   it('reaches a container that arrived through a LOADER, not only the registry', async () => {
@@ -188,10 +196,7 @@ describe('#13913 getViewsByObject() expands aggregated view containers', () => {
       }),
     );
 
-    expect(names(await manager.getViewsByObject('crm_lead'))).toEqual([
-      'crm_lead.default',
-      'crm_lead.pipeline',
-    ]);
+    expect(names(await manager.getViewsByObject('crm_lead'))).toEqual(EXPANDED);
   });
 
   // ------------------------------------------------------------------
@@ -225,7 +230,7 @@ describe('#13913 getViewsByObject() expands aggregated view containers', () => {
 
     const views = (await manager.getViewsByObject('crm_lead')) as Record<string, unknown>[];
 
-    expect(names(views)).toEqual(['crm_lead.default', 'crm_lead.pipeline']);
+    expect(names(views)).toEqual(EXPANDED);
     expect(views.find((v) => v.name === 'crm_lead.pipeline')).toBe(registeredPipeline);
   });
 });
