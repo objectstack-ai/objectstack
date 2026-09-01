@@ -5,7 +5,6 @@
     "shared/BaseMetadataRecord",
     "shared/CorsConfig",
     "shared/CronExpressionInput",
-    "shared/EventName",
     "shared/Expression",
     "shared/ExpressionDialect",
     "shared/ExpressionInput",

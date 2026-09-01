@@ -643,7 +643,7 @@ ObjectStack UI protocol provides three paths:
 
 **Strengths:**
 - Perfect foundational layer — small, focused, widely imported
-- `identifiers.zod.ts` is the naming convention enforcer (SystemIdentifierSchema, SnakeCaseIdentifierSchema, EventNameSchema)
+- `identifiers.zod.ts` is the naming convention enforcer (SystemIdentifierSchema, SnakeCaseIdentifierSchema)
 - `connector-auth.zod.ts` uses `z.discriminatedUnion` perfectly (5 auth types)
 
 **Key Files:**

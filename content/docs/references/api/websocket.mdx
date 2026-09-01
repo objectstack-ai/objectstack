@@ -213,7 +213,7 @@ const result = AckMessageSchema.parse(data);
 | **type** | `'event'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **subscriptionId** | `string` | ✅ | Subscription ID this event belongs to |
-| **eventName** | `string` | ✅ | Event name |
+| **eventName** | `string` | ✅ | Event name (dot notation by convention; the platform-checked event vocabulary is the closed DataEventType / BulkDataEventType enums) |
 | **object** | `string` | optional | Object name the event relates to |
 | **payload** | `any` | ✅ | Event payload data |
 | **userId** | `string` | optional | User who triggered the event |
@@ -519,7 +519,7 @@ This schema accepts one of the following structures:
 | **type** | `'event'` | ✅ |  |
 | **timestamp** | `string` | ✅ | ISO 8601 datetime when message was sent |
 | **subscriptionId** | `string` | ✅ | Subscription ID this event belongs to |
-| **eventName** | `string` | ✅ | Event name |
+| **eventName** | `string` | ✅ | Event name (dot notation by convention; the platform-checked event vocabulary is the closed DataEventType / BulkDataEventType enums) |
 | **object** | `string` | optional | Object name the event relates to |
 | **payload** | `any` | ✅ | Event payload data |
 | **userId** | `string` | optional | User who triggered the event |

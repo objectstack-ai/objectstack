@@ -171,38 +171,13 @@ export const MetadataItemNameSchema = lazySchema(() => z
   })
   .describe('Metadata item name (lowercase snake_case segments, optionally dot-qualified)'));
 
-/**
- * Event Name Identifier
- *
- * Specialized identifier for event names that encourages dot notation.
- * Used in event-driven systems, message queues, and webhooks.
- * 
- * Pattern: `namespace.action` or `entity.event_type`
- * 
- * @example Valid
- * - 'user.created'
- * - 'order.paid'
- * - 'user.login_success'
- * - 'alarm.high_cpu'
- * 
- * @example Invalid
- * - 'UserCreated' (camelCase)
- * - 'user_created' (should use dots for namespacing)
- *
- * No `.max()` is declared, deliberately — identifier length ceilings are
- * storage-owned; see the length-ceiling note on
- * {@link SystemIdentifierSchema} and issue #12144. (No bounded storage column
- * among #12144's measured set stores an event name, so no ceiling has been
- * measured for this schema at all.)
- */
-export const EventNameSchema = lazySchema(() => z
-  .string()
-  .min(3, { message: 'Event name must be at least 3 characters' })
-  .regex(/^[a-z][a-z0-9_.]*$/, {
-    message:
-      'Event name must be lowercase with dots for namespacing (e.g., "user.created", "order.paid")',
-  })
-  .describe('Event name (lowercase with dot notation for namespacing)'));
+// [#13613] `EventNameSchema` (and its `EventName` type) was retired under
+// ADR-0049 enforce-or-remove. It presented itself as the platform's
+// event-name grammar while nothing that runs consumed its three binding
+// schemas; the vocabulary the platform actually checks is the closed literal
+// enums `DataEventType` / `BulkDataEventType` (`api/events.zod.ts`) — the
+// event surface is platform-defined, not author-extensible, so a grammar
+// layer for a hypothetical extension surface misleads in both directions.
 
 /**
  * Type Exports
@@ -210,4 +185,3 @@ export const EventNameSchema = lazySchema(() => z
 export type SystemIdentifier = z.input<typeof SystemIdentifierSchema>;
 export type SnakeCaseIdentifier = z.input<typeof SnakeCaseIdentifierSchema>;
 export type MetadataItemName = z.input<typeof MetadataItemNameSchema>;
-export type EventName = z.input<typeof EventNameSchema>;

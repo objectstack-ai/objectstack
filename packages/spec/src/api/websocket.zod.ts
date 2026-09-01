@@ -1,7 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { EventNameSchema } from '../shared/identifiers.zod';
 import { PresenceStatus } from './realtime-shared.zod';
 
 // Re-export shared PresenceStatus for backward compatibility
@@ -296,7 +295,11 @@ export type UnsubscribeMessage = z.input<typeof UnsubscribeMessageSchema>;
 export const EventMessageSchema = lazySchema(() => BaseWebSocketMessage.extend({
   type: z.literal('event'),
   subscriptionId: z.string().uuid().describe('Subscription ID this event belongs to'),
-  eventName: EventNameSchema.describe('Event name'),
+  // [#13613] Carried `EventNameSchema` until ADR-0049 enforce-or-remove
+  // retired it — no runtime consumer ever parsed through this schema, and the
+  // platform-checked event vocabulary is the closed DataEventType /
+  // BulkDataEventType enums (api/events.zod.ts).
+  eventName: z.string().describe('Event name (dot notation by convention; the platform-checked event vocabulary is the closed DataEventType / BulkDataEventType enums)'),
   object: z.string().optional().describe('Object name the event relates to'),
   payload: z.unknown().describe('Event payload data'),
   userId: z.string().optional().describe('User who triggered the event'),

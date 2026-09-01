@@ -1,7 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-import { EventNameSchema } from '../../shared/identifiers.zod';
+// [#13613] The `name` fields below carried `EventNameSchema` (a dot-notation
+// grammar from shared/identifiers.zod) until ADR-0049 enforce-or-remove
+// retired it: no runtime consumer ever parsed through these schemas, and the
+// event vocabulary the platform actually checks is the closed literal enums
+// `DataEventType` / `BulkDataEventType` (`api/events.zod.ts`). The fields stay
+// as plain strings; the enums are the only event-name contract.
 
 // ==========================================
 // Event Priority
@@ -91,7 +96,7 @@ export const EventMetadataSchema = lazySchema(() => z.object({
  * }
  */
 export const EventTypeDefinitionSchema = lazySchema(() => z.object({
-  name: EventNameSchema.describe('Event type name (lowercase with dots)'),
+  name: z.string().describe('Event type name (dot notation by convention, e.g. order.created; the platform-checked event vocabulary is the closed DataEventType / BulkDataEventType enums)'),
   version: z.string().default('1.0.0').describe('Event schema version'),
   schema: z.unknown().optional().describe('JSON Schema for event payload validation'),
   description: z.string().optional().describe('Event type description'),
@@ -119,7 +124,7 @@ export const EventSchema = lazySchema(() => z.object({
   /**
    * Event name
    */
-  name: EventNameSchema.describe('Event name (lowercase with dots, e.g., user.created, order.paid)'),
+  name: z.string().describe('Event name (dot notation by convention, e.g. user.created, order.paid; the platform-checked event vocabulary is the closed DataEventType / BulkDataEventType enums)'),
   
   /**
    * Event payload

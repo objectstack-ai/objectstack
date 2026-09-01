@@ -40,7 +40,7 @@ const result = DeadLetterQueueEntrySchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | optional | Unique event identifier |
-| **name** | `string` | ✅ | Event name (lowercase with dots, e.g., user.created, order.paid) |
+| **name** | `string` | ✅ | Event name (dot notation by convention, e.g. user.created, order.paid; the platform-checked event vocabulary is the closed DataEventType / BulkDataEventType enums) |
 | **payload** | `any` | ✅ | Event payload schema |
 | **metadata** | `{ source: string; timestamp: string; userId?: string; tenantId?: string; … }` | ✅ | Event metadata |
 
@@ -74,7 +74,7 @@ const result = DeadLetterQueueEntrySchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **id** | `string` | optional | Unique event identifier |
-| **name** | `string` | ✅ | Event name (lowercase with dots, e.g., user.created, order.paid) |
+| **name** | `string` | ✅ | Event name (dot notation by convention, e.g. user.created, order.paid; the platform-checked event vocabulary is the closed DataEventType / BulkDataEventType enums) |
 | **payload** | `any` | ✅ | Event payload schema |
 | **metadata** | `{ source: string; timestamp: string; userId?: string; tenantId?: string; … }` | ✅ | Event metadata |
 
