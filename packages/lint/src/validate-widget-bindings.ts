@@ -462,9 +462,16 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
       const path = `dashboards[${i}].widgets[${j}]`;
       const suppressed = (rule: string): boolean =>
         Array.isArray(w.suppressWarnings) && w.suppressWarnings.includes(rule);
-      const push = (f: Omit<WidgetBindingFinding, 'where' | 'path'>): void => {
+      // [#14148] `path` defaults to the WIDGET, and a caller may override it
+      // with a position inside the widget. The two #14148 limbs do: a filter
+      // key is reported at `…widgets[j].filter.<key>` and `sortBy` at
+      // `…widgets[j].options.sortBy`, matching the precision `filter-token-unknown`
+      // already offers in this exact subtree (`…widgets[4].filter.due_date.$lte`).
+      // Reporting a five-key filter's one bad key at the widget is a location the
+      // author still has to search.
+      const push = (f: Omit<WidgetBindingFinding, 'where' | 'path'> & { path?: string }): void => {
         if (f.severity === 'warning' && suppressed(f.rule)) return;
-        findings.push({ ...f, where, path });
+        findings.push({ ...f, where, path: f.path ?? path });
       };
 
       // ── (a0) legacy pre-ADR-0021 analytics shape ──
@@ -649,6 +656,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
               push({
                 severity: 'error',
                 rule: WIDGET_FILTER_FIELD_UNKNOWN,
+                path: at,
                 message:
                   `${account.message} The widget's own \`filter\` is ANDed into the ` +
                   `dataset query as \`runtimeFilter\`, so the condition addresses a column ` +
@@ -673,6 +681,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             push({
               severity: 'error',
               rule: WIDGET_FILTER_FIELD_NOT_INCLUDED,
+              path: at,
               message:
                 `filter key "${field}" resolves on the object graph, but its relationship ` +
                 `prefix "${prefix}" is not declared in dataset "${dsName}"'s \`include\` — ` +
@@ -759,6 +768,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
         push({
           severity: 'error',
           rule: WIDGET_SORTBY_UNSELECTED,
+          path: `${path}.options.sortBy`,
           message: declaredButUnselected
             ? `options.sortBy "${sortBy}" is declared by dataset "${dsName}" but is not ` +
               `selected by this widget (selects: ${list(selected)}), so the query result ` +

@@ -12,6 +12,9 @@ import {
   WIDGET_LEGACY_ANALYTICS_UNRENDERABLE,
   DASHBOARD_FILTER_FIELD_UNKNOWN,
   DASHBOARD_FILTER_FIELD_UNPROVISIONED,
+  WIDGET_FILTER_FIELD_UNKNOWN,
+  WIDGET_FILTER_FIELD_NOT_INCLUDED,
+  WIDGET_SORTBY_UNSELECTED,
 } from './validate-widget-bindings.js';
 
 /** The downstream repro from issue #1719 — dataset with a count AND a sum
@@ -760,5 +763,263 @@ describe('validateWidgetBindings (dashboard-filter-field-unprovisioned, issue #8
     const s = stack();
     delete (s as { objects?: unknown }).objects;
     expect(only(validateWidgetBindings(s))).toHaveLength(0);
+  });
+});
+
+// ── [#14148] The widget's OWN filter keys and options.sortBy ─────────────────
+
+/**
+ * The card's measured shape, reduced: a widget bound to a dataset over
+ * `duly_task`, carrying its own presentation-scope `filter` and an
+ * `options.sortBy`. The dataset joins `owner` so the include clause has both a
+ * declared and an undeclared prefix to exercise.
+ */
+function widgetOwnStack(
+  widgetOverrides: Record<string, unknown> = {},
+  datasetOverrides: Record<string, unknown> = {},
+) {
+  return {
+    objects: [
+      {
+        name: 'duly_task',
+        fields: [
+          { name: 'subject', type: 'text' },
+          { name: 'due_date', type: 'date' },
+          { name: 'business_unit', type: 'select' },
+          { name: 'owner', type: 'lookup', reference: 'duly_user' },
+          { name: 'estimate', type: 'number' },
+        ],
+      },
+      {
+        name: 'duly_user',
+        fields: [
+          { name: 'name', type: 'text' },
+          { name: 'region', type: 'select' },
+        ],
+      },
+    ],
+    datasets: [{
+      name: 'duly_workload',
+      object: 'duly_task',
+      include: ['owner'],
+      dimensions: [{ name: 'business_unit', field: 'business_unit' }],
+      measures: [
+        { name: 'untouched_over_14d', aggregate: 'count' },
+        { name: 'total_estimate', aggregate: 'sum', field: 'estimate' },
+      ],
+      ...datasetOverrides,
+    }],
+    dashboards: [{
+      name: 'duly_duty_health',
+      widgets: [{
+        id: 'not_moving_14d',
+        type: 'table',
+        dataset: 'duly_workload',
+        dimensions: ['business_unit'],
+        values: ['untouched_over_14d'],
+        ...widgetOverrides,
+      }],
+    }],
+  };
+}
+
+const idsOf = (fs: { rule: string }[], rule: string) => fs.filter((f) => f.rule === rule);
+
+describe('widget-filter-field-unknown (#14148 limb A)', () => {
+  it('errors on the card\'s repro — a widget filter key that is not a column', () => {
+    const findings = idsOf(
+      validateWidgetBindings(widgetOwnStack({
+        filter: { due_daet: { $gte: '{today}', $lte: '{14_days_from_now}' } },
+      })),
+      WIDGET_FILTER_FIELD_UNKNOWN,
+    );
+    expect(findings).toHaveLength(1);
+    const [f] = findings;
+    expect(f.severity).toBe('error');
+    // Names dashboard, widget, key and object — the card's acceptance criterion.
+    expect(f.where).toBe('dashboard "duly_duty_health" › widget "not_moving_14d"');
+    expect(f.message).toContain('due_daet');
+    expect(f.message).toContain('duly_task');
+    expect(f.path).toBe('dashboards[0].widgets[0].filter.due_daet');
+    // The "did you mean", and the object's field list, both present.
+    expect(f.message).toContain('Did you mean "due_date"?');
+    expect(f.hint).toContain('business_unit');
+  });
+
+  it('is silent on the clean shape — a real column', () => {
+    expect(idsOf(
+      validateWidgetBindings(widgetOwnStack({
+        filter: { due_date: { $gte: '{today}' } },
+      })),
+      WIDGET_FILTER_FIELD_UNKNOWN,
+    )).toHaveLength(0);
+  });
+
+  it('descends $and / $or / $not rather than reading only top-level keys', () => {
+    const findings = idsOf(
+      validateWidgetBindings(widgetOwnStack({
+        filter: { $and: [{ due_date: { $lte: '{today}' } }, { $not: { bogus_column: 1 } }] },
+      })),
+      WIDGET_FILTER_FIELD_UNKNOWN,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('bogus_column');
+  });
+
+  it('judges the `{ field, operator }` rule shape and the `[field, op, value]` triple too', () => {
+    expect(idsOf(
+      validateWidgetBindings(widgetOwnStack({
+        filter: { field: 'no_such_col', operator: 'equals', value: 1 },
+      })),
+      WIDGET_FILTER_FIELD_UNKNOWN,
+    )).toHaveLength(1);
+    expect(idsOf(
+      validateWidgetBindings(widgetOwnStack({ filter: ['no_such_col', '=', 1] })),
+      WIDGET_FILTER_FIELD_UNKNOWN,
+    )).toHaveLength(1);
+  });
+
+  it('RESOLVES a dotted path through a declared include — the sub-question, answered', () => {
+    // `owner` is declared in include and `region` is a real column on duly_user.
+    expect(idsOf(
+      validateWidgetBindings(widgetOwnStack({ filter: { 'owner.region': 'emea' } })),
+      WIDGET_FILTER_FIELD_UNKNOWN,
+    )).toHaveLength(0);
+    // ...and a dangling leaf on the joined object is caught, not skipped.
+    const findings = idsOf(
+      validateWidgetBindings(widgetOwnStack({ filter: { 'owner.regionn': 'emea' } })),
+      WIDGET_FILTER_FIELD_UNKNOWN,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('duly_user');
+  });
+
+  it('reads a nested condition object as one dotted position, not a bare leaf', () => {
+    expect(idsOf(
+      validateWidgetBindings(widgetOwnStack({ filter: { owner: { region: { $eq: 'emea' } } } })),
+      WIDGET_FILTER_FIELD_UNKNOWN,
+    )).toHaveLength(0);
+  });
+
+  it('errors when a hop is not a relationship at all', () => {
+    const findings = idsOf(
+      validateWidgetBindings(widgetOwnStack({ filter: { 'estimate.total': 1 } })),
+      WIDGET_FILTER_FIELD_UNKNOWN,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('not a relationship');
+  });
+
+  it('takes skip 1 — an object this stack does not define is never reported', () => {
+    const s = widgetOwnStack({ filter: { due_daet: 1 } });
+    s.objects = s.objects.filter((o) => o.name !== 'duly_task');
+    expect(idsOf(validateWidgetBindings(s), WIDGET_FILTER_FIELD_UNKNOWN)).toHaveLength(0);
+  });
+
+  it('takes skip 2 — an object with no readable field map is never reported', () => {
+    const s = widgetOwnStack({ filter: { due_daet: 1 } });
+    delete (s.objects[0] as { fields?: unknown }).fields;
+    expect(idsOf(validateWidgetBindings(s), WIDGET_FILTER_FIELD_UNKNOWN)).toHaveLength(0);
+  });
+
+  it('takes skip 3 — a registry-injected system column resolves', () => {
+    expect(idsOf(
+      validateWidgetBindings(widgetOwnStack({ filter: { created_at: { $gte: '{today}' } } })),
+      WIDGET_FILTER_FIELD_UNKNOWN,
+    )).toHaveLength(0);
+  });
+});
+
+describe('widget-filter-field-not-included (#14148 limb A, the include clause)', () => {
+  it('errors when a resolvable dotted key traverses an UNDECLARED relationship', () => {
+    const findings = idsOf(
+      validateWidgetBindings(widgetOwnStack(
+        { filter: { 'owner.region': 'emea' } },
+        { include: [] },
+      )),
+      WIDGET_FILTER_FIELD_NOT_INCLUDED,
+    );
+    expect(findings).toHaveLength(1);
+    const [f] = findings;
+    expect(f.severity).toBe('error');
+    expect(f.message).toContain('owner');
+    expect(f.message).toContain('duly_workload');
+    expect(f.hint).toContain('(none)');
+  });
+
+  it('is silent for a bare base column — it needs no join', () => {
+    expect(idsOf(
+      validateWidgetBindings(widgetOwnStack({ filter: { due_date: 1 } }, { include: [] })),
+      WIDGET_FILTER_FIELD_NOT_INCLUDED,
+    )).toHaveLength(0);
+  });
+
+  it('does not double-report: an unresolvable key yields the existence finding only', () => {
+    const all = validateWidgetBindings(widgetOwnStack(
+      { filter: { 'owner.regionn': 'emea' } },
+      { include: [] },
+    ));
+    expect(idsOf(all, WIDGET_FILTER_FIELD_UNKNOWN)).toHaveLength(1);
+    expect(idsOf(all, WIDGET_FILTER_FIELD_NOT_INCLUDED)).toHaveLength(0);
+  });
+});
+
+describe('widget-sortby-unselected (#14148 limb B)', () => {
+  it('errors on the card\'s repro — sortBy names nothing the widget selects', () => {
+    const findings = idsOf(
+      validateWidgetBindings(widgetOwnStack({
+        options: { sortBy: 'not_selected', sortOrder: 'asc' },
+      })),
+      WIDGET_SORTBY_UNSELECTED,
+    );
+    expect(findings).toHaveLength(1);
+    const [f] = findings;
+    expect(f.severity).toBe('error');
+    expect(f.where).toBe('dashboard "duly_duty_health" › widget "not_moving_14d"');
+    expect(f.path).toBe('dashboards[0].widgets[0].options.sortBy');
+    expect(f.message).toContain('not_selected');
+    // Lists what the widget DOES select — the card's acceptance criterion.
+    expect(f.message).toContain('business_unit');
+    expect(f.message).toContain('untouched_over_14d');
+  });
+
+  it('is silent when sortBy names a selected dimension', () => {
+    expect(idsOf(
+      validateWidgetBindings(widgetOwnStack({ options: { sortBy: 'business_unit' } })),
+      WIDGET_SORTBY_UNSELECTED,
+    )).toHaveLength(0);
+  });
+
+  it('is silent when sortBy names a selected measure', () => {
+    expect(idsOf(
+      validateWidgetBindings(widgetOwnStack({ options: { sortBy: 'untouched_over_14d' } })),
+      WIDGET_SORTBY_UNSELECTED,
+    )).toHaveLength(0);
+  });
+
+  it('is silent when there is no sortBy at all', () => {
+    expect(idsOf(
+      validateWidgetBindings(widgetOwnStack({ options: { limit: 10 } })),
+      WIDGET_SORTBY_UNSELECTED,
+    )).toHaveLength(0);
+  });
+
+  it('names the declared-but-unselected case apart — the fix is a selection, not a spelling', () => {
+    const findings = idsOf(
+      validateWidgetBindings(widgetOwnStack({ options: { sortBy: 'total_estimate' } })),
+      WIDGET_SORTBY_UNSELECTED,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('is declared by dataset "duly_workload" but is not');
+    expect(findings[0].hint).toContain("this widget's values");
+  });
+
+  it('does not double-report a dimension entry that rule (b) already errored on', () => {
+    const all = validateWidgetBindings(widgetOwnStack({
+      dimensions: ['business_unitt'],
+      options: { sortBy: 'business_unitt' },
+    }));
+    expect(idsOf(all, WIDGET_DIMENSION_UNKNOWN)).toHaveLength(1);
+    expect(idsOf(all, WIDGET_SORTBY_UNSELECTED)).toHaveLength(0);
   });
 });
