@@ -129,7 +129,13 @@ export interface DuplicateHolder {
   organization: string | null;
   /** The partition the row falls in — `organization` or the global sentinel. */
   partition: string;
-  /** The row's `created_at`, or `null` when the object carries no such column. */
+  /**
+   * The row's `created_at` as canonical ISO-8601 UTC, or `null` when the object
+   * carries no such column.
+   *
+   * ONE spelling, whatever dialect produced the row — see
+   * {@link canonicalHolderCreatedAt} for why that is this side's to owe.
+   */
   createdAt: string | null;
 }
 
@@ -569,6 +575,54 @@ export function answeringSeam(exec: SeedTenancyExec): SeedTenancyExec {
   };
 }
 
+/**
+ * The canonical `createdAt` spelling for one holder row.
+ *
+ * `created_at` is a BUILTIN audit column: it is not in `datetimeFields`, and
+ * `SqlDriver#formatOutput` repairs it only inside its `if (this.isSqlite)` arm —
+ * and the holder probe reads through the raw-SQL seam anyway, so no presentation
+ * runs on this path at all. The DIALECT therefore decides what lands in
+ * `row.created_at`, and both sides of that asymmetry are pinned in
+ * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`:
+ * Postgres and MySQL materialise a JS `Date`, SQLite and its siblings hand back
+ * canonical ISO-8601 UTC text.
+ *
+ * `DuplicateHolder.createdAt` is declared `string | null`, so this leaf consumer
+ * is the side that owes the canonical spelling — the same form the `occurredAt`
+ * mapper in `packages/metadata-protocol/src/protocol.ts` already uses. Without
+ * it, `String(value)` runs `Date.prototype.toString` on the production default
+ * driver and the operator reads
+ *
+ *     Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)
+ *
+ * where the same command against SQLite prints `2026-08-30T10:19:25.947Z`: the
+ * operator's local zone baked in, whole seconds instead of milliseconds, no `Z`,
+ * and not `Date.parse`-safe for anything consuming this command's JSON.
+ *
+ * NOT a tolerant fallback (#13973's standing prohibition). Nothing downstream is
+ * taught to accept a second spelling; this produces ONE spelling for one instant,
+ * whichever dialect produced it.
+ *
+ * Two arms are deliberately left exactly as they were:
+ *
+ *  - **`null` stays `null`.** An object may opt out of system fields, in which
+ *    case the caller retries the probe without the column; that absence is not a
+ *    timestamp to canonicalise.
+ *  - **A `Date` carrying no time value keeps its verbatim rendering.**
+ *    `toISOString()` THROWS on one (`RangeError: Invalid time value`), and
+ *    `mysql2` hands back exactly that for a zero date. A non-instant has no
+ *    canonical spelling, so it stays visibly wrong rather than taking down a
+ *    command whose entire defect was a spelling in a report.
+ */
+export function canonicalHolderCreatedAt(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === 'string') return value;
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value.toISOString() : String(value);
+  }
+  return String(value);
+}
+
 /** How many values one holder query asks about — bound-parameter limits are per dialect. */
 const HOLDER_BATCH = 200;
 
@@ -681,7 +735,7 @@ export async function collectDuplicateIdentifierReport(
           id: row.holder_id == null ? null : String(row.holder_id),
           organization,
           partition: organization ?? globalTenant,
-          createdAt: row.created_at == null ? null : String(row.created_at),
+          createdAt: canonicalHolderCreatedAt(row.created_at),
         };
         const key = String(row.dup_value);
         const list = holdersByValue.get(key);

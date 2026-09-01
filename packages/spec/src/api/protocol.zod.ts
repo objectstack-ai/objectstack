@@ -2181,6 +2181,53 @@ export const SearchAllHitSchema = lazySchema(() => z.object({
 }));
 
 /**
+ * One PAGE hit of the global cross-object search (#13216).
+ *
+ * A published custom page has an end-user entry point in the ⌘K palette:
+ * `searchAll` additionally sweeps the pages the caller's ordinary metadata
+ * read door already serves (`getMetaItems({ type: 'page' })` — published
+ * state only, org-scoped through the same registry-derived predicate the
+ * REST `/meta` read doors use), so a page hit surfaces exactly what
+ * `GET /api/v1/meta/page` would have answered the same caller — never more.
+ * Opening the hit goes through the existing page routes/renderer, where the
+ * page's own audience gate (`assignedProfiles`) applies unchanged; the
+ * search response is not a second read door.
+ *
+ * NOT a member of {@link SearchAllHitSchema}'s array: page hits live in the
+ * sibling `pages` array so an existing consumer iterating `hits` (every one
+ * of which is a record with an `object`/`id` address) never receives an
+ * element whose address vocabulary it predates. `kind` is the self-describing
+ * discriminant for clients that flatten both arrays into one palette list.
+ */
+export const SearchAllPageHitSchema = lazySchema(() => z.object({
+  kind: z.literal('page').describe(
+    'Discriminant, always the literal `page` — kept on the hit (despite the dedicated array) so '
+    + 'a client merging record and page hits into one palette list still holds a self-describing '
+    + 'element.'
+  ),
+  name: z.string().describe(
+    'Machine name of the page (`page.name`) — the address a client routes to; the same name the '
+    + 'metadata read door serves the page under.'
+  ),
+  title: z.string().describe(
+    'Display title: the page `label` resolved through the shared i18n label resolution '
+    + '(exact tag → base language → regional sibling → `default` → `en` → any), falling back to '
+    + 'the machine name when no label resolves.'
+  ),
+  snippet: z.string().optional().describe(
+    'Excerpt cut around the first matched term in the page `description`, ellipsized at both '
+    + 'ends when truncated — the same geometry as a record hit\'s snippet. ABSENT when the match '
+    + 'is on the name or label only (the title already shows it) — absence is a correct answer, '
+    + 'not a miss.'
+  ),
+  pageType: z.string().optional().describe(
+    'The page\'s own declared `type` (`record` | `app` | `home` | …) when the served document '
+    + 'carries one — a routing hint, deliberately typed as a plain string so a future page type '
+    + 'cannot invalidate an already-produced search response.'
+  ),
+}));
+
+/**
  * Global Cross-Object Search Response (#11924)
  *
  * The WHOLE body of `GET /api/v1/search` — the route answers BARE
@@ -2191,9 +2238,11 @@ export const SearchAllHitSchema = lazySchema(() => z.object({
  * Declared AS PRODUCED (maintainer ruling 2026-08-25 on #11924: the shape is
  * stable and server-produced). One query sweeps every searchable,
  * API-enabled object the caller can read (ADR-0061 Tier 1: the server
- * resolves which fields to search from object metadata); an empty/blank `q`
- * short-circuits to `{ query: '', hits: [], totalObjects: 0, totalHits: 0,
- * truncated: false }` without scanning.
+ * resolves which fields to search from object metadata) — and, on an
+ * unscoped sweep, the published pages the caller's metadata read door serves
+ * (#13216, {@link SearchAllPageHitSchema}); an empty/blank `q`
+ * short-circuits to `{ query: '', hits: [], pages: [], totalObjects: 0,
+ * totalHits: 0, truncated: false }` without scanning.
  */
 export const SearchAllResponseSchema = lazySchema(() => z.object({
   query: z.string().describe(
@@ -2203,6 +2252,15 @@ export const SearchAllResponseSchema = lazySchema(() => z.object({
   hits: z.array(SearchAllHitSchema).describe(
     'Matched records across objects, in scan order, capped at the overall `limit` '
     + '(default 20, max 100) with at most `perObject` (default 5, max 25) per object.'
+  ),
+  pages: z.array(SearchAllPageHitSchema).describe(
+    'Published pages whose name, label, or description matches every term (each term may match '
+    + 'in a different field; matching folds case), in the served listing\'s order, capped at '
+    + '`perObject` — the page store is swept as one more container, and more matching pages may '
+    + 'exist beyond the cap. Produced ONLY on an unscoped sweep: a request that names `objects` '
+    + 'asks for records of those objects and answers `pages: []`. The swept set is exactly what '
+    + 'the caller\'s metadata read door (`GET /api/v1/meta/page`) serves — published state only, '
+    + 'never drafts.'
   ),
   totalObjects: z.number().describe(
     'Number of objects the sweep actually SCANNED (searchable, API-enabled, with a '
@@ -3126,6 +3184,8 @@ export type DeleteDataResponse = z.input<typeof DeleteDataResponseSchema>;
  * — see {@link SearchAllHitSchema} for the trap.
  */
 export type SearchAllHit = z.input<typeof SearchAllHitSchema>;
+/** One published-page hit of the same body (#13216) — see {@link SearchAllPageHitSchema}. */
+export type SearchAllPageHit = z.input<typeof SearchAllPageHitSchema>;
 export type SearchAllResponse = z.input<typeof SearchAllResponseSchema>;
 
 export type BatchDataRequest = z.input<typeof BatchDataRequestSchema>;

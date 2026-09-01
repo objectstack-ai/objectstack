@@ -684,6 +684,8 @@
     "ScheduledExportSchema": "api/ScheduledExport",
     "SearchAllHit": "api/SearchAllHit",
     "SearchAllHitSchema": "api/SearchAllHit",
+    "SearchAllPageHit": "api/SearchAllPageHit",
+    "SearchAllPageHitSchema": "api/SearchAllPageHit",
     "SearchAllResponse": "api/SearchAllResponse",
     "SearchAllResponseSchema": "api/SearchAllResponse",
     "ServiceInfo": "api/ServiceInfo",

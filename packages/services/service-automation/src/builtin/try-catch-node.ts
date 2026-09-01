@@ -182,12 +182,32 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
       }
 
       // No catch handler — surface the failure to the flow's fault edge / error
-      // handling. No `childSteps` here on purpose: the engine splices them only
-      // on a SUCCESSFUL node result, so attaching them to a failing one would
-      // be dead weight. That path is not the gap #7546 closes either — an
-      // unhandled failure already terminates the run `failed` with both
-      // run-level and step-level errors, which is loud by construction.
-      return { success: false, error: `try_catch '${node.id}': try region failed — ${lastError}` };
+      // handling.
+      //
+      // #14184 — and the try region's steps ride out WITH it. They used to be
+      // withheld here on purpose, because the engine spliced `childSteps` only
+      // on a SUCCESSFUL node result and attaching them to a failing one really
+      // was dead weight. #13803 taught the engine's THROW arm to fold a dying
+      // container's carried steps, and this card teaches its returned-failure
+      // arm the same, so the sink now has a reader on both channels.
+      //
+      // Withholding them was the #13803 defect one construct over. The try
+      // region's nodes may have written rows before one of them failed; the run
+      // log kept no step for any of them, so the #4354 summary folded over that
+      // log reported `acted: 0` for a region that had genuinely written. `acted:
+      // 0` on a failed run reads as "nothing happened, safe to re-run", which
+      // for a non-idempotent region invites double-execution.
+      //
+      // Purely additive to the RECORD: this return already reported failure,
+      // already produced a `NODE_FAILURE` step, already set `$error` and was
+      // already routable by a `fault` edge. Adding `childSteps` moves none of
+      // that — unlike the rejected "make `loop` swallow its throw and return"
+      // shape (see `partial-steps.ts`), which would have changed all four.
+      return {
+        success: false,
+        error: `try_catch '${node.id}': try region failed — ${lastError}`,
+        childSteps: failedAttemptSteps,
+      };
     },
   });
 

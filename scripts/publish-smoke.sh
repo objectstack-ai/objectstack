@@ -26,13 +26,63 @@
 # Both modes then run the scaffolded project's own `build` script and assert it
 # exits 0 — the step section 1b explains, and the one this gate used to lack.
 #
-# Both modes then boot `objectstack dev --fresh` and assert:
-#   - GET  /api/v1/auth/get-session        → 200   (anonymous)
-#   - POST /api/v1/auth/sign-up/email      → 200
-#   - POST /api/v1/auth/sign-in/email      → 200, session established
+# Both modes then boot `objectstack dev --fresh` and assert the DECLARED
+# first-run contract (see "the first run this asserts" below):
+#   - GET  /api/v1/auth/get-session              → 200   (anonymous)
+#   - GET  /api/v1/auth/config                   → 200, and in `pack` mode the
+#                                                  advertised audience posture
+#                                                  IS the declared `invite_only`
+#   - POST /api/v1/auth/sign-in/email            → 200   (the SEEDED dev admin)
+#   then, under a closed posture (always in `pack` mode — see the mode note at
+#   the `/auth/config` probe for why `registry` mode reads it rather than
+#   assuming it):
+#   - POST /api/v1/auth/sign-up/email            → 403 SELF_REGISTRATION_CLOSED
+#                                                  (an UNINVITED second account)
+#   - POST /api/v1/auth/organization/invite-member → 200 (the operator path)
+#   - POST /api/v1/auth/sign-up/email            → 200   (the invitee, admitted
+#                                                  by the invitation carve-out)
+#   - POST /api/v1/auth/sign-in/email            → 200, session established
 #   - REST CRUD on the scaffolded object (POST/GET/PATCH/DELETE /api/v1/data/…)
 #   - zero error/fatal log lines (specifically the #3091 signature:
 #     "Failed to register OIDC discovery routes")
+#
+# ── the first run this asserts (#14000) ─────────────────────────────────────
+#
+# Until #14000 this script asserted that the first `POST /auth/sign-up/email`
+# after `objectstack dev --fresh` returns 200 — an expectation authored before
+# #11767/#11739 made `invite_only` the platform's DEFAULT audience posture. It
+# is not the first account that reaches this probe: `objectstack dev --fresh`
+# seeds a dev admin IN-PROCESS at boot (`maybeSeedDevAdmin`, plugin-auth) via
+# the real `signUpEmail` pipeline, and THAT is the zero-user creation the
+# bootstrap bypass admits. The smoke's own sign-up is therefore the SECOND
+# self-serve account, which `invite_only` refuses — correctly — with
+# `SELF_REGISTRATION_CLOSED` + 403.
+#
+# So the gate had been red for ~7 days on a product that was behaving exactly
+# as declared, and the release candidate had NEVER once passed this smoke with
+# the posture default aboard. Ruling (issue #14000, maintainer-approved,
+# director batch #23) — re-pin the smoke TO the declared contract, and do not
+# touch auth/audience runtime code:
+#
+#   1. the seeded admin can SIGN IN            ⇒ the bootstrap bypass really
+#                                                fired inside the packed install
+#      (it is the only thing that could have created that account);
+#   2. the second self-serve sign-up is REFUSED with the envelope `code`
+#      SELF_REGISTRATION_CLOSED and status 403 ⇒ the closed-by-default posture
+#      is now load-bearing in CI: an accidental widening of the unauthenticated
+#      surface turns the RC red instead of shipping;
+#   3. the non-admin probe user arrives through the OPERATOR path (the
+#      invitation carve-out) before the session/CRUD probes run as before.
+#
+# ⛔ Assert BEHAVIOUR, never a vendor-internal symbol. Wiring a release gate to
+# better-auth's own internals (dist line numbers, private helpers) is the shape
+# that made #11767's breakage possible; every assertion here is an HTTP status
+# plus a `code` this repo owns and publishes.
+#
+# ⛔ Do NOT "fix" a red here by relaxing an assertion back toward 200. The whole
+# reason this gate exists (#3091) is that 15.1.0 shipped with every fresh
+# project's auth endpoints broken because in-repo settings hid the user's real
+# first run. A refusal that this script asserts is a refusal a user gets.
 #
 # better-sqlite3 is an optionalDependency of @objectstack/driver-sql: if the
 # runner cannot build the native addon the install still succeeds and the
@@ -717,6 +767,19 @@ COOKIES_USER="$SMOKE_ROOT/cookies-user.txt"
 COOKIES_ADMIN="$SMOKE_ROOT/cookies-admin.txt"
 BODY="$SMOKE_ROOT/body.json"
 
+# The credentials `objectstack dev --fresh` seeds in-process, spelled once.
+# Defaults live in plugin-auth (`maybeSeedDevAdmin`) and are echoed by the CLI
+# startup banner (packages/cli/src/utils/format.ts). This script deliberately
+# passes NO --admin-email/--admin-password: the values a user is handed on a
+# fresh install are what this gate must exercise.
+ADMIN_EMAIL="admin@objectos.ai"
+ADMIN_PASSWORD="admin123"
+# The non-admin probe user. Spelled once because the operator invitation and
+# the sign-up that redeems it MUST address the same mailbox — the carve-out is
+# a lookup for a pending `sys_invitation` row on exactly this address.
+USER_EMAIL="smoke@example.com"
+USER_PASSWORD="Sm0ke-Pass!42"
+
 # probe <label> <expected-status> <curl args…> — body lands in $BODY.
 probe() {
   local label=$1 expect=$2; shift 2
@@ -729,30 +792,153 @@ probe() {
   echo "  ok — $label → $status"
 }
 
+# assert_body <jq-filter> <what-failed> — reads the LAST probe's body.
+# Always paired with `probe` for a refusal: a status code on its own names no
+# reason, and two different defects can produce the same number.
+assert_body() {
+  jq -e "$1" "$BODY" >/dev/null \
+    || fail "$2 (filter: $1; body: $(cat "$BODY"))"
+}
+
 log "Auth probes (the #3091 failure surface)"
 probe "GET /auth/get-session (anonymous)" 200 "$BASE_URL/api/v1/auth/get-session"
 
-probe "POST /auth/sign-up/email" 200 \
+# ── which contract THIS artifact declares ───────────────────────────────────
+# `GET /auth/config` is public and unauthenticated, and since #11739 it
+# advertises the audience posture in force (`features.audiencePosture`) so a
+# login surface can render honest messaging instead of a sign-up form the
+# server will refuse. This script reads it for the same reason: the two SMOKE
+# MODES install DIFFERENT products.
+#
+#   pack     — the release candidate, i.e. THIS repo's tree. Its declared
+#              default is `invite_only`, and the assertion below is where that
+#              stops being a claim about source and becomes a measurement of
+#              the artifact.
+#   registry — the LAST PUBLISHED release, whose contract this tree does not
+#              define and may predate. `@objectstack/plugin-auth` 17.2.0
+#              (published 2026-08-23) ships no audience posture at all; #11767
+#              landed 2026-08-25. Hard-coding the RC's posture here would turn
+#              the weekly canary red — and auto-file a "fresh install is
+#              broken" issue — over a release that is behaving exactly as ITS
+#              contract declares.
+#
+# So the posture is READ, then the enforcement is asserted to MATCH it. That is
+# the same declared-equals-enforced pin in both modes, and the legacy branch
+# retires itself: once a published release carries the posture, the canary
+# takes the closed-posture path too and the `else` below stops being reached.
+probe "GET /auth/config (anonymous)" 200 "$BASE_URL/api/v1/auth/config"
+AUDIENCE_POSTURE=$(jq -r '.data.features.audiencePosture // "unadvertised"' "$BODY")
+echo "  advertised audience posture: $AUDIENCE_POSTURE"
+
+# ⛔ The RC's own default is not negotiable and not read from the RC's opinion
+# of itself: `invite_only` is what #11739/#11767 declare, so anything else here
+# is a widening of the unauthenticated surface and the release candidate must
+# go red for it — BEFORE the behaviour probes, which would otherwise report the
+# widening as a cheerful 200.
+if [ "$SMOKE_MODE" = "pack" ] && [ "$AUDIENCE_POSTURE" != "invite_only" ]; then
+  fail "the release candidate advertises audience posture '$AUDIENCE_POSTURE', but the declared default is invite_only (#11739/#11767). Either the default was widened — in which case this refusal is the point of the gate — or the posture is no longer advertised on /auth/config and this probe has stopped measuring anything."
+fi
+
+# ── the seeded admin signs in ───────────────────────────────────────────────
+# This is the packed install's proof that the BOOTSTRAP BYPASS fired. Under the
+# default `invite_only` posture the only self-registration the audience gate
+# admits is the very first account on a zero-user database, and
+# `objectstack dev --fresh` spends exactly that carve-out on the in-process
+# dev-admin seed (`maybeSeedDevAdmin` → the real `signUpEmail` pipeline, which
+# passes through the same gate). An account that can sign in HERE is an account
+# that gate admitted — nothing else could have created it. When the bypass
+# genuinely fails to fire (the #11767 defect: the bootstrap probe threw and the
+# outer `catch` read the rejection as "not bootstrap"), the seed never lands and
+# this probe fails, naming the real defect instead of leaving it to be inferred
+# from a sign-up refusal further down.
+probe "POST /auth/sign-in/email (seeded dev admin — proves the bootstrap bypass fired)" 200 \
+  -c "$COOKIES_ADMIN" \
   -X POST -H 'content-type: application/json' \
-  -d '{"name":"Smoke User","email":"smoke@example.com","password":"Sm0ke-Pass!42"}' \
-  "$BASE_URL/api/v1/auth/sign-up/email"
+  -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" \
+  "$BASE_URL/api/v1/auth/sign-in/email"
+assert_body ".user.email == \"$ADMIN_EMAIL\"" \
+  "the seeded dev admin's sign-in returned a session for a different user"
+
+if [ "$AUDIENCE_POSTURE" = "invite_only" ]; then
+  # ── the second self-serve sign-up is REFUSED ──────────────────────────────
+  # The closed-by-default posture, pinned into CI in the artifact a user
+  # installs: if the unauthenticated surface is ever widened by accident, the
+  # release candidate goes red here instead of shipping.
+  #
+  # The status alone is NOT the assertion. A 403 also comes out of the origin
+  # check (INVALID_ORIGIN), out of a rate limiter, and out of any guard added
+  # later — each would keep this probe green while saying nothing whatever
+  # about the audience posture. The envelope `code` is the part that pins the
+  # posture, and it is a code this repo owns and publishes
+  # (`SELF_REGISTRATION_CLOSED`), ⛔ never a vendor-internal symbol.
+  #
+  # A DIFFERENT address than the invited one below, on purpose: this probe must
+  # measure an uninvited self-registrant, and reusing the invitee's mailbox
+  # would let the carve-out answer instead of the posture.
+  probe "POST /auth/sign-up/email (SECOND self-serve account, uninvited — must be REFUSED)" 403 \
+    -X POST -H 'content-type: application/json' \
+    -d "{\"name\":\"Uninvited Smoke\",\"email\":\"uninvited@example.com\",\"password\":\"$USER_PASSWORD\"}" \
+    "$BASE_URL/api/v1/auth/sign-up/email"
+  assert_body '.code == "SELF_REGISTRATION_CLOSED"' \
+    "the uninvited self-serve sign-up was refused, but NOT by the audience posture — a 403 whose code is not SELF_REGISTRATION_CLOSED means some other guard answered, and this probe has stopped measuring the closed-by-default posture"
+
+  # ── the operator path admits the probe user ───────────────────────────────
+  # How a real operator adds a teammate on a fresh install: `invite_only` means
+  # BY INVITATION, and a self-serve sign-up whose address holds a pending,
+  # unexpired `sys_invitation` row is admitted under every posture (the
+  # invitation carve-out). The route runs as the signed-in admin against the
+  # default organization their session carries — ADR-0081 bootstraps that org
+  # precisely so this path exists on a single-org install.
+  #
+  # Chosen over `POST /auth/admin/create-user` — the other operator path named
+  # in the ruling — because that route needs better-auth's `admin` plugin,
+  # which a scaffolded project does NOT get by default
+  # (`admin: pluginConfig.admin ?? scimEffective`, auth-manager.ts), so it
+  # would answer 501 NOT_IMPLEMENTED on the very artifact under test. The
+  # organization plugin IS on by default
+  # (`organization: pluginConfig.organization ?? true`), so the invitation
+  # carve-out is the operator path a fresh install actually ships.
+  log "Operator path (invitation carve-out) — how a fresh install adds its second user"
+  probe "POST /auth/organization/invite-member (as the seeded admin)" 200 \
+    -b "$COOKIES_ADMIN" \
+    -X POST -H 'content-type: application/json' \
+    -d "{\"email\":\"$USER_EMAIL\",\"role\":\"member\"}" \
+    "$BASE_URL/api/v1/auth/organization/invite-member"
+  assert_body '.status == "pending"' \
+    "invite-member answered 200 but persisted no pending invitation — the carve-out below would have nothing to redeem"
+
+  probe "POST /auth/sign-up/email (invited user — admitted by the carve-out)" 200 \
+    -X POST -H 'content-type: application/json' \
+    -d "{\"name\":\"Smoke User\",\"email\":\"$USER_EMAIL\",\"password\":\"$USER_PASSWORD\"}" \
+    "$BASE_URL/api/v1/auth/sign-up/email"
+else
+  # ── legacy: an artifact that declares no closed posture ───────────────────
+  # Reached only by `registry` mode against a published release older than
+  # #11739/#11767 (pack mode has already failed above if the RC lands here).
+  # Such a release admits open self-registration, and asserting a refusal
+  # against it would be this gate reporting a defect that its subject does not
+  # have. Retires itself: the first published release carrying the posture
+  # sends the canary down the closed branch above.
+  log "Open-registration first run (this artifact advertises no closed audience posture)"
+  probe "POST /auth/sign-up/email (self-serve)" 200 \
+    -X POST -H 'content-type: application/json' \
+    -d "{\"name\":\"Smoke User\",\"email\":\"$USER_EMAIL\",\"password\":\"$USER_PASSWORD\"}" \
+    "$BASE_URL/api/v1/auth/sign-up/email"
+fi
 
 probe "POST /auth/sign-in/email" 200 \
   -c "$COOKIES_USER" \
   -X POST -H 'content-type: application/json' \
-  -d '{"email":"smoke@example.com","password":"Sm0ke-Pass!42"}' \
+  -d "{\"email\":\"$USER_EMAIL\",\"password\":\"$USER_PASSWORD\"}" \
   "$BASE_URL/api/v1/auth/sign-in/email"
 
 probe "GET /auth/get-session (signed in)" 200 -b "$COOKIES_USER" "$BASE_URL/api/v1/auth/get-session"
-jq -e '.user.email == "smoke@example.com"' "$BODY" >/dev/null \
-  || fail "signed-in get-session did not return the smoke user (body: $(cat "$BODY"))"
+assert_body ".user.email == \"$USER_EMAIL\"" \
+  "signed-in get-session did not return the smoke user"
 
 log "REST CRUD probes (seeded dev admin)"
-probe "POST /auth/sign-in/email (admin)" 200 \
-  -c "$COOKIES_ADMIN" \
-  -X POST -H 'content-type: application/json' \
-  -d '{"email":"admin@objectos.ai","password":"admin123"}' \
-  "$BASE_URL/api/v1/auth/sign-in/email"
+# The admin session was established by the bootstrap-bypass probe above and is
+# reused here — one sign-in, not two.
 
 # The scaffolder renames the template's `blank_note` object after the project
 # (e.g. smoke_app_note) — read the real name from the generated source.

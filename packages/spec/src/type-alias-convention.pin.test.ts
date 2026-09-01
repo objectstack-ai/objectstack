@@ -269,7 +269,7 @@ import type * as M170 from './ui/component.zod.js';
 import type * as M183 from './api/sortability.zod.js';
 
 // ---------------------------------------------------------------------------
-// 835 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 836 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -500,6 +500,7 @@ export type Iso146 = Assert<Eq< z.input< typeof M28.UpdateDataResponseSchema >, 
 export type Iso147 = Assert<Eq< z.input< typeof M28.DeleteDataResponseSchema >, z.infer< typeof M28.DeleteDataResponseSchema > >>;
 export type Iso859 = Assert<Eq< z.input< typeof M28.CloneDataResponseSchema >, z.infer< typeof M28.CloneDataResponseSchema > >>;
 export type Iso860 = Assert<Eq< z.input< typeof M28.SearchAllHitSchema >, z.infer< typeof M28.SearchAllHitSchema > >>;
+export type Iso866 = Assert<Eq< z.input< typeof M28.SearchAllPageHitSchema >, z.infer< typeof M28.SearchAllPageHitSchema > >>;
 export type Iso861 = Assert<Eq< z.input< typeof M28.SearchAllResponseSchema >, z.infer< typeof M28.SearchAllResponseSchema > >>;
 export type Iso148 = Assert<Eq< z.input< typeof M28.CreateManyDataResponseSchema >, z.infer< typeof M28.CreateManyDataResponseSchema > >>;
 export type Iso150 = Assert<Eq< z.input< typeof M28.CheckPermissionResponseSchema >, z.infer< typeof M28.CheckPermissionResponseSchema > >>;
@@ -1681,7 +1682,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 835 isomorphic pins', () => {
+  it('still declares all 836 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2057,9 +2058,19 @@ describe('ADR-0122 type-alias convention', () => {
     // the platform-checked event vocabulary is the closed `DataEventType` /
     // `BulkDataEventType` enums. -1 removed; the Iso number stays vacant
     // (ids are claims about pins, not positions).
+    //
+    // 835 -> 836 is #13216's `SearchAllPageHitSchema` — the published-page
+    // hit of the global-search body (`pages`, the sibling array of
+    // `SearchAllHitSchema`'s record hits), declared as produced like its
+    // #11924 siblings one family up. Isomorphism MEASURED, not assumed: one
+    // `z.literal('page')`, two required `z.string()`s and two optional
+    // `z.string()`s — no `.default()`, `.transform()`, `.catch()` or
+    // `.pipe()` anywhere, so the two shapes coincide and ADR-0122 gives it a
+    // pin rather than an `XParsed`. Its id is `Iso866`, the next free one —
+    // ids are claims about pins, not positions.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(835);
+    expect(pins).toHaveLength(836);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either
