@@ -2,6 +2,10 @@
 
 import { describe, it, expect } from 'vitest';
 import { compileCelToFilter } from '@objectstack/formula';
+// [#14234] The spec-owned vocabulary the fix-hint quotes back at the author.
+// Imported rather than transcribed so a rename in the spec reds this file
+// instead of leaving the hint naming values the platform no longer has.
+import { OWDModel, ShareRecipientType, ObjectAccessScopeSchema } from '@objectstack/spec/security';
 
 import {
   validateSharingRuleEnforceability,
@@ -391,5 +395,129 @@ describe('validateSharingRuleEnforceability — an anchor a gate WOULD consult s
     const stack = anchoredOn('private');
     expect(Object.keys((stack.objects[0] as { fields: object }).fields)).not.toContain('owner_id');
     expect(validateSharingRuleEnforceability(stack)).toEqual([]);
+  });
+});
+
+// ── The `private`-case wording pin (#14234) ──────────────────────────
+//
+// The hint this rule prints used to end in an UNQUALIFIED remedy: "express
+// per-user access with … an RLS policy on a permission set". That advice is
+// sound on an open OWD and structurally impossible on `private`, which is the
+// sharing model an author hitting this rule is most likely to be on.
+//
+// Measured, not argued. The security layers are AND-composed —
+// `security-plugin.ts` returns
+// `andComposeLayers(andComposeLayers(filter, cbpFilter), sharingFilter)`, and
+// `getReadFilter`'s own prose promises "the same filter the engine middleware
+// AND-s into every find". `plugin-sharing`'s `buildReadFilter` returns `null`
+// for every model except `private`, so:
+//
+//   - `public_read` / `public_read_write` → sharing imposes nothing on reads;
+//     an RLS policy NARROWS an open baseline, the direction AND expresses.
+//   - `private` → sharing has ALREADY withheld the row, and an AND term can
+//     only remove rows, never add one back. An RLS "widener" there lints
+//     clean, passes every gate and grants nothing — a silent failure at the
+//     security boundary.
+//
+// These legs pin the split. The failure they exist to catch is a REGRESSION TO
+// ADVICE THAT CANNOT WORK, which is invisible to every other gate: the hint is
+// prose, so nothing else in CI reads a word of it.
+describe('SHARING_RULE_RUNTIME_VARIABLE_CONDITION — the hint qualifies its RLS remedy by sharing model', () => {
+  const hintOf = (): string => {
+    const findings = validateSharingRuleEnforceability(
+      ruleWith("record.visibility == 'manager' && record.owner_id == current_user.id"),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(SHARING_RULE_RUNTIME_VARIABLE_CONDITION);
+    return findings[0].hint;
+  };
+
+  it('keeps the WHY verbatim — the most useful part of the diagnostic', () => {
+    // Byte-exact. This sentence explains why the condition is refused at all,
+    // and it was correct before this card and after it.
+    expect(hintOf()).toContain(
+      'A criteria sharing rule is MATERIALISED: the seeder compiles ONE static `criteria_json` per ' +
+      'rule and the evaluator writes `sys_record_share` rows from it, so there is no "current user" ' +
+      'for the condition to read.',
+    );
+  });
+
+  it('never offers RLS unqualified — the sentence naming `using` names the models it holds for', () => {
+    // The load-bearing leg. `rowLevelSecurity[].using` may still be
+    // recommended, but only inside a sentence that says WHERE it works; the
+    // shipped defect was exactly this recommendation with no model attached.
+    const sentences = hintOf().split(/(?<=\.)\s+/);
+    const rlsSentences = sentences.filter((s) => s.includes('rowLevelSecurity[].using'));
+    expect(rlsSentences.length).toBeGreaterThan(0);
+    rlsSentences.forEach((s) => {
+      expect(s).toMatch(/public_read/);
+    });
+  });
+
+  it('states the `private` case: AND-composed layers mean RLS cannot widen', () => {
+    const hint = hintOf();
+    expect(hint).toMatch(/AND-composed/);
+    expect(hint).toMatch(/can only REMOVE rows/);
+    // The consequence an author must be told, because it is silent.
+    expect(hint).toMatch(/lints clean/);
+    expect(hint).toMatch(/grants nothing/);
+  });
+
+  it('names the doors that DO widen a private object, and what they key on', () => {
+    const hint = hintOf();
+    // Widen by OWNER (ADR-0057 D1 depth) …
+    expect(hint).toMatch(/readScope/);
+    expect(hint).toMatch(/owner_id IN/);
+    // … or by an explicit share row, which only a criteria rule writes.
+    expect(hint).toMatch(/sys_record_share/);
+    // And the property that makes both unusable as a per-record predicate.
+    expect(hint).toMatch(/never on a property of the record/);
+  });
+
+  it('mentions `position` only as an over-broad-grant WARNING, never as the remedy', () => {
+    // The neighbouring temptation is worse than doing nothing: `position`
+    // shares every matched row with every holder of that position tenant-wide.
+    const hint = hintOf();
+    expect(hint).toMatch(/position/);
+    expect(hint).toMatch(/over-broad grant/);
+    expect(hint).toMatch(/EVERY holder/);
+  });
+
+  it('names the open capability gap rather than inventing a mechanism', () => {
+    expect(hintOf()).toMatch(/#14103/);
+  });
+});
+
+// The vocabulary leg. Without it the hint and its expectations above move
+// together under a rename and nothing goes red — the failure mode the doctor
+// tenancy-hint pin was written to close. Every model and depth the hint names
+// is checked against the SPEC-owned enum that declares it.
+describe('the hint names REAL sharing-model and depth vocabulary', () => {
+  const hint = (): string => {
+    const f = validateSharingRuleEnforceability(ruleWith('record.owner_id == current_user.id'));
+    return f[0].hint;
+  };
+
+  const MODELS_NAMED_BY_THE_HINT = ['private', 'public_read', 'public_read_write'] as const;
+  const DEPTHS_NAMED_BY_THE_HINT = ['own', 'own_and_reports', 'unit', 'unit_and_below', 'org'] as const;
+
+  it('every sharing model it names is an `OWDModel` value the spec still declares', () => {
+    const declared = new Set<string>(OWDModel.options);
+    MODELS_NAMED_BY_THE_HINT.forEach((m) => {
+      expect(declared.has(m)).toBe(true);
+      expect(hint()).toContain(`\`${m}\``);
+    });
+  });
+
+  it('every depth scope it names is an `ObjectAccessScope` value the spec still declares', () => {
+    const declared = new Set<string>(ObjectAccessScopeSchema.options);
+    DEPTHS_NAMED_BY_THE_HINT.forEach((d) => {
+      expect(declared.has(d)).toBe(true);
+      expect(hint()).toContain(`\`${d}\``);
+    });
+  });
+
+  it('`position` is a real `ShareRecipientType` — the warning is about a live trap', () => {
+    expect(new Set<string>(ShareRecipientType.options).has('position')).toBe(true);
   });
 });

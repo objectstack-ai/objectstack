@@ -92,8 +92,16 @@
  *    MATERIALIZED — the seeder compiles one static `criteria_json` per rule and
  *    the evaluator writes `sys_record_share` grants from it — so there is no
  *    "current user" at compile time and the compiler correctly refuses. The fix
- *    is a different mechanism (RLS / an ownership-shaped grant), not a
- *    different spelling, which is exactly why it earns its own id.
+ *    is a different mechanism, not a different spelling, which is exactly why
+ *    it earns its own id — and WHICH mechanism is decided by the anchor's
+ *    `sharingModel`, because the security layers are AND-composed. RLS
+ *    NARROWS: it is the right answer on `public_read` / `public_read_write`,
+ *    where the sharing layer imposes nothing on reads, and structurally the
+ *    WRONG one on `private`, where the sharing layer has already withheld the
+ *    row and an AND term can only withhold more (an RLS "widener" there lints
+ *    clean and grants nothing). The hint carries that split rather than the
+ *    unqualified "use RLS" it shipped with, and the tests pin the `private`
+ *    half so it cannot regress to advice that cannot work.
  *  - `parse-error` → deliberately NOT reported here. CEL syntax is
  *    `validateStackExpressions`' surface and it already gates this same field
  *    (`stack.sharingRules[].condition`). Reporting it twice, in two
@@ -463,11 +471,28 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
         hint:
           'A criteria sharing rule is MATERIALISED: the seeder compiles ONE static `criteria_json` per ' +
           'rule and the evaluator writes `sys_record_share` rows from it, so there is no "current user" ' +
-          'for the condition to read. Express per-user access with the mechanism that runs per request ' +
-          'instead — an RLS policy on a permission set (`rowLevelSecurity[].using`, where ' +
-          '`current_user.*` IS resolved), or the record-ownership path. Keep this rule for the part of ' +
-          'the predicate that is a property of the RECORD (e.g. `record.stage == \'closed_won\'`) and ' +
-          'name the audience through `sharedWith`.',
+          'for the condition to read. WHICH mechanism replaces it depends on the anchor object\'s ' +
+          '`sharingModel`, because the security layers are AND-composed (`getReadFilter` = RLS AND ' +
+          'controlled-by-parent AND sharing) and an AND term can only REMOVE rows — it can never add ' +
+          'one back. On `public_read` / `public_read_write` the sharing layer imposes nothing on reads ' +
+          '(`buildReadFilter` constrains `private` only), so an RLS policy on a permission set ' +
+          '(`rowLevelSecurity[].using`, where `current_user.*` IS resolved) is the right mechanism: it ' +
+          'NARROWS an open baseline, the direction AND can express. On `private` — including a CUSTOM ' +
+          'object that declares no `sharingModel`, which resolves to `private` (ADR-0090 D1) — that ' +
+          'same policy CANNOT work: the sharing layer has already withheld the row, and AND-ing an RLS ' +
+          'predicate onto it can only withhold more, so the policy lints clean, passes every gate and ' +
+          'grants nothing. The two doors that widen a `private` object for a non-admin principal both ' +
+          'key on WHO OWNS the row or on an explicit share row, never on a property of the record: the ' +
+          'ADR-0057 D1 depth scopes (`readScope` / `writeScope` on the object permission — `own` | ' +
+          '`own_and_reports` | `unit` | `unit_and_below` | `org`), which widen the owner-match to ' +
+          '`owner_id IN (…)`; and a `sys_record_share` row, which on this path only a criteria sharing ' +
+          'rule writes — i.e. THIS rule. So keep this rule for the part of the predicate that is a ' +
+          'property of the RECORD (e.g. `record.stage == \'closed_won\'`) and name the audience ' +
+          'through `sharedWith`. If the audience is genuinely record-relative ("the owner\'s manager", ' +
+          '"this record\'s approver"), no mechanism expresses it today — `sharedWith` recipients ' +
+          'resolve tenant-wide, so reaching for `position` shares every matched row with EVERY holder ' +
+          'of that position (the skip-level, the manager two teams over): an over-broad grant, not the ' +
+          'narrower one you meant. That gap is tracked at #14103.',
       });
       return;
     }
