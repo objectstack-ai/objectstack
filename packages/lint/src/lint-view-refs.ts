@@ -319,7 +319,9 @@ export function lintViewRefs(stack: AnyRec): ViewRefFinding[] {
 
     const navId =
       (typeof nav.id === 'string' && nav.id) || (typeof nav.label === 'string' && nav.label) || '(unnamed)';
-    const dedupeKey = `${appName} ${navId} ${objectName} ${viewName}`;
+    // JSON, not a delimiter-joined string: injective without needing a
+    // separator byte that cannot appear in the parts.
+    const dedupeKey = JSON.stringify([appName, navId, objectName, viewName]);
     if (seenNavRefs.has(dedupeKey)) return;
     seenNavRefs.add(dedupeKey);
 
