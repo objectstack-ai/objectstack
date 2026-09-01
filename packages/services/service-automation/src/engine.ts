@@ -618,6 +618,21 @@ export const DEFAULT_MAX_EXECUTION_LOG_SIZE = 1000;
 export const MAX_PERSISTED_HISTORY_STEPS = 200;
 
 /**
+ * Cap on the in-memory {@link AutomationEngine.consumedSuspensions} journal —
+ * the hot half of the operator restore path (#13909).
+ *
+ * Bounded because each entry holds a whole suspension (variables, steps,
+ * context), and SMALL because it is a cache, not the record: with a
+ * {@link SuspendedRunStore} configured, the authoritative copy rides the run's
+ * own terminal history row and outlives both this map and the process. A
+ * store-less engine keeps only the newest N, and
+ * {@link AutomationEngine.restoreConsumedSuspension} answers
+ * `NO_CONSUMED_SUSPENSION` for an evicted one rather than implying the run was
+ * never suspended.
+ */
+export const MAX_CONSUMED_SUSPENSIONS = 50;
+
+/**
  * Level the one-line-per-terminal-run summary is logged at (#4354), or `'off'`.
  *
  * Defaults to `'info'` — deliberately. The whole premise of #4354 is that a
@@ -1150,6 +1165,128 @@ export interface RunRecord {
      * absent summary must never be read as "this run did nothing".
      */
     summary?: FlowRunSummary;
+    /**
+     * [#13909] The suspension this run's resume CONSUMED before the downstream
+     * node threw — written only on that one path, so its presence is itself the
+     * statement "this `failed` run had a pause and no longer has one".
+     *
+     * It rides the terminal row because that is the only durable artefact the
+     * failure leaves: `forgetSuspendedRun` deleted the paused row before
+     * `traverseNext` ran, and this row's `variables_json` / `context_json` /
+     * `screen_json` columns already exist and were simply never written on
+     * terminal rows (`sys_automation_run` says so at the field itself). No new
+     * column, no new status value, no new table.
+     *
+     * Cleared by the next terminal record for the same run — a restored run
+     * that resumes to completion upserts this row without a snapshot — so
+     * "restorable" cannot outlive the condition it describes.
+     *
+     * ⛔ Not a run state. See {@link ConsumedSuspension}.
+     */
+    consumedSuspension?: SuspendedRun;
+}
+
+/**
+ * A suspension that a resume CONSUMED and then failed downstream of — the input
+ * {@link AutomationEngine.restoreConsumedSuspension} puts back (#13909).
+ *
+ * `resumeInternal` consumes the suspension **before** running downstream nodes,
+ * so a node that merely throws throws with the pause already gone and the catch
+ * arm records the run `failed`. There is then no suspension left to resume —
+ * and, before this journal existed, nothing anywhere to rebuild one from: the
+ * durable paused row is deleted at consumption and the terminal history row
+ * carries no `variables` / `context` / `screen` at all.
+ *
+ * ⛔ **This is not a run state and not a status.** The run is `failed`,
+ * {@link AutomationResult.status} is unchanged, and nothing here names the
+ * condition — naming it is an explicit same-batch sub-item of #13937, because
+ * what it should be called depends on which resume-ordering shape is ruled.
+ * This is a SNAPSHOT of a deleted row, kept so a deliberate operator action can
+ * restore it.
+ */
+export interface ConsumedSuspension {
+    /**
+     * The suspension exactly as it stood when the resume consumed it —
+     * VERBATIM: the resume signal is not folded in and the failed attempt's
+     * steps are not included. See
+     * {@link AutomationEngine.restoreConsumedSuspension} for why that is the
+     * only shape that is safe to put back.
+     */
+    run: SuspendedRun;
+    /** When the resume that consumed it recorded its downstream failure. */
+    consumedAt: string;
+    /** The downstream failure that left the run terminal and unresumable. */
+    error: string;
+}
+
+/**
+ * Why {@link AutomationEngine.restoreConsumedSuspension} declined (#13909).
+ *
+ * Every value is EARNED BY A SPECIFIC OBSERVATION, not by a catch-all "bad
+ * input" arm: an operator whose repair is refused has to be able to tell "this
+ * run is fine" from "this run is beyond this verb" from "I could not read the
+ * store", because the remedy differs for each.
+ *
+ *  - `'RESTORE_IN_PROGRESS'` — another restore of this run is already running
+ *    in this process. The in-process half of the idempotence guarantee.
+ *  - `'RESUME_IN_PROGRESS'` — a resume is running for this run RIGHT NOW.
+ *    ⚠️ The subtle one: "suspension gone, no terminal row yet" is exactly what
+ *    a resume in flight looks like, so re-arming one of those races the live
+ *    resume — the traversal would finish and record `completed` while a paused
+ *    row it knows nothing about survives.
+ *  - `'RUN_SUSPENDED'` — a live suspension already exists. The run is already
+ *    resumable, so there is nothing to restore; this is also what a second
+ *    restore of an already-restored run answers, in this process or after a
+ *    restart.
+ *  - `'STORE_UNAVAILABLE'` — the durable store could not be read, so whether a
+ *    suspension is live is UNKNOWN. Refused rather than guessed: reading an
+ *    outage as "no suspension" is the one mistake that mints a second pause.
+ *  - `'RUN_COMPLETED'` — the run finished. Nothing to exit from.
+ *  - `'RUN_CANCELLED'` — the run was cancelled (ADR-0044). A restore would
+ *    undo a decision somebody made on purpose.
+ *  - `'NO_CONSUMED_SUSPENSION'` — the run exists, but no consumed suspension
+ *    is available for it: it never paused, or its snapshot is gone (no store
+ *    configured and the in-memory journal evicted it, or a later terminal
+ *    record cleared it). Usually a terminal (`failed`) run, but this arm also
+ *    answers when the log's last word on the run is non-terminal
+ *    (`running` / `pending`) — the fall-through does not require terminality.
+ *    Deliberately does NOT claim which cause —
+ *    nothing in the engine can tell those apart, and the result's `reason`
+ *    names the status actually observed instead of overclaiming.
+ *  - `'RUN_NOT_FOUND'` — no record of this run at all.
+ */
+export type SuspensionRestoreRefusal =
+    | 'RESTORE_IN_PROGRESS'
+    | 'RESUME_IN_PROGRESS'
+    | 'RUN_SUSPENDED'
+    | 'STORE_UNAVAILABLE'
+    | 'RUN_COMPLETED'
+    | 'RUN_CANCELLED'
+    | 'NO_CONSUMED_SUSPENSION'
+    | 'RUN_NOT_FOUND';
+
+/**
+ * Outcome of {@link AutomationEngine.restoreConsumedSuspension} (#13909).
+ *
+ * Deliberately NOT an {@link AutomationResult}: this verb does not execute a
+ * flow, and its refusal vocabulary is its own. Folding it into the platform
+ * result type would put eight new codes into a contract every transport reads
+ * — and would mint platform vocabulary for a condition #13937 has not yet
+ * ruled the shape of.
+ */
+export interface SuspensionRestoreResult {
+    /** `true` only when a suspension was actually put back by THIS call. */
+    restored: boolean;
+    runId: string;
+    /** Absent exactly when `restored` is `true`. */
+    refusal?: SuspensionRestoreRefusal;
+    /** One sentence naming what was observed — always present, both ways. */
+    reason: string;
+    /** The restored run's flow / node, when one was restored. */
+    flowName?: string;
+    nodeId?: string;
+    /** When the resume that consumed the restored suspension failed. */
+    consumedAt?: string;
 }
 
 export interface SuspendedRunStore {
@@ -1500,6 +1637,25 @@ export class AutomationEngine implements IAutomationService {
      * duplicate `resume(runId)` can't re-enter and double-run side effects.
      */
     private resuming = new Set<string>();
+    /**
+     * [#13909] Suspensions this process consumed on a resume that then failed
+     * downstream — the hot half of {@link restoreConsumedSuspension}, mirrored
+     * to the run's terminal history row when a {@link store} is configured
+     * (exactly the {@link suspendedRuns} + {@link store} pairing one field up).
+     *
+     * Bounded by {@link MAX_CONSUMED_SUSPENSIONS}, oldest first: each entry
+     * holds a whole suspension, and the durable copy is the record.
+     */
+    private consumedSuspensions = new Map<string, ConsumedSuspension>();
+    /**
+     * [#13909] Run ids currently mid-RESTORE — the same synchronous in-process
+     * guard shape as {@link resuming}, so two operators racing the verb produce
+     * one restored pause and one refusal instead of two `restored: true`
+     * answers. Across processes the guarantee is carried by the paused row
+     * itself: a suspension is keyed by run id, so a second restore finds one
+     * live and refuses `RUN_SUSPENDED`.
+     */
+    private restoring = new Set<string>();
     /**
      * Optional persisted dispatch-claim ledger (#10220). When set, `claim()`
      * checks-and-records against `sys_flow_dispatch` so trigger dispatch dedup
@@ -4626,6 +4782,22 @@ export class AutomationEngine implements IAutomationService {
                 };
             }
 
+            // [#13909] How long the step log was AT THE PAUSE, read before
+            // anything downstream runs. `steps` below is the SAME array
+            // `traverseNext` appends to, so by the time the catch arm builds a
+            // restore snapshot the pause's own step log is no longer
+            // recoverable from it — this integer is what trims it back. One
+            // `int` on every resume and nothing else: the snapshot itself is
+            // built only on the failure path.
+            //
+            // ⛔ Deliberately NOT a change to the ordering. The consumption
+            // below still precedes the traversal, `forgetSuspendedRun` is
+            // untouched, and `hasSuspendedRun` still answers false for the
+            // whole traversal window (pinned in
+            // `consumed-suspension-restore.test.ts`). Which ordering is right
+            // is #13937's, and unruled.
+            const stepCountAtPause = run.steps.length;
+
             // Consume the suspension *before* running downstream work — a run
             // resumes exactly once per pause, and a duplicate resume after a
             // partial restart must not double-run side effects. (Folding the
@@ -4727,6 +4899,20 @@ export class AutomationEngine implements IAutomationService {
 
                 const errorMessage = err instanceof Error ? err.message : String(err);
                 const durationMs = Date.now() - run.startTime;
+                // [#13909] THE seam this card is about. The pause was consumed
+                // above, this node merely threw, and the record below makes the
+                // run terminal — so from here on nothing in the engine can move
+                // it: `resume` answers RUN_NOT_FOUND, `cancelRun` is a no-op on
+                // it, and none of the other public methods takes it anywhere.
+                // Journal the suspension that was consumed so a DELIBERATE
+                // operator action can put it back
+                // ({@link restoreConsumedSuspension}).
+                //
+                // ⛔ Not a repair, and nothing here re-arms anything: the run
+                // stays `failed`, no suspension exists after this line, and no
+                // caller's result changes. It is the evidence a repair needs,
+                // written at the only moment it still exists.
+                const consumed = this.journalConsumedSuspension(run, stepCountAtPause, errorMessage);
                 const logged = this.recordLog({
                     id: runId,
                     flowName: run.flowName,
@@ -4738,7 +4924,7 @@ export class AutomationEngine implements IAutomationService {
                     trigger: buildRunTrigger(context),
                     steps,
                     error: errorMessage,
-                }, context);
+                }, context, consumed.run);
                 // Subflow chain: a child failing terminally fails every
                 // ancestor awaiting it — they can never be resumed otherwise.
                 // The delegation path handles its own level (skipBubble).
@@ -5047,6 +5233,348 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * Record the suspension a resume consumed before its downstream node threw
+     * (#13909) — the one and only producer of a {@link ConsumedSuspension}.
+     *
+     * VERBATIM, and that word is load-bearing:
+     *
+     *  - `run.variables` is the pause's OWN snapshot. The resume's signal was
+     *    folded into a separate `Map` built from it, never into this object, so
+     *    what is journalled is the state at the pause, not the state the failed
+     *    attempt was working from. It is the same object the durable paused row
+     *    was written from at suspend time.
+     *  - `run.steps` is the live array `traverseNext` appended to, so it is
+     *    trimmed back to `stepCountAtPause` — the failed attempt's steps are
+     *    NOT part of the thing an operator puts back.
+     *  - Everything else (`nodeId`, `nodeType`, `context`, `correlation`,
+     *    `screen`, `startedAt`, `startTime`) is carried across untouched.
+     *
+     * Shallow by design, not lazily: a JSON clone here could throw on a
+     * circular value INSIDE a catch arm that is already handling a failure, and
+     * the fields it would deep-copy are exactly the ones the durable store
+     * already round-tripped through JSON at suspend time.
+     */
+    private journalConsumedSuspension(
+        run: SuspendedRun,
+        stepCountAtPause: number,
+        error: string,
+    ): ConsumedSuspension {
+        const consumed: ConsumedSuspension = {
+            run: { ...run, steps: run.steps.slice(0, stepCountAtPause) },
+            consumedAt: new Date().toISOString(),
+            error,
+        };
+        this.consumedSuspensions.set(run.runId, consumed);
+        // Oldest first — `Map` iterates in insertion order, and re-`set`ting an
+        // existing key keeps its original position, which is what we want: a
+        // run that strands twice does not jump the queue ahead of one that has
+        // been waiting for an operator longer.
+        while (this.consumedSuspensions.size > MAX_CONSUMED_SUSPENSIONS) {
+            const oldest = this.consumedSuspensions.keys().next().value;
+            if (oldest === undefined) break;
+            this.consumedSuspensions.delete(oldest);
+        }
+        return consumed;
+    }
+
+    /** Build a refusal from {@link restoreConsumedSuspension}. */
+    private refuseRestore(
+        runId: string,
+        refusal: SuspensionRestoreRefusal,
+        reason: string,
+    ): SuspensionRestoreResult {
+        return { restored: false, runId, refusal, reason };
+    }
+
+    /**
+     * **The operator exit from a run a resume left terminally unresumable**
+     * (#13909, deliverable 2). Puts back the suspension that resume consumed,
+     * so the run is resumable again.
+     *
+     * ## The state this is an exit from
+     *
+     * `resumeInternal` consumes the suspension **before** running downstream
+     * nodes, so a node that merely throws throws with the pause already gone
+     * and the catch arm records the run `failed`. That state is terminal:
+     * {@link resume} answers `RUN_NOT_FOUND` (there is no suspension left),
+     * {@link cancelRun} is a no-op on it, and nothing else moves it either. A
+     * deployment could enter that state and never leave it. This verb is the
+     * leaving.
+     *
+     * ⚠️ It is a REPAIR, not a prevention: whether the pause should survive a
+     * downstream throw at all is #13937, unruled and in the maintainer's hands.
+     * This method changes no resume semantics for any pausing node type — the
+     * ordering, {@link forgetSuspendedRun} and `traverseNext` are all exactly
+     * as they were — and it stays useful whichever way that card is ruled,
+     * because the runs already stuck today are not released by changing what
+     * FUTURE resumes do.
+     *
+     * ## Deliberate — never automatic
+     *
+     * Nothing calls this on its own. There is no retry, no sweeper, no
+     * self-healing arm anywhere in the engine: an operator (or an admin door
+     * standing in for one) asks for this run, by id, on purpose. A machine that
+     * re-armed strandings by itself would re-run the node that threw, forever,
+     * with nobody deciding it should.
+     *
+     * ## Verbatim — the pause goes back as it was, and nothing else
+     *
+     * The restored suspension is the one that was consumed, exactly: the
+     * pause's own variables, its step log as of the pause, its node, its
+     * correlation, its screen. Two consequences an operator must know, and both
+     * are in the trace this writes:
+     *
+     *  - ⚠️ **The resume signal is NOT replayed.** The approval decision or
+     *    screen submission that accompanied the failed resume is not folded
+     *    back in; the continuation must be re-issued. Replaying it would mean
+     *    re-deciding on the operator's behalf, and the branch a signal routes
+     *    down (`signal.branchLabel`) is not part of a suspension at all — a
+     *    resume with the signal dropped would silently take a different edge.
+     *  - ⚠️ **The failed attempt is NOT undone.** Whatever the downstream nodes
+     *    did before one of them threw stands; this re-arms a pause, it does not
+     *    roll a transaction back. That is why re-deciding is the right default
+     *    and why this is an operator's call rather than the engine's.
+     *
+     * Restoring the pause exactly as it stood is also the shape that does not
+     * pre-empt #13937: it is precisely the state a resume-ordering change would
+     * have left behind, so this composes with that ruling instead of racing it.
+     *
+     * ## Idempotence — carried by the paused row, not by a flag
+     *
+     * A suspension is keyed by run id, so a restore cannot produce two
+     * resumable pauses however many operators ask: the second call finds one
+     * live and answers `RUN_SUSPENDED`. That holds across processes and across
+     * a restart, because the paused row is durable. {@link restoring} adds the
+     * in-process half — two callers racing in one process get one
+     * `restored: true` and one `RESTORE_IN_PROGRESS`, rather than two calls
+     * both claiming the restore.
+     *
+     * And it cannot produce two traversals, by construction: **this verb does
+     * not resume.** It re-arms the pause and stops. The continuation is an
+     * ordinary {@link resume} afterwards, through the same authority gate, the
+     * same screen validation and the same `resuming` guard as any other.
+     *
+     * ## The trace
+     *
+     * A restore is recorded at `warn` with the run, flow, node, when the
+     * suspension was consumed, who asked and why. #4632's vocabulary grades
+     * this FUNCTIONAL — nothing claimed-persisted failed to land — but the
+     * level is `warn` rather than `info` on purpose: this moves a run the
+     * platform had already recorded as terminally failed, and an exit that
+     * leaves no mark is the same silence that let this whole class go
+     * unnoticed. Operator-supplied text (`requestedBy` / `reason`) and the
+     * original thrown message ride the STRUCTURED slot, never the message —
+     * none of the three is controlled by us and a newline in any of them would
+     * split one record into several physical lines of which only the first is
+     * greppable (the #6299 family).
+     *
+     * @param options.requestedBy - Who asked. Logged; `not recorded` when
+     *   absent, which is itself something an operator can find.
+     * @param options.reason - Why. Logged the same way.
+     * @returns Never throws: every outcome — including an unreadable store — is
+     *   a {@link SuspensionRestoreResult} naming what was observed.
+     */
+    async restoreConsumedSuspension(
+        runId: string,
+        options?: { requestedBy?: string; reason?: string },
+    ): Promise<SuspensionRestoreResult> {
+        // Synchronously, before the first await — the same shape as `resuming`
+        // in `resumeInternal`: a guard set after an await is not a guard.
+        if (this.restoring.has(runId)) {
+            return this.refuseRestore(
+                runId,
+                'RESTORE_IN_PROGRESS',
+                `Another restore of run '${runId}' is already in progress in this process`,
+            );
+        }
+        // ⚠️ The subtle one. `resuming` is set before `resumeInternal`'s first
+        // await and cleared in its `finally`, so this window is exactly
+        // "suspension consumed, outcome not yet decided" — which is what a
+        // resume IN FLIGHT looks like, and is indistinguishable from the
+        // stranded state by any other reading. Re-arming one of these races the
+        // live resume: its traversal would finish and record `completed` while
+        // a paused row it knows nothing about survives, and the next restart
+        // would resume an already-finished run.
+        if (this.resuming.has(runId)) {
+            return this.refuseRestore(
+                runId,
+                'RESUME_IN_PROGRESS',
+                `Run '${runId}' is being resumed right now — its outcome is not decided yet`,
+            );
+        }
+        this.restoring.add(runId);
+        try {
+            // Already resumable? STRICT read: an unreadable store must not read
+            // as "no suspension" here. That degradation is harmless for a
+            // display path and is the one mistake that mints a second pause on
+            // this one.
+            let live: SuspendedRun | null;
+            try {
+                live = await this.loadSuspendedRunStrict(runId);
+            } catch (err) {
+                this.logger.warn(
+                    `[automation] restoreConsumedSuspension('${runId}') could not read the durable suspended-run ` +
+                        `store, so whether this run is still parked is UNKNOWN — the restore was REFUSED rather ` +
+                        `than guessed, because reading an outage as "no suspension" is what would put a second ` +
+                        `resumable pause on a live run. Nothing was written. Fix the store failure in this ` +
+                        `record's meta, then re-issue the restore.`,
+                    describeThrownForLog(err),
+                );
+                return this.refuseRestore(
+                    runId,
+                    'STORE_UNAVAILABLE',
+                    `Durable suspended-run store unreachable for run '${runId}' — whether it is still suspended is unknown`,
+                );
+            }
+            if (live) {
+                return this.refuseRestore(
+                    runId,
+                    'RUN_SUSPENDED',
+                    `Run '${runId}' is suspended at node '${live.nodeId}' and already resumable — nothing to restore`,
+                );
+            }
+
+            // The journal: this process's hot copy first, then the durable
+            // copy on the run's own terminal history row. One reader, two
+            // sources — the same pairing `resume` itself uses for suspensions.
+            let consumed = this.consumedSuspensions.get(runId);
+            if (!consumed && this.store?.loadTerminal) {
+                let terminal: RunRecord | null;
+                try {
+                    terminal = await this.store.loadTerminal(runId);
+                } catch (err) {
+                    this.logger.warn(
+                        `[automation] restoreConsumedSuspension('${runId}') could not read the durable run-history ` +
+                            `row, so whether a consumed suspension is recoverable for this run is UNKNOWN — the ` +
+                            `restore was REFUSED rather than reported as "nothing to restore", which is the answer ` +
+                            `an operator would act on by giving up. Nothing was written. Fix the store failure in ` +
+                            `this record's meta, then re-issue the restore.`,
+                        describeThrownForLog(err),
+                    );
+                    return this.refuseRestore(
+                        runId,
+                        'STORE_UNAVAILABLE',
+                        `Durable run-history unreachable for run '${runId}' — whether a consumed suspension survives is unknown`,
+                    );
+                }
+                if (terminal?.consumedSuspension) {
+                    consumed = {
+                        run: terminal.consumedSuspension,
+                        consumedAt: terminal.finishedAt ?? terminal.startedAt,
+                        error: terminal.error ?? '',
+                    };
+                }
+            }
+
+            if (!consumed) {
+                // Nothing to restore — say WHICH nothing. The remedy differs for
+                // every one of these and a single "bad run" refusal would send an
+                // operator looking for the wrong thing.
+                const logged = await this.getRun(runId);
+                if (!logged) {
+                    return this.refuseRestore(runId, 'RUN_NOT_FOUND', `No run '${runId}' is known`);
+                }
+                if (logged.status === 'completed') {
+                    return this.refuseRestore(
+                        runId,
+                        'RUN_COMPLETED',
+                        `Run '${runId}' completed — there is no unresumable state to exit`,
+                    );
+                }
+                if (logged.status === 'cancelled') {
+                    return this.refuseRestore(
+                        runId,
+                        'RUN_CANCELLED',
+                        `Run '${runId}' was cancelled — restoring it would undo a deliberate decision`,
+                    );
+                }
+                // ⛔ Deliberately does not claim WHICH: "it never paused" and
+                // "its snapshot is gone" are indistinguishable from here, and
+                // guessing would hand an operator a false certainty. The status
+                // actually observed is named instead.
+                return this.refuseRestore(
+                    runId,
+                    'NO_CONSUMED_SUSPENSION',
+                    `Run '${runId}' is recorded '${logged.status}' and no consumed suspension is available for it ` +
+                        `— it never suspended, or its snapshot is no longer held`,
+                );
+            }
+
+            // Claim, then re-arm. No await between the claim and the write.
+            this.consumedSuspensions.delete(runId);
+            await this.persistSuspendedRun(consumed.run);
+
+            // The run IS paused again, so the run log has to say so — otherwise
+            // the repair is invisible on every surface that reads it and the
+            // Runs view keeps calling a resumable run `failed`. This is the
+            // SAME record the resume path writes when a run re-suspends at a
+            // downstream node (`status: 'paused'`, carrying the variable
+            // snapshot, #7639), for the same reason, and `getRun`'s
+            // last-entry-wins order is what makes it the answer.
+            //
+            // ⚠️ Deliberately NOT terminal, so it neither writes a history row
+            // nor clears the snapshot the row carries: until this run reaches a
+            // real terminal state, "it failed mid-resume and was put back" is
+            // the truth, and both halves of it should survive a restart.
+            //
+            // ⚠️ Measured limitation, stated rather than papered over: after a
+            // restart the DURABLE surfaces still read this run `failed`, because
+            // `getRun` / `listRuns` deliberately let a terminal row win over a
+            // paused one (a paused row can outlive the run it describes). The
+            // in-process log entry and the `warn` above are the trace this slice
+            // ships; a durable status that survives the restart is naming work,
+            // and naming is #13937's same-batch sub-item.
+            this.recordLog({
+                id: runId,
+                flowName: consumed.run.flowName,
+                flowVersion: consumed.run.flowVersion,
+                status: 'paused',
+                startedAt: consumed.run.startedAt,
+                durationMs: Date.now() - consumed.run.startTime,
+                trigger: buildRunTrigger(consumed.run.context),
+                steps: consumed.run.steps,
+                variables: consumed.run.variables,
+            }, consumed.run.context);
+
+            // ⚠️ Uncontrolled text — the operator's own words and the original
+            // thrown message — goes to the STRUCTURED slot, never the message
+            // (#6299 family). `warn(message, meta?)`: meta is the SECOND
+            // argument; `warn` has no `Error` slot.
+            this.logger.warn(
+                `[automation] run '${runId}' of flow '${consumed.run.flowName}': an operator RESTORED the ` +
+                    `suspension its resume had consumed at node '${consumed.run.nodeId}', so the run is resumable ` +
+                    `again. ⚠️ Nothing the failed attempt already did was undone, and the original resume signal ` +
+                    `was NOT replayed — the continuation must be re-issued. Who asked, why, and the failure this ` +
+                    `is an exit from are in this record's meta.`,
+                {
+                    runId,
+                    flowName: consumed.run.flowName,
+                    nodeId: consumed.run.nodeId,
+                    nodeType: consumed.run.nodeType,
+                    correlation: consumed.run.correlation,
+                    consumedAt: consumed.consumedAt,
+                    requestedBy: options?.requestedBy ?? 'not recorded',
+                    restoreReason: options?.reason ?? 'not recorded',
+                    failure: consumed.error,
+                },
+            );
+
+            return {
+                restored: true,
+                runId,
+                reason:
+                    `Restored the suspension run '${runId}' consumed at node '${consumed.run.nodeId}' — the run is ` +
+                    `resumable again; re-issue the continuation`,
+                flowName: consumed.run.flowName,
+                nodeId: consumed.run.nodeId,
+                consumedAt: consumed.consumedAt,
+            };
+        } finally {
+            this.restoring.delete(runId);
+        }
+    }
+
+    /**
      * Walk a failed run's `$parentRunId` chain and fail each suspended
      * ancestor (see {@link failSuspendedRun}). Bounded so a corrupt context
      * can't loop forever.
@@ -5185,7 +5713,20 @@ export class AutomationEngine implements IAutomationService {
     // tenant (the ruled fallback). Threaded as a parameter rather than read
     // off the entry because `ExecutionLogEntry` deliberately keeps the
     // published `trigger` block's shape (`ExecutionLogSchema`).
-    private recordLog(entry: ExecutionLogEntry, context?: AutomationContext): ExecutionLogEntry {
+    // [#13909] `consumedSuspension` is the suspension a resume consumed before
+    // the downstream node threw, passed ONLY by that one call site and copied
+    // straight onto the {@link RunRecord} below. It is deliberately a parameter
+    // rather than a field of {@link ExecutionLogEntry}: that interface is
+    // served verbatim by `GET /automation/:name/runs/:runId`, so carrying a
+    // whole variable map and run context on it would publish a paused run's
+    // internals for every failed run — a disclosure change with no card behind
+    // it, and the exact widening #7639 refused when it added `variables` to the
+    // `paused` sites only.
+    private recordLog(
+        entry: ExecutionLogEntry,
+        context?: AutomationContext,
+        consumedSuspension?: SuspendedRun,
+    ): ExecutionLogEntry {
         // #4354 — fold the run's outcome BEFORE anything downstream trims the
         // step log. History compaction keeps 200 steps; the summary must count
         // all 5000, or a long sweep's `acted` would shrink with its step log and
@@ -5267,6 +5808,12 @@ export class AutomationEngine implements IAutomationService {
                 nodeId: lastStep?.nodeId,
                 steps: this.compactStepsForHistory(entry.steps),
                 summary: entry.summary,
+                // [#13909] Present only on the resume-consumed-then-failed
+                // path. On every other terminal record it is `undefined`, and
+                // the store writes explicit NULLs for it — so a run that is
+                // restored and then finishes CLEARS its own snapshot instead of
+                // leaving a stale one an operator could restore a second time.
+                consumedSuspension,
             };
             void this.store.recordTerminal(record).catch((err) => {
                 // #6499 — driver text to the structured slot; see

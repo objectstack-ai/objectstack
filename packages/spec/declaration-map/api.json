@@ -573,6 +573,8 @@
     "PresenceUpdateSchema": "api/PresenceUpdate",
     "PresignedUrlResponse": "api/PresignedUrlResponse",
     "PresignedUrlResponseSchema": "api/PresignedUrlResponse",
+    "ProvenanceWaiver": "api/ProvenanceWaiver",
+    "ProvenanceWaiverSchema": "api/ProvenanceWaiver",
     "PublishMetaItemRequest": "api/PublishMetaItemRequest",
     "PublishMetaItemRequestSchema": "api/PublishMetaItemRequest",
     "PublishMetaItemResponse": "api/PublishMetaItemResponse",

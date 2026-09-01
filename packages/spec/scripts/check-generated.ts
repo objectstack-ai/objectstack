@@ -223,6 +223,18 @@ const NO_GENERATOR: ReadonlyArray<{ check: string; why: string }> = [
   // failing on `main` itself. The doc it checks against is hand-written, so there
   // is no generator to name.
   { check: 'check:variant-docs', why: 'audits that each schema variant appears in its hand-written doc — no artifact' },
+  // #13353. A pure source audit over the WHOLE workspace, not this package:
+  // every stamp site of a ledger-registered code in `packages/**` non-test
+  // source must be listed under the stamping package's own owner key or carry
+  // a recorded PROVENANCE_WAIVERS entry (both live in
+  // src/api/error-code-ledger.zod.ts). Reads source text through tsx and
+  // writes nothing: a failure is a ledger row or waiver to record — a
+  // provenance DECISION — never a `gen:` to run, and a generator that wrote
+  // rows from the scan would admit an emitter by running a command.
+  {
+    check: 'check:error-code-provenance',
+    why: 'audits that packages stamping ledger-registered codes list them under their own owner key (or carry a recorded waiver) — no artifact',
+  },
   // `check:strictness-ledger` used to sit here — "the ledger it audits is a
   // hand-maintained doc, so there is no generator". #5107 gave it one (the ledger's
   // NUMBERS became an artifact; its VERDICTS stayed hand-written), so it moved to

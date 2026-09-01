@@ -269,7 +269,7 @@ import type * as M170 from './ui/component.zod.js';
 import type * as M183 from './api/sortability.zod.js';
 
 // ---------------------------------------------------------------------------
-// 835 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 836 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -407,6 +407,7 @@ export type Iso83 = Assert<Eq< z.input< typeof M20.RetryStrategy >, z.infer< typ
 
 // api/error-code-ledger.zod.ts
 export type Iso838 = Assert<Eq< z.input< typeof M182.StandardSynonymWaiverSchema >, z.infer< typeof M182.StandardSynonymWaiverSchema > >>;
+export type Iso865 = Assert<Eq< z.input< typeof M182.ProvenanceWaiverSchema >, z.infer< typeof M182.ProvenanceWaiverSchema > >>;
 export type Iso84 = Assert<Eq< z.input< typeof M20.FieldErrorCode >, z.infer< typeof M20.FieldErrorCode > >>;
 export type Iso85 = Assert<Eq< z.input< typeof M20.FieldErrorSchema >, z.infer< typeof M20.FieldErrorSchema > >>;
 
@@ -1681,7 +1682,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 835 isomorphic pins', () => {
+  it('still declares all 836 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2038,9 +2039,20 @@ describe('ADR-0122 type-alias convention', () => {
     // either tree, so the two shapes coincide and ADR-0122 gives each a pin
     // rather than an `XParsed`. Ids `Iso863`/`Iso864`, the next free ones —
     // ids are claims about pins, not positions.
+    //
+    // 835 -> 836 is #13353's `ProvenanceWaiverSchema` — the recorded waiver
+    // that keeps a registered-code stamp site without an owner-key row a
+    // decision instead of drift (the door-not-producer class). Isomorphism
+    // MEASURED, not assumed: four `z.string()`s (three regex-, one
+    // min-constrained — constraints refine, they do not reshape), with no
+    // `.default()`, `.transform()`, `.catch()`, `.optional()` or `.pipe()`
+    // anywhere, so the two shapes coincide and ADR-0122 gives it a pin rather
+    // than an `XParsed` — the exact reasoning of its #8211 sibling `Iso838`
+    // one entry up. Its id is `Iso865`, the next free one — ids are claims
+    // about pins, not positions.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(835);
+    expect(pins).toHaveLength(836);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

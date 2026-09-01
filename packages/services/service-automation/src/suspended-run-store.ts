@@ -58,6 +58,19 @@ const OVERFLOW_PRUNE_BATCH = 50;
  *  tail is halved until it fits — the newest steps carry the failure. */
 const MAX_STEPS_JSON_BYTES = 64 * 1024;
 
+/**
+ * [#13909] Byte cap for the consumed-suspension snapshot a terminal row
+ * carries (`variables_json` + `context_json` + `screen_json` together).
+ *
+ * ⛔ Over budget the snapshot is DROPPED, never truncated — and that asymmetry
+ * with `steps_json` above is the whole point. A halved step tail is still an
+ * honest, smaller observation; half a variable map is a run that would resume
+ * from state it was never in. `restoreConsumedSuspension` then answers
+ * `NO_CONSUMED_SUSPENSION` for the run, which is true, instead of restoring a
+ * corrupt pause that looks perfectly healthy.
+ */
+const MAX_CONSUMED_SUSPENSION_JSON_BYTES = 256 * 1024;
+
 /** Byte cap for a terminal row's persisted `summary_json` (#4354). Generous
  *  relative to the shape it holds — one entry per node that ran, one per gate
  *  that closed — so only a pathological flow ever trips it. */
@@ -327,6 +340,20 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       skipped_count: record.summary?.skipped ?? null,
       unmeasured_count: record.summary?.unmeasured ?? null,
       summary_json: record.summary ? serializeSummaryBounded(record.summary) : null,
+      // [#13909] The suspension this run's resume consumed before the
+      // downstream node threw, in the columns that already exist for exactly
+      // this state and were simply never written on terminal rows.
+      //
+      // ALWAYS all four keys, `null` when there is no snapshot: this is an
+      // UPSERT, and a restored run that later finishes must CLEAR what it
+      // carried. Omitting the keys would leave a stale snapshot behind on the
+      // updated row, which an operator could restore a second time — the run
+      // would go back to a pause it has already left.
+      //
+      // `node_type` rides along because the resume authority gate (#3801) keys
+      // on it: a suspension restored without it is one a `resumeAuthority`
+      // check can only fall back on the live flow for.
+      ...serializeConsumedSuspension(record.consumedSuspension, this.logger),
     };
     const existing = await this.engine.find(TABLE, {
       where: { id }, limit: 1, context: SYSTEM_CTX,
@@ -428,6 +455,14 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       // steps are compacted (200 max), so recomputing would report a
       // 5000-iteration sweep as having acted a couple of hundred times.
       summary: parseJson<RunRecord['summary']>(row.summary_json, undefined),
+      // [#13909] Rebuilt only when the row actually carries the resumable
+      // state. `variables_json` is the discriminator: it is written on a
+      // terminal row by nothing but the consumed-suspension path, so its
+      // presence IS the statement "this failed run had a pause and no longer
+      // has one". A pre-#13909 row has none and rebuilds to `undefined`, which
+      // `restoreConsumedSuspension` reports honestly rather than as a run that
+      // never suspended.
+      consumedSuspension: deserializeConsumedSuspension(row),
     };
   }
 
@@ -524,6 +559,85 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       screen: parseJson<SuspendedRun['screen']>(row.screen_json, undefined as any),
     };
   }
+}
+
+/**
+ * [#13909] The `sys_automation_run` columns that carry a terminal row's
+ * consumed-suspension snapshot — or explicit `null`s for all of them.
+ *
+ * Refuses rather than truncates when the snapshot is over
+ * {@link MAX_CONSUMED_SUSPENSION_JSON_BYTES}: a partial variable map would
+ * restore a run into a state it was never in, and would do it silently. The
+ * drop is logged with the size so an operator who finds the run unrestorable
+ * learns WHY instead of concluding it never suspended.
+ */
+function serializeConsumedSuspension(
+  run: SuspendedRun | undefined,
+  logger?: MinimalLogger,
+): Record<string, unknown> {
+  const empty = {
+    variables_json: null,
+    context_json: null,
+    screen_json: null,
+    node_type: null,
+    correlation: null,
+  };
+  if (!run) return empty;
+  const variables_json = JSON.stringify(run.variables ?? {});
+  const context_json = JSON.stringify(run.context ?? {});
+  const screen_json = run.screen ? JSON.stringify(run.screen) : null;
+  const bytes = variables_json.length + context_json.length + (screen_json?.length ?? 0);
+  if (bytes > MAX_CONSUMED_SUSPENSION_JSON_BYTES) {
+    logger?.warn?.(
+      `[automation] run '${run.runId}': the suspension its resume consumed is ${bytes} bytes, over the ` +
+        `${MAX_CONSUMED_SUSPENSION_JSON_BYTES}-byte row budget, so it was NOT persisted and this run cannot be ` +
+        `restored after a restart. It was dropped rather than truncated on purpose — half a variable map would ` +
+        `restore the run into a state it was never in.`,
+    );
+    return empty;
+  }
+  // `correlation` is part of the resumable state, not decoration: a run parked
+  // at a `subflow:`/`map:` node resumes down a DIFFERENT path on it, and a
+  // pausing plugin finds its external row through it. A snapshot restored
+  // without it is a different pause.
+  return {
+    variables_json,
+    context_json,
+    screen_json,
+    node_type: run.nodeType ?? null,
+    correlation: run.correlation ?? null,
+  };
+}
+
+/**
+ * [#13909] Rebuild a terminal row's consumed-suspension snapshot, or
+ * `undefined` when the row carries none.
+ *
+ * Keyed off `variables_json`, which no other terminal-row writer populates —
+ * see the call site. `correlation` and `node_type` come back from their own
+ * columns, written by the same helper. `steps` come from the row's own `steps_json`: they are the
+ * step log AS OF THE PAUSE (the engine trims the failed attempt's steps off the
+ * snapshot before recording), bounded by the same cap every terminal row's
+ * steps are.
+ */
+function deserializeConsumedSuspension(row: any): SuspendedRun | undefined {
+  if (row.variables_json == null || row.variables_json === '') return undefined;
+  const startedAt = row.started_at ?? row.created_at ?? '';
+  const rawId = String(row.id ?? '');
+  return {
+    runId: rawId.startsWith(HISTORY_PREFIX) ? rawId.slice(HISTORY_PREFIX.length) : rawId,
+    flowName: String(row.flow_name ?? ''),
+    flowVersion: typeof row.flow_version === 'number' ? row.flow_version : undefined,
+    nodeId: String(row.node_id ?? ''),
+    nodeType: row.node_type ?? undefined,
+    variables: parseJson<Record<string, unknown>>(row.variables_json, {}),
+    steps: parseJson<SuspendedRun['steps']>(row.steps_json, []),
+    context: parseJson<SuspendedRun['context']>(row.context_json, {}),
+    startedAt,
+    startTime: typeof row.start_time === 'number' ? row.start_time : (Date.parse(startedAt) || Date.now()),
+    correlation: row.correlation ?? undefined,
+    screen: parseJson<SuspendedRun['screen']>(row.screen_json, undefined as any),
+  };
 }
 
 /**

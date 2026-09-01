@@ -165,9 +165,16 @@ export function resolveTenancyPosture(): TenancyPosture {
  * The env variable naming the deployment's PLATFORM OWNER account
  * (#11184, the framework leg of cloud#1509).
  *
- * Exported as a constant so every message that refuses over it (the walled
- * boot guard in plugin-auth, the elevation refusal in plugin-security's
- * `bootstrapPlatformAdmin`) names exactly one spelling.
+ * Exported as a constant so every message that names it quotes exactly one
+ * spelling: the walled boot guard in plugin-auth, and plugin-security's
+ * `bootstrapPlatformAdmin` — its fail-closed backstop for an undeclared or
+ * refused config, and the config-derived standing it logs beside it.
+ *
+ * ⚠️ That second site is no longer an ELEVATION refusal. Since the #11663
+ * platform-admin re-anchor (leg L4) the walled `bootstrapPlatformAdmin` writes
+ * no grant row and elevates nobody — it reports. Standing is derived PER
+ * REQUEST at `resolve-authz-context.ts` §6b-config, from a declared address
+ * held on a VERIFIED `sys_user` row.
  */
 export const PLATFORM_OWNER_EMAIL_ENV = 'OS_PLATFORM_OWNER_EMAIL';
 
