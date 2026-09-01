@@ -17,7 +17,6 @@
     "system/AppManifest:views = []",
     "system/AudienceConfig:posture = \"invite_only\"",
     "system/AuthConfig:uiBasePath = \"/_console\"",
-    "system/AuthPluginConfig:admin = false",
     "system/AuthPluginConfig:deviceAuthorization = false",
     "system/AuthPluginConfig:magicLink = false",
     "system/AuthPluginConfig:oidcProvider = false",
