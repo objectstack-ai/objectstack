@@ -25,6 +25,9 @@ import {
  * be in (no host at all / a host that loads / a host that does not).
  */
 
+/** The declaration boot's write guard (#13332) — first in every composed list. */
+const WRITE_GUARD = 'com.objectstack.cli.declaration-boot-write-guard';
+
 const dirs: string[] = [];
 function tempProject(): string {
   const dir = mkdtempSync(join(tmpdir(), 'os-12938-unit-'));
@@ -137,15 +140,19 @@ describe('buildSchemaMigrationPlugins', () => {
       basePlugins: [artifactApp],
       cwd: tempProject(),
     });
-    expect(out.plugins).toHaveLength(1);
-    expect((out.plugins[0] as any)?.name).toBe('com.objectstack.platform-objects');
+    // The write guard leads every composed list (#13332) — see the ordering
+    // assertion in the host-config case below for why the position matters.
+    expect(out.plugins.map((p: any) => p?.name)).toEqual([
+      WRITE_GUARD,
+      'com.objectstack.platform-objects',
+    ]);
 
     // A host that already brought one gets nothing added — `serve` 5c's rule.
     const already = await buildSchemaMigrationPlugins({
       basePlugins: [artifactApp, { name: 'com.objectstack.platform-objects' }],
       cwd: tempProject(),
     });
-    expect(already.plugins).toEqual([]);
+    expect(already.plugins.map((p: any) => p?.name)).toEqual([WRITE_GUARD]);
   });
 
   it('composes a host config\'s plugins for their declarations only', async () => {
@@ -166,8 +173,16 @@ describe('buildSchemaMigrationPlugins', () => {
     const out = await buildSchemaMigrationPlugins({ basePlugins: [], cwd: dir });
     expect(out.hostConfigPath).toBe(join(dir, 'objectstack.config.ts'));
     expect(out.hostConfigLoaded).toBe(true);
-    // The host plugin, plus the platform floor.
-    expect(out.plugins).toHaveLength(2);
+    // The write guard, the host plugin, then the platform floor — and the
+    // guard's POSITION is load-bearing, not cosmetic (#13332):
+    // `resolvePluginOrder` is a DFS in registration order, so a host `init()`
+    // that writes directly is only refused if the guard's `init()` already
+    // ran. Composed last, it would arm after the write it exists to refuse.
+    expect(out.plugins.map((p: any) => p?.name)).toEqual([
+      WRITE_GUARD,
+      'com.example.demo',
+      'com.objectstack.platform-objects',
+    ]);
 
     const demo = out.plugins.find((p: any) => p?.name === 'com.example.demo') as any;
     expect(demo, 'the host plugin must be composed').toBeDefined();
