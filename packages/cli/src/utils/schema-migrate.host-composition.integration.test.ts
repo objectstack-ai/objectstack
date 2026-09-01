@@ -565,6 +565,32 @@ describe('a plan writes nothing even when the host writes from init() (#13332)',
     hookLog = join(dir, 'hooks.log');
     writeFileSync(hookLog, '');
 
+    savedEnv.NODE_ENV = process.env.NODE_ENV;
+    savedEnv.OS_ARTIFACT_PATH = process.env.OS_ARTIFACT_PATH;
+    process.env.NODE_ENV = 'production';
+    process.env.OS_ARTIFACT_PATH = join(dir, 'dist', 'objectstack.json');
+
+    // Materialize `sys_metadata` FIRST, with no host config on disk yet. The
+    // measured defect is precisely that on a database whose tables EXIST the
+    // inserts succeed rather than fail, so neither case below may run against
+    // an empty schema — and the fixture must not depend on the fix to build
+    // itself: with the guard ablated, a writing hook against a table that does
+    // not exist yet THROWS, and boot hooks dispatch propagating, so the whole
+    // bootstrap dies. Setting the schema up before the writer exists keeps an
+    // ablation landing on the assertions below instead of on this hook.
+    const boot = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${dbFile}`,
+      deferSchemaDdl: true,
+      composeHostStack: false,
+      projectRoot: dir,
+    });
+    try {
+      await boot.flushSchemaDdl();
+    } finally {
+      await boot.shutdown();
+    }
+
     // A host config carrying the SAME plugin shape, so the composed path is
     // exercised as an operator would hit it — the plugin comes out of
     // `objectstack.config.ts`, through `composeForDeclarations`.
@@ -602,27 +628,6 @@ describe('a plan writes nothing even when the host writes from init() (#13332)',
       ].join('\n'),
     );
 
-    savedEnv.NODE_ENV = process.env.NODE_ENV;
-    savedEnv.OS_ARTIFACT_PATH = process.env.OS_ARTIFACT_PATH;
-    process.env.NODE_ENV = 'production';
-    process.env.OS_ARTIFACT_PATH = join(dir, 'dist', 'objectstack.json');
-
-    // Materialize the tables the way `os migrate apply` does. The measured
-    // defect is precisely that on a database whose tables EXIST the inserts
-    // succeed rather than fail, so the cases below must not run against an
-    // empty schema.
-    const boot = await bootSchemaStack({
-      jsonOutput: false,
-      databaseUrl: `file:${dbFile}`,
-      deferSchemaDdl: true,
-      composeHostStack: true,
-      projectRoot: dir,
-    });
-    try {
-      await boot.flushSchemaDdl();
-    } finally {
-      await boot.shutdown();
-    }
     writeFileSync(hookLog, '');
   }, 60_000);
 
