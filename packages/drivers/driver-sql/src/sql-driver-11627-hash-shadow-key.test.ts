@@ -132,6 +132,17 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow key (#11627)', (cell) => {
      * The accept transition: schema creation MySQL REFUSED before this change
      * now succeeds, and the constraint is carried on a full-width digest.
      */
+    // ── Why the 9 it() blocks below carry an explicit 60_000 budget (#13902) ──
+    // Each constructs a FRESH `new SqlDriver(...)` against this cell's live
+    // server inside their own body — so the live connect cycle, and the
+    // schema-sync DDL and catalog read-back that all but the cheapest of these
+    // drive through it, are paid PER TEST rather than once in a beforeAll.
+    // With no third argument vitest applies its own 5000ms default — a number
+    // nobody chose for that work, and one that reddens unrelated PRs when the
+    // runner is merely a bit slow (#13688 measured exactly this shape: a timeout,
+    // no MySQL error in the logs, on a diff that touched no driver). Sized like
+    // this package's siblings — 60_000 is 7 of its 9 explicit budgets — and NOT
+    // an assertion that these tests are normally anywhere near that slow.
     it('creates a UNIQUE index over a 1024-char column, on a varbinary(32) shadow', async () => {
       driver = new SqlDriver(cell.config());
       await driver.initObjects([uniqueOn('os11627_wide', 1024)]);
@@ -156,7 +167,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow key (#11627)', (cell) => {
       // ⛔ The control that separates this from the REJECTED route: a prefix
       // index reports a SUB_PART. The shadow index keys a whole column.
       expect(carried[0].SUB_PART).toBeNull();
-    });
+    }, 60_000);
 
     /**
      * The boundary, both sides, read from the catalog: 768 characters is the
@@ -176,7 +187,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow key (#11627)', (cell) => {
       const over = await catalog('os11627_over');
       expect(String(over.cols.find((c: any) => c.COLUMN_NAME === 'v').DATA_TYPE)).toBe('text');
       expect(over.cols.filter((c: any) => isHashShadowColumn(c.COLUMN_NAME)).length).toBe(1);
-    });
+    }, 60_000);
 
     /**
      * ⛔ The assertion a PREFIX index fails. Two distinct values sharing their
@@ -198,7 +209,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow key (#11627)', (cell) => {
 
       // …and the constraint is real: the same value twice is refused.
       await expect(knex('os11627_sem').insert({ id: 'dup', v: `${shared}AAA` })).rejects.toThrow();
-    });
+    }, 60_000);
 
     /**
      * NULL must stay DISTINCT, exactly as under a direct UNIQUE index.
@@ -213,7 +224,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow key (#11627)', (cell) => {
       const knex = (driver as any).knex;
       await knex('os11627_null').insert([{ id: 'n1', v: null }, { id: 'n2', v: null }, { id: 'n3', v: null }]);
       expect((await knex('os11627_null').whereNull('v')).length).toBe(3);
-    });
+    }, 60_000);
 
     /**
      * A COMPOSITE unique hashes the tuple, and a tuple containing NULL must
@@ -239,7 +250,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow key (#11627)', (cell) => {
       await knex('os11627_comp').insert([{ id: 's1', a: 'xy', b: '' }, { id: 's2', a: 'x', b: 'y2' }]);
       // …and the composite constraint still bites.
       await expect(knex('os11627_comp').insert({ id: 'dup', a: 'x', b: 'y' })).rejects.toThrow();
-    });
+    }, 60_000);
 
     /**
      * The digest stored is the one this repo can independently recompute — the
@@ -257,7 +268,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow key (#11627)', (cell) => {
       const stored: Buffer = row[shadowCol];
       expect(stored.length).toBe(32);
       expect(stored.toString('hex')).toBe(createHash('sha256').update(value).digest('hex'));
-    });
+    }, 60_000);
 
     /**
      * The clause-② half: once uniqueness is enforced over a DIGEST, MySQL's
@@ -277,7 +288,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow key (#11627)', (cell) => {
       await expect(driver.create('os11627_dup', { v: 'T'.repeat(900) })).rejects.toThrow(
         /duplicate value for the UNIQUE constraint 'uniq_os11627_dup_v'.*\(v\)/s,
       );
-    });
+    }, 60_000);
 
     /**
      * ⛔ NON-UNIQUE indexes are deliberately NOT shadowed. An index over a
@@ -296,7 +307,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow key (#11627)', (cell) => {
       await expect(driver.initObjects([nonUnique])).rejects.toThrow(
         /hash-shadow|cannot create index|BLOB\/TEXT/i,
       );
-    });
+    }, 60_000);
   });
 });
 
@@ -327,6 +338,6 @@ declareDialectCell(PG_CELL, 'hash-shadow key (#11627)', (cell) => {
       );
       const defs = (idx.rows ?? []).map((r: any) => String(r.indexdef)).join('\n');
       expect(defs).toMatch(/UNIQUE INDEX .*uniq_os11627_pg_v.*\(v\)/i);
-    });
+    }, 60_000);
   });
 });

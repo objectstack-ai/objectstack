@@ -436,6 +436,17 @@ declareDialectCell(PG_CELL, 'date wire form (#11389)', (cell) => {
       driver = undefined;
     });
 
+    // ── Why the it() below carries an explicit 60_000 budget (#13902) ──
+    // It constructs a FRESH `new SqlDriver(...)` against this cell's live
+    // server inside its own body — so the live connect cycle, and the
+    // schema-sync DDL and catalog read-back that all but the cheapest of these
+    // drive through it, are paid PER TEST rather than once in a beforeAll.
+    // With no third argument vitest applies its own 5000ms default — a number
+    // nobody chose for that work, and one that reddens unrelated PRs when the
+    // runner is merely a bit slow (#13688 measured exactly this shape: a timeout,
+    // no MySQL error in the logs, on a diff that touched no driver). Sized like
+    // this package's siblings — 60_000 is 7 of its 9 explicit budgets — and NOT
+    // an assertion that these tests are normally anywhere near that slow.
     it('hands back strings for `date` and `date[]`, and keeps `timestamptz` an instant', async () => {
       driver = new SqlDriver(cell.config());
       await underProcessZone('Asia/Shanghai', async () => {
@@ -456,6 +467,6 @@ declareDialectCell(PG_CELL, 'date wire form (#11389)', (cell) => {
         expect(row.ts instanceof Date).toBe(true);
         expect((row.ts as Date).toISOString()).toBe(`${DAY}T00:00:00.000Z`);
       });
-    });
+    }, 60_000);
   });
 });

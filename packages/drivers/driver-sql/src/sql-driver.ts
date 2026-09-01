@@ -4569,6 +4569,61 @@ export class SqlDriver implements IDataDriver {
    * Granularities not listed (or set to false) fall back to in-memory bucketing
    * via engine.findData → applyInMemoryAggregation.
    */
+  /**
+   * [#13714] The caller's OUTPUT COLUMN NAME, quoted as exactly ONE identifier.
+   *
+   * ## The defect this exists for
+   *
+   * Knex's `??` binding does not quote an identifier — it PARSES one. Its
+   * `wrapString` splits the value on `.` into `table.column` segments (and on a
+   * literal `" as "` into value + alias) and re-quotes each piece separately.
+   * That is right for a column REFERENCE, which may legitimately be qualified,
+   * and wrong for an ALIAS, which is a single name the caller reads its own
+   * result back under. Every alias site here used `?? `, so an alias carrying a
+   * dot compiled to a qualified reference in the alias position:
+   *
+   * ```
+   * select strftime('%Y-%m', `due_date`) as `due_date`,
+   *        count(*) as `showcase_delivery`.`count`   ← not valid SQL anywhere
+   *   from `showcase_task` group by strftime('%Y-%m', `due_date`)
+   *   -- near ".": syntax error   (better-sqlite3, measured)
+   * ```
+   *
+   * The statement never runs, so the caller gets `DATABASE_ERROR`/500 from
+   * {@link SqlDriver.aggregate}'s terminal envelope (#11455) — a backend fault
+   * for a query that is spelled correctly.
+   *
+   * ## Why analytics hits this and almost nothing else does
+   *
+   * An analytics measure is named `<cube>.<measure>` on the wire, and
+   * `ObjectQLStrategy` uses that name verbatim as the aggregation `alias` —
+   * because it is the key the caller reads the number back under. So EVERY cube
+   * query that reaches this face carries a dotted alias. It only shows when a
+   * `timeDimensions[].granularity` is present, and the granularity is the ROUTER
+   * rather than the fault: `NativeSQLStrategy.canHandle` declines exactly on a
+   * granularity, and that native face hand-writes `AS "<measure>"` — one quoted
+   * identifier, correct — so every un-bucketed cube query is served by the face
+   * that already got this right. That fork is why the field report's controls
+   * are 200 while `granularity: 'month'` is a 500, and why the date-bucket
+   * parity pins are green: their reference side keys rows by the alias as a
+   * plain JS object key, where a dot is inert.
+   *
+   * ## Why this is not "quote it ourselves"
+   *
+   * `client.wrapIdentifier` is the SAME function knex calls on each segment it
+   * split out, so this changes nothing but the segmentation: the dialect's own
+   * quoting and quote-doubling still apply (`"` on Postgres, backticks on MySQL
+   * and SQLite), and a host-supplied `wrapIdentifier` config hook is still
+   * honoured. An alias is therefore never grammar — it stays a quoted
+   * identifier, exactly as it was before, minus the split.
+   *
+   * ⛔ NOT for column references. `field` may be qualified and MUST keep going
+   * through `??`; only the name after `as` is one identifier by definition.
+   */
+  protected aliasIdentifierSql(alias: string): string {
+    return (this.knex.client as { wrapIdentifier(value: string): string }).wrapIdentifier(String(alias));
+  }
+
   protected get dateGranularityCapabilities(): Record<string, boolean> {
     if (this.isPostgres) {
       return { day: true, month: true, quarter: true, year: true, week: true };
@@ -8160,13 +8215,16 @@ export class SqlDriver implements IDataDriver {
               );
             }
             builder.groupByRaw(bucket.sql, bucket.bindings);
-            builder.select(this.knex.raw(`${bucket.sql} as ??`, [...bucket.bindings, outKey]));
+            builder.select(this.knex.raw(`${bucket.sql} as ${this.aliasIdentifierSql(outKey)}`, [...bucket.bindings]));
           } else {
             builder.groupBy(g.field);
-            // `?? as ??` only when the name actually moves: an alias equal to
+            // Aliased only when the name actually moves: an alias equal to
             // the field would otherwise rewrite `select "region"` into
             // `select "region" as "region"` on every dialect for no gain.
-            builder.select(outKey === g.field ? g.field : this.knex.raw('?? as ??', [g.field, outKey]));
+            // [#13714] The alias half is {@link aliasIdentifierSql}, never a
+            // `??` binding — the FIELD stays a `??` reference (it may be
+            // qualified), the alias is one identifier by definition.
+            builder.select(outKey === g.field ? g.field : this.knex.raw(`?? as ${this.aliasIdentifierSql(outKey)}`, [g.field]));
             // Keyed by the OUTPUT column, like the aggregation branch below —
             // `presentReadColumns` matches on the name the row actually
             // carries, so an aliased group value went unpresented before.
@@ -8239,9 +8297,9 @@ export class SqlDriver implements IDataDriver {
           : `${lowering.sql}(${argExpr})`;
         if (agg.alias) {
           if (fieldExpr === '*') {
-            builder.select(this.knex.raw(`${lowering.sql}(*) as ??`, [agg.alias]));
+            builder.select(this.knex.raw(`${lowering.sql}(*) as ${this.aliasIdentifierSql(agg.alias)}`));
           } else {
-            builder.select(this.knex.raw(`${rawFunc} as ??`, [fieldExpr, agg.alias]));
+            builder.select(this.knex.raw(`${rawFunc} as ${this.aliasIdentifierSql(agg.alias)}`, [fieldExpr]));
           }
           // `min`/`max` are the only supported functions that hand back a value
           // OF the column rather than a count/total derived from it, so they are
@@ -8600,7 +8658,7 @@ export class SqlDriver implements IDataDriver {
     if (query.windowFunctions && Array.isArray(query.windowFunctions)) {
       for (const wf of query.windowFunctions) {
         const windowFunc = this.buildWindowFunction(wf);
-        builder.select(this.knex.raw(`${windowFunc} as ??`, [wf.alias]));
+        builder.select(this.knex.raw(`${windowFunc} as ${this.aliasIdentifierSql(wf.alias)}`));
       }
     }
 

@@ -30,7 +30,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import * as NodeModule from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   createHostImporter,
@@ -573,5 +573,252 @@ describe('the undeclared fallback resolves from the CALLER (#10943)', () => {
       '@fixture/nowhere-at-all',
     ).catch((e: Error) => e);
     expect(withBase.message).not.toMatch(/did not pass `fallbackImport`/);
+  });
+});
+
+/**
+ * #13330 — the DECLARED leg used to load the CommonJS build of a dual-published
+ * package, giving the process a SECOND instance of everything that package
+ * brings with it.
+ *
+ * The defect was invisible to every test that imports things the normal way,
+ * because "the same module" is only ever one instance in a suite that never
+ * crosses the seam. It surfaced as a shipped EE boot: `os serve` loaded
+ * `@objectstack/service-cluster-redis` through this leg, the driver's load-time
+ * `registerClusterDriver('redis', …)` ran against the CJS copy of
+ * `@objectstack/service-cluster`, and the ESM Runtime read the ESM copy and
+ * found nothing — `Cluster driver "redis" is not registered`, about a package
+ * that was installed, declared and resolvable.
+ *
+ * The fixtures below are a miniature of exactly that: a dual-published package
+ * holding module-scope state, and a second dual-published package whose only
+ * job is a load-time write into it. What is asserted is the SHARED INSTANCE,
+ * not the file name — a test that only checked which path was imported would
+ * pass on a fix that loaded the right file into the wrong instance.
+ */
+describe('the declared leg loads the `import` build, not the `require` one (#13330)', () => {
+  const REGISTRY = '@fixture/instance-registry';
+  const DRIVER = '@fixture/instance-registry-driver';
+  const CJS_ONLY = '@fixture/require-only';
+  const SUBPATHS = '@fixture/dual-subpaths';
+
+  /** Module-scope state, published as both builds — the `tsup` dual-build shape. */
+  const REGISTRY_ESM = `export const BUILD = 'esm';
+const registered = [];
+export function register(name) { registered.push(name); }
+export function listRegistered() { return [...registered]; }
+`;
+  const REGISTRY_CJS = `const registered = [];
+exports.BUILD = 'cjs';
+exports.register = (name) => { registered.push(name); };
+exports.listRegistered = () => [...registered];
+`;
+  /** A driver package: its entire contract is the load-time side effect. */
+  const DRIVER_ESM = `import { register } from '${REGISTRY}';
+register('probe');
+export const BUILD = 'esm';
+`;
+  const DRIVER_CJS = `const { register } = require('${REGISTRY}');
+register('probe');
+exports.BUILD = 'cjs';
+`;
+
+  const roots: string[] = [];
+
+  function writePackage(root: string, name: string, exportsField: unknown, files: Record<string, string>): void {
+    const dir = join(root, 'node_modules', ...name.split('/'));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({
+        name,
+        version: '0.0.0-fixture',
+        type: 'module',
+        main: 'dist/index.js',
+        exports: exportsField,
+      }),
+      'utf8',
+    );
+    for (const rel of Object.keys(files)) {
+      const target = join(dir, rel);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, files[rel] as string, 'utf8');
+    }
+  }
+
+  /**
+   * The condition map `tsup` emits: nested, with `types` first, so the
+   * resolution under test has to walk INTO the `import` branch rather than
+   * match a flat string.
+   */
+  const DUAL: unknown = {
+    '.': {
+      import: { types: './dist/index.d.ts', default: './dist/index.js' },
+      require: { types: './dist/index.d.cts', default: './dist/index.cjs' },
+    },
+  };
+
+  /**
+   * A fresh app per case. The ESM module cache is keyed by absolute URL, so a
+   * shared fixture directory would let one case's load answer the next one's
+   * question — the failure mode this whole suite exists to detect.
+   */
+  function app(tag: string): string {
+    const root = mkdtempSync(join(tmpdir(), `os-instance-split-${tag}-`));
+    roots.push(root);
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({
+        name: 'dual-build-host-fixture',
+        type: 'module',
+        dependencies: {
+          [REGISTRY]: '0.0.0-fixture',
+          [DRIVER]: '0.0.0-fixture',
+          [CJS_ONLY]: '0.0.0-fixture',
+          [SUBPATHS]: '0.0.0-fixture',
+        },
+      }),
+      'utf8',
+    );
+    writePackage(root, REGISTRY, DUAL, {
+      'dist/index.js': REGISTRY_ESM,
+      'dist/index.cjs': REGISTRY_CJS,
+    });
+    writePackage(root, DRIVER, DUAL, {
+      'dist/index.js': DRIVER_ESM,
+      'dist/index.cjs': DRIVER_CJS,
+    });
+    // Publishes ONE build, under the `require` condition only.
+    writePackage(root, CJS_ONLY, { '.': { require: './dist/index.cjs' } }, {
+      'dist/index.cjs': "exports.BUILD = 'cjs-only';\n",
+    });
+    writePackage(
+      root,
+      SUBPATHS,
+      {
+        '.': { import: './dist/index.js', require: './dist/index.cjs' },
+        './named': { import: './dist/named.js', require: './dist/named.cjs' },
+        './deep/*': { import: './dist/deep/*.js', require: './dist/deep/*.cjs' },
+      },
+      {
+        'dist/index.js': "export const WHERE = 'root-esm';\n",
+        'dist/index.cjs': "exports.WHERE = 'root-cjs';\n",
+        'dist/named.js': "export const WHERE = 'named-esm';\n",
+        'dist/named.cjs': "exports.WHERE = 'named-cjs';\n",
+        'dist/deep/leaf.js': "export const WHERE = 'leaf-esm';\n",
+        'dist/deep/leaf.cjs': "exports.WHERE = 'leaf-cjs';\n",
+      },
+    );
+    return root;
+  }
+
+  /** The instance an ESM consumer chain holds — what the Runtime reads. */
+  function esmInstance(root: string): Promise<{ BUILD: string; listRegistered: () => string[]; register: (n: string) => void }> {
+    return import(
+      pathToFileURL(join(root, 'node_modules', ...REGISTRY.split('/'), 'dist', 'index.js')).href
+    );
+  }
+
+  /** The instance a CommonJS load lands in — where the registration used to go. */
+  function cjsInstance(root: string): Promise<{ BUILD: string; listRegistered: () => string[]; register: (n: string) => void }> {
+    return import(
+      pathToFileURL(join(root, 'node_modules', ...REGISTRY.split('/'), 'dist', 'index.cjs')).href
+    );
+  }
+
+  // No `fallbackImport`: every fixture here is DECLARED, so the undeclared leg
+  // (the only consumer of that base) is never reached.
+  const importer = (root: string) => createHostImporter(root);
+
+  afterAll(() => {
+    for (const dir of roots) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('CONTROL: the reader can see BOTH answers, so an empty registry is a reading', async () => {
+    // Every assertion below rests on `listRegistered()` being able to come back
+    // non-empty. A probe that could only ever return `[]` would make the whole
+    // describe pass on a broken fix — so it is proved here, on the same
+    // instrument, before anything is measured with it.
+    const root = app('control');
+    const esm = await esmInstance(root);
+    const cjs = await cjsInstance(root);
+
+    expect(esm.BUILD).toBe('esm');
+    expect(cjs.BUILD).toBe('cjs');
+    expect(esm.listRegistered()).toEqual([]);
+
+    // And the two really are separate instances: writing one leaves the other
+    // untouched. That is the split; without it there would be no defect to fix.
+    cjs.register('control-probe');
+    expect(cjs.listRegistered()).toEqual(['control-probe']);
+    expect(esm.listRegistered()).toEqual([]);
+  });
+
+  it('PRECONDITION: host CJS resolution still answers the `require` condition', () => {
+    // The cause, pinned separately from the fix. `hostRequire.resolve` is still
+    // the host-anchored half of the answer and is deliberately unchanged; if a
+    // future Node stopped returning the `require` entry here, this test says so
+    // rather than leaving the fix looking like a no-op.
+    const root = app('precondition');
+    expect(createHostRequire(root).resolve(DRIVER)).toMatch(/dist[/\\]index\.cjs$/);
+  });
+
+  it('loads the `import` build of a declared package', async () => {
+    const root = app('import-condition');
+    expect((await importer(root)(DRIVER)).BUILD).toBe('esm');
+  });
+
+  it("a driver's load-time registration lands in the instance an ESM caller reads", async () => {
+    // The defect, stated as its consequence. Before the fix this was `[]`.
+    const root = app('visible');
+    expect((await esmInstance(root)).listRegistered()).toEqual([]);
+    await importer(root)(DRIVER);
+    expect((await esmInstance(root)).listRegistered()).toEqual(['probe']);
+  });
+
+  it('and no longer lands in the CommonJS instance nothing reads', async () => {
+    // The other direction: the registration MOVED, it was not duplicated. A
+    // fix that loaded both builds would satisfy the previous case and still
+    // leave a process holding two live copies of the package's state.
+    const root = app('cjs-empty');
+    await importer(root)(DRIVER);
+    expect((await cjsInstance(root)).listRegistered()).toEqual([]);
+    expect((await esmInstance(root)).listRegistered()).toEqual(['probe']);
+  });
+
+  it('a package publishing only a `require` condition still loads', async () => {
+    // Narrowness. There is no import entry to prefer, so the resolved CJS path
+    // is used exactly as before — the fix may not turn a working load into a
+    // failure.
+    const root = app('cjs-only');
+    expect((await importer(root)(CJS_ONLY)).BUILD).toBe('cjs-only');
+  });
+
+  it('a package with no `exports` map at all is untouched', async () => {
+    // `main` is the only entry such a package publishes and CJS resolution
+    // already returned it; there is nothing to re-decide.
+    const root = app('no-exports');
+    writeFixturePackage(root, '@fixture/no-exports-map', 'export const BUILD = "main";\n');
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({
+        name: 'dual-build-host-fixture',
+        type: 'module',
+        dependencies: { '@fixture/no-exports-map': '0.0.0-fixture' },
+      }),
+      'utf8',
+    );
+    expect((await importer(root)('@fixture/no-exports-map')).BUILD).toBe('main');
+  });
+
+  it('resolves a declared SUBPATH under the import condition', async () => {
+    const root = app('subpath');
+    expect((await importer(root)(SUBPATHS)).WHERE).toBe('root-esm');
+    expect((await importer(root)(`${SUBPATHS}/named`)).WHERE).toBe('named-esm');
+  });
+
+  it('resolves a wildcard subpath pattern under the import condition', async () => {
+    const root = app('pattern');
+    expect((await importer(root)(`${SUBPATHS}/deep/leaf`)).WHERE).toBe('leaf-esm');
   });
 });

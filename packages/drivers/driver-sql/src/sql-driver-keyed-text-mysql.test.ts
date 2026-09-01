@@ -175,6 +175,17 @@ declareDialectCell(MYSQL_CELL, 'keyed text columns (#11374)', (cell) => {
       await driver?.disconnect().catch(() => {});
     });
 
+    // ── Why the 5 it() blocks below carry an explicit 60_000 budget (#13902) ──
+    // Each constructs a FRESH `new SqlDriver(...)` against this cell's live
+    // server inside their own body — so the live connect cycle, and the
+    // schema-sync DDL and catalog read-back that all but the cheapest of these
+    // drive through it, are paid PER TEST rather than once in a beforeAll.
+    // With no third argument vitest applies its own 5000ms default — a number
+    // nobody chose for that work, and one that reddens unrelated PRs when the
+    // runner is merely a bit slow (#13688 measured exactly this shape: a timeout,
+    // no MySQL error in the logs, on a diff that touched no driver). Sized like
+    // this package's siblings — 60_000 is 7 of its 9 explicit budgets — and NOT
+    // an assertion that these tests are normally anywhere near that slow.
     it('creates the declared indexes — the whole defect, in one assertion', async () => {
       driver = new SqlDriver(cell.config());
       await driver.execute(`drop table if exists ${BOUNDED_TABLE}`).catch(() => {});
@@ -204,7 +215,7 @@ declareDialectCell(MYSQL_CELL, 'keyed text columns (#11374)', (cell) => {
         [BOUNDED_TABLE, 'uniq_os11374_bounded_slug'],
       )) as any[];
       expect(subPart ?? null).toBeNull();
-    });
+    }, 60_000);
 
     it('refuses a NON-UNIQUE unkeyable column by name instead of weakening it', async () => {
       driver = new SqlDriver(cell.config());
@@ -223,7 +234,7 @@ declareDialectCell(MYSQL_CELL, 'keyed text columns (#11374)', (cell) => {
       // relax this — a hash shadow is offered only to a UNIQUE index, because
       // a digest serves no lookup an ordinary index exists to accelerate.
       expect(await indexNames(driver, UNBOUNDED_NONUNIQUE_TABLE)).toEqual([]);
-    });
+    }, 60_000);
 
     it('gives a NON-UNIQUE bound past the key ceiling the same named refusal', async () => {
       driver = new SqlDriver(cell.config());
@@ -232,7 +243,7 @@ declareDialectCell(MYSQL_CELL, 'keyed text columns (#11374)', (cell) => {
         /cannot create index 'idx_os11374_too_wide_nonuniq_token'.*wider than 768 characters/s,
       );
       expect(await indexNames(driver, TOO_WIDE_NONUNIQUE_TABLE)).toEqual([]);
-    });
+    }, 60_000);
 
     /**
      * The UNIQUE half of the same two shapes, after #11627: expressible, and
@@ -268,7 +279,7 @@ declareDialectCell(MYSQL_CELL, 'keyed text columns (#11374)', (cell) => {
         expect(Number(rows[0].NON_UNIQUE)).toBe(0);
         expect(String(rows[0].COLUMN_NAME)).toContain('__hash');
       }
-    });
+    }, 60_000);
 
     /**
      * The measurement that DISQUALIFIED the prefix-index route, kept executable
@@ -317,7 +328,7 @@ declareDialectCell(MYSQL_CELL, 'keyed text columns (#11374)', (cell) => {
         `select count(*) as N from os11374_prefix`,
       )) as any[];
       expect(Number(n)).toBe(1);
-    });
+    }, 60_000);
   });
 });
 

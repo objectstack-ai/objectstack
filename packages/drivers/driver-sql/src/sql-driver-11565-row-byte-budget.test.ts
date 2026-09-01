@@ -198,12 +198,23 @@ declareDialectCell(MYSQL_CELL, 'row byte budget (#11565)', (cell) => {
      * the cell asserts the multiplier rather than assuming it, the same way the
      * matrix asserts its zone skew instead of hoping for it.
      */
+    // ── Why the 6 it() blocks below carry an explicit 60_000 budget (#13902) ──
+    // Each constructs a FRESH `new SqlDriver(...)` against this cell's live
+    // server inside their own body — so the live connect cycle, and the
+    // schema-sync DDL and catalog read-back that all but the cheapest of these
+    // drive through it, are paid PER TEST rather than once in a beforeAll.
+    // With no third argument vitest applies its own 5000ms default — a number
+    // nobody chose for that work, and one that reddens unrelated PRs when the
+    // runner is merely a bit slow (#13688 measured exactly this shape: a timeout,
+    // no MySQL error in the logs, on a diff that touched no driver). Sized like
+    // this package's siblings — 60_000 is 7 of its 9 explicit budgets — and NOT
+    // an assertion that these tests are normally anywhere near that slow.
     it('runs on a 4-byte charset — the boundaries below are utf8mb4 numbers', async () => {
       driver = new SqlDriver(cell.config());
       const seen = await (driver as any).schemaBytesPerChar();
       expect(seen).not.toBeNull();
       expect(seen.bytesPerChar).toBe(4);
-    });
+    }, 60_000);
 
     /**
      * Both sides of the boundary, in one test, because only the pair means
@@ -245,7 +256,7 @@ declareDialectCell(MYSQL_CELL, 'row byte budget (#11565)', (cell) => {
       // ⛔ And nothing was left behind: the object is not registered half-built.
       const exists = await (driver as any).knex.schema.hasTable('os11565_over');
       expect(exists).toBe(false);
-    });
+    }, 60_000);
 
     /** The card's second measured row, moved by the driver's own `id` column. */
     it('creates 63 fields at maxLength 255 and refuses 64', async () => {
@@ -259,7 +270,7 @@ declareDialectCell(MYSQL_CELL, 'row byte budget (#11565)', (cell) => {
       await expect(driver.initObjects([wideObject('os11565_over255', 64, 255)])).rejects.toThrow(
         /cannot create table "os11565_over255".*Its 64 varchar column\(s\) take 65408 bytes/s,
       );
-    });
+    }, 60_000);
 
     /**
      * The path that is more likely than CREATE in a living app: a field added
@@ -275,7 +286,7 @@ declareDialectCell(MYSQL_CELL, 'row byte budget (#11565)', (cell) => {
       await expect(driver.initObjects([wideObject('os11565_grow', 16, 1024)])).rejects.toThrow(
         /cannot add column\(s\) "f16" to "os11565_grow".*Its 16 varchar column\(s\)/s,
       );
-    });
+    }, 60_000);
 
     /**
      * The SECOND limit, which the card's threshold table does not reach and a
@@ -296,7 +307,7 @@ declareDialectCell(MYSQL_CELL, 'row byte budget (#11565)', (cell) => {
       expect(message).toMatch(/InnoDB's per-PAGE limit of 8126 bytes/);
       expect(message).not.toMatch(/65535-byte budget for one ROW/);
       expect(message).toMatch(/"f1" varchar\(63\) = 253 bytes/);
-    });
+    }, 60_000);
 
     /**
      * The shape a diagnostic reading only DECLARED bounds would have nothing to
@@ -315,6 +326,6 @@ declareDialectCell(MYSQL_CELL, 'row byte budget (#11565)', (cell) => {
       const message = String(failure.message);
       expect(message).toMatch(/"f1" varchar\(255\) = 1022 bytes/);
       expect(message).toMatch(/a field declaring NO `maxLength` still takes varchar\(255\)/i);
-    });
+    }, 60_000);
   });
 });

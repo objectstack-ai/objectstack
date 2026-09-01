@@ -86,6 +86,17 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
      * equivalence pin: the shadow enforces the SAME key the direct
      * `COALESCE(organization_id, '__global__')` index would have.
      */
+    // ── Why the 4 it() blocks below carry an explicit 60_000 budget (#13902) ──
+    // Each constructs a FRESH `new SqlDriver(...)` against this cell's live
+    // server inside their own body — so the live connect cycle, and the
+    // schema-sync DDL and catalog read-back that all but the cheapest of these
+    // drive through it, are paid PER TEST rather than once in a beforeAll.
+    // With no third argument vitest applies its own 5000ms default — a number
+    // nobody chose for that work, and one that reddens unrelated PRs when the
+    // runner is merely a bit slow (#13688 measured exactly this shape: a timeout,
+    // no MySQL error in the logs, on a diff that touched no driver). Sized like
+    // this package's siblings — 60_000 is 7 of its 9 explicit budgets — and NOT
+    // an assertion that these tests are normally anywhere near that slow.
     it('collides two NULL-organization rows under an org-scoped shadow unique', async () => {
       driver = new SqlDriver(cell.config());
       await driver.initObjects([orgUniqueOn('os12998_org')]);
@@ -124,7 +135,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
       await expect(
         knex('os12998_org').insert({ id: 'f', v: V2, organization_id: null }),
       ).rejects.toThrow(/duplicate/i);
-    });
+    }, 60_000);
 
     /**
      * ⛔ The control, colocated: a PLAIN composite's expression must NOT gain a
@@ -151,7 +162,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
         { id: 'n2', a: 'x'.repeat(900), b: null },
       ]);
       expect((await knex('os12998_plain').whereNull('b')).length).toBe(2);
-    });
+    }, 60_000);
 
     /**
      * Turning the constraint ON is data-dependent (ADR-0120 D4's exact shape):
@@ -196,7 +207,7 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
       const { cols, idx } = await catalog('os12998_dirty');
       expect(idx.some((i: any) => i.INDEX_NAME === 'uniq_os12998_dirty_org_v')).toBe(false);
       expect(cols.filter((c: any) => isHashShadowColumn(c.COLUMN_NAME))).toEqual([]);
-    });
+    }, 60_000);
 
     /**
      * The write-path half of ruling #11627 clause-②, now for the NULL-safe
@@ -220,6 +231,6 @@ declareDialectCell(MYSQL_CELL, 'hash-shadow NULL-safe key (#12998)', (cell) => {
       expect(msg).toMatch(/duplicate value for the UNIQUE constraint 'uniq_os12998_msg_org_v'/);
       expect(msg).toContain("COALESCE(organization_id, '__global__')");
       expect(msg).not.toContain('HASH COLLISION');
-    });
+    }, 60_000);
   });
 });

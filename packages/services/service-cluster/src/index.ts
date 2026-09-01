@@ -24,6 +24,7 @@
 export {
     defineCluster,
     registerClusterDriver,
+    listClusterDrivers,
     ComposedClusterService,
     type ClusterDriverFactory,
     type DriverFactoryConfig,
