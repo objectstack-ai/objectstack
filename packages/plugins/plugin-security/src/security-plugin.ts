@@ -6529,10 +6529,19 @@ export class SecurityPlugin implements Plugin {
       // `required`; `required: true` + `readonly`; `required: true` + `system`.
       // They are the last three rows of #8772's five-shape measurement table,
       // and exactly the three shapes `record-validator.ts` skips before its
-      // required check ever runs (`if (def.system || def.readonly) continue;`,
-      // insert-mode :993 / update-mode :1003) — `record-validator.ts` never
-      // throws on any of them, so nothing downstream of this gate would refuse
-      // the insert either.
+      // required check ever runs: `validateRecord()` opens BOTH of its field
+      // loops with `if (def.system || def.readonly) continue;` — the
+      // `mode === 'insert'` branch, over `Object.entries(fields)`, and the
+      // `else` update branch, over `Object.entries(data)`.
+      // `record-validator.ts` never throws on any of them, so nothing
+      // downstream of this gate would refuse the insert either.
+      //
+      // ⛔ Cite those two loops by SYMBOL, never by line number. The `:993`
+      // and `:1003` positions this note carried until now had both rotted
+      // onto an unrelated docblock: an anchor that still RESOLVES never
+      // announces that it moved, so the reader lands on unrelated prose and
+      // has to decide whether this note describes code that no longer exists.
+      // These anchors are this freeze note's only evidence pointer.
       //
       // Do NOT move this gate, weaken it, or stand it down further for these
       // three shapes — concretely: do not widen `omissionRefusedByValidation`
