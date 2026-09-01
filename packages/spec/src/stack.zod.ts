@@ -158,6 +158,67 @@ function applyApiEndpointGates(
 }
 
 /**
+ * One package carried by a release artifact (ADR-0130 D4).
+ *
+ * A release artifact MAY carry N package manifests: everything inside one
+ * artifact is delivered atomically by one publisher, and that joint delivery IS
+ * the co-ownership declaration (ADR-0130 D1). This schema is the ELEMENT of the
+ * artifact's `packages` list.
+ *
+ * ## ⛔ The entry is a WRAPPER object, and that is the whole point of its shape
+ *
+ * The manifest body sits UNDER a key (`manifest`); it is never inlined flat as
+ * the array element itself. ADR-0130 D4 reserves the position deliberately, at
+ * schema time, and says why: an artifact schema is on disk at every customer,
+ * so format is the hardest decision to revisit — 黑猫's 30-object artifact is
+ * already 2.6 MB, and modules accreting into one JSON grow both marketplace
+ * transfer and startup parse. When a future external-segment form lands, it is
+ * `{ ref, integrity }` — an ADDITIVE key on this existing object. Flatten the
+ * manifest into the array element instead and that same future is a SHAPE
+ * change: `ref`/`integrity` would have to be bolted onto `ManifestSchema`
+ * (which every other consumer shares) and every required manifest field would
+ * have to go optional, because a segment reference carries no manifest content
+ * at all.
+ *
+ * ⛔ Segmented loading itself is NOT implemented and is an explicit Non-goal of
+ * ADR-0130 ("D4 reserves the key position only. The segmented form itself needs
+ * its own decision."). This schema reserves structure, nothing else.
+ *
+ * Forward compatibility rides the mechanism that already exists —
+ * `manifest.engines.protocol` (ADR-0025, `kernel/manifest.zod.ts`). A
+ * new-format artifact declares a new protocol range and an older runtime
+ * refuses it cleanly instead of mis-parsing it into a half-registered install.
+ * ⛔ No new version-negotiation mechanism is introduced here.
+ *
+ * @example
+ * ```jsonc
+ * {
+ *   "packages": [
+ *     { "manifest": { "id": "com.example.crm", "name": "crm", "version": "1.0.0",
+ *                     "type": "app", "namespace": "crm" } },
+ *     { "manifest": { "id": "com.example.crm.cpq", "name": "cpq", "version": "1.0.0",
+ *                     "type": "module", "namespace": "crm" } }
+ *   ]
+ * }
+ * ```
+ */
+export const ArtifactPackageEntrySchema = lazySchema(() => strictObject({
+  surface: 'an artifact package entry',
+  history:
+    'The entry is a wrapper object whose manifest body lives under `manifest:` — the '
+    + 'structural position ADR-0130 D4 reserves so a future `{ ref, integrity }` external '
+    + 'segment is an additive key rather than a reshape. An inlined manifest body (`id`, '
+    + '`name`, `version`, … written directly on the array element) is therefore refused: '
+    + 'wrap it as `{ manifest: { … } }`.',
+}, {
+  manifest: ManifestSchema.describe('The package manifest this artifact entry carries'),
+}).describe('One package carried by a release artifact (ADR-0130 D4)'));
+
+export type ArtifactPackageEntry = z.input<typeof ArtifactPackageEntrySchema>;
+/** Post-parse shape of {@link ArtifactPackageEntry} — defaults applied, transforms run (ADR-0122). */
+export type ArtifactPackageEntryParsed = z.infer<typeof ArtifactPackageEntrySchema>;
+
+/**
  * ObjectStack Ecosystem Definition
  *
  * This schema represents the "Full Stack" definition of a project or environment.
@@ -238,6 +299,38 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
 }, {
   /** System Configuration */
   manifest: ManifestSchema.optional().describe('Project Package Configuration'),
+
+  /**
+   * The artifact's package list (ADR-0130 D4) — **optional, and additive**.
+   *
+   * A release artifact MAY carry N package manifests so a product can be split
+   * into modules **without renaming a single object** (which is what separate
+   * namespaces would cost: the object `name` IS the table name, the REST path,
+   * the formula token and the saved-view key — ADR-0129 D1–D2 — and
+   * rename-on-install is ADR-0048's standing non-goal).
+   *
+   * ## Read BOTH shapes — the schema shape IS the compatibility mechanism
+   *
+   * - `packages` present → iterate it.
+   * - `packages` absent → treat `manifest` (singular) as a **single-element
+   *   list**.
+   *
+   * `manifest` is therefore RETAINED, not replaced. A replacement would break
+   * every artifact already built and on disk at every customer; the read-both
+   * rule is the term ADR-0130's whole compatibility claim rests on, which is
+   * why D4 states it as the schema decision rather than an implementation note.
+   * An existing single-`manifest` artifact takes the second branch and its
+   * behaviour is unchanged.
+   *
+   * ⚠️ This declares the SHAPE. The load path that iterates it — topologically
+   * ordered through the one sorter, `resolvePluginOrder` (ADR-0130 D5,
+   * ADR-0116) — and the `installPackage` co-ownership gate (ADR-0130 D1/D3) are
+   * separate, dependent changes. Until they land, a multi-package artifact
+   * parses and carries its list; nothing downstream iterates it yet.
+   */
+  packages: z.array(ArtifactPackageEntrySchema).optional()
+    .describe('Package manifests carried by this release artifact (ADR-0130 D4)'),
+
   datasources: z.array(DatasourceSchema).optional().describe('External Data Connections'),
 
   /**
@@ -1832,6 +1925,20 @@ const COMPOSE_KEY_DISPOSITIONS: Record<keyof ObjectStackDefinition, ComposeDispo
   functions: 'functions',
 
   // ── Array collections — concatenated in stack order ──
+  // ADR-0130 D4's artifact package list. Not a metadata collection like the
+  // rest of this block — it carries package MANIFESTS, not authored metadata —
+  // but its composition rule is the same one for the same reason: composing two
+  // stacks that each carry package entries must yield BOTH publishers' entries,
+  // since dropping one would lose a package the composed artifact still
+  // delivers. Declared here in the change that declares the key, as the table's
+  // docblock requires.
+  //
+  // ⚠️ This does NOT repair `manifest:`'s deliberate pick-one semantics above
+  // (`selectManifest`, first/last): two stacks that each declare only the
+  // SINGULAR `manifest` still lose N−1 of them. Teaching `composeStacks` a
+  // preserve mode that folds those into `packages` is ADR-0130's follow-up row
+  // 3 — additive, and its own card. ⛔ Not done here.
+  packages: 'concat',
   datasources: 'concat',
   datasourceMapping: 'concat',
   translations: 'concat',
