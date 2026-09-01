@@ -118,7 +118,16 @@ export const VARIABLE_NAME_CONFIG_KEYS = ['iteratorVariable', 'indexVariable', '
  * and catastrophic over-collection for any other (a `start` node would donate
  * `objectName` and `condition`, an `http` node its `url`).
  */
-export const ASSIGNMENT_NODE_TYPE = 'assignment';
+/*
+ * ⛔ Module-private, deliberately. `rule-id-barrel-exports.test.ts` reads every
+ * `export const NAME = '<slug>';` in `src/` as a RULE ID that a published
+ * barrel must re-export — and `'assignment'` is slug-shaped. This is a node
+ * type, not a rule id, and putting it in the package's public surface to
+ * satisfy that scan would publish an internal detail nobody consumes. The
+ * type gate is pinned through BEHAVIOUR instead (a non-assignment node donates
+ * no config keys), which is the property that actually matters.
+ */
+const ASSIGNMENT_NODE_TYPE = 'assignment';
 
 /**
  * The keys an `assignments` ARRAY entry may name its target with — the three

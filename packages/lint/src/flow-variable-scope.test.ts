@@ -15,7 +15,6 @@ import {
   shadowedFieldReads,
   shadowedFieldMessage,
   VARIABLE_NAME_CONFIG_KEYS,
-  ASSIGNMENT_NODE_TYPE,
   ASSIGNMENT_ENTRY_NAME_KEYS,
 } from './flow-variable-scope.js';
 
@@ -269,9 +268,11 @@ describe('flow-variable-scope reads only keys the spec declares (meta-test)', ()
     expect(declaredAnywhere).toContain('errorVariable');
   });
 
-  it('the assignment surface is spelled the way the executor dispatches', () => {
-    expect(ASSIGNMENT_NODE_TYPE).toBe('assignment');
-    // `logic-nodes.ts` reads these three, in this precedence order.
+  it('the assignment entry-name keys are the three the executor reads, in its order', () => {
+    // The node TYPE itself is module-private (see the comment on it): a
+    // slug-shaped `export const` in this package is read as a rule id that a
+    // published barrel must carry. Its gate is pinned by BEHAVIOUR above —
+    // `row 7 is gated on the node TYPE` — which is the property that matters.
     expect([...ASSIGNMENT_ENTRY_NAME_KEYS]).toEqual(['variable', 'name', 'key']);
   });
 });
