@@ -38,16 +38,25 @@
  * chain exists for, and it is why `container.object` has to be consulted first.
  *
  * ---------------------------------------------------------------------------
- * The control
+ * The controls, and what the first ablation corrected about them
  * ---------------------------------------------------------------------------
- * `a non-container ViewItem still resolves unchanged` and `already-registered
- * expanded items are NOT duplicated` are green in BOTH directions on purpose:
- * this change must not move what the exit already answered. A case going red
- * there would report a regression, not this fix.
+ * The two `CONTROL:` cases are green in BOTH directions on purpose: this change
+ * must not move what the exit already answered, so a case going red there would
+ * report a regression rather than this fix. Neither may therefore depend on the
+ * expansion existing.
  *
- * Reverse verification (direction predicted before running, and recorded in the
- * PR body as measured): reverting `getViewsByObject` to its pre-#13913 body
- * turns the two container cases RED and leaves both controls GREEN.
+ * The dedupe case was originally written as ONE control asserting both the full
+ * answer AND the identity of the registered item. The first ablation falsified
+ * that: it went RED, because pre-fix the answer is the registered item alone.
+ * A control that goes red under ablation is not a control, so it is split here
+ * — the SET assertion is an ordinary case (`contributes only the names the
+ * store does not already hold`, red under ablation), and the both-directions
+ * half is the object-IDENTITY assertion, which holds either way.
+ *
+ * Reverse verification, direction re-predicted after that split and recorded in
+ * the PR body as measured: reverting `getViewsByObject` to its pre-#13913 body
+ * turns the four container/expansion cases RED and leaves all three of the
+ * remaining cases GREEN.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -141,6 +150,30 @@ function managerWithRegistryContainer(): MetadataManager {
   return manager;
 }
 
+/**
+ * What every SOURCE registrar leaves behind: the container under the bare
+ * object key, PLUS each expanded ViewItem under `<object>.<viewKey>`. Only one
+ * of the three is registered here, so both halves are observable in one store —
+ * the registered name must not be re-minted, and the two absent ones must be.
+ */
+function managerWithContainerAndRegisteredItem(): {
+  manager: MetadataManager;
+  registeredPipeline: Record<string, unknown>;
+} {
+  const manager = managerWithRegistryContainer();
+  const registeredPipeline = {
+    name: 'crm_lead.pipeline',
+    object: 'crm_lead',
+    viewKind: 'list',
+    config: { type: 'kanban' },
+    order: 0,
+    scope: 'package',
+    _packageId: 'crm',
+  };
+  manager.registerInMemory('view', 'crm_lead.pipeline', registeredPipeline);
+  return { manager, registeredPipeline };
+}
+
 describe('#13913 getViewsByObject() expands aggregated view containers', () => {
   it('answers with the container EXPANSION, not empty', async () => {
     const manager = managerWithRegistryContainer();
@@ -199,8 +232,23 @@ describe('#13913 getViewsByObject() expands aggregated view containers', () => {
     expect(names(await manager.getViewsByObject('crm_lead'))).toEqual(EXPANDED);
   });
 
+  it('contributes only the names the store does not already hold', async () => {
+    const { manager } = managerWithContainerAndRegisteredItem();
+
+    const views = (await manager.getViewsByObject('crm_lead')) as Record<string, unknown>[];
+
+    // One entry per named view — the registered `crm_lead.pipeline` is NOT
+    // joined by a second, freshly-expanded copy of itself.
+    expect(names(views)).toEqual(EXPANDED);
+    expect(views.filter((v) => v.name === 'crm_lead.pipeline')).toHaveLength(1);
+  });
+
   // ------------------------------------------------------------------
-  // Controls — green in BOTH directions.
+  // Controls — green in BOTH directions, and measured so.
+  //
+  // These pin what this change must NOT move. A case going red here would be
+  // reporting a regression, not this fix, so neither may depend on the
+  // expansion existing.
   // ------------------------------------------------------------------
 
   it('CONTROL: a non-container ViewItem still resolves unchanged', async () => {
@@ -212,25 +260,14 @@ describe('#13913 getViewsByObject() expands aggregated view containers', () => {
     expect(views).toEqual([independentViewItem]);
   });
 
-  it('CONTROL: already-registered expanded items are NOT duplicated by the expansion', async () => {
-    const manager = managerWithRegistryContainer();
-    // What every source registrar does: the container under the bare object
-    // key, PLUS each expanded item under `<object>.<viewKey>`. The registered
-    // copy is the fully-enriched one and must win.
-    const registeredPipeline = {
-      name: 'crm_lead.pipeline',
-      object: 'crm_lead',
-      viewKind: 'list',
-      config: { type: 'kanban' },
-      order: 0,
-      scope: 'package',
-      _packageId: 'crm',
-    };
-    manager.registerInMemory('view', 'crm_lead.pipeline', registeredPipeline);
+  it('CONTROL: a registered expanded item is returned BY IDENTITY, never shadowed', async () => {
+    const { manager, registeredPipeline } = managerWithContainerAndRegisteredItem();
 
     const views = (await manager.getViewsByObject('crm_lead')) as Record<string, unknown>[];
 
-    expect(names(views)).toEqual(EXPANDED);
+    // Object identity, not deep equality: the store's own fully-enriched copy
+    // (it carries `_packageId`) is what comes back, not an expansion-minted
+    // stand-in that happens to share a name.
     expect(views.find((v) => v.name === 'crm_lead.pipeline')).toBe(registeredPipeline);
   });
 });
