@@ -114,11 +114,14 @@ export interface PlatformAdminEmailConfig {
    *
    * It exists so that no consumer ever has a reason to split {@link raw} a
    * second time. Two readers need the as-typed form and neither may re-parse
-   * to get it: the elevation gate's by-email `sys_user` lookup queries the
-   * verbatim spelling alongside the normalized one (an imported/legacy row may
-   * not be stored lowercased, and a driver `where` is an exact match), and the
-   * walled boot diagnostic quotes the addresses back to the operator, who
-   * should see what they wrote.
+   * to get it: the platform-admin STANDING surface's by-email `sys_user`
+   * lookup queries the verbatim spelling alongside the normalized one (an
+   * imported/legacy row may not be stored lowercased, and a driver `where` is
+   * an exact match) — that lookup is `resolvePlatformAdminStanding` in
+   * plugin-security's `platform-admin-service.ts`, which inherited the
+   * two-spelling discipline from the elevation gate the #11663 re-anchor
+   * (leg L4) retired — and the walled boot diagnostic quotes the addresses
+   * back to the operator, who should see what they wrote.
    */
   readonly declaredSpellings: readonly string[];
   /** What the operator actually typed, when the variable was set to anything. */
@@ -284,9 +287,16 @@ export function matchesConfiguredPlatformAdmin(
  * and exported, because the row-and-verified predicate above is not the shape
  * every reader of `OS_PLATFORM_OWNER_EMAIL` needs:
  *
- *  - the elevation gate (`plugin-security/bootstrap-platform-admin.ts`) must
- *    keep the two halves SEPARATE — its `walled_owner_not_registered` and
- *    `walled_owner_not_verified` diagnostics are different answers;
+ *  - the walled platform-admin STANDING surface must keep the two halves
+ *    SEPARATE — `resolvePlatformAdminStanding`
+ *    (`plugin-security/platform-admin-service.ts`, reported at boot by
+ *    `bootstrap-platform-admin.ts`) answers `registered` and `verified` as two
+ *    independent per-entry fields, so the operator's log can tell "not
+ *    registered yet" apart from "registered, NOT verified". ⚠️ That reason
+ *    predates the #11663 re-anchor and survives it: the pair used to be the
+ *    retired elevation gate's `walled_owner_not_registered` /
+ *    `walled_owner_not_verified` reasons — the mechanism moved, the need to
+ *    keep the halves apart did not;
  *  - the creation-time operator stamp (`plugin-auth`) is handed an email
  *    STRING by better-auth, before any row exists to read;
  *  - the Layer 0 wall bypass takes a fast negative on the session's
