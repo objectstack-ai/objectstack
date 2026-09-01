@@ -81,12 +81,16 @@ export const MANAGED_DENY_ENTRY = {
  * The default sets that must carry an explicit entry for every managed table.
  *
  * Holding a write-granting `'*'` wildcard is the FLOOR of membership, not its
- * definition: every default set whose wildcard grants create/edit/delete must
- * be listed here (or carry a documented exclusion below), because the wildcard
- * is what would otherwise grant raw CRUD on a newly-declared identity table —
- * that floor is what `default-permission-sets.test.ts` derives independently
- * and diffs against this list (#14029), so a future write-granting set that is
- * not added here fails a pin instead of silently keeping its wildcard.
+ * definition: every default set whose wildcard grants any generic write class
+ * — via the three write flags (`allowCreate`/`allowEdit`/`allowDelete`) OR via
+ * `modifyAllRecords`, whose super-user bypass grants edit/delete and the
+ * destructive class by the evaluator's second route (`MODIFY_ALL_WRITE_KEYS`,
+ * `permission-evaluator.ts`) — must be listed here (or carry a documented
+ * exclusion below), because the wildcard is what would otherwise grant raw
+ * writes on a newly-declared identity table — that floor is what
+ * `default-permission-sets.test.ts` derives independently and diffs against
+ * this list (#14029), so a future write-granting set that is not added here
+ * fails a pin instead of silently keeping its wildcard.
  * Membership is WIDER than the floor: `viewer_readonly`'s wildcard is read-only
  * and `member_default` has held none since #5491 — their injected entries are
  * belt-and-suspenders and the read grant itself, respectively (see the module

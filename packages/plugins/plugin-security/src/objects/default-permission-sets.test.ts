@@ -384,10 +384,23 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
  */
 describe('managed-deny targets — independent-property floor + registry union reaches the derived variant (#14029)', () => {
   // Derived from `defaultPermissionSets`, never from the list under test.
+  // "Grants a write" in the evaluator's own terms: the three CRUD flags OR
+  // `modifyAllRecords` — the super-user bypass grants edit/delete and the
+  // destructive class by a second route (`MODIFY_ALL_WRITE_KEYS`,
+  // `permission-evaluator.ts`), so `'*': { modifyAllRecords: true }` is
+  // write-granting even with all three CRUD flags false. Value tests
+  // (`=== true`), not key-existence: Zod materialises the superuser bits with
+  // `.default(false)` (`permission.zod.ts`), so they are present-as-false.
   const writeGrantingWildcardSets: string[] = defaultPermissionSets
     .filter((s: any) => {
       const wc = s.objects?.['*'];
-      return !!wc && (wc.allowCreate === true || wc.allowEdit === true || wc.allowDelete === true);
+      return (
+        !!wc &&
+        (wc.allowCreate === true ||
+          wc.allowEdit === true ||
+          wc.allowDelete === true ||
+          wc.modifyAllRecords === true)
+      );
     })
     .map((s) => s.name)
     .sort();

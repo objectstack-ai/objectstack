@@ -15,7 +15,7 @@ parent's `objects` can never propagate to it. Its own docblock declares
 declared contract.
 
 No gap opens on today's tree — the static `BETTER_AUTH_MANAGED_OBJECTS`
-baseline covers the 30 declared managed tables and is copied into the variant at
+baseline covers the 28 declared managed tables and is copied into the variant at
 derivation. The gap was the next `managedBy: 'better-auth'` schema that lands
 without a hand edit to that list: `organization_admin` would receive the
 injected deny while the wall-less variant's wildcard kept granting raw CRUD on
