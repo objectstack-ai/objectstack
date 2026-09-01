@@ -16,33 +16,35 @@ import { flush, handle, run, settings } from '@oclif/core';
 /**
  * How long stderr may make NO PROGRESS before this shim stops waiting for it.
  *
- * A wall-clock deadline is the wrong instrument here: it cannot tell a reader
- * that is merely SLOW from one that is ABSENT, and those two want opposite
- * answers — the slow one must be waited for (it is the whole point of this
- * file), the absent one must never be waited for (nobody is reading, so the
- * bytes are worthless). Progress separates them exactly: a live reader keeps
- * draining however slowly, an absent one drains nothing, ever.
+ * A wall-clock deadline is the wrong instrument: it cannot tell a reader that
+ * is merely SLOW from one that is ABSENT, and those two want opposite answers —
+ * the slow one must be waited for (it is the whole point of this file), the
+ * absent one must never be (nobody is reading, so the bytes are worthless).
+ * Progress separates them exactly: a live reader keeps draining however slowly,
+ * an absent one drains nothing, ever.
  *
- * ## Where the number comes from — re-derive, do not bump
+ * ## Where the number comes from — re-derive it, do not bump it
  *
- *   • A live reader under real load never stalled longer than **61 ms**:
- *     two samples of a vitest worker's event loop while this package's e2e
- *     suite ran beside it (12 680 and 9 663 samples of a 10 ms timer;
- *     p999 = 24/25 ms, max = 61/57 ms).
- *   • The SHORTEST reader stall that can produce the truncation this file
- *     exists to prevent is one that outlasts the CLI's own run, because the
- *     bytes are only lost if the child exits while the reader is away.
- *     Measured child runtime here: 1.0-2.5 s (max 2535 ms).
+ *   • A live reader under real load never stalled longer than **61 ms**: two
+ *     samples of a vitest worker's event loop while this package's e2e suite
+ *     ran beside it (12 680 and 9 663 samples of a 10 ms timer; p999 = 24/25 ms,
+ *     max = 61/57 ms).
+ *   • The stall that actually loses these bytes has to span the CLI's WHOLE
+ *     RUN, not just an instant: the bulk (~138 KB of oclif warnings) is emitted
+ *     during `Config.load()`, the diagnostic ~3 s later, and the bytes are only
+ *     lost if the child exits while the reader is away. So the bound must
+ *     outlast a whole run. Measured child runtime: **1.0 s idle, 6.9 s on a
+ *     contended box** (same container, other agents building).
  *
- * 5 s is ~2x that worst measured child runtime, so a stall long enough to
- * cause the bug is still waited out, and ~82x the worst measured live-reader
- * stall, so a merely slow reader is never cut off.
+ * 15 s is ~2.2x that worst measured runtime, so a stall long enough to cause
+ * the bug is still waited out, and ~245x the worst measured live-reader stall,
+ * so a merely slow reader is never cut off.
  *
- * ⚠️ Exceeding this bound degrades to the behaviour this file had BEFORE the
- * drain existed — a lossy but prompt exit. It can never degrade to a hang,
- * which is the property that matters: the failure it replaced was unbounded.
+ * ⚠️ Exceeding the bound degrades to the behaviour this file had BEFORE the
+ * drain existed — lossy, but prompt. It can never degrade to a hang, which is
+ * the property that matters: the failure this replaced was unbounded.
  */
-const STDERR_DRAIN_STALL_MS = 5_000;
+const STDERR_DRAIN_STALL_MS = 15_000;
 
 /** How often progress is sampled — comfortably under the 61 ms above. */
 const STDERR_DRAIN_POLL_MS = 50;

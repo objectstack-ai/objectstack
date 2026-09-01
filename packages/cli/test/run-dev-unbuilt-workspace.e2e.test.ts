@@ -125,20 +125,32 @@ function runCli(args: string[], cwd: string, nodeOptions: string | undefined): P
 const PIPE_BUFFER_BYTES = 65_536;
 
 /**
- * How long case 4 refuses to drain. Two constraints pin it, and the order is
+ * How long case 4 refuses to drain. Two constraints pin it, and the ORDER is
  * the whole design:
  *
- *   max measured child runtime (2535 ms)  <  STALL_MS  <  the shim's
- *   no-progress bound (STDERR_DRAIN_STALL_MS, 5 s in `bin/run-dev.js`)
+ *   worst measured child runtime (6.9 s)  <  STALL_MS  <  the shim's
+ *   no-progress bound (`STDERR_DRAIN_STALL_MS`, 15 s in `bin/run-dev.js`)
  *
- * Below the child's runtime the control cannot bite — the child has to EXIT
- * while the reader is away for anything to be lost. Above the shim's bound the
- * fixed child correctly gives up, and the case would red against a working fix.
+ * Below the child's runtime the control cannot bite: the bulk of stderr is
+ * emitted during `Config.load()` and the diagnostic ~3 s later, so a stall that
+ * ends first lets the tail out and the case passes against unfixed code.
+ * Above the shim's bound the fixed child correctly gives up, and the case would
+ * red against a WORKING fix.
+ *
+ * ⚠️ Both failure directions have actually happened here. 4 s was tried and the
+ * ablation against base came back GREEN — the case had silently stopped
+ * discriminating once a contended box pushed child runtime past it. A slow
+ * continuous reader was tried instead and failed the other way: it drains the
+ * bulk long before the tail is written, so the tail meets an EMPTY pipe and
+ * nothing is ever lost. Only a stall spanning the whole run reproduces this.
  */
-const STALL_MS = 4_000;
+const STALL_MS = 10_000;
 
-/** Ceiling for case 5. Far above the shim's 5 s bound, so reaching it means a HANG. */
-const UNREAD_HARD_CAP_MS = 25_000;
+/**
+ * Ceiling for case 5: comfortably above the worst child runtime plus the shim's
+ * 15 s bound (~22 s measured), so reaching it means a HANG rather than a wait.
+ */
+const UNREAD_HARD_CAP_MS = 40_000;
 
 interface Lifetime {
   code: number | null;
@@ -307,14 +319,19 @@ describe('the mirror direction: a reader that is never coming back', () => {
     expect(unread.elapsedMs).toBeLessThan(UNREAD_HARD_CAP_MS);
   });
 
-  it('waited for the bound before giving up — proving the detector RAN and TRIPPED', () => {
-    // Requirement of its own, not a restatement: a bound that never runs and a
-    // bound that never trips are indistinguishable from the outside, and both
-    // read as "fine" from the case above alone. Exiting promptly here would
-    // mean the drain was skipped entirely (the pre-fix behaviour); exiting at
-    // all means it did not run forever. Only both together pin the bound.
-    expect(unread.elapsedMs).toBeGreaterThan(STALL_MS);
-  });
+  // ⛔ There is deliberately NO assertion here that the child WAITED for the
+  // bound before exiting, though an earlier version of this file had one. It
+  // is not sound: whether the tail finds bytes still pending — and so whether
+  // the bound is needed at all — depends on how much of the ~138 KB backlog
+  // the kernel and node's own readable buffer happened to absorb, which moves
+  // with load. Measured on one contended run the child exited at 7653 ms
+  // having never needed the bound; on another, with 7621 bytes still pending,
+  // the unfixed shim hung instead. Asserting the wait would red on the first
+  // run and pass on the second, which is a flake, not a pin. What this case
+  // pins is the property that actually matters and holds either way: the
+  // process ENDS. That the bound itself runs and trips is shown out of band,
+  // by tracing a run whose reader blocks its loop for the whole run — see the
+  // PR for the `BOUND TRIPPED` trace.
 
   it('a CLOSED read end is released at once, not held for the bound (EPIPE reaches the callback)', () => {
     // Pins the fast path measured alongside the hang: when the reader is gone
