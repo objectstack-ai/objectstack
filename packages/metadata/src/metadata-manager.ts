@@ -78,6 +78,9 @@ import { EndpointMatcher } from './endpoint-matcher.js';
 // [#5309] The stored ENVELOPE / authored BODY split — peeled before any spec
 // schema parses a stored row. See `stored-envelope.ts`.
 import { peelStoredEnvelope } from './stored-envelope.js';
+// [#13913] Registry-free expansion of an aggregated view container reached
+// through THIS manager's own store — see `getViewsByObject`.
+import { expandRuntimeViewContainer } from './view-container-expansion.js';
 import type { ApiEndpointMatch } from '@objectstack/spec/contracts';
 
 /**
@@ -1579,19 +1582,65 @@ export class MetadataManager implements IMetadataService {
    * Runtime-authored `shared` / `personal` views (`sys_view_definition`) are
    * merged in by the REST layer; this method returns the `package` layer that
    * was registered from source.
+   *
+   * ## [#13913] Aggregated containers are expanded inline, per read
+   *
+   * `this.list('view')` is `MetadataManager`'s OWN loader-based store — the
+   * in-memory registry plus every registered loader — and is a completely
+   * different store from the `sys_metadata` rows `getMetaItems` reads. #13407
+   * taught `getMetaItems` to expand a runtime-authored aggregated container
+   * inline; this exit never called it and had no equivalent step, so a
+   * container that `GET /meta/view?object=` now serves still answered **empty**
+   * here.
+   *
+   * Merely getting the container into the store would not have helped: the
+   * filter also requires `viewKind`, and a container has none. Loosening that
+   * requirement is NOT the repair — it would answer with the container itself
+   * as a view, the behaviour #7163 ruled wrong — so what is added below is the
+   * container's **expansion**, whose items each carry the `viewKind` + `object`
+   * pair this filter has always tested. The filter itself is untouched: it
+   * reads the top-level `object`, exactly as `ViewSchema.object` declares.
+   *
+   * Registry-free and per-read, mirroring #13407's choice at the other exit and
+   * for the same reason — the registry is process-wide, so a read must not
+   * graft rows into it (see `view-container-expansion.ts`'s header, which also
+   * records why the protocol's copy of this logic cannot be imported).
+   *
+   * Already-present items win: an expansion contributes only names the store
+   * does not already hold, so a container whose expanded ViewItems were
+   * registered by a source registrar (the ObjectQL boot loop, the artifact/HMR
+   * loader) still answers with those registered, fully-enriched items and this
+   * step adds nothing.
    */
   async getViewsByObject(object: string): Promise<unknown[]> {
     const views = await this.list('view');
-    return views
-      .filter(
-        (v: any) =>
-          v && typeof v === 'object' && v.viewKind && v.object === object,
-      )
-      .sort(
-        (a: any, b: any) =>
-          (a.order ?? 0) - (b.order ?? 0) ||
-          String(a.name).localeCompare(String(b.name)),
-      );
+    const matches = views.filter(
+      (v: any) =>
+        v && typeof v === 'object' && v.viewKind && v.object === object,
+    );
+
+    // Every name the store already holds — containers included, though a
+    // container is keyed by the bare `<object>` and can never collide with the
+    // `<object>.<key>` names an expansion mints.
+    const known = new Set<string>();
+    for (const v of views as any[]) {
+      if (v && typeof v === 'object' && typeof v.name === 'string') known.add(v.name);
+    }
+
+    for (const v of views) {
+      for (const item of expandRuntimeViewContainer(v)) {
+        if (!item.viewKind || item.object !== object) continue;
+        if (known.has(item.name)) continue;
+        known.add(item.name);
+        matches.push(item);
+      }
+    }
+
+    return matches.sort(
+      (a: any, b: any) =>
+        (a.order ?? 0) - (b.order ?? 0) ||
+        String(a.name).localeCompare(String(b.name)),
+    );
   }
 
   /**
