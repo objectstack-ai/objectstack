@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { runAuthoringRules, splitBySeverity } from './authoring-rules.js';
 import {
   validateWidgetBindings,
   TABLE_COUNT_ONLY,
@@ -823,7 +824,8 @@ function widgetOwnStack(
   };
 }
 
-const idsOf = (fs: { rule: string }[], rule: string) => fs.filter((f) => f.rule === rule);
+const idsOf = <T extends { rule: string }>(fs: T[], rule: string): T[] =>
+  fs.filter((f) => f.rule === rule);
 
 describe('widget-filter-field-unknown (#14148 limb A)', () => {
   it('errors on the card\'s repro — a widget filter key that is not a column', () => {
@@ -1022,4 +1024,40 @@ describe('widget-sortby-unselected (#14148 limb B)', () => {
     expect(idsOf(all, WIDGET_DIMENSION_UNKNOWN)).toHaveLength(1);
     expect(idsOf(all, WIDGET_SORTBY_UNSELECTED)).toHaveLength(0);
   });
+});
+
+/**
+ * [#14148] The card's binding acceptance criterion, pinned end-to-end rather
+ * than inferred from the registry entry: BOTH limbs must fail `validate` AND
+ * `build`. `build` is the publish gate and is where these currently ship, so a
+ * validate-only fix was explicitly not acceptable — and nothing else in this
+ * file would notice if the entry's `commands` were narrowed later.
+ */
+describe('#14148 acceptance — both limbs gate `validate` AND `build`', () => {
+  const limbA = widgetOwnStack({ filter: { due_daet: { $gte: '{today}' } } });
+  const limbB = widgetOwnStack({ options: { sortBy: 'not_selected', sortOrder: 'asc' } });
+
+  for (const command of ['validate', 'build'] as const) {
+    it(`limb A (widget filter key) fails \`${command}\``, () => {
+      const { errors } = splitBySeverity(runAuthoringRules(command, { normalized: limbA }));
+      expect(errors.map((f) => f.rule)).toContain(WIDGET_FILTER_FIELD_UNKNOWN);
+    });
+
+    it(`limb B (options.sortBy) fails \`${command}\``, () => {
+      const { errors } = splitBySeverity(runAuthoringRules(command, { normalized: limbB }));
+      expect(errors.map((f) => f.rule)).toContain(WIDGET_SORTBY_UNSELECTED);
+    });
+
+    it(`the clean shape passes \`${command}\` on both limbs`, () => {
+      const clean = widgetOwnStack({
+        filter: { due_date: { $gte: '{today}' }, 'owner.region': 'emea' },
+        options: { sortBy: 'business_unit', sortOrder: 'asc' },
+      });
+      const { errors } = splitBySeverity(runAuthoringRules(command, { normalized: clean }));
+      const mine = errors.filter((f) => [
+        WIDGET_FILTER_FIELD_UNKNOWN, WIDGET_FILTER_FIELD_NOT_INCLUDED, WIDGET_SORTBY_UNSELECTED,
+      ].includes(f.rule));
+      expect(mine).toEqual([]);
+    });
+  }
 });
