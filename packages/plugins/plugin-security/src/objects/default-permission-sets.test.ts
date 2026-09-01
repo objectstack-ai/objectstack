@@ -7,7 +7,7 @@ import * as PlatformObjects from '@objectstack/platform-objects';
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
 import { defaultPermissionSets, BETTER_AUTH_MANAGED_OBJECTS } from './default-permission-sets.js';
-import { MANAGED_DENY_TARGET_SETS } from '../managed-object-write-denies.js';
+import { applyManagedWriteDenies, MANAGED_DENY_TARGET_SETS } from '../managed-object-write-denies.js';
 
 // Every object schema the platform-objects package exports whose bucket is
 // `better-auth` — the ground truth the static baseline must mirror.
@@ -366,5 +366,105 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
       PermissionSetSchema.parse({ name: 'admin_full_access', ...ADMIN_FULL_ACCESS_CAPABILITIES }).objects,
     );
     expect(admin.systemPermissions).toEqual(ADMIN_FULL_ACCESS_CAPABILITIES.systemPermissions);
+  });
+});
+
+/**
+ * [#14029] The managed-deny target list, pinned against an INDEPENDENT
+ * property instead of against itself.
+ *
+ * The old shape of this pin iterated `MANAGED_DENY_TARGET_SETS` to assert
+ * membership, so it was structurally unable to see a set that SHOULD have been
+ * a member — which is exactly how `organization_admin_no_bypass` (a shallow
+ * copy of `organization_admin` taken at module load, write-granting wildcard
+ * intact) sat outside the list while `applyManagedWriteDenies` walked it and
+ * skipped it at `kernel:ready`. The floor is therefore derived here from the
+ * REAL seeded sets — "holds a `'*'` wildcard granting any generic write
+ * class" — and diffed against the list; a non-empty difference is red.
+ */
+describe('managed-deny targets — independent-property floor + registry union reaches the derived variant (#14029)', () => {
+  // Derived from `defaultPermissionSets`, never from the list under test.
+  const writeGrantingWildcardSets: string[] = defaultPermissionSets
+    .filter((s: any) => {
+      const wc = s.objects?.['*'];
+      return !!wc && (wc.allowCreate === true || wc.allowEdit === true || wc.allowDelete === true);
+    })
+    .map((s) => s.name)
+    .sort();
+
+  /**
+   * The one documented exclusion: `admin_full_access` keeps its unqualified
+   * wildcard so an admin can rescue data directly (recorded in the
+   * `MANAGED_DENY_TARGET_SETS` docblock; runtime guards are its boundary).
+   * Pinned exactly, like `EDIT_EXCEPTIONS` above: widening it is an edit HERE,
+   * which is the moment a reviewer is asked why the new set may keep raw CRUD
+   * on identity tables.
+   */
+  const WILDCARD_DENY_EXCLUSIONS = ['admin_full_access'];
+
+  it('the property derivation is live (found the known write-granting sets)', () => {
+    // If the filter silently matched nothing, the difference below would be
+    // vacuously empty — guard the probe itself.
+    expect(writeGrantingWildcardSets).toContain('organization_admin');
+    expect(writeGrantingWildcardSets).toContain('organization_admin_no_bypass');
+    expect(writeGrantingWildcardSets.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('every write-granting wildcard set is a managed-deny target or a documented exclusion', () => {
+    const missing = writeGrantingWildcardSets.filter(
+      (name) => !MANAGED_DENY_TARGET_SETS.includes(name) && !WILDCARD_DENY_EXCLUSIONS.includes(name),
+    );
+    expect(missing, 'write-granting sets missing from MANAGED_DENY_TARGET_SETS').toEqual([]);
+  });
+
+  it('the exclusion list is exactly admin_full_access, and it really is outside the target list', () => {
+    expect(WILDCARD_DENY_EXCLUSIONS).toEqual(['admin_full_access']);
+    expect([...MANAGED_DENY_TARGET_SETS]).not.toContain('admin_full_access');
+  });
+
+  // ── The behaviour the membership buys, measured on the REAL derived set ──
+  // (clones so the module-level instances other tests read stay unmutated;
+  // the kernel path hands the same objects to the same function in place).
+
+  const FUTURE = 'sys_future_identity_table';
+  const DENY = { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false };
+
+  it('a managedBy:better-auth object OUTSIDE the static list now reaches the variant (the card)', () => {
+    const sets: any[] = structuredClone(defaultPermissionSets as any);
+    const variant = sets.find((s) => s.name === 'organization_admin_no_bypass');
+    const parent = sets.find((s) => s.name === 'organization_admin');
+    expect(variant.objects[FUTURE]).toBeUndefined(); // genuinely not in the compile-time baseline
+    applyManagedWriteDenies(sets, [{ name: FUTURE, managedBy: 'better-auth' }]);
+    expect(variant.objects[FUTURE]).toEqual(DENY);
+    // The fix ADDS a target; the parent keeps receiving its injection too.
+    expect(parent.objects[FUTURE]).toEqual(DENY);
+  });
+
+  it('reverse control: the variant pre-existing explicit entries survive the injection unchanged', () => {
+    const sets: any[] = structuredClone(defaultPermissionSets as any);
+    const variant = sets.find((s) => s.name === 'organization_admin_no_bypass');
+    const before = structuredClone(variant.objects);
+    const registry = [
+      ...BETTER_AUTH_MANAGED_OBJECTS.map((n) => ({ name: n, managedBy: 'better-auth' })),
+      { name: FUTURE, managedBy: 'better-auth' },
+    ];
+    applyManagedWriteDenies(sets, registry);
+    for (const name of BETTER_AUTH_MANAGED_OBJECTS) {
+      expect(variant.objects[name], `variant entry ${name}`).toEqual(before[name]);
+    }
+    // Wildcard and the anti-escalation RBAC read-only block untouched as well.
+    expect(variant.objects['*']).toEqual(before['*']);
+    expect(variant.objects.sys_position).toEqual(before.sys_position);
+    // Only the future table was new on the variant.
+    expect(variant.objects[FUTURE]).toEqual(DENY);
+    expect(Object.keys(variant.objects).sort()).toEqual([...Object.keys(before), FUTURE].sort());
+  });
+
+  it('control: admin_full_access is untouched by the injection (admin rescue path)', () => {
+    const sets: any[] = structuredClone(defaultPermissionSets as any);
+    const admin = sets.find((s) => s.name === 'admin_full_access');
+    const before = structuredClone(admin);
+    applyManagedWriteDenies(sets, [{ name: FUTURE, managedBy: 'better-auth' }]);
+    expect(admin).toEqual(before);
   });
 });

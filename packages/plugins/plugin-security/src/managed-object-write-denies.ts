@@ -4,12 +4,14 @@
  * ADR-0092 / ADR-0103 — registry-driven managed-object write denies for the
  * default permission sets.
  *
- * The default sets this module targets (`organization_admin`, `member_default`,
- * `viewer_readonly`, and the MCP write set) DENY writes on the
+ * The default sets this module targets (`organization_admin`, its derived
+ * `organization_admin_no_bypass` variant, `member_default`, `viewer_readonly`,
+ * and the MCP write set) DENY writes on the
  * better-auth-managed identity tables so mutations must flow through the auth
  * pipeline (ADR-0092). What that entry narrows differs per set, and the
- * difference is load-bearing for the rest of this file: `organization_admin` and
- * the MCP write set grant CRUD through an `objects['*']` wildcard, so their
+ * difference is load-bearing for the rest of this file: `organization_admin`,
+ * its no-bypass variant and the MCP write set grant CRUD through an
+ * `objects['*']` wildcard, so their
  * managed-table entries are a narrowing overlay; `viewer_readonly`'s wildcard is
  * read-only, so its entries are belt-and-suspenders over a wildcard that already
  * denies; and `member_default` carries NO wildcard at all since #5491 (the
@@ -59,6 +61,7 @@
  */
 
 import type { PermissionSet } from '@objectstack/spec/security';
+import { ORGANIZATION_ADMIN_NO_BYPASS } from '@objectstack/spec';
 import { MCP_AGENT_PERMISSION_SET_WRITE } from '@objectstack/spec/ai';
 
 /**
@@ -76,16 +79,34 @@ export const MANAGED_DENY_ENTRY = {
 
 /**
  * The default sets that must carry an explicit entry for every managed table.
- * Membership is NOT "holds a write-granting `'*'` wildcard" — only
- * `organization_admin` and the MCP write set hold one; `viewer_readonly`'s
- * wildcard is read-only and `member_default` has held none since #5491 (see the
- * module docblock for what the injected entry does in each). Explicit allowlist
- * — `admin_full_access` is deliberately excluded (it keeps its unqualified
- * wildcard so an admin can rescue data directly; the runtime guards are its
- * boundary), as are the MCP read / restricted sets (they grant no writes).
+ *
+ * Holding a write-granting `'*'` wildcard is the FLOOR of membership, not its
+ * definition: every default set whose wildcard grants create/edit/delete must
+ * be listed here (or carry a documented exclusion below), because the wildcard
+ * is what would otherwise grant raw CRUD on a newly-declared identity table —
+ * that floor is what `default-permission-sets.test.ts` derives independently
+ * and diffs against this list (#14029), so a future write-granting set that is
+ * not added here fails a pin instead of silently keeping its wildcard.
+ * Membership is WIDER than the floor: `viewer_readonly`'s wildcard is read-only
+ * and `member_default` has held none since #5491 — their injected entries are
+ * belt-and-suspenders and the read grant itself, respectively (see the module
+ * docblock for what the injected entry does in each).
+ *
+ * `organization_admin_no_bypass` is a member in its own right (#14029): it is
+ * derived from `organization_admin` by a SHALLOW copy taken at module load
+ * (`deriveWallLessOrgAdmin`), so entries injected into the parent's `objects`
+ * at `kernel:ready` can never propagate to it — dropping only the superuser
+ * bits leaves `allowCreate`/`allowEdit`/`allowDelete` true on its wildcard,
+ * exactly the shape this module exists to narrow.
+ *
+ * Documented exclusions: `admin_full_access` is deliberately NOT a member (it
+ * keeps its unqualified wildcard so an admin can rescue data directly; the
+ * runtime guards are its boundary), and the MCP read / restricted sets grant
+ * no writes for a deny to narrow.
  */
 export const MANAGED_DENY_TARGET_SETS: readonly string[] = [
   'organization_admin',
+  ORGANIZATION_ADMIN_NO_BYPASS,
   'member_default',
   'viewer_readonly',
   MCP_AGENT_PERMISSION_SET_WRITE,
