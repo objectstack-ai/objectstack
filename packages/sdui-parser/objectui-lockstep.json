@@ -5,9 +5,9 @@
     "ONE SIDE ONLY: this file holds no diff and blesses no divergence — see scripts/check-sdui-lockstep.mjs."
   ],
   "objectui": {
-    "repo": "objectstack-ai/objectui",
-    "rev": "45a9aeb57c1374171a5c95ec8aa02adfd731e915",
-    "revDate": "2026-08-30T06:17:22+00:00",
+    "repo": "https://github.com/objectstack-ai/objectui.git",
+    "rev": "d8ec8d6d4f011b11c8eb1e6dbd364ef206711391",
+    "revDate": "2026-09-01T08:23:58+00:00",
     "source": "packages/sdui-parser/src",
     "files": [
       "packages/sdui-parser/src/codegen.ts",
@@ -20,7 +20,7 @@
       "packages/sdui-parser/src/validate.ts"
     ]
   },
-  "recordedAgainstPin": "9602dc820450dda956843c6cfe5b329bcf88c757",
+  "recordedAgainstPin": "d8ec8d6d4f011b11c8eb1e6dbd364ef206711391",
   "grammarRegion": {
     "file": "packages/sdui-parser/src/parse.ts",
     "delimiter": "/* ---------------------- the JS literal subset (#6614) ---------------------- */",

@@ -274,15 +274,17 @@ describe('PageAccordionProps variant (#6776)', () => {
 // sweep once read as declared-but-unenforced. It has a live cross-repo consumer:
 // objectui's `PageAccordionRenderer` renders `{item.icon && <LazyIcon
 // name={item.icon} …/>}` inside the `AccordionTrigger`
-// (`packages/components/src/renderers/layout/containers.tsx:851-857`), and the
+// (`packages/components/src/renderers/layout/containers.tsx:918-924`), and the
 // same file's `ComponentRegistry.register('accordion', …)` publishes the key to
-// the Studio block designer at `:898` (the `items` input, documented as
+// the Studio block designer at `:965` (the `items` input, documented as
 // `[{ label, icon?, collapsed?, children }]`). Measured at the pin this repo
-// builds against — `.objectui-sha` = `9602dc820`. Re-derived at that pin
-// 2026-08-28: `containers.tsx` is byte-identical to the one at `190fbd01d`, so
-// both anchors above are unmoved — and both were re-READ at the new pin rather
-// than inferred from that identity, because identity preserves a wrong anchor
-// as faithfully as a right one (#10274).
+// builds against — `.objectui-sha` = `d8ec8d6d4`. Re-derived at that pin
+// 2026-09-01: `containers.tsx` DID change across the move off `9602dc820`, so
+// both anchors above were re-derived rather than carried over — the icon block
+// moved `851-857` → `918-924` and the registration input `898` → `965`, both
+// shifted by insertions above them, with the cited text itself unchanged. Every
+// anchor was re-READ at the new pin, never inferred, because identity preserves
+// a wrong anchor as faithfully as a right one (#10274).
 //
 // #9397 spent a full dispatch cycle re-deriving that read point from scratch
 // after the sweep proposed retiring the key. This block plus the `.describe()`
@@ -361,14 +363,16 @@ describe('PageTabsProps items[].value / items[].count (#5775)', () => {
 // same bare declaration a liveness sweep reads as declared-but-unenforced.
 // objectui's `PageTabsRenderer` renders `{item.icon && <LazyIcon
 // name={item.icon} …/>}` inside the `TabsTrigger`
-// (`packages/components/src/renderers/layout/containers.tsx:662-668`), and the
+// (`packages/components/src/renderers/layout/containers.tsx:729-735`), and the
 // same file's `ComponentRegistry.register('tabs', …)` publishes the key to the
-// Studio block designer at `:721` (the `items` input, documented as
+// Studio block designer at `:788` (the `items` input, documented as
 // `[{ label, value?, icon?, count?, visibleWhen?, children }]`). Measured at
-// the pin this repo builds against — `.objectui-sha` = `9602dc820`. Re-derived
-// at that pin 2026-08-28: `containers.tsx` is byte-identical to the one at
-// `190fbd01d`, so both anchors above are unmoved — and both were re-READ at the
-// new pin rather than inferred from that identity (#10274).
+// the pin this repo builds against — `.objectui-sha` = `d8ec8d6d4`. Re-derived
+// at that pin 2026-09-01: `containers.tsx` DID change across the move off
+// `9602dc820`, so both anchors above were re-derived rather than carried over —
+// the icon block moved `662-668` → `729-735` and the registration input
+// `721` → `788`, both shifted by insertions above them, with the cited text
+// itself unchanged. Both were re-READ at the new pin, never inferred (#10274).
 //
 // #9397 spent a full dispatch cycle re-deriving the accordion's read point
 // after the sweep proposed retiring it. This block plus the `.describe()` it
@@ -2437,18 +2441,22 @@ describe('#7751 — object-* block props schemas', () => {
 // #9881 and #9972 recorded the accordion and tab items; these two close the set.
 //
 // The button record re-measured at the pin this repo builds against —
-// `.objectui-sha` = `9602dc820`, re-derived there 2026-08-28. This is the first
-// move that changed the button READ POINT and not merely its line numbers:
-// objectui#5993 deleted `button.tsx`'s file-local `toPascalCase` +
-// `iconNameMap` + `icons` index and routed the button through the SHARED
-// `resolveIcon` that every `action:*` site already used, so the resolution
-// anchor now hops into `renderers/action/resolve-icon.ts`. What an author sees
-// did not move with it: an unknown name still resolves to `null` and draws
-// nothing, which is still the `LazyIcon` contrast the third test below pins.
-// The earlier moves were line-number drift only — #10137 moved the pin while
-// #9881/#9972 still cited `82a94170c`, #10274 re-measured those four onto
-// `9a3daf8d3`, and `button.tsx` was byte-identical at `9a3daf8d3` and
-// `190fbd01d`.
+// `.objectui-sha` = `d8ec8d6d4`, re-derived there 2026-09-01: `button.tsx` and
+// `resolve-icon.ts` are both byte-identical to the ones at `9602dc820`, and
+// every anchor below was still re-READ at the new pin rather than carried on
+// that identity (#10274). The move off `9602dc820` changed neither the read
+// point nor a single line number here.
+// The one move that changed the button READ POINT and not merely its line
+// numbers was the one onto `9602dc820`: objectui#5993 deleted `button.tsx`'s
+// file-local `toPascalCase` + `iconNameMap` + `icons` index and routed the
+// button through the SHARED `resolveIcon` that every `action:*` site already
+// used, so the resolution anchor hops into `renderers/action/resolve-icon.ts`.
+// What an author sees did not move with it: an unknown name still resolves to
+// `null` and draws nothing, which is still the `LazyIcon` contrast the third
+// test below pins. The moves before that were line-number drift only — #10137
+// moved the pin while #9881/#9972 still cited `82a94170c`, #10274 re-measured
+// those four onto `9a3daf8d3`, and `button.tsx` was byte-identical at
+// `9a3daf8d3` and `190fbd01d`.
 describe('ElementButtonPropsSchema icon liveness (#10053)', () => {
   const button = ComponentPropsMap['element:button'];
 
