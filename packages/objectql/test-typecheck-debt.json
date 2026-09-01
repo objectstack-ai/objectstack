@@ -1,0 +1,163 @@
+{
+  "_comment": "Per-file tsc error debt of the @objectstack/objectql TEST layer (#5286). `tsconfig.test.json` compiles `src/**/*.test.ts` — which `tsconfig.json` excludes and therefore no gate ever read — and every file below still carries errors from before that gate existed. THIS FIELD IS GENERATED: every regeneration rewrites it from scripts/check-test-typecheck.mts, and the EXACT ratchet below requires a regeneration on every repair — so an edit made here is gone by the next one. Anything true of THIS package goes in the sibling `_note` field, which is authored, is preserved verbatim, and is never written by the generator (#12624). This comment states NO cause for the errors, deliberately: the classes differ per package and per file, they move as the debt is paid down, and a cause written here is rewritten verbatim into every ledger by every regeneration — so it outlives its own repair and cannot be corrected in the file where it is read. Measure instead, before repairing anything: `tsc --noEmit --pretty false -p tsconfig.test.json` in the package prints the real classes with their TS codes. Each entry maps a file to its per-SIGNATURE error counts, never to a bare total (#13470): a signature is the TS code plus the diagnostic message with structural type blobs collapsed, and it carries NO line or column — so the pin survives edits that move code around, and only stops matching when the error itself becomes a different error. EXACT ratchet, judged by re-running tsc: a file that gains errors is red, a file that loses them is red until its number is re-recorded, a file that reaches zero is red until its entry is deleted, a signature that ARRIVES or VANISHES is red even when the file total is unchanged, and a file NOT listed here may have no errors at all. Regenerate with: pnpm --filter @objectstack/objectql gen:test-typecheck-debt",
+  "_note": "SEEDED at 2a181174a6 by the PR that first put this layer in front of tsc (#13676), workspace closure built first. All 242 errors across 44 files are PRE-EXISTING: that PR edits no test file, and every one of these would have been reported on origin/main had this program ever existed. ⛔ Not one `any` and not one `@ts-expect-error` was added anywhere to open the gate — bulk-suppressing this residue is the exact shape the card was filed to prevent, and it would turn a real gate into a phantom one. The residue is NOT annotation debt to sweep: 14 of the 17 in src/datasource-mapping.test.ts and the bulk of the TS2345 population are one story — a driver double that does not satisfy IDataDriver — and src/engine.test.ts alone carries 102 of the 242, so read the classes before touching anything (`tsc --noEmit --pretty false -p tsconfig.test.json`). ⚠️ src/engine-filter-array-lowering.test.ts is DELIBERATELY ABSENT and must stay absent: it is the #13357 point-3 negative pin proving a refused filter shape cannot reach the reference matcher, it reports zero errors, and an unledgered file is red on its first error. ⚠️ But its zero is a weak guarantee today and must not be read as 'that pin is type-checked': the file holds `const driver: any` and `interface SeenRead { ast: any }` at the very seam the proof reads, so a drifted IDataDriver signature would not redden it. Repairing that is tracked separately and is not a licence to loosen tsconfig.test.json.",
+  "entries": {
+    "src/build-probes.test.ts": {
+      "TS2493: Tuple type '…' of length '0' has no element at index '1'.": 1
+    },
+    "src/datasource-mapping.test.ts": {
+      "TS2345: Argument of type '…' is not assignable to parameter of type 'IDataDriver'.": 14,
+      "TS6133: 'obj' is declared but its value is never read.": 3
+    },
+    "src/engine-audit-anchor-write.test.ts": {
+      "TS2532: Object is possibly 'undefined'.": 1
+    },
+    "src/engine-autonumber-default-format.test.ts": {
+      "TS2339: Property 'getObject' does not exist on type 'typeof SchemaRegistry'.": 3
+    },
+    "src/engine-autonumber-defer.test.ts": {
+      "TS2339: Property 'getObject' does not exist on type 'typeof SchemaRegistry'.": 4
+    },
+    "src/engine-autonumber-resync.test.ts": {
+      "TS2339: Property 'getObject' does not exist on type 'typeof SchemaRegistry'.": 1
+    },
+    "src/engine-autonumber-seed-outage.test.ts": {
+      "TS2339: Property 'getObject' does not exist on type 'typeof SchemaRegistry'.": 1
+    },
+    "src/engine-autonumber-seed-scan.test.ts": {
+      "TS2339: Property 'getObject' does not exist on type 'typeof SchemaRegistry'.": 5
+    },
+    "src/engine-autonumber-seed-suffix.test.ts": {
+      "TS2339: Property 'getObject' does not exist on type 'typeof SchemaRegistry'.": 1
+    },
+    "src/engine-cascade-delete.test.ts": {
+      "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 1
+    },
+    "src/engine-data-events.test.ts": {
+      "TS6133: 'warn' is declared but its value is never read.": 1
+    },
+    "src/engine-delete-prior-read-scope.test.ts": {
+      "TS2749: 'ObjectSchema' refers to a value, but is being used as a type here. Did you mean 'typeof ObjectSchema'?": 3,
+      "TS6196: 'ObjectSchema' is declared but never used.": 1
+    },
+    "src/engine-lifecycle-datasource.test.ts": {
+      "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 1
+    },
+    "src/engine-update-prior-read-scope.test.ts": {
+      "TS2345: Argument of type 'unknown' is not assignable to parameter of type '…'.": 1
+    },
+    "src/engine.test.ts": {
+      "TS2339: Property 'getObject' does not exist on type 'typeof SchemaRegistry'.": 75,
+      "TS2339: Property 'registerKind' does not exist on type 'typeof SchemaRegistry'.": 1,
+      "TS2339: Property 'registerObject' does not exist on type 'typeof SchemaRegistry'.": 3,
+      "TS2353: Object literal may only specify known properties, and 'filter' does not exist in type '…'.": 1,
+      "TS7006: Parameter 'name' implicitly has an 'any' type.": 22
+    },
+    "src/function-registry-effect.test.ts": {
+      "TS2352: Conversion of type '…' to type '…' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.": 1
+    },
+    "src/hook-binder.test.ts": {
+      "TS2339: Property 'then' does not exist on type '…'.": 1,
+      "TS7006: Parameter 'e' implicitly has an 'any' type.": 1
+    },
+    "src/hook-condition-bulk-previous.test.ts": {
+      "TS2339: Property 'then' does not exist on type '…'.": 3,
+      "TS7006: Parameter 'e' implicitly has an 'any' type.": 3
+    },
+    "src/hook-condition-fail-loud.test.ts": {
+      "TS2339: Property 'catch' does not exist on type '…'.": 2,
+      "TS2339: Property 'then' does not exist on type '…'.": 5,
+      "TS7006: Parameter 'e' implicitly has an 'any' type.": 5
+    },
+    "src/hook-condition-merged-record.test.ts": {
+      "TS2322: Type '…' is not assignable to type '…'.": 1,
+      "TS2339: Property 'then' does not exist on type '…'.": 1,
+      "TS7006: Parameter 'e' implicitly has an 'any' type.": 1
+    },
+    "src/hook-condition-previous-scope.test.ts": {
+      "TS2322: Type '…' is not assignable to type '…'.": 1,
+      "TS2339: Property 'then' does not exist on type '…'.": 1,
+      "TS6133: 'reads' is declared but its value is never read.": 1,
+      "TS7006: Parameter 'e' implicitly has an 'any' type.": 1
+    },
+    "src/in-memory-aggregation.test.ts": {
+      "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 3
+    },
+    "src/layered-overlay-integration.test.ts": {
+      "TS2322: Type '…' is not assignable to type 'SysMetadataEngine'.": 1,
+      "TS2353: Object literal may only specify known properties, and 'org' does not exist in type 'InMemoryRepositoryOptions'.": 1
+    },
+    "src/metadata-service-roundtrip-conformance.test.ts": {
+      "TS2322: Type 'WritableFixtureLoader' is not assignable to type 'MetadataLoader'.": 1,
+      "TS2416: Property 'save' in type 'WritableFixtureLoader' is not assignable to the same property in base type 'MetadataLoader'.": 1
+    },
+    "src/plugin-authored-hooks.test.ts": {
+      "TS6133: 'obj' is declared but its value is never read.": 1
+    },
+    "src/plugin.integration.test.ts": {
+      "TS2749: 'ObjectSchema' refers to a value, but is being used as a type here. Did you mean 'typeof ObjectSchema'?": 11,
+      "TS6133: 'ObjectSchema' is declared but its value is never read.": 1
+    },
+    "src/protocol-boot-hydration-scoped.test.ts": {
+      "TS2322: Type '…' is not assignable to type 'string'.": 3
+    },
+    "src/protocol-boot-object-package-binding.test.ts": {
+      "TS2345: Argument of type 'Row' is not assignable to parameter of type '…'.": 3
+    },
+    "src/protocol-discovery.test.ts": {
+      "TS7053: Element implicitly has an 'any' type because expression of type 'string' can't be used to index type '{ data: string; metadata: string; discovery?: string | undefined; ui?: string | undefined; auth?: string | undefined; automation?: string | undefined; storage?: string | undefined; analytics?: string | undefined; ... 8 more ...; mcp?: string | undefined; }'.": 1
+    },
+    "src/protocol-lock-enforcement.test.ts": {
+      "TS6133: 'beforeEach' is declared but its value is never read.": 1
+    },
+    "src/protocol-package-lifecycle.test.ts": {
+      "TS2339: Property 'mock' does not exist on type 'never'.": 3,
+      "TS2339: Property 'mockResolvedValue' does not exist on type 'never'.": 2,
+      "TS7006: Parameter 'c' implicitly has an 'any' type.": 3
+    },
+    "src/protocol-publish-rollback.test.ts": {
+      "TS6133: 'rows' is declared but its value is never read.": 1
+    },
+    "src/protocol-recorded-by-null.test.ts": {
+      "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 2
+    },
+    "src/protocol-registry-shadow.test.ts": {
+      "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 2
+    },
+    "src/protocol-save-meta-repo-path-real-engine.test.ts": {
+      "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 3
+    },
+    "src/protocol-save-meta-repo-path.test.ts": {
+      "TS18048: 'row.checksum' is possibly 'undefined'.": 1
+    },
+    "src/protocol-writepath-object-ownership.test.ts": {
+      "TS2345: Argument of type 'Row' is not assignable to parameter of type '…'.": 2
+    },
+    "src/query-expression-conformance.test.ts": {
+      "TS2322: Type '…' is not assignable to type 'QueryInput'.": 2
+    },
+    "src/registry-invalidate.test.ts": {
+      "TS2459: Module '\"@objectstack/spec\"' declares 'ServiceObject' locally, but it is not exported.": 1
+    },
+    "src/registry.test.ts": {
+      "TS18048: 'out.enable' is possibly 'undefined'.": 7,
+      "TS2339: Property 'indexed' does not exist on type '…'.": 3
+    },
+    "src/sys-metadata-repository-list-drafts.test.ts": {
+      "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 1
+    },
+    "src/sys-metadata-repository.test.ts": {
+      "TS2322: Type '\"theme\"' is not assignable to type '…'.": 2,
+      "TS2322: Type '\"trigger\"' is not assignable to type '…'.": 1,
+      "TS2322: Type '\"webhook\"' is not assignable to type '…'.": 1,
+      "TS2322: Type '…' is not assignable to type 'SysMetadataEngine'.": 1
+    },
+    "src/validation/record-validator.test.ts": {
+      "TS2367: This comparison appears to be unintentional because the types 'number' and 'boolean' have no overlap.": 1
+    },
+    "src/validation/rule-fail-closed.test.ts": {
+      "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 1,
+      "TS2353: Object literal may only specify known properties, and 'name' does not exist in type 'ConditionalFieldDef'.": 2
+    }
+  }
+}
