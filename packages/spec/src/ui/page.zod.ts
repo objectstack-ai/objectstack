@@ -19,10 +19,6 @@ import {
   ListColumnSchema,
 } from './view.zod';
 
-/**
- * Page Region Schema
- * A named region in the template where components are dropped.
- */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
@@ -39,6 +35,10 @@ const PAGE_HISTORY =
   'Until this shape was closed these were dropped silently — the page still rendered, '
   + 'without whatever the key was meant to configure.';
 
+/**
+ * Page Region Schema
+ * A named region in the template where components are dropped.
+ */
 export const PageRegionSchema = lazySchema(() => strictObject({
   surface: 'this page region',
   history: PAGE_HISTORY,

@@ -6,23 +6,6 @@ import { ExpressionInputSchema } from '../shared/expression.zod';
 import { I18nLabelSchema } from './i18n.zod';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject, type StrictObjectOptions } from '../shared/strict-object';
-
-/**
- * Base Navigation Item Schema
- * Shared properties for all navigation types.
- * 
- * **NAMING CONVENTION:**
- * Navigation item IDs are used in URLs and configuration and must be lowercase snake_case.
- * 
- * @example Good IDs
- * - 'menu_accounts'
- * - 'page_dashboard'
- * - 'nav_settings'
- * 
- * @example Bad IDs (will be rejected)
- * - 'MenuAccounts' (PascalCase)
- * - 'Page Dashboard' (spaces)
- */
 import { lazySchema } from '../shared/lazy-schema';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { ProtectionSchema } from '../shared/protection.zod';
@@ -255,6 +238,23 @@ const navItemSurface = (variant: NavItemVariant): StrictObjectOptions => ({
     'config shipped as a nav item that quietly ignored it (a stripped `visible` renders ' +
     'an entry that should have been gated).',
 });
+
+/**
+ * Base Navigation Item Schema
+ * Shared properties for all navigation types.
+ *
+ * **NAMING CONVENTION:**
+ * Navigation item IDs are used in URLs and configuration and must be lowercase snake_case.
+ *
+ * @example Good IDs
+ * - 'menu_accounts'
+ * - 'page_dashboard'
+ * - 'nav_settings'
+ *
+ * @example Bad IDs (will be rejected)
+ * - 'MenuAccounts' (PascalCase)
+ * - 'Page Dashboard' (spaces)
+ */
 
 /**
  * Shared shape of every navigation item — spread into the nine branches below.

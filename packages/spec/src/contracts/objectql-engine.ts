@@ -306,6 +306,20 @@ export interface IObjectQLEngine extends IDataEngine {
     // ── Boot-time wiring (AppPlugin / metadata-protocol) ─────────────────
     /** Register a driver; the optional second argument makes it the default. */
     registerDriver(driver: IDataDriver, isDefault?: boolean): void;
+    /**
+     * Evict a driver from the registry — `registerDriver`'s removal counterpart
+     * (#13578). Returns `true` when an entry was removed.
+     *
+     * Declared here because its ABSENCE was the defect: the registry had a
+     * registration door and no eviction door, so a datasource deleted through
+     * the admin API left its driver instance registered and the readiness probe
+     * (`checkDriversHealth`) kept reporting it until the process restarted.
+     *
+     * Evicting only stops this engine routing to the driver. It does NOT
+     * disconnect the pool — teardown belongs to whoever owns the pool, which
+     * for an adopted host-owned instance is not this engine (ADR-0062 D5).
+     */
+    unregisterDriver(name: string): boolean;
     /** Install the stack's datasource-mapping rules. Rule shape is engine-local; see `setDatasourceMapping` on the class. */
     setDatasourceMapping(rules: unknown[]): void;
     /** Register an app/plugin manifest (objects, apps, metadata items) — MetadataProtocolPlugin's table-provisioning path. */

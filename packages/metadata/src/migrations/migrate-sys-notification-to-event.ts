@@ -104,7 +104,7 @@ export async function migrateSysNotificationToEvent(
             const recipientId = row.recipient_id != null ? String(row.recipient_id) : null;
             if (!recipientId) continue; // defensive — guarded by the SELECT filter
             const orgId = row.organization_id != null ? String(row.organization_id) : null;
-            const createdAt = row.created_at != null ? String(row.created_at) : now();
+            const createdAt = row.created_at != null ? canonicalTimestampText(row.created_at) : now();
             const title = row.title != null ? String(row.title) : (row.type != null ? String(row.type) : 'Notification');
             const isRead = row.is_read === true || row.is_read === 1 || row.is_read === '1';
             // One topic for both the inbox row and the rewritten event, so the
@@ -132,7 +132,7 @@ export async function migrateSysNotificationToEvent(
                 user_id: recipientId,
                 channel: 'inbox',
                 state: isRead ? 'read' : 'delivered',
-                at: isRead && row.read_at != null ? String(row.read_at) : createdAt,
+                at: isRead && row.read_at != null ? canonicalTimestampText(row.read_at) : createdAt,
                 organization_id: orgId,
                 created_at: createdAt,
             });
@@ -173,6 +173,52 @@ export async function migrateSysNotificationToEvent(
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * The canonical text spelling of a timestamp read back out of the legacy table.
+ *
+ * `selectLegacyRows` reads through `driver.raw`/`execute`, which hands the
+ * dialect client's own materialisation straight back — that door does not run
+ * `formatOutput`, so none of its repairs apply here on any dialect:
+ *
+ *  - `created_at` is a BUILTIN audit column, so it is never in `datetimeFields`
+ *    and no declared-field coercion reaches it; `formatOutput` repairs it only
+ *    inside its `if (this.isSqlite)` arm (`repairNaiveUtcAuditTimestamp` over
+ *    `AUDIT_TIMESTAMP_COLUMNS`).
+ *  - `read_at` is a LEGACY column ADR-0030 removed from the object, so it is
+ *    not declared either — it can never enter `datetimeFields`, and it is not
+ *    an audit column, so no arm of `formatOutput` could reach it even at the
+ *    record read door.
+ *
+ * On SQLite both arrive as canonical ISO text and `String()` is the identity —
+ * which is why every test in this directory stayed green. On Postgres and
+ * MySQL an instant column materialises as a JS `Date`
+ * (`withPostgresCalendarDayAsText` leaves the instant types alone deliberately;
+ * pinned in `sql-driver-13567-audit-stamp-materialisation.test.ts`), and
+ * `String(date)` spells
+ *
+ *   Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)
+ *
+ * — whole seconds in the MIGRATING HOST's zone, with the milliseconds gone.
+ * This migration is one-way and this value is WRITTEN, so that spelling is what
+ * the platform would carry afterwards: either accepted and stored skewed and
+ * de-precisioned, or rejected outright, since the trailing zone name is in no
+ * dialect's timestamp grammar (#13998).
+ *
+ * Canonicalising HERE, at the consumer that writes, is deliberate and is the
+ * only shape that could also repair an already-migrated deployment (#13973
+ * option A). It is not a tolerant alias: `Date` and ISO text are two
+ * materialisations of ONE instant, not two spellings of a key. Matches the
+ * repo's existing correct form at `metadata-protocol/src/protocol.ts` (the
+ * `occurred_at` read in `readMetadataAuditEvents`); anything that is neither a
+ * string nor a `Date` keeps its previous `String()` rendering unchanged rather
+ * than having a unit guessed for it on a one-way write path.
+ */
+function canonicalTimestampText(value: unknown): string {
+    if (typeof value === 'string') return value;
+    if (value instanceof Date) return value.toISOString();
+    return String(value);
+}
 
 async function selectLegacyRows(exec: DriverExec): Promise<any[]> {
     const result: any[] = await exec(
