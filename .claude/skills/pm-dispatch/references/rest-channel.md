@@ -22,6 +22,9 @@ payload → REST → MCP/GraphQL** 的策略住那里,本表是逐操作的通�
   `open_issues_count`(含 PR,减开放 PR)核总数;⛔ 未核总数的枚举不是读数。⚠️ 成因未知(GitHub
   游标 vs 出口代理改写 `Link`):处方**不依赖该头**,⛔ 不把「已修」写成「已解释」。⚠️
   关键词阳性对照**结构上**看不见本类(必中卡落在首页照样绿),只有计数核对逮得住。
+- ⛔ **查重必须含 closed**:卡刚关闭时最易被重开(2026-08-31 双向实测:开域查重漏掉 6 小时前
+  刚关闭的同题卡 ⇒ 重复派发;含闭卡那次命中已关闭同形卡 ⇒ 免开重复)。开域查重
+  是**要申报的例外**,不是默认;状态 / 标签列卡读仍 `state=open` —— 那是状态读,不是查重。
 - ✓ 卡 / PR 元数据:`GET .../issues/{n}` · `GET .../pulls/{n}`(assignees、labels、body 齐全 —— MCP
   `list_issues` 永不返回 assignees,这条差别本身就是走 REST 的理由)。
 - ✓ 整条评论线:`GET .../issues/{n}/comments?per_page=100`。
