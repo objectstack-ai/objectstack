@@ -822,3 +822,301 @@ exports.BUILD = 'cjs';
     expect((await importer(root)(`${SUBPATHS}/deep/leaf`)).WHERE).toBe('leaf-esm');
   });
 });
+
+/**
+ * #14041 — the declared leg could not load an ESM-only package AT ALL, and
+ * misreported it as a broken install.
+ *
+ * `hostRequire.resolve(pkg)` is a CommonJS resolution. A package publishing
+ * only an `import` condition — common outside this workspace, where every
+ * dual build publishes both — makes that resolve throw
+ * `ERR_PACKAGE_PATH_NOT_EXPORTED`, and the leg classified EVERY resolver
+ * throw as `declared-unresolvable`: an INSTALL-problem message about an
+ * install that is fine. Nothing the message told the operator to do could
+ * help.
+ *
+ * The fix is a second finder that fires ONLY when the CJS resolve throws: a
+ * `node_modules` lookup anchored at `hostRoot` — strictly TIGHTER than CJS
+ * resolution (one directory, no `NODE_PATH`, no walk above `hostRoot`), so it
+ * cannot reopen the #4719 hole. Two cases below pin exactly that tightness on
+ * layouts CJS resolution CAN see: where the fixture and the security gate
+ * disagree, the gate wins and the load stays refused.
+ *
+ * ⛔ No workspace package can exercise this defect — every dual build here
+ * publishes both conditions (`check:dual-build-cjs-loads` measures all of
+ * them loading) — so these fixtures are the repo's ONLY detection surface.
+ * A green run of every other suite proves nothing about this leg.
+ */
+describe('the declared leg loads an ESM-only package via a hostRoot node_modules walk (#14041)', () => {
+  /** The card's exact shape: `import` condition only, no `require`, no `main`. */
+  const ESM_ONLY = '@fixture/esm-only';
+  /** ESM-only with a subpath map — the walk must answer subpaths too. */
+  const ESM_SUBPATHS = '@fixture/esm-only-subpaths';
+  /** Publishes NO runtime entry at all — the failure-kind split's case (b). */
+  const TYPES_ONLY = '@fixture/types-only';
+  /** Names an `import` target that does not exist on disk — still case (a). */
+  const ESM_UNBUILT = '@fixture/esm-only-unbuilt';
+  /** Dual build — the positive control: never reaches the fallback at all. */
+  const DUAL_CONTROL = '@fixture/dual-still-cjs-found';
+  /** ESM-only, installed ONLY in the NODE_PATH store — must NOT be rescued. */
+  const HOISTED_ESM_ONLY = '@fixture/esm-only-hoisted';
+  /** ESM-only, installed only ABOVE the host root — must NOT be rescued. */
+  const PARENT_ESM_ONLY = '@fixture/esm-only-parent';
+  /** ESM-only whose entry THROWS while evaluating — a crash, not an absence. */
+  const ESM_THROWS = '@fixture/esm-only-throws';
+
+  const roots: string[] = [];
+
+  function writeShapedPackage(
+    base: string,
+    name: string,
+    manifest: Record<string, unknown>,
+    files: Record<string, string>,
+  ): void {
+    const dir = join(base, 'node_modules', ...name.split('/'));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ name, version: '0.0.0-fixture', type: 'module', ...manifest }),
+      'utf8',
+    );
+    for (const rel of Object.keys(files)) {
+      const target = join(dir, rel);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, files[rel] as string, 'utf8');
+    }
+  }
+
+  /** A fresh host app per case — fresh URLs, so no case answers another's load. */
+  function app(tag: string, dependencies: Record<string, string>): string {
+    const root = mkdtempSync(join(tmpdir(), `os-esm-only-${tag}-`));
+    roots.push(root);
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ name: 'esm-only-host-fixture', type: 'module', dependencies }),
+      'utf8',
+    );
+    return root;
+  }
+
+  const ESM_ONLY_EXPORTS = { '.': { import: './dist/index.js' } };
+
+  afterAll(() => {
+    for (const dir of roots) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('PRECONDITION: CJS resolution cannot see an ESM-only package — the fallback is additive', () => {
+    // The cause, pinned on its own. `hostRequire.resolve` answers the `require`
+    // condition; this exports map names none, so the resolve THROWS — which is
+    // why every case this suite rescues was a hard failure before the fix, and
+    // why the fallback cannot change any currently-succeeding load: it runs
+    // only inside this throw's catch.
+    const root = app('precondition', { [ESM_ONLY]: '1' });
+    writeShapedPackage(root, ESM_ONLY, { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'esm-only';\n",
+    });
+    let code: string | undefined;
+    try {
+      createHostRequire(root).resolve(ESM_ONLY);
+    } catch (e) {
+      code = (e as { code?: string }).code;
+    }
+    expect(code).toBe('ERR_PACKAGE_PATH_NOT_EXPORTED');
+  });
+
+  it('loads a declared ESM-only package — the card', async () => {
+    // Before the fix: MODULE_NOT_FOUND, worded as an INSTALL problem, about an
+    // install that is fine.
+    const root = app('loads', { [ESM_ONLY]: '1' });
+    writeShapedPackage(root, ESM_ONLY, { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'esm-only';\n",
+    });
+    expect((await createHostImporter(root)(ESM_ONLY)).BUILD).toBe('esm-only');
+  });
+
+  it('loads a declared ESM-only SUBPATH', async () => {
+    const root = app('subpath', { [ESM_SUBPATHS]: '1' });
+    writeShapedPackage(
+      root,
+      ESM_SUBPATHS,
+      {
+        exports: {
+          '.': { import: './dist/index.js' },
+          './plugin': { import: './dist/plugin.js' },
+          './deep/*': { import: './dist/deep/*.js' },
+        },
+      },
+      {
+        'dist/index.js': "export const WHERE = 'root';\n",
+        'dist/plugin.js': "export const WHERE = 'plugin';\n",
+        'dist/deep/leaf.js': "export const WHERE = 'leaf';\n",
+      },
+    );
+    expect((await createHostImporter(root)(`${ESM_SUBPATHS}/plugin`)).WHERE).toBe('plugin');
+    expect((await createHostImporter(root)(`${ESM_SUBPATHS}/deep/leaf`)).WHERE).toBe('leaf');
+  });
+
+  it('POSITIVE CONTROL: a dual-published package never reaches the fallback, and loads as before', async () => {
+    // The strictly-additive claim's control. The CJS finder still answers for
+    // every package that publishes a `require` condition — the resolve
+    // SUCCEEDS, so the new code is structurally unreachable — and the load
+    // still selects the `import` build exactly as #13330 pinned.
+    const root = app('control', { [DUAL_CONTROL]: '1' });
+    writeShapedPackage(
+      root,
+      DUAL_CONTROL,
+      {
+        main: 'dist/index.cjs',
+        exports: { '.': { import: './dist/index.js', require: './dist/index.cjs' } },
+      },
+      {
+        'dist/index.js': "export const BUILD = 'esm';\n",
+        'dist/index.cjs': "exports.BUILD = 'cjs';\n",
+      },
+    );
+    expect(createHostRequire(root).resolve(DUAL_CONTROL)).toMatch(/dist[/\\]index\.cjs$/);
+    expect((await createHostImporter(root)(DUAL_CONTROL)).BUILD).toBe('esm');
+  });
+
+  it('TIGHTNESS: an ESM-only package reachable only through NODE_PATH is NOT rescued (#4719)', async () => {
+    // The walk is strictly tighter than the CJS resolution it backs up. This
+    // package sits in the NODE_PATH store — where CJS resolution demonstrably
+    // reaches it (the resolve fails on the CONDITION, not on finding it) — and
+    // the host app declares it. A finder that honoured NODE_PATH would load
+    // it; the declaration gate's whole point (#4719) is that it must not.
+    // The store is `nodePathStore` from the file-level fixture. A NODE_PATH
+    // entry IS a node_modules-shaped directory — packages sit directly inside
+    // it (`<store>/<name>`), so the host-app helper (which inserts a
+    // `node_modules` segment) does not apply here.
+    const storeDir = join(nodePathStore, ...HOISTED_ESM_ONLY.split('/'));
+    mkdirSync(join(storeDir, 'dist'), { recursive: true });
+    writeFileSync(
+      join(storeDir, 'package.json'),
+      JSON.stringify({
+        name: HOISTED_ESM_ONLY,
+        version: '0.0.0-fixture',
+        type: 'module',
+        exports: ESM_ONLY_EXPORTS,
+      }),
+      'utf8',
+    );
+    writeFileSync(
+      join(storeDir, 'dist', 'index.js'),
+      "export const BUILD = 'esm-only-hoisted';\n",
+      'utf8',
+    );
+    const root = app('node-path', { [HOISTED_ESM_ONLY]: '1' });
+    let code: string | undefined;
+    try {
+      createHostRequire(root).resolve(HOISTED_ESM_ONLY);
+    } catch (e) {
+      code = (e as { code?: string }).code;
+    }
+    // CJS resolution FOUND it (condition refused, not absence) — so a refusal
+    // below is the tightness working, not blindness.
+    expect(code).toBe('ERR_PACKAGE_PATH_NOT_EXPORTED');
+    const err = await createHostImporter(root)(HOISTED_ESM_ONLY).catch((e: unknown) => e);
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect((err as Error).message).toMatch(/INSTALL problem/);
+  });
+
+  it('TIGHTNESS: an ESM-only package installed ABOVE hostRoot is NOT rescued', async () => {
+    // Same shape, the other looseness: CJS resolution walks every parent
+    // directory's node_modules; the fallback must not walk above hostRoot.
+    const parent = mkdtempSync(join(tmpdir(), 'os-esm-only-parent-'));
+    roots.push(parent);
+    writeShapedPackage(parent, PARENT_ESM_ONLY, { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'esm-only-parent';\n",
+    });
+    const root = join(parent, 'app');
+    mkdirSync(root, { recursive: true });
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({
+        name: 'nested-host-fixture',
+        type: 'module',
+        dependencies: { [PARENT_ESM_ONLY]: '1' },
+      }),
+      'utf8',
+    );
+    let code: string | undefined;
+    try {
+      createHostRequire(root).resolve(PARENT_ESM_ONLY);
+    } catch (e) {
+      code = (e as { code?: string }).code;
+    }
+    expect(code).toBe('ERR_PACKAGE_PATH_NOT_EXPORTED');
+    const err = await createHostImporter(root)(PARENT_ESM_ONLY).catch((e: unknown) => e);
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+  });
+
+  it('case (a): declared and installed NOWHERE keeps the INSTALL message, verbatim class', async () => {
+    // The rescue must not soften the genuinely-broken install. Same wording,
+    // same kind, same classification as before the fix.
+    const root = app('not-installed', { '@fixture/esm-only-never-installed': '1' });
+    const err = await createHostImporter(root)('@fixture/esm-only-never-installed').catch(
+      (e: unknown) => e,
+    );
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect((err as Error).message).toMatch(/INSTALL problem, not a declaration problem/);
+    expect((err as { code?: string }).code).toBe('MODULE_NOT_FOUND');
+  });
+
+  it('case (a) boundary: an `import` target named but MISSING on disk stays an INSTALL problem', async () => {
+    // The split's boundary criterion: (b) fires only when the manifest names
+    // NOTHING loadable. Here the manifest names `./dist/index.js` and the file
+    // is absent — a dist that was never built or published, which is exactly
+    // the INSTALL message's third bullet. Rescuing the message here would
+    // trade a right verdict for a wrong one, in the other direction.
+    const root = app('unbuilt', { [ESM_UNBUILT]: '1' });
+    writeShapedPackage(root, ESM_UNBUILT, { exports: ESM_ONLY_EXPORTS }, {});
+    const err = await createHostImporter(root)(ESM_UNBUILT).catch((e: unknown) => e);
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect((err as Error).message).toMatch(/INSTALL problem/);
+  });
+
+  it('case (b): installed fine but publishing NO loadable entry gets a message about the PACKAGE', async () => {
+    // The failure-kind split. The app declared it, the install delivered it,
+    // and the package's exports names no runtime entry for ANY condition this
+    // loader can use — `pnpm install` will never change that, so the INSTALL
+    // message is a wrong verdict and the remedy lives in the package itself.
+    const root = app('types-only', { [TYPES_ONLY]: '1' });
+    writeShapedPackage(root, TYPES_ONLY, { exports: { '.': { types: './dist/index.d.ts' } } }, {
+      'dist/index.d.ts': 'export declare const BUILD: string;\n',
+    });
+    const err = await createHostImporter(root)(TYPES_ONLY).catch((e: unknown) => e);
+    expect(hostImportFailureKind(err)).toBe('declared-no-loadable-entry');
+    expect((err as Error).message).toMatch(/publishes no entry/);
+    expect((err as Error).message).toMatch(/PACKAGE/);
+    expect((err as Error).message).not.toMatch(/INSTALL problem/);
+    expect((err as Error).message).not.toMatch(/does not declare it/);
+    // Still the "missing" class for every existing caller's classifier.
+    expect((err as { code?: string }).code).toBe('MODULE_NOT_FOUND');
+  });
+
+  it('case (b): a subpath the exports map never names is the package shape too', async () => {
+    const root = app('no-subpath', { [ESM_ONLY]: '1' });
+    writeShapedPackage(root, ESM_ONLY, { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'esm-only';\n",
+    });
+    const err = await createHostImporter(root)(`${ESM_ONLY}/not-exported`).catch(
+      (e: unknown) => e,
+    );
+    expect(hostImportFailureKind(err)).toBe('declared-no-loadable-entry');
+    expect((err as Error).message).not.toMatch(/INSTALL problem/);
+  });
+
+  it('an evaluation crash in a rescued entry propagates untouched, as everywhere else', async () => {
+    // The contract the whole file keeps: resolution failure is the only thing
+    // that falls back or gets classified; a package that LOADS and explodes is
+    // a crash, and masking it as module-not-found is the defect class this
+    // helper exists to remove.
+    const root = app('throws', { [ESM_THROWS]: '1' });
+    writeShapedPackage(root, ESM_THROWS, { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': 'throw new Error("esm-only fixture exploded on import");\n',
+    });
+    const err = await createHostImporter(root)(ESM_THROWS).catch((e: unknown) => e);
+    expect((err as Error).message).toMatch(/esm-only fixture exploded on import/);
+    expect(hostImportFailureKind(err)).toBeUndefined();
+  });
+});
