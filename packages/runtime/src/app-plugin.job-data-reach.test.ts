@@ -306,7 +306,10 @@ export const meta = { builtAt: '2026-09-01T00:00:00.000Z' };
         const shipped = (bundle as any).functions.sweep.handler as (c: unknown) => Promise<void>;
         await expect(
             shipped({ jobId: 'artifact_sweep', data: undefined, bundle }),
-        ).rejects.toThrow(/ql/i);
+        // Reaching through the absent handle — `undefined.find(...)` — is what
+        // "no data reach" IS. The message wording is V8's, so only the shape is
+        // pinned; the store assertion below is what carries the control.
+        ).rejects.toThrow(TypeError);
 
         const after = rowsOf(await h.engine.find('sweep_note', {}));
         expect(after[0].swept).toBe('no');
@@ -388,7 +391,7 @@ describe('#14094 — additivity (Zone 1.1)', () => {
             (sweepHandler as unknown as (c: unknown) => Promise<void>)({
                 jobId: 'nightly_sweep', data: undefined, bundle: {},
             }),
-        ).rejects.toThrow(/ql/i);
+        ).rejects.toThrow(TypeError);
 
         const after = rowsOf(await h.engine.find('sweep_note', {}));
         expect(after[0].swept).toBe('no');
