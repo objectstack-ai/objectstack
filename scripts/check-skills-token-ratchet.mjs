@@ -332,7 +332,23 @@ export const CEILINGS = new Map([
   // with the frame it amends — the #5130 drift is exactly a frame-semantics change
   // that skipped this mirror. +152 tokens across both copies, compressed to the
   // minimal anchor form; the raising PR's body carries the arithmetic.
-  ['skills/objectstack-pm-dispatch/SKILL.md', 14391],
+  // 14391 -> 14549: the axis WEIGHTING joined the decision frame (maintainer
+  // ruling 2026-09-01, verbatim and untranslated: 「四维分析中，长期合理应该权重最
+  // 高，至少50%」 — long-term soundness carries the highest weight, at least 50%).
+  // Same shape and same reason as the +152 row above it: this file carries TWO
+  // enforced frame copies (check:skill-frame-sync COPIES), and a rule that
+  // changes WHICH RECOMMENDATION the frame yields is exactly the #5130 drift
+  // class if it ships to third-party installers with only the old tie-break —
+  // the customer's agent would weigh the axes co-equally while this repo weighs
+  // long-term ≥50%, and no report would reveal it. +158 tokens across both
+  // copies, against +152 for the comparable 2026-08-27 rule. Compressed twice
+  // before landing: the first cut measured +242, and the provenance was then
+  // removed on the #5451 route-B convention — the published copy carries the
+  // RULE without this repo's dates or quoted rulings (verified: the file holds
+  // zero of each), so the verbatim ruling lives in the internal copies and in
+  // the raising PR's body. No genuine deletion was available: the rule makes no
+  // existing sentence redundant, and a re-wrap moves no tokens and pays nothing.
+  ['skills/objectstack-pm-dispatch/SKILL.md', 14549],
   ['skills/objectstack-query/SKILL.md', 5552], //       -17 (was 5569)
   // 25125 -> 25143: the CRM UI Blueprint — the catalog's module-completeness
   // list, and the only place an agent is told what a finished module contains —
@@ -826,8 +842,12 @@ function selfTest() {
     // and correctly does not shift this pin. Subtotal after: 118830, i.e. the
     // same 80 tokens of slack the strip's claim had before either raise — which
     // is the point of shifting rather than widening.
+    // 118910 -> 119068: same operation for the 2026-09-01 axis-weighting raise
+    // on the pm-dispatch row (+158, see that row) — one SKILL.md row, so the
+    // shift equals the raise exactly, and the strip's claim keeps the same 80
+    // tokens of slack it has carried since before any of the three raises.
     ['the re-measure lowered the SKILL.md subtotal',
-      skillMdCeilings.reduce((a, [, n]) => a + n, 0) < 118910, true],
+      skillMdCeilings.reduce((a, [, n]) => a + n, 0) < 119068, true],
 
     // ── the #12392 extension basis ───────────────────────────────────────
     // Same reasoning as the pins above: the gate never reads this sha, so it
