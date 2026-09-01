@@ -145,6 +145,8 @@ import {
   resolveSweepRepo,
 } from './check-half-states.mjs';
 
+// dispatch-gates: no-path-population -- this gate reads no file in the tree at all; its whole input is the GitHub API (PRs, their labels, and the claim comments on their cards), so no card's file surface can predict it and the honest derivation is a repo-wide undetermined one (#13519)
+
 const API = 'https://api.github.com';
 const TOKEN = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -860,9 +862,15 @@ async function main(argv) {
   const repoRes = resolveSweepRepo(process.env);
   if (!repoRes.valid) {
     console.error(
-      `check-clause2-carriers: ${repoRes.source}=${JSON.stringify(repoRes.repo)} is not an ` +
-        '`owner/name` repository. Refusing to fall back to a different board — a report about the ' +
-        'wrong repo reads exactly like a report about this one.',
+      // The example is spelled `owner`/`name` rather than as one backticked
+      // span deliberately: the dispatch derivation reads any quoted path-shaped
+      // literal in a module body as a declared population, and the one-span
+      // spelling was this family's ONLY such literal — a slug that names no
+      // tracked file, so the family declared a population that reached nothing
+      // and printed as an ordinary silence (#13519). Split, it is not a path.
+      `check-clause2-carriers: ${repoRes.source}=${JSON.stringify(repoRes.repo)} is not a ` +
+        'repository in `owner`/`name` form. Refusing to fall back to a different board — a report ' +
+        'about the wrong repo reads exactly like a report about this one.',
     );
     return EXIT_USAGE;
   }

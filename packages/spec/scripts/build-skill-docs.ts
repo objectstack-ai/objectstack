@@ -29,6 +29,60 @@ const SKILLS_DIR = path.resolve(REPO_ROOT, 'skills');
 const README = path.resolve(SKILLS_DIR, 'README.md');
 const GUIDE = path.resolve(REPO_ROOT, 'content/docs/ai/skills-reference.mdx');
 
+/**
+ * The population this script READS, declared for `scripts/pm/dispatch-gates.mjs`
+ * — the `ROOT_DIR_WATCH_HINTS` idiom, spelled as a LITERAL array because the
+ * hint extractor reads source TEXT (a declaration computed from `SKILLS_DIR`
+ * would build no hint at all; `scripts/check-watch-hint-literal.mjs` holds that
+ * spelling for every declarer in the tree).
+ *
+ * ## What was declared before, and why it under-matched
+ *
+ * The only path literal this module body spelled was the GUIDE path,
+ * `content/docs/ai/skills-reference.mdx` — an OUTPUT. So `check:skill-docs`
+ * declared its generated artifact and not one of its inputs: a card editing
+ * `skills/<name>/SKILL.md` — the file whose frontmatter is the entire catalog —
+ * was never told that this gate reads it, and `--check` reds in CI on drift the
+ * derivation could have predicted.
+ *
+ * The inputs were unspellable rather than forgotten: `SKILLS_DIR` is built with
+ * `path.resolve(REPO_ROOT, 'skills')`, and a single-segment literal is refused
+ * by the extractor as too generic to be a path population. The subtree spelling
+ * is the escape, and it is what the idiom exists for.
+ *
+ * `skills/README.md` is an output too, but it sits INSIDE the declared subtree,
+ * so no separate literal claims it — the population is the directory this
+ * script both reads and rewrites.
+ */
+const ROOT_DIR_WATCH_HINTS = ['skills/**'];
+
+/**
+ * The declaration above, held against the constant this script really reads
+ * from. A hand-written path that agreed with the read only on the day it was
+ * typed is the drift this idiom replaces, so the check compares the declared
+ * root to `SKILLS_DIR` rather than to a second copy of the string — move the
+ * directory and this throws here, in this file, instead of going quiet in a
+ * dispatch brief.
+ */
+function assertWatchHintsDeclareTheReadSurface(): void {
+  const declaredRoots = ROOT_DIR_WATCH_HINTS.map((h) => h.replace(/\/\*+$/, ''));
+  const readRoot = path.relative(REPO_ROOT, SKILLS_DIR).split(path.sep).join('/');
+  if (declaredRoots.length !== 1 || declaredRoots[0] !== readRoot) {
+    throw new Error(
+      `build-skill-docs: the declared watch-hint population ${JSON.stringify(ROOT_DIR_WATCH_HINTS)} no longer ` +
+        `names the directory this script reads (${readRoot}) — update the declaration, as a LITERAL array.`,
+    );
+  }
+  // …and the declared form is the SUBTREE spelling, not the bare directory:
+  // that is what the idiom's other declarers spell and what
+  // `check-watch-hint-literal.mjs` reads them as.
+  if (!ROOT_DIR_WATCH_HINTS.every((h) => h.endsWith('/**'))) {
+    throw new Error(
+      `build-skill-docs: the watch-hint declaration must use the subtree spelling: ${JSON.stringify(ROOT_DIR_WATCH_HINTS)}`,
+    );
+  }
+}
+
 // Marker comments delimit the generated region. MDX does not support HTML
 // comments (`<!-- -->`) — it needs `{/* */}` — so the syntax is per file type.
 type CommentStyle = 'html' | 'mdx';
@@ -215,6 +269,8 @@ function spliceBlock(file: string, block: string, style: CommentStyle): string {
 
 function main() {
   const check = process.argv.includes('--check');
+
+  assertWatchHintsDeclareTheReadSurface();
 
   // Catalog ⇄ DISPLAY must be in lockstep.
   const onDisk = fs
