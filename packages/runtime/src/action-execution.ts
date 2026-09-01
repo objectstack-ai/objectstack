@@ -1178,6 +1178,97 @@ export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?
 }
 
 /**
+ * The subject-record load's outcome, as the two action doors hand it to a
+ * handler (#14143).
+ */
+export interface ActionSubjectRecordLoad {
+    /** What the handler receives as `ctx.record`. Unchanged by #14143. */
+    record: Record<string, unknown>;
+    /**
+     * `true` exactly when a caller-scope load was ATTEMPTED and did not deliver
+     * the row. Absent-or-`false` otherwise — including for the record-less and
+     * new-record actions that never attempt one.
+     */
+    recordLoadDenied: boolean;
+}
+
+/**
+ * Load an action's subject record IN THE CALLER'S OWN SCOPE, and report whether
+ * that load actually delivered the row (#14143). ONE producer for both action
+ * doors — the MCP `run_action` bridge below and the REST `/actions` route
+ * (`domains/actions.ts`) — because the signal it emits is documented to app
+ * authors, and a signal only one of two doors sets is an authorization guard
+ * that is silently inert on the other.
+ *
+ * ## Why the signal exists
+ *
+ * The load runs under the CALLER's `ExecutionContext` deliberately: an action's
+ * subject row must be readable by the person invoking the action. But the body
+ * that follows runs ELEVATED (`buildActionExecutionContext` = `isSystem: true`,
+ * settled design — #3914), so authorization has to be re-established INSIDE the
+ * handler, and the platform's most natural predicate for that was broken:
+ *
+ *  - a refused/absent load leaves `record` as `{}`, so `record.id == null`;
+ *  - the `recordId` stamp below fires on exactly that condition.
+ *
+ * The stamp condition and the load-failure condition COINCIDED, so
+ * `if (!ctx.record?.id) refuse()` — the guard an author reaches for first —
+ * was true on a row the caller cannot read, every time. The stamp is NOT the
+ * defect and is kept verbatim: new-record / record-less actions legitimately
+ * depend on `recordId` being in place, and removing it would break them.
+ * What was missing is a second, independent channel saying "this id did not
+ * resolve in your caller's scope", which is what `recordLoadDenied` is.
+ *
+ * ## What the flag can and cannot tell you
+ *
+ * It reports "the caller-scope load did not deliver the row", NOT "the platform
+ * caught an authorization error". The read path collapses the two on purpose:
+ * a row filtered out by RLS and an id that names nothing both arrive as
+ * `RECORD_NOT_FOUND` / 404 (`recordNotFoundError`, `@objectstack/core`), which
+ * is existence non-disclosure working as designed — the same reason the doc
+ * comment on the call site says "an unseen record reads as not-found". Nothing
+ * in the caught error separates them, so this flag deliberately does not
+ * pretend to, and carries no code/status: for an authorization decision the two
+ * are ONE answer — this caller has not demonstrated read access to that row.
+ */
+export async function loadActionSubjectRecord(
+    objectName: string,
+    recordId: string | undefined,
+    getRecord: () => Promise<any>,
+): Promise<ActionSubjectRecordLoad> {
+    let record: Record<string, unknown> = {};
+    let recordLoadDenied = false;
+    if (recordId && !isObjectLessActionKey(objectName)) {
+        try {
+            const got: any = await getRecord();
+            if (got?.record) record = got.record;
+            // A resolved call that carried no row is the same fact as a thrown
+            // one — the protocol's own 404 arrives as a throw, but a data
+            // service that answers `{ record: undefined }` must not read as a
+            // successful load just because it declined to throw.
+            else recordLoadDenied = true;
+        } catch {
+            /* new-record / record-less actions pass an empty record */
+            recordLoadDenied = true;
+        }
+    }
+    // ⛔ Do NOT delete: a new-record / record-less action's handler reads its
+    // id from here. `recordLoadDenied` is what tells the two cases apart now.
+    if (record && (record as any).id == null && recordId) (record as any).id = recordId;
+    return { record, recordLoadDenied };
+}
+
+/**
+ * The `ctx` keys that carry {@link loadActionSubjectRecord}'s verdict into an
+ * action context — spread so the flag is ABSENT rather than `false` when no
+ * load was refused, matching the `referentialFieldClear` marker convention on
+ * the sandbox seam: a body reads `ctx.recordLoadDenied === true`.
+ */
+export function actionRecordLoadSignal(load: ActionSubjectRecordLoad): { recordLoadDenied?: true } {
+    return load.recordLoadDenied ? { recordLoadDenied: true } : {};
+}
+
+/**
  * Resolve + invoke a business action by its declarative name for the MCP
  * `run_action` tool. Enforces the AI-exposure gate (`ai.exposed`, #2849), the
  * ADR-0066 D4 capability gate, loads the subject record under the caller's
@@ -1276,16 +1367,11 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
 
     // Load the subject record under RLS when row-context (engages the same
     // permission path as get_record — an unseen record reads as not-found).
-    let record: Record<string, unknown> = {};
-    if (recordId && !isObjectLessActionKey(objectName)) {
-        try {
-            const got: any = await callData('get', { object: objectName, id: recordId }, driver, envId, ec);
-            if (got?.record) record = got.record;
-        } catch {
-            /* new-record / record-less actions pass an empty record */
-        }
-    }
-    if (record && (record as any).id == null && recordId) (record as any).id = recordId;
+    // [#14143] Through the ONE shared producer, so this door and the REST
+    // `/actions` door emit the same `recordLoadDenied` signal to handlers.
+    const subject = await loadActionSubjectRecord(objectName, recordId, () =>
+        callData('get', { object: objectName, id: recordId }, driver, envId, ec));
+    const record = subject.record;
 
     // [#5372] One shared producer for the user shape (`security/actor-user.ts`),
     // the same one the REST `/actions` route and the AI routes use. What stood
@@ -1330,6 +1416,12 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     );
     const actionContext: any = {
         record,
+        // [#14143] The caller-scope load's verdict, on the same context the
+        // record rides. `ctx.record.id` is present either way (the stamp is
+        // load-bearing for record-less actions), so this is the ONLY thing that
+        // tells a handler its subject row did not resolve for THIS caller —
+        // and the body face carries it too (`sandbox/body-runner.ts`).
+        ...actionRecordLoadSignal(subject),
         user,
         session: buildActionSession(deps, ec),
         engine: buildActionEngineFacade(deps, ql, ec),
