@@ -45,3 +45,5 @@ unlicensed multi-node topology on the old fail-open default; it now downgrades
 to single-node at boot and logs the refusal. Deploy a distribution that
 registers the gate (at module load of a carrier package, so every boot route
 mounts it), or remove the multi-node declaration.
+
+<!-- adr-0087: not-required (no-migration-prescription) A runtime default-direction change on the multi-node authorization gate: no spec key is removed, renamed or re-shaped, so there is no tombstone and nothing mechanical for `objectstack migrate meta` to rewrite. The channel that reaches an affected operator is the boot-time refusal itself (`os serve` downgrades to single-node and logs `MULTI_NODE_NO_GATE_REASON` with the remedy); whether to deploy a gate-registering distribution or drop the multi-node declaration is a deployment decision no migration entry can perform. -->
