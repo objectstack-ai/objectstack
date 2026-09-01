@@ -1385,6 +1385,124 @@ export function declaredNoPathPopulation(scriptSource) {
 }
 
 /**
+ * A family whose verdict CANNOT EXIST outside a workflow run, read from the
+ * gate's own source rather than from a roster of names (#14004).
+ *
+ * ## The defect
+ *
+ * `check-governed-queue-guard.mjs` judges the merge-queue event payload and
+ * nothing else. Run on a clean tree with nothing wrong in it, its only possible
+ * outcome is `EXIT=1` — deliberately, because "could not look" must never exit
+ * 0 in a guard (#13885 / #13954, and that refusal is CORRECT: ⛔ this rule does
+ * not touch the gate). The derivation nonetheless advertised it among the
+ * families under "Local gates for this card (paste into the dispatch prompt)",
+ * and `--commands` emitted it on a line whose caption promises a runnable
+ * command. Every dev on a `.claude/agents/**` diff — the highest-traffic
+ * governed surface in this repo — harvested 10 commands, ran them, and got 9
+ * green and 1 structurally red, then went and read the gate source to learn the
+ * red meant nothing. The second cost is the one that compounds: a red that
+ * always fires trains its reader to discount reds in that list, which is #4690
+ * pointed at the reader instead of at the tool.
+ *
+ * ## Why a SHAPE and not a list of CI-only gate names
+ *
+ * The same reason nothing else in this file is a list: a hand-maintained roster
+ * does a per-family job and drifts the day a family is added, and this file's
+ * whole contract is that a gate added tomorrow classifies itself. Triage leaned
+ * this way and left the criterion's COST to be measured here; measured on
+ * fa1eca31d over the 200 discovered families, it is cheap — the discovery
+ * already reads every family file once for four other answers, so this is a
+ * fifth answer off the same read, with no new I/O at all.
+ *
+ * ## The criterion is a CONJUNCTION, and the second limb is the safe direction
+ *
+ *   limb 1  the gate's own source ACCESSES the workflow event payload —
+ *           `process.env.GITHUB_EVENT_PATH` / `env['GITHUB_EVENT_PATH']` —
+ *           with comments and self-test bodies masked out, so a gate that
+ *           merely mentions the variable in prose or stages it in a fixture is
+ *           not classified by what it talks about;
+ *   limb 2  and NO ONE CAN RUN IT BY NAME here: the family is a direct
+ *           workflow `run:` invocation (never a `check:*` npm script, which is
+ *           a local invocation by construction) and no root manifest script
+ *           names its file.
+ *
+ * Measured on fa1eca31d, over 200 families: limb 1 alone selects 1, limb 2
+ * alone selects 43, the conjunction selects exactly 1 — the queue guard. So
+ * limb 2 buys nothing TODAY and is not there for today: this classification
+ * SUBTRACTS a row from `--commands`, and a subtraction that fires wrongly is
+ * silent (a real gate quietly missing from the runnable list, every dispatch
+ * order still reading normal), while a miss is loud (the status quo — a red the
+ * dev has to go read a gate to understand). The whole file errs that way, and
+ * `declaredInheritedPopulation`'s ruling one screen up is the same trade
+ * decided the same direction by the maintainer. A gate with a `check:*` name,
+ * or one that reads the payload with a git fallback, therefore keeps its place
+ * in the list and keeps its loud red.
+ *
+ * ⚠️ Deliberately NARROW on the variable, too: `GITHUB_EVENT_PATH` alone, not
+ * the whole `GITHUB_EVENT_NAME`/`GITHUB_BASE_REF`/`GITHUB_HEAD_REF`/
+ * `GITHUB_REF_NAME` family, because those are routinely read WITH a local
+ * fallback while the payload path is the run's input or nothing. The narrowing
+ * costs nothing measurable: on this tree exactly one tracked file names any of
+ * the five, so widening the set changes zero classifications — it is a
+ * statement about tomorrow's gate, not today's count.
+ *
+ * ⚠️ What this does NOT claim: that the gate refuses. It reads a dependence,
+ * not a control-flow proof, and no static reading of a source can promise how a
+ * program behaves with an env var absent. That is why the family stays NAMED,
+ * with its provenance and this reason printed beside it, in every rendering —
+ * an annotation a reader can check against the gate, never a family this tool
+ * quietly disappears.
+ */
+const WORKFLOW_PAYLOAD_ENV = 'GITHUB_EVENT_PATH';
+
+// Assembled from the variable name held above rather than spelled inline, for
+// the reason DEFAULT_BASE_REF states one screen down: a module-body literal in
+// this file is inherited as a watch hint by anything that follows it, and a
+// name with no slash cannot become one. The access forms are the two JS
+// spellings of one read — dotted and bracketed, through `process.env` or
+// through a local `env` alias, which is how the live specimen spells it.
+const PAYLOAD_ENV_ACCESS = new RegExp(
+  String.raw`(?:process\s*\.\s*env|(?<![\w$.])env)\s*` +
+    String.raw`(?:\.\s*${WORKFLOW_PAYLOAD_ENV}\b|\[\s*(['"\`])${WORKFLOW_PAYLOAD_ENV}\1\s*\])`,
+);
+
+/**
+ * limb 1 — the gate's own source, comments and self-test bodies masked, ACCESSES
+ * the workflow event payload. Returns the variable name, or null.
+ *
+ * The masking is the same normalization `extractWatchHints` applies, and for
+ * the same reason: what a gate SAYS is not what it READS. It costs nothing on
+ * this tree (one file names the variable, and it also accesses it), and it is
+ * the difference between classifying a gate and classifying its docblock.
+ */
+export function payloadEnvDependence(scriptSource) {
+  const body = maskSelfTests(maskComments(String(scriptSource)));
+  return PAYLOAD_ENV_ACCESS.test(body) ? WORKFLOW_PAYLOAD_ENV : null;
+}
+
+/**
+ * Both limbs, against one discovered family. Returns `{ env }` for a CI-measured
+ * family and null for every other, which is the answer every rendering keys on.
+ *
+ * `rootScripts` is passed IN, from the manifest `discoverFamilies` has already
+ * read, so this cannot answer from a different revision of the file than the
+ * discovery that calls it.
+ */
+export function ciOnlyMeasurement(entry, rootScripts = {}) {
+  const env = entry?.payloadEnv ?? null;
+  if (!env) return null;
+  // A `check:*` family is invocable by name by construction — limb 2 fails
+  // before the manifest is consulted at all.
+  if (!entry.direct) return null;
+  const files = entry.files ?? [];
+  const namedByManifest = Object.values(rootScripts).some(
+    (command) => typeof command === 'string' && files.some((f) => f && command.includes(f)),
+  );
+  if (namedByManifest) return null;
+  return { env };
+}
+
+/**
  * A FOLLOWED MODULE's own declaration of which of its module-body literals are
  * a population a gate INHERITS by importing it — a whole-line comment anywhere
  * in the module's source:
@@ -7696,6 +7814,11 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
         entry.readOrigin.set(target, f);
       }
       entry.noPopulationReason ??= declaredNoPathPopulation(source);
+      // ONE read, SIX answers now (#14004). The payload dependence is read off
+      // the SAME source text as the five above, so this classification cannot
+      // describe a different revision of the gate than the hints printed beside
+      // it — the discipline every other reader in this loop follows.
+      entry.payloadEnv ??= payloadEnvDependence(source);
       // A `--self-test` family follows NO import, and that is a measurement
       // rather than a preference (#11404). The invocation runs the script's
       // SELF-TEST; a module the script imports carries the population of the
@@ -7788,6 +7911,11 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     // the marker while inheriting a population is a contradiction the live
     // half of the self-test catches, which is the direction that costs.
     entry.noPopulationReason ??= null;
+    // Read from the gate's own files only, exactly like the declaration above
+    // it: a followed module cannot make its caller CI-only, and a family that
+    // reached no file at all reaches no classification either.
+    entry.payloadEnv ??= null;
+    entry.ciOnly = ciOnlyMeasurement(entry, rootScripts);
   }
   return { byCheck, workflows, workflowEntries };
 }
@@ -7812,11 +7940,37 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
  * and as a null in `--json`, and emitting a fabricated command for it would be
  * exactly the failure this whole file exists to refuse.
  */
+/**
+ * The commands a CI-measured family renders — read off the matched rows, which
+ * are where the classification lives, and shared by every consumer that has to
+ * subtract them. One expression, so `--commands` and the reconciliation cannot
+ * disagree about which commands are omitted.
+ */
+export function ciOnlyCommandSet(matchedRows = []) {
+  return new Set(matchedRows.filter((row) => row.ciOnly).map((row) => row.command));
+}
+
 export function commandsFor({ matchedRows = [], kindGroups = [] } = {}) {
   const commands = new Set();
-  for (const row of matchedRows) commands.add(row.command);
+  // A CI-MEASURED-ONLY family contributes NOTHING here (#14004). This list's
+  // caption promises one RUNNABLE command per line, and a command whose only
+  // possible local outcome is a nonzero exit is not one. It is the single
+  // subtraction this list makes, it is measured rather than listed
+  // (`ciOnlyMeasurement`), and it is loud in both other renderings: the family
+  // keeps its own heading with its provenance in the human output, and carries
+  // `ciOnly` on its row in `--json`. ⛔ Not silence — omission stated where the
+  // omission happens is this file's own rule for the pending-changeset
+  // families, and it applies here unchanged.
+  const ciOnly = ciOnlyCommandSet(matchedRows);
+  for (const row of matchedRows) if (!row.ciOnly) commands.add(row.command);
   for (const group of kindGroups) {
-    for (const gate of group.gates) if (gate.command) commands.add(gate.command);
+    // The exclusion follows the COMMAND, not the section it was reached
+    // through: a family named by change KIND as well as by path is one family,
+    // and it is no more runnable from the second section than from the first.
+    // Reachable only in a corner today — no CI-measured family is in
+    // CHANGE_KIND_GATES — but a rule that held in one section and not the
+    // other is exactly the two-renderings drift this file keeps closing.
+    for (const gate of group.gates) if (gate.command && !ciOnly.has(gate.command)) commands.add(gate.command);
   }
   return [...commands].sort();
 }
@@ -7884,27 +8038,47 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [] } = {})
   // The SAME expression commandsFor uses for its matched half. Written as a
   // second traversal it would be a second answer to a question this file
   // already answers once.
-  const matchedCommands = new Set(matchedRows.map((row) => row.command));
+  const runnableRows = matchedRows.filter((row) => !row.ciOnly);
+  const ciOnlyRows = matchedRows.filter((row) => row.ciOnly);
+  const matchedCommands = new Set(runnableRows.map((row) => row.command));
+  // Counted, never folded into the total: the total is the RUNNABLE answer and
+  // a CI-measured family is outside it by construction. Kept as its own term so
+  // the omission is a number the reader gets rather than a difference they have
+  // to notice (#14004).
+  const ciOnlyCommands = ciOnlyCommandSet(matchedRows);
   const conventionCommands = new Set();
   let conventionRows = 0;
   let staleRows = 0;
+  let ciOnlyConventionRows = 0;
   for (const group of kindGroups) {
     for (const gate of group.gates) {
       conventionRows += 1;
-      if (gate.command) conventionCommands.add(gate.command);
-      else staleRows += 1;
+      if (!gate.command) {
+        staleRows += 1;
+        continue;
+      }
+      // The SAME subtraction `commandsFor` makes, from the same set — a term
+      // counted here but absent from the union would break the arithmetic
+      // below, which is the drift that check exists to catch. Counted on its
+      // own so the rows-versus-commands note names this reason rather than
+      // charging it to the two it already knows about.
+      if (ciOnlyCommands.has(gate.command)) ciOnlyConventionRows += 1;
+      else conventionCommands.add(gate.command);
     }
   }
   const both = [...conventionCommands].filter((command) => matchedCommands.has(command)).length;
   const recon = {
     total: commands.length,
     matched: matchedCommands.size,
-    matchedRows: matchedRows.length,
+    matchedRows: runnableRows.length,
+    ciOnly: ciOnlyCommands.size,
+    ciOnlyRows: ciOnlyRows.length,
     convention: conventionCommands.size,
     conventionRows,
     conventionOnly: conventionCommands.size - both,
     both,
     staleRows,
+    ciOnlyConventionRows,
   };
   if (recon.matched + recon.convention - recon.both !== recon.total) {
     throw new Error(
@@ -7933,10 +8107,22 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [] } = {})
  * `derive` already makes for printing the tier verdict on every run.
  */
 export function familyReconciliationLines(recon) {
+  // The CI-measured term, rendered identically on the zero and non-zero
+  // branches (#14004). An answer of zero RUNNABLE families on a card that
+  // matched a CI-measured one is exactly the reading that must not come out as
+  // a bare "nothing matched": the family matched, it is named above, and what
+  // is zero is what the dev can run.
+  const ciOnlyLine =
+    recon.ciOnly > 0
+      ? `  + ${recon.ciOnly} famil(ies) this card's paths reach are CI-MEASURED ONLY and sit OUTSIDE this total —` +
+        ' they read the workflow event payload, so no local run of them can produce a verdict. Named under their own' +
+        ' heading above, carried on their row in --json, and omitted from --commands by design.'
+      : null;
   if (recon.total === 0) {
     return [
       'Reconciliation — 0 famil(ies): this card\'s whole runnable answer, and the derivation COMPLETED to reach it.',
       '  0 named by PATH (the matched block) + 0 named by change KIND (the convention block). An empty answer, not a missing one.',
+      ...(ciOnlyLine ? [ciOnlyLine] : []),
       '  ⇒ --commands prints nothing for these paths and exits 0. The always-runs tail below still applies and is NOT covered by this number.',
     ];
   }
@@ -7952,6 +8138,7 @@ export function familyReconciliationLines(recon) {
         ' Two cards lost the convention block exactly this way, hours apart, and CI found it both times.',
     );
   }
+  if (ciOnlyLine) lines.push(ciOnlyLine);
   lines.push(
     `  ⇒ Skip the arithmetic: --commands prints exactly these ${recon.total}, one runnable command per line, nothing else on stdout.` +
       ' It cannot drop a section or a spelling; this line exists so a harvest of the PROSE can be caught when it does.',
@@ -7964,8 +8151,13 @@ export function familyReconciliationLines(recon) {
   if (recon.conventionRows !== recon.convention) {
     const notes = [];
     if (recon.staleRows > 0) notes.push(`${recon.staleRows} STALE, contributing no command`);
-    if (recon.conventionRows - recon.staleRows > recon.convention) {
-      notes.push(`${recon.conventionRows - recon.staleRows - recon.convention} a repeat of a family another kind already hit`);
+    // Named before the repeat term, which is computed as a remainder: an
+    // unnamed reason would be charged to "a repeat" and read as a fact about
+    // the kinds table rather than about a family nobody can run here (#14004).
+    const ciOnlyConventionRows = recon.ciOnlyConventionRows ?? 0;
+    if (ciOnlyConventionRows > 0) notes.push(`${ciOnlyConventionRows} CI-measured only, contributing no runnable command`);
+    if (recon.conventionRows - recon.staleRows - ciOnlyConventionRows > recon.convention) {
+      notes.push(`${recon.conventionRows - recon.staleRows - ciOnlyConventionRows - recon.convention} a repeat of a family another kind already hit`);
     }
     lines.push(
       `  (the convention block prints ${recon.conventionRows} rows for those ${recon.convention}: ${notes.join('; ')}.)`,
@@ -8044,10 +8236,20 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
   }
 
   const conventionCount = kindGroups.reduce((n, g) => n + g.gates.filter((x) => x.command).length, 0);
+  const ciOnlyRows = matchedRows.filter((row) => row.ciOnly);
   console.error(
     `dispatch-gates --${mode}: ${commands.length} command(s) — ${split.pnpm} pnpm, ${split.node} direct node` +
-      `${split.other ? `, ${split.other} neither` : ''} (${matchedRows.length} matched by path, ${conventionCount} by change KIND).`,
+      `${split.other ? `, ${split.other} neither` : ''} (${matchedRows.length - ciOnlyRows.length} matched by path, ${conventionCount} by change KIND).`,
   );
+  // The THIRD thing stdout deliberately omits, omitted OUT LOUD for the reason
+  // this function's header gives for the other two: a quiet omission is the
+  // defect this mode exists to fix (#14004).
+  if (ciOnlyRows.length) {
+    console.error(
+      `  + ${ciOnlyRows.length} famil(ies) matched by path are CI-MEASURED ONLY and are ${mode === 'json' ? 'flagged as ciOnly on their matched row, not in commands' : 'NOT above'} — ` +
+        'they read the workflow event payload, so no local run of them can produce a verdict. Run without --commands/--json to see them named.',
+    );
+  }
   if (pending.length) {
     console.error(
       `  + ${pending.length} famil(ies) apply once this card's changeset exists and are ${mode === 'json' ? 'under pendingChangeset, not in commands' : 'NOT above'} — ` +
@@ -8108,6 +8310,11 @@ function derive(paths, { showResidue = false, mode = 'human' } = {}) {
     // and a lead inferred from a string in a script are different claims, and
     // the column that justifies the lead has to say which.
     via: hits.map((h) => ({ path: h.path, via: h.via, hint: h.hint })),
+    // The classification travels ON the row, for the same reason the
+    // provenance does: every rendering below is a reading of these rows, so a
+    // family cannot be runnable in one output and CI-measured in another
+    // (#14004).
+    ciOnly: entry.ciOnly ?? null,
   }));
   const kindGroups = changeKindGates(paths, resolveInvocation);
   // The pending-changeset section is derived in BOTH input modes and is gated
@@ -8151,21 +8358,48 @@ function derive(paths, { showResidue = false, mode = 'human' } = {}) {
   // whatever the run said.
   for (const line of tierLines(deriveTier(paths))) console.log(line);
   console.log('');
-  if (matched.size) {
+  // The block a dev PASTES carries only families a dev can run (#14004). The
+  // CI-measured ones are not dropped — they get their own heading below, past
+  // the blank line the published harvest stops at, so the family stays named
+  // and named ONCE, and no harvest of this block can pick up a command whose
+  // only local outcome is a nonzero exit.
+  const runnableRows = matchedRows.filter((row) => !row.ciOnly);
+  const ciOnlyRows = matchedRows.filter((row) => row.ciOnly);
+  const viaText = (hits) => hits.map((h) => `${h.path} ⇢ ${h.via} '${h.hint}'`).join('; ');
+  if (runnableRows.length) {
     console.log('Local gates for this card (paste into the dispatch prompt):');
-    for (const { command, workflows: wfs, via: hits } of matchedRows) {
-      const via = hits.map((h) => `${h.path} ⇢ ${h.via} '${h.hint}'`).join('; ');
-      console.log(`  - ${command}   [${wfs.join(', ')}]   matched via ${via}`);
+    for (const { command, workflows: wfs, via: hits } of runnableRows) {
+      console.log(`  - ${command}   [${wfs.join(', ')}]   matched via ${viaText(hits)}`);
     }
     // The blank line FIRST, and it is not cosmetic: the published harvest ends
     // the block at the first empty line, so a footer butted against the rows
     // would be harvested AS rows. See spellingFooterLines.
     console.log('');
-    for (const line of spellingFooterLines(spellingSplit(matchedRows.map((r) => r.command)), recon)) {
+    for (const line of spellingFooterLines(spellingSplit(runnableRows.map((r) => r.command)), recon)) {
       console.log(line);
     }
+  } else if (ciOnlyRows.length) {
+    // ⛔ NOT the "nothing matched" sentence below: families DID match, and
+    // saying otherwise would hide the one row this card is about behind a
+    // claim the run just measured as false.
+    console.log('No LOCALLY runnable check family names the given paths — every family they matched is CI-measured only; see the heading below.');
   } else {
     console.log("No check family names the given paths in its own source, and no workflow's path filter schedules one for them.");
+  }
+
+  if (ciOnlyRows.length) {
+    console.log('');
+    console.log(`CI-measured only — matched by path, and NOT runnable here (${ciOnlyRows.length} famil(ies)):`);
+    for (const { command, workflows: wfs, via: hits, ciOnly } of ciOnlyRows) {
+      console.log(`  - ${command}   [${wfs.join(', ')}]   matched via ${viaText(hits)}`);
+      console.log(
+        `      ↳ reads the workflow event payload (${ciOnly.env}) and is invoked only by its workflow — outside a run` +
+          ' there is no payload to judge, and a guard that "could not look" must never exit 0, so a local run of this' +
+          ' can only ever exit nonzero. CI measures it on the PR; there is nothing to run here, and a red from running it' +
+          ' anyway is not a finding.',
+      );
+    }
+    console.log('  ⇒ Derived from the gate\'s own source, not from a list of names: a family that reads the payload and has no local invocation classifies itself.');
   }
   const kindLines = changeKindLines(paths, resolveInvocation);
   if (kindLines.length) {
@@ -12398,6 +12632,111 @@ function selfTest() {
     declaredEmpty.every(([, e]) => typeof e.noPopulationReason === 'string' && e.noPopulationReason.length > 0),
   );
 
+  // ── The CI-MEASURED-ONLY shape (#14004) ───────────────────────────────────
+  //
+  // The two markers above are DECLARATIONS a gate carries. This one is the
+  // opposite kind of reading and the difference is the point: nothing is
+  // declared anywhere, the classification is a SHAPE read off the gate's own
+  // source, so a family added tomorrow classifies itself with nothing here to
+  // update. What it buys is that a row whose only possible local outcome is a
+  // nonzero exit stops being advertised as a runnable command.
+  t('limb 1 reads the payload access in its dotted spelling', payloadEnvDependence('const p = process.env.GITHUB_EVENT_PATH;') === 'GITHUB_EVENT_PATH');
+  t('and in the bracketed spelling, and through a local `env` alias — one read, two ways to write it', payloadEnvDependence("const env = process.env;\nconst p = env['GITHUB_EVENT_PATH'];") === 'GITHUB_EVENT_PATH');
+  // What a gate SAYS is not what it READS, and the direction of this mistake
+  // is the expensive one: a false positive here SUBTRACTS a real command from
+  // --commands, silently.
+  t('a gate that only MENTIONS the variable in a comment is not classified by its prose', payloadEnvDependence('// this gate does not read process.env.GITHUB_EVENT_PATH\nconst x = 1;\n') === null);
+  t('nor is one that only names it in a message string', payloadEnvDependence('throw new Error("could not read GITHUB_EVENT_PATH");') === null);
+  t('nor is one whose --self-test body stages it as a fixture (the self-test is not the gate\'s work)', payloadEnvDependence('function selfTest() {\n  process.env.GITHUB_EVENT_PATH = "/tmp/e.json";\n}\n') === null);
+  t('an unrelated env read is not a payload dependence', payloadEnvDependence('const x = process.env.OS_LOG_LEVEL;') === null);
+  // LIVE, against the real specimen the card was filed on: a fixture-only pin
+  // would stay green if the gate were rewritten to read the payload some other
+  // way, and the whole classification is about THAT file.
+  t(
+    'LIVE: the queue guard\'s own source still carries the payload dependence this reads',
+    payloadEnvDependence(readFileSync(join(ROOT, 'scripts/pm/check-governed-queue-guard.mjs'), 'utf8')) === 'GITHUB_EVENT_PATH',
+  );
+
+  // limb 2, both directions. It selects 43 families on this tree ALONE, so
+  // every case below is about the conjunction: limb 1 is what discriminates,
+  // limb 2 only ever refuses.
+  const ciEntry = (over = {}) => ({
+    direct: true,
+    files: ['scripts/pm/check-a-payload-gate.mjs'],
+    payloadEnv: 'GITHUB_EVENT_PATH',
+    ...over,
+  });
+  t('both limbs together classify a direct, payload-reading family as CI-measured', ciOnlyMeasurement(ciEntry(), {})?.env === 'GITHUB_EVENT_PATH');
+  t(
+    'limb 2 REFUSES when a root manifest script names the gate\'s file — someone can run it here, so nothing may be subtracted',
+    ciOnlyMeasurement(ciEntry(), { 'check:a-payload-gate': 'node scripts/pm/check-a-payload-gate.mjs' }) === null,
+  );
+  t(
+    'and refuses a `check:*` family outright — an npm-script name IS a local invocation, whatever the gate reads',
+    ciOnlyMeasurement(ciEntry({ direct: false, files: ['scripts/pm/check-a-payload-gate.mjs'] }), {}) === null,
+  );
+  t(
+    'limb 1 is REQUIRED — without it limb 2 alone would subtract every directly-invoked gate in the repo',
+    ciOnlyMeasurement(ciEntry({ payloadEnv: null }), {}) === null,
+  );
+
+  // LIVE: the classification against the real derivation, in BOTH directions.
+  // The positive alone would pass on a rule that classified everything; the
+  // negative alone would pass on a rule that classified nothing.
+  const liveCiOnly = [...liveDiscovery.byCheck].filter(([, e]) => e.ciOnly);
+  t(
+    `LIVE: exactly one family classifies CI-measured, and it is the queue guard (got: ${liveCiOnly.map(([c]) => c).join(', ') || 'none'})`,
+    liveCiOnly.length === 1 && liveCiOnly[0][0] === 'scripts/pm/check-governed-queue-guard.mjs',
+  );
+  t(
+    'LIVE: an ordinary local family on the same card is NOT classified — the rule discriminates rather than sweeping',
+    liveDiscovery.byCheck.get('check:nul-bytes') && !liveDiscovery.byCheck.get('check:nul-bytes').ciOnly,
+  );
+  t(
+    'LIVE: and neither is a directly-invoked gate that reads no payload (limb 2 is not the classifier)',
+    [...liveDiscovery.byCheck].some(([, e]) => e.direct && !e.ciOnly),
+  );
+
+  // The renderings, driven off rows of the shape `derive` builds. Each is the
+  // half a consumer actually reads, and they must agree.
+  {
+    const ciRow = { check: 'g', command: 'node scripts/pm/check-a-payload-gate.mjs', workflows: ['w.yml'], via: [], ciOnly: { env: 'GITHUB_EVENT_PATH' } };
+    const localRow = { check: 'check:b', command: 'pnpm check:b', workflows: ['lint.yml'], via: [], ciOnly: null };
+    t('--commands omits the CI-measured row and keeps the runnable one', commandsFor({ matchedRows: [ciRow, localRow] }).join('|') === 'pnpm check:b');
+    // The exclusion follows the COMMAND, not the section it arrived through.
+    // Unreachable today — no CI-measured family sits in CHANGE_KIND_GATES —
+    // and pinned anyway, because a rule that held in one section and not the
+    // other would re-emit the row through the block the published snippet
+    // cannot even harvest.
+    {
+      const kindEcho = [{ kind: 'a kind', gates: [{ name: 'g', why: 'because', command: ciRow.command }] }];
+      t(
+        'and it stays omitted when a change KIND names the same family, which is the other section it could arrive through',
+        commandsFor({ matchedRows: [ciRow, localRow], kindGroups: kindEcho }).join('|') === 'pnpm check:b',
+      );
+      const kindRecon = familyReconciliation({ matchedRows: [ciRow, localRow], kindGroups: kindEcho });
+      t('the reconciliation still CLOSES on that input rather than counting a term the union does not have', kindRecon.total === 1 && kindRecon.convention === 0);
+      t(
+        'and the rows-versus-commands note names that reason instead of charging it to a repeat',
+        familyReconciliationLines(kindRecon).some((l) => l.includes('1 CI-measured only, contributing no runnable command')),
+      );
+    }
+    const recon = familyReconciliation({ matchedRows: [ciRow, localRow] });
+    t('the reconciliation total is the RUNNABLE answer — the CI-measured row is outside it', recon.total === 1 && recon.matched === 1);
+    t('and the omission is a term it carries rather than a difference the reader has to notice', recon.ciOnly === 1 && recon.ciOnlyRows === 1);
+    t(
+      'the rendered reconciliation states that term out loud',
+      familyReconciliationLines(recon).some((l) => l.includes('CI-MEASURED ONLY') && l.includes('omitted from --commands')),
+    );
+    // The reading that must not come out as a bare "nothing matched": a card
+    // whose ONLY matched family is CI-measured.
+    const ciAlone = familyReconciliation({ matchedRows: [ciRow] });
+    t(
+      'a card whose only match is CI-measured still says so at a total of zero',
+      ciAlone.total === 0 && familyReconciliationLines(ciAlone).some((l) => l.includes('CI-MEASURED ONLY')),
+    );
+  }
+
   // ── Hints come from the COMMAND's named scripts AND, one level down, from
   //    the first-party modules those scripts import (#11190) ─────────────────
   //
@@ -15102,6 +15441,65 @@ function selfTest() {
     // Two answers to "what shape is stdout" is no answer.
     const bothRun = runCli(['--commands', '--json', seamCard]);
     t('passing both stdout spellings refuses instead of silently preferring one', bothRun.status === 2 && (bothRun.stdout ?? '').trim() === '');
+  }
+
+  // ── END TO END: the CI-measured family, on the card it was measured on (#14004)
+  //
+  // Everything in the unit half above stays green if the split in `derive` is
+  // dropped, or if the row is filtered out of `--commands` but left in the
+  // block a dev pastes. Only a real run on a real card can tell those apart,
+  // and this is the card the defect was measured on: `.claude/agents/**` is the
+  // highest-traffic governed surface here, so every dev on it met the row.
+  {
+    const guardCard = '.claude/agents/os-dev.md';
+    const guardCommand = 'node scripts/pm/check-governed-queue-guard.mjs';
+    const run = runCli([guardCard]);
+    const out = run.stdout ?? '';
+    t('the card still derives at all', run.status === 0 && out.includes('Local gates for this card'));
+    // ⭐ CONTROL: the family is still MATCHED — the fix is a marking, not a
+    // disappearance. Without this case, a rule that dropped the family from the
+    // derivation entirely would pass every case below it.
+    t('CONTROL: the queue-guard family is still derived for this card', out.includes(guardCommand));
+    // The block a dev pastes, harvested with the REAL published snippet, must
+    // no longer contain it.
+    // ONE `--commands` run, read by three cases below. Each CLI spawn is a
+    // full derivation of this tree (~30s on a contended box), so a second run
+    // for a second reading would be a minute of fleet compute to answer a
+    // question this run already answered — and two runs could disagree.
+    const cmdRun = runCli(['--commands', guardCard]);
+    const harvestTmp = mkdtempSync(join(tmpdir(), 'dg-cionly-'));
+    try {
+      writeFileSync(join(harvestTmp, 'gates.txt'), out);
+      const harvested = (spawnSync('bash', ['-c', HARVEST_SNIPPET.join('\n')], { encoding: 'utf8', cwd: harvestTmp }).stdout ?? '')
+        .split('\n')
+        .filter(Boolean);
+      t('the published harvest of the pasted block no longer yields the CI-measured command', harvested.length > 0 && !harvested.includes(guardCommand));
+      const cmdRows = (cmdRun.stdout ?? '').split('\n').filter(Boolean);
+      t('--commands omits it too, and the two renderings still agree exactly', !cmdRows.includes(guardCommand) && [...cmdRows].sort().join('\n') === [...harvested].sort().join('\n'));
+      t('and every command still on the list is one a dev can actually run here', cmdRows.length > 0 && cmdRows.every((l) => /^(pnpm|node) \S/.test(l)));
+      t('the stderr accounting says the omission out loud, where it cannot corrupt the harvest', (cmdRun.stderr ?? '').includes('CI-MEASURED ONLY'));
+    } finally {
+      rmSync(harvestTmp, { recursive: true, force: true });
+    }
+    // ...and the family is still NAMED, under its own heading, with the reason
+    // a reader can check against the gate. Dropping a gate quietly is the
+    // failure this whole file refuses; marking it is the remedy.
+    const ciSection = out.slice(out.indexOf('CI-measured only —'));
+    t('the human rendering names it under its own CI-measured heading', out.includes('CI-measured only — matched by path'));
+    t('with its command, its workflow and its matched-via provenance intact', ciSection.includes(guardCommand) && ciSection.includes('governed-surface-guard.yml') && ciSection.includes(`matched via ${guardCard}`));
+    t('and the reason names the payload variable the classification was read from', ciSection.includes('GITHUB_EVENT_PATH'));
+    // --json: the same row, flagged rather than absent.
+    const jsonRun = runCli(['--json', guardCard]);
+    let guardDoc = null;
+    try {
+      guardDoc = JSON.parse(jsonRun.stdout ?? '');
+    } catch {
+      guardDoc = null;
+    }
+    const guardRow = guardDoc?.matched?.find((r) => r.command === guardCommand);
+    t('--json carries the family as a matched row rather than dropping it', Boolean(guardRow));
+    t('and flags it, so a machine consumer reads the omission instead of inferring it', guardRow?.ciOnly?.env === 'GITHUB_EVENT_PATH');
+    t('and keeps it out of the runnable list, which is the same list --commands prints', Boolean(guardDoc) && !guardDoc.commands.includes(guardCommand));
   }
 
   let failed = 0;
