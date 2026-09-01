@@ -138,12 +138,17 @@ function makeReplica(store: ReturnType<typeof makeSharedStore>) {
             if (table !== 'sys_metadata') return null;
             return findRow(opts.where)?.row ?? null;
         },
-        async find(table: string, opts?: { where?: Record<string, unknown> }) {
+        async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
+            // Hold the caller's bound AFTER the filter, by PRESENCE — the
+            // objectql-double-limit contract: a bound the double ignores makes
+            // a pagination bug invisible to every test built on it.
+            const bound = <T>(all: T[]): T[] =>
+                typeof opts?.limit === 'number' ? all.slice(0, opts.limit) : all;
             if (table === 'sys_metadata_history') {
-                return historyRows.filter((h) => matchesHistory(h, opts?.where ?? {}));
+                return bound(historyRows.filter((h) => matchesHistory(h, opts?.where ?? {})));
             }
             if (table !== 'sys_metadata') return [];
-            return Array.from(rows.values()).filter((r) => matchesWhere(r, opts?.where ?? {}));
+            return bound(Array.from(rows.values()).filter((r) => matchesWhere(r, opts?.where ?? {})));
         },
         async insert(table: string, data: Record<string, unknown>) {
             if (table === 'sys_metadata_audit') return { id: 'audit_skip' };
