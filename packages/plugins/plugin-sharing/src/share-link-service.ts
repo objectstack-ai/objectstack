@@ -231,12 +231,22 @@ async function defaultVerifyPassword(password: string, hash: string): Promise<bo
  * that cannot be compiled, or that faults on the record, is an UNANSWERED
  * question — and an unanswered question must not mint a capability token that
  * `resolveToken` will go on to serve anonymously. Same direction
- * `recordStillExists` already takes below, and the same call the declarative
+ * `loadRecordForServing` already takes below, and the same call the declarative
  * hook-condition evaluator makes (#4775: fail LOUD, never `false`).
  *
  * The two failure kinds keep separate codes because the fix differs: a false
  * verdict is about THIS record (it does not qualify yet), while an unevaluable
  * predicate is broken for every record of the object until its author fixes it.
+ *
+ * ## [#13608] Both seams call THIS function
+ *
+ * `createLink` calls it to refuse the MINT; `resolveToken` calls it again
+ * before SERVING, through `stillEligible`. One implementation, so the two
+ * points in a link's life cannot disagree about what the policy admits — the
+ * drift a second, hand-matched evaluator would have invited on a security gate.
+ * What differs is only what happens to the throw: at mint the caller is
+ * authenticated and gets the code, at redemption it becomes the same
+ * indistinguishable `null` a revoked token gets (see `stillEligible`).
  */
 function assertEligible(
   source: string,
@@ -607,6 +617,13 @@ export class ShareLinkService implements IShareLinkService {
       if (!ok) return null;
     }
 
+    // [#13608] The object's policy is read HERE, before the record probe,
+    // because it decides that probe's projection. `redactFields` is still
+    // computed from it below, unchanged.
+    const schema = this.engine.getSchema?.(row.object_name);
+    const policy = getPolicy(schema);
+    const eligibility = policy.enabled ? policy.eligibility : undefined;
+
     // [#5190] Does the shared RECORD still exist? A share link is an
     // identity-less CAPABILITY token: whoever holds it has the access, no
     // principal required. So an orphaned link is worse than an orphaned
@@ -625,11 +642,47 @@ export class ShareLinkService implements IShareLinkService {
     // Placed AFTER the cheap in-memory gates (a revoked or expired token pays
     // no query) and BEFORE the usage stamp, so a dead record never bumps
     // `use_count` / `last_used_at` either.
-    if (!(await this.recordStillExists(row.object_name, row.record_id))) return null;
+    //
+    // [#13608] It is ONE read either way: when the object declares an
+    // eligibility predicate the projection widens from `['id']` to the whole
+    // row instead of a second query being issued — the same shape, for the
+    // same reason, as the widening in `createLink`.
+    const record = await this.loadRecordForServing(
+      row.object_name,
+      row.record_id,
+      Boolean(eligibility),
+    );
+    if (!record) return null;
+
+    // [#13608] Re-evaluate `publicSharing.eligibility` BEFORE serving.
+    //
+    // ## Why a mint-time gate was not enough
+    //
+    // The state the predicate reads is mutable, and it is exactly the state an
+    // editor changes: publish an article `public`, mint a link, then flip
+    // `audience` to `internal` or `status` back to `draft`. The object's own
+    // declared policy then says the record may not be reached anonymously,
+    // while the token minted before the flip kept resolving and kept serving
+    // the record in full to a caller with NO principal. Declared ≠ enforced,
+    // and the remedy was to revoke every link on the record by hand — which
+    // first requires knowing they exist.
+    //
+    // ## The argument that decided it (maintainer ruling, 2026-08-31)
+    //
+    // `recordStillExists` — the probe directly above, now
+    // `loadRecordForServing` — is deliberately fail-CLOSED. So in THIS SAME
+    // door a *deleted* record stopped being served immediately while a
+    // *reclassified* one did not: two failure directions, one door. Where one
+    // operation has two implementations that disagree, the governed
+    // (fail-closed) side wins, and that is the side this now takes.
+    //
+    // The record is already fetched, so the marginal cost of holding the policy
+    // at redemption is one CEL evaluation. A policy tightening therefore cuts
+    // off links that were legitimately minted before it — that IS the intent,
+    // declared as a behaviour change in the changeset rather than smoothed over.
+    if (eligibility && !this.stillEligible(eligibility, record, schema, row)) return null;
 
     // Compute the effective redaction set (object default ∪ per-link).
-    const schema = this.engine.getSchema?.(row.object_name);
-    const policy = getPolicy(schema);
     const redactFields = Array.from(
       new Set<string>([...(policy.redactFields ?? []), ...((row.redact_fields as string[]) ?? [])]),
     );
@@ -653,32 +706,99 @@ export class ShareLinkService implements IShareLinkService {
   }
 
   /**
-   * [#5190] Is `(object, recordId)` still there? Read under the SYSTEM context
-   * on purpose: the question is EXISTENCE, not the holder's visibility — the
-   * token is the authorisation, and an anonymous holder has no context to read
-   * under in the first place.
+   * [#5190 / #13608] Read the shared record at redemption time: the existence
+   * probe, and — when the object declares an eligibility predicate — the row
+   * that predicate is judged on. `null` means "do not serve".
+   *
+   * Read under the SYSTEM context on purpose: the questions are EXISTENCE and
+   * the object's own POLICY, not the holder's visibility — the token is the
+   * authorisation, and an anonymous holder has no context to read under in the
+   * first place.
    *
    * Fails CLOSED. A probe that throws (driver blip, unregistered object) is an
    * unanswered question, and an unanswered question must not authorise: the
-   * caller treats `false` exactly like revoked. Note this is the OPPOSITE
+   * caller treats `null` exactly like revoked. Note this is the OPPOSITE
    * direction from the orphan sweep, which leaves rows alone when its probe
    * fails — and for the same principle. Neither acts on an unanswered question;
    * for a grant the safe direction is "deny", for a deletion it is "keep".
+   *
+   * [#13608] `withRecord` widens the projection from `['id']` to the whole row
+   * rather than issuing a second query, and it widens ONLY when a predicate is
+   * there to read it: an object with no `eligibility` key keeps the exact
+   * `id`-only probe it has always had.
    */
-  private async recordStillExists(
+  private async loadRecordForServing(
     object: string | null | undefined,
     recordId: string | null | undefined,
-  ): Promise<boolean> {
-    if (!object || !recordId) return false;
+    withRecord: boolean,
+  ): Promise<Record<string, unknown> | null> {
+    if (!object || !recordId) return null;
     try {
       const rows = await this.engine.find(String(object), {
         where: { id: recordId },
-        fields: ['id'],
+        ...(withRecord ? {} : { fields: ['id'] }),
         limit: 1,
         context: SYSTEM_CTX,
       } as any);
-      return Array.isArray(rows) && rows.length > 0;
+      const found = Array.isArray(rows) ? rows[0] : undefined;
+      return (found as Record<string, unknown> | undefined) ?? null;
     } catch {
+      return null;
+    }
+  }
+
+  /**
+   * [#13608] The redemption half of the eligibility gate.
+   *
+   * ## It is the MINT gate, called again
+   *
+   * The verdict comes from `assertEligible` itself, not from a second
+   * evaluation written to match it. Mint and redemption therefore cannot drift
+   * on strictness (`true`, never merely truthy), on the declared-field binding,
+   * or on which faults refuse: there is one implementation and both seams call
+   * it.
+   *
+   * ## Why the answer collapses to a boolean here (ruling item 2, 2026-08-31)
+   *
+   * `assertEligible` throws two distinct codes on purpose —
+   * `RECORD_NOT_ELIGIBLE` (this record does not qualify) and
+   * `ELIGIBILITY_UNEVALUABLE` (the predicate is broken for every record until
+   * its author fixes it) — because at MINT they reach a caller who has already
+   * proved they can see the record, and the distinction tells them which thing
+   * to fix.
+   *
+   * At REDEMPTION the caller may hold nothing but the token. Telling such a
+   * caller "does not exist" apart from "revoked" apart from "no longer
+   * eligible" is an existence oracle, judged here the same way the
+   * `RESOURCE_NOT_FOUND` family is. So every refusal collapses into the one
+   * answer revoked, expired and record-gone already give: `null` — no code, no
+   * distinct error, nothing an anonymous holder can read a policy out of.
+   *
+   * The human-readable "why this link died" is not discarded; it goes to the
+   * server-side log, which is where the ruling puts it.
+   */
+  private stillEligible(
+    eligibility: string,
+    record: Record<string, unknown>,
+    schema: any,
+    row: ShareLink,
+  ): boolean {
+    try {
+      assertEligible(eligibility, record, schema, String(row.object_name));
+      return true;
+    } catch (err: any) {
+      this.logger?.warn?.(
+        '[share-link] redemption refused — the record is no longer eligible under publicSharing.eligibility',
+        {
+          link: row.id,
+          object: row.object_name,
+          record: row.record_id,
+          // The distinction the anonymous response deliberately withholds. It
+          // is readable HERE, and only here.
+          reason: err?.code ?? 'UNKNOWN',
+          detail: err?.message,
+        },
+      );
       return false;
     }
   }

@@ -36,6 +36,16 @@
  *      whole `resolveAuthzContext` envelope, not a per-site subset. See
  *      {@link ShareLinkExecutionContext} for the boundary this draws and
  *      why (#6206 / #6430).
+ *
+ *   6. **`publicSharing.eligibility` is a STANDING policy, not a mint-time
+ *      check (#13608).** Implementations evaluate the object's declared
+ *      predicate when the link is minted AND again on every `resolveToken`,
+ *      against the record about to be served. A record that stops qualifying
+ *      stops being served through tokens minted while it did qualify — no
+ *      revocation step, no grace period. Fail-closed at both points: a
+ *      predicate that cannot be evaluated refuses. The redemption refusal is
+ *      the undifferentiated `null` documented on {@link
+ *      IShareLinkService.resolveToken}.
  */
 
 import type { ExecutionContext } from '../kernel/execution-context.zod.js';
@@ -217,9 +227,20 @@ export interface IShareLinkService {
   listLinks(filter: ListShareLinksFilter, context: ExecutionContext): Promise<ShareLink[]>;
 
   /**
-   * Resolve a token at request-handling time. Returns null when the
-   * token does not exist, is revoked, expired, or fails the audience
-   * check. Increments `use_count` / `last_used_at` as a side effect.
+   * Resolve a token at request-handling time. Increments `use_count` /
+   * `last_used_at` as a side effect of a SUCCESSFUL resolution only.
+   *
+   * Returns `null` when the token does not exist, is revoked, is expired,
+   * fails the audience or password gate, names a record that no longer exists
+   * (#5190), or names a record that no longer satisfies the object's
+   * `publicSharing.eligibility` predicate (#13608).
+   *
+   * ⛔ That single `null` is the contract, not an implementation detail. The
+   * caller of this method may hold nothing but a token, and distinguishing
+   * "does not exist" from "revoked" from "no longer eligible" for such a
+   * caller is an existence oracle. Implementations MUST NOT return a
+   * distinguishable answer per reason, and MUST NOT throw one either; the
+   * readable reason belongs in the server-side log.
    *
    * @param token  raw token from the URL / cookie
    * @param probe  contextual gates the caller has already evaluated

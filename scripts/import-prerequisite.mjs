@@ -22,7 +22,9 @@
  *   exit 1
  *
  * Exit 1 from an unmet prerequisite and exit 1 from a real finding are the same
- * reading. The expensive direction is not the lost minutes: a dev who assumes
+ * reading — which is why the guarded refusal below does NOT keep that number
+ * (see `EXIT_PREREQUISITE_NOT_MET`). The expensive direction is not the lost
+ * minutes: a dev who assumes
  * "this needs an install" and moves on has recorded a gate as RUN when it never
  * executed a single assertion, and a seat that reads the stack as a verdict
  * reports a false RED against whatever landed most recently. Both were measured
@@ -67,6 +69,13 @@
  * Following `cli-build-prerequisite.mjs`: the FRAME is shared, the claim about
  * what went unmeasured stays with the gate. Only the gate knows what it did not
  * check, and "nothing was measured" is the load-bearing half of the message.
+ *
+ * ## The exit code is 3 — the class every sibling already answers these words with
+ *
+ * A refusal here exits `EXIT_PREREQUISITE_NOT_MET`, and the printed advisory
+ * says the same number in the same stroke. That constant's comment carries the
+ * argument, the five sites that had already written the contract, and the true
+ * half of the counter-argument this replaced.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -77,6 +86,54 @@ import { isEntrypoint } from './invoked-as.mjs';
 
 /** `pnpm install` at the repo root — the one remedy for an absent dependency. */
 export const INSTALL_FIX = 'pnpm install';
+
+/**
+ * The exit-code contract, NAMED rather than spelled inline at each site, so the
+ * self-test pins the value each path actually returns instead of a comment
+ * about it — `check-test-completeness.mjs`'s shape, and the one
+ * `check-type-check-coverage.mjs` adopted in PR #13982.
+ *
+ * ## Why 3, when this frame argued for 1 until #13983
+ *
+ * Because 3 is what every OTHER gate in this repo means by these two words.
+ * Measured on this tree, `PREREQUISITE NOT MET` is already exit 3 in five
+ * places: `check-test-completeness.mjs` (`EXIT_PREREQUISITE_NOT_MET`, argued at
+ * length in its header), `check-dual-build-cjs-loads.mjs` (`EXIT_PREREQ`),
+ * `check-type-check-coverage.mjs`, and `pm/check-half-states.mjs` — whose
+ * constant `pm/ci-failure.mjs` IMPORTS rather than re-picks. It is not only
+ * declared: `half-state-patrol.yml` branches on the number (`exitCode === 3`)
+ * to render "the runner could not reach the board" instead of "the sweep
+ * failed", so a consumer that reads 3 by value already exists.
+ *
+ * ⚠️ The argument this replaces stood in this file, and half of it was right:
+ * *"a second failure code would be a new contract nobody asked for"*.
+ *
+ *   • The half that HOLDS: nothing mechanical changes. Every consumer of the
+ *     gates that import this frame treats any non-zero as failure — measured,
+ *     not assumed: the `&&` chains in the root `package.json`, the bare `run:`
+ *     steps in `lint.yml`/`ci.yml`, and `required-set-patrol.yml`, which
+ *     branches on `== '0'` / `!= '0'` and nothing finer. ⛔ This change buys
+ *     zero CI benefit today and must not be sold as if it did.
+ *   • The half that does NOT: it is not a new contract. The contract was
+ *     already written, by the five sites above. What this frame was doing was
+ *     CONTRADICTING it from the largest inheritance surface in the repo — the
+ *     closing paragraph of `prerequisiteNotMetText` is printed verbatim by 45
+ *     importing gates. A reader (or a gate-reconciling agent) who learned "3
+ *     means nothing was measured" from those five read all 45 backwards.
+ *
+ * ⛔ ONLY the prerequisite branch has a code of its own. A gate's real verdict
+ * is still that gate's own exit 1, and this module never touches it. And the
+ * refusal itself is unchanged: what a refusal SAYS, when it fires, and that it
+ * fires at all were all correct already.
+ */
+export const EXIT_PREREQUISITE_NOT_MET = 3;
+
+/**
+ * A gate's real verdict — NOT this module's to produce. Named here for the one
+ * thing the advisory has to do that the number alone cannot: say which code it
+ * is distinct FROM.
+ */
+export const EXIT_FINDINGS = 1;
 
 /**
  * The package a bare specifier names, subpath removed: `yaml/util` -> `yaml`,
@@ -350,12 +407,15 @@ export function classifyImportFailure(specifier, err, fromDir) {
 }
 
 /**
- * Load a dependency, or refuse with a diagnosis and exit 1.
+ * Load a dependency, or refuse with a diagnosis and exit
+ * `EXIT_PREREQUISITE_NOT_MET`.
  *
- * Exits 1, the code every real verdict uses: any wrapper treating non-zero as
- * failure keeps behaving identically, and a second failure code would be a new
- * contract nobody asked for. The reading a caller MUST be able to make is not in
- * the code — it is in the printed text, which says nothing was measured.
+ * The code and the printed advisory move together — a number changed without
+ * the prose would leave 45 gates inheriting a FALSE advisory, which is worse
+ * than either number consistently applied. Why 3, and what did not change, is
+ * on the constant. The reading a caller MUST be able to make is still in the
+ * printed text, which says nothing was measured; the code is what a reader who
+ * sees only the number gets, and it now agrees with the text.
  *
  * @param {string} specifier e.g. `'typescript'`
  * @param {() => Promise<any>} load `() => import('typescript')`, written in the CALLER
@@ -424,7 +484,7 @@ export async function requireDefaultExport(specifier, load, importerUrl, options
  */
 export function reportPrerequisiteNotMet(importerUrl, verdict, measures) {
   console.error(prerequisiteNotMetText(importerUrl, verdict, measures));
-  process.exit(1);
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 /**
@@ -441,7 +501,7 @@ function prerequisiteNotMetText(importerUrl, verdict, measures) {
       `  Nothing was measured: this gate exited before running a single check, so this\n` +
       `  result says NOTHING about ${subject}. It is NOT a finding, and it is not\n` +
       `  evidence that anything in the tree is wrong.\n` +
-      `  (Exit code 1 — capture it BEFORE any pipe:\n` +
+      `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:\n` +
       `  \`node scripts/${gate}.mjs > /tmp/${gate}.log 2>&1; echo "EXIT=$?"\`.\n` +
       `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
       `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
@@ -651,6 +711,44 @@ export function selfTest() {
   // reaches its own exit. See the mechanism note on `reportPrerequisiteNotMet`.
   t('the advisory does NOT claim a pipe shape defeats `${PIPESTATUS[0]}`/`pipefail`',
     !/turns even .*PIPESTATUS.*green|reads green either way/.test(advisory));
+
+  // ── the exit-code CLASS, and the advisory that must move with it ──────────
+  //
+  // Pinned over the FUNCTION BODIES rather than over the constant alone —
+  // PR #13982's shape, for the same reason it gave: the regression that costs
+  // something is not a mistyped constant. It is a `process.exit(1)` written
+  // back into the refusal by an author who never thought about exit codes, or a
+  // number typed into the advisory instead of interpolated. Either leaves the
+  // constant reading 3, every consumer green (they all treat any non-zero as
+  // failure, so 1-instead-of-3 is invisible to all of them), and a message that
+  // still reads perfectly right. Nothing else in this repo would notice.
+  const hardcodesExitCall = (fn) => /process\.exit\(\s*\d/.test(fn.toString());
+  const spellsALiteralCode = (fn) => /Exit code \d/.test(fn.toString());
+  t('the refusal exits through the named constant, never a literal',
+    !hardcodesExitCall(reportPrerequisiteNotMet), reportPrerequisiteNotMet.toString());
+  t('the advisory INTERPOLATES the code rather than spelling one',
+    !spellsALiteralCode(prerequisiteNotMetText));
+  // The NEGATIVE CONTROLS, and the reason the two cases above are measurements
+  // rather than tautologies: each predicate is run against a function that does
+  // the forbidden thing and must SEE it. Without these, one typo in either
+  // regex passes forever — a pin that cannot fail is not a pin. ⛔ Neither
+  // control is ever CALLED; they exist to be read by `toString()`.
+  const controlHardcodedExit = () => { process.exit(1); };
+  const controlLiteralAdvisory = () => `  (Exit code 1 — capture it BEFORE any pipe:`;
+  t('NEGATIVE CONTROL: the literal-exit pin can still fail', hardcodesExitCall(controlHardcodedExit));
+  t('NEGATIVE CONTROL: the literal-advisory pin can still fail', spellsALiteralCode(controlLiteralAdvisory));
+
+  t('the refusal class is 3 — the code four sibling gates answer these words with',
+    EXIT_PREREQUISITE_NOT_MET === 3, String(EXIT_PREREQUISITE_NOT_MET));
+  t('the refusal class is distinct from a finding and from a pass',
+    EXIT_PREREQUISITE_NOT_MET !== EXIT_FINDINGS && EXIT_PREREQUISITE_NOT_MET !== 0);
+  t('the advisory names its own code AND the finding code it is distinct from',
+    advisory.includes(`Exit code ${EXIT_PREREQUISITE_NOT_MET}`)
+      && advisory.includes(`a finding's ${EXIT_FINDINGS}`), advisory);
+  // The one stroke Zone 1.2 of this card is about: a stale spelling anywhere in
+  // the text is a false advisory inherited by all 45 importers.
+  t('the advisory carries NO stale spelling of the old code',
+    !/Exit code 1\b/.test(advisory), advisory);
 
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name}${c.detail ? ` -- ${c.detail}` : ''}`);

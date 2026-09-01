@@ -6,6 +6,7 @@ import { resolveUserAuthzGrants, resetPlatformAdminEmailMemo } from '@objectstac
 import { PermissionSetSchema } from '@objectstack/spec/security';
 import { PermissionEvaluator } from './permission-evaluator';
 import { explainAccess, buildContextForUser, type ExplainEngineDeps } from './explain-engine';
+import { RLS_DENY_FILTER } from './rls-compiler';
 import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
 // [#13176] `ExplainDecision.layers` is `ExplainLayer[]` — the z.INPUT shape
@@ -27,6 +28,21 @@ const ADMIN = PermissionSetSchema.parse({
 });
 
 const PRIVATE_SCHEMA = { name: 'leave_request', sharingModel: 'private' };
+
+// The ONE engine double this file declares: a `ql` whose `findOne` resolves the
+// `onBehalfOf` delegator, so D10 resolves instead of failing closed as
+// 'missing' (which is a different report entirely). Shared by every test that
+// needs a resolvable delegator — a second inline copy would be a second double
+// for `check:engine-double-contract` to ratchet, and reusing the one the file
+// already pins is cheaper than growing that ledger.
+const DELEGATOR_QL = {
+  getSchema: () => PRIVATE_SCHEMA,
+  findOne: async (object: string, query?: EngineFindOneQueryInput) => {
+    assertEngineFindOnePredicate(object, query);
+    return { id: 'u_boss' };
+  },
+  find: async () => [],
+};
 
 function makeDeps(overrides: Partial<ExplainEngineDeps> & { sets?: any[]; schema?: any; rls?: any } = {}): ExplainEngineDeps {
   const evaluator = new PermissionEvaluator();
@@ -346,13 +362,7 @@ describe('explainAccess — fls reports partial masking (#9127)', () => {
   it('keeps the D10 delegator suffix when only partial masks apply', async () => {
     const d = await explainAccess(
       makeDeps({
-        // A resolvable delegator — otherwise D10 fails closed as 'missing' and
-        // `delegatorSets` stays null, which is a different report entirely.
-        ql: {
-          getSchema: () => PRIVATE_SCHEMA,
-          findOne: async (object: string, query?: EngineFindOneQueryInput) => { assertEngineFindOnePredicate(object, query); return ({ id: 'u_boss' }); },
-          find: async () => [],
-        },
+        ql: DELEGATOR_QL, // resolvable delegator — otherwise D10 fails closed
         getPartialMaskRules: async () => ({ phone: 'phone' }),
       }),
       {
@@ -1257,5 +1267,193 @@ describe('buildContextForUser bypasses the #11971 grants cache (ruled bypass lis
       if (saved === undefined) delete process.env[TTL_ENV];
       else process.env[TTL_ENV] = saved;
     }
+  });
+});
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// [#13639] A fail-closed RLS denial is reported as a DENIAL.
+//
+// Before this suite's repair, `explain` recognised only its own `__deny_all__`
+// sentinel, so the "no active organization" path — which composes
+// plugin-security's `RLS_DENY_FILTER` (`__rls_deny__:…`) and is guaranteed to
+// return zero rows — was reported with verdict `narrows` and
+// `decision.allowed: TRUE`. Not an imprecise label: an affirmatively wrong
+// answer, handed to the operator asking why a user sees nothing.
+//
+// ⛔ The repair is RECOGNITION ONLY. The sentinels are not merged and the
+// published `readFilter` payload is NOT rewritten — options B and C on #13639
+// are the maintainer's, and the boundary between A and B is PINNED below, not
+// left to a comment.
+// ═══════════════════════════════════════════════════════════════════════════
+describe('explainAccess — fail-closed RLS denial (#13639)', () => {
+  // [ADR-0123 D2] Producers SPREAD the frozen constant rather than returning
+  // it, which is why identity is decided on the sentinel's VALUE. Every
+  // fixture here spreads it too, so a recognition that compared REFERENCES
+  // would pass nothing.
+  const rlsDeny = (): Record<string, unknown> => ({ ...RLS_DENY_FILTER });
+  const readOf = async (deps: ExplainEngineDeps) =>
+    explainAccess(deps, { object: 'leave_request', operation: 'read', context: CTX });
+
+  // `DELEGATOR_QL` resolves the delegator, so BOTH computeRlsFilter calls happen
+  // and `readFilter` is a real two-part composite — the only shape in which the
+  // payload collapse at §9 is observable at all.
+  const composedOf = async (delegatorFilter: Record<string, unknown>) =>
+    explainAccess(
+      makeDeps({
+        ql: DELEGATOR_QL,
+        computeRlsFilter: async (_s: any, _o: string, _op: string, ctx: any) =>
+          ctx?.userId === 'u_boss' ? delegatorFilter : { owner_id: 'u1' },
+      }),
+      { object: 'leave_request', operation: 'read', context: { ...CTX, onBehalfOf: { userId: 'u_boss' } } },
+    );
+
+  // ── the object-level `rls` verdict ──────────────────────────────────────
+
+  it('reports the rls layer as `denies`, not `narrows`', async () => {
+    const rls = (await readOf(makeDeps({ rls: rlsDeny() }))).layers.find((l) => l.layer === 'rls')!;
+    expect(rls.verdict).toBe('denies');
+    expect(rls.detail).toContain('DENY ALL');
+    expect(rls.detail).not.toContain('narrows the row set');
+  });
+
+  // ── ⭐ the assertion that matters most ──────────────────────────────────
+
+  it('⭐ answers decision.allowed = FALSE for a request that cannot return a row', async () => {
+    expect((await readOf(makeDeps({ rls: rlsDeny() }))).allowed).toBe(false);
+  });
+
+  it('decides identity on the sentinel VALUE, not on reference to the frozen constant', async () => {
+    const spread = rlsDeny();
+    expect(spread).not.toBe(RLS_DENY_FILTER); // control: the fixture really is a copy
+    expect(spread).toEqual({ id: RLS_DENY_FILTER.id });
+    expect((await readOf(makeDeps({ rls: spread }))).allowed).toBe(false);
+  });
+
+  // ── ⭐ THE A/B BOUNDARY — the payload is reported AS COMPOSED ───────────
+
+  it('⭐ does NOT rewrite readFilter: the composed __rls_deny__ predicate is published unchanged', async () => {
+    const d = await readOf(makeDeps({ rls: rlsDeny() }));
+    expect(d.readFilter).toEqual({ id: RLS_DENY_FILTER.id });
+    // ⛔ Option B — rewriting the payload for every deployment whose RLS fails
+    // closed — is explicitly NOT what happened here.
+    expect(d.readFilter).not.toEqual({ id: '__deny_all__' });
+  });
+
+  it('⭐ leaves a two-part composite INTACT when the DELEGATOR half denies — no collapse', async () => {
+    const d = await composedOf(rlsDeny());
+    expect(d.allowed).toBe(false);
+    expect(d.layers.find((l) => l.layer === 'rls')!.verdict).toBe('denies');
+    expect(d.readFilter).toEqual({ $and: [{ owner_id: 'u1' }, { id: RLS_DENY_FILTER.id }] });
+  });
+
+  // ── `__deny_all__` is unchanged in EVERY respect, collapse included ─────
+
+  it('leaves the __deny_all__ verdict and decision exactly as they were', async () => {
+    const d = await readOf(makeDeps({ rls: { id: '__deny_all__' } }));
+    expect(d.allowed).toBe(false);
+    const rls = d.layers.find((l) => l.layer === 'rls')!;
+    expect(rls.verdict).toBe('denies');
+    expect(rls.detail).toBe('Row-level security composes to DENY ALL for this principal.');
+    expect(d.readFilter).toEqual({ id: '__deny_all__' });
+  });
+
+  it('⭐ still COLLAPSES a composite to { id: "__deny_all__" } for THAT sentinel', async () => {
+    const d = await composedOf({ id: '__deny_all__' });
+    expect(d.allowed).toBe(false);
+    // The documented payload rewrite survives untouched for the sentinel the
+    // published contract names.
+    expect(d.readFilter).toEqual({ id: '__deny_all__' });
+  });
+
+  // ── the negative ───────────────────────────────────────────────────────
+
+  it('a policy that genuinely NARROWS still narrows, and stays allowed', async () => {
+    const d = await readOf(makeDeps({ rls: { owner_id: 'u1' } }));
+    expect(d.allowed).toBe(true);
+    const rls = d.layers.find((l) => l.layer === 'rls')!;
+    expect(rls.verdict).toBe('narrows');
+    expect(d.readFilter).toEqual({ owner_id: 'u1' });
+  });
+
+  it('an id predicate that is NOT a sentinel is a narrowing, not a denial', async () => {
+    const d = await readOf(makeDeps({ rls: { id: 'r1' } }));
+    expect(d.allowed).toBe(true);
+    expect(d.layers.find((l) => l.layer === 'rls')!.verdict).toBe('narrows');
+  });
+
+  it('no RLS policy at all is still not_applicable and allowed', async () => {
+    const d = await readOf(makeDeps({ rls: null }));
+    expect(d.allowed).toBe(true);
+    expect(d.layers.find((l) => l.layer === 'rls')!.verdict).toBe('not_applicable');
+  });
+
+  // ── record-grained layers: the CORRECTNESS must not move, the prose does ─
+  //
+  // Slice 1 measured that `outcome` and `matchesRecord` are ALREADY right at
+  // both `isDenyAll` call sites today, because `matchesFilterCondition` excludes
+  // every real record against either sentinel. So the two groups below are
+  // asserted for opposite reasons: the correctness assertions are CONTROLS
+  // (green with and without the repair), the `detail` assertions are the ones
+  // the repair moves.
+  describe('record-grained attribution (the isDenyAll call sites)', () => {
+    const REC_CTX = { userId: 'u1', tenantId: 'org1', positions: ['sales_rep', 'everyone'], permissions: [] };
+    const recOf = async (layered: { layer0: any; layer1: any }) =>
+      explainAccess(
+        {
+          ...makeDeps({ rls: null }),
+          computeLayeredRlsFilter: async () => layered,
+          fetchRecord: async () => ({ id: 'r1', organization_id: 'org1', owner_id: 'u1' }),
+          sharingReadFilter: async () => null,
+          listRecordShares: async () => [],
+          canEditRecord: async () => false,
+        } as ExplainEngineDeps,
+        { object: 'leave_request', operation: 'read', context: REC_CTX, recordId: 'r1' },
+      );
+
+    it('layer 0: outcome/matchesRecord/effect do NOT move — only the prose does', async () => {
+      const l0 = (await recOf({ layer0: rlsDeny(), layer1: null })).layers.find((l) => l.layer === 'tenant_isolation')!;
+      // CONTROL — already correct before the repair, must stay correct after.
+      expect(l0.verdict).toBe('denies');
+      expect(l0.record!.outcome).toBe('excluded');
+      expect(l0.record!.matchesRecord).toBe(false);
+      expect(l0.record!.rules?.[0]?.effect).toBe('excludes');
+      expect(l0.record!.rowFilter).toEqual({ id: RLS_DENY_FILTER.id }); // payload untouched here too
+      // THE PROSE — this is what the repair moves.
+      expect(l0.record!.detail).toBe(
+        'No active organization on the context — the tenant wall denies all rows (fail closed).',
+      );
+      expect(l0.record!.detail).not.toContain('does not match');
+    });
+
+    it('layer 1: outcome/matchesRecord/effect do NOT move — only the prose does', async () => {
+      const l1 = (await recOf({ layer0: { organization_id: 'org1' }, layer1: rlsDeny() })).layers.find((l) => l.layer === 'rls')!;
+      // CONTROL — already correct before the repair.
+      expect(l1.record!.outcome).toBe('excluded');
+      expect(l1.record!.matchesRecord).toBe(false);
+      expect(l1.record!.rules?.[0]?.effect).toBe('excludes');
+      expect(l1.record!.rowFilter).toEqual({ id: RLS_DENY_FILTER.id });
+      // THE PROSE.
+      expect(l1.record!.detail).toBe('Business RLS composes to DENY ALL for this principal.');
+      expect(l1.record!.detail).not.toContain('does not satisfy');
+    });
+
+    it('a record the layers genuinely admit is still admitted (negative)', async () => {
+      const d = await recOf({ layer0: { organization_id: 'org1' }, layer1: { owner_id: 'u1' } });
+      const l0 = d.layers.find((l) => l.layer === 'tenant_isolation')!;
+      expect(l0.record!.outcome).toBe('admitted');
+      expect(l0.record!.matchesRecord).toBe(true);
+      expect(d.layers.find((l) => l.layer === 'rls')!.record!.outcome).toBe('admitted');
+    });
+
+    it('the __deny_all__ prose at both call sites is unchanged (control)', async () => {
+      const d = await recOf({ layer0: { id: '__deny_all__' }, layer1: { id: '__deny_all__' } });
+      expect(d.layers.find((l) => l.layer === 'tenant_isolation')!.record!.detail).toBe(
+        'No active organization on the context — the tenant wall denies all rows (fail closed).',
+      );
+      expect(d.layers.find((l) => l.layer === 'rls')!.record!.detail).toBe(
+        'Business RLS composes to DENY ALL for this principal.',
+      );
+    });
   });
 });
