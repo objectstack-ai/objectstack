@@ -20,6 +20,18 @@ rewriting: `formula`'s `matchesFilterCondition` (`v === true ? actual != null : 
 
 Prose only. No accept/reject change: `$exists` was and stays `z.boolean().optional()`,
 and the JSDoc is a comment, not a `.describe()` — the schema, its JSON-Schema
-projection and every generated artifact are byte-identical. It reaches consumers as
-the hover text on `@objectstack/spec`'s shipped `.d.ts`, which is why this is a patch
-rather than no changeset at all.
+projection and all 15 generated artifacts are byte-identical (`check:generated` green
+on a freshly built `dist`).
+
+Where the corrected line does and does not surface, measured rather than assumed:
+
+- **Published source — yes.** This package's `files` array ships `src/**/*.zod.ts`, so
+  `filter.zod.ts` is in the npm tarball and the comment reaches consumers verbatim.
+  That is the surface this patch is for.
+- **Emitted `.d.ts` — no.** Zero of the emitted `.d.ts`/`.d.mts` carry the text; the
+  property's type is inferred from Zod, so no declaration comment is written. It
+  appears in `dist` only inside `.js.map` sourcemaps.
+- **Generated reference page — no.** `content/docs/references/data/filter.mdx` renders
+  its Description column from `prop.description`, i.e. a Zod `.describe()`; `$exists`
+  carries none, so that cell is empty before and after. Regenerating all 230 pages
+  produces no diff. See #13709 for the follow-up on that empty cell.
