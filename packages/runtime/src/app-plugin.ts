@@ -16,6 +16,7 @@ import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
 import { hookBodyRunnerFactory, actionBodyRunnerFactory } from './sandbox/body-runner.js';
 import { GLOBAL_ACTION_OBJECT_KEY } from './action-execution.js';
 import { toBoundaryJobSchedule } from './job-schedule.js';
+import type { JobHandlerContext } from './job-handler-context.js';
 import { countServerTiming, SEMCONV } from '@objectstack/observability';
 import { resolveMetrics } from './observability/observability-service-plugin.js';
 
@@ -936,8 +937,25 @@ export class AppPlugin implements Plugin {
                                 // bare cron string. Same seam, same place, as the
                                 // retryPolicy/timeout threading just below.
                                 toBoundaryJobSchedule(job.schedule, jobName),
+                                // #14094: the handler is given DATA REACH. A job has no
+                                // graph — no node before it, none after — so unlike a
+                                // flow `script` node it cannot be a pure value-returner
+                                // whose I/O the surrounding graph performs. `ql` is the
+                                // same engine handle `defineStack({ onEnable })` gets, and
+                                // it is the only route that survives the ARTIFACT path:
+                                // an artifact carries no `onEnable` and `mergeRuntimeModule`
+                                // merges only `functions`, so the module-scope-global
+                                // escape is never bound on an artifact-served boot.
+                                // Additive — see `JobHandlerContext` for the full argument.
                                 async (jobCtx: any) => {
-                                    await handler({ ...jobCtx, jobId: jobName, bundle: this.bundle });
+                                    const jobContext: JobHandlerContext = {
+                                        ...jobCtx,
+                                        jobId: jobName,
+                                        bundle: this.bundle,
+                                        ql,
+                                        logger: ctx.logger,
+                                    };
+                                    await handler(jobContext);
                                 },
                                 // #3494: thread the authored retryPolicy/timeout to the adapter
                                 (job.retryPolicy || job.timeout)
