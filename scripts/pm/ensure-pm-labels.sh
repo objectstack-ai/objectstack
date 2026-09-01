@@ -282,6 +282,34 @@ done
 # a script would be issuing the review verdict, which is 自查放行.
 gh label create needs:contract-review -R objectstack-ai/objectstack -c d93f0b -d "Clause-② enqueue gate: dispatched below contract-review tier — blocked until the review clears it" 2>/dev/null || true
 
+# needs:pack-smoke — the opt-in pre-merge pack smoke (#14214, derived from the
+# #14000 ruling; maintainer-approved 2026-09-01, director batch #23, 「同意」).
+# Its named consumer is a GATE rather than a query: the job guard in
+# `.github/workflows/pack-smoke-optin.yml`, which runs the packed-install smoke
+# on the PR's merge preview only while this label is on the PR.
+#
+# ⚠️ It is the first label in this file that is NOT part of the PM state
+# machine, and the difference matters to anyone extending it. Every pm:* row
+# above is a state a PM seat writes; this one is written by the PR AUTHOR about
+# their own diff — the ruling's word is 自声明 — and it names a property of the
+# CHANGE, not a position on the board. So it is one-of with nothing, it blocks
+# no dispatch, and no sweep in scripts/pm/ reads it. It is declared here anyway
+# because this file is the repo's only declared home for a label OBJECT, and an
+# undeclared label is the grey / empty-description drift the header describes:
+# auto-created by its first application and unrepairable by any rerun.
+#
+# ⛔ Never auto-applied. Nothing in .github/labeler.yml may grow a rule for it
+# (the workflow header argues why: path-derived application is a different
+# design from the one that was ruled, and it puts the ~45-minute cost back into
+# the default inner loop the ruling kept it out of). Like every other row here,
+# this file only ensures the OBJECT — it never hangs the label on a PR.
+#
+# Main repo only, for the ordinary reason: the workflow that consumes it lives
+# here. Colour 006b75 is deliberately outside every family above — this is not a
+# lane, not a state, and not a routing seam, and borrowing one of their colours
+# would assert a kinship the paragraph above spends its length denying.
+gh label create needs:pack-smoke -R objectstack-ai/objectstack -c 006b75 -d "Opt-in pre-merge pack smoke: self-declared breaking auth/audience change (see CONTRIBUTING.md)" 2>/dev/null || true
+
 # Routing labels exist only on the main backlog repo, and mark SEAM cards only
 # (file-at-destination ruling: pure sibling-repo fixes live in the target repo).
 #

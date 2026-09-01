@@ -363,6 +363,9 @@ Provide both English and Chinese versions:
 - [ ] Naming conventions are followed
 - [ ] JSDoc comments are complete
 - [ ] No unrelated changes included
+- [ ] If the PR changes the auth/audience **defaults** or the **accept/reject behaviour** of
+      the unauthenticated surface, label it `needs:pack-smoke` — that runs the packed-install
+      smoke on the merge preview before you merge, instead of finding out at release time.
 
 ### PR Checklist
 
