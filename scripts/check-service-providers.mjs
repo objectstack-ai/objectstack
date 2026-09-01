@@ -32,15 +32,82 @@
 // be read here (or reported) as "nothing exists".
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 const ROOT = process.cwd();
 const TABLE_FILE = 'packages/spec/src/system/core-services.zod.ts';
 
+/**
+ * The parent directories whose immediate children's MANIFESTS this gate opens.
+ * Hoisted out of `workspacePackageNames` so the declaration below can be held
+ * against it rather than against a second copy of the same list.
+ *
+ * Each element is built with `join` on single-segment pieces deliberately: a
+ * `'packages/plugins'` literal in this module body would be read by
+ * `extractWatchHints` as a declared DIRECTORY population and would put this gate
+ * on every card touching any of the 691 files under it — where this gate opens
+ * only the `package.json` at each child's root. The narrow claim is spelled in
+ * `DECLARED_WATCH_HINTS` instead.
+ */
+const MANIFEST_PARENTS = ['packages', join('packages', 'plugins'), join('packages', 'services')];
+
+/**
+ * The population this gate READS, declared for `scripts/pm/dispatch-gates.mjs`
+ * — spelled as a LITERAL array because the hint extractor reads source TEXT
+ * (`scripts/check-watch-hint-literal.mjs` holds that spelling for every
+ * declarer in the tree).
+ *
+ * ## What was declared before, and why it under-matched
+ *
+ * The only path literal this module body spelled was `TABLE_FILE` — the table
+ * this gate JUDGES. Its other input, the set of workspace package names, is
+ * read by opening `<parent>/<child>/package.json` for each parent above, and
+ * none of those paths existed as a literal: the parents are assembled with
+ * `join` and `'packages'` alone is refused by the extractor as too generic. So
+ * a card renaming a package — the exact change that invalidates a row of the
+ * table — derived no lead to this gate.
+ *
+ * ## Why PATTERNS and not the parent directories
+ *
+ * `'packages/plugins'` as a hint is a claim on the whole subtree, and
+ * `scripts/workspace-enumerator.mjs`'s header carries the measurement that
+ * settles this shape: handing a workspace-wide population to importing gates
+ * priced at +41725 (gate, file) pairs, and its conclusion is that each gate
+ * declares its OWN population in its OWN module body. The manifests are that
+ * own population here — 53 files on this tree rather than the ~5400 the subtree
+ * spelling would claim.
+ */
+const DECLARED_WATCH_HINTS = [
+  'packages/*/package.json',
+  'packages/plugins/*/package.json',
+  'packages/services/*/package.json',
+];
+
+// The declaration held against the read, at every invocation — the pin the
+// idiom asks each declarer to carry from its own side, where the walked root is
+// in scope. Both directions: a parent with no pattern is an UNDECLARED read
+// (the defect being repaired), and a pattern with no parent is a fabricated
+// lead pasted into every card under it. Add a fourth parent above and this
+// throws here rather than going quiet in a dispatch brief.
+{
+  const declaredParents = DECLARED_WATCH_HINTS.map((h) => h.replace(/\/\*\/package\.json$/, ''));
+  const readParents = MANIFEST_PARENTS.map((p) => p.split(sep).join('/'));
+  const missing = readParents.filter((p) => !declaredParents.includes(p));
+  const invented = declaredParents.filter((p) => !readParents.includes(p));
+  if (missing.length || invented.length) {
+    throw new Error(
+      'check-service-providers: DECLARED_WATCH_HINTS no longer matches the directories this gate reads manifests from'
+        + `${missing.length ? ` — undeclared: ${missing.join(', ')}` : ''}`
+        + `${invented.length ? ` — declared but not read: ${invented.join(', ')}` : ''}`
+        + '. Update the declaration, as a LITERAL array of `<parent>/*/package.json` patterns.',
+    );
+  }
+}
+
 /** Every package name declared anywhere in the workspace. */
 function workspacePackageNames() {
   const names = new Set();
-  const roots = ['packages', join('packages', 'plugins'), join('packages', 'services')];
+  const roots = MANIFEST_PARENTS;
   for (const dir of roots) {
     const abs = join(ROOT, dir);
     if (!existsSync(abs)) continue;

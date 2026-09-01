@@ -688,6 +688,24 @@ jobs:
       - name: ROOT_DIR_WATCH_HINTS declarations are literals
         run: pnpm check:watch-hint-literal
 
+      # The other half of the same failure (#13519). The step above holds that a
+      # declaration is still READABLE BY A TEXT SCANNER; this one holds that
+      # what it reads still names something. A family whose declared literals
+      # all reach zero tracked files prints as an ORDINARY SILENCE — byte for
+      # byte the output of a gate that declared nothing — so the derivation and
+      # the gate disagree about whether a population was declared and neither
+      # says so. Measured on the tree this landed against: two families, one of
+      # them a gate that sweeps every workflow file and appeared on no card that
+      # edited one. The rule is per-FAMILY, not per-literal: a gate may spell a
+      # slug or a sentinel path beside a live declaration, and only a whole
+      # declaration that reaches nothing is refused. No allowlist and no gate
+      # names — the stronger rule ("a gate that enumerates a directory must
+      # declare one") was implemented, measured at 86 findings over 114
+      # enumerating gate files, and refused as an allowlist with a verdict
+      # attached. Reads the derivation once over the tracked corpus; ~5s.
+      - name: A declared gate population reaches the tree
+        run: pnpm check:declared-population-live
+
       # PM bare-root worklist self-test (#10840). The step above proves the
       # dispatch derivation still WORKS; this one proves the recorded triage of
       # the gates that derivation structurally cannot see is still true of the
