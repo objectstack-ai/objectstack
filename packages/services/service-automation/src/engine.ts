@@ -185,6 +185,7 @@ const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
 };
 import { runIsUnscopedUserMode, flowTouchesData } from './runtime-identity.js';
 import { isGuardRefusal, refuseNode } from './guard-refusal.js';
+import { readPartialSteps } from './partial-steps.js';
 import { summarizeRun, formatRunSummaryLine } from './run-summary.js';
 // #5660 — the degrade registration reports a FOREIGN failure (a third-party
 // provider factory's text), so it renders it as structured `meta` rather than
@@ -6563,6 +6564,31 @@ export class AutomationEngine implements IAutomationService {
                     durationMs: Date.now() - stepStart,
                     error: { code: 'EXECUTION_ERROR', message: errMsg },
                 });
+
+                // #13803 — a structured container that DIED mid-body still did
+                // whatever its completed iterations did, and those writes are
+                // already in the database. Fold the body steps it carried out
+                // on the throw into the run log, in the same position the
+                // success path splices `childSteps`: right behind the
+                // container's own step, ahead of any `fault` handler's steps.
+                //
+                // Without this the record was lost twice over — the run log
+                // kept no trace of the completed iterations, and the #4354
+                // summary folded over that log reported `acted: 0` for a sweep
+                // that had genuinely written rows. `acted: 0` on a failed run
+                // reads as "nothing happened, safe to re-run", so the summary
+                // was wrong in the one direction that causes double-execution.
+                //
+                // Purely additive to the record: the error is rethrown below
+                // untouched, so which failures route, what `$error` holds and
+                // what the run reports as its error are all unchanged. Every
+                // step folded here carries a `parentNodeId` (set by
+                // `runRegion`'s tagger), so the ADR-0044 runaway guard — which
+                // counts only top-level visits — cannot see them either.
+                const carriedSteps = readPartialSteps(execErr);
+                if (carriedSteps?.length) {
+                    steps.push(...carriedSteps);
+                }
 
                 // #3863 — a guard that THROWS is as un-routable as one that
                 // returns: `UnscopedRunDataAccessError` (ADR-0049/#1888) reports
