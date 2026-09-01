@@ -163,6 +163,17 @@ for (const cell of [MYSQL_CELL, PG_CELL]) {
         await driver?.disconnect().catch(() => {});
       });
 
+      // ── Why the 3 it() blocks below carry an explicit 60_000 budget (#13902) ──
+      // Each constructs a FRESH `new SqlDriver(...)` against this cell's live
+      // server inside their own body — so the live connect cycle, and the
+      // schema-sync DDL and catalog read-back that all but the cheapest of these
+      // drive through it, are paid PER TEST rather than once in a beforeAll.
+      // With no third argument vitest applies its own 5000ms default — a number
+      // nobody chose for that work, and one that reddens unrelated PRs when the
+      // runner is merely a bit slow (#13688 measured exactly this shape: a timeout,
+      // no MySQL error in the logs, on a diff that touched no driver). Sized like
+      // this package's siblings — 60_000 is 7 of its 9 explicit budgets — and NOT
+      // an assertion that these tests are normally anywhere near that slow.
       it('accepts a write the declaration allows — the whole defect, in one assertion', async () => {
         driver = new SqlDriver(c.config());
         for (const t of [T, PARENT]) await driver.execute(`drop table if exists ${t}`).catch(() => {});
@@ -185,7 +196,7 @@ for (const cell of [MYSQL_CELL, PG_CELL]) {
         );
         const rows: any[] = Array.isArray(res) && Array.isArray(res[0]) ? res[0] : (res?.rows ?? res);
         expect(Number(rows[0]?.n ?? rows[0]?.N)).toBe(300);
-      });
+      }, 60_000);
 
       it('reports no varchar drift against a table it just created', async () => {
         driver = new SqlDriver(c.config());
@@ -225,7 +236,7 @@ for (const cell of [MYSQL_CELL, PG_CELL]) {
         // same predicate, which is the whole point of the fix.
         expect(varcharDrift.map((d) => d.column)).not.toContain('bogus_url');
         expect(varcharDrift.map((d) => d.column)).not.toContain('fractional_url');
-      });
+      }, 60_000);
 
       it('still refuses a value past the DECLARED bound — the bound binds, it did not merely move', async () => {
         driver = new SqlDriver(c.config());
@@ -238,7 +249,7 @@ for (const cell of [MYSQL_CELL, PG_CELL]) {
         await expect(
           driver.create(T, { id: 'r2', narrow_phone: 'p'.repeat(300) }),
         ).rejects.toThrow(/too long|ER_DATA_TOO_LONG|22001/i);
-      });
+      }, 60_000);
     });
   });
 }
