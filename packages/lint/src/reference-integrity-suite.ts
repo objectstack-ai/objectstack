@@ -50,6 +50,16 @@
  * because a view's declared sort is its FIRST fetch, the refusal is the whole
  * view failing to load, every time, from an authoring typo made long before.
  *
+ * `validateListViewFieldRefs` completes that pair (#14107): the two members
+ * above judge ONE list-view axis each (`sort`, `searchableFields`), and every
+ * OTHER field-naming position on the same record — `columns`, filter keys,
+ * `grouping`, `rowColor`, `userFilters`, `filterableFields`, `hiddenFields`,
+ * `fieldOrder`, and every binding inside the kanban / calendar / gantt /
+ * timeline / gallery / map / tree blocks — was resolved by nothing at all. It
+ * carries BOTH severities, like `validateFlowTemplatePaths`: a position whose
+ * miss empties or mis-selects the view's data gates, one whose miss drops a
+ * decoration advises.
+ *
  * Rules that check SHAPE rather than reference (view containers, responsive
  * styles, seed replay safety, seed state machines, seed/security posture) stay
  * out — they answer a different question and have their own call sites.
@@ -79,6 +89,7 @@
 import { validateObjectReferences } from './validate-object-references.js';
 import { validateSearchableFields } from './validate-searchable-fields.js';
 import { validateSortableFields } from './validate-sortable-fields.js';
+import { validateListViewFieldRefs } from './validate-list-view-field-refs.js';
 import { validateActionNameRefs } from './validate-action-name-refs.js';
 import { validatePageFieldBindings } from './validate-page-field-bindings.js';
 import { validateChartBindings } from './validate-chart-bindings.js';
@@ -187,6 +198,26 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // both answer `400 INVALID_SORT` — and a view's sort is its FIRST fetch, so
   // the refusal is the whole view, on every load, traced to nothing.
   { name: 'validateSortableFields', runtimeTypes: ['flow', 'view'], run: validateSortableFields },
+  // [#14107] The REST of the same list view's field surface. The two members
+  // above own `sort` and `searchableFields`; every OTHER field-naming position
+  // on a list view — `columns`, filter keys, `grouping`, `rowColor`,
+  // `userFilters`, `filterableFields`, `hiddenFields`, `fieldOrder` and every
+  // binding inside the kanban / calendar / gantt / timeline / gallery / map /
+  // tree blocks — was resolved by nothing, on both `os validate` and `os
+  // build`. Placed directly after its two siblings because the three walk the
+  // identical rungs (an object's `listViews`, a `defineView` aggregate's
+  // `list` / `listViews`, and the two standalone `views[]` shapes the
+  // `PUT /api/v1/meta/view` door carries), so a rung added to one is read
+  // against the other two.
+  //
+  // `runtimeTypes` gains `view` for exactly the #9313 reason its two siblings
+  // did, and the reason is a property of the SNAPSHOT rather than a
+  // convenience: this member resolves only against `stack.objects`, which the
+  // per-write snapshot does carry, so it has no missing-collection
+  // false-positive channel. The standalone list view a Studio tenant or an
+  // MCP/AI author writes goes through that door and no CLI, so a
+  // build-time-only rule would never reach the author who made the typo.
+  { name: 'validateListViewFieldRefs', runtimeTypes: ['flow', 'view'], run: validateListViewFieldRefs },
   { name: 'validateActionNameRefs', run: validateActionNameRefs },
   { name: 'validatePageFieldBindings', run: validatePageFieldBindings },
   { name: 'validateChartBindings', run: validateChartBindings },
