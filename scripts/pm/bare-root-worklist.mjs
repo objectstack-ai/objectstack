@@ -629,20 +629,24 @@ const TRIAGE = new Map([
       + 'also already reaches its own cards through the artifact roster it names file by file',
   }],
   ['check:skill-docs SKILLS_DIR skills', {
-    verdict: 'SPELLABLE-UNDECLARED',
+    verdict: 'DECLARED-NARROWER',
     spelling: 'skill entrypoints',
-    why: 'one named file per child directory plus the root README — 12 of 50 (24%), re-measured '
-      + '2026-08-26. ⚠️ The recorded spelling is 100% PRECISE and deliberately INCOMPLETE: it '
-      + 'reaches 11 of the 12, and the twelfth is skills/README.md, a file this generator WRITES '
-      + 'and which sits outside any skill directory, so no single spelling of this idiom reaches '
-      + 'both. That is the honest record and the reason this row is not declared on the strength '
-      + 'of a precise-looking hint. build-skill-docs.ts:221 readdirSync-es the bare root and '
-      + 'reconciles the listing against DISPLAY in both directions (:227-228), so a new or removed '
-      + 'objectstack-*/SKILL.md moves the verdict and no fixed list can name it; :222 admits a '
-      + 'child only if it CARRIES SKILL.md, which is what the recorded spelling states. ⛔ It is '
-      + 'NOT recorded to match its check-skills-token-ratchet neighbour any more: that gate went '
-      + 'recursive in #12392 and the two now read the SAME root at DIFFERENT scales, 49 files '
-      + 'against 12',
+    why: 'RE-POINTED 2026-09-01 (#13519) from SPELLABLE-UNDECLARED, and the deferral it replaces '
+      + 'is not merely overruled — its own premise stopped holding. That record read: the '
+      + 'population is 12 of 50 (24%), the recorded spelling is 100% PRECISE and deliberately '
+      + 'INCOMPLETE at 11 of the 12, "and the twelfth is skills/README.md, a file this generator '
+      + 'WRITES and which sits outside any skill directory, so no single spelling of this idiom '
+      + 'reaches both". That is a fact about ONE spelling. The gate now declares TWO literals '
+      + 'beside its constants — the recorded spelling plus the root README it writes — reaching '
+      + '12 of 12: 100% precise AND complete. ⛔ The row STAYS in the sweep, which is what this '
+      + 'verdict commits to and not outstanding debt: the declaration is strictly narrower than '
+      + 'the bare word, so the root remains uncovered at 12 of 50 and a card touching the other '
+      + '38 files still derives nothing from it — correctly, because this gate opens none of '
+      + 'them. ⛔ The wholesale spelling was measured and REFUSED on the way here: it names this '
+      + 'gate for 38 files it never reads, which is the REFUSE-WIDE trade this file prices as '
+      + 'the costlier error. ⛔ NOT re-pointed with its check-skills-token-ratchet neighbour '
+      + 'above: that gate walks the same root RECURSIVELY at 49 of 50, where the precise '
+      + 'spelling buys one file of discrimination and its deferral is untouched by this row',
   }],
   ['check:changeset-gate-self-tests PACKAGE_ROOTS packages', {
     verdict: 'SPELLABLE-UNDECLARED',
