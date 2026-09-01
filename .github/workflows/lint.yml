@@ -795,6 +795,26 @@ jobs:
       - name: PM half-state sweeper self-test
         run: pnpm check:pm-half-states
 
+      # Clause-② carrier + declaration checker self-test (#13922 · #12409 ·
+      # #13914). Same family and the same split as the two steps either side:
+      # the LIVE sweep reads a shared board over the API and is report-only, so
+      # only the offline self-test runs here — a clause-② desync on somebody
+      # else's pair is a fact about the board, not about the PR that happens to
+      # run CI next, and failing that PR would punish the wrong actor.
+      #
+      # ⛔ Do not "promote" the live sweep into this step. The script's own
+      # `--pair <pr>` mode is the per-PR predicate, and it is a PRE-ARM tool a
+      # seat runs against its own pair — deliberately not a merge gate, because
+      # a new blocking context over board state is a required-set change and
+      # the required set is the maintainer's.
+      #
+      # The self-test is offline and imports `check-half-states.mjs` for the
+      # label constant, the `prDeliversCard` delivery relation and the shared
+      # PREREQUISITE-NOT-MET exit code — one source for each, so this checker
+      # and H31 cannot come to disagree about which PR delivers which card.
+      - name: Clause-② carrier checker self-test
+        run: pnpm check:pm-clause2-carriers
+
       # Governed-merges audit self-test (#9495) — same family, same split as
       # the half-state sweeper above: the live sweep enumerates the governed
       # merges since a date/ref for the PM round report — report-only by
@@ -1402,6 +1422,58 @@ jobs:
           node scripts/check-system-context-census.mjs --self-test
           node scripts/check-system-context-census.mjs
 
+      # #13548 tenant-audit census. `content/docs/permissions/tenant-audit-census.mdx`
+      # carries the population `SqlDriver.auditMissingTenant` acts on: every
+      # application-surface write call site against a tenancy-enabled object, and
+      # what execution context each one threads.
+      #
+      # ⭐ The reason it is an in-tree artefact at all is the failure it replaces.
+      # That census used to live in a COMMENT on an issue; the issue became
+      # unreachable (404 on three independent channels while its neighbours
+      # answer 200) and took the list with it, while three open cards still named
+      # it as their input and nothing noticed. What survived did so because a
+      # changeset author had happened to quote two of the figures in prose. A
+      # measurement that decides a repair family's severity and a ruling's scope
+      # is not a comment.
+      #
+      # ⚠️ It is a DRIFT gate, deliberately NOT an anchor gate like its `isSystem`
+      # sibling above. The generated region aggregates by (file, verb, object,
+      # tenancy, context posture) and carries no line numbers, so a pure
+      # displacement — an import inserted above a site — cannot move it. That
+      # skips the sibling's whole open defect class: anchors that rot on
+      # displacement, and a repair arm that then misreads displacement as a
+      # population change and asserts it on a security-relevant surface. There is
+      # exactly one repair path here (`node scripts/tenant-audit-census.mjs
+      # --write`), it is mechanical, and it has no case where it must guess.
+      #
+      # It lives in THIS job, next to its sibling, for the same reason that one
+      # does: the job has no paths filter, so the census runs on code-only PRs —
+      # the ones that ADD a write call site. The `--self-test` invocation is what
+      # `check:self-test-wired` requires, and it is the only instrument on this
+      # gate's matching rules; a clean tree cannot tell a working rule from a
+      # weakened one.
+      #
+      # ⭐ THREE commands, not two. The GENERATOR carries a self-test of its own
+      # because its classifiers are published FIGURES rather than findings: the
+      # gate's verdict is "no unplaceable receiver", and the elevation and
+      # tenant-context verdicts are not part of it. Nothing else reads them, so a
+      # clean tree cannot tell a working classifier from a weakened one. Both of
+      # the shapes it pins were measured WRONG on the first edition — a spread
+      # read as a denial of the flag it might carry, and an unreadable options
+      # argument folded into "carries no tenant context" — and six of its
+      # eighteen cases red against that reading.
+      #
+      # Invoked as `node` rather than through a `pnpm check:*` alias: see the
+      # GATE INVOCATION IDIOM note at the top of this file. AST walk over every
+      # tracked non-test source under the two roots plus the object registry, no
+      # spawns; ~8s. ⛔ The source COUNT is deliberately not quoted here: it is
+      # corpus scale, it moves on any file added under those roots, and a comment
+      # nothing checks is exactly where a stale number hides.
+      - name: Tenant-audit census matches the tree
+        run: |
+          node scripts/check-tenant-audit-census.mjs --self-test
+          node scripts/check-tenant-audit-census.mjs
+
       # #12236 one <h1> per doc page. `DocsTitle` renders the frontmatter `title`
       # as the page's <h1> unconditionally (apps/docs/app/[lang]/docs/[[...slug]]/
       # page.tsx), so a body-level `# ` heading compiles to a SECOND one inside
@@ -1810,6 +1882,38 @@ jobs:
       - name: Teaching-corpus lexical anti-drift ratchet
         run: pnpm check:corpus-claim-drift
 
+      # #13678: the third gate over this corpus, and the only one asking an
+      # EXISTENCE question rather than a lexical one. The two steps above ask
+      # whether a forbidden word appears, and whether a spelling stands next to
+      # prose naming a semantic it does not have. This one asks, in both
+      # directions, whether the identifiers the catalog names and the schema
+      # members it enumerates are the same set:
+      #
+      #   Leg 1 (phantom row)  a table row citing an identifier that greps to
+      #                        zero in `packages/**` is a red. Measured: 3 of 6
+      #                        falsehoods in one skill were this class, every one
+      #                        catchable by a single grep of the cited name.
+      #   Leg 2 (missing row)  a section REGISTERED as exhaustive over a schema
+      #                        symbol that does not document every member is a
+      #                        red. Measured on a later flight: 15 of 20.
+      #
+      # Leg 2 is table-driven rather than inferred, and that is a measurement
+      # result, not a preference — auto-binding a doc table to any enum it is a
+      # subset of scored 1 true positive in 3 on this corpus, because deliberate
+      # subsets ("Three action types dispatch headlessly") and semantically mixed
+      # enums are indistinguishable from real gaps without a human. The heuristic
+      # ships as `--suggest`, which cannot fail anything.
+      #
+      # It lives in this job for the reason every other docs guard does
+      # (`check:doc-anchors`, `check:role-word`, `check:corpus-claim-drift`
+      # above): this job carries the whole `check:*` gate family and has no paths
+      # filter. That matters more here than for its neighbours — the gate's two
+      # inputs are `skills/**` and `packages/**`, so a paths filter on either
+      # would let the OTHER side drift a member in or an identifier out without
+      # ever running the check that notices.
+      - name: Published-skills identifier liveness gate (two legs)
+        run: pnpm check:skill-identifier-liveness
+
       # #11671: `os i18n extract --fill=default` fills GAPS only, so revising a
       # source string rewrites `en` and strands the previous source text in every
       # other locale. The bundle stays in sync BY KEY, so `check:i18n` reports OK
@@ -2025,6 +2129,26 @@ jobs:
       # exit status. Static AST over 82 sources; under a second, no build.
       - name: CLI test child-env guard
         run: pnpm check:cli-test-child-env
+
+      # #13940. A version stamp about a PINNED VENDOR is an attestation: it says a
+      # behaviour was MEASURED against the version it names. The same drift has
+      # been swept by hand four times (#10073: 29 stamps, #10188: +3, #11362: +2,
+      # #13940: 95) and the population GREW each round, so the sweep was trailing
+      # a producer rather than converging.
+      # The producer is a sentence that fuses a permanent fact with a LIVE READING
+      # of a value that moves — "the installed better-auth 1.7.1" is not stale
+      # after a bump, it is false. This gate reds on exactly that shape and on
+      # nothing else. It deliberately does NOT hold stamps equal to the resolved
+      # pin: restamping without re-measuring manufactures an attestation nobody
+      # made, which is strictly worse than a stale one, and 130 of today's stamps
+      # are anchored historical facts that must never be rewritten. Drift is
+      # measured and REPORTED, never enforced.
+      # Static text scan over ~5,600 sources; no build, no install (the pin comes
+      # from pnpm-lock.yaml). Runs its own --self-test first: the gate computes
+      # its own population, so a scan that stopped matching would print a
+      # confident green over a tree it never read.
+      - name: Vendor version stamps
+        run: pnpm check:vendor-version-stamps
 
       # #12016. A CLI command id spelled as a string literal OUTSIDE the CLI
       # package has nothing tying it to the command file it names: rename the

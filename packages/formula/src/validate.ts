@@ -541,6 +541,44 @@ export function inferExpressionType(input: ExprInput, schema?: ExprSchemaHint): 
  * advertises to authors (incl. AI). Every entry MUST actually resolve at runtime:
  * either registered in `registerStdLib` or a verified cel-js built-in. Drifting this
  * list ahead of the runtime tells the author to call functions that fault (#1928).
+ *
+ * ## This is a CURATED SUBSET of what the environment resolves — by construction
+ *
+ * The evaluation `Environment` resolves **72** distinct function names. This list
+ * carries 35 of them, and the 37-name gap is NOT staleness. Measured decomposition
+ * (`cel-stdlib-drift.test.ts` re-measures all four numbers on every run):
+ *
+ *   72 registered names
+ *    = 39 callable BARE, as `fn(x)`            -> the only shape this list may carry
+ *    + 33 callable only on a RECEIVER, `x.fn()` -> structurally ineligible
+ *
+ *   39 bare-callable
+ *    = 27 added by `registerStdLib`   -> ALL advertised (one per registration site)
+ *    +  8 cel-js built-ins            -> advertised: has size int string bool double
+ *                                        timestamp duration
+ *    +  4 cel-js built-ins WITHHELD   -> bytes dyn type uint
+ *
+ * **Bare-callability is the membership rule, and it is load-bearing.** Every
+ * consumer spends an entry as a bare call: objectui's Studio predicate editor
+ * inserts a suggestion verbatim as `` `name(` `` (`CelPredicateField.tsx`), and the
+ * runtime drift guard in `cel-engine.test.ts` probes each entry with a bare-call
+ * expression. So the 33 receiver-only names cel-js registers (`s.split(',')`,
+ * `list.map(...)`, `ts.getFullYear()`, `opt.orValue(...)`) can never appear here:
+ * flattening them into this list would autocomplete `split(` into an author's
+ * predicate, which faults `no matching overload`. Widening this list to "every
+ * registered name" is therefore not the safe direction — it is a broken one.
+ *
+ * The 4 withheld bare-callables are CEL's remaining type-conversion/introspection
+ * primitives. They resolve today; they are withheld as an authoring decision (no
+ * measured demand, and `dyn`/`uint`/`bytes` mostly widen the ways an AI author can
+ * emit something unusable), not because they are unavailable. That withholding is
+ * a declared ledger in the drift pin, so adding one is a deliberate edit and a new
+ * cel-js built-in cannot arrive unnoticed.
+ *
+ * ⛔ This list is NOT an oracle for rejecting unknown functions. A gate that
+ * rejects what is absent here would reject 37 names that resolve and evaluate
+ * today. The unknown-function verdict belongs to the engine's own `check()`
+ * (ruling on #13594); `@objectstack/lint` uses that and never reads this list.
  */
 export const CEL_STDLIB_FUNCTIONS: string[] = [
   // Dates (registered stdlib)

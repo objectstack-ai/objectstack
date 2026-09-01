@@ -75,14 +75,16 @@ function Page() {
   //     applied, is the server's real count over the same $filter rather than
   //     the page length. Counting data.length under a cap is how a KPI starts
   //     under-reporting in silence; count 'total' and the cap stays a fetch
-  //     bound instead of a lie about the business.
+  //     bound instead of a lie about the business. That envelope is the ONLY
+  //     shape find() resolves to -- normalizeQueryResult WRAPS a bare array
+  //     response into it -- so there is no array form to test for either.
   React.useEffect(() => {
     let alive = true;
     (async () => {
       if (!adapter || !sel) { setRelated({ projects: 0, invoices: 0, openInvoices: 0, capped: false }); return; }
       const pr = await adapter.find('showcase_project', { $filter: ['account', '=', sel], $top: 500 });
       const iv = await adapter.find('showcase_invoice', { $filter: ['account', '=', sel], $top: 500 });
-      const rows = (res) => (Array.isArray(res) ? res : (res && res.data) || []);
+      const rows = (res) => res?.data ?? [];
       const count = (res, list) => (typeof (res && res.total) === 'number' ? res.total : list.length);
       const projects = rows(pr);
       const invoices = rows(iv);

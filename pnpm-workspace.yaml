@@ -43,9 +43,9 @@ onlyBuiltDependencies:
 # the three zero-consumer pins awaiting a #5835-style ruling
 # (@tootallnate/once, react-router, @sveltejs/kit). (`@better-auth/scim` was
 # the other carve-out while it held the rc; #3653 moved it onto stable with
-# the bound at the major boundary. Its TARGET is exact `1.7.1` by ruling —
-# see its note below — which is about the resolved version, not the selector
-# shape this rule governs.)
+# the bound at the major boundary, and #13715 returned its TARGET to the
+# family's `^` — see its note below. Both are about the resolved version, not
+# the selector shape this rule governs.)
 #   - esbuild: GHSA-gv7w-rqvm-qjhr (high). tsup/tsx/vite pulled 0.27.7 / 0.28.0
 #     (< 0.28.1); force the patched line everywhere.
 #   - form-data: GHSA-hmw2-7cc7-3qxx (high) — CRLF injection via unescaped
@@ -94,12 +94,13 @@ onlyBuiltDependencies:
 #     `managedConnections` catalog (three more conditional models) is
 #     deliberately NOT adopted — maintainer ruling 2026-08-25, no real
 #     customers, no pull.
-#     The TARGET is `1.7.1` EXACT rather than the family's `^1.7.1` — see the
-#     comment at the override line below: `^1.7.1` resolves to 1.7.2, whose
-#     `better-auth`/`@better-auth/core` peers at `^1.7.2` these overrides
-#     would silence rather than satisfy. Floating is its own follow-up card.
+#     The TARGET is the family's `^1.7.2`. It was held at `1.7.1` EXACT while
+#     the family sat on `^1.7.1`; #13715 was the follow-up that ruling named,
+#     and it moved the whole family to `^1.7.2` in step — see the comment at
+#     the override line below.
 #     The rc-era better-call skew is GONE: stable 1.7.1 peers
-#     `better-call@1.4.0` exactly — the one version this lockfile holds — so
+#     `better-call@1.4.0` exactly — measured unchanged on 1.7.2, the version
+#     this lockfile now holds, and still the one better-call copy — so
 #     the scaffold `peerDependencyRules` entries for
 #     `@better-auth/scim>better-call` retired with the pin move (#3653).
 #     Its sibling line is better-auth's own stale `better-sqlite3@^12.0.0`
@@ -165,26 +166,46 @@ overrides:
   # better-auth family — kept on one line (see @better-auth/oauth-provider note).
   # Off the 1.7.0-rc.2 prerelease and onto the stable line (#3002). Bounds sit
   # at the MAJOR boundary, so a future advisory lift moves only the target.
-  'better-auth@<2.0.0': '^1.7.1'
-  '@better-auth/core@<2.0.0': '^1.7.1'
-  # scim is pinned to 1.7.1 EXACTLY, one deliberate step behind the family's
-  # `^1.7.1` — see the @better-auth/scim note above. `^1.7.1` resolves to
-  # 1.7.2, which peers `better-auth`/`@better-auth/core` at `^1.7.2` while the
-  # installed family is 1.7.1; these very overrides would rewrite those peer
-  # ranges down and SILENCE the mismatch rather than satisfy it. Every
-  # instrument of the #3653 migration measured 1.7.1, so the resolution is
-  # held to the measured version (#3653 ruling, 2026-08-27); floating to
-  # 1.7.2+ is its own follow-up with the family moved in step, never a side
-  # effect of a lockfile refresh.
-  '@better-auth/scim@<2.0.0': '1.7.1'
-  '@better-auth/oauth-provider@<2.0.0': '^1.7.1'
-  '@better-auth/sso@<2.0.0': '^1.7.1'
-  '@better-auth/drizzle-adapter@<2.0.0': '^1.7.1'
-  '@better-auth/kysely-adapter@<2.0.0': '^1.7.1'
-  '@better-auth/memory-adapter@<2.0.0': '^1.7.1'
-  '@better-auth/mongo-adapter@<2.0.0': '^1.7.1'
-  '@better-auth/prisma-adapter@<2.0.0': '^1.7.1'
-  '@better-auth/telemetry@<2.0.0': '^1.7.1'
+  'better-auth@<2.0.0': '^1.7.2'
+  '@better-auth/core@<2.0.0': '^1.7.2'
+  # scim carries the family's `^` again — see the @better-auth/scim note
+  # above. It was held at 1.7.1 EXACT, one deliberate step behind `^1.7.1`,
+  # because `^1.7.1` then resolved scim to 1.7.2 while the installed family
+  # was still 1.7.1: scim 1.7.2 peers `better-auth`/`@better-auth/core` at
+  # `^1.7.2`, and these very overrides would have rewritten those peer ranges
+  # down and SILENCED the mismatch rather than satisfy it (#3653 ruling,
+  # 2026-08-27, which named the fix as its own follow-up "with the family
+  # moved in step, never a side effect of a lockfile refresh"). #13715 IS that
+  # follow-up: all eleven members move together in one commit, for the reason
+  # the @better-auth/oauth-provider note gives — one line, or better-auth init
+  # throws and every auth endpoint 500s.
+  # The step is measured gone. `npm view <pkg> dist-tags.latest` reads 1.7.2
+  # for all eleven; the install resolves all eleven to 1.7.2 (one copy each),
+  # so scim's `^1.7.2` peers are SATISFIED by the installed 1.7.2 pair rather
+  # than silenced — the condition the exact hold existed for no longer holds.
+  # `^` rather than a fresh exact pin for two reasons. Structural: the two
+  # sibling standalone plugins, oauth-provider and sso, peer the family in
+  # exactly the same shape (`better-auth`/`@better-auth/core` at `^1.7.2`) and
+  # carry `^`; an exact scim would be the one asymmetric member with no reason
+  # left to state. Security: this pin is also the GHSA-j8v8-g9cx-5qf4 floor,
+  # and a floor that cannot take the next patch is the wrong shape for a
+  # package with that history. Measured, so it is not a preference: `^1.7.2`
+  # and exact `1.7.2` produce byte-identical resolutions today — two
+  # `pnpm install --lockfile-only` runs differ only in the echoed override
+  # string and the echoed importer specifier, in no resolved version and no
+  # peer-resolution suffix — so the shape is chosen on durability, not on a
+  # resolution difference that does not exist.
+  # What stays true: the whole family still moves as ONE line, and a bump that
+  # moves scim alone is still the mistake the ruling named.
+  '@better-auth/scim@<2.0.0': '^1.7.2'
+  '@better-auth/oauth-provider@<2.0.0': '^1.7.2'
+  '@better-auth/sso@<2.0.0': '^1.7.2'
+  '@better-auth/drizzle-adapter@<2.0.0': '^1.7.2'
+  '@better-auth/kysely-adapter@<2.0.0': '^1.7.2'
+  '@better-auth/memory-adapter@<2.0.0': '^1.7.2'
+  '@better-auth/mongo-adapter@<2.0.0': '^1.7.2'
+  '@better-auth/prisma-adapter@<2.0.0': '^1.7.2'
+  '@better-auth/telemetry@<2.0.0': '^1.7.2'
   'uuid@<12.0.0': '^11.1.1'
   'postcss@<9.0.0': '^8.5.10'
   'cookie@<0.8.0': '^0.7.0'

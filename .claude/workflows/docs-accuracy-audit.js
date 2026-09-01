@@ -166,6 +166,7 @@ const ALL_HANDWRITTEN = [
   "content/docs/permissions/sharing-rules.mdx",
   "content/docs/permissions/sso.mdx",
   "content/docs/permissions/system-context.mdx",
+  "content/docs/permissions/tenant-audit-census.mdx",
   "content/docs/plugins/adding-a-metadata-type.mdx",
   "content/docs/plugins/anatomy.mdx",
   "content/docs/plugins/development.mdx",

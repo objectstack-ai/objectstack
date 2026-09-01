@@ -3,7 +3,7 @@
 import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import { bundleRequire } from 'bundle-require';
-import { normalizeStackInput } from '@objectstack/spec';
+import { normalizeStackInput, type ConversionNotice } from '@objectstack/spec';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
 import { computeI18nCoverage, type CoverageIssue } from '../utils/i18n-coverage.js';
@@ -510,6 +510,42 @@ export default class Lint extends Command {
       printStep('Loading configuration...');
     }
 
+    // [#12297] The ADR-0087 D2 conversion notices this command raises.
+    //
+    // ⛔ This is the #3782 PARITY class, NOT the "computed, then dropped"
+    // family (#11643 / #11391 / #11772 / #12047 / #12125). Nothing was computed
+    // and discarded here: `normalizeStackInput` was called with no options
+    // object at all, so no sink existed and the notices were never PRODUCED —
+    // in either face. `os lint` is the third of the three authoring commands
+    // the #4409 registry holds to one bar, and it was the only one telling an
+    // author nothing about a conversion its own load path had just applied.
+    // That is the exact gap `os build` was in before #11772 / PR #12079.
+    //
+    // It bites harder than it reads: a conversion notice is the one advisory
+    // class carrying an EXPIRY — `retiresIn` names the protocol major where the
+    // old shape stops loading — and an author whose only authoring gate is
+    // `os lint` got no signal at all until the conversion retired and their
+    // metadata stopped loading.
+    //
+    // Declared above the `try` so the catch-all exit can read it, under the
+    // maintainer's 2026-08-25 ruling (#11772/#12047, applied to this field by
+    // #12125): every failure exit carries the lists the run has ALREADY
+    // COMPUTED, so the field means the same thing on every exit. The CALL that
+    // fills it stays below, at the step that owns it — a throw in `loadConfig`,
+    // above it, reports `[]` honestly.
+    //
+    // ⛔ NOT FOLDED INTO `issues`. Whether an auto-converted key should become
+    // a `LintIssue` — or, on the sibling commands, whether `warnings` and
+    // `conversions` should become one field — is an open question raised on
+    // #12125, left unsettled by the ruling there and explicitly withheld by
+    // that card's implementer. This change had no authority to settle it, so it
+    // mirrors the shipped sibling shape rather than merging: `issues` keeps
+    // meaning "something to fix", the notice keeps its structured
+    // `conversionId`/`surface`/`from`/`to`/`retiresIn` fields, and the
+    // `total`/`errors`/`warnings` counts keep counting exactly what they
+    // counted before.
+    const conversionNotices: ConversionNotice[] = [];
+
     try {
       const { config, absolutePath } = await loadConfig(configPath);
 
@@ -517,7 +553,22 @@ export default class Lint extends Command {
         printInfo(`Config: ${chalk.white(absolutePath)}`);
       }
 
-      const normalized = normalizeStackInput(config as Record<string, unknown>);
+      // The ADR-0087 D2 conversion layer runs here, inside `normalizeStackInput`
+      // — it always did. Passing the sink is what makes the rewrites SAYABLE.
+      const normalized = normalizeStackInput(config as Record<string, unknown>, {
+        onConversionNotice: (n) => conversionNotices.push(n),
+      });
+      // The human face, mirroring the #11772 repair in `compile.ts` verbatim —
+      // same wording, so an author who runs two of the three commands over one
+      // tree is told the same thing in the same words.
+      if (conversionNotices.length > 0 && !flags.json) {
+        console.log('');
+        for (const n of conversionNotices) {
+          printWarning(
+            `${n.path}: '${n.from}' → '${n.to}' (converted at load; conversion '${n.conversionId}', retires in protocol ${n.retiresIn})`,
+          );
+        }
+      }
       const issues = lintConfig(normalized, { sduiManifest: resolveSduiManifest() });
 
       // ── Package docs (ADR-0046) ── collected src/docs/*.md + inline docs:
@@ -564,6 +615,14 @@ export default class Lint extends Command {
           ...(hiddenPlatform > 0 ? { hiddenPlatform } : {}),
           ...(score ? { score: score.score, grade: score.grade } : {}),
           issues,
+          // [#12297] The notices computed at `normalizeStackInput` above. Its
+          // own key, unconditionally present — the same `conversions` key
+          // `os validate --json` and `os build --json` publish, carrying the
+          // same structured notice objects, so one consumer reads all three
+          // authoring commands the same way. `[]` when nothing converted, never
+          // absent: a machine consumer keying off presence must not have to
+          // distinguish "did not convert" from "this command does not tell me".
+          conversions: conversionNotices,
           duration: timer.elapsed(),
         }, errors.length > 0 ? 1 : 0);
         return;
@@ -651,7 +710,16 @@ export default class Lint extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) {
-        await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
+        // [#12297] Whatever the run had reached before the throw, under the
+        // same 2026-08-25 ruling: `[]` for a throw in `loadConfig` — the
+        // normalize step never ran — and the notices in hand for any later one.
+        // Wiring the producer without this exit would ship a fresh instance of
+        // the #12125 defect one command over, on the day it was closed.
+        await emitJson(
+          { error: error.message, ...errorCodeFields(error), conversions: conversionNotices },
+          0,
+          { compact: true },
+        );
         process.exit(1);
       }
       console.log('');

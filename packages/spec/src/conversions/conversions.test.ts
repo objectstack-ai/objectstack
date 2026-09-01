@@ -1379,4 +1379,120 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(entry!.toMajor).toBe(17);
     });
   });
+
+  /**
+   * `field-reference-to-alias` (#13700 — ui#6837 half 1).
+   *
+   * The fixture pair pins before → after; what needs its own cover is the
+   * SPLIT this entry lives on: the authoring surface keeps REJECTING
+   * `reference_to` by name (the schema pin below), while the stored/migrate
+   * paths — the only paths that meet data written around the Zod gate —
+   * canonicalize it. Every conversion case here therefore runs
+   * `includeRetired` (the stored posture); the one case without it pins that
+   * the load seam does NOT quietly accept the dialect.
+   */
+  describe('field-reference-to-alias (#13700 — the stored `reference_to` dialect canonicalizes)', () => {
+    const stackWith = (fields: Record<string, unknown>) => ({
+      objects: [{ name: 'crm_contact', label: 'Contact', fields }],
+    });
+    const fieldsOf = (stack: Record<string, unknown>) =>
+      (stack.objects as Array<{ fields: Record<string, Record<string, unknown>> }>)[0]!.fields;
+    const convert = (stack: Record<string, unknown>, notices?: ConversionNotice[]) =>
+      applyConversions(stack, { includeRetired: true, onNotice: notices ? (n) => notices.push(n) : undefined });
+
+    it('renames the dialect key on a lookup field (stored posture)', () => {
+      const notices: ConversionNotice[] = [];
+      const out = convert(
+        stackWith({ company_id: { type: 'lookup', label: 'Company', reference_to: 'crm_company' } }),
+        notices,
+      );
+      expect(fieldsOf(out).company_id).toEqual({ type: 'lookup', label: 'Company', reference: 'crm_company' });
+      expect(fieldsOf(out).company_id).not.toHaveProperty('reference_to');
+      expect(notices.filter((n) => n.conversionId === 'field-reference-to-alias')).toHaveLength(1);
+    });
+
+    it('emits a notice that names the surface, the site and the graduation', () => {
+      const notices: ConversionNotice[] = [];
+      convert(stackWith({ company_id: { type: 'lookup', reference_to: 'crm_company' } }), notices);
+      expect(notices).toHaveLength(1);
+      expect(notices[0]).toMatchObject({
+        conversionId: 'field-reference-to-alias',
+        surface: 'field.reference_to',
+        from: 'reference_to',
+        to: 'reference',
+        path: 'objects[0].fields.company_id.reference',
+        toMajor: 18,
+        retiresIn: 19,
+      });
+    });
+
+    it('keeps a `reference_to` that DISAGREES with an existing `reference` (both survive)', () => {
+      // The house precedence `renameKey` encodes since #4923: two different
+      // targets are the author's to reconcile — no rewrite, no notice.
+      const before = stackWith({
+        parent_id: { type: 'lookup', reference: 'crm_account', reference_to: 'crm_branch' },
+      });
+      const notices: ConversionNotice[] = [];
+      const out = convert(structuredClone(before), notices);
+      expect(out).toEqual(before);
+      expect(notices).toHaveLength(0);
+    });
+
+    it('is idempotent — the canonical shape is not a match', () => {
+      const before = stackWith({ company_id: { type: 'lookup', reference: 'crm_company' } });
+      const out = applyConversions(before, { includeRetired: true });
+      expect(out).toBe(before);
+    });
+
+    it('does NOT run on the plain load posture — the authoring surface keeps its rejection', () => {
+      // `retiredFromLoadPath`: without `includeRetired` (the
+      // `normalizeStackInput` posture) the dialect is untouched here, so the
+      // schema's named rejection stays the ONLY authoring-surface answer —
+      // accepting it quietly at load would widen the authoring surface, which
+      // is exactly what #11567/#13222 spent their refusal doors closing.
+      const before = stackWith({ company_id: { type: 'lookup', reference_to: 'crm_company' } });
+      const notices: ConversionNotice[] = [];
+      const out = applyConversions(structuredClone(before), { onNotice: (n) => notices.push(n) });
+      expect(out).toEqual(before);
+      expect(notices).toHaveLength(0);
+    });
+
+    it('reaches a STORED object row, so data at rest canonicalizes on rehydration', () => {
+      // `applyConversionsToStoredItem` wraps the row as `{ objects: [row] }`
+      // (#3903) and pins `includeRetired` — the serve-face guarantee ui#6837
+      // half 2 waits on lives on this seam.
+      const notices: ConversionNotice[] = [];
+      const row = {
+        name: 'crm_contact',
+        label: 'Contact',
+        fields: { company_id: { type: 'lookup', label: 'Company', reference_to: 'crm_company' } },
+      };
+      const out = applyConversionsToStoredItem('object', row, { onNotice: (n) => notices.push(n) });
+      expect(out.fields.company_id).toEqual({ type: 'lookup', label: 'Company', reference: 'crm_company' });
+      expect(notices.map((n) => n.conversionId)).toEqual(['field-reference-to-alias']);
+    });
+
+    /**
+     * The premise pin: this conversion is only correct while `FieldSchema`
+     * declares exactly one relationship spelling and refuses the dialect BY
+     * NAME. If the alias ever becomes a declared key, the entry above turns
+     * from history-replay into a silent overwrite of live data — this is the
+     * test that fails first.
+     */
+    it('the canonical field schema declares `reference` and rejects `reference_to` with the rename', async () => {
+      const { FieldSchema } = await import('../data/field.zod.js');
+      expect(
+        FieldSchema.safeParse({ name: 'company_id', type: 'lookup', reference: 'crm_company' }).success,
+      ).toBe(true);
+
+      const rejected = FieldSchema.safeParse({ name: 'company_id', type: 'lookup', reference_to: 'crm_company' });
+      expect(rejected.success).toBe(false);
+      const issue = rejected.error!.issues.find((i) => i.code === 'unrecognized_keys');
+      expect(issue).toBeDefined();
+      expect(issue!.message).toContain('`reference_to`');
+      // The rename the conversion performs, said out loud to the author who is
+      // typing the key right now.
+      expect(issue!.message).toContain('`reference`');
+    });
+  });
 });

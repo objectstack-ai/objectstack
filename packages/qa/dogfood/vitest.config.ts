@@ -15,6 +15,29 @@
 //
 // `isolated` keeps vitest defaults (fresh fork registry per file) for
 // everything else — fixture stacks, custom security/plugins, env-flag files.
+//
+// ── #13517: this suite asks the SchemaRegistry for quiet, DECLARATIVELY ─────
+//
+// Measured on this suite (one full run, `origin/main` eb649cb8bc): 66,976
+// lines on the run's stdout, 39,738 of them `[Registry] …` — 94.9% of
+// everything this suite writes through `console`. They are per-item
+// registration lines (`Registered object/namespace/action/view/…`), emitted
+// once per registered item per app boot, and this suite boots real example
+// apps ~130 times.
+//
+// `OS_REGISTRY_LOG` is `@objectstack/objectql`'s OWN published seam for that
+// verbosity (`SchemaRegistryOptions.logLevel` / `REGISTRY_LOG_LEVELS`,
+// registry.ts) — at `warn` the registry's private `log()` returns before
+// writing. What it does NOT silence is the diagnostics: the ADR-0005
+// `[Registry] Collision` lines go through a bare `console.warn` that the
+// level never gates, so a real shadowing still speaks here.
+//
+// ⛔ Two things this deliberately is NOT. It does not move the engine's
+// SHIPPED default (still `'info'`, unchanged for every production reader),
+// and it does not make library code sniff `process.env.VITEST` — a library
+// that behaves differently under a test runner would make every log reading
+// in tests a reading of something other than production. The request lives
+// HERE, in the harness, where the test author can see it.
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 
@@ -62,6 +85,11 @@ export default defineConfig({
           // vitest 4.1.10). Mechanism: examples/app-showcase/vitest.config.ts.
           // Enforced by scripts/check-console-intercept-disarm.mjs.
           disableConsoleIntercept: true,
+          // #13517: quiet the registry's per-item registration chatter — the
+          // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
+          // default. Header docblock carries the measurement and the rationale.
+          // PER PROJECT for the same measured reason as the line above.
+          env: { OS_REGISTRY_LOG: 'warn' },
           name: 'shared-showcase',
           include: SHARED_SHOWCASE,
           isolate: false,
@@ -74,6 +102,11 @@ export default defineConfig({
           // vitest 4.1.10). Mechanism: examples/app-showcase/vitest.config.ts.
           // Enforced by scripts/check-console-intercept-disarm.mjs.
           disableConsoleIntercept: true,
+          // #13517: quiet the registry's per-item registration chatter — the
+          // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
+          // default. Header docblock carries the measurement and the rationale.
+          // PER PROJECT for the same measured reason as the line above.
+          env: { OS_REGISTRY_LOG: 'warn' },
           name: 'isolated',
           include: ['test/**/*.test.ts'],
           exclude: SHARED_SHOWCASE,

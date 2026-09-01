@@ -634,8 +634,21 @@ export const GRANT_STANDING_KEYS = [
  *    to say so: `resolveAuthzContext` derived `platform_admin` from the name
  *    alone and read no flag. It now drops a DEACTIVATED set before any
  *    derivation, so `active: false` on `admin_full_access` un-makes every
- *    platform admin at once — the same end state as renaming or deleting the
- *    row, reached by a payload that touches neither. Enforcing the flag without
+ *    GRANT-anchored platform admin at once — the same end state as renaming or
+ *    deleting the row, reached by a payload that touches neither. ⚠️ Not
+ *    "every platform admin": since the #11663 re-anchor (L2) standing has a
+ *    SECOND anchor this write cannot reach — a config-anchored administrator
+ *    (a declared `OS_PLATFORM_OWNER_EMAIL` address on a VERIFIED `sys_user`
+ *    row) is derived at `resolve-authz-context.ts` §6b-config without
+ *    consulting the set row or its `active` flag at all, and carries the
+ *    shipped `ADMIN_FULL_ACCESS_CAPABILITIES` envelope rather than the stored
+ *    set's. That is deliberately NOT a reason to drop `active` from this
+ *    list: the write can still empty the GRANT anchor, which on every
+ *    deployment that has declared no administrator emails is the whole
+ *    population. Listing it is an over-approximation in the SAFE direction —
+ *    it can cost an enumeration on a write that turns out to change no count,
+ *    never the reverse — and taking it out would be a behaviour change, not a
+ *    comment fix. Enforcing the flag without
  *    listing it here would have left exactly one unguarded route to an
  *    installation-wide lockout: the action is offered on every row with no
  *    visibility or condition guard, the seeders deliberately never reconcile
@@ -645,13 +658,16 @@ export const GRANT_STANDING_KEYS = [
  * Everything else a permission-set write touches (`label`, `description`, the
  * four permission JSON blobs, provenance) is still invisible to "who is an
  * administrator" — `resolveAuthzContext` derives `platform_admin` from the NAME
- * of an ACTIVE set, never from the capabilities it carries — so those writes
- * still cost this guard no reads at all. Adding `active` does not walk that
- * back: the projection is FACETS ONLY and deliberately never re-flips a
- * record's on/off switch (`permission-set-projection.ts`, #4669), so every
- * projection pass, every `os meta resync` and every ordinary Setup edit still
- * misses this list entirely. What now pays for an enumeration is the write that
- * actually toggles the switch — which is the write this list exists to judge.
+ * of an ACTIVE set or, since the #11663 re-anchor (L2), from the
+ * deployment-config anchor, and from the capabilities of neither (the config
+ * arm's envelope is the shipped `ADMIN_FULL_ACCESS_CAPABILITIES` declaration,
+ * not the stored row) — so those writes still cost this guard no reads at all.
+ * Adding `active` does not walk that back: the projection is FACETS ONLY and
+ * deliberately never re-flips a record's on/off switch
+ * (`permission-set-projection.ts`, #4669), so every projection pass, every
+ * `os meta resync` and every ordinary Setup edit still misses this list
+ * entirely. What now pays for an enumeration is the write that actually
+ * toggles the switch — which is the write this list exists to judge.
  *
  * `id` is deliberately NOT here even though the enumeration reads it. On this
  * engine `data.id` on an update ADDRESSES the row (it is what
@@ -661,9 +677,12 @@ export const GRANT_STANDING_KEYS = [
  *
  * `sys_position` gets no analogous list because it has no route into this
  * enumeration to guard: platform-admin standing is read from UNSCOPED
- * `sys_user_permission_set` grants only (a position-bound `admin_full_access`
- * never conferred it, in the resolver or here), and org-administrator standing
- * is read from `sys_member.role`. Deactivating a position cannot empty either.
+ * `sys_user_permission_set` grants and from the deployment-config anchor (a
+ * declared `OS_PLATFORM_OWNER_EMAIL` address on a VERIFIED `sys_user` row,
+ * which `USER_STANDING_KEYS` below guards) — a position-bound
+ * `admin_full_access` reaches neither, in the resolver or here — and
+ * org-administrator standing is read from `sys_member.role`. Deactivating a
+ * position cannot empty any of them.
  */
 export const PERMISSION_SET_STANDING_KEYS = ['name', 'active'] as const;
 

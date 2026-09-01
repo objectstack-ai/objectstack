@@ -56,7 +56,7 @@ patterns.
 Agent  →  Skill  →  Tool
   │         │         │
   │         │         └─ Atomic operation (query, action, flow, API call)
-  │         └─ Capability bundle with instructions & trigger phrases
+  │         └─ Capability bundle with instructions & trigger conditions
   └─ Autonomous actor with role, instructions, and guardrails
 ```
 
@@ -112,24 +112,23 @@ its surface-compatible skills' tools** — there is no global fall-through
 
 The built-in skills and their affinities:
 
-| Skill | `surface` | Owns | Edition |
-|---|---|---|---|
-| `schema_reader` | `both` | `list_objects`, `describe_object`, `query_data` | OSS |
-| `data_explorer` | `ask` | `query_records`, `get_record`, `aggregate_data`, `visualize_data` | OSS |
-| `actions_executor` | `ask` | `action_*` (the business actions an object exposes) | OSS |
-| `metadata_authoring` + `solution_design` | `build` | metadata draft / verify / publish + blueprint propose / apply | **cloud only** |
+| Skill | `surface` | Owns |
+|---|---|---|
+| `schema_reader` | `both` | `list_objects`, `describe_object`, `query_data` |
+| `data_explorer` | `ask` | `query_records`, `get_record`, `aggregate_data`, `visualize_data` |
+| `actions_executor` | `ask` | `action_*` (the business actions an object exposes) |
+| `metadata_authoring` + `solution_design` | `build` | metadata draft / verify / publish + blueprint propose / apply |
 
 To grant data exploration to your own (platform-internal) agent, add
 `data_explorer` / `schema_reader` to its `skills[]`; deactivating a skill
 (`active: false`) revokes that capability for every agent that references it.
 
-> **`surface:'build'` skills are inert on OSS — by design, not a bug.** The open
-> single-env framework ships only the `ask` agent; `metadata_authoring` /
-> `solution_design` (and any third-party `surface:'build'` skill) are supplied by
-> the cloud AI Studio plugin and simply do not resolve in OSS. A `build`-intent
-> turn on OSS degrades gracefully ("authoring lives in the cloud Build assistant")
-> instead of dead-ending — this is intentional tiering. Do not assume authoring
-> tools resolve in the open framework.
+> **All four are cloud-runtime skills — none resolves on OSS.** The open
+> framework ships *no* in-product agent (there is no `service-ai` package), so
+> `surface` / `tools` / `triggerConditions` are authored for cloud and inert.
+> What a skill DOES serve on the open edition is its `instructions`, projected
+> onto the MCP `prompts` primitive by `@objectstack/mcp`: a skill with blank
+> `instructions`, or `active: false`, is not listed as a prompt at all.
 
 > **`visualize_data`:** the only built-in tool that draws a chart —
 > it aggregates an object and emits an inline `data-chart` part. Auto-registered
@@ -165,15 +164,15 @@ To grant data exploration to your own (platform-internal) agent, add
 
 | Property | Purpose |
 |:---------|:--------|
-| `skills` | Array of skill names — **primary capability model** |
-| `tools` | Direct tool references — legacy fallback |
+| `skills` | Array of skill names — **the** capability model (ADR-0064) |
+| ~~`tools`~~ | REMOVED in protocol 17 — the inline slot resolved names against the *full* registry with no surface check. A parse error now; move each reference into a skill |
 | `surface` | `'ask' \| 'build'` — the product surface this agent is (default `'ask'`) |
 | `model` | LLM model configuration — `provider`, `model`, `temperature`, `maxTokens`, `topP` |
 | ~~`knowledge`~~ | REMOVED in protocol 17 — declaring sources/indexes on an agent never scoped retrieval (`search_knowledge` takes `sourceIds` from the LLM's tool-call arguments). Restrict at the knowledge-service/source level; describe intended grounding in `instructions` |
-| `guardrails` | `maxTokensPerInvocation`, `maxExecutionTimeSec`, `blockedTopics` |
-| `structuredOutput` | Output format (JSON schema, regex, etc.) |
+| `guardrails` | `maxTokensPerInvocation`, `maxExecutionTimeSec`, `blockedTopics` — declared only |
+| `structuredOutput` | Output format (JSON schema, regex, etc.) — declared only |
 | `planning` | Autonomous reasoning — `maxIterations` (default 10) |
-| `memory` | `longTerm` persistence + `reflectionInterval` |
+| `memory` | `longTerm` persistence + `reflectionInterval` — declared only |
 | `permissions` | Permission-set capabilities required to use the agent |
 | `active` | Enable/disable the agent |
 
@@ -206,10 +205,10 @@ export default defineAgent({
     model: 'gpt-4o',
     temperature: 0.3,
   },
-  guardrails: {
-    blockedTopics: ['internal_pricing', 'employee_data'],   // forbidden topics / action names
-    maxTokensPerInvocation: 8000,                            // token budget per invocation
-    maxExecutionTimeSec: 60,                                 // wall-clock cap per invocation
+  guardrails: {                  // declared only — nothing reads these yet
+    blockedTopics: ['internal_pricing', 'employee_data'],
+    maxTokensPerInvocation: 8000,
+    maxExecutionTimeSec: 60,
   },
 });
 ```
@@ -236,11 +235,10 @@ trigger conditions.
 | `surface` | `'ask' \| 'build' \| 'both'` — agent surface affinity (default `'ask'`; see above) |
 | `description` | What the skill does — helps the agent decide when to use it |
 | `instructions` | LLM prompt guidance specific to this skill's context |
-| `triggerPhrases` | Natural language phrases that activate the skill |
 | `triggerConditions` | Programmatic activation rules |
 | `active` | Is the skill enabled (default: `true`) |
 
-> A skill has **no `permissions` key** — it was removed in 16.x. Skill invocation
+> A skill has **no `permissions` key** — removed in 17.0.0. Skill invocation
 > was never gated by it (the registry reads only `active` / `triggerConditions` /
 > `tools`), and a security-shaped field that enforces nothing is worse than no
 > field at all. Gate access at the **agent** instead — `access` / `permissions` on
@@ -326,8 +324,8 @@ export default defineTool({
 To gate what a tool can do, gate the underlying action
 (`action.requiredPermissions`, ADR-0066) or the objects it touches; to withdraw
 a tool, remove it from the skills/agents that reference it. Categorization, if
-you need it, belongs on the action side (`action.ai.category` — a live,
-enforced surface).
+you need it, belongs on the action side (`action.ai.category` — live, but
+listing-only: carried onto the tool, never sent to the model).
 
 > **Tool metadata is a read-only projection — not an execution entry point.**
 > `ToolSchema` has no `handler` / `implementation` field, and no framework
@@ -336,21 +334,14 @@ enforced surface).
 > tool metadata is a one-way projection for Studio / discovery. Do not expect a
 > hand-authored tool to run in the open edition.
 
-### Inline Agent `tools[]` (legacy)
-
-Entries in an agent's inline `tools[]` array are a **different, legacy shape**
-(`AIToolSchema`): `{ type: 'action' | 'flow' | 'query' | 'vector_search',
-name, description? }` — references to existing actions / flows / queries, not
-tool definitions. Prefer skills + first-class tool names.
-
-### Auto-Exposed Actions
+### Actions as AI Tools — opt-in
 
 > **Cloud / EE runtime.** `registerActionsAsTools()`, `AIServicePlugin`, and
 > the HITL approval queue below ship in `@objectstack/service-ai` — the closed
 > cloud / Enterprise runtime, not an open package. On the open edition, expose
 > actions to your own AI via `@objectstack/mcp` instead.
 
-You usually **don't author tool definitions by hand** for action invocation. Every `Action` you attach to an object via `defineObject({ actions: [...] })` is auto-exposed as a tool named `action_<actionName>` by `registerActionsAsTools()` (invoked from `AIServicePlugin`).
+You usually **don't author tool definitions by hand** for action invocation. An `Action` you attach to an object via `defineObject({ actions: [...] })` becomes a tool named `action_<actionName>` **only when it opts in** — `ai.exposed: true` (default `false`) plus an `ai.description` of ≥ 40 chars, refused by the parse without it (ADR-0011). `registerActionsAsTools()` (from `AIServicePlugin`) walks the opted-in ones; exposure is never automatic, and there is no opt-out key.
 
 Three action types dispatch headlessly:
 
@@ -360,10 +351,9 @@ Three action types dispatch headlessly:
 | `api` | HTTP call to `action.target` (`fetch`-based by default) | `AIServicePlugin({ apiActionBaseUrl, apiActionHeaders })` or custom `apiClient` |
 | `flow` | `IAutomationService.execute(target, { triggerData })` | `automation` service registered with the kernel |
 
-**Skipped automatically:**
+**Skipped even when opted in:**
 - UI-only types (`url`, `modal`, `form`).
-- Dangerous variants (`confirmText` set, `mode: 'delete'`, `variant: 'danger'`) — **unless** the plugin is started with `enableActionApproval: true`, in which case they route through the HITL approval queue (see below).
-- Owner opt-outs (`aiExposed: false`).
+- Dangerous variants — the declared `mode: 'delete'` / `variant: 'danger'` only (`confirmText` is dialog copy, *not* a destructive signal; `ai.requiresConfirmation` overrides either way) — **unless** the plugin is started with `enableActionApproval: true`, in which case they route through the HITL approval queue (see below).
 
 **`type:'api'` body assembly** (last wins): user params → `recordIdParam` (using `recordIdField`, default `'id'`) → `bodyExtra`. `bodyShape: { wrap: 'data' }` nests user params under `data` while keeping `recordIdParam` flat.
 
@@ -537,10 +527,10 @@ On validation failure the runtime retries by default
    more. Be specific about what the agent should and should not do.
 2. **Too many tools per skill.** Keep skills focused (3–8 tools). If a skill
    has 15+ tools, split it.
-3. **Missing guardrails and approval gates.** Define `blockedTopics` (plus the
-   token / time budgets) in agent `guardrails`; for destructive operations put
-   a human in the loop with a gate that is **actually enforced** —
-   `enableActionApproval: true` (HITL queue, cloud) for auto-exposed actions,
+3. **Mistaking `guardrails` for a gate.** `guardrails` / `memory` /
+   `structuredOutput` are declared only — no runtime reads them, and real
+   limits come from the quota service. For a gate that is **enforced**, use
+   `enableActionApproval: true` (HITL queue, cloud) for AI-exposed actions,
    `ai.requiresConfirmation` on the **action**, or `approval: 'always'` on an
    MCP tool binding. AI metadata edits are already gated: they land as drafts a
    human must publish (ADR-0033).
@@ -550,8 +540,8 @@ On validation failure the runtime retries by default
    There is no `requireApprovalFor` field.
 4. **Ignoring tool descriptions.** The LLM uses tool `description` to decide
    when to call it. Poor descriptions = wrong tool selection.
-5. **Not testing trigger phrases.** Ambiguous trigger phrases cause skill
-   conflicts. Test with edge-case inputs.
+5. **Expecting a phrase to activate a skill.** Nothing matches phrases; write
+   routing as `triggerConditions` and intent in `description`/`instructions`.
 6. **Indexing everything.** A knowledge source without a `where` filter and
    curated `contentFields` fills the index with drafts and boilerplate that
    pollute retrieval. Source hygiene is the metadata's job; relevance tuning
@@ -565,7 +555,7 @@ Reference layout for a scaffolded app:
 
 | Layer | File | Pattern |
 |:--|:--|:--|
-| Reusable skill | `src/skills/lead-qualification.skill.ts` | `defineSkill` — trigger phrases + trigger conditions + bounded toolset; pick a `surface` |
+| Reusable skill | `src/skills/lead-qualification.skill.ts` | `defineSkill` — `instructions` + trigger conditions + bounded toolset; pick a `surface` |
 | Tool metadata | `src/tools/query-leads.tool.ts` | `defineTool` — JSON-Schema `parameters`; a discovery projection, not an executor (see caveat above) |
 | Knowledge source | `src/knowledge/sales-kb.ts` | `KnowledgeSourceSchema` metadata, registered at runtime via `IKnowledgeService.registerSource()` |
 | Central registration | `defineStack({ skills: [...], tools: [...] })` | `agents` / `tools` / `skills` are the only AI stack collections — knowledge sources have none; agents are platform-supplied |

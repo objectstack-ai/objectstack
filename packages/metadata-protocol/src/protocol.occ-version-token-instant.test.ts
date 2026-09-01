@@ -49,6 +49,23 @@
  *      prose version of this claim was believed by three readers while
  *      `If-Match: ""` had already flipped from accept to 409.
  *
+ * ## [#13576 amendment, 决裁批 #20 ①, 2026-08-31] ONE deliberate exception
+ *
+ * Invariant 5 now has exactly one carved-out exception, by maintainer ruling
+ * rather than by drift: the quoted-empty RFC-7232 entity-tag `""` — which this
+ * file's own tests below USED to pin as "still opts out" — is refused
+ * `400 VALIDATION_FAILED` at ingress instead. It was always the one token
+ * shape that opted OUT of the guard rather than failing it (unlike a
+ * garbage-but-nonempty token, which still fails toward 409); the ruling's
+ * reasoning is on {@link MalformedVersionTokenError}'s class doc in
+ * `protocol.ts`. Every OTHER pair this file pins is UNCHANGED — including
+ * `''`, whitespace-only, and the whitespace-*inside*-quotes shape `'"  "'`,
+ * none of which are the empty-tag shape and none of which this ruling
+ * touches. Full pin coverage for the new behaviour (the four-way pin set,
+ * exact message text, ablation) lives in
+ * `protocol.occ-empty-etag-rejected.test.ts`; this file keeps only the narrow
+ * regression pins for the invariant it is about, updated to match.
+ *
  * ## What is deliberately NOT claimed here
  *
  * That the driver hands this seam a `Date` on Postgres. That is a fact about
@@ -371,25 +388,36 @@ describe('[#13382] the change cannot refuse a token that was accepted before', (
         expect(await guardedPatch(new Date(INSTANT), '   ')).toMatchObject({ accepted: true });
     });
 
-    it('an EMPTY If-Match entity-tag — a bare pair of quotes — still opts out', async () => {
+    it('[#13576] an EMPTY If-Match entity-tag — a bare pair of quotes — is now REFUSED, not opted out', async () => {
         // `If-Match: ""` is empty only AFTER the RFC-7232 quotes come off, so the
         // emptiness test has to run on the stripped token and not just the raw
-        // one. This is the shipped behaviour, not a new one: the pre-fix seam
-        // returned the empty STRING here and every caller short-circuited on its
-        // falsiness. Wrapping the result in an object made it truthy and turned
-        // this token from "skip the check" into a 409 — an accept-to-refuse flip
-        // on a live API, which is exactly what the widening guarantee forbids.
-        expect(await guardedPatch(new Date(INSTANT), '""')).toMatchObject({ accepted: true });
-        expect(await guardedPatch(ISO, '""')).toMatchObject({ accepted: true });
+        // one — `normaliseVersionToken` itself still reduces it to null,
+        // unchanged since #13382 (see that function's own doc). What changed is
+        // what the CALLER does with that null: `assertVersionTokenNotMalformed`
+        // now distinguishes "caller sent nothing" (`''`, unquoted — still opts
+        // out, pinned two tests up) from "caller sent a token that names
+        // nothing" (this — refused). Pre-#13576 this asserted `accepted: true`;
+        // the maintainer ruling (决裁批 #20 ①, 2026-08-31) is why it does not
+        // any more.
+        const verdict1 = await guardedPatch(new Date(INSTANT), '""');
+        expect(verdict1).toMatchObject({ accepted: false, code: 'VALIDATION_FAILED', status: 400 });
+        expect(verdict1.wrote).toBe(0);
+        const verdict2 = await guardedPatch(ISO, '""');
+        expect(verdict2).toMatchObject({ accepted: false, code: 'VALIDATION_FAILED', status: 400 });
+        expect(verdict2.wrote).toBe(0);
     });
 
-    it('the DELETE door opts out on the same empty tag — it has its own call site', async () => {
-        // `assertVersionMatch` tests the token's truthiness itself, before it
-        // probes, so it can regress independently of the PATCH door.
+    it('[#13576] the DELETE door refuses the same empty tag BEFORE it ever probes', async () => {
+        // `assertVersionMatch` checks the token's malformed-ness itself, before
+        // it probes, so it can regress independently of the PATCH door — same
+        // reason the old "opts out" pin here had its own call site.
         const { p, del, findOne } = makeProtocol(new Date(INSTANT));
-        await p.deleteData({ object: 'task', id: 'rec_1', expectedVersion: '""' });
-        expect(del).toHaveBeenCalledOnce();
-        // Opting out also means NOT paying for the probe the OCC check needs.
+        await expect(
+            p.deleteData({ object: 'task', id: 'rec_1', expectedVersion: '""' }),
+        ).rejects.toMatchObject({ code: 'VALIDATION_FAILED', status: 400 });
+        expect(del).not.toHaveBeenCalled();
+        // The malformed check runs BEFORE the probe — a client defect is
+        // refused without paying for a read the request was never going to earn.
         expect(findOne).not.toHaveBeenCalled();
     });
 
@@ -446,11 +474,21 @@ describe('[#13382] every pair the OLD comparison accepted is still accepted', ()
         ['empty string', ''],
     ];
 
-    /** What a client can put in `If-Match` / `expectedVersion`. */
+    /**
+     * What a client can put in `If-Match` / `expectedVersion`.
+     *
+     * [#13576] Deliberately EXCLUDES `'""'` (the quoted-empty entity-tag): the
+     * maintainer ruling carved it out as the one exception to "the accept set
+     * only grows" (see this file's header amendment), so feeding it through
+     * this generic sweep would report a "regression" that is in fact the
+     * intended, ruling-authorized behaviour change — not a defect this sweep
+     * exists to catch. Its own pin lives two describe-blocks up and in
+     * `protocol.occ-empty-etag-rejected.test.ts`. `'"  "'` (whitespace INSIDE
+     * the quotes, not empty) stays — it was never part of either defect.
+     */
     const TOKENS: readonly string[] = [
         ISO,
         `"${ISO}"`,
-        '""',
         '',
         '   ',
         '"  "',

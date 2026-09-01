@@ -245,6 +245,7 @@
     "ExternalTable": "src/data/external-catalog.zod.ts#ExternalTable (type)",
     "ExternalTableParsed": "src/data/external-catalog.zod.ts#ExternalTableParsed (type)",
     "ExternalTableSchema": "src/data/external-catalog.zod.ts#ExternalTableSchema (const)",
+    "FIELD_GROUP_KEY_PATTERN": "src/data/field-group-layout.ts#FIELD_GROUP_KEY_PATTERN (const)",
     "FIELD_GROUP_SYSTEM_FIELDS": "src/data/field-group-layout.ts#FIELD_GROUP_SYSTEM_FIELDS (const)",
     "FIELD_KEY_GUIDANCE": "src/data/authoring-key-lint.ts#FIELD_KEY_GUIDANCE (const)",
     "FIELD_MASKING_PRESETS": "src/data/field.zod.ts#FIELD_MASKING_PRESETS (const)",

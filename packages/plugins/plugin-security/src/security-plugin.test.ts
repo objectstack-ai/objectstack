@@ -3460,15 +3460,22 @@ describe('RLSCompiler D4 — uncompilable predicates are surfaced', () => {
     expect(warned[0]).toContain('uncompilable predicate');
   });
 
-  it('does NOT warn a SUPPORTED shape whose context var is merely absent', () => {
+  it('a SUPPORTED shape whose context var is absent gets the DENY line, not the uncompilable one', () => {
     const warned: string[] = [];
     const compiler = new RLSCompiler();
     compiler.setLogger({ warn: (message: string) => warned.push(message) });
-    // valid shape; `department` simply isn't in the context → intentional fail-closed skip.
-    // CEL form (SQL `=` would now additionally emit a deprecation warn).
+    // Valid shape; `department` simply isn't in the context. This is the
+    // fail-closed path, NOT an authoring fault — so it must not be reported as
+    // "uncompilable". [#13639] It used to be reported as nothing at all: the
+    // caller got zero rows, no error, and an empty log, which is the exact
+    // failure shape that card measured. It now says which variable did not
+    // resolve. (CEL form; SQL `=` would additionally emit a deprecation warn.)
     const policy: any = { name: 'dept', object: 'thing', operation: 'select', using: 'dept == current_user.department' };
-    compiler.compileFilter([policy], { userId: 'u1' } as any);
-    expect(warned.length).toBe(0);
+    expect(compiler.compileFilter([policy], { userId: 'u1' } as any)).toEqual(RLS_DENY_FILTER);
+    expect(warned.length).toBe(1);
+    expect(warned[0]).toContain('DENY (fail closed)');
+    expect(warned[0]).toContain('current_user.department');
+    expect(warned[0]).not.toContain('uncompilable predicate');
   });
 });
 

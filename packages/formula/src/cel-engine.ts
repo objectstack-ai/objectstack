@@ -34,12 +34,32 @@ export const DEFAULT_LIMITS = {
   maxCallArguments: 16,
 } as const;
 
-function buildEnv(now: () => Date, timezone = 'UTC'): Environment {
-  const env = new Environment({
-    unlistedVariablesAreDyn: true,
-    enableOptionalTypes: true,
-    limits: DEFAULT_LIMITS,
-  });
+/**
+ * The `Environment` options EVERY ObjectStack CEL evaluation is built with.
+ *
+ * Named rather than inlined so the stdlib drift pin
+ * (`cel-stdlib-drift.test.ts`) can construct the *same* environment it
+ * measures. A pin that hand-rebuilt a lookalike would keep passing after these
+ * options changed underneath it — measuring an environment nothing evaluates
+ * in, which is the exact failure mode the pin exists to prevent.
+ *
+ * Not re-exported from `index.ts`: package-internal seam, not public API.
+ */
+export const CEL_ENV_OPTIONS = {
+  unlistedVariablesAreDyn: true,
+  enableOptionalTypes: true,
+  limits: DEFAULT_LIMITS,
+} as const;
+
+/**
+ * Build the evaluation `Environment` — cel-js's own global registrations plus
+ * {@link registerStdLib} and {@link registerNumericCoercions}.
+ *
+ * Exported (package-internal; NOT in `index.ts`) so the stdlib drift pin reads
+ * the authoritative environment through the same constructor the engine uses.
+ */
+export function buildEnv(now: () => Date, timezone = 'UTC'): Environment {
+  const env = new Environment(CEL_ENV_OPTIONS);
   return registerNumericCoercions(registerStdLib(env, now, timezone));
 }
 

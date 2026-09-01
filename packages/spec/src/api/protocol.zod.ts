@@ -2097,7 +2097,8 @@ export const UpdateDataRequestSchema = lazySchema(() => z.object({
   expectedVersion: z.string().optional().describe(
     'Optimistic concurrency token (typically the `updated_at` value the client read). ' +
     'When provided, the server compares it against the current record version and ' +
-    'returns 409 CONCURRENT_UPDATE if they differ. Optional — omit to skip the check.'
+    'returns 409 CONCURRENT_UPDATE if they differ. Optional — omit to skip the check. ' +
+    'The quoted-empty entity-tag (`""`) is refused 400 VALIDATION_FAILED, not treated as omitted.'
   ),
 }));
 
@@ -2128,7 +2129,8 @@ export const DeleteDataRequestSchema = lazySchema(() => z.object({
   expectedVersion: z.string().optional().describe(
     'Optimistic concurrency token (typically the `updated_at` value the client read). ' +
     'When provided, the server compares it against the current record version and ' +
-    'returns 409 CONCURRENT_UPDATE if they differ. Optional — omit to skip the check.'
+    'returns 409 CONCURRENT_UPDATE if they differ. Optional — omit to skip the check. ' +
+    'The quoted-empty entity-tag (`""`) is refused 400 VALIDATION_FAILED, not treated as omitted.'
   ),
 }));
 

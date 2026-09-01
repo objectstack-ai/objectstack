@@ -43,6 +43,46 @@ name: Merge Queue Triage
 # (#10120, via #10115) was a module-load cost that no assertion was ever
 # involved in. One grep in this file would have separated them, so it is here.
 #
+# ## The reason line's named exception: what the assertion MEASURES (#13830)
+#
+# The rule above is right about the common case and is doing real work: the
+# same morning the exception below was measured, a seat used the rule to
+# REFUSE a flake reading on an `AssertionError` (#13683), correctly, and that
+# refusal is why that card exists. But "assertion ⇒ real behaviour change" has
+# a counterexample class, and it is the expensive direction. #13691 ejected
+# the queue with:
+#
+#     AssertionError: this run took over a second, so second-precision stamps
+#     could have differed too: expected 1006 to be less than 1000
+#
+# That assertion measures nothing about the product. It is the test's own
+# VALIDITY PRECONDITION — the run has to fit inside one second so that a
+# truncated second-precision stamp COULD NOT have distinguished the two
+# updates, which is what gives the distinctness assertion below it any
+# meaning. The invariant actually under test (monotonicity, asserted a line
+# above) HELD. The experiment was invalidated; the product was not falsified —
+# confirmed by evidence, not by taste: same head, same test, re-queued once
+# with no change → success.
+#
+# So the discriminator is not `AssertionError` vs timeout. It is what the
+# assertion MEASURES. Product behaviour (a value, a shape, a refusal) reads
+# the way the rule says. A precondition of the experiment's OWN validity
+# (elapsed time, ordering under load, anything that only holds inside a time
+# budget) reads WITH the timeouts, where one re-queue is a legitimate
+# discriminator. The tell is cheap and mechanical: the assertion's message or
+# its compared values name a duration, a timestamp, or a count of elapsed
+# units.
+#
+# Both readings are expensive, in opposite directions, and the rule alone only
+# protects one of them: a behaviour assertion read as a flake gets a real
+# defect re-queued until it passes (that is the failure the rule prevents),
+# and a validity-precondition assertion read as a behaviour change sends an
+# author to debug a product that is not broken, on a red they cannot reproduce.
+#
+# ⛔ This NAMES an exception; it does not soften the rule. ⛔ And it changes
+# only how a red is READ — which tests may be re-queued is governed elsewhere
+# and is untouched here.
+#
 # ## Cross-PR aggregation, and its boundary (#10128, limb ②)
 #
 # The same test file ejected #10105, then #10003, then #10008 — three unrelated
@@ -693,6 +733,12 @@ jobs:
               '',
               '> `↳ 失败原因` 是判读的关键：**超时**（`Test timed out in …` / `Hook timed out in …`）多半是负载/时序，不是本 PR 的回归；',
               '> **断言**（`AssertionError: …`）才指向真实的行为改变。两者的 `FAIL` 行长得一模一样，只有这一行能区分。',
+              '>',
+              '> ⚠️ **断言这一侧有一类例外，判据是断言在测什么，不是它是不是 `AssertionError`。** 断言的对象是**产品行为**（一个值、一个形状、一次拒收）⇒ 照上面读：真实的行为改变，去查，⛔ 不要重排掉；',
+              '> 断言的对象是**这次实验自身的有效性前提**（跑完的耗时、负载下的先后、任何只在时间预算内才成立的条件）⇒ 它跟**超时**是同一类，同样对负载敏感，重排一次是合法的判别手段。',
+              '> 识别是机械的：断言的消息或它比较的值本身点名了一段**时长、一个时间戳、一个耗时计数**。实测过的一对 —— `AssertionError: SecurityPlugin.init() ran: expected false to be true` 测的是产品行为（真回归）；',
+              '> `AssertionError: this run took over a second, so second-precision stamps could have differed too: expected 1006 to be less than 1000` 测的是实验前提：它守护的那条不变式当时是绿的，同一个 head 原样重排一次即成功。',
+              '> 穿着 `AssertionError` 外衣的时间测量，仍然是时间测量。（⛔ 这只改「怎么读一次红」，不改「哪些测试可以重排」——后者由别处管。）',
               '',
               '**跨 PR 相同签名（24h，按失败测试文件聚合）：**',
               '',

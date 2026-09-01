@@ -134,6 +134,11 @@ export const objectForm = defineForm({
             // to stop at 9 types (`code` was the one it was missing); it moves
             // with the set, exactly like the row above.
             { field: 'minLength', type: 'number', helpText: 'Min characters', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code','signature','qrcode']" },
+            // objectui#6140 (maintainer ruling 2026-08-25, Option A) — `rows`
+            // is shown for exactly the multiline editor types the schema
+            // accepts it on (MULTILINE_EDITOR_FIELD_TYPES in field.zod.ts);
+            // this visibleWhen moves with the set.
+            { field: 'rows', type: 'number', helpText: 'Inline editor height (text rows)', visibleWhen: "data.type in ['textarea','markdown','html','richtext']" },
 
             // Numeric constraints
             { field: 'min', type: 'number', helpText: 'Minimum value', visibleWhen: "data.type in ['number','currency','percent','rating','slider','progress']" },

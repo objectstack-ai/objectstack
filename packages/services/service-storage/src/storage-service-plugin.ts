@@ -544,46 +544,57 @@ export class StorageServicePlugin implements Plugin {
             const merged: Record<string, unknown> = { ...(values ?? {}), ...overrides };
             const probeKey = `__objectstack_probe__/${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
             const probeBytes = Buffer.from(`probe@${new Date().toISOString()}`, 'utf-8');
-            try {
-              // If merged values are present, build a temporary adapter
-              // so we can validate user-typed credentials without
-              // committing them.
-              let target: IStorageService = proxy;
-              if (merged && Object.keys(merged).length > 0) {
-                try {
-                  target = await this.buildAdapterFromValues(merged);
-                } catch (err: any) {
-                  return { ok: false, severity: 'error', message: err?.message ?? String(err) };
-                }
-              }
-              await target.upload(probeKey, probeBytes, { contentType: 'text/plain' });
-              const got = await target.download(probeKey);
-              if (!got || !Buffer.isBuffer(got) || got.toString('utf-8') !== probeBytes.toString('utf-8')) {
-                return { ok: false, severity: 'error', message: 'Probe download did not match upload.' };
-              }
-              await target.delete(probeKey);
-              const adapter = String(merged.adapter ?? this.options.adapter ?? 'local');
-              return {
-                ok: true,
-                severity: 'info',
-                message: `Storage round-trip succeeded (adapter=${adapter}).`,
-              };
-            } catch (err: any) {
-              // Best-effort cleanup. [#12981] The cleanup's OWN failure used to
-              // be swallowed by `catch { /* ignore */ }`. The `return` below
-              // reports the PROBE's failure, which is a different failure: the
-              // operator is told the round-trip did not work and is told
-              // nothing at all about the probe object that is still sitting in
-              // the bucket. One stray key accrues per failed test, with the
-              // only record of its name -- `probeKey` is minted per call from a
-              // timestamp and a random suffix -- lost when this frame returns.
-              //
-              // `warn`, not `error`: nothing the system claims to a caller as
-              // persisted was lost. This is housekeeping that did not happen,
-              // and the AGENTS.md rule is explicit that escalating a
-              // non-durability degradation is how `error` stops being read.
+            // [#13726] Resolve the store the probe writes to BEFORE entering
+            // the region whose failure path has to clean up after it. This
+            // declaration used to sit inside that `try`, which left `target`
+            // out of scope at the `catch` -- so the cleanup deleted from
+            // `proxy`, the PERSISTED adapter, even when the probe had written
+            // to the temporary one. On exactly the case the temporary adapter
+            // exists for -- an operator validating unsaved credentials -- the
+            // object leaked in the store that held it while a delete went to a
+            // store that never did, and since deleting an absent key is a no-op
+            // on both shipped adapters, nothing looked wrong.
+            //
+            // Resolving it here makes "the cleanup names the store the upload
+            // named" true by CONSTRUCTION rather than by two expressions that
+            // happen to agree and can drift apart in a later edit. It also
+            // settles the question the scoped-in version raised -- whether the
+            // catch could see a half-built adapter, or the very adapter whose
+            // construction threw. It cannot: a construction failure returns
+            // right below, BEFORE the probe writes anything, so there is
+            // deliberately no cleanup on that path -- there is nothing to clean
+            // up, and a delete against an adapter that failed to build is a
+            // call we have no reason to make. Past this point `target` is
+            // either `proxy` or a fully constructed temporary adapter, and
+            // either way it is the one every verb below uses.
+            let target: IStorageService = proxy;
+            if (merged && Object.keys(merged).length > 0) {
               try {
-                await (proxy as IStorageService).delete(probeKey);
+                target = await this.buildAdapterFromValues(merged);
+              } catch (err: any) {
+                return { ok: false, severity: 'error', message: err?.message ?? String(err) };
+              }
+            }
+
+            // Best-effort removal of the probe object from the store it was
+            // written to -- `target`, never `proxy` (see above).
+            //
+            // [#12981] The cleanup's OWN failure used to be swallowed by
+            // `catch { /* ignore */ }`. The `return` beside each call site
+            // reports the PROBE's failure, which is a different failure: the
+            // operator is told the round-trip did not work and is told nothing
+            // at all about the probe object that is still sitting in the
+            // bucket. One stray key accrues per failed test, with the only
+            // record of its name -- `probeKey` is minted per call from a
+            // timestamp and a random suffix -- lost when this frame returns.
+            //
+            // `warn`, not `error`: nothing the system claims to a caller as
+            // persisted was lost. This is housekeeping that did not happen,
+            // and the AGENTS.md rule is explicit that escalating a
+            // non-durability degradation is how `error` stops being read.
+            const removeProbeObject = async (): Promise<void> => {
+              try {
+                await target.delete(probeKey);
               } catch (cleanupErr: any) {
                 ctx.logger.warn(
                   `StorageServicePlugin: the storage/test probe object '${probeKey}' was NOT removed — `
@@ -594,6 +605,33 @@ export class StorageServicePlugin implements Plugin {
                     + '`__objectstack_probe__/` matter in this bucket.',
                 );
               }
+            };
+
+            try {
+              await target.upload(probeKey, probeBytes, { contentType: 'text/plain' });
+              const got = await target.download(probeKey);
+              if (!got || !Buffer.isBuffer(got) || got.toString('utf-8') !== probeBytes.toString('utf-8')) {
+                // [#13726] The upload SUCCEEDED -- reaching this comparison at
+                // all is the proof -- so the object is in `target` right now,
+                // and this `return` used to walk straight past the delete on
+                // the next line: a GUARANTEED leak, not a best-effort one, on
+                // the one path that by construction only fires when the adapter
+                // is misbehaving. Cleaned up HERE rather than in a `finally`,
+                // deliberately: the success path below keeps its single
+                // unguarded delete, whose failure IS a probe failure the
+                // operator must be told about, and no path deletes twice.
+                await removeProbeObject();
+                return { ok: false, severity: 'error', message: 'Probe download did not match upload.' };
+              }
+              await target.delete(probeKey);
+              const adapter = String(merged.adapter ?? this.options.adapter ?? 'local');
+              return {
+                ok: true,
+                severity: 'info',
+                message: `Storage round-trip succeeded (adapter=${adapter}).`,
+              };
+            } catch (err: any) {
+              await removeProbeObject();
               return { ok: false, severity: 'error', message: err?.message ?? String(err) };
             }
           });

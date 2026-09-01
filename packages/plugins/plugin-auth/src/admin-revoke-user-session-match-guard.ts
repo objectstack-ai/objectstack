@@ -7,7 +7,7 @@
  * ## The defect, and where it is minted
  *
  * Not here: the wrong answer comes out of the pinned vendor. better-auth
- * `1.7.1` (the installed line, re-read for this card),
+ * `1.7.1` (the line installed at the time, re-read for this card),
  * `dist/plugins/admin/routes.mjs`, `revokeUserSession` runs, after its
  * `session: ["revoke"]` permission check:
  *

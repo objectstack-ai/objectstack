@@ -49,6 +49,11 @@ export const fieldForm = defineForm({
         // #11875 added `signature`/`qrcode` to the set (the write seam now
         // enforces their declared bound); this visibleWhen moves with it.
         { field: 'maxLength', visibleWhen: "data.type in ['text','textarea','email','url','phone','password','markdown','html','richtext','code','signature','qrcode']", helpText: 'Maximum character length' },
+        // objectui#6140 (maintainer ruling 2026-08-25, Option A) — `rows` is
+        // shown for exactly the multiline editor types the schema accepts it
+        // on (MULTILINE_EDITOR_FIELD_TYPES in field.zod.ts); this visibleWhen
+        // moves with the set.
+        { field: 'rows', visibleWhen: "data.type in ['textarea','markdown','html','richtext']", helpText: 'Inline editor height in text rows' },
         // Number field options
         { field: 'min', visibleWhen: "data.type == 'number' || data.type == 'currency'", helpText: 'Minimum value' },
         { field: 'max', visibleWhen: "data.type == 'number' || data.type == 'currency'", helpText: 'Maximum value' },

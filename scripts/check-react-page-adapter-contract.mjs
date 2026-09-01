@@ -1,9 +1,15 @@
 #!/usr/bin/env node
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// check-react-page-adapter-contract (#10751) -- the two `useAdapter()` contracts
-// a hand-rolled rollup owns, swept over EVERY react-page source this repo ships:
+// check-react-page-adapter-contract (#10751) -- the `useAdapter()` contracts a
+// hand-rolled rollup owns, swept over EVERY react-page source this repo ships:
 // the app-showcase page modules AND the react-page samples in `content/docs`.
+//
+// Three detectors: an unprefixed query option (#10288), a `.records` row read
+// (#10288, narrowed in #13705), and an `Array.isArray` limb on a find() result
+// (#13970). All three are DROP-SHAPED or DEAD -- nothing throws and the page
+// renders a plausible number either way, which is why neither `os validate`
+// nor `tsc` nor a smoke test catches them.
 //
 //   node scripts/check-react-page-adapter-contract.mjs
 //   node scripts/check-react-page-adapter-contract.mjs --self-test
@@ -137,13 +143,22 @@ const CENSUS_ANCHORS = {
 };
 
 // ---------------------------------------------------------------------------
-// The two detectors -- MOVED from
+// The detectors. Two were MOVED from
 // examples/app-showcase/test/react-page-adapter-query-contract.test.ts (#10288).
 // `unprefixedQueryKeys` is still verbatim. `recordsReads` is NOT: it arrived
 // carrying a `.data`-beside carve-out that made `data ?? records` invisible,
 // and that carve-out was narrowed to comment/string stripping in the same
 // edit that deleted the two aliases it was load-bearing for. See the
 // function's own header for why a tolerant alias is a finding.
+//
+// `arrayIsArrayLimbs` (#13970) is the third, and it is NEW here rather than
+// moved. Its history is the reason it exists: `Array.isArray(<find result>)`
+// is the SAME defect wearing a different name, it was repaired three times
+// (#11585 -> #13705 -> #13969), and each repair left nothing pinning it. It is
+// a separate function on purpose -- `recordsReads` matches the `.records`
+// property, and its self-test pins a line that carries the limb to ZERO,
+// correctly. Widening `recordsReads` would have had to flip that pin; a third
+// detector does not, and both statements about that line stay true.
 // ---------------------------------------------------------------------------
 
 const DECLARED_QUERY_PARAM_PREFIX = '$';
@@ -232,6 +247,16 @@ export function unprefixedQueryKeys(source) {
 const RECORDS_READ = /\??\.\s*records\b/;
 
 /**
+ * A real `find`/`findOne` on the objectui adapter -- never on `engine`/`client`.
+ *
+ * ONE definition, read by both consumers: `arrayIsArrayLimbs` (which needs to
+ * know an identifier holds a find() result) and `isReactPageSample` (the docs
+ * selector). Two copies of the marker would double the places a future
+ * contract change has to land -- the shape of the defect this file exists for.
+ */
+const ADAPTER_CALL = /\b(?:adapter|dataSource)\s*\.\s*(?:find|findOne)\s*\(/;
+
+/**
  * One line's executable text: string and template bodies blanked (quotes kept),
  * and a trailing `//` or block comment dropped.
  *
@@ -260,6 +285,18 @@ export function codeOnly(line) {
     out += c;
   }
   return out;
+}
+
+/**
+ * A WHOLE-LINE comment. Prose about the trap is not the trap -- `crm-workbench`
+ * documents both traps in the comment block above the call it once got wrong,
+ * and `contact-form` names `Array.isArray` in an unrelated design note.
+ *
+ * @param {string} trimmed  a line, already trimmed
+ * @returns {boolean}
+ */
+function isCommentLine(trimmed) {
+  return trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*');
 }
 
 /**
@@ -297,9 +334,124 @@ export function recordsReads(source) {
   const out = [];
   for (const line of source.split('\n')) {
     const trimmed = line.trim();
-    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) continue;
+    if (isCommentLine(trimmed)) continue;
     if (!RECORDS_READ.test(codeOnly(trimmed))) continue;
     out.push(trimmed);
+  }
+  return out;
+}
+
+/** An `Array.isArray(x)` test, capturing the identifier under test. */
+const ARRAY_ISARRAY_TEST = /\bArray\s*\.\s*isArray\s*\(\s*([A-Za-z_$][\w$]*)\s*\)/g;
+
+/** `const rows = await adapter.find(...)` -- the declaration form of the binding. */
+const FIND_RESULT_DECL = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/;
+
+/** `rows = await adapter.find(...)` -- the same binding as a bare reassignment. */
+const FIND_RESULT_ASSIGN = /^([A-Za-z_$][\w$]*)\s*=[^=]/;
+
+/**
+ * The identifiers a source binds to an `adapter`/`dataSource` find() result.
+ *
+ * Line-local by construction: a line that both calls the adapter and names its
+ * target is the only binding this recognises. Published rather than left
+ * implicit, because an unrecognised spelling produces no flag -- silently:
+ *
+ *   const rows = await adapter.find(...)      // and `let` / `var`
+ *   rows = await adapter.find(...)            // reassignment at line start
+ *
+ * NOT recognised, stated rather than discovered later: a destructured binding
+ * (`const { data } = await adapter.find(...)` -- which has no identifier to
+ * test for array-ness anyway), a result handed through a `.then()`, and a
+ * result passed into a helper. The last of those is real and occurs in this
+ * tree, so it has a second route rather than a wider regex: see the `.data`
+ * arm of `arrayIsArrayLimbs`.
+ *
+ * @param {string} source
+ * @returns {Set<string>}
+ */
+export function findResultBindings(source) {
+  const bound = new Set();
+  for (const line of source.split('\n')) {
+    const trimmed = line.trim();
+    if (isCommentLine(trimmed)) continue;
+    const code = codeOnly(trimmed);
+    if (!ADAPTER_CALL.test(code)) continue;
+    const decl = FIND_RESULT_DECL.exec(code);
+    if (decl) { bound.add(decl[1]); continue; }
+    const assign = FIND_RESULT_ASSIGN.exec(code);
+    if (assign) bound.add(assign[1]);
+  }
+  return bound;
+}
+
+/**
+ * Every `Array.isArray()` test whose subject is an `adapter.find()` result.
+ *
+ * `ObjectStackAdapter.find()` cannot resolve to an array. Every return path is
+ * an object literal or a `normalizeQueryResult(...)`, and normalizeQueryResult
+ * WRAPS a bare array response into the same `{ data, total, page, pageSize,
+ * hasMore }` envelope. So an `Array.isArray(<find result>)` limb is dead code:
+ * it never executes, and what it costs is the same thing the `?? .records`
+ * alias cost -- it teaches an author, and a coding assistant reading the page
+ * as a sample, a row shape the producer cannot emit. The next author who
+ * simplifies the chain then has to guess which limb was real.
+ *
+ * ⛔ THIS IS A THIRD DETECTOR, NOT A WIDENING OF `recordsReads`. That one
+ * matches the `.records` PROPERTY; its self-test pins the repaired docs sample
+ * -- `const records = result?.data ?? (Array.isArray(result) ? result : []);`
+ * -- to ZERO findings, because the `records` there is a LOCAL, not a property
+ * read. That pin is a false-positive control on the property matcher and it is
+ * still correct, so it is unchanged: this function is what sees the limb on
+ * that same line. The history is that this shape survived three rounds
+ * (#11585 -> #13705 -> #13969) with nothing pinning it.
+ *
+ * A subject qualifies on either route, and a finding says which:
+ *
+ *   1. It is BOUND from an adapter/dataSource find() in this same source.
+ *   2. It is read as `<subject>.data` / `<subject>?.data` on the SAME LINE --
+ *      the envelope read is what identifies it as a find() result. This is the
+ *      route that catches a subject with no binding to find at all: the
+ *      renewals-pipeline repair was `(res) => (Array.isArray(res) ? res :
+ *      (res && res.data) || [])`, whose subject is a LAMBDA PARAMETER.
+ *
+ * Neither route fires on an array narrowing that has nothing to do with the
+ * adapter, which is the whole difficulty here: `Array.isArray` is ordinary
+ * JavaScript. A page is free to test any other value for array-ness.
+ *
+ * Known exclusion, stated rather than discovered later: an ObjectQL
+ * `engine.find` DOES resolve to an array-or-envelope union by contract, so
+ * `Array.isArray` on one is correct. No page module in the swept population
+ * holds one today (they hold `adapter.find` only, and the docs selector
+ * refuses `engine.find` fences outright), and route 1 would not bind it. Route
+ * 2 would fire on an `engine.find` result read as `.data` on the same line as
+ * its own array test -- if that shape ever enters this population, extend the
+ * detector in the same edit rather than routing around the gate.
+ *
+ * @param {string} source
+ * @returns {{ subject: string, why: string, snippet: string, index: number }[]}
+ */
+export function arrayIsArrayLimbs(source) {
+  const bound = findResultBindings(source);
+  const out = [];
+  let offset = 0;
+  for (const line of source.split('\n')) {
+    const start = offset;
+    offset += line.length + 1;
+    const trimmed = line.trim();
+    if (isCommentLine(trimmed)) continue;
+    const code = codeOnly(trimmed);
+    for (const m of code.matchAll(ARRAY_ISARRAY_TEST)) {
+      const subject = m[1];
+      const envelopeRead = new RegExp(`\\b${subject}\\s*\\??\\s*\\.\\s*data\\b`);
+      const why = bound.has(subject)
+        ? `\`${subject}\` is bound from an adapter/dataSource find() in this source`
+        : envelopeRead.test(code)
+          ? `\`${subject}.data\` is read on this same line, so \`${subject}\` is the find() envelope`
+          : null;
+      if (why === null) continue;
+      out.push({ subject, why, snippet: trimmed, index: start });
+    }
   }
   return out;
 }
@@ -310,9 +462,6 @@ export function recordsReads(source) {
 
 /** Languages a runnable react-page sample is tagged with. */
 const SAMPLE_LANGS = new Set(['jsx', 'tsx', 'js', 'ts', 'javascript', 'typescript']);
-
-/** A real `find`/`findOne` on the objectui adapter -- never on `engine`/`client`. */
-const ADAPTER_CALL = /\b(?:adapter|dataSource)\s*\.\s*(?:find|findOne)\s*\(/;
 
 /** The hook that hands a page the adapter. Case-sensitive, so `useAdapter` alone matches. */
 const USE_ADAPTER = /\buseAdapter\s*\(/;
@@ -492,6 +641,15 @@ export function sweep(population) {
           + `silently. In: ${line}`,
         );
       }
+      for (const { subject, why, snippet, index } of arrayIsArrayLimbs(source)) {
+        findings.push(
+          `${at(lineOfIndex(source, index))}: tests \`Array.isArray(${subject})\` on a find() result `
+          + `(${why}). \`ObjectStackAdapter.find()\` resolves the same \`QueryResult\` envelope on every `
+          + `path — normalizeQueryResult WRAPS a bare array response into it — so the array limb is `
+          + `DEAD CODE teaching a row shape the producer cannot emit. Read \`${subject}.data\`. `
+          + `In: ${snippet}`,
+        );
+      }
     }
   }
   return findings;
@@ -527,9 +685,11 @@ function report({ population, findings, censusProblems }) {
     console.error(`✗ check-react-page-adapter-contract — ${findings.length} useAdapter() contract violation(s):\n`);
     for (const f of findings) console.error(`  • ${f}`);
     console.error(
-      `\n  Both traps are DROP-SHAPED: nothing throws, nothing warns, and the page renders a\n`
-      + `  plausible number either way — which is why neither \`os validate\` nor \`tsc\` nor a\n`
-      + `  smoke test catches them. If a flagged fence is a deliberate counter-example, this\n`
+      `\n  Every trap here is DROP-SHAPED or DEAD: nothing throws, nothing warns, and the page\n`
+      + `  renders a plausible number either way — which is why neither \`os validate\` nor \`tsc\`\n`
+      + `  nor a smoke test catches them. An \`Array.isArray\` limb on a find() result never\n`
+      + `  executes at all: read \`.data\` and delete the limb rather than keeping both.\n`
+      + `  If a flagged fence is a deliberate counter-example, this\n`
       + `  doc set writes those as prose (see the "$ prefixes are load-bearing" Callout in\n`
       + `  ${DOCS_ROOT}/ui/react-pages.mdx); extend this gate with an opt-out in the same edit\n`
       + `  rather than routing around it.\n`
@@ -537,7 +697,10 @@ function report({ population, findings, censusProblems }) {
     );
     return 1;
   }
-  console.log(`✓ check-react-page-adapter-contract: ${scope} — every adapter query option is $-prefixed and every row read is off \`data\`.`);
+  console.log(
+    `✓ check-react-page-adapter-contract: ${scope} — every adapter query option is $-prefixed, every row read `
+    + `is off \`data\`, and no find() result is tested for array-ness.`,
+  );
   return 0;
 }
 
@@ -593,6 +756,78 @@ export function selfTest() {
   assert(
     recordsReads(`const records = result?.data ?? (Array.isArray(result) ? result : []);`).length === 0,
     'the REPAIRED docs sample is silent — a local named `records` is not a `.records` read',
+  );
+
+  // ── The THIRD detector: the `Array.isArray` limb (#13970) ────────────────
+  // The assertion directly above is UNCHANGED, byte for byte, and that is the
+  // point. It is a false-positive control on `recordsReads`'s PROPERTY matcher
+  // -- the `records` on that line is a LOCAL, not a `.records` read -- and it
+  // is still correct. `arrayIsArrayLimbs` is a separate function, so pinning
+  // the limb cost that pin nothing: the same string is 0 findings for
+  // `recordsReads` and 1 for the new detector, and both statements are true.
+  //
+  // The corpus below is the three lines PR #13969 actually deleted, carried
+  // verbatim. Measured over the pre-#13969 tree (bd8791fd8), this detector
+  // reports exactly these three across the whole population and nothing else.
+  // The class survived three rounds (#11585 -> #13705 -> #13969) because
+  // nothing pinned it; this block is the pin.
+  assert(
+    arrayIsArrayLimbs(`const records = result?.data ?? (Array.isArray(result) ? result : []);`).length === 1,
+    'the DOCS line #13969 deleted IS a finding — the same string the assertion above pins to zero for `recordsReads`',
+  );
+  assert(
+    arrayIsArrayLimbs(`const rows = Array.isArray(all) ? all : (all && all.data) || [];`).length === 1,
+    'the crm-workbench line #13969 deleted IS a finding',
+  );
+  assert(
+    arrayIsArrayLimbs(`const rows = (res) => (Array.isArray(res) ? res : (res && res.data) || []);`).length === 1,
+    'the renewals-pipeline line #13969 deleted IS a finding — its subject is a LAMBDA PARAMETER bound to no find() call anywhere, so the same-line `.data` read is the only thing that identifies it',
+  );
+  const reintroduced = `
+      const all = await adapter.find('showcase_project', { $top: 200 });
+      const rows = Array.isArray(all) ? all : [];
+    `;
+  assert(
+    arrayIsArrayLimbs(reintroduced).length === 1,
+    'a reintroduction carrying NO `.data` limb is still a finding — the subject is bound from adapter.find() in the same source',
+  );
+  assert(
+    JSON.stringify([...findResultBindings(reintroduced)]) === JSON.stringify(['all']),
+    'the binding walk names the identifier the adapter call was assigned to',
+  );
+  assert(
+    arrayIsArrayLimbs(`const rows = Array.isArray(all) ? all : [];`).length === 0,
+    'the SAME line without the binding is silent — `Array.isArray` is ordinary JavaScript and a page may narrow any other value',
+  );
+
+  // ...and the shapes it must NOT fabricate on. All four are text that sits in
+  // this tree today.
+  assert(
+    arrayIsArrayLimbs(`      // response into it, so an 'Array.isArray(all)' limb can never be taken.`).length === 0,
+    'the comment #13969 left in crm-workbench explaining why the limb is unreachable is not the limb',
+  );
+  assert(
+    arrayIsArrayLimbs('            // key discriminated by `Array.isArray`.').length === 0,
+    'contact-form\'s unrelated design note naming Array.isArray in prose is not a finding',
+  );
+  assert(
+    arrayIsArrayLimbs(`emit({ type: 'Array.isArray(result)', rows: result.data });`).length === 0,
+    'text that merely SPELLS the test inside a string is not a test — codeOnly blanks string bodies',
+  );
+  assert(
+    arrayIsArrayLimbs(`const rows = await engine.find('customer', { where: {} });\nreturn Array.isArray(rows) ? rows : rows.records;`).length === 0,
+    'an ObjectQL `engine.find` result IS an array-or-envelope union by contract — app-showcase reads exactly this shape in its job runtime, and the detector must not fabricate a finding on it',
+  );
+  assert(
+    arrayIsArrayLimbs(`const all = await adapter.find('showcase_project', { $top: 200 });\nconst rows = all?.data ?? [];`).length === 0,
+    'the REPAIRED crm-workbench shape is silent — the detector reds the limb, not the adapter call',
+  );
+
+  // ...and a finding is separable and actionable.
+  const limb = arrayIsArrayLimbs(`const rows = Array.isArray(page) ? page : page.data;`);
+  assert(
+    limb.length === 1 && limb[0].subject === 'page' && limb[0].why.includes('.data'),
+    'a finding names the identifier under test and WHICH route qualified it — two limbs in one file must be separable',
   );
 
   // ...and the narrowing must not start firing on text that merely SPELLS it.
@@ -711,6 +946,22 @@ export function selfTest() {
     'a docs finding names the line IN THE FILE, not in the fence body — a fence-relative line sends the author nowhere, got '
       + fromDocs[0].split(':').slice(0, 2).join(':'),
   );
+  const limbSource = `
+      const all = await adapter.find('showcase_project', { $top: 200 });
+      const rows = Array.isArray(all) ? all : (all && all.data) || [];
+    `;
+  const limbFromPage = sweep({ appShowcase: [{ file: 'p.ts', startLine: 1, source: limbSource }], docs: [] });
+  assert(
+    limbFromPage.length === 1 && limbFromPage[0].startsWith('p.ts:3'),
+    'the sweep wires the THIRD detector to the app-showcase half and names the line, got '
+      + limbFromPage.map((f) => f.split(':').slice(0, 2).join(':')).join(' / '),
+  );
+  const limbFromDocs = sweep({ appShowcase: [], docs: [{ file: 'd.mdx', startLine: 100, source: limbSource }] });
+  assert(
+    limbFromDocs.length === 1 && limbFromDocs[0].startsWith('d.mdx:102'),
+    'and to the DOCS half, naming the line IN THE FILE — the sample a customer copies from is the half this class kept surviving in, got '
+      + limbFromDocs.map((f) => f.split(':').slice(0, 2).join(':')).join(' / '),
+  );
   assert(lineOfIndex('a\nb\nc', 4) === 3 && lineOfIndex('a\nb', 0) === 1, 'lineOfIndex counts newlines before the offset');
   assert(lineOfText('x\n  hit\ny', 'hit') === 2 && lineOfText('x', 'nope') === 1, 'lineOfText matches on the TRIMMED line, and falls back to 1');
 
@@ -720,7 +971,8 @@ export function selfTest() {
     return 1;
   }
   console.log(
-    `✓ check-react-page-adapter-contract --self-test: ${checked} assertions — both detectors observed FIRING and observed silent, `
+    `✓ check-react-page-adapter-contract --self-test: ${checked} assertions — all THREE detectors observed FIRING and observed silent, `
+    + `the \`Array.isArray\` limb pinned on the three lines #13969 deleted (the docs one on the very string \`recordsReads\` is pinned to IGNORE), `
     + `the selector observed refusing the engine.find / useQuery / webhook shapes it must not fabricate on, `
     + `and an empty sweep of EITHER half observed failing the census.`,
   );

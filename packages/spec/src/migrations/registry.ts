@@ -5304,7 +5304,17 @@ const step18: MigrationStep = {
     'overlayWritable` are retiredKey tombstones (no D2 conversion — plugin/manager ' +
     'configs are not stack collection members, the additionalTypes reasoning). The ' +
     'customization that actually ships: ADR-0005\'s org overlay and ADR-0126\'s ' +
-    'packaged-metadata model.',
+    'packaged-metadata model. ' +
+    'Finally, it canonicalizes the legacy objectql field-key dialect `reference_to` → ' +
+    '`reference` on lookup/master_detail fields (#13700, ui#6837 half 1). `FieldSchema` ' +
+    'has always refused `reference_to` by name, but stored `sys_metadata` rows written by ' +
+    'seams that bypass the parse still carry it, held up today only by objectui\'s ' +
+    '`reference ?? reference_to` fallback arms — which ui#6837 half 2 deletes. The ' +
+    'mechanical conversion renames the key (house #4923 precedence: a canonical ' +
+    '`reference` wins, a disagreeing pair is kept for the author), replays on every ' +
+    'stored-row rehydration so the serve face only ever emits the canonical spelling, ' +
+    'and `os migrate meta` rewrites old sources; the authoring-surface rejection with ' +
+    'its rename prescription is unchanged.',
   conversionIds: [
     'field-malformed-scale-precision-removed',
     'record-chatter-position-vocabulary',
@@ -5320,6 +5330,7 @@ const step18: MigrationStep = {
     'object-grid-default-sort-removed',
     'permission-allow-restore-purge-removed',
     'form-view-option-default-removed',
+    'field-reference-to-alias',
   ],
   semantic: [
     // One file per entry under `entries/semantic/`, concatenated here sorted by

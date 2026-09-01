@@ -4,9 +4,11 @@ import { describe, it, expect } from 'vitest';
 import {
   validatePageFieldBindings,
   checkFieldRefs,
+  componentSectionGroupRefs,
   indexObjectFields,
   PAGE_FIELD_UNKNOWN,
   PAGE_FIELD_UNPROVISIONED,
+  PAGE_SECTION_GROUP_UNKNOWN,
 } from './validate-page-field-bindings.js';
 import { indexUnprovisionedAnchors } from './system-fields.js';
 
@@ -124,6 +126,96 @@ describe('validatePageFieldBindings — record:details real authored shape', () 
     });
     expect(findings).toHaveLength(1);
     expect(findings[0].path).toBe('pages[0].regions[0].components[0].properties.hideFields[1]');
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// #13855 — a section may REFERENCE a declared field group instead of
+// enumerating its members. The key names something on a different schema, so
+// the spec door takes any well-formed one and the existence question lands
+// here, with the field-existence family it belongs to.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('validatePageFieldBindings — dangling `section.group` (#13855)', () => {
+  /** `baseStack()` with declared field groups on `crm_lead`. */
+  const groupedStack = () => {
+    const stack = baseStack();
+    (stack.objects[0] as Record<string, unknown>).fieldGroups = [
+      { key: 'overview', label: 'Overview' },
+      { key: 'money', label: 'Money' },
+    ];
+    return stack;
+  };
+
+  const detailsWith = (sections: unknown[]) =>
+    [{ type: 'record:details', properties: { sections } }];
+
+  it('is clean when the key names a declared group', () => {
+    const findings = validatePageFieldBindings({
+      ...groupedStack(),
+      pages: [pageWith(detailsWith([{ group: 'overview' }, { group: 'money' }]))],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('flags a key that names no declared group', () => {
+    const findings = validatePageFieldBindings({
+      ...groupedStack(),
+      pages: [pageWith(detailsWith([{ group: 'overview' }, { group: 'contact_info' }]))],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(PAGE_SECTION_GROUP_UNKNOWN);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].path).toBe('pages[0].regions[0].components[0].properties.sections[1].group');
+    expect(findings[0].message).toContain('field group "contact_info"');
+    expect(findings[0].message).toContain('silently does not render');
+    expect(findings[0].hint).toContain('Declared groups on crm_lead: money, overview.');
+  });
+
+  it('reports the group miss alongside — not instead of — a field miss in a sibling section', () => {
+    const findings = validatePageFieldBindings({
+      ...groupedStack(),
+      pages: [pageWith(detailsWith([
+        { group: 'ghost_group' },
+        { label: 'Money', fields: ['amount', 'nonexistent_field'] },
+      ]))],
+    });
+    expect(findings.map(f => `${f.rule}@${f.path}`)).toEqual([
+      `${PAGE_FIELD_UNKNOWN}@pages[0].regions[0].components[0].properties.sections[1].fields[1]`,
+      `${PAGE_SECTION_GROUP_UNKNOWN}@pages[0].regions[0].components[0].properties.sections[0].group`,
+    ]);
+  });
+
+  it('tells an author on an object with NO declared groups what to do instead', () => {
+    const findings = validatePageFieldBindings({
+      ...baseStack(),
+      pages: [pageWith(detailsWith([{ group: 'overview' }]))],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].hint).toContain('declares no field groups at all');
+  });
+
+  it('says nothing about an object this stack does not define', () => {
+    const findings = validatePageFieldBindings({
+      ...groupedStack(),
+      pages: [{
+        name: 'external_detail',
+        object: 'from_another_package',
+        regions: [{ name: 'main', components: detailsWith([{ group: 'nope' }]) }],
+      }],
+    });
+    expect(findings).toEqual([]);
+  });
+
+  it('reads the group refs through the ONE descriptor table the field refs use', () => {
+    // `componentSectionGroupRefs` walks `COMPONENT_FIELD_SPECS[…].nestedSections`
+    // — the same list `componentFieldRefs` walks. A component that grows
+    // sections is covered by both checks in one edit, rather than gaining the
+    // field check and silently missing this one.
+    expect(componentSectionGroupRefs('record:details', { sections: [{ group: 'a' }, { fields: ['x'] }] }, 'P'))
+      .toEqual([{ key: 'a', path: 'P.sections[0].group' }]);
+    // Unregistered component types stay skipped, silently, exactly as for fields.
+    expect(componentSectionGroupRefs('record:line_items', { sections: [{ group: 'a' }] }, 'P')).toBeNull();
   });
 });
 

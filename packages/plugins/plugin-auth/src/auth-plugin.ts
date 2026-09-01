@@ -2143,7 +2143,7 @@ export class AuthPlugin implements Plugin {
     // #9653 — ADR-0068 D4: the platform-admin gate runs HERE, before the
     // bridge delegates. Registering an identity provider is a platform-
     // operator action, and the delegated authorization is NOT a substitute:
-    // measured on the installed @better-auth/sso 1.7.1, the vendor's
+    // measured on the then-installed @better-auth/sso 1.7.1, the vendor's
     // /sso/register admits ANY authenticated user when no organizationId is
     // supplied (the org-admin check is inside `if (ctx.body.organizationId)`),
     // and the auth-manager before-hook that narrows this admits org
@@ -2352,7 +2352,7 @@ export class AuthPlugin implements Plugin {
       // reached by any AUTHENTICATED caller, admin or not, before either
       // authorization layer had run.
       //
-      // MEASURED on the installed better-auth 1.7.1 before this mount existed,
+      // MEASURED on the then-installed better-auth 1.7.1 before this mount existed,
       // one authenticated non-admin, two targets: naming the break-glass
       // holder answered `409 LAST_LOCAL_CREDENTIAL` while naming an ordinary
       // user answered `403 YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS`. Two different

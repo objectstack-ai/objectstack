@@ -56,6 +56,10 @@ import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../share
 import { ExpressionInputSchema } from '../shared/expression.zod';
 import { normalizeVisibleWhen, VISIBILITY_STRICT_OPTIONS } from '../shared/visibility';
 import { SELECT_OPTION_EDITABILITY_GUIDANCE, VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
+// [#13855] The section → field-group reference form, shared with the
+// `record:details` section shape (component.zod.ts) so one mixing rule serves
+// both layout escape hatches.
+import { SectionGroupKeySchema, sectionGroupReferenceRefinement } from '../shared/section-group-reference';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
 import { ChartTypeSchema } from './chart.zod';
 import { SharingConfigSchema } from './sharing.zod';
@@ -2422,6 +2426,16 @@ export const FormSectionSchema = lazySchema(() => strictObject({
   // to rename it in place. The reader can only tell which answer is theirs if
   // the rejection names the shape, so each of the three shapes names itself.
   surface: 'this form section',
+  // [#13855] Both are the author reaching for the field-group reference form
+  // with the word a neighbouring surface uses: the object declares
+  // `fieldGroups`, and a field points back with `group`. Neither is a typo edit
+  // distance reaches. Spread the inherited table first so nothing it carries is
+  // dropped by re-declaring the key.
+  aliases: {
+    ...VISIBILITY_ONLY_STRICT_OPTIONS.aliases,
+    fieldGroup: 'group',
+    groupKey: 'group',
+  },
 }, {
   /**
    * Stable identifier for translation lookup. snake_case convention.
@@ -2502,11 +2516,65 @@ export const FormSectionSchema = lazySchema(() => strictObject({
   pane: z.enum(['primary', 'secondary']).optional().describe(
     "Split pane this section renders in (split forms only; a parse error elsewhere). Omitted → first section 'primary', others 'secondary'.",
   ),
+  /**
+   * [#13855] Reference a declared field GROUP instead of enumerating members —
+   * the delta form ruled 2026-08-31 (maintainer: 「直接处理b」).
+   *
+   * `{ group: 'contact_info' }` inherits the bound object's `fieldGroups` entry
+   * with that key: its members (every visible field whose `Field.group` points
+   * at it, in field-declaration order) and its own presentation (label,
+   * description, `collapse`, `visibleWhen`, and the drop when the group has no
+   * visible members) all come from `deriveFieldGroupLayout` (ADR-0085 §5). The
+   * section restates none of it — see {@link sectionGroupReferenceRefinement}
+   * for the mixing rule, and for why the keys the group owns are refused beside
+   * `group` rather than given a precedence.
+   *
+   * Existence is NOT a parse question: the key names something on a DIFFERENT
+   * schema, so it follows the `UserFilterFieldSchema.field` precedent — parse
+   * takes any well-formed key, and `form-section-group-unknown`
+   * (`@objectstack/lint`) reports one that resolves to no declared group.
+   *
+   * ⛔ Not on a wizard step — refused by the {@link FormViewSchema} refinement,
+   * for the reason #13704 refused the step keys themselves: a group carries
+   * `visibleWhen` and `collapse`, and a wizard step has no slot for either.
+   */
+  group: SectionGroupKeySchema.optional().describe(
+    'Field group key (snake_case) whose members and presentation this section inherits, from the bound object\'s `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `collapsible`, `collapsed`, `visibleWhen`/`visibleOn`). Not valid on a wizard step. Must name a declared group — checked by reference diagnostics.',
+  ),
+  /**
+   * The section's members, enumerated.
+   *
+   * Optional since #13855 — and optional ONLY in the sense that `group` is the
+   * other way to declare the same fact. A section carrying neither is refused
+   * (see {@link sectionGroupReferenceRefinement}), so no section reaches a
+   * renderer without a member source, which is what the previously-required key
+   * guaranteed.
+   */
   fields: z.array(z.union([
     z.string(), // Legacy: simple field name
     FormFieldSchema, // Enhanced: detailed field config
-  ])),
-}).transform(normalizeVisibleWhen));
+  ])).optional(),
+}).superRefine(sectionGroupReferenceRefinement({
+  surface: 'this form section',
+  // Exactly the keys `deriveFieldGroupLayout` fills from the group. `name` is
+  // in the list because the derived section's `key` IS the group key, which is
+  // already this surface's i18n anchor (`metadataForms.<type>.sections.<name>`)
+  // — a second name would give one section two lookup identities. `visibleOn`
+  // rides along because this refinement runs BEFORE the `.transform` that folds
+  // it onto `visibleWhen`, so the deprecated spelling must be named here or it
+  // would be the one way to smuggle a section-level predicate past the rule.
+  //
+  // NOT in the list, deliberately: `columns` and `pane`. Those are how THIS
+  // form lays the section out and the group declares nothing about them, so
+  // there is no second source to create.
+  derivedKeys: ['name', 'label', 'description', 'visibleWhen', 'visibleOn'],
+  // `collapsible` / `collapsed` carry `.default(false)`, so an authored `false`
+  // is already indistinguishable from the default by the time this runs — the
+  // same asymmetry #13704 records for the wizard step keys, and it costs
+  // nothing: `false` declares exactly what a group with `collapse: 'none'`
+  // delivers. Only `true` declares presentation the group owns.
+  trueOnlyDerivedKeys: ['collapsible', 'collapsed'],
+})).transform(normalizeVisibleWhen));
 
 /**
  * A single form action button (submit / cancel / reset): visibility + label.
@@ -3257,6 +3325,35 @@ export const FormViewSchema = lazySchema(() => strictObject({
                 + 'grouping belongs to `simple`/`tabbed` sections.',
             });
           }
+        }
+        // [#13855] The field-group REFERENCE form is refused on a wizard step
+        // for the same reason the two refusals above exist, one layer back: a
+        // `fieldGroups` entry carries `visibleWhen` and `collapse`, and
+        // `deriveFieldGroupLayout` passes both through to the derived section.
+        // Accepting `group` here would hand a wizard step exactly the predicate
+        // and collapse state #13704 just finished refusing — reached through
+        // the object's declaration instead of the step's own keys, so the
+        // refusals above would report clean while the behaviour arrived anyway.
+        // The section schema cannot see the group (that is cross-schema), so
+        // the honest answer at parse is to refuse the reference on this form
+        // type, not to guess what the group declares.
+        //
+        // Deliberately the CONSERVATIVE direction: a wizard step whose group
+        // declares neither key is legal metadata this refuses today, and
+        // allowing it later (once the renderer half lands and a ruling covers a
+        // derived predicate on a step) is additive.
+        if (section.group != null) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key, index, 'group'],
+            message:
+              '`group` on a wizard step is refused: a field group carries `visibleWhen` and '
+              + '`collapse`, and `deriveFieldGroupLayout` passes both through to the section it '
+              + 'derives — neither of which a wizard step has a slot for (steps are entered in '
+              + 'array order behind the step gate, and the wizard shows exactly the current step). '
+              + 'Enumerate the step with `fields: [...]`, or use a `simple`/`tabbed` form to '
+              + 'inherit the group.',
+          });
         }
       }
     });

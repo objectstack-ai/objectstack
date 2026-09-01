@@ -147,6 +147,63 @@ describe('getMetaItems — stored rows are served canonical (#3903)', () => {
     });
 });
 
+// [#13700 — ui#6837 half 1] A stored object row carrying the legacy objectql
+// `reference_to` dialect. `FieldSchema` has always REFUSED the key (so this
+// row could only have been written by a seam that bypasses the parse — which
+// is exactly what the stub seeding reproduces), and objectui's
+// `reference ?? reference_to` fallback arms are being deleted on the strength
+// of this suite: the serve face must only ever emit `reference`.
+// Typed `any` like the stub engine above: the seed deliberately carries an
+// object-literal `metadata` (makeStubEngine stringifies it), which `Row`'s
+// stored shape (`metadata: string`) rejects at the call site.
+const legacyReferenceToRow: any = {
+    type: 'object',
+    name: 'crm_contact',
+    metadata: {
+        name: 'crm_contact',
+        label: 'Contact',
+        fields: {
+            company_id: { type: 'lookup', label: 'Company', reference_to: 'crm_company' },
+            title: { type: 'text', label: 'Title' },
+        },
+    },
+};
+
+describe('getMetaItems — stored reference_to serves as reference (#13700, ui#6837 half 1)', () => {
+    it('serves the lookup target under the canonical key ONLY', async () => {
+        const { engine } = makeStubEngine([legacyReferenceToRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const res = await protocol.getMetaItems({ type: 'object' });
+        const obj = (res.items as any[]).find((i) => i.name === 'crm_contact');
+        expect(obj.fields.company_id.reference).toBe('crm_company');
+        expect('reference_to' in obj.fields.company_id).toBe(false);
+        // The non-relationship sibling rides through untouched.
+        expect(obj.fields.title).toEqual({ type: 'text', label: 'Title' });
+    });
+
+    it('single read is canonical too, with clean _diagnostics (chain-owned history is not "invalid")', async () => {
+        const { engine } = makeStubEngine([legacyReferenceToRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const res: any = await protocol.getMetaItem({ type: 'object', name: 'crm_contact' });
+        expect(res.item.fields.company_id.reference).toBe('crm_company');
+        expect('reference_to' in res.item.fields.company_id).toBe(false);
+        // Unconverted, this row reads as invalid metadata (the dialect key is
+        // an `unrecognized_keys` rejection); converted first, it is valid —
+        // the serve face OWNS this history rather than reporting it broken.
+        expect(res.item._diagnostics?.valid).toBe(true);
+    });
+
+    it('boot hydration registers the CONVERTED body', async () => {
+        const { engine, registered } = makeStubEngine([legacyReferenceToRow]);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const res = await protocol.loadMetaFromDb();
+        expect(res).toEqual({ loaded: 1, errors: 0, invalid: 0, storeUnavailable: false });
+        const obj = registered.find((r) => r.kind === 'object')!;
+        expect(obj.body.fields.company_id.reference).toBe('crm_company');
+        expect('reference_to' in obj.body.fields.company_id).toBe(false);
+    });
+});
+
 describe('getMetaItem — single stored read is canonical (#3903)', () => {
     it('returns the converted body with clean _diagnostics (chain-owned history is not "invalid")', async () => {
         const { engine } = makeStubEngine([legacyObjectRow]);

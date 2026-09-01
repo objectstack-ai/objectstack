@@ -824,6 +824,68 @@ export interface MountedRoute extends RouteEntry {
     readonly source: MountedRouteSource;
 }
 
+/**
+ * Reach a HOST-WIRED provider seam so that a SYNCHRONOUS throw and a REJECTED
+ * promise reach the SAME answer.
+ *
+ * ## Why this exists
+ *
+ * `provider(environmentId).catch(() => undefined)` attaches its handler to the
+ * promise the call RETURNS, so the handler can only ever see a *rejection*. A
+ * provider that throws BEFORE returning a promise — an ordinary non-`async`
+ * function, which the seam's own type (`(environmentId?: string) =>
+ * Promise<T>`) does not and cannot prevent a host from wiring — throws while
+ * the expression is still being evaluated, so there is no promise to attach to
+ * and the `.catch` is never reached. The throw escapes to
+ * {@link RestServer.computeExecCtx}'s outer `catch`, which discards the ENTIRE
+ * execution context, identity included.
+ *
+ * Measured at one and the same seam (`settingsServiceProvider`), on a real
+ * `RestServer` with a real `registerPackageRoutes`, both callers holding a
+ * valid session and identical grants — the fault differing ONLY in how the
+ * provider fails:
+ *
+ * | `settingsServiceProvider` | `GET /api/v1/packages` (before) |
+ * |:--|:--|
+ * | `async () =>` throws (a rejecting promise) | **200** — caller keeps `manage_metadata` + `studio.access` |
+ * | `() =>` throws (synchronous)               | **401 UNAUTHENTICATED** |
+ *
+ * ⇒ the wire answer was decided by whether the host happened to declare its
+ * provider `async`. That is the defect: not which of the two answers is right,
+ * but that one fault had two.
+ *
+ * ## What this normalisation does and does NOT decide
+ *
+ * It makes the SYNCHRONOUS path agree with the path the `.catch` already
+ * defines — absorb, resolve `undefined`, let the caller degrade. It does NOT
+ * touch `computeExecCtx`'s outer `catch`, and it does not re-decide whether a
+ * post-identity fault SHOULD discard identity; that is a behaviour change on a
+ * public door and is deliberately left unruled here.
+ *
+ * ⚠️ Absorbing here cannot weaken the #13279 loud path: an
+ * `AuthzStoreUnavailableError` has exactly one construction site
+ * (`tryFind`, in `@objectstack/core`'s `resolve-authz-context.ts`), which is
+ * reached from `resolveAuthzContext` — never from a provider seam — so no
+ * branded outage travels through this helper in either direction.
+ *
+ * ⚠️ `call` is invoked SYNCHRONOUSLY (an async function body runs to its first
+ * `await` synchronously), so this changes when a provider *fails*, never when
+ * it is *called* — deliberately not `Promise.resolve().then(call)`, which
+ * would defer every provider by a microtask for no gain.
+ *
+ * ⛔ Not for the seams that carry NO `.catch` at all — `kernelManager
+ * .getOrCreate()` and `authService.getApi()` lose the context in BOTH
+ * directions, so they are already symmetric and giving them a swallow would be
+ * a new policy rather than a normalisation.
+ */
+async function seamOrUndefined<T>(call: () => T | PromiseLike<T>): Promise<T | undefined> {
+    try {
+        return await call();
+    } catch {
+        return undefined;
+    }
+}
+
 export class RestServer {
     private protocol: RestProtocol;
     private config: NormalizedRestServerConfig;
@@ -1978,7 +2040,7 @@ export class RestServer {
             let authEnvironmentId: string | undefined;
             if (environmentId && environmentId !== 'platform' && this.kernelManager) {
                 kernel = await this.kernelManager.getOrCreate(environmentId);
-                authService = await kernel.getServiceAsync('auth').catch(() => undefined);
+                authService = await seamOrUndefined(() => kernel.getServiceAsync('auth'));
                 if (authService) authEnvironmentId = environmentId;
             }
             if (!authService && this.defaultEnvironmentIdProvider && this.kernelManager) {
@@ -1986,7 +2048,7 @@ export class RestServer {
                     const def = this.defaultEnvironmentIdProvider();
                     if (def) {
                         kernel = await this.kernelManager.getOrCreate(def);
-                        authService = await kernel.getServiceAsync('auth').catch(() => undefined);
+                        authService = await seamOrUndefined(() => kernel.getServiceAsync('auth'));
                         // ⚠️ The CROSS-ENVIRONMENT branch. The request resolved to
                         // `environmentId`, but the credential is being checked
                         // against `def`'s auth service — so a session minted in the
@@ -2001,7 +2063,7 @@ export class RestServer {
             // the plugin wired an `authServiceProvider` that hits the
             // local kernel directly.
             if (!authService && this.authServiceProvider) {
-                authService = await this.authServiceProvider(environmentId).catch(() => undefined);
+                authService = await seamOrUndefined(() => this.authServiceProvider!(environmentId));
                 // The provider is asked FOR this environment and answers for it
                 // (`rest-api-plugin` wires it to the lone local kernel), so the
                 // credential is anchored where the request resolved.
@@ -2036,8 +2098,8 @@ export class RestServer {
 
             // Resolve the data engine for this scope (shared by the resolver below).
             const ql: any = kernel
-                ? await kernel.getServiceAsync('objectql').catch(() => undefined)
-                : (this.objectQLProvider ? await this.objectQLProvider(environmentId).catch(() => undefined) : undefined);
+                ? await seamOrUndefined(() => kernel.getServiceAsync('objectql'))
+                : (this.objectQLProvider ? await seamOrUndefined(() => this.objectQLProvider!(environmentId)) : undefined);
 
             // Delegate ALL identity + role/permission/RLS aggregation to the SINGLE
             // shared resolver (`resolveAuthzContext`, @objectstack/core) — the same one
@@ -2067,7 +2129,7 @@ export class RestServer {
             if (!authz.userId) return undefined;
 
             const settings = this.settingsServiceProvider
-                ? await this.settingsServiceProvider(environmentId).catch(() => undefined)
+                ? await seamOrUndefined(() => this.settingsServiceProvider!(environmentId))
                 : undefined;
             const localization = await resolveLocalizationContext({
                 ql,

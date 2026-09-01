@@ -1675,12 +1675,22 @@ export { maskComments };
  * comment convention: `function selfTest() {` at column 0, optionally `export`
  * and/or `async`, with any name that spells self-test (`selfTest`,
  * `fixtureSelfTest`, `selfTestReadSeams`, `prePushIsArmedSelfTest`,
- * `decisionTableSelfTest` — the five spellings this tree actually uses).
+ * `decisionTableSelfTest` — four of the 18 compound names this tree uses).
  *
- * Measured across the 61 scripts under `scripts/` that carry one: 53 write
- * `function selfTest() {`, 7 write `async function selfTest() {`, and the four
- * remaining names are the compound ones above — 61 of 61 at column 0, none of
- * them an arrow-function const. If a script ever spells one as
+ * Re-derived at 6193e576d across the 169 scripts under `scripts/` that carry
+ * one — 185 declarations: 111 `function selfTest(`, 28
+ * `export function selfTest(`, 19 `async function selfTest(`, 8
+ * `export async function selfTest(`, and 19 compound names — one of which is
+ * this module's own `maskSelfTests`, so this file's masker blanks its own body
+ * whenever it scans itself. That was true long before the helper follow below
+ * existed and it costs nothing today, because none of the functions it reaches
+ * spells a path; it is recorded because it is the kind of thing that stops
+ * being free the day one of them does. The load-bearing half holds: 185 of 185
+ * at column 0, and a column-0 scan for the const/arrow spelling finds ZERO.
+ * ⚠ The counts in this paragraph read 61/53/7/4 when it was written and had
+ * gone stale by a factor of three before anyone re-read them — re-derive them
+ * rather than quoting them; only the two PROPERTIES are what this pattern
+ * rests on. If a script ever spells one as
  * `const selfTest = () => {`, widen this pattern rather than reaching for a
  * comment marker; a declaration is a thing the language guarantees, a marker
  * comment is a thing an author has to remember.
@@ -1689,7 +1699,261 @@ const SELF_TEST_DECL =
   /^(?:export[ \t]+)?(?:async[ \t]+)?function[ \t]+[A-Za-z0-9_$]*[Ss]elf[_]?[Tt]est[A-Za-z0-9_$]*[ \t]*\(/gm;
 
 /**
- * The source with the BODY of every top-level self-test function blanked.
+ * Every TOP-LEVEL declaration in a module body: `export`ness, name, span, and
+ * whether it is CALLABLE (a `function`/`class`, whose body runs only when
+ * something calls it) or a VALUE (`const`/`let`/`var`, evaluated at module
+ * load). Anchored at column 0 for the same structural reason the self-test
+ * anchor above is, and measured on the same corpus.
+ *
+ * Destructuring binders (`const { a } = x`) are deliberately unmatched: the
+ * declaration below is only ever used to decide what NOT to read, so a binder
+ * this pattern cannot name stays in the module body, which is the direction
+ * that masks LESS.
+ */
+const TOP_LEVEL_DECL =
+  /^(export[ \t]+)?(?:(?:default[ \t]+)?(?:async[ \t]+)?function[ \t]*\*?[ \t]*([A-Za-z_$][\w$]*)[ \t]*\(|(?:default[ \t]+)?class[ \t]+([A-Za-z_$][\w$]*)[\s{]|(?:const|let|var)[ \t]+([A-Za-z_$][\w$]*)[ \t]*=)/gm;
+
+/** One JavaScript identifier. Read as a REFERENCE, wherever it stands. */
+const IDENTIFIER_TOKEN = /[A-Za-z_$][\w$]*/g;
+
+/**
+ * The end of a brace-balanced body, or -1 if the braces never close.
+ *
+ * `skipParams` walks the parameter list first, and it is not a refinement: a
+ * destructured default puts braces in the SIGNATURE, and counting those closes
+ * the body before it opens. `release-rehearsal-clone.mjs` writes two of them
+ * among its fixture builders — and, the half this docblock asserted backwards
+ * once, THREE self-test ENTRY POINTS in the `scripts/` tree carry one TODAY, so
+ * this repairs live files rather than guarding against a future spelling:
+ *
+ *   scripts/check-test-completeness.mjs:576
+ *   scripts/measure-position-name-fold-census.mjs:689
+ *       both `function selfTest({ quiet = false } = {})`
+ *   scripts/workspace-enumerator.mjs:328
+ *       `export function selfTest({ root = null } = {})`
+ *
+ * Measured at 6193e576d — bytes `maskSelfTests` changes in each file, this
+ * module against a staged copy of the one on `origin/main`: 30 -> 14848,
+ * 30 -> 3961, 34 -> 6294. Thirty bytes is the destructured parameter and
+ * nothing else; the entire self-test body was surviving the mask. The control
+ * that makes those three a reading rather than an artifact is a self-test with
+ * no brace in its signature, identical both ways —
+ * `check-empty-changeset.mjs`, 48044 -> 48044.
+ *
+ * It did not move the hint census, and that is LUCK rather than design: those
+ * three bodies happen to carry no path literal their module bodies do not
+ * already carry, so `extractWatchHints` returns the same set on both sides
+ * (`[]`, `[]`, and the same 8 hints). A fourth file with the same signature
+ * shape and one fixture path in it would have been a live fabricated lead.
+ */
+function bracedBodyEnd(source, scan, start, skipParams) {
+  let i = start;
+  if (skipParams) {
+    let parens = 0;
+    let openedParen = false;
+    for (; i < source.length; i++) {
+      if (scan.comment[i] || scan.literal[i]) continue;
+      if (source[i] === '(') {
+        parens++;
+        openedParen = true;
+      } else if (source[i] === ')') {
+        parens--;
+        if (openedParen && parens === 0) {
+          i++;
+          break;
+        }
+      }
+    }
+    if (!openedParen) return -1;
+  }
+  let depth = 0;
+  let opened = false;
+  for (; i < source.length; i++) {
+    if (scan.comment[i] || scan.literal[i]) continue;
+    if (source[i] === '{') {
+      depth++;
+      opened = true;
+    } else if (source[i] === '}') {
+      depth--;
+      if (opened && depth === 0) return i + 1;
+    }
+  }
+  return -1;
+}
+
+/**
+ * The end of a value declaration — the first `;` at bracket depth 0 — or -1
+ * when the statement has none (ASI). Braces, brackets and parens are counted
+ * over CODE positions only, so a `;` inside a fixture string or a regex cannot
+ * end the statement early.
+ */
+function valueDeclEnd(source, scan, start) {
+  let depth = 0;
+  for (let i = start; i < source.length; i++) {
+    if (scan.comment[i] || scan.literal[i]) continue;
+    const c = source[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ';' && depth === 0) return i + 1;
+  }
+  return -1;
+}
+
+/**
+ * The module's top-level declarations, in source order and non-overlapping.
+ *
+ * A declaration whose span cannot be closed is DROPPED rather than run to end
+ * of file: one unterminated span would otherwise swallow every declaration
+ * after it, including the self-test the mask exists to find. Its text stays in
+ * the module body — again the direction that masks less. The mask-to-end-of-
+ * file behaviour a malformed self-test has always had is kept where it lives,
+ * in `maskSelfTests` itself.
+ */
+function topLevelDecls(source, scan, selfTestStarts) {
+  const decls = [];
+  let guard = 0;
+  for (const m of source.matchAll(TOP_LEVEL_DECL)) {
+    const start = m.index;
+    if (start < guard) continue;
+    if (scan.comment[start] || scan.literal[start]) continue;
+    const isFunction = m[2] !== undefined;
+    const callable = isFunction || m[3] !== undefined;
+    const end = callable ? bracedBodyEnd(source, scan, start, isFunction) : valueDeclEnd(source, scan, start);
+    if (end < 0) continue;
+    decls.push({
+      name: m[2] ?? m[3] ?? m[4],
+      start,
+      end,
+      callable,
+      exported: m[1] !== undefined,
+      selfTest: selfTestStarts.has(start),
+    });
+    guard = end;
+  }
+  return decls;
+}
+
+/**
+ * The top-level CALLABLES that only the self-test can reach.
+ *
+ * ## The defect this answers
+ *
+ * `SELF_TEST_DECL` finds the ENTRY POINT and nothing else. A helper the entry
+ * point calls is named for what it builds — `makeSource`, `buildFixtureTree`,
+ * `stampFor`, `fixtureCommit` — and no part of that name spells self-test, so
+ * its body survived the mask and its fixture literals were read as paths the
+ * gate opens. Measured on `scripts/pm/release-rehearsal-clone.mjs`, whose
+ * `makeSource` writes a fixture `.changeset` tree: the hint set carried
+ * `.changeset/one.md` and `.changeset/two.md`, and the residue printed a cause
+ * for them — "the tree stops at .changeset; the layout moved under it" — that
+ * describes a directory rename which never happened. A fabricated lead, from
+ * the same fixture family the entry-point mask was written to refuse.
+ *
+ * ## Why reachability, and not a banner comment
+ *
+ * The obvious alternative is to mask everything below the block-comment
+ * `self-test` banner these scripts write. `SELF_TEST_DECL`'s docblock argues
+ * against it directly, and that argument is adopted here rather than
+ * re-litigated: a declaration is a thing the language guarantees, a marker
+ * comment is a thing an author has to remember. The banner is also not
+ * load-bearing anywhere else, so nothing would go red when one is missing — the mask would simply
+ * stop reaching, silently, which is the failure family this whole module is
+ * built to refuse.
+ *
+ * ## The predicate, and which half is the safety half
+ *
+ * A callable is masked when it is reachable from a self-test body AND NOT
+ * reachable from anything else the module does. The second conjunct is the
+ * safety half: a helper shared by the self-test and the real gate body stays
+ * unmasked, or the mask would drop a population the gate really reads. The
+ * roots of "anything else" are the module-body statements outside every
+ * declaration (the `import`s, the top-level side effects, the `export { … }`
+ * lists, the entrypoint guard at the bottom) plus every `export`ed
+ * declaration, which is reachable from outside this file by definition. A
+ * self-test body is REACHED but never TRAVERSED — the bottom of these scripts
+ * calls `selfTest()` from module scope, so traversing it would make every
+ * helper root-reachable and the whole predicate vacuous.
+ *
+ * ## Why VALUE declarations are excluded, measured rather than assumed
+ *
+ * Extending the same predicate to `const`/`let`/`var` was implemented and
+ * REFUSED. A top-level constant that carries path literals and is referenced
+ * from no executing code is, in this tree, overwhelmingly a gate DECLARING its
+ * population for this very scanner to read — `ROOT_DIR_WATCH_HINTS`,
+ * `ROOT_FILE_WATCH_HINTS`, `ROOT_WATCH_HINTS`, the shape
+ * `scripts/check-watch-hint-literal.mjs` exists to enforce. Being unreferenced
+ * is what those declarations ARE. Measured over the 204 files this derivation
+ * scans: masking values as well takes 36 files and 175 hints instead of 9 and
+ * 104, and the 71 extra include the declared populations of eight gates
+ * (`.claude/**`, `content/**`, `docs/**`, `skills/**`, `packages/drivers/**`,
+ * `examples/**`, `scripts/**`, `ARCHITECTURE.md/**`) — the mask erasing
+ * exactly the declarations it is supposed to see. The fixture TABLES it would
+ * also have caught (`SELF_TEST_CASES` and friends) are left behind
+ * deliberately: keeping a false hint costs a CI round, dropping a declared
+ * population costs a gate.
+ *
+ * ## What counts as a reference
+ *
+ * Identifiers at CODE positions, plus identifiers inside `${…}`
+ * interpolations, which are code — `scan.interpolation` exists for exactly
+ * this and skipping it is not academic: `release-rehearsal-clone.mjs` names
+ * its own path constant only from inside template literals, so a scan that
+ * read `${SELF}` as string text would have found `SELF` unreferenced and
+ * masked away the one hint that file really declares. Prose is excluded (a
+ * docblock naming a helper is not a call), and so is plain string text;
+ * admitting string text too was measured over the same 204 files and moved
+ * nothing at all, so it buys no safety worth its cost.
+ *
+ * An identifier is counted wherever it stands, property accesses and shadowing
+ * locals included. That over-counts references, and over-counting can only
+ * keep a declaration unmasked.
+ */
+function selfTestOnlyCallables(source, scan, selfTestStarts) {
+  const decls = topLevelDecls(source, scan, selfTestStarts);
+  if (!decls.some((d) => d.selfTest)) return [];
+  const refs = decls.map(() => new Set());
+  const moduleBodyRefs = new Set();
+  let at = 0;
+  for (const m of source.matchAll(IDENTIFIER_TOKEN)) {
+    const i = m.index;
+    if (scan.comment[i]) continue;
+    if (scan.literal[i] && !scan.interpolation[i]) continue;
+    while (at < decls.length && decls[at].end <= i) at++;
+    if (at < decls.length && i >= decls[at].start) refs[at].add(m[0]);
+    else moduleBodyRefs.add(m[0]);
+  }
+  const byName = new Map();
+  for (let k = 0; k < decls.length; k++) {
+    const list = byName.get(decls[k].name);
+    if (list) list.push(k);
+    else byName.set(decls[k].name, [k]);
+  }
+  const reach = (seeds) => {
+    const seen = new Set();
+    const queue = [...seeds];
+    while (queue.length > 0) {
+      const name = queue.pop();
+      if (seen.has(name)) continue;
+      seen.add(name);
+      for (const k of byName.get(name) ?? []) {
+        // Reached, never traversed: what a self-test body calls is not part of
+        // what this module DOES.
+        if (decls[k].selfTest) continue;
+        for (const next of refs[k]) if (!seen.has(next)) queue.push(next);
+      }
+    }
+    return seen;
+  };
+  const roots = new Set(moduleBodyRefs);
+  for (const d of decls) if (d.exported) roots.add(d.name);
+  const live = reach(roots);
+  const fromSelfTest = reach(decls.flatMap((d, k) => (d.selfTest ? [...refs[k]] : [])));
+  return decls.filter((d) => d.callable && !d.selfTest && fromSelfTest.has(d.name) && !live.has(d.name));
+}
+
+/**
+ * The source with the BODY of every top-level self-test function blanked, and
+ * with it every top-level callable ONLY the self-test can reach.
  *
  * ## Why the self-test is not part of what a gate reads
  *
@@ -1703,38 +1967,40 @@ const SELF_TEST_DECL =
  * through `check:changeset-gate-self-tests`, which resolves to all three
  * changeset gates at once and inherits the union of their fixtures.
  *
+ * The fixture builders those self-tests CALL are the other half, and they are
+ * `selfTestOnlyCallables`' subject: the declaration's own name is what
+ * `SELF_TEST_DECL` reads, and a helper's name never spells self-test. Measured
+ * over the 204 scripts this derivation scans, adding them removes 104 hints
+ * from 9 files and adds none; every one of the 104 is attributable to a single
+ * fixture-building declaration, and no family loses coverage of a file it
+ * still opens.
+ *
  * The end of the body is found by counting braces over code positions only, so
  * a `}` inside a fixture string or a `{1,6}` inside a regex cannot close it
- * early. A declaration whose braces never balance masks to end of file: recall
- * loss on a malformed script, never a fabricated lead.
+ * early. A self-test declaration whose braces never balance masks to end of
+ * file: recall loss on a malformed script, never a fabricated lead.
  *
  * Compose comment masking FIRST — otherwise a `function selfTest() {` written
  * at column 0 inside a block comment (a docblock example, exactly the kind this
  * file is full of) would anchor a mask over real code.
+ *
+ * The result is a strict superset of the mask this function applied before the
+ * helper follow existed: the self-test spans are computed exactly as they were,
+ * and the helpers are added to them. Nothing that used to be blanked survives.
  */
 export function maskSelfTests(source) {
-  const { comment, literal } = scanSource(source);
+  const scan = scanSource(source);
   const flags = new Uint8Array(source.length);
+  const selfTestStarts = new Set();
   for (const m of source.matchAll(SELF_TEST_DECL)) {
     const start = m.index;
-    if (comment[start] || literal[start]) continue;
-    let depth = 0;
-    let opened = false;
-    let end = start;
-    for (; end < source.length; end++) {
-      if (comment[end] || literal[end]) continue;
-      if (source[end] === '{') {
-        depth++;
-        opened = true;
-      } else if (source[end] === '}') {
-        depth--;
-        if (opened && depth === 0) {
-          end++;
-          break;
-        }
-      }
-    }
-    for (let k = start; k < end; k++) flags[k] = 1;
+    if (scan.comment[start] || scan.literal[start]) continue;
+    selfTestStarts.add(start);
+    const end = bracedBodyEnd(source, scan, start, true);
+    for (let k = start; k < (end < 0 ? source.length : end); k++) flags[k] = 1;
+  }
+  for (const decl of selfTestOnlyCallables(source, scan, selfTestStarts)) {
+    for (let k = decl.start; k < decl.end; k++) flags[k] = 1;
   }
   return blank(source, flags);
 }
@@ -3589,7 +3855,7 @@ export function commonDirectory(paths) {
  *
  * ## The test, and why it is FILES and not a shape heuristic
  *
- * Every declared literal must collapse to a path the tree tracks as a FILE. A
+ * Every declared literal must NAME a path the tree tracks as a FILE. A
  * gate that names one directory has declared a population, whatever else it
  * names; a gate that names only files has declared ARTIFACTS — a baseline it
  * maintains, an allowlist of current members, a sibling tool it reads — and
@@ -3597,6 +3863,53 @@ export function commonDirectory(paths) {
  * test rather than needing to be told apart: one artifact is the "names only
  * its baseline artifact" case the residue prose already describes, and several
  * under a common root is the enumeration above.
+ *
+ * ## Why it asks `declaredFileTarget` and holds no answer of its own (#13520)
+ *
+ * "NAME" above used to read "collapse to", and the difference was a whole
+ * category. The test was `trackedFiles.has(collapseHint(h))` — a private,
+ * weaker copy of a question this file already has an owner for. `hintCovers`
+ * resolves a module specifier through `MODULE_SPECIFIER_EXTENSIONS` (#12514)
+ * and `extensionlessModuleTarget` names the file it resolves to (#12299); this
+ * predicate followed neither, so a family whose whole roster is extensionless
+ * import targets — `packages/spec/scripts/lib/dist-freshness`, while the tree
+ * holds `…/dist-freshness.ts` — failed the every-literal test and printed as
+ * an ORDINARY silence, which this file's header calls a different fact.
+ *
+ * ⚠️ Note the failure direction, which is why it survived: it threw nothing and
+ * printed no error. It returned a coherent, plausible, WRONG category, and the
+ * `--residue` block printed both halves of the contradiction on one line — the
+ * dead-hint sweep (`hintCovers`) marking every literal as reaching the tree,
+ * and this predicate declining to call the family a roster.
+ *
+ * The repair is not a list of the families it got wrong. It is that this
+ * predicate no longer decides the question at all: `declaredFileTarget` is the
+ * one owner of "the tracked FILE this declared literal names", and every
+ * spelling that owner learns is learned here in the same edit, for every
+ * family at once. The self-test holds the two EQUAL over the live fleet, so a
+ * future widening of the covering rule that forgets this reader reds instead of
+ * silently re-categorising families — the class, not the gate names.
+ *
+ * ## Blast radius, measured over the WHOLE fleet before widening (#13520)
+ *
+ * On 192 discovered families × 754 distinct hints × 7605 tracked files, at
+ * `16c3601d2`:
+ *
+ *   artifact-roster families            30 -> 39   (+9, and ZERO lost)
+ *   rosters whose membership or dir moved        0
+ *   literals where the covering rule and this predicate disagree   40 -> 0
+ *
+ * All nine gained are `packages/spec` families whose rosters are `.ts` module
+ * specifiers; no family loses the verdict it had, and no existing roster's
+ * `artifacts` or `dir` changes, because resolution is the identity on a literal
+ * that already spells its file. The card that filed this named six; the sweep
+ * it asked for found nine.
+ *
+ * The widening cannot reach a declared POPULATION: `extensionlessModuleTarget`
+ * refuses any hint the tree has as a prefix, so a directory literal never
+ * resolves, and a pattern is refused up front (measured: 18 pattern-judged
+ * hints in the fleet, 0 of which collapse to a tracked file — the refusal is
+ * structural rather than lucky).
  *
  * Deliberately NOT inferred: whether the author meant the roster as the
  * population. Intent is not in the tree — the same refusal `unreachableFamilies`
@@ -3614,12 +3927,26 @@ export function commonDirectory(paths) {
  *
  * @param {{hints?: string[]}} entry
  * @param {string[]} paths the card's file surface
- * @param {Set<string>} trackedFiles every file git tracks, repo-relative
+ * @param {{files: Set<string>, prefixes: Set<string>}} tree the `watchHintTree` bundle
  */
-export function artifactOnlySilence(entry, paths, trackedFiles) {
-  const artifacts = [...new Set(entry.hints ?? [])].map(collapseHint);
-  if (artifacts.length === 0) return null;
-  if (!artifacts.every((a) => trackedFiles.has(a))) return null;
+export function artifactOnlySilence(entry, paths, tree) {
+  // A bare file set is exactly what this predicate used to take, and it is the
+  // shape that loses every literal naming its file through a dropped
+  // extension. Refused loudly rather than read as an empty answer (#4690's
+  // rule, applied to a caller instead of to a corpus): a wrong CATEGORY is the
+  // failure this parameter was widened to stop, and it prints as a plausible
+  // sentence when it happens.
+  if (!(tree?.files instanceof Set) || !(tree?.prefixes instanceof Set)) {
+    throw new TypeError(
+      'artifactOnlySilence needs the watch-hint TREE bundle ({files, prefixes}) from watchHintTree(), ' +
+        'not a bare file set — the pair is meaningless apart, and files alone silently mis-categorises ' +
+        'every family whose roster is spelled as extensionless module specifiers.',
+    );
+  }
+  const declared = [...new Set(entry.hints ?? [])];
+  if (declared.length === 0) return null;
+  const artifacts = declared.map((h) => declaredFileTarget(h, tree));
+  if (!artifacts.every(Boolean)) return null;
   const dir = commonDirectory(artifacts);
   const coversYourPath = Boolean(dir) && paths.some((p) => p === dir || p.startsWith(`${dir}/`));
   return { artifacts, dir, coversYourPath };
@@ -3652,7 +3979,11 @@ export function artifactOnlySilence(entry, paths, trackedFiles) {
  */
 export function artifactOnlyNote({ artifacts, dir, coversYourPath }) {
   const what =
-    `⚠ artifact roster: all ${artifacts.length} declared literal(s) are tracked FILES` +
+    // "NAME", not "are" (#13520). A literal may name its file through a
+    // dropped extension, so the roster is a list of files the literals RESOLVE
+    // to, and a sentence saying the literals ARE those files stopped being true
+    // the moment the classifier learned to follow the resolution.
+    `⚠ artifact roster: all ${artifacts.length} declared literal(s) name tracked FILES` +
     (dir ? `, under ${dir}` : '') +
     ' — artifacts this gate names (a baseline, an allowlist of current members), not a population it declares.';
   if (!coversYourPath) {
@@ -4558,6 +4889,66 @@ export function extensionlessModuleTarget(hint, files, prefixes) {
   if (!plain || prefixes.has(plain)) return null;
   for (const ext of MODULE_SPECIFIER_EXTENSIONS) if (files.has(plain + ext)) return plain + ext;
   return null;
+}
+
+/**
+ * The tracked FILE a declared literal NAMES, or `null` when it names anything
+ * else — a directory, a pattern, a path this tree does not have. The one owner
+ * of that question, for every reader in this file that has it (#13520).
+ *
+ * ## Why it exists: the question had three answers and they disagreed
+ *
+ * Three places in this file ask some form of "does this literal name a tracked
+ * file", and until this function they answered it three different ways:
+ *
+ *   - `hintCovers` — the covering rule, which follows a dropped extension
+ *     through `MODULE_SPECIFIER_EXTENSIONS` (#12514);
+ *   - `extensionlessModuleTarget` — which NAMES the file such a specifier
+ *     resolves to, and is what the residue printer says "the tree HAS this
+ *     file" with (#12299);
+ *   - `artifactOnlySilence` — which asked `trackedFiles.has(collapseHint(h))`
+ *     and so followed nothing.
+ *
+ * The third is a private copy of a rule that lives elsewhere, and a copy that
+ * drifts is the defect this file refuses everywhere else — `extractWatchHints`
+ * was refused the same widening on exactly this ground ("a SECOND answer to a
+ * question `extensionlessModuleTarget` already owns — the drift this file
+ * refuses everywhere else"). Measured over the fleet, the copy disagreed with
+ * the covering rule about 40 of 754 declared literals, silently, in the
+ * direction that prints a coherent wrong category rather than an error.
+ *
+ * ## What it composes, and why the composition is total
+ *
+ * A literal names a tracked file in exactly two ways, and they are mutually
+ * exclusive by construction rather than by luck: it IS the file, or it is that
+ * file's module specifier with the extension dropped.
+ * `extensionlessModuleTarget` refuses any hint the tree has as a prefix, and a
+ * tracked file is a tracked prefix, so the second branch can never re-answer
+ * the first. That exclusion is already pinned; this function is where the two
+ * halves are joined so no third caller has to join them again.
+ *
+ * ## Why a PATTERN is refused before either branch
+ *
+ * A glob is a declared population — the opposite of an artifact — and a
+ * mangled collapse must never be able to smuggle one in through the file
+ * branch. `globInNonFinalSegment` and `globCarriesLiteralSuffix` both splice
+ * strings that were never adjacent (`skills/*\/references/_index.md` →
+ * `skills//references/_index.md`, `.changeset/*.md` → `.changeset/.md`), and
+ * a splice that happened to land on a tracked file would enter here as an
+ * artifact. Measured on this tree: 18 pattern-judged hints in the fleet, none
+ * of which collapses to a tracked file — so the refusal costs nothing today and
+ * makes the exclusion structural, the standard this file holds its other
+ * boundaries to.
+ *
+ * @param {string} hint one declared literal, as the family spells it
+ * @param {{files: Set<string>, prefixes: Set<string>}} tree the `watchHintTree` bundle
+ */
+export function declaredFileTarget(hint, tree) {
+  if (judgedAsPattern(hint)) return null;
+  const plain = collapseHint(hint);
+  if (!plain) return null;
+  if (tree.files.has(plain)) return plain;
+  return extensionlessModuleTarget(hint, tree.files, tree.prefixes);
 }
 
 /**
@@ -6940,7 +7331,12 @@ function derive(paths, { showResidue = false, mode = 'human' } = {}) {
   // corpus to judge a single-segment directory literal — one listing, so the
   // hints and the sweep that grades them cannot be taken from different trees.
   const swept = trackedFiles();
-  const { byCheck, workflows, workflowEntries } = discoverFamilies({ tree: watchHintTree(swept) });
+  // Held in a name rather than built inline: the artifact-roster split needs
+  // the SAME bundle the discovery was handed. Built twice it would be two
+  // readings of one listing, which is the drift `watchHintTree`'s own docblock
+  // refuses ("the pair is meaningless apart").
+  const tree = watchHintTree(swept);
+  const { byCheck, workflows, workflowEntries } = discoverFamilies({ tree });
   // ONE per-hint sweep feeds both readers of dead literals: the unreachable
   // listing (whole-family grain) and the residue annotations (per-hint grain,
   // #13312) — so the two cannot disagree about which literals are dead.
@@ -6950,18 +7346,13 @@ function derive(paths, { showResidue = false, mode = 'human' } = {}) {
   const matched = new Map();
   const undetermined = [];
   const silent = [];
-  // The corpus the reachability sweep already read, as a membership test: the
-  // artifact-roster split asks whether a declared literal is a tracked FILE,
-  // and re-reading the tree for it would be a second answer to a question this
-  // run has already asked once.
-  const trackedSet = new Set(swept);
   for (const [check, entry] of byCheck) {
     const { verdict, hits } = classifyEntry(entry, paths);
     if (verdict === 'matched') matched.set(check, { entry, hits });
     else if (verdict === 'undetermined') undetermined.push([check, entry]);
     else silent.push([check, entry]);
   }
-  const rosters = silent.map(([, entry]) => artifactOnlySilence(entry, paths, trackedSet)).filter(Boolean);
+  const rosters = silent.map(([, entry]) => artifactOnlySilence(entry, paths, tree)).filter(Boolean);
 
   // ONE structured answer, rendered three ways below. The human block, the
   // `--commands` list and the `--json` document are readings of these same
@@ -7068,7 +7459,7 @@ function derive(paths, { showResidue = false, mode = 'human' } = {}) {
         // said the same words in this listing as one that really does not read
         // your file. The note says which, and raises its voice only where the
         // roster was taken from a directory the card edits.
-        const roster = withHints ? artifactOnlySilence(entry, paths, trackedSet) : null;
+        const roster = withHints ? artifactOnlySilence(entry, paths, tree) : null;
         if (roster) for (const line of artifactOnlyNote(roster)) console.log(line);
       }
     };
@@ -8448,6 +8839,128 @@ function selfTest() {
     "const REAL = 'packages/ddd/src';",
   ].join('\n');
   t('a self-test declaration inside a comment anchors nothing', extractWatchHints(declInComment).includes('packages/ddd/src'));
+
+  // ── The helpers the self-test CALLS ──────────────────────────────────────
+  //
+  // `SELF_TEST_DECL` finds the ENTRY POINT by name, and a fixture builder is
+  // named for what it builds, so its body used to survive the mask whole.
+  // Measured specimen, live on this tree:
+  // `scripts/pm/release-rehearsal-clone.mjs` commits a fixture `.changeset`
+  // tree inside `makeSource`, and its two entries were read as paths that gate
+  // OPENS — the residue printed "the tree stops at .changeset; the layout moved
+  // under it" for them, a directory rename that never happened.
+  //
+  // The safety half is pinned beside it: a helper the module body can also
+  // reach is a path the gate really reads, and must survive.
+  const helperFixtures = [
+    "const REAL = 'packages/runtime/src';",
+    'function makeFixture(root) {',
+    "  write(root, 'packages/fixture-only/one.ts');",
+    '}',
+    'function shared() {',
+    "  return 'packages/shared/src';",
+    '}',
+    'function unreferenced() {',
+    "  return 'packages/dead/src';",
+    '}',
+    'export function alsoExported() {',
+    "  return 'packages/exported/src';",
+    '}',
+    'function selfTest() {',
+    '  makeFixture(tmp);',
+    '  shared();',
+    '  alsoExported();',
+    '}',
+    'function run() {',
+    '  return shared();',
+    '}',
+    'run();',
+  ].join('\n');
+  const helperHints = extractWatchHints(helperFixtures);
+  t(
+    'a fixture literal in a helper only the self-test calls is not a hint',
+    !helperHints.includes('packages/fixture-only/one.ts'),
+  );
+  t('…but a helper the module body also reaches keeps its literal', helperHints.includes('packages/shared/src'));
+  t('…and a declaration nothing references at all is left alone', helperHints.includes('packages/dead/src'));
+  t('…and an exported helper is reachable from outside this file, so it stays', helperHints.includes('packages/exported/src'));
+  t('the module body around them still hints', helperHints.includes('packages/runtime/src'));
+
+  // Transitive, and through a signature that carries braces. Counting the
+  // SIGNATURE's braces closes the body before it opens — the mask then covers
+  // 29 characters and reports success, which is how
+  // `function makeSource(root, name, { branch = 'main', … } = {})` reads.
+  const transitiveHelpers = [
+    'function writeOne(root, rel) {',
+    "  return rel === 'packages/leaf/fixture.ts';",
+    '}',
+    'function buildTree(root, { depth = 0 } = {}) {',
+    "  writeOne(root, 'packages/branch/fixture.ts');",
+    '}',
+    'function selfTest() {',
+    '  buildTree(root);',
+    '}',
+  ].join('\n');
+  const transitiveHints = extractWatchHints(transitiveHelpers);
+  t('a helper reached only THROUGH another helper is masked too', !transitiveHints.includes('packages/leaf/fixture.ts'));
+  t(
+    'a destructured default in the signature does not end the body early',
+    !transitiveHints.includes('packages/branch/fixture.ts'),
+  );
+
+  // A population DECLARED for this very scanner is referenced by no executing
+  // code — being unreferenced is what such a declaration IS. Extending the mask
+  // to value declarations was implemented and REFUSED on this evidence: over
+  // the 204 scripts this derivation scans it took 175 hints from 36 files
+  // instead of 104 from 9, and the 71 extra were the declared populations of
+  // eight gates (`ROOT_DIR_WATCH_HINTS` and its spellings).
+  const declaredPopulation = [
+    "const ROOT_DIR_WATCH_HINTS = ['packages/drivers/**'];",
+    'function selfTest() {',
+    '  return ROOT_DIR_WATCH_HINTS;',
+    '}',
+  ].join('\n');
+  t(
+    'a declaration constant only the self-test names is still a declaration',
+    extractWatchHints(declaredPopulation).includes('packages/drivers/**'),
+  );
+
+  // `${…}` is CODE, and reading it as string text is not academic: the live
+  // specimen names its own path only from inside template literals, so a scan
+  // blind to interpolations finds that constant unreferenced and masks the one
+  // hint the file really declares.
+  const interpolatedReference = [
+    'function banner() {',
+    "  return 'scripts/pm/thing.mjs';",
+    '}',
+    'function usage() {',
+    '  return `node ${banner()} --help`;',
+    '}',
+    'function selfTest() {',
+    '  banner();',
+    '}',
+    'usage();',
+  ].join('\n');
+  t(
+    'a reference from inside a template interpolation keeps a helper alive',
+    extractWatchHints(interpolatedReference).includes('scripts/pm/thing.mjs'),
+  );
+
+  // The specimen itself, on the live tree rather than in a fixture — both
+  // directions, so a future edit that deletes the file or empties its
+  // declaration cannot leave this green by vacuity.
+  const rehearsalPath = 'scripts/pm/release-rehearsal-clone.mjs';
+  const rehearsalAbs = join(ROOT, rehearsalPath);
+  t('the fixture-in-helper specimen is still on the tree', existsSync(rehearsalAbs));
+  if (existsSync(rehearsalAbs)) {
+    const rehearsalHints = extractWatchHints(readFileSync(rehearsalAbs, 'utf8'), rehearsalPath);
+    t(
+      'the fixture changesets it commits are not hints',
+      !rehearsalHints.some((h) => /^\.changeset\/(one|two)\.md$/.test(h)),
+    );
+    t('…while the population it really declares survives', rehearsalHints.includes('.changeset/*.md'));
+    t('…and so does its own path', rehearsalHints.includes(rehearsalPath));
+  }
   // Module-relative spellings: `new URL('../../x', import.meta.url)` is how
   // these scripts name a repo path, and the leading segments are the script's
   // own depth, not part of what it watches.
@@ -9553,7 +10066,7 @@ function selfTest() {
   t('files with nothing above the repo root share no directory', commonDirectory(['README.md', 'AGENTS.md']) === '');
   t('one file is its own directory', commonDirectory(['scripts/pm/a.mjs']) === 'scripts/pm');
 
-  const rosterTree = new Set(['scripts/a.mjs', 'scripts/b.mjs', 'scripts/pm/c.mjs']);
+  const rosterTree = watchHintTree(['scripts/a.mjs', 'scripts/b.mjs', 'scripts/pm/c.mjs']);
   const rosterFam = (hints) => ({ hints, files: [], workflows: new Set(['lint.yml']) });
   const roster = artifactOnlySilence(rosterFam(['scripts/a.mjs', 'scripts/b.mjs']), [unwrittenScript], rosterTree);
   t('a population of nothing but tracked FILES is an artifact roster', roster?.artifacts.length === 2 && roster.dir === 'scripts');
@@ -9585,6 +10098,161 @@ function selfTest() {
     artifactOnlyNote(artifactOnlySilence(rosterFam(['scripts/a.mjs', 'scripts/b.mjs']), ['packages/spec/src/index.ts'], rosterTree))
       .join('\n')
       .includes('ordinary one'),
+  );
+
+  // ── The classifier returned a plausible WRONG CATEGORY (#13520) ───────────
+  //
+  // ⚠️ Every case below asserts the CATEGORY, never "it did not crash" and
+  // never "it still classifies". This defect threw nothing and printed no
+  // error — it answered `null` where the answer is a roster, so a case that
+  // only checked for an answer would have been GREEN against the bug. Each
+  // assertion therefore names the bucket AND its contents: which tracked files,
+  // under which directory, and for the negatives, `null` exactly.
+  const extlessTree = watchHintTree([
+    'packages/spec/scripts/lib/dist-freshness.ts',
+    'packages/spec/scripts/lib/sharded-artifacts.ts',
+    'packages/spec/scripts/lib/notes.md',
+    'packages/spec/src/index.ts',
+  ]);
+  const extlessRoster = artifactOnlySilence(
+    rosterFam(['packages/spec/scripts/lib/dist-freshness', 'packages/spec/scripts/lib/sharded-artifacts']),
+    ['packages/spec/scripts/lib/dist-freshness.ts'],
+    extlessTree,
+  );
+  t(
+    'a roster spelled as extensionless module specifiers is an artifact ROSTER, not an ordinary silence',
+    extlessRoster !== null,
+    JSON.stringify(extlessRoster),
+  );
+  t(
+    '…and the CATEGORY is pinned by its contents: the tracked files those specifiers name',
+    JSON.stringify(extlessRoster?.artifacts) ===
+      JSON.stringify(['packages/spec/scripts/lib/dist-freshness.ts', 'packages/spec/scripts/lib/sharded-artifacts.ts']),
+    JSON.stringify(extlessRoster?.artifacts),
+  );
+  t(
+    '…under the directory those files really sit in, not the one the specifier stops short at',
+    extlessRoster?.dir === 'packages/spec/scripts/lib',
+    String(extlessRoster?.dir),
+  );
+  t(
+    '…and for a card in that directory it is the INVERTED silence, which is the whole point of the split',
+    extlessRoster?.coversYourPath === true,
+  );
+  t(
+    'a roster mixing both spellings of the same claim resolves to the same category',
+    JSON.stringify(
+      artifactOnlySilence(
+        rosterFam(['packages/spec/scripts/lib/dist-freshness', 'packages/spec/scripts/lib/notes.md']),
+        [],
+        extlessTree,
+      )?.artifacts,
+    ) === JSON.stringify(['packages/spec/scripts/lib/dist-freshness.ts', 'packages/spec/scripts/lib/notes.md']),
+  );
+  // The negatives, which are what stop the widening from becoming a second
+  // defect pointing the other way: a POPULATION must still refuse the roster
+  // category however resolvable its siblings are.
+  t(
+    'a declared DIRECTORY beside resolvable specifiers is still a population, not a roster',
+    artifactOnlySilence(
+      rosterFam(['packages/spec/scripts/lib/dist-freshness', 'packages/spec/scripts/lib']),
+      [],
+      extlessTree,
+    ) === null,
+  );
+  t(
+    'a specifier that resolves to nothing is not an artifact — that is still the unreachable species',
+    artifactOnlySilence(rosterFam(['packages/spec/scripts/lib/gone']), [], extlessTree) === null,
+  );
+  t(
+    'a PATTERN whose collapse would land on a tracked file is refused before the file branch',
+    declaredFileTarget('packages/spec/scripts/lib/dist-freshness*.ts', extlessTree) === null &&
+      extlessTree.files.has(collapseHint('packages/spec/scripts/lib/dist-freshness*.ts')),
+  );
+  t(
+    '…non-vacuously: that hint really is judged as a pattern, and the same literal without the glob resolves',
+    judgedAsPattern('packages/spec/scripts/lib/dist-freshness*.ts') &&
+      declaredFileTarget('packages/spec/scripts/lib/dist-freshness', extlessTree) ===
+        'packages/spec/scripts/lib/dist-freshness.ts',
+  );
+  // The bare file set is the OLD parameter, and it is the one input that
+  // reproduces the defect exactly. It must not be readable as an empty answer.
+  let rosterRefusedBareSet = false;
+  try {
+    artifactOnlySilence(rosterFam(['scripts/a.mjs']), [], new Set(['scripts/a.mjs']));
+  } catch {
+    rosterRefusedBareSet = true;
+  }
+  t('a bare file set is REFUSED, never answered — it is the shape that mis-categorises silently', rosterRefusedBareSet);
+
+  // ⭐ THE CLASS GUARD, and the reason this card is not "nine gate names added
+  // to a table". The defect was ONE PREDICATE holding a private, weaker copy of
+  // the covering rule; the copy is gone, and this holds the two instruments
+  // EQUAL over the LIVE fleet, at FAMILY grain:
+  //
+  //   for every discovered family — `artifactOnlySilence` returns a roster
+  //   exactly when every declared literal of that family names exactly one
+  //   tracked file under `hintCovers`, and the roster IS those files.
+  //
+  // ⚠️ Family grain, not literal grain, and the difference was measured rather
+  // than reasoned. Written against `declaredFileTarget` this case was GREEN
+  // against the very bug it exists to catch: the ablation that put the old rule
+  // back inside `artifactOnlySilence` left the resolver untouched, so a guard
+  // comparing resolver to covering rule saw nothing wrong. A guard on the OWNER
+  // does not hold the CALLER to it. Stated over the classifier's own output it
+  // reds, because the classifier is what the reader is shown.
+  //
+  // Non-tautological in both directions: the right side is computed by sweeping
+  // the whole tracked corpus through `hintCovers`, which shares no code with the
+  // membership test and resolver the classifier composes. Measured while
+  // writing this — before the repair the two disagreed about 40 of 754 declared
+  // literals and 9 of 192 families; after it, 0 and 0. The day someone teaches
+  // `hintCovers` a further spelling (the way #12514 taught it the extension
+  // list) and forgets this reader, or reintroduces a private test in the
+  // classifier, this reds for whatever family happens to carry it. No gate name
+  // appears in it, which is the whole point.
+  const classFiles = trackedFiles();
+  const classTree = watchHintTree(classFiles);
+  const classFams = [...discoverFamilies({ tree: classTree }).byCheck];
+  const isTrackedDirHint = (h) => {
+    const plain = collapseHint(h);
+    return classTree.prefixes.has(plain) && !classTree.files.has(plain);
+  };
+  // The covering rule's own answer to "this literal names exactly one tracked
+  // FILE": swept, not resolved. A pattern and a directory are declared
+  // POPULATIONS and are excluded before the sweep — `apps/*/package.json`
+  // reaches exactly one file on this tree only because the repo has one app.
+  const coveringRuleFile = (h) => {
+    if (judgedAsPattern(h) || isTrackedDirHint(h)) return null;
+    const reached = classFiles.filter((f) => hintCovers(h, f));
+    return reached.length === 1 ? reached[0] : null;
+  };
+  const ruleRoster = (entry) => {
+    const declaredHints = [...new Set(entry.hints ?? [])];
+    if (declaredHints.length === 0) return null;
+    const named = declaredHints.map(coveringRuleFile);
+    return named.every(Boolean) ? named : null;
+  };
+  const classSplit = classFams.map(([check, entry]) => [
+    check,
+    JSON.stringify(artifactOnlySilence(entry, [], classTree)?.artifacts ?? null),
+    JSON.stringify(ruleRoster(entry)),
+  ]);
+  const classDisagreements = classSplit.filter(([, mine, rule]) => mine !== rule);
+  t(
+    `the roster classifier and the covering rule agree about every family in the fleet (${classFams.length} families)`,
+    classDisagreements.length === 0,
+    classDisagreements.slice(0, 5).map(([c, mine, rule]) => `${c}: classifier=${mine} rule=${rule}`).join(' · '),
+  );
+  // Non-vacuity for the case above — an agreement over an empty or all-null
+  // population asserts nothing, and the fleet really does carry both the shape
+  // this card was filed for and rosters that predate it.
+  t(
+    '…non-vacuously: the fleet carries families whose roster is named only through a dropped extension',
+    classFams.some(([, entry]) => {
+      const r = artifactOnlySilence(entry, [], classTree);
+      return r && r.artifacts.some((a, i) => a !== collapseHint([...new Set(entry.hints ?? [])][i]));
+    }),
   );
 
   // ── A trailing sentence period is not part of the path (#8534, half two) ──
@@ -13072,10 +13740,16 @@ const invokedDirectly = isEntrypoint(import.meta.url);
  * running its own `--self-test` fired all of THIS file's assertions inside it,
  * printing a second summary line and putting an unrelated file's failures on
  * the importer's exit code. That is the same defect PR #9897 fixed in
- * `check-governed-merges.mjs` at 77 assertions; this file carries it at 334. A
- * self-test is a mode of the file being RUN, never a side effect of importing
- * it, and a shared module that exits on import is a shared module nobody can
- * share.
+ * `check-governed-merges.mjs`, which carried 77 assertions at that PR; this
+ * file carries it at more than ten times that many. That multiple is a FLOOR,
+ * and it is written as one on purpose. The live figure is whatever
+ * `--self-test` prints from `cases.length`; it moves on most edits to this
+ * file, and over this file's history it has never once gone down — so a floor
+ * stays true where a reading rots. A reading stood here before and had drifted
+ * by more than a factor of three before anyone repaired it, so do not
+ * "helpfully" refresh this back into one. A self-test is a mode of the file
+ * being RUN, never a side effect of importing it, and a shared module that
+ * exits on import is a shared module nobody can share.
  *
  * The guard is ONE site wrapping the whole chain, not a condition repeated per
  * branch: a branch added inside it later cannot forget to carry it.

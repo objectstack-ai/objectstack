@@ -30,10 +30,25 @@
  */
 
 import { collectionEntries } from './collection-entries.js';
+// [#13855] The field-group reference question, shared with
+// `validate-page-field-bindings` so both layout escape hatches resolve a
+// `section.group` against one index and report the same way.
+import {
+  checkSectionGroupRefs,
+  indexObjectFieldGroups,
+  sectionGroupRefs,
+} from './object-field-groups.js';
 import { formViewSites, viewObjectName } from './view-walk.js';
 
 export const FORM_FIELD_UNKNOWN = 'form-field-unknown';
 export const FORM_COLSPAN_ABSOLUTE = 'absolute-colspan-discouraged';
+/**
+ * [#13855] A section's `group` names a field group the bound object does not
+ * declare. The reference form inherits the section's whole membership from that
+ * group, so a dangling key leaves the section with no members and it does not
+ * render at all. Advisory like both rules above — see `object-field-groups.ts`.
+ */
+export const FORM_SECTION_GROUP_UNKNOWN = 'form-section-group-unknown';
 
 export type FormLayoutSeverity = 'error' | 'warning';
 
@@ -115,6 +130,8 @@ export function validateFormLayout(stack: AnyRec): FormLayoutFinding[] {
       : [];
     objectFields.set(name, new Set(fields));
   }
+  // [#13855] object name → its declared field-group keys, for `section.group`.
+  const objectFieldGroups = indexObjectFieldGroups(stack);
 
   for (const { rec: view, path: viewPath } of collectionEntries(stack.views, 'views')) {
     // A container names itself with `name`, or binds with `object` — and an
@@ -142,6 +159,19 @@ export function validateFormLayout(stack: AnyRec): FormLayoutFinding[] {
       // half-coverage this issue is about.
       for (const bucket of ['sections', 'groups'] as const) {
         const sections = Array.isArray(site.view[bucket]) ? (site.view[bucket] as unknown[]) : [];
+
+        // ── (c) [#13855] a section's `group` names a declared field group ──
+        // Both buckets, for the reason (a) reads both: a rule that judges only
+        // the canonical spelling is silent on the legacy one.
+        findings.push(
+          ...checkSectionGroupRefs(
+            sectionGroupRefs(sections, `${site.path}.${bucket}`),
+            objName,
+            objectFieldGroups,
+            where,
+            FORM_SECTION_GROUP_UNKNOWN,
+          ),
+        );
 
         for (let s = 0; s < sections.length; s++) {
           const sec = sections[s];

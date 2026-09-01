@@ -310,6 +310,71 @@ import {
  * cannot tell net polarity (see #13571's verdict). Separately, the ObjectQL
  * ENGINE execution path never reaches this compiler at all (#13640): this
  * refusal guards the NativeSQL path and the `/analytics/sql` echo only.
+ *
+ * ## The ObjectQL ENGINE path gets the SAME disposition, at a different door (#13640)
+ *
+ * Everything above describes what THIS compiler emits, and it reaches SQL on
+ * two routes only: `NativeSQLStrategy.applyReadScope` and the `/analytics/sql`
+ * echo. `ObjectQLStrategy.execute()` is a THIRD route to the same rows and it
+ * never calls this compiler — it ANDs the `getReadScope` output into the
+ * `FilterCondition` it hands `engine.aggregate`, and the ENGINE's lowering
+ * answers it. Measured there (`driver-sql` through `driver-sqlite-wasm`, three
+ * fixture rows, transcript in `objectql-read-scope-vacancy-refusal.test.ts`):
+ *
+ * | read scope from a non-RLS provider          | rows the ENGINE admitted |
+ * |---------------------------------------------|--------------------------|
+ * | `{ owner: { $nin: [] } }`                   | ALL THREE                |
+ * | `{ $not: { owner: { $in: [] } } }`          | ALL THREE                |
+ * | `{ $not: { owner: [] } }`                   | ALL THREE                |
+ * | `{ $not: { owner: { $in: [], $ne: 'u' } } }`| ALL THREE                |
+ * | `{ $or: [{ $not: { owner: { $in: [] } } }, …] }` | ALL THREE           |
+ * | `{ owner: { $in: [] } }`                    | none                     |
+ * | `{ $or: [{ owner: { $in: [] } }, { owner: 'u_me' }] }` | the own row    |
+ *
+ * So the widening this file closed at its own lowering was open one strategy
+ * over, on the route a spec-contract provider is most likely to be served by.
+ * {@link assertReadScopeCannotVacate} is the guard for that door — exported
+ * from THIS file, next to the compiler, deliberately: the disposition is one
+ * ruling and a second file holding a second copy of it is how the two answers
+ * drift apart. It refuses, in the same {@link readScopeCompileError} envelope,
+ * an EMPTIED MEMBERSHIP that does not bind:
+ *
+ *   - `$nin: []` at ANY polarity — polarity-INDEPENDENT for one reason only:
+ *     the `$nin` arm of {@link compileOperator} throws whatever encloses it, so
+ *     matching it exactly is what keeps a scope from getting two answers
+ *     depending on which strategy served the query. (At even polarity it is
+ *     the whole-table fold; at odd polarity it is merely narrowing, and
+ *     refusing it there costs no live traffic — the CEL lowering never emits
+ *     `$nin` and #13570's producer guard drops the rest.)
+ *   - `$in: []`, the bare `[]` comparand, and a multi-key operator object
+ *     containing either, when the effective polarity is INVERTED. FALSE
+ *     absorbs the AND its sibling operators form, so the multi-key spelling is
+ *     the single-key one — measured above, not assumed.
+ *
+ * ⚠️ What it deliberately does NOT catch is the same bound #13571 drew: an
+ * emptied POSITIVE membership at even polarity stays a ruled #5322/#5243
+ * reduction, because `{ $or: [{ owner: { $in: [] } }, { owner: 'u_me' }] }` is
+ * a LIVE RLS composite ("own rows keep flowing", #13570's
+ * `rls-empty-membership-polarity.test.ts`) and it reaches this strategy too.
+ *
+ * ⚠️ This does NOT re-decide #13571 and does not move either route above. The
+ * residue that verdict declared — `$not` over `$in: []` compiling to constant
+ * TRUE — is still exactly that HERE, in {@link compileScopedFilterToSql}, and
+ * the reason it could be closed at the other door without the ruled design is
+ * structural, not a change of mind: this guard is a WALK over the scope tree
+ * that never reduces anything, so effective polarity is simply readable and
+ * there is no interaction with the #5322 `$not`-over-identity reductions to
+ * rule on first. The consequence is declared rather than hidden: for that one
+ * spelling the ObjectQL echo (which compiles) and the ObjectQL execution
+ * (which now refuses) disagree, and closing the echo's half is #13571's
+ * follow-up, not this guard's business.
+ *
+ * ⚠️ It is a SECOND line of defence, not a replacement for #13570's
+ * producer-side guard, and deliberately not shared code with it: that guard
+ * lives in `plugin-security` (a layer `service-analytics` must not depend on)
+ * and answers a different question — whether to DROP a degenerate policy
+ * before emitting it. This one answers whether a scope that arrived from any
+ * producer at all may be handed to an engine.
  */
 
 const IDENT = /^[a-z_][a-z0-9_]*$/i;
@@ -371,6 +436,126 @@ export function compileScopedFilterToSql(
   const params: unknown[] = [];
   const sql = compileNode(filter, quotedAlias, params);
   return { sql, params };
+}
+
+/**
+ * [#13640] What an emptied membership was found to be, so the refusal can say
+ * the true thing about it. `'nin'` is the empty EXCLUSION (constant TRUE at its
+ * own arm); `'negatedIn'` is an empty MEMBERSHIP under an odd number of `$not`s
+ * (constant FALSE at its own arm, therefore TRUE once inverted).
+ */
+type EmptyMembershipFinding = { path: string; kind: 'nin' | 'negatedIn' };
+
+/**
+ * [#13640] Is this FIELD CONSTRAINT an emptied membership that fails to bind at
+ * `negated` polarity — and where?
+ *
+ * The three spellings are the ones measured to reach `engine.aggregate` and
+ * come back with the whole table (module header's table):
+ *
+ *   - `{ $nin: [] }` — flagged at EVERY polarity, matching {@link compileOperator}'s
+ *     own `$nin` arm, which throws whatever encloses it (#13571). Any weaker
+ *     rule here would give one read scope two answers, chosen by strategy.
+ *   - `{ $in: [] }` — flagged only when inverted; at even polarity it is the
+ *     ruled #5322 reduction to FALSE and a LIVE RLS composite depends on it.
+ *   - a bare `[]` comparand — the same emptied positive membership written
+ *     without the operator (`{ owner: [] }`), and measured to behave as one.
+ *
+ * Sibling operators do not rescue the `$in` case: FALSE absorbs the AND a
+ * multi-key operator object forms, so `{ $in: [], $ne: 'u' }` is constant FALSE
+ * exactly like the single-key spelling (measured — the header's fourth row).
+ */
+function emptyMembershipFinding(spec: unknown, negated: boolean, path: string): EmptyMembershipFinding | null {
+  if (Array.isArray(spec)) {
+    return spec.length === 0 && negated ? { path: `${path}: []`, kind: 'negatedIn' } : null;
+  }
+  if (spec === null || typeof spec !== 'object') return null;
+  const rec = spec as Record<string, unknown>;
+  if (Array.isArray(rec.$nin) && rec.$nin.length === 0) return { path: `${path}.$nin`, kind: 'nin' };
+  if (Array.isArray(rec.$in) && rec.$in.length === 0 && negated) {
+    return { path: `${path}.$in`, kind: 'negatedIn' };
+  }
+  return null;
+}
+
+/**
+ * [#13640] Walk the scope tree tracking EFFECTIVE polarity and return the first
+ * emptied membership that does not bind.
+ *
+ * A walk, never a reduction — which is precisely why this can be polarity-aware
+ * where {@link compileScopedFilterToSql} could not be (#13571's verdict): there
+ * is no constant being folded here, so nothing interacts with the #5322
+ * `$not`-over-identity reductions and none of them has to be re-ruled.
+ *
+ * `$and` and `$or` arms are both walked at the CALLER's polarity and a finding
+ * in either is returned. That is not sloppiness about which composite widens:
+ * as an `$or` arm a constant-TRUE clause makes the whole scope allow-all, and
+ * as an `$and` arm the restriction its author wrote has silently evaporated
+ * while its siblings carry on — degenerate either way, exactly the reading
+ * #13570's producer-side guard takes for the same two shapes.
+ */
+function findEmptyMembership(node: unknown, negated: boolean, path: string): EmptyMembershipFinding | null {
+  if (node === null || typeof node !== 'object' || Array.isArray(node)) return null;
+  const rec = node as Record<string, unknown>;
+  // A BARE operator object (an emptied membership with no field key) is not a
+  // shape any in-repo producer emits, but `getReadScope` is a spec contract and
+  // this guard's contract is over the FilterCondition SHAPE — so it is judged
+  // rather than walked past. (`compileNode` refuses it outright on the other
+  // route, with its own unsupported-top-level-operator message.)
+  const bare = emptyMembershipFinding(rec, negated, path.length > 0 ? path : '<root>');
+  if (bare) return bare;
+  for (const [key, value] of Object.entries(rec)) {
+    const here = path.length > 0 ? `${path}.${key}` : key;
+    if (key === '$not') {
+      const found = findEmptyMembership(value, !negated, here);
+      if (found) return found;
+    } else if (key === '$and' || key === '$or') {
+      if (!Array.isArray(value)) continue;
+      for (let i = 0; i < value.length; i++) {
+        const found = findEmptyMembership(value[i], negated, `${here}[${i}]`);
+        if (found) return found;
+      }
+    } else if (!key.startsWith('$')) {
+      const found = emptyMembershipFinding(value, negated, here);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/**
+ * [#13640] Refuse a read scope that does not BIND, before it is handed to an
+ * engine that would lower it to a boolean constant.
+ *
+ * The door `ObjectQLStrategy` uses. See the module header's #13640 section for
+ * the measured table, for why the `$nin` arm is polarity-independent while the
+ * `$in` arm is not, and for the bound this deliberately keeps (an emptied
+ * POSITIVE membership at even polarity is a ruled reduction and a live RLS
+ * composite depends on it).
+ *
+ * ⛔ Not called by {@link compileScopedFilterToSql}. Calling it there would move
+ * the NativeSQL path and the `/analytics/sql` echo, whose disposition #13571
+ * settled and #13640 was ruled not to re-open.
+ *
+ * @param scope the `StrategyContext.getReadScope` output, exactly as returned
+ * @param objectName the object the scope was requested for — for the operator's
+ *   log only; like every message in this module it is withheld from the
+ *   response by the `READ_SCOPE_COMPILE_FAILED` / 500 declaration.
+ */
+export function assertReadScopeCannotVacate(scope: unknown, objectName: string): void {
+  const found = findEmptyMembership(scope, false, '');
+  if (found === null) return;
+  if (found.kind === 'nin') {
+    throw readScopeCompileError(
+      `[read-scope-sql] read scope for "${objectName}" has an empty $nin at ${found.path} — an empty exclusion excludes nothing, ` +
+        `so the engine lowers that clause to constant TRUE and the scope does not bind as written. Refused at every ` +
+        `polarity, matching this module's own $nin arm (fail-closed).`,
+    );
+  }
+  throw readScopeCompileError(
+    `[read-scope-sql] read scope for "${objectName}" has an empty $in under negation at ${found.path} — an empty membership matches nothing, ` +
+      `so its negation matches every row and the read scope admits the whole table (fail-closed).`,
+  );
 }
 
 /**

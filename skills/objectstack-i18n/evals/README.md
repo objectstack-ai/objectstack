@@ -13,11 +13,11 @@ When implemented, evals will follow this structure:
 ```
 evals/
 ├── bundle-shape/
-│   ├── test-objects-vs-o-keys.md        # runtime `objects.*` vs secondary `o.*` format
+│   ├── test-objects-vs-o-keys.md        # runtime `objects.*`; retired `o.*` is rejected
 │   ├── test-snake-case-keys.md          # object/field keys match metadata machine names
 │   └── test-option-machine-values.md    # lowercase option values, not display labels
 ├── interpolation/
-│   └── test-double-brace-params.md      # {{userName}}, not {userName}; ICU is experimental
+│   └── test-double-brace-params.md      # {{userName}}, not {userName}; no ICU engine
 ├── coverage-workflow/
 │   ├── test-extract-command.md          # os i18n extract --locales/--out flags & TS output
 │   └── test-check-command.md            # os i18n check --strict/--threshold CI gate

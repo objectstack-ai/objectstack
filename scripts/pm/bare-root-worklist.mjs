@@ -394,6 +394,20 @@ const TRIAGE = new Map([
       + 'no arbitrary file at the top of packages/ is reached — which is what this verdict says',
   }],
   // ── Refused: the population is the whole root, and the root is saturated ──
+  ['check:skill-identifier-liveness IMPL_ROOTS packages', {
+    verdict: 'REFUSE-WIDE',
+    why: 'the gate builds a WORD INDEX of the implementation tree and asks whether each identifier '
+      + 'cited by a published skill row appears anywhere in it, so every source file under the '
+      + 'root contributes and any one of them can be the only site keeping a citation live — '
+      + '5405 of 5640 (96%), measured 2026-08-31; the 4% missed are non-source extensions and '
+      + 'build output, not a subset a glob could name. The population is not a part of the root, '
+      + 'it IS the root. A true declaration would name this gate on every card touching any '
+      + 'package, which is the precision trade this verdict refuses — and the coupling it would '
+      + 'buy is already carried by CI, which schedules this family on every PR (lint.yml has no '
+      + 'paths filter, stated in the step comment for exactly this reason). Its OTHER root, '
+      + 'skills, IS declared beside the constant: that one is small, is the surface the gate '
+      + 'exists for, and naming a skills-only card is the discoverability this idiom is for',
+  }],
   ['scripts/check-position-name-fold-loaders.mjs SCAN_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
     why: 'every text file under the root is walked and any one of them could name the #13419 '
