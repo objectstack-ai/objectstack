@@ -1,7 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
-import { APPROVAL_STATUSES, APPROVAL_STATUS_LABELS } from '@objectstack/spec/contracts';
+import {
+  APPROVAL_STATUSES,
+  APPROVAL_STATUS_LABELS,
+  APPROVAL_CANCEL_REASONS,
+  APPROVAL_CANCEL_REASON_LABELS,
+} from '@objectstack/spec/contracts';
 
 /**
  * sys_approval_request — Live approval instance.
@@ -11,6 +16,7 @@ import { APPROVAL_STATUSES, APPROVAL_STATUS_LABELS } from '@objectstack/spec/con
  *
  *   `pending` → (per-approver decisions) → `approved` | `rejected`
  *   `pending` → recalled by submitter → `recalled`
+ *   `pending` → its record was deleted → `cancelled` + `cancel_reason`
  *
  * `flow_run_id` / `flow_node_id` tie the request back to the suspended run so a
  * decision can resume it; `current_step` mirrors the node id. `node_config_json`
@@ -76,7 +82,10 @@ export const SysApprovalRequest = ObjectSchema.create({
       label: 'Completed',
       data: { provider: 'object', object: 'sys_approval_request' },
       columns: ['process_name', 'object_name', 'record_id', 'status', 'submitter_id', 'completed_at'],
-      filter: [{ field: 'status', operator: 'in', value: ['approved', 'rejected', 'recalled'] }],
+      // Every terminal state, `cancelled` included (#13568) — a platform-voided
+      // request is kept as audit evidence, and a terminal state absent from the
+      // only curated terminal view is evidence nobody can find.
+      filter: [{ field: 'status', operator: 'in', value: ['approved', 'rejected', 'recalled', 'cancelled'] }],
       sort: [{ field: 'completed_at', order: 'desc' }],
       pagination: { pageSize: 25 },
     },
@@ -208,6 +217,30 @@ export const SysApprovalRequest = ObjectSchema.create({
         required: true,
         defaultValue: 'pending',
         description: 'Lifecycle state of the request',
+        group: 'State',
+      },
+    ),
+
+    // [#13568] Why a `cancelled` request was cancelled — the machine-readable
+    // half of the maintainer's 2026-08-31 ruling ("状态转 cancelled + 机器可读
+    // 原因"). Derived from `APPROVAL_CANCEL_REASONS`, never re-typed, on the
+    // same #3786 rule the `status` column above follows.
+    //
+    // On the ROW rather than on the `sys_approval_action` audit entry, because
+    // the readers are the inbox and the tombstone presentation, which page the
+    // request table: making them join the append-only action log to learn why a
+    // row they already hold is cancelled buys nothing and would make the reason
+    // unavailable to a plain list view. The action row still records the event
+    // (`action: 'cancel'`); this column records the STATE.
+    //
+    // Null on every non-cancelled row, and on rows written before the column
+    // existed — "not recorded", never "cancelled for no reason".
+    cancel_reason: Field.select(
+      APPROVAL_CANCEL_REASONS.map((value) => ({ value, label: APPROVAL_CANCEL_REASON_LABELS[value] })),
+      {
+        label: 'Cancellation Reason',
+        required: false,
+        description: 'Why the platform voided this request (set only when the status is cancelled)',
         group: 'State',
       },
     ),

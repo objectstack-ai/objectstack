@@ -40,6 +40,7 @@ import type {
   ApprovalResubmitInput,
   ApprovalResubmitResult,
   ApprovalStatus,
+  ApprovalCancelReason,
 } from '@objectstack/spec/contracts';
 // [#7135] The full `resolveAuthzContext` envelope — what `IApprovalService`
 // declares for every one of these context parameters since #6523 (the #6206
@@ -293,6 +294,20 @@ export type ActionTokenOutcome =
 const SYSTEM_CTX: ExecutionContext = { isSystem: true, positions: [], permissions: [] };
 
 /**
+ * [#13568] Bound on the pending requests one deleted record can carry into
+ * {@link ApprovalService.cancelForDeletedRecord}.
+ *
+ * Not a safety valve like `lifecycle-hooks.ts`' `PENDING_LOCK_LIMIT` — that one
+ * fails a WRITE closed when it cannot decide row by row, and there is no such
+ * decision here: the delete has already landed, and going over the bound
+ * cancels fewer rows rather than refusing anything. It exists so a pathological
+ * row set cannot turn one delete into an unbounded write loop. In practice a
+ * record carries one pending request (`sys_approval_request`'s own guard on
+ * submit), so this is two orders of magnitude of headroom over the real shape.
+ */
+const RECORD_DELETE_CANCEL_LIMIT = 200;
+
+/**
  * Who is acting, for the purpose of a data write made on their behalf (#3783).
  *
  * Reads the AUTHENTICATED principal off the execution context — deliberately not
@@ -467,6 +482,10 @@ function rowFromRequest(row: any): ApprovalRequestRow {
     submitter_id: row.submitter_id ?? undefined,
     submitter_comment: row.submitter_comment ?? undefined,
     status: (row.status as ApprovalStatus) ?? 'pending',
+    // [#13568] Why a cancelled row was cancelled. Surfaced on every read for
+    // the same reason `status` is: a client that can see the terminal state and
+    // not the machine-readable cause is back to guessing from prose.
+    cancel_reason: (row.cancel_reason as ApprovalCancelReason) ?? undefined,
     current_step: row.current_step ?? undefined,
     current_step_index: row.current_step_index ?? undefined,
     pending_approvers: csvSplit(row.pending_approvers),
@@ -2888,6 +2907,153 @@ export class ApprovalService implements IApprovalService {
 
     const fresh = await this.readBackRequest(requestId, context);
     return { request: fresh, runId, resumed, ...(resumeError ? { resumeError } : {}) };
+  }
+
+  // ── Record-delete lifecycle linkage (#13568) ─────────────────
+
+  /**
+   * Void every `pending` request about a record that has just been DELETED
+   * (#13568, maintainer ruling 2026-08-31 「同意」).
+   *
+   * ## What the ruling asked for, and what each half costs
+   *
+   *   status → `cancelled`, a machine-readable `cancel_reason`, the row KEPT
+   *   for audit, and the request out of the pending count and the inbox's
+   *   default view.
+   *
+   * The last clause needs both writes below, not just the status one: the
+   * inbox's "My Pending" tab pages the request table by `status`, but the
+   * approver filter resolves through the normalized `sys_approval_approver`
+   * index (#1745), which is keyed on nothing but `request_id`. Leaving the
+   * index rows behind would keep the request in `approverRequestIds`' answer
+   * for every approver forever — so {@link syncApproverIndex} clears them, the
+   * same call every other exit from `pending` makes.
+   *
+   * ## Three things this deliberately does NOT do
+   *
+   * 1. **No status mirror-back.** Every other terminal transition calls
+   *    {@link mirrorStatusField} to write the outcome onto the subject record's
+   *    `approvalStatusField`. Here the subject record is precisely what no
+   *    longer exists, so that write is guaranteed to fail — it is the very
+   *    `update_record(...) failed: Record ... not found` this card's own
+   *    forensics recorded on the reject door. Skipped by construction, not by a
+   *    swallowed error.
+   *
+   * 2. **No flow resume, and no run cancel.** A cancellation is a status write
+   *    plus a reason; it is not a decision, so there is no branch to resume
+   *    down and no downstream node that should run. The suspended run this
+   *    request gated is reported (below) and left alone — what becomes of an
+   *    approval run whose request was voided is a lifecycle question that
+   *    belongs to the automation service, not to a delete hook, and answering
+   *    it here by guessing would be exactly the kind of consumer-side
+   *    accommodation PD #12 refuses.
+   *
+   * 3. **No refusal of the delete.** The delete has already landed by the time
+   *    this runs, and the "forbid delete while an approval is pending"
+   *    direction was VETOED in the same ruling (`lockRecord` already blocks the
+   *    edit; blocking the delete too locks an author onto a record they cannot
+   *    fix). So nothing here throws — a failure degrades to a warning and the
+   *    stale row, which is the pre-existing state, never to a failed delete.
+   *
+   * Terminal rows are untouched: the `where` below names `status: 'pending'`,
+   * so an `approved` / `rejected` / `recalled` / `returned` request about the
+   * same record keeps its recorded outcome. That is the ruling's second half —
+   * history is kept; only the presentation of its dead record reference is
+   * someone else's card.
+   *
+   * @returns the request ids cancelled and the suspended run ids left behind.
+   */
+  async cancelForDeletedRecord(
+    objectName: string,
+    recordId: string,
+  ): Promise<{ cancelled: string[]; suspendedRuns: string[] }> {
+    const empty = { cancelled: [] as string[], suspendedRuns: [] as string[] };
+    const object = String(objectName ?? '').trim();
+    const record = String(recordId ?? '').trim();
+    if (!object || !record) return empty;
+
+    let pending: any[];
+    try {
+      const rows = await this.engine.find('sys_approval_request', {
+        where: { object_name: object, record_id: record, status: 'pending' },
+        limit: RECORD_DELETE_CANCEL_LIMIT,
+        context: SYSTEM_CTX,
+      });
+      pending = Array.isArray(rows) ? rows : [];
+    } catch (err: any) {
+      // Reading the bookkeeping is the one step with no partial outcome: if it
+      // fails, nothing was changed and the rows stay exactly as they were.
+      this.logger?.warn?.(
+        '[approvals] could not read the pending requests of a deleted record — they stay in the inbox '
+        + 'until the record is deleted again or an operator finalises them',
+        { object, record, error: err?.message ?? String(err) },
+      );
+      return empty;
+    }
+    if (pending.length === 0) return empty;
+
+    const now = this.clock.now().toISOString();
+    const cancelled: string[] = [];
+    const suspendedRuns: string[] = [];
+
+    for (const raw of pending) {
+      const requestId = String(raw?.id ?? '');
+      if (!requestId) continue;
+      const org = raw?.organization_id ?? null;
+      const nodeId: string | null = raw?.flow_node_id ?? raw?.current_step ?? null;
+      try {
+        // Audit first, same ordering as every other write path here: if the
+        // status write fails, the trail still records that the platform tried
+        // to void the request, rather than the reverse (a cancelled row whose
+        // history says nothing happened).
+        //
+        // `actor_id` is null on purpose and is the point of the `cancel` kind:
+        // no person did this. Attributing it to a submitter (`recall`) or an
+        // approver (`reject`) would file a decision nobody made.
+        await this.engine.insert('sys_approval_action', {
+          id: uid('aact'), request_id: requestId, organization_id: org,
+          step_name: nodeId, step_index: 0, action: 'cancel',
+          actor_id: null,
+          comment: `Auto-cancelled: the ${object} record '${record}' this request is about was deleted`,
+          created_at: now,
+        }, { context: SYSTEM_CTX });
+
+        await this.engine.update('sys_approval_request', {
+          id: requestId,
+          status: 'cancelled',
+          cancel_reason: 'record_deleted',
+          pending_approvers: null,
+          completed_at: now,
+          updated_at: now,
+        }, { context: SYSTEM_CTX });
+
+        // See the docstring: the status write alone does not empty the inbox.
+        await this.syncApproverIndex(requestId, [], org, now);
+        cancelled.push(requestId);
+
+        const runId = raw?.flow_run_id ? String(raw.flow_run_id) : '';
+        if (runId) suspendedRuns.push(runId);
+      } catch (err: any) {
+        // Per request, so one unwritable row cannot skip the rest.
+        this.logger?.warn?.(
+          '[approvals] could not auto-cancel a pending request whose record was deleted — it stays in '
+          + 'the inbox pointing at a record that no longer exists',
+          { object, record, request: requestId, error: err?.message ?? String(err) },
+        );
+      }
+    }
+
+    if (suspendedRuns.length) {
+      // Reported, never repaired here (docstring point 2). `warn`: a run parked
+      // on an approval that can no longer be decided is a real functional
+      // degradation, and naming the run ids is what makes it actionable.
+      this.logger?.warn?.(
+        '[approvals] auto-cancelled approval request(s) for a deleted record — the automation run(s) '
+        + 'they gated stay suspended and are not resumed by a cancellation',
+        { object, record, requests: cancelled, runs: suspendedRuns },
+      );
+    }
+    return { cancelled, suspendedRuns };
   }
 
   // ── Send back for revision / resubmit (ADR-0044) ─────────────
