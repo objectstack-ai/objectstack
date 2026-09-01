@@ -2181,7 +2181,17 @@ jobs:
       # chained second self-test is neither green nor red — it never runs
       # (#10814). The collector runs both unconditionally and fails at the end
       # naming every one that broke.
-      - name: ADR symbol anchors resolve (no line numbers survive)
+      #
+      # ⛔ AND THE PRODUCTION SWEEP IS A SEPARATE STEP, which is not cosmetic.
+      # `check-step-collectors` drives this very block under a real `bash -e`
+      # with a STUB planted at each collected command's script path, and holds
+      # "all green => every command runs" as an equality. A trailing
+      # `node scripts/check-adr-symbol-anchors.mjs` in the same block re-invokes
+      # that same stub, so the harness counts 3 executions against 2 collected
+      # commands and the gate reds (3/2) — which is exactly what it did here.
+      # Both existing collectors in this file carry self-tests ONLY, for the
+      # same reason. Keep the sweep out of the collector block.
+      - name: ADR symbol-anchor gate self-tests
         run: |
           failed=""
           run_self_test() {
@@ -2202,7 +2212,9 @@ jobs:
             printf "%s" "$failed"
             exit 1
           fi
-          node scripts/check-adr-symbol-anchors.mjs
+
+      - name: ADR symbol anchors resolve (no line numbers survive)
+        run: node scripts/check-adr-symbol-anchors.mjs
 
       # NOTE: the standing platform test checklist (docs/qa/platform-checklist/)
       # is validated by `pnpm check:platform-checklist`, but by MAINTAINER
