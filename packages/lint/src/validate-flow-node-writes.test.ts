@@ -181,6 +181,41 @@ describe('validateFlowNodeWrites', () => {
     expect(findings[0].hint).toMatch(/Did you mean (one of: )?'stage'/);
   });
 
+  // [#13858] This rule GATES (severity `error`), so its message is what an
+  // author reads while their build is refused — the one place a wrong causal
+  // story costs the most. It used to say "on a SQL datasource the driver
+  // rejects the whole statement ('no such column') … on a schemaless one the
+  // stray key is persisted". Measured through the real AutomationEngine, the
+  // real builtin CRUD nodes, a real ObjectQL engine and BOTH families
+  // (driver-sql on better-sqlite3, driver-memory): neither happens. Both
+  // answered `INVALID_FIELD` / 400, "Unknown field 'stagee' on object 'deal'",
+  // the node folded that into `create_record(deal) failed: …`, the run failed,
+  // and nothing was stored on either family — no row on create, an untouched
+  // row and no shadow column on update.
+  it('states the measured refusal — INVALID_FIELD / 400 on every datasource — and no driver split', () => {
+    const [finding] = validateFlowNodeWrites({
+      objects: [dealObject],
+      flows: [flowWith({ stagee: 'won' })],
+    });
+
+    expect(finding.message).toContain('INVALID_FIELD / 400');
+    expect(finding.message).toContain('identically on every datasource');
+    expect(finding.message).toContain('before any statement is built');
+    // Why the door answers and not a datasource: the node hands `fields`
+    // straight to the data engine, so it is a caller payload.
+    expect(finding.message).toContain('ordinary caller payload');
+    // The severity's own justification, unchanged by the rewrite and still
+    // stated: the refusal is WHOLE, so correctly named siblings are lost too.
+    expect(finding.message).toContain('never land either');
+    expect(finding.message).toContain('the step fails the run');
+
+    // The retired driver split, both halves.
+    expect(finding.message).not.toMatch(/no such column/);
+    expect(finding.message).not.toMatch(/schemaless/);
+    expect(finding.message).not.toMatch(/is persisted/);
+    expect(finding.message).not.toMatch(/Nothing between the node and storage/);
+  });
+
   it('flags every unknown key in one node, and only those', () => {
     const findings = validateFlowNodeWrites({
       objects: [dealObject],

@@ -18,6 +18,17 @@
 // is refused `INVALID_FIELD` / 400 identically on every driver, before any
 // statement is built.
 //
+// [#13858] The `ctx.api` example in that first sentence answers for a
+// DIFFERENT reason, and it always did since #8682/#8738: `ctx.api` is a
+// ScopedContext over the running engine (`ObjectQL.buildHookApi`), so its
+// payload is CALLER-supplied and the PRE-hook declared-field door refuses it —
+// the same `INVALID_FIELD` / 400, before the hooks and before any statement.
+// `applyMutationsToInput` above describes the `ctx.input` half only. Measured
+// for all three write-set rules (this one, `validate-action-body-writes.ts`,
+// `validate-flow-node-writes.ts`) through a real QuickJS sandbox, a real
+// engine and both driver families: neither half reaches a driver any more, so
+// no message in this family describes a driver split.
+//
 // ⚠️ That does NOT retire this rule — it changes what it is worth. The runtime
 // refusal arrives at WRITE time, on whichever record first exercises the
 // branch; this rule arrives at AUTHOR time and names the field, the object and
@@ -863,9 +874,17 @@ export function validateHookBodyWrites(stack: AnyRec): HookBodyWriteFinding[] {
           path,
           message:
             `body calls ctx.api.object('${w.object}').${w.method ?? 'update'}(…) writing '${w.field}', but ` +
-            `object '${w.object}' declares no such field. The write-path validator skips the unknown key — ` +
-            `on a SQL driver the whole call then fails with a driver-level error far from here; on a ` +
-            `schemaless driver (memory, MongoDB) the stray key is persisted (#4271).`,
+            // [#13858] ctx.api is a ScopedContext over the running engine
+            // (`ObjectQL.buildHookApi`), so this payload is CALLER-supplied and
+            // the declared-field door (#8682 insert, #8738 update) is what
+            // refuses it. Measured on both families; the ids stay in comments
+            // rather than in the string, which reaches authors and operators
+            // who cannot resolve a tracker number.
+            `object '${w.object}' declares no such field. ctx.api is a scoped handle on the running ` +
+            `engine, so the payload arrives as an ordinary CALLER write and the declared-field door ` +
+            `REFUSES it at run time — INVALID_FIELD / 400, identically on every driver (#4271), before ` +
+            `any statement is built. The nested write lands nothing, and the refusal escapes the body ` +
+            `and fails the operation that triggered the hook.`,
           hint: fixHint(w.field, [...known]),
         });
       }

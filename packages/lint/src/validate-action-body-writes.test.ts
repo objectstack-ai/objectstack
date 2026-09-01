@@ -167,6 +167,35 @@ describe('validateActionBodyWrites — ctx.api writes', () => {
     expect(findings[0].hint).toContain("'discount_total'");
   });
 
+  // [#13858] The same rewrite as the hook sibling, from the same measurement:
+  // real QuickJS sandbox, a real L2 ACTION body run through
+  // `actionBodyRunnerFactory`, a real ObjectQL engine, real driver-sql
+  // (better-sqlite3) AND real driver-memory. Both families answered
+  // `INVALID_FIELD` / 400, "Unknown field 'stagee' on object 'deal'"; the
+  // target row was untouched and the memory family stored no shadow column.
+  // The old text promised a driver-level error on SQL and a persisted stray
+  // key on schemaless — neither happens on this path, and has not since
+  // #8682/#8738 put the declared-field door ahead of any statement.
+  it('states the measured refusal — INVALID_FIELD / 400 on every driver — and no driver split', () => {
+    const [finding] = validateActionBodyWrites(
+      stackWith("await ctx.api.object('crm_deal').update({ discont_total: 0 });"),
+    );
+
+    expect(finding.message).toContain('INVALID_FIELD / 400');
+    expect(finding.message).toContain('identically on every driver');
+    expect(finding.message).toContain('before any statement is built');
+    // The reason the door — not a driver — is what answers.
+    expect(finding.message).toContain('ordinary CALLER write');
+    // The action-side blast radius, the one word that differs from the hook
+    // sibling's sentence. Pinned so a future sweep cannot flatten the two.
+    expect(finding.message).toContain('fails the action');
+
+    expect(finding.message).not.toMatch(/driver-level error/);
+    expect(finding.message).not.toMatch(/schemaless/);
+    expect(finding.message).not.toMatch(/is persisted/);
+    expect(finding.message).not.toMatch(/write-path validator skips/);
+  });
+
   it('checks insert/create/update payloads (argument 0) and updateById at argument 1', () => {
     const findings = validateActionBodyWrites(
       stackWith(
