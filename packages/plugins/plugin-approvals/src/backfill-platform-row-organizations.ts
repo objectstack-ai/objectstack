@@ -168,9 +168,12 @@ export const BACKFILL_TARGETS: readonly BackfillTarget[] = [
     subjectObjectField: 'trigger_object',
     subjectIdField: 'trigger_record_id',
     // `context_json` is the serialized AutomationContext; the trigger record
-    // sits at `.record`. Written on paused rows only — `recordTerminal` does
-    // not persist it, so terminal rows resolve from the live subject or not
-    // at all.
+    // sits at `.record`. Written on every paused row, and — since #13909 —
+    // on the one class of TERMINAL row that carries a restorable suspension
+    // (a run whose resume consumed its pause and then failed downstream).
+    // Every other terminal row still has none, so those still resolve from the
+    // live subject or not at all. Nothing here needs to branch on which: a row
+    // that HAS the snapshot uses it, exactly as a paused row does.
     snapshotField: 'context_json',
     snapshotPath: ['record'],
     statusField: 'status',

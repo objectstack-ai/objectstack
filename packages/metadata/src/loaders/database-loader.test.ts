@@ -619,20 +619,27 @@ describe('DatabaseLoader schema-sync failure reporting (#4728)', () => {
     });
 
     it('still runs the post-sync migrations (the table exists, so they apply)', async () => {
+      // #14023 — this used to bolt a `raw` method onto the mock through an
+      // `as unknown as { raw: unknown }` cast, because that was the only
+      // surface the migration accepted. The cast was the tell: it reached PAST
+      // the declared contract. `IDataDriver` declares `execute` non-optionally
+      // and has never declared `raw`, which is why `createMockDriver` already
+      // carries `execute` and needed no cast to carry it. The migration now
+      // drives the declared surface, so this case observes the mock's own
+      // `execute` and the cast is gone.
       const driver = createMockDriver();
       driver.syncSchema = vi.fn().mockRejectedValue(alreadyExists());
-      const raw = vi.fn().mockResolvedValue(undefined);
-      (driver as unknown as { raw: unknown }).raw = raw;
+      const execute = driver.execute as ReturnType<typeof vi.fn>;
       const loader = new DatabaseLoader({ driver });
 
       await loader.list('object');
 
       // The `project_id` → `environment_id` forward migration still runs; it
       // probes the column list before touching anything.
-      expect(raw).toHaveBeenCalled();
-      expect(raw.mock.calls.some(([sql]) => /table_info|information_schema/i.test(String(sql)))).toBe(
-        true,
-      );
+      expect(execute).toHaveBeenCalled();
+      expect(
+        execute.mock.calls.some(([sql]) => /table_info|information_schema/i.test(String(sql))),
+      ).toBe(true);
     });
 
     /**
@@ -646,15 +653,20 @@ describe('DatabaseLoader schema-sync failure reporting (#4728)', () => {
     it('issues NO overlay-index DDL — this package is not a producer of that name', async () => {
       const driver = createMockDriver();
       driver.syncSchema = vi.fn().mockRejectedValue(alreadyExists());
-      const raw = vi.fn().mockResolvedValue(undefined);
-      (driver as unknown as { raw: unknown }).raw = raw;
+      const execute = driver.execute as ReturnType<typeof vi.fn>;
       const loader = new DatabaseLoader({ driver });
 
       await loader.list('object');
 
-      const overlayDdl = raw.mock.calls
+      // Non-vacuity FIRST (#14023). This assertion is "no statement matched a
+      // pattern", which a run that issued NO statements at all satisfies just
+      // as well — and that is exactly the state this file was in while the
+      // migration refused every driver. Observe that SQL really flowed before
+      // reading anything into the absence of that one statement.
+      expect(execute, 'nothing ran — the emptiness below would prove nothing').toHaveBeenCalled();
+      const overlayDdl = execute.mock.calls
         .map(([sql]) => String(sql))
-        .filter((sql) => /idx_sys_metadata_overlay_active/i.test(sql));
+        .filter((sql: string) => /idx_sys_metadata_overlay_active/i.test(sql));
       expect(overlayDdl).toEqual([]);
     });
   });
@@ -1489,5 +1501,87 @@ describe('MetadataManager auto-configuration', () => {
     await manager.save('object', 'account', { name: 'account', label: 'Account' });
     const result = await manager.load('object', 'account');
     expect(result).toEqual({ name: 'account', label: 'Account' });
+  });
+});
+
+/**
+ * [#13997] `MetadataStats.mtime` is declared `z.string().datetime()` — `stat()`
+ * adapts a driver row into it and must canonicalise the timestamp.
+ *
+ * ## The defect
+ *
+ * `MetadataStatsSchema.mtime` is `z.string().datetime()`
+ * (`packages/spec/src/system/metadata-persistence.zod.ts`) — stricter than the
+ * sibling `MetadataItem.authoredAt`, which is a bare `z.string()`. `stat()`
+ * built it from `record.updatedAt ?? record.createdAt`, and `created_at` /
+ * `updated_at` are BUILTIN audit columns: not in `datetimeFields`, and
+ * `SqlDriver#formatOutput` repairs them only inside its `if (this.isSqlite)`
+ * arm. On Postgres and MySQL they arrive as a JS `Date`, pinned live in
+ * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`.
+ *
+ * ⚠️ `rowToRecord` reaches `createdAt` / `updatedAt` through an unchecked
+ * `row.created_at as string | undefined` cast, so the `string` in
+ * `MetadataRecord` is an assertion about a driver row and never a measurement
+ * of one — which is why tsc reported nothing.
+ *
+ * ## Why the double is overridden rather than replaced
+ *
+ * `createMockDriver` above stores and returns plain objects, so it cannot
+ * produce the one shape that discriminates this defect. Overriding `findOne`
+ * on the existing double keeps every other guarantee that double already
+ * carries instead of introducing a second, looser one.
+ */
+describe('#13997 — stat() emits canonical ISO text whatever the dialect materialised', () => {
+  /** The instant the live dialects hand out, with observable milliseconds. */
+  const PG_INSTANT = new Date('2026-03-04T05:06:07.089Z');
+  const ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+  /** A `sys_metadata` row as a live dialect returns it: `updated_at` is a Date. */
+  function rowWithStamp(stamp: unknown): Record<string, unknown> {
+    return {
+      id: 'r_1',
+      name: 'account',
+      type: 'object',
+      metadata: JSON.stringify({ name: 'account' }),
+      checksum: 'sha256:abc',
+      version: 1,
+      created_at: stamp,
+      updated_at: stamp,
+    };
+  }
+
+  it('canonicalises a JS Date into the declared ISO string', async () => {
+    const driver = createMockDriver();
+    // Cache off: `stat()` memoises, and a cached hit would read back the value
+    // this assertion is about without re-running the adapter under test.
+    const loader = new DatabaseLoader({ driver, cache: { enabled: false } });
+
+    const row = rowWithStamp(PG_INSTANT);
+    // Non-vacuity guard — a fixture that degraded to a string would leave this
+    // test green while measuring the shape that was never broken.
+    expect(row.updated_at).toBeInstanceOf(Date);
+    driver.findOne = vi.fn().mockResolvedValue(row);
+
+    const stats = await loader.stat('object', 'account');
+
+    expect(stats).not.toBeNull();
+    expect(typeof stats!.mtime).toBe('string');
+    expect(stats!.mtime).toMatch(ISO_Z);
+    expect(stats!.mtime).toBe(PG_INSTANT.toISOString());
+  });
+
+  it('passes an already-canonical SQLite string through byte-identically', async () => {
+    const driver = createMockDriver();
+    const loader = new DatabaseLoader({ driver, cache: { enabled: false } });
+
+    const canonical = '2026-03-04T05:06:07.089Z';
+    const row = rowWithStamp(canonical);
+    expect(typeof row.updated_at).toBe('string');
+    driver.findOne = vi.fn().mockResolvedValue(row);
+
+    const stats = await loader.stat('object', 'account');
+
+    // Idempotent: the dialect that was already correct must not be reshaped.
+    expect(stats!.mtime).toBe(canonical);
   });
 });

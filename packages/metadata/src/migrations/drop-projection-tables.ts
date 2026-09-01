@@ -19,6 +19,8 @@
 
 import type { IDataDriver } from '@objectstack/spec/contracts';
 
+import { driverExecRefusal, resolveDriverExec } from './driver-exec.js';
+
 const DEPRECATED_TABLES = [
     'sys_object',
     'sys_view',
@@ -36,19 +38,21 @@ export interface DropProjectionResult {
 /**
  * Drop the deprecated per-type metadata projection tables.
  *
- * @param driver  An `IDataDriver` with `driver.raw(sql, bindings?)` access.
+ * @param driver  An `IDataDriver`. Raw SQL is issued through the surface
+ *                `IDataDriver` declares — `execute(sql, bindings?)` — falling
+ *                back to `raw(sql, bindings?)`; see `./driver-exec.ts`.
  * @returns       Per-table results.
  */
 export async function dropProjectionTables(driver: IDataDriver): Promise<DropProjectionResult[]> {
-    const driverAny = driver as any;
-    if (typeof driverAny.raw !== 'function') {
-        throw new Error('dropProjectionTables: driver must expose a raw(sql) method');
+    const exec = resolveDriverExec(driver);
+    if (!exec) {
+        throw new Error(driverExecRefusal('dropProjectionTables'));
     }
 
     const results: DropProjectionResult[] = [];
     for (const table of DEPRECATED_TABLES) {
         try {
-            await driverAny.raw(`DROP TABLE IF EXISTS ${table}`);
+            await exec(`DROP TABLE IF EXISTS ${table}`);
             results.push({ table, status: 'dropped' });
         } catch (error) {
             results.push({

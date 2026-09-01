@@ -245,7 +245,8 @@ describe('findModuleDocBlock — a block documents a symbol, or it documents the
  * The tightening applies only INSIDE the import block and stops at a comment of
  * any kind, which is what the four `keeps` cases below pin: without the first
  * limb, three real headers written above their imports go blank; without the
- * second, `api/analytics` and `system/cache` do.
+ * second, `api/analytics` does (and `system/cache` did, until #13334 put its
+ * selection on the `@module` marker instead — the describe after this one).
  *
  * MEASURED over `packages/spec/src` (193 sources, base `3322527f`): 28 pages
  * lose a misattributed opening, 0 change to a different block, 165 are
@@ -330,15 +331,18 @@ describe('findModuleDocBlock — #13263: an import injected between a block and 
     expect(opening(findModuleDocBlock(source))).toBe('Package Documentation Metadata Protocol (ADR-0046)');
   });
 
-  it('keeps a header inside the imports when the next schema carries its own JSDoc', () => {
-    // `system/cache.zod.ts` — its block names itself ("This File") and the
-    // declaration beyond the injected import is already documented, so that
-    // import says nothing about what the block documents.
+  it('keeps a marked header inside the imports when the next schema carries its own JSDoc', () => {
+    // `system/cache.zod.ts`, as #13334 left it: a block inside the import list
+    // with a comment on the far side is the position no structural signal can
+    // decide (see the #13334 describe below), so the real header now carries
+    // `@module` — and that marker, not the far-side comment, is what selects it.
     const source = [
       "import { z } from 'zod';",
       "import { CronExpressionInputSchema } from '../shared/expression.zod';",
       '',
       '/**',
+      ' * @module system/cache',
+      ' *',
       ' * Application-Level Cache Protocol',
       ' */',
       "import { lazySchema } from '../shared/lazy-schema';",
@@ -347,12 +351,15 @@ describe('findModuleDocBlock — #13263: an import injected between a block and 
       "export const CacheStrategySchema = z.enum(['lru']);",
       '',
     ].join('\n');
-    expect(opening(findModuleDocBlock(source))).toBe('Application-Level Cache Protocol');
+    expect(opening(findModuleDocBlock(source))).toBe('@module system/cache');
   });
 
   it('keeps a block with no declaration on the far side at all', () => {
     // A module that is nothing but re-exports — the plumbing runs to the end of
     // the file, so there is no symbol for the block to have been torn from.
+    // #13334's marker gate deliberately leaves this shape alone: with no symbol
+    // anywhere beyond, the block cannot be a detached symbol doc, so it selects
+    // bare.
     const source = [
       "import { z } from 'zod';",
       '',
@@ -364,6 +371,132 @@ describe('findModuleDocBlock — #13263: an import injected between a block and 
       '',
     ].join('\n');
     expect(opening(findModuleDocBlock(source))).toBe('Environment Artifact Envelope — re-export');
+  });
+});
+
+/**
+ * #13334 — inside the import list, only `@module` selects.
+ *
+ * The position #13263 could not decide: a block with imports before it, an
+ * import the FIRST thing after it, and a comment beyond that plumbing. Two
+ * genuine headers (`system/cache`, `shared/mapping`) and eight detached symbol
+ * docs (`ai/agent`, `data/datasource`, `data/hook`, `security/permission`,
+ * `ui/action`, `ui/app`, `ui/component`, `ui/page`) sat there structurally
+ * identical — #13334 measured every positional signal (line number, imports
+ * before, block length, whether the next declaration has its own JSDoc) and
+ * none separates them; only the prose differs, and a prose pattern check is the
+ * approach `file-description.ts`'s own header rejects with the measurement
+ * behind the rejection. So the rule asks the author: the explicit `@module`
+ * marker — already this repo's spelling for a module header, fourteen sources
+ * above their imports open with it — decides, in both directions.
+ */
+describe('findModuleDocBlock — #13334: inside the import list, only `@module` selects', () => {
+  // `ui/page.zod.ts` as #13263 left it, reduced: the block reads like (and is)
+  // one schema's doc, the injected import sits against it, and the next thing
+  // beyond the plumbing is another doc block. Under the far-side-comment rule
+  // this was SELECTED — the eighth published page opening with `Page Region
+  // Schema`.
+  const unmarked = [
+    "import { z } from 'zod';",
+    '',
+    '/**',
+    ' * Page Region Schema',
+    ' * A named region in the template where components are dropped.',
+    ' */',
+    "import { lazySchema } from '../shared/lazy-schema';",
+    '',
+    '/** Shared history for this file. */',
+    "const PAGE_HISTORY = 'Until this shape was closed…';",
+    '',
+    'export const PageRegionSchema = lazySchema(() => strictObject({}));',
+    '',
+  ].join('\n');
+
+  it('rejects an unmarked block inside the import list, comment on the far side or not', () => {
+    expect(findModuleDocBlock(unmarked)).toBeNull();
+  });
+
+  it('selects the byte-identical block once it carries `@module` — the minimal pair', () => {
+    const marked = unmarked.replace(' * Page Region Schema', ' * @module ui/page\n *\n * Page Region Schema');
+    expect(opening(findModuleDocBlock(marked))).toBe('@module ui/page');
+  });
+
+  it('lets `@module` decide even with a declaration on the far side of the plumbing', () => {
+    // The marker is the author's explicit declaration, and explicit beats
+    // inferred: a marked header whose next schema happens to be undocumented
+    // must not go blank the day that schema loses its JSDoc.
+    const source = [
+      "import { z } from 'zod';",
+      '',
+      '/**',
+      ' * @module system/example',
+      ' *',
+      ' * Example Protocol',
+      ' */',
+      "import { lazySchema } from '../shared/lazy-schema';",
+      '',
+      'export const ExampleSchema = lazySchema(() => z.object({}));',
+      '',
+    ].join('\n');
+    expect(opening(findModuleDocBlock(source))).toBe('@module system/example');
+  });
+
+  it('reads an `@module` inside a fenced example as content, never as the marker', () => {
+    // The predicate runs through `classifyLines`, the same model of "which
+    // lines are code" the renderer uses — an author ILLUSTRATING the convention
+    // must not thereby publish the block they illustrated it in.
+    const source = [
+      "import { z } from 'zod';",
+      '',
+      '/**',
+      ' * Widget Config Schema',
+      ' *',
+      ' * ```ts',
+      ' * @module not/a/marker',
+      ' * ```',
+      ' */',
+      "import { lazySchema } from '../shared/lazy-schema';",
+      '',
+      '/** The widget. */',
+      'export const WidgetSchema = lazySchema(() => z.object({}));',
+      '',
+    ].join('\n');
+    expect(findModuleDocBlock(source)).toBeNull();
+  });
+
+  it('reads a mid-sentence mention of the tag as prose about it, never as the marker', () => {
+    const source = [
+      "import { z } from 'zod';",
+      '',
+      '/**',
+      ' * Widget Config Schema — needs no @module marker to look like one.',
+      ' */',
+      "import { lazySchema } from '../shared/lazy-schema';",
+      '',
+      '/** The widget. */',
+      'export const WidgetSchema = lazySchema(() => z.object({}));',
+      '',
+    ].join('\n');
+    expect(findModuleDocBlock(source)).toBeNull();
+  });
+
+  it('still needs no marker ABOVE the imports — the gate is scoped to the ambiguous position', () => {
+    // ~180 real headers sit outside the import list and stay untouched; the
+    // fixture beside `keeps a module header written above the imports` pins the
+    // same thing, and this one pins it against the gate specifically.
+    const source = [
+      '/**',
+      ' * Widget Protocol',
+      ' */',
+      '',
+      "import { z } from 'zod';",
+      "import { lazySchema } from '../shared/lazy-schema';",
+      '',
+      '/** The widget. */',
+      'export const WidgetSchema = lazySchema(() => z.object({}));',
+      '',
+    ].join('\n');
+    expect(opening(findModuleDocBlock(source))).toBe('Widget Protocol');
   });
 });
 
@@ -1222,6 +1355,80 @@ describe('corpus — no reference source donates a symbol comment to its page', 
     expect(openingOf('kernel/execution-context.zod.ts')).toBeNull();
     expect(openingOf('data/field.zod.ts')).toBeNull();
   });
+
+  /**
+   * #13334's corpus limb — the half that cannot rot.
+   *
+   * Re-derives the marker gate from the real tree: a SELECTED block that sits
+   * inside the import list — plumbing somewhere before it, plumbing the first
+   * thing after it — must carry `@module` on a prose line, unless nothing but
+   * plumbing and blanks follows it to the end of the file. A source that
+   * drifts back into the ambiguous position (the lazify codemod's insertion
+   * point is exactly there) cannot quietly re-acquire a wrong page opening:
+   * unmarked, it renders no description at all.
+   */
+  it('never selects an unmarked block inside the import list (#13334)', () => {
+    const PLUMBING = /^(?:import\b|export\s*(?:\*|\{|type\s*\{))/;
+    const offenders: string[] = [];
+    for (const file of zodFiles) {
+      const source = fs.readFileSync(file, 'utf-8');
+      const block = findModuleDocBlock(source);
+      if (block === null) continue;
+      const marker = `/**${block}*/`;
+      const at = source.indexOf(marker);
+      if (at < 0) continue; // already reported by the first corpus case
+      const lines = source.split('\n');
+      const startLine = source.slice(0, at).split('\n').length - 1;
+      const endLine = startLine + marker.split('\n').length - 1;
+      if (!lines.slice(0, startLine).some(l => PLUMBING.test(l))) continue; // above the imports
+      const next = lines.slice(endLine + 1).find(l => l.trim() !== '') ?? '';
+      if (!PLUMBING.test(next)) continue; // a comment or declaration against the block decides for itself
+      // The same walk the selector runs: over blanks and plumbing, does
+      // anything but the end of the file lie beyond? A comment or a
+      // declaration both count — only a pure re-export tail selects bare.
+      const runsToEof = lines.slice(endLine + 1).every(
+        l => l.trim() === '' || (PLUMBING.test(l) || (!l.trimStart().startsWith('/') && !/^[A-Za-z_$@]/.test(l))),
+      );
+      const marked = block.split('\n').some(l => /^@module\b/.test(l.replace(/^\s*\*\s?/, '')));
+      if (!marked && !runsToEof) {
+        offenders.push(path.relative(SRC_DIR, file));
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('opens `system/cache` and `shared/mapping` with their marked headers (#13334)', () => {
+    // The two genuine headers the ambiguous position held; each now carries
+    // the one-line `@module` marker, and the gate is what makes that marker
+    // load-bearing rather than decorative.
+    const openingOf = (rel: string) =>
+      opening(findModuleDocBlock(fs.readFileSync(path.join(SRC_DIR, rel), 'utf-8')));
+    expect(openingOf('system/cache.zod.ts')).toBe('@module system/cache');
+    expect(openingOf('shared/mapping.zod.ts')).toBe('@module shared/mapping');
+  });
+
+  it('publishes no description for the eight modules whose opening was one schema\'s doc (#13334)', () => {
+    // The corpus half of route ② — each of the eight had a symbol's comment
+    // wedged into its import list by the lazify codemod, published as the
+    // page's opening and as the module's skill-index pointer row. The comments
+    // moved back to the declarations they document (or to the family they
+    // head), so no block sits in the header zone documenting nothing: the page
+    // honestly prints no description. 宁可缺,不要错.
+    const openingOf = (rel: string) =>
+      opening(findModuleDocBlock(fs.readFileSync(path.join(SRC_DIR, rel), 'utf-8')));
+    for (const rel of [
+      'ai/agent.zod.ts',
+      'data/datasource.zod.ts',
+      'data/hook.zod.ts',
+      'security/permission.zod.ts',
+      'ui/action.zod.ts',
+      'ui/app.zod.ts',
+      'ui/component.zod.ts',
+      'ui/page.zod.ts',
+    ]) {
+      expect(openingOf(rel), rel).toBeNull();
+    }
+  });
 });
 
 /**
@@ -1422,7 +1629,11 @@ describe('corpus — every rendered description is well-formed markdown', () => 
   };
 
   it('finds descriptions to check', () => {
-    expect(described.length).toBeGreaterThan(150);
+    // 146 at #13334 (154 before it — the marker gate blanked the eight modules
+    // whose "description" was one schema's detached comment; the diff of every
+    // per-file verdict, old selector vs new over all 208 sources, is in that
+    // card's PR: 200 identical, 8 SELECTED→null, 0 to a different block).
+    expect(described.length).toBeGreaterThan(140);
   });
 
   it('never cuts an inline code span in half (#5553)', () => {

@@ -51,7 +51,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           approved: "Aprobada",
           rejected: "Rechazada",
           recalled: "Retirada",
-          returned: "Devuelta para revisión"
+          returned: "Devuelta para revisión",
+          cancelled: "Anulada"
+        }
+      },
+      cancel_reason: {
+        label: "Motivo de anulación",
+        help: "Por qué la plataforma anuló esta solicitud (solo se establece cuando el estado es Anulada)",
+        options: {
+          record_deleted: "Registro relacionado eliminado"
         }
       },
       current_step: {
@@ -232,7 +240,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           comment: "Comentario",
           revise: "Devolución",
           resubmit: "Reenvío",
-          ooo_substitute: "Sustitución por ausencia"
+          ooo_substitute: "Sustitución por ausencia",
+          cancel: "Anulación"
         }
       },
       actor_id: {

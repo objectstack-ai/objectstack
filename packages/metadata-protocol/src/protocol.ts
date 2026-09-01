@@ -1598,6 +1598,78 @@ function versionTokensAgree(current: NormalisedVersion, expected: NormalisedVers
     return current.token === expected.token;
 }
 
+/** The verbatim spelling the ADR-0067 timeline compared before #13995 - `String(v ?? '')`. */
+function auditInstantToken(value: unknown): string {
+    return value === null || value === undefined ? '' : String(value);
+}
+
+/**
+ * Epoch milliseconds for a DRIVER-stamped audit column, or null when the value
+ * does not denote an instant.
+ *
+ * The input domain is {@link canonicalVersionInstant}'s, and it is delegated to
+ * rather than re-spelled: that domain (`Date` / epoch `number` / canonical ISO
+ * text / opaque) was measured off the drivers for #13382 and is the same set a
+ * `created_at` arrives in. Its canonical answer round-trips through `Date.parse`
+ * exactly, and it has already bounded the value to a finite, `toISOString`-able
+ * time, so the number below is always finite.
+ */
+function auditInstantMs(value: unknown): number | null {
+    if (value === null || value === undefined) return null;
+    const canonical = canonicalVersionInstant(value, auditInstantToken(value).trim());
+    return canonical === null ? null : Date.parse(canonical);
+}
+
+/**
+ * Compare two engine-stamped audit instants, OLDEST-FIRST (`< 0` when `a` is
+ * older than `b`) - the shape both a `sort` comparator and a "strictly newer
+ * than" filter need.
+ *
+ * ## Why this exists (#13995)
+ *
+ * `created_at` is an engine-injected audit column: it is not in `datetimeFields`,
+ * and `SqlDriver#formatOutput` repairs it only inside `if (this.isSqlite)`, so
+ * the live dialects hand it out of the record read door as a JS `Date` and the
+ * SQLite family as canonical ISO-Z text (pinned by driver-sql's
+ * `sql-driver-13567-audit-stamp-materialisation.test.ts`). `String(aDate)` is
+ * `"Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard Time)"`, whose LEADING
+ * token is the weekday NAME - so a lexicographic compare over those strings
+ * orders `Fri < Mon < Sat < Sun < Thu < Tue < Wed`, which has nothing to do with
+ * chronology. It is stable across the whole set, so the failure is systematic
+ * rather than intermittent: there is never an "it worked once" to warn anyone.
+ * Both ADR-0067 commit-timeline consumers compared exactly that way, and one of
+ * them - {@link ObjectStackProtocolImplementation.rollbackToPackageCommit} -
+ * chooses the set of commits to UNDO with it.
+ *
+ * ## Why a sibling of {@link canonicalVersionInstant} rather than a reuse of
+ * {@link versionTokensAgree}
+ *
+ * The canonicalisation IS reused (see {@link auditInstantMs}). What is not is
+ * `versionTokensAgree`: it answers EQUALITY between two client-facing version
+ * TOKENS, and ordering needs `<`/`>`, not `===`. It also takes the pre-tidied
+ * {@link NormalisedVersion} pair an HTTP `If-Match` header produces - RFC-7232
+ * quote stripping, the "no token supplied" opt-out - none of which applies to a
+ * column a driver stamped and no client ever sends.
+ *
+ * The opaque limb is deliberately the one `versionTokensAgree` documents: when
+ * either side does not denote an instant, the two are compared VERBATIM, exactly
+ * as this seam did before. So the only verdicts that change are pairs that denote
+ * instants - the defect - and nothing a host stamps into the column starts
+ * ordering differently. This is not a tolerant fallback over a mis-spelled key
+ * (#13973's standing prohibition): no alternative spelling is accepted anywhere
+ * here, and an unparseable value is not repaired, only left where it was.
+ */
+function compareAuditInstants(a: unknown, b: unknown): number {
+    const aMs = auditInstantMs(a);
+    const bMs = auditInstantMs(b);
+    if (aMs !== null && bMs !== null) {
+        return aMs < bMs ? -1 : aMs > bMs ? 1 : 0;
+    }
+    const aToken = auditInstantToken(a);
+    const bToken = auditInstantToken(b);
+    return aToken < bToken ? -1 : aToken > bToken ? 1 : 0;
+}
+
 // Lifecycle columns the engine always owns; the clone path drops them by NAME
 // so the insert re-stamps fresh values instead of copying the source's. Mirrors
 // record-validator's SKIP_FIELDS (system-injected, never author-supplied).
@@ -6599,6 +6671,41 @@ export class ObjectStackProtocolImplementation implements
                         request.type, (data as { name?: unknown } | null)?.name, data,
                     );
                 });
+
+                // [#13407] Expand any aggregated `defineView` container this
+                // READ just merged in, INLINE into this response's own `items`
+                // — never into the SchemaRegistry. This is what actually closes
+                // the card: {@link hydrateExpandedViewItems} below is
+                // registry-mutating and is therefore gated off for exactly the
+                // rows the card's own repro used (an org-scoped write, on any
+                // kernel; ANY write on a real environment-scoped kernel) — see
+                // that method's "#13407 scope boundary" note for why widening
+                // those gates was rejected rather than attempted. This pass
+                // has no such gate to worry about: `overlays` is already this
+                // request's own correctly org/environment-scoped read (the
+                // `queryByOrg` merge above), so expanding it into the RETURNED
+                // list — and only the returned list — cannot leak one
+                // org/environment's container into another's.
+                //
+                // Upserted by name (not appended) so this stays idempotent
+                // against the registry-hydration path below: on an unscoped,
+                // env-wide kernel that path may have ALREADY registered the
+                // same expansion (from this or an earlier write's write-
+                // through), and re-deriving here from the row this call just
+                // read is a byte-identical, never-stale restatement of the
+                // same items — not a duplicate.
+                if (isView) {
+                    const byName = new Map<string, unknown>();
+                    for (const it of items as any[]) {
+                        if (it && typeof it === 'object' && typeof it.name === 'string') byName.set(it.name, it);
+                    }
+                    for (const { data, packageId: recPkg } of overlays) {
+                        for (const vi of this.expandRuntimeViewContainer(request.type, data, { packageId: recPkg })) {
+                            byName.set(vi.name as string, vi);
+                        }
+                    }
+                    items = Array.from(byName.values());
+                }
 
                 // Only hydrate the global registry for unscoped (control-plane)
                 // calls — scoped project entries must not leak process-wide.
@@ -12979,10 +13086,74 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#7736] Expand an aggregated `defineView` container that arrived through
-     * the RUNTIME door into the same independent ViewItems the two SOURCE
-     * registrars produce — at the one hydration choke point all three runtime
-     * callers already share.
+     * [#7736, #13407] Expand an aggregated `defineView` container that arrived
+     * through the RUNTIME door into the same independent, fully-enriched
+     * ViewItems the two SOURCE registrars produce — object binding, artifact-
+     * protection merge and package provenance all applied, but nothing
+     * REGISTERED. Returns `[]` (never throws) for a non-view type, a body that
+     * is not a container, or a container with no derivable object binding —
+     * exactly the "no expansion" outcomes the two callers below already
+     * decide on independently.
+     *
+     * Pure and side-effect-free on purpose: it is shared by two callers with
+     * DIFFERENT scope rules for what may be registered where —
+     * {@link hydrateExpandedViewItems} (registry-mutating, org/environment-
+     * gated) and `getMetaItems`' inline per-request expansion (registry-free,
+     * ungated) — see the #13407 note on {@link hydrateExpandedViewItems} for
+     * why the registry path could not simply be widened instead.
+     *
+     * ## Object-name derivation (#13407 fix)
+     *
+     * The container's OWN top-level `object` field — `ViewSchema.object`,
+     * documented there as "how a stack-level `views: [...]` entry says which
+     * object its views belong to; read by `getViewsByObject()` /
+     * `GET /meta/view?object=`" — is the authorial, explicit signal and is
+     * consulted FIRST. Before #13407 this walked only `list.data.object` →
+     * `form.data.object` → the row's own name (mirroring `plugin.ts`) and
+     * never read `container.object` at all, so a container that set the
+     * top-level field but not `list.data.object` (or whose save `name` is not
+     * the object it binds — the two are the same value only by convention)
+     * expanded under the WRONG key or not at all. The three-deep fallback is
+     * kept, unchanged, for every container written before this field was
+     * consulted here.
+     */
+    private expandRuntimeViewContainer(
+        type: string,
+        data: unknown,
+        options: { packageId?: string | null },
+    ): Record<string, unknown>[] {
+        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return [];
+        if (!isAggregatedViewContainer(data)) return [];
+        const container = data as Record<string, any>;
+        const viewObject =
+            (typeof container.object === 'string' && container.object ? container.object : undefined)
+            ?? container?.list?.data?.object
+            ?? container?.form?.data?.object
+            ?? (typeof container.name === 'string' ? container.name : undefined);
+        if (!viewObject) return [];
+        const out: Record<string, unknown>[] = [];
+        for (const vi of expandViewContainer(viewObject, container)) {
+            // Carry the container's package provenance onto each expanded item
+            // so the package-disable filter and ADR-0048 artifact scoping judge
+            // them by the same owner the container has.
+            const item: Record<string, unknown> = { ...(vi as any) };
+            if (container._packageId !== undefined && item._packageId === undefined) {
+                item._packageId = container._packageId;
+            }
+            const viArtifact = this.lookupArtifactItem(
+                type,
+                vi.name,
+                (item._packageId as string | undefined) ?? options.packageId ?? undefined,
+            );
+            out.push(mergeArtifactProtection(item, viArtifact) as Record<string, unknown>);
+        }
+        return out;
+    }
+
+    /**
+     * [#7736] Register an aggregated `defineView` container's expansion
+     * ({@link expandRuntimeViewContainer}) into the SchemaRegistry — at the
+     * one hydration choke point all three runtime callers already share.
      *
      * "Object has-many View" (ADR-0017 §2, §3.2) makes container ingestion
      * DUAL-READ: register the container under the bare `<object>` key for
@@ -13002,27 +13173,41 @@ export class ObjectStackProtocolImplementation implements
      * items that WOULD match the switcher, and both object-bound exits answered
      * zero.
      *
-     * Here rather than at either read exit deliberately. There are two
-     * independent object-bound readers — the REST route reads through
-     * `getMetaItems`, while `getViewsByObject()` reads `MetadataManager.list`
-     * — so expanding at one of them fixes the card's literal repro and leaves
-     * its sibling exit answering empty. This function is the ONE place all
-     * three runtime hydration callers (boot `loadMetaFromDb`, read-side
-     * `getMetaItems`, write-through `applyRegistryWriteThrough`) already
-     * funnel through, so one expansion serves every reader, survives a restart,
-     * and keeps read-your-writes — the "single, universally-applied location"
-     * #7163 asked for after the same defect was fixed one seam further in.
-     *
      * The canonical-shape filter in `getMetaItems` is deliberately left alone:
      * its invariant ("a container's expanded items are also present") is what
      * was false here, and this restores it rather than loosening the filter —
      * which would surface the legacy wrapper shape to every list consumer and
      * still show the switcher nothing, since a container carries no `viewKind`.
      *
-     * Object-name derivation mirrors `plugin.ts` (`list.data.object` →
-     * `form.data.object`), falling back to the row's own name — for a container
-     * the metadata door's save name IS the object. No derivable object means no
-     * expansion, exactly as the artifact loader already decides.
+     * ## [#13407] This function's OWN scope boundary — the reason it is not
+     * ## the whole fix
+     *
+     * This is registry-MUTATING, and both its callers gate it off exactly
+     * where {@link hydrateOverlayIntoRegistry}'s own comments say why:
+     * write-through (`applyRegistryWriteThrough`) never calls it when
+     * `this.environmentId !== undefined` (a real per-environment kernel —
+     * `assembleMetadataProtocol`'s own comment: "per-project (cloud) kernels
+     * source metadata from the control plane"), and `hydrateOverlayIntoRegistry`
+     * itself refuses ANY org-scoped row before ever reaching this function
+     * ("[#6602] a per-org overlay is served on demand, never grafted into the
+     * registry every org in this process shares") — REGARDLESS of
+     * `environmentId`. Both gates are deliberate isolation boundaries (ADR-0005
+     * per-org isolation; the registry is shared by every org/request a given
+     * kernel serves) and #13407 does not touch either one.
+     *
+     * That is precisely why #7736's fix — this function, reached only through
+     * the registry-hydration callers — never helped the card's own repro ("a
+     * signed-in user with an ACTIVE ORG" on "a live multi-node EE deployment"):
+     * an org-scoped write NEVER reaches this function, on ANY kernel, container
+     * shape or object-derivation notwithstanding. #13407's actual fix is
+     * `getMetaItems`' separate, registry-free call to
+     * {@link expandRuntimeViewContainer} (below, in the overlay-merge section)
+     * — safe for org/environment isolation because it operates only on rows
+     * `getMetaItems` already read for THIS request's own scope, and never
+     * writes them anywhere shared. This function keeps serving the case it
+     * always did (env-wide rows on an unscoped/control-plane kernel — the ONLY
+     * combination #7736's own pin ever exercised), now with the corrected
+     * derivation chain.
      */
     private hydrateExpandedViewItems(
         type: string,
@@ -13030,28 +13215,8 @@ export class ObjectStackProtocolImplementation implements
         options: { packageId?: string | null; organizationId: string | null },
         registry: any,
     ): void {
-        if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view') return;
-        if (!isAggregatedViewContainer(data)) return;
-        const container = data as Record<string, any>;
-        const viewObject =
-            container?.list?.data?.object
-            ?? container?.form?.data?.object
-            ?? (typeof container.name === 'string' ? container.name : undefined);
-        if (!viewObject) return;
-        for (const vi of expandViewContainer(viewObject, container)) {
-            // Carry the container's package provenance onto each expanded item
-            // so the package-disable filter and ADR-0048 artifact scoping judge
-            // them by the same owner the container has.
-            const item: Record<string, unknown> = { ...(vi as any) };
-            if (container._packageId !== undefined && item._packageId === undefined) {
-                item._packageId = container._packageId;
-            }
-            const viArtifact = this.lookupArtifactItem(
-                type,
-                vi.name,
-                (item._packageId as string | undefined) ?? options.packageId ?? undefined,
-            );
-            registry.registerItem(type, mergeArtifactProtection(item, viArtifact), 'name' as any);
+        for (const item of this.expandRuntimeViewContainer(type, data, options)) {
+            registry.registerItem(type, item, 'name' as any);
         }
     }
 
@@ -18258,8 +18423,17 @@ export class ObjectStackProtocolImplementation implements
                 ...(r.created_at ? { createdAt: r.created_at } : {}),
             }));
             // Newest-first; tolerate drivers that don't order by returning
-            // insertion order, then sort by the ISO timestamp.
-            mapped.sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
+            // insertion order, then sort by the audit instant.
+            //
+            // [#13995] The comparison is on INSTANTS, not on the raw column's
+            // `String()` spelling.
+            // The comment here used to say "sort by the ISO timestamp" - an
+            // assumption written down and never verified, and false on the
+            // production default driver: Postgres and MySQL materialise this
+            // column as a JS `Date`, whose string spelling LEADS WITH THE WEEKDAY
+            // NAME, so this timeline was ordered `Fri < Mon < Sat < ...` while
+            // claiming newest-first. See {@link compareAuditInstants}.
+            mapped.sort((a, b) => compareAuditInstants(b.createdAt, a.createdAt));
             return mapped;
         } catch (error) {
             // [#5980] Benign (the table has not been provisioned) falls through;
@@ -18840,9 +19014,19 @@ export class ObjectStackProtocolImplementation implements
         // listCommits is newest-first; revert every `apply` commit strictly newer
         // than the target (by created_at). Revert commits are skipped (their
         // effect is already captured by re-reverting the apply they undid).
-        const targetCreatedAt = String(target.created_at ?? '');
+        //
+        // [#13995] "Strictly newer" is an INSTANT comparison. This site both
+        // CONSUMES {@link listCommits}' ordering and re-derives the same
+        // comparison itself, so neither site could correct the other: with
+        // the raw column's `String()` spelling over a `Date`-materialising driver
+        // the predicate
+        // ranked by weekday NAME, and this rollback then reverted `apply` commits
+        // OLDER than the target while skipping the newer ones it exists to undo -
+        // a destructive operation planning off a wrong predicate, on every run and
+        // in the same way. See {@link compareAuditInstants}.
+        const targetCreatedAt = target.created_at;
         const toRevert = all.filter(
-            (c) => String(c.createdAt ?? '') > targetCreatedAt && c.operation === 'apply',
+            (c) => compareAuditInstants(c.createdAt, targetCreatedAt) > 0 && c.operation === 'apply',
         );
         const revertedCommits: string[] = [];
         const failed: Array<{ commitId: string; error: string }> = [];

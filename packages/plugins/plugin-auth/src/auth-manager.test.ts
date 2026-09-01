@@ -441,8 +441,9 @@ describe('AuthManager', () => {
 
     // @better-auth/scim mounts the SCIM 2.0 Service Provider so an external IdP
     // can auto-provision/deprovision this env's users (ADR-0071). It is opt-in
-    // via OS_SCIM_ENABLED and FORCES the admin plugin on (active:false → ban
-    // runs through admin).
+    // via `plugins.scim` (explicit value wins, #13439) or OS_SCIM_ENABLED
+    // (decides where the config leaves it unset), and effective SCIM FORCES
+    // the admin plugin on (active:false → ban runs through admin).
     it('should NOT register the scim plugin by default', async () => {
       let capturedConfig: any;
       (betterAuth as any).mockImplementation((config: any) => {
@@ -479,6 +480,73 @@ describe('AuthManager', () => {
         expect(ids).toContain('scim');
         // active:false → ban needs the admin plugin; SCIM forces it on.
         expect(ids).toContain('admin');
+      } finally {
+        if (prev === undefined) delete process.env.OS_SCIM_ENABLED;
+        else process.env.OS_SCIM_ENABLED = prev;
+        warnSpy.mockRestore();
+      }
+    });
+
+    // #13439 (maintainer ruling 2026-08-31) — an EXPLICIT `plugins.scim`
+    // value wins over `OS_SCIM_ENABLED`; the env var decides only where the
+    // config leaves the key unset. This is the cloud control plane's case:
+    // its plan-derived `plugins.scim: false` must be authoritative even in a
+    // deployment env that carries an ambient OS_SCIM_ENABLED (cloud#1265).
+    // The forced-admin coupling (ADR-0071) follows the EFFECTIVE scim value,
+    // so declining scim also declines the admin plugin it would have dragged
+    // in (unless `admin` is set explicitly).
+    it('should NOT register the scim plugin (nor force admin on) when plugins.scim=false despite OS_SCIM_ENABLED', async () => {
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((config: any) => {
+        capturedConfig = config;
+        return { handler: vi.fn(), api: {} };
+      });
+      const prev = process.env.OS_SCIM_ENABLED;
+      process.env.OS_SCIM_ENABLED = 'true';
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const manager = new AuthManager({
+          secret: 'test-secret-at-least-32-chars-long',
+          baseUrl: 'http://localhost:3000',
+          plugins: { scim: false },
+        });
+        await manager.getAuthInstance();
+        const ids = capturedConfig.plugins.map((p: any) => p.id);
+        expect(ids).not.toContain('scim');
+        expect(ids).not.toContain('admin');
+        // The /auth/config features block recomputes the admin default from
+        // the same flipped chain (its own inline scim resolution) — it must
+        // agree with the wired plugin list.
+        expect(manager.getPublicConfig().features.admin).toBe(false);
+      } finally {
+        if (prev === undefined) delete process.env.OS_SCIM_ENABLED;
+        else process.env.OS_SCIM_ENABLED = prev;
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('should register the scim plugin (and force admin on) when plugins.scim=true with no env set', async () => {
+      let capturedConfig: any;
+      (betterAuth as any).mockImplementation((config: any) => {
+        capturedConfig = config;
+        return { handler: vi.fn(), api: {} };
+      });
+      const prev = process.env.OS_SCIM_ENABLED;
+      delete process.env.OS_SCIM_ENABLED;
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      try {
+        const manager = new AuthManager({
+          secret: 'test-secret-at-least-32-chars-long',
+          baseUrl: 'http://localhost:3000',
+          plugins: { scim: true },
+        });
+        await manager.getAuthInstance();
+        const ids = capturedConfig.plugins.map((p: any) => p.id);
+        expect(ids).toContain('scim');
+        // ADR-0071 — the forced-admin coupling is unchanged: effective SCIM
+        // still drags the admin plugin in when `admin` is left unset.
+        expect(ids).toContain('admin');
+        expect(manager.getPublicConfig().features.admin).toBe(true);
       } finally {
         if (prev === undefined) delete process.env.OS_SCIM_ENABLED;
         else process.env.OS_SCIM_ENABLED = prev;
@@ -2530,14 +2598,14 @@ describe('AuthManager', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const manager = new AuthManager({
         secret: 'test-secret-at-least-32-chars-long',
-        plugins: { sso: true } as any,
+        plugins: { sso: true },
       });
       warnSpy.mockRestore();
 
       expect(manager.getPublicConfig().features.sso).toBe(true);
     });
 
-    it('should let OS_SSO_ENABLED env override the config (matches buildPlugins wiring)', () => {
+    it('should let OS_SSO_ENABLED decide when the config leaves sso unset (matches buildPlugins wiring)', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const prev = process.env.OS_SSO_ENABLED;
       process.env.OS_SSO_ENABLED = 'true';
@@ -2575,7 +2643,7 @@ describe('AuthManager', () => {
     );
 
     it.each(['0', 'false', 'off', 'no'])(
-      'should treat OS_SSO_ENABLED=%s as disabled even when plugins.sso=true',
+      'should treat OS_SSO_ENABLED=%s as disabled when the config leaves sso unset',
       (val) => {
         const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const prev = process.env.OS_SSO_ENABLED;
@@ -2583,7 +2651,6 @@ describe('AuthManager', () => {
         try {
           const manager = new AuthManager({
             secret: 'test-secret-at-least-32-chars-long',
-            plugins: { sso: true } as any,
           });
           expect(manager.getPublicConfig().features.sso).toBe(false);
         } finally {
@@ -2593,6 +2660,99 @@ describe('AuthManager', () => {
         }
       },
     );
+
+    // #13439 (maintainer ruling 2026-08-31) — an EXPLICIT `plugins.sso`
+    // value wins over `OS_SSO_ENABLED`; the env var decides only where the
+    // config leaves the key unset. Before the flip, a host that wrote
+    // `plugins: { sso: false }` got no effect whenever the env var was set —
+    // a line that read as a security control and did nothing.
+    it.each(['0', 'false', 'off', 'no'])(
+      'should keep sso ENABLED when plugins.sso=true despite OS_SSO_ENABLED=%s (explicit config wins)',
+      (val) => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const prev = process.env.OS_SSO_ENABLED;
+        process.env.OS_SSO_ENABLED = val;
+        try {
+          const manager = new AuthManager({
+            secret: 'test-secret-at-least-32-chars-long',
+            plugins: { sso: true },
+          });
+          expect(manager.getPublicConfig().features.sso).toBe(true);
+        } finally {
+          if (prev === undefined) delete process.env.OS_SSO_ENABLED;
+          else process.env.OS_SSO_ENABLED = prev;
+          warnSpy.mockRestore();
+        }
+      },
+    );
+
+    // The empty string is a PRESENT env value (readBooleanEnv resolves it to
+    // a boolean — it only returns undefined for an ABSENT variable), so it
+    // must lose to an explicit config value like any other present value.
+    it.each(['1', 'true', 'yes', 'on', ''])(
+      'should keep sso DISABLED when plugins.sso=false despite OS_SSO_ENABLED=%j (explicit config wins)',
+      (val) => {
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const prev = process.env.OS_SSO_ENABLED;
+        process.env.OS_SSO_ENABLED = val;
+        try {
+          const manager = new AuthManager({
+            secret: 'test-secret-at-least-32-chars-long',
+            plugins: { sso: false },
+          });
+          expect(manager.getPublicConfig().features.sso).toBe(false);
+          expect(manager.isSsoWired()).toBe(false);
+        } finally {
+          if (prev === undefined) delete process.env.OS_SSO_ENABLED;
+          else process.env.OS_SSO_ENABLED = prev;
+          warnSpy.mockRestore();
+        }
+      },
+    );
+
+    // #13439 — ssoDomainVerification follows the same explicit-config-wins
+    // order (and still requires sso to be wired at all).
+    it('should let plugins.ssoDomainVerification=false win over OS_SSO_DOMAIN_VERIFICATION', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const prevSso = process.env.OS_SSO_ENABLED;
+      const prevDv = process.env.OS_SSO_DOMAIN_VERIFICATION;
+      process.env.OS_SSO_DOMAIN_VERIFICATION = 'true';
+      delete process.env.OS_SSO_ENABLED;
+      try {
+        const manager = new AuthManager({
+          secret: 'test-secret-at-least-32-chars-long',
+          plugins: { sso: true, ssoDomainVerification: false },
+        });
+        expect(manager.isSsoDomainVerificationEnabled()).toBe(false);
+      } finally {
+        if (prevSso === undefined) delete process.env.OS_SSO_ENABLED;
+        else process.env.OS_SSO_ENABLED = prevSso;
+        if (prevDv === undefined) delete process.env.OS_SSO_DOMAIN_VERIFICATION;
+        else process.env.OS_SSO_DOMAIN_VERIFICATION = prevDv;
+        warnSpy.mockRestore();
+      }
+    });
+
+    it('should let OS_SSO_DOMAIN_VERIFICATION decide when the config leaves it unset', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const prevSso = process.env.OS_SSO_ENABLED;
+      const prevDv = process.env.OS_SSO_DOMAIN_VERIFICATION;
+      process.env.OS_SSO_DOMAIN_VERIFICATION = 'true';
+      delete process.env.OS_SSO_ENABLED;
+      try {
+        const manager = new AuthManager({
+          secret: 'test-secret-at-least-32-chars-long',
+          plugins: { sso: true },
+        });
+        expect(manager.isSsoDomainVerificationEnabled()).toBe(true);
+      } finally {
+        if (prevSso === undefined) delete process.env.OS_SSO_ENABLED;
+        else process.env.OS_SSO_ENABLED = prevSso;
+        if (prevDv === undefined) delete process.env.OS_SSO_DOMAIN_VERIFICATION;
+        else process.env.OS_SSO_DOMAIN_VERIFICATION = prevDv;
+        warnSpy.mockRestore();
+      }
+    });
 
     it('should filter out disabled providers', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});

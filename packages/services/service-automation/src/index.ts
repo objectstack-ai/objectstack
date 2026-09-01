@@ -34,6 +34,16 @@ export type {
     // one it cannot derive — the shadowed definition is not in the flow map.
     FlowContender,
     FlowShadowingRecord,
+    // [#13909] The operator exit verb's result vocabulary. The method
+    // (`AutomationEngine.restoreConsumedSuspension`) was already
+    // barrel-reachable, so consumers received these values at runtime; without
+    // the type names they could not annotate a result, type a handler
+    // parameter, or write an exhaustive switch over the refusal union — and
+    // the refusals exist precisely to be branched on (the remedy differs for
+    // each). `ConsumedSuspension` stays unexported on purpose: it appears in
+    // no barrel-reachable signature.
+    SuspensionRestoreResult,
+    SuspensionRestoreRefusal,
 } from './engine.js';
 
 // [#11997] ADR-0005 overlay precedence for same-named flow definitions. The boot

@@ -1166,6 +1166,17 @@ export const ListChartConfigSchema = lazySchema(() => strictObject({
 
 /**
  * Calendar Settings
+ *
+ * [#13817] `startDateField` is the ONLY required key — measured against the
+ * one renderer (objectui `plugin-calendar/src/ObjectCalendar.tsx`): an explicit
+ * `titleField` wins when present, and in its absence the event title resolves
+ * through the ADR-0079 record display-name chain (`titleFormat` →
+ * `displayNameField` → type-aware derivation → `"Untitled"`). Requiring
+ * `titleField` here would demand more than the renderer reads — the exact
+ * shape the #13748 ruling forbids ("do not require more than the renderer
+ * actually needs"). The date has no such fallback: without `startDateField`
+ * there is nothing truthful to place events by, which is what
+ * {@link checkListViewCalendarVisualization} enforces cross-field.
  */
 export const CalendarConfigSchema = lazySchema(() => strictObject({
   surface: 'this calendar configuration',
@@ -1173,7 +1184,7 @@ export const CalendarConfigSchema = lazySchema(() => strictObject({
 }, {
   startDateField: z.string().describe('Field providing the event start date/time'),
   endDateField: z.string().optional().describe('Field providing the event end date/time (defaults to a single-day event)'),
-  titleField: z.string().describe('Field displayed as the event title'),
+  titleField: z.string().optional().describe('Field displayed as the event title. Omit to fall back to the record display name (ADR-0079 resolver chain)'),
   colorField: z.string().optional().describe('Field whose value determines the event color'),
 }));
 
@@ -1519,6 +1530,56 @@ function checkListViewPageMount(
   }
   if (isPageMount && Array.isArray(view.columns) && view.columns.length > 0) {
     ctx.addIssue({ code: 'custom', path: ['columns'], message: VIEW_PAGE_MOUNT_HAS_COLUMNS });
+  }
+}
+
+const VIEW_CALENDAR_ALLOWED_NEEDS_START_DATE =
+  "`appearance.allowedVisualizations` includes 'calendar', so end users can switch this view to a "
+  + 'calendar — but no `calendar:` block says which field supplies the event date. There is no '
+  + 'truthful fallback: a date guessed by the renderer lands every record without that field on '
+  + '"today", a plausible-looking, fully wrong screen. Declare `calendar: { startDateField: '
+  + "'<date_field>' }` — only `startDateField` is required; the event title falls back to the "
+  + "record display name (ADR-0079) — or remove 'calendar' from `allowedVisualizations`.";
+
+/**
+ * [#13817] The `appearance.allowedVisualizations` ⇄ `calendar` binding check —
+ * ruled on #13748 (2026-08-31, option A "fix both halves"; this is the spec
+ * half, objectui#7029 is the runtime half).
+ *
+ * A view declaring `appearance.allowedVisualizations: [... 'calendar']` with no
+ * `calendar:` block used to parse clean; the switcher then rendered a clickable
+ * calendar toggle, objectui invented `startDateField: 'due_date'`, and every
+ * record without that field piled onto "today" (measured on hotcrm pinned at
+ * `@objectstack/* 17.1.0` — all 9 leave requests on one cell). The renderer's
+ * own refusal screen was unreachable because the synthesized config always
+ * looked complete. Loud-over-silent: refuse at parse, naming the missing key.
+ *
+ * Only the block's `startDateField` is load-bearing — see the measurement note
+ * on {@link CalendarConfigSchema} (it is that schema's one required key, so
+ * requiring the block IS requiring `calendar.startDateField` and nothing more).
+ *
+ * ⚠️ Scope: `calendar` only — the measured defect. Whether `timeline` or
+ * another visualization has the same shape is a separate finding to measure
+ * first, not a rider here (the #13748 ruling says so in those words).
+ *
+ * Attached with `.superRefine` at the same three doors as
+ * {@link checkListViewPageMount}, for the same zod-4 reason (refinements block
+ * `.omit()`/key-overwriting `.extend()`, so derived shapes re-attach): the
+ * authoring terminal, `objects[].listViews.*`, and the flattened runtime
+ * overlay arm — the door a Studio tenant or an MCP/AI author writes through.
+ */
+function checkListViewCalendarVisualization(
+  view: { appearance?: { allowedVisualizations?: unknown } | null; calendar?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const allowed = view.appearance?.allowedVisualizations;
+  if (!Array.isArray(allowed) || !allowed.includes('calendar')) return;
+  if (view.calendar === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['calendar'],
+      message: VIEW_CALENDAR_ALLOWED_NEEDS_START_DATE,
+    });
   }
 }
 
@@ -1874,12 +1935,15 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
 
 /**
  * List View Schema (Expanded) — {@link ListViewShapeSchema} plus the
- * `type: 'page'` ⇄ `pageName` binding check. See that shape for why the two are
- * separate bindings, and {@link checkListViewPageMount} for what the check
- * refuses.
+ * `type: 'page'` ⇄ `pageName` binding check and the
+ * `allowedVisualizations` ⇄ `calendar` binding check. See that shape for why
+ * shape and checks are separate bindings, and {@link checkListViewPageMount} /
+ * {@link checkListViewCalendarVisualization} for what each check refuses.
  */
 export const ListViewSchema = lazySchema(() =>
-  ListViewShapeSchema.superRefine(checkListViewPageMount));
+  ListViewShapeSchema
+    .superRefine(checkListViewPageMount)
+    .superRefine(checkListViewCalendarVisualization));
 
 /**
  * [#12868] Form-view select option — {@link SelectOptionSchema} minus the
@@ -3455,11 +3519,13 @@ export const ObjectListViewSchema = lazySchema(() =>
   ListViewShapeSchema.omit({ userFilters: true })
     .extend({ userFilters: ObjectUserFiltersSchema.optional() })
     // Derived from the UNREFINED shape (zod 4 refuses `.omit()` on a refined
-    // object), so the binding check is re-attached here rather than inherited.
-    // Dropping this line would leave `objects[].listViews.*` — the ADR-0047
-    // authoring surface — as the one door where a `page` view with no
-    // `pageName` parses clean.
-    .superRefine(checkListViewPageMount));
+    // object), so the binding checks are re-attached here rather than
+    // inherited. Dropping these lines would leave `objects[].listViews.*` —
+    // the ADR-0047 authoring surface — as the one door where a `page` view
+    // with no `pageName`, or a calendar-enabled view with no `calendar:`
+    // block, parses clean.
+    .superRefine(checkListViewPageMount)
+    .superRefine(checkListViewCalendarVisualization));
 
 /**
  * [#4001/#7741] The wrap remedy, ONE prose source for two doors: the container's
@@ -4365,13 +4431,14 @@ const ListViewOverlayWireSchema = lazySchema(() =>
   // [#13216] Built from {@link ListViewShapeSchema}, not {@link ListViewSchema}:
   // `flattenedViewOverlayFields()` re-declares `name` and `label`, and zod 4
   // refuses to overwrite a key on an object that carries refinements. So the
-  // binding check is re-attached AFTER `.strip()` instead of inherited — this
+  // binding checks are re-attached AFTER `.strip()` instead of inherited — this
   // is the runtime write door (`PUT /api/v1/meta/view`), the one an MCP/AI
-  // author reaches, so it is the last place the refusal may go missing.
+  // author reaches, so it is the last place the refusals may go missing.
   // `viewDoorsCarryingPageMountCheck` in `view.test.ts` fails if any of the
   // three attachment points is dropped.
   ListViewShapeSchema.extend(flattenedViewOverlayFields()).strip()
-    .superRefine(checkListViewPageMount),
+    .superRefine(checkListViewPageMount)
+    .superRefine(checkListViewCalendarVisualization),
 );
 
 /**

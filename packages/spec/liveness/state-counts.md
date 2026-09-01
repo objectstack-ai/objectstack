@@ -25,37 +25,37 @@ protection envelope, which the gate auto-classifies `live` on every type that
 spreads `MetadataProtectionFields`. See the README's counting-method section
 for both corollaries.
 
-| Type | live | exp | dead | planned | classified |
-|---|---|---|---|---|---|
-| `object` | 51 | 0 | 0 | 1 | 52 |
-| `field` | 89 | 0 | 1 | 2 | 92 |
-| `flow` | 34 | 0 | 6 | 0 | 40 |
-| `action` | 41 | 0 | 3 | 2 | 46 |
-| `hook` | 18 | 0 | 2 | 0 | 20 |
-| `permission` | 36 | 0 | 6 | 0 | 42 |
-| `position` | 12 | 0 | 0 | 0 | 12 |
-| `agent` | 21 | 4 | 1 | 0 | 26 |
-| `tool` | 13 | 1 | 0 | 0 | 14 |
-| `skill` | 16 | 0 | 1 | 0 | 17 |
-| `dataset` | 27 | 0 | 0 | 0 | 27 |
-| `page` | 23 | 0 | 0 | 1 | 24 |
-| `view` | 79 | 0 | 9 | 0 | 88 |
-| `report` | 21 | 0 | 0 | 0 | 21 |
-| `dashboard` | 34 | 0 | 7 | 0 | 41 |
-| `webhook` | 19 | 0 | 0 | 0 | 19 |
-| `query` | 16 | 0 | 5 | 0 | 21 |
-| `datasource` | 30 | 0 | 0 | 0 | 30 |
-| `app` | 47 | 0 | 9 | 0 | 56 |
-| `book` | 20 | 0 | 1 | 0 | 21 |
-| `doc` | 15 | 0 | 0 | 0 | 15 |
-| `email_template` | 21 | 0 | 0 | 0 | 21 |
-| `job` | 15 | 0 | 0 | 0 | 15 |
-| `mapping` | 14 | 0 | 0 | 0 | 14 |
-| `seed` | 12 | 0 | 0 | 0 | 12 |
-| `translation` | 19 | 0 | 0 | 2 | 21 |
-| `validation` | 15 | 0 | 3 | 0 | 18 |
-| `api` | 25 | 0 | 0 | 2 | 27 |
-| `capability` | 12 | 0 | 0 | 0 | 12 |
-| `qa` | 4 | 0 | 5 | 0 | 9 |
-| `manifest` | 22 | 0 | 16 | 0 | 38 |
-| **total** | **821** | **5** | **75** | **10** | **911** |
+| Type | live | exp | elsewhere | dead | planned | classified |
+|---|---|---|---|---|---|---|
+| `object` | 51 | 0 | 0 | 0 | 1 | 52 |
+| `field` | 89 | 0 | 0 | 1 | 2 | 92 |
+| `flow` | 34 | 0 | 0 | 6 | 0 | 40 |
+| `action` | 41 | 0 | 0 | 3 | 2 | 46 |
+| `hook` | 18 | 0 | 0 | 2 | 0 | 20 |
+| `permission` | 36 | 0 | 0 | 6 | 0 | 42 |
+| `position` | 12 | 0 | 0 | 0 | 0 | 12 |
+| `agent` | 21 | 4 | 0 | 1 | 0 | 26 |
+| `tool` | 13 | 1 | 0 | 0 | 0 | 14 |
+| `skill` | 16 | 0 | 0 | 1 | 0 | 17 |
+| `dataset` | 27 | 0 | 0 | 0 | 0 | 27 |
+| `page` | 23 | 0 | 0 | 0 | 1 | 24 |
+| `view` | 79 | 0 | 0 | 9 | 0 | 88 |
+| `report` | 21 | 0 | 0 | 0 | 0 | 21 |
+| `dashboard` | 34 | 0 | 0 | 7 | 0 | 41 |
+| `webhook` | 19 | 0 | 0 | 0 | 0 | 19 |
+| `query` | 16 | 0 | 0 | 5 | 0 | 21 |
+| `datasource` | 30 | 0 | 0 | 0 | 0 | 30 |
+| `app` | 47 | 0 | 0 | 9 | 0 | 56 |
+| `book` | 20 | 0 | 0 | 1 | 0 | 21 |
+| `doc` | 15 | 0 | 0 | 0 | 0 | 15 |
+| `email_template` | 21 | 0 | 0 | 0 | 0 | 21 |
+| `job` | 15 | 0 | 0 | 0 | 0 | 15 |
+| `mapping` | 14 | 0 | 0 | 0 | 0 | 14 |
+| `seed` | 12 | 0 | 0 | 0 | 0 | 12 |
+| `translation` | 19 | 0 | 0 | 0 | 2 | 21 |
+| `validation` | 15 | 0 | 0 | 3 | 0 | 18 |
+| `api` | 25 | 0 | 0 | 0 | 2 | 27 |
+| `capability` | 12 | 0 | 0 | 0 | 0 | 12 |
+| `qa` | 4 | 0 | 0 | 5 | 0 | 9 |
+| `manifest` | 22 | 0 | 1 | 15 | 0 | 38 |
+| **total** | **821** | **5** | **1** | **74** | **10** | **911** |

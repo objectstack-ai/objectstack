@@ -1,11 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
-
-/**
- * Driver Identifier
- * Can be a built-in driver or a plugin-contributed driver (e.g., "com.vendor.snowflake").
- */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
@@ -173,6 +168,10 @@ const RETIRED_READ_REPLICAS =
   + '`config` at that endpoint, which is the only read-scaling path that works today. '
   + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.';
 
+/**
+ * Driver Identifier
+ * Can be a built-in driver or a plugin-contributed driver (e.g., "com.vendor.snowflake").
+ */
 export const DriverType = z.string().describe('Underlying driver identifier');
 export type DriverType = z.input<typeof DriverType>;
 

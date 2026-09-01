@@ -191,24 +191,30 @@ describe('migrateProjectIdToEnvironmentId — behaviour against a physically-sta
         expect(statements.filter((s) => s.startsWith('ALTER TABLE'))).toEqual([]);
     });
 
-    it('still refuses a driver without .raw(), stating the remedy exactly once', async () => {
+    it('still refuses a driver with NEITHER surface, stating the remedy exactly once', async () => {
         // #13219 — the guard concatenated its instruction sentence TWICE, so an
-        // operator with a raw-less driver read the same remedy twice in one
+        // operator with an unusable driver read the same remedy twice in one
         // message. The assertion that used to stand here
         // (`rejects.toThrow(/must expose a \.raw\(sql, bindings\?\) method/)`)
         // passed either way: a substring match cannot see a second copy. So
         // these pin the PROPERTIES of the assembled message, not a full-string
         // copy of today's wording.
+        //
+        // The refusal now names BOTH surfaces, because the guard now accepts
+        // both — `execute` first, which is the one `IDataDriver` declares. The
+        // properties below are unchanged; only the sentence they are counted
+        // over moved. That the guard still fires AT ALL is the totality floor:
+        // widening what is accepted must not mean accepting everything.
         const outcome: unknown = await migrateProjectIdToEnvironmentId({} as any).then(
             (value) => value,
             (error: unknown) => error,
         );
-        expect(outcome, 'a driver with no .raw() must be refused').toBeInstanceOf(Error);
+        expect(outcome, 'a driver with neither .execute() nor .raw() must be refused').toBeInstanceOf(Error);
         const message = (outcome as Error).message;
 
         // 1. The remedy is stated exactly ONCE. Counted, not compared, so a
         //    later rewording of the sentence still leaves this asserting.
-        const instruction = /driver must expose a \.raw\(sql, bindings\?\) method\./g;
+        const instruction = /driver must expose an \.execute\(sql, bindings\?\) or \.raw\(sql, bindings\?\) method\./g;
         expect(message.match(instruction) ?? []).toHaveLength(1);
 
         // 2. ...and the sentences stay SEPARATED. Deleting the duplicate by
@@ -223,5 +229,39 @@ describe('migrateProjectIdToEnvironmentId — behaviour against a physically-sta
         //    satisfy (1) and (2). It names the drivers that do conform, which
         //    is the half of the message an operator acts on.
         expect(message).toMatch(/SqlDriver/);
+    });
+
+    it('accepts a driver that offers only execute(), and binds through it', async () => {
+        // The counterpart of the refusal above, and the reason the guard was
+        // wrong rather than merely strict: `IDataDriver` declares
+        // `execute(command, parameters?, options?)` NON-optionally and has never
+        // declared `raw`, so this double is the CONFORMING shape — and the
+        // pre-repair guard rejected it. Real-driver coverage is in
+        // `real-driver-exec-surface.test.ts`; this case pins the resolution
+        // itself, with no `raw` anywhere to fall back to.
+        const statements: Array<{ sql: string; bindings: unknown }> = [];
+        const executeOnly = {
+            async execute(sql: string, bindings?: unknown[]) {
+                statements.push({ sql, bindings });
+                const pragma = /^PRAGMA table_info\("(.+)"\)$/.exec(sql);
+                if (pragma) {
+                    const columns = pragma[1] === 'sys_metadata' ? ['id', SOURCE_COLUMN] : [];
+                    return columns.map((name) => ({ name }));
+                }
+                return [];
+            },
+        } as any;
+        expect(typeof executeOnly.raw, 'the double must NOT carry a raw()').not.toBe('function');
+
+        const results = await migrateProjectIdToEnvironmentId(executeOnly);
+
+        expect(results.find((r) => r.table === 'sys_metadata')?.status).toBe('renamed');
+        expect(statements.filter((c) => c.sql.startsWith('ALTER TABLE')).map((c) => c.sql)).toEqual([
+            `ALTER TABLE "sys_metadata" RENAME COLUMN ${SOURCE_COLUMN} TO ${TARGET_COLUMN}`,
+        ]);
+        // The information_schema fallback is the one call site here that binds
+        // values; every other statement must still receive an empty array
+        // rather than `undefined`.
+        expect(statements.every((c) => Array.isArray(c.bindings))).toBe(true);
     });
 });

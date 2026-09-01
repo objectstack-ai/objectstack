@@ -21,6 +21,8 @@
 
 import type { IDataDriver } from '@objectstack/spec/contracts';
 
+import { type DriverExec, driverExecRefusal, resolveDriverExec } from './driver-exec.js';
+
 const AFFECTED_TABLES = [
     'sys_metadata',
     'sys_metadata_history',
@@ -35,18 +37,17 @@ export interface MigrationResult {
 /**
  * Rename `env_id` → `project_id` on all metadata tables.
  *
- * @param driver  An IDataDriver with access to the target database.
- *                Must expose a raw query method: `driver.raw(sql, bindings?)`.
+ * @param driver  An IDataDriver with access to the target database. Raw SQL is
+ *                issued through the surface `IDataDriver` declares —
+ *                `execute(sql, bindings?)` — falling back to
+ *                `raw(sql, bindings?)`; see `./driver-exec.ts`.
  * @returns       Per-table migration results.
  */
 export async function migrateEnvIdToProjectId(driver: IDataDriver): Promise<MigrationResult[]> {
-    const driverAny = driver as any;
+    const exec = resolveDriverExec(driver);
 
-    if (typeof driverAny.raw !== 'function') {
-        throw new Error(
-            'migrateEnvIdToProjectId: driver must expose a .raw(sql, bindings?) method. ' +
-            'SqlDriver (better-sqlite3/knex) supports this; cloud-side TursoDriver also conforms.'
-        );
+    if (!exec) {
+        throw new Error(driverExecRefusal('migrateEnvIdToProjectId'));
     }
 
     const results: MigrationResult[] = [];
@@ -54,8 +55,8 @@ export async function migrateEnvIdToProjectId(driver: IDataDriver): Promise<Migr
     for (const table of AFFECTED_TABLES) {
         try {
             // Detect dialect: SQLite uses PRAGMA, others use information_schema.
-            const hasColumn = await _columnExists(driverAny, table, 'env_id');
-            const alreadyMigrated = await _columnExists(driverAny, table, 'project_id');
+            const hasColumn = await _columnExists(exec, table, 'env_id');
+            const alreadyMigrated = await _columnExists(exec, table, 'project_id');
 
             if (alreadyMigrated && !hasColumn) {
                 results.push({ table, status: 'already_done' });
@@ -69,7 +70,7 @@ export async function migrateEnvIdToProjectId(driver: IDataDriver): Promise<Migr
             }
 
             // Perform the rename.  SQLite ≥ 3.25.0 supports ALTER TABLE RENAME COLUMN.
-            await driverAny.raw(`ALTER TABLE "${table}" RENAME COLUMN env_id TO project_id`);
+            await exec(`ALTER TABLE "${table}" RENAME COLUMN env_id TO project_id`);
 
             results.push({ table, status: 'renamed' });
         } catch (err: any) {
@@ -84,10 +85,10 @@ export async function migrateEnvIdToProjectId(driver: IDataDriver): Promise<Migr
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-async function _columnExists(driver: any, table: string, column: string): Promise<boolean> {
+async function _columnExists(exec: DriverExec, table: string, column: string): Promise<boolean> {
     try {
         // SQLite: PRAGMA table_info returns rows with `name` column.
-        const rows: any[] = await driver.raw(`PRAGMA table_info("${table}")`);
+        const rows: any[] = await exec(`PRAGMA table_info("${table}")`);
         if (Array.isArray(rows) && rows.length > 0) {
             // knex wraps PRAGMA result; handle both `rows` and `rows[0]` shapes.
             const list: any[] = Array.isArray(rows[0]) ? rows[0] : rows;
@@ -95,7 +96,7 @@ async function _columnExists(driver: any, table: string, column: string): Promis
         }
 
         // Fallback for non-SQLite: query information_schema.
-        const result: any[] = await driver.raw(
+        const result: any[] = await exec(
             `SELECT column_name FROM information_schema.columns WHERE table_name = ? AND column_name = ?`,
             [table, column]
         );

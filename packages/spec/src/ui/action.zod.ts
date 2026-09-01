@@ -23,41 +23,6 @@ import { PUBLIC_AUTH_FEATURE_NAMES, lowerRequiresFeature } from '../kernel/publi
 import { strictUnknownKeyError } from '../shared/suggestions.zod';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-
-/**
- * Action Parameter Schema
- *
- * Defines inputs required before executing an action.
- *
- * Two declaration modes:
- *
- * 1. **Field-backed** (preferred) — reference an existing object field; the
- *    runtime resolves the field's label (i18n), type, validation rules,
- *    options, placeholder, help text, and widget mapping from object
- *    metadata. Cross-object references use `objectOverride`.
- *
- *    ```ts
- *    params: [
- *      { field: 'email' },                                 // same object
- *      { field: 'role', objectOverride: 'sys_member' },    // different object
- *    ]
- *    ```
- *
- * 2. **Inline** (legacy / bespoke) — declare `name`, `label`, `type` etc.
- *    inline when no matching object field exists. Inline values may also be
- *    used alongside `field` to override individual properties. A `lookup` /
- *    `master_detail` param declared this way MUST name its target object via
- *    `reference` — there is no field to inherit it from:
- *
- *    ```ts
- *    params: [
- *      { name: 'inspector', label: 'Inspector', type: 'lookup', reference: 'sys_user' },
- *    ]
- *    ```
- *
- * `name` is required unless `field` is provided (in which case it defaults
- * to the field name and is used as the request-body key).
- */
 import { lazySchema } from '../shared/lazy-schema';
 
 /**
@@ -167,6 +132,40 @@ const actionParamOptionUndeclaredAnywhere = (key: 'icon' | 'disabled'): string =
   + `\`SelectOptionMetadata\` type, which no metadata path populates and no widget reads. An `
   + `action param's options are \`{ label, value, visibleWhen }\`; drop the key.`;
 
+/**
+ * Action Parameter Schema
+ *
+ * Defines inputs required before executing an action.
+ *
+ * Two declaration modes:
+ *
+ * 1. **Field-backed** (preferred) — reference an existing object field; the
+ *    runtime resolves the field's label (i18n), type, validation rules,
+ *    options, placeholder, help text, and widget mapping from object
+ *    metadata. Cross-object references use `objectOverride`.
+ *
+ *    ```ts
+ *    params: [
+ *      { field: 'email' },                                 // same object
+ *      { field: 'role', objectOverride: 'sys_member' },    // different object
+ *    ]
+ *    ```
+ *
+ * 2. **Inline** (legacy / bespoke) — declare `name`, `label`, `type` etc.
+ *    inline when no matching object field exists. Inline values may also be
+ *    used alongside `field` to override individual properties. A `lookup` /
+ *    `master_detail` param declared this way MUST name its target object via
+ *    `reference` — there is no field to inherit it from:
+ *
+ *    ```ts
+ *    params: [
+ *      { name: 'inspector', label: 'Inspector', type: 'lookup', reference: 'sys_user' },
+ *    ]
+ *    ```
+ *
+ * `name` is required unless `field` is provided (in which case it defaults
+ * to the field name and is used as the request-body key).
+ */
 export const ActionParamSchema = lazySchema(() => strictObject(
   {
     surface: 'this action param',

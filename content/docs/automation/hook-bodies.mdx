@@ -247,7 +247,7 @@ A body may write *other* objects — e.g. `await ctx.api.object('parent').update
 
 ### Writing a `readonly` field
 
-There is an asymmetry here that costs data if you learn it the hard way, so learn it here. A field declared `readonly: true` can still be **maintained by automation** — but only through two channels, and a nested `ctx.api` write is **not** one of them.
+There is an asymmetry here that costs data if you learn it the hard way, so learn it here. A field declared `readonly: true` can still be **maintained by automation** from a body — but through exactly **one** channel (the own-hook stamp, plus INSERT), and a nested `ctx.api` write is **not** one of them.
 
 `readonly` governs the *caller* surface. On UPDATE the engine strips read-only keys from the payload, but only the ones the **caller supplied** and only when the value is still the caller's. So:
 
@@ -255,13 +255,13 @@ There is an asymmetry here that costs data if you learn it the hard way, so lear
 |:---|:---|
 | `ctx.input.<field> = …` in `beforeInsert`/`beforeUpdate` | **Lands.** The stamp is a *server* value, not a caller-supplied one, so the strip leaves it alone. This is the recommended shape. |
 | `ctx.api.object('x').update({ <field> })` | **Silently dropped.** `ctx.api` is scoped to the *triggering* operation's context, so on any non-system trigger the payload is an ordinary caller payload and the key is stripped. The call still returns success. |
-| `ctx.api.sudo().object('x').update({ <field> })` | **Lands.** `sudo()` elevates to a system context, which the strip skips — the hook-side analogue of a flow's `runAs: 'system'`. Use it deliberately: it also bypasses the acting user's row and field permissions for that write. |
+| `ctx.api.sudo().object('x').update({ <field> })` | **`TypeError` — not available here.** `sudo()` is a member of the *in-process* `ScopedContext`; the VM's `ctx.api` carries `object()` and `transaction()` and nothing else, so a **body** cannot reach it. Worse than unavailable: the same source *works* when the handler runs in-process, so it passes a native `hook.handler(ctx)` test and throws only once the build lowers it into a body — aborting the triggering write under the default `onError: 'abort'`. `objectstack build` now refuses to lower such a handler and keeps it bundled instead. A hook has **no** declared elevation knob (no hook-side `runAs`); [#14010](https://github.com/objectstack-ai/objectstack/issues/14010) is where that gap is argued. |
 | `ctx.api.object('x').insert({ <field> })` | **Lands.** INSERT is exempt — a create may legitimately seed read-only columns. |
 
 The dropped case is the dangerous one: nothing fails, the step reports success, and the column is simply always null. Because both halves of that judgement are declared in your own stack, it is checked at author time and **gates the build**:
 
 - `hook-api-update-readonly-field` — **error**. A body's literal `ctx.api.object('…').update()` / `.updateById()` writes a field the named object declares `readonly: true`.
-- `hook-api-update-readonly-when-field` — **warning**. The same write against a `readonlyWhen` field, which strips per record *state*. Note that `readonlyWhen` also strips a `beforeUpdate`-derived value, so the own-hook stamp is **not** a workaround for it — `sudo()` is.
+- `hook-api-update-readonly-when-field` — **warning**. The same write against a `readonlyWhen` field, which strips per record *state*. Note that `readonlyWhen` also strips a `beforeUpdate`-derived value, so the own-hook stamp is **not** a workaround for it — and neither is `sudo()`, which a body cannot reach (see the row above). On this shape, confirm the write only targets records whose predicate is `false`, or drop the field from the payload.
 
 Only literal object names and literal payload keys are seen; a `sudo()` chain, a dynamic object name, an object this stack does not declare, and `insert`/`create` are all skipped, so the rule has no opinion on them. The flow surface has carried the same gate as `flow-update-readonly-field` since [#3425](https://github.com/objectstack-ai/objectstack/issues/3425).
 

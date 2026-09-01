@@ -51,7 +51,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           approved: "承認済み",
           rejected: "却下済み",
           recalled: "取り消し済み",
-          returned: "差し戻し済み"
+          returned: "差し戻し済み",
+          cancelled: "無効化済み"
+        }
+      },
+      cancel_reason: {
+        label: "無効化理由",
+        help: "プラットフォームがこの申請を無効化した理由(ステータスが無効化済みの場合のみ設定)",
+        options: {
+          record_deleted: "関連レコードが削除されました"
         }
       },
       current_step: {
@@ -232,7 +240,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           comment: "コメント",
           revise: "差し戻し",
           resubmit: "再提出",
-          ooo_substitute: "不在時代理"
+          ooo_substitute: "不在時代理",
+          cancel: "無効化"
         }
       },
       actor_id: {
