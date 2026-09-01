@@ -327,7 +327,11 @@ export interface StrandedApprovalRequest {
   requestId: string;
   /** Terminal status the request reached — the decision that WAS recorded. */
   status: string;
-  /** The `flow_run_id` that resolves to neither a suspension nor a run history row. */
+  /**
+   * The `flow_run_id` that resolves to no live suspension and no recoverable
+   * run — see `runState`: no history row at all (`missing`), or a terminal
+   * `failed` row (`failed`).
+   */
   runId: string;
   /**
    * Which unrecoverable shape this is — see {@link StrandedRunState}. Carried
@@ -3756,7 +3760,7 @@ export class ApprovalService implements IApprovalService {
    *    live pause exists. It THROWS when the store cannot be read, and that
    *    case is SKIPPED, never counted as dead: an unreadable store means
    *    "unknown", and a storage outage must not be published as a lost run.
-   *  - {@link classifyStrandedRunState} over `getRun(runId)` — the run's own
+   *  - `classifyStrandedRunState` over `getRun(runId)` — the run's own
    *    history row (the `run_` prefixed rows in `sys_automation_run`). A run
    *    that merely finished is not stranded; a request whose run neither waits
    *    nor completed is.
@@ -3777,7 +3781,7 @@ export class ApprovalService implements IApprovalService {
    *
    * ⚠️ The widening does NOT reverse the conservatism: `completed`, `cancelled`
    * and `paused` are each still skipped, for reasons named one at a time in
-   * {@link classifyStrandedRunState}, and an unrecognised status is skipped too.
+   * `classifyStrandedRunState`, and an unrecognised status is skipped too.
    * What the widening buys is that a `failed` run is now reported with
    * `runState: 'failed'` instead of counted as healthy.
    *
