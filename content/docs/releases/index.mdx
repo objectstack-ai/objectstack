@@ -44,8 +44,28 @@ These pages are curated summaries. For exhaustive, per-package detail:
 
 ## Versioning policy
 
-ObjectStack follows [Semantic Versioning](https://semver.org). A **major**
-release may remove or change schemas in `@objectstack/spec`, public APIs, CLI
-flags, or environment variables — always with a migration path documented in
-the release notes. **Minor** releases add capabilities without breaking
-existing metadata or code. **Patch** releases fix bugs.
+ObjectStack follows [Semantic Versioning](https://semver.org), with one
+override that is in force today: **while the launch window is open, a breaking
+change ships as a minor release.** All `@objectstack/*` packages version in
+lockstep, so a single major bump would promote the whole platform; instead a
+breaking change lands in a **minor** alongside a changeset entry marked
+`**BREAKING**`, and `scripts/check-changeset-no-major.mjs` fails any pull
+request that declares a major bump.
+
+What that means when you read a version number:
+
+- A **major** release may remove or change schemas in `@objectstack/spec`,
+  public APIs, CLI flags, or environment variables — always with a migration
+  path documented in the release notes.
+- A **minor** release adds capabilities, and **may also remove or change those
+  same surfaces**. `17.2.0` retired `http_request_errors_total` and
+  `sys_position.permissions`; `15.1.0` removed `tenancy.strategy` and
+  `tenancy.crossTenantAccess` — all in minor releases. As the v17 notes put it,
+  17.1.0 and 17.2.0 are minors by version number, not by blast radius.
+- A **patch** release fixes bugs.
+
+⚠️ **The version number is not the upgrade-safety signal.** Read the release
+note for the version you are moving to — each one leads with breaking changes
+and migration steps — and see
+[Backward Compatibility](/docs/protocol/backward-compatibility#launch-window-minor-releases-can-contain-breaking-changes)
+for the full policy.

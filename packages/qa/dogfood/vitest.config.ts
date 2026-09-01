@@ -69,10 +69,24 @@ export default defineConfig({
     // Aliasing is graph-wide, so packages still loaded from dist (objectql,
     // plugin-security, …) resolve their own `@objectstack/metadata-core`
     // imports to this same single source instance rather than a second copy.
+    // [#13513] `date-bucket-parity-turso.test.ts` drives `TursoDriver` itself —
+    // it asserts the driver's SQL date bucketing against the in-memory
+    // reference, plus the on-disk storage form SqlDriver writes. That verdict
+    // has to be about the driver source in this checkout, not about the last
+    // `pnpm build`, and it was: the suite used to live inside
+    // `packages/drivers/driver-turso` and imported `./turso-driver.js`
+    // relatively. It moved here because the `@objectstack/verify` devDependency
+    // it needs was the one edge that made this workspace's manifest graph
+    // cyclic; this alias is what keeps the move semantics-preserving rather than
+    // quietly converting a source pin into a dist pin.
     alias: [
       {
         find: /^@objectstack\/metadata-core$/,
         replacement: path.resolve(__dirname, '../../metadata-core/src/index.ts'),
+      },
+      {
+        find: /^@objectstack\/driver-turso$/,
+        replacement: path.resolve(__dirname, '../../drivers/driver-turso/src/index.ts'),
       },
     ],
   },

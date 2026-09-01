@@ -78,6 +78,10 @@ import {
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal, METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
+// [#13331] The cluster fan-out transport type only — the protocol never
+// depends on `@objectstack/service-cluster`; a bridge plugin there hands the
+// live transport in through `attachMetadataMutationPubSub`.
+import type { IPubSub } from '@objectstack/spec/contracts';
 import { applyConversionsToStoredItem, type ConversionNotice } from '@objectstack/spec';
 import { type FormView, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
 // [#11350] Emitted-specifier pin. This module's inferred public declarations
@@ -3986,6 +3990,39 @@ export interface MetadataMutationEvent {
 }
 
 /**
+ * [#13331] Cluster channel for post-persistence metadata mutations — the
+ * cross-node half of {@link MetadataMutationEvent}.
+ *
+ * Published by the protocol that performed the write (see
+ * `attachMetadataMutationPubSub`) and consumed by every peer replica to
+ * CONVERGE its in-memory registry from its OWN `sys_metadata` read. Distinct
+ * from `MetadataManager`'s `metadata.changed` channel on purpose: that one
+ * replays watch events into the metadata SERVICE's caches, while this one
+ * repairs the ObjectQL engine registry behind the data plane — the state the
+ * runtime authoring path (`saveMetaItem` → `applyRegistryWriteThrough`)
+ * mutates without ever touching the metadata service.
+ */
+export const METADATA_MUTATION_CLUSTER_CHANNEL = 'metadata.mutated';
+
+/**
+ * [#13331] Payload for {@link METADATA_MUTATION_CLUSTER_CHANNEL}.
+ *
+ * ⭐ A SIGNAL, never trusted content (ruled 2026-09-01): the receiving replica
+ * re-reads the row from its own `sys_metadata` and re-runs the registry
+ * write-through from that read, so the shared database stays the single
+ * source of truth. `event` carries only the row's ADDRESS (type/name/state/
+ * org scope); no body ever rides this channel, which is also what makes
+ * at-least-once delivery and duplicates harmless by construction — replaying
+ * the same address converges to the same registry state.
+ */
+export interface ClusterMetadataMutationPayload {
+    /** Origin nodeId — used for loopback suppression. */
+    originNode?: string;
+    /** The post-persistence mutation notification, address-only. */
+    event: MetadataMutationEvent;
+}
+
+/**
  * [#10219] A single item reached `active` through the per-item publish door
  * (`publishMetaItem`, i.e. `POST /api/v1/meta/:type/:name/publish`). `type` is
  * the CANONICAL singular metadata type name — the same spelling the promoted
@@ -4908,8 +4945,30 @@ export class ObjectStackProtocolImplementation implements
      * Notify mutation listeners (best-effort, synchronous fan-out). A
      * listener failure must never fail the write it observes — the row is
      * already persisted — so each listener is isolated in its own try/catch.
+     *
+     * [#13331] Also the cluster publish point: this method is called at
+     * exactly the post-persistence sites (`saveMetaItem`,
+     * `runPublishSideEffects`, `deleteMetaItem`) — the ONE choke point the
+     * listener bus above documents — so publishing here is what makes every
+     * authoring transport inherit the cross-node signal instead of each HTTP
+     * surface hand-announcing. Local listeners first, then the bus, matching
+     * `MetadataManager.notifyWatchers`' order.
      */
     private emitMetadataMutation(evt: MetadataMutationEvent): void {
+        this.notifyMutationListenersLocal(evt);
+        this.publishMetadataMutation(evt);
+    }
+
+    /**
+     * The LOCAL half of {@link emitMetadataMutation} — split out (#13331,
+     * mirroring `MetadataManager.notifyWatchersLocal`) so a mutation received
+     * FROM the cluster can be replayed to this replica's listeners without
+     * re-publishing it: replaying through `emitMetadataMutation` would
+     * publish again from this node, every peer would apply-and-republish in
+     * turn, and the loopback guard (which only suppresses a node's OWN
+     * messages) could not stop the storm.
+     */
+    private notifyMutationListenersLocal(evt: MetadataMutationEvent): void {
         for (const listener of this.metadataMutationListeners) {
             try {
                 listener(evt);
@@ -4920,6 +4979,192 @@ export class ObjectStackProtocolImplementation implements
                 );
             }
         }
+    }
+
+    // ── [#13331] Cross-node registry convergence ────────────────────────────
+    //
+    // The gap this closes, measured on a live 3-replica EE deployment: a
+    // runtime-authored object persists to the SHARED `sys_metadata` (so
+    // `/api/v1/meta/*` answers 200 fleet-wide) but registers with the ObjectQL
+    // engine registry of the WRITING replica only — `assertObjectRegistered`
+    // fails closed on the other replicas and `/api/v1/data/<object>` answers
+    // OBJECT_NOT_FOUND on (N-1)/N of the fleet, indefinitely (200 concurrent
+    // creates through the LB: 67×201 / 133×404; boot-loaded control object:
+    // 0 errors). The authoring path lives entirely in this protocol and never
+    // touches the metadata service, so `MetadataManager`'s `metadata.changed`
+    // bridge — even when attached — never hears these writes. The protocol is
+    // the state owner here, and owns the fan-out (ruled 2026-09-01, Option A).
+
+    /** The cluster transport, when a bridge attached one. [#13331] */
+    private clusterPubSub?: IPubSub;
+    /** This node's cluster id — stamps `originNode` for loopback suppression. */
+    private clusterNodeId?: string;
+    /** Disposer for the cluster subscription, when attached. */
+    private clusterUnsubscribe?: () => void;
+
+    /**
+     * [#13331] Attach a cluster pub/sub transport so this protocol's
+     * post-persistence mutations fan out on
+     * {@link METADATA_MUTATION_CLUSTER_CHANNEL} and peer mutations converge
+     * this replica's registry. Mirrors `MetadataManager.attachClusterPubSub()`
+     * and the engine's `attachAuthzInvalidationPubSub()` — including their
+     * idempotency on the `(pubsub, nodeId)` pair — and is called the same
+     * way: by `MetadataClusterBridgePlugin` in `@objectstack/service-cluster`,
+     * once per kernel boot at `kernel:ready`, after both services exist.
+     *
+     * ⭐ Receipt runs CONVERGENCE, not trust: the payload is an address, and
+     * {@link applyRemoteMetadataMutation} re-reads the row from this
+     * replica's own `sys_metadata` before re-running the registry
+     * write-through. Duplicates are harmless (same read, same registration);
+     * loss is bounded the way it always was — by the next boot's full reload
+     * — because no shipped driver exceeds at-most-once delivery
+     * (`IPubSub`'s own contract). This channel narrows the staleness window
+     * from "until restart" to "one network hop"; it does not promise more.
+     *
+     * @returns a disposer that detaches the bridge.
+     */
+    attachMetadataMutationPubSub(pubsub: IPubSub, nodeId: string): () => void {
+        if (this.clusterPubSub === pubsub && this.clusterNodeId === nodeId) {
+            return () => this.detachMetadataMutationPubSub();
+        }
+        this.detachMetadataMutationPubSub();
+        this.clusterPubSub = pubsub;
+        this.clusterNodeId = nodeId;
+        this.clusterUnsubscribe = pubsub.subscribe<ClusterMetadataMutationPayload>(
+            METADATA_MUTATION_CLUSTER_CHANNEL,
+            (msg) => {
+                const p = msg.payload;
+                // Loopback guard — never re-apply what this node just wrote:
+                // the write-through already ran here, synchronously, at the
+                // door that persisted the row.
+                if (p?.originNode && p.originNode === this.clusterNodeId) return;
+                if (!p?.event?.type || !p.event.name) return;
+                // Drafts are a staging buffer and never hydrate into any
+                // registry — the publisher skips them (matching
+                // `applyRegistryWriteThrough`'s `mode === 'publish'` gate),
+                // and this guard keeps a peer honest about the same rule.
+                if (p.event.state === 'draft') return;
+                void this.applyRemoteMetadataMutation(p.event).catch((err) => {
+                    console.warn(
+                        `[Protocol] cluster metadata-mutation apply failed for `
+                        + `${p.event.type}/${p.event.name}: ${err instanceof Error ? err.message : String(err)}`,
+                    );
+                });
+            },
+        );
+        console.info(
+            `[Protocol] attached to the ${METADATA_MUTATION_CLUSTER_CHANNEL} cluster channel (node=${nodeId})`,
+        );
+        return () => this.detachMetadataMutationPubSub();
+    }
+
+    /** Tear down the cluster wiring. Safe to call multiple times. [#13331] */
+    detachMetadataMutationPubSub(): void {
+        if (this.clusterUnsubscribe) {
+            try { this.clusterUnsubscribe(); } catch { /* idempotent */ }
+            this.clusterUnsubscribe = undefined;
+        }
+        this.clusterPubSub = undefined;
+        this.clusterNodeId = undefined;
+    }
+
+    /**
+     * [#13331] The cluster half of {@link emitMetadataMutation}: publish the
+     * mutation's ADDRESS to peers. Best-effort and fire-and-forget — a
+     * publish failure must never fail the write it announces (the row is
+     * already persisted), matching `MetadataManager.notifyWatchers`' cluster
+     * leg verbatim. No-op until a bridge attaches a transport.
+     *
+     * Drafts are not published: they never enter any replica's registry
+     * (including this one's — `saveMetaItem` gates its write-through on
+     * `mode === 'publish'`), so a draft signal would wake every peer to
+     * converge on a no-op.
+     */
+    private publishMetadataMutation(evt: MetadataMutationEvent): void {
+        if (!this.clusterPubSub) return;
+        if (evt.state === 'draft') return;
+        const payload: ClusterMetadataMutationPayload = {
+            originNode: this.clusterNodeId,
+            event: evt,
+        };
+        void this.clusterPubSub
+            .publish(METADATA_MUTATION_CLUSTER_CHANNEL, payload, {
+                partitionKey: `${evt.type}:${evt.name}`,
+            })
+            .catch((err) => {
+                console.warn(
+                    `[Protocol] cluster metadata-mutation publish failed for `
+                    + `${evt.type}/${evt.name}: ${err instanceof Error ? err.message : String(err)}`,
+                );
+            });
+    }
+
+    /**
+     * [#13331] Converge this replica's registry after a PEER's metadata
+     * mutation — the ruled receipt semantics: re-run the registry
+     * write-through from THIS replica's own `sys_metadata` read, never from
+     * the payload.
+     *
+     * One applier for both `active` and `deleted` signals, because the DB
+     * read decides, not the event name: an active row present means the
+     * registry must serve it (a save/publish — or a draft DISCARD whose
+     * active overlay survives, which re-registers the same body and is
+     * idempotent); no active row means the heal walk must run
+     * ({@link restoreArtifactRegistryView}, the same walk the local delete
+     * runs). That makes out-of-order and duplicate delivery converge to the
+     * row's current state by construction.
+     *
+     * The write-through call makes this the FIFTH caller of
+     * `applyRegistryWriteThrough` — traced, with the fold discipline the
+     * other four follow, in
+     * `protocol.object-registry-write-through-spelling.test.ts`. The fold
+     * here mirrors `revertCommit`'s call-site fold: the event crossed a
+     * process boundary, so this caller folds rather than trusting the wire —
+     * through {@link canonicalMetaType} (the complete map, #9161), not the
+     * manifest map.
+     *
+     * Scope parity is INHERITED, not re-decided: `applyRegistryWriteThrough`
+     * carries the org/environment gates (#6602: an org-scoped overlay never
+     * enters the shared registry; the non-object branch stays
+     * control-plane-only) and `restoreArtifactRegistryView` refuses org
+     * scopes on its own — so a peer applies exactly what the writer's own
+     * kernel shape would have applied locally.
+     *
+     * After convergence the event replays into this replica's LOCAL mutation
+     * listeners (never re-published — see
+     * {@link notifyMutationListenersLocal}), so boot-cached consumers wired
+     * to `onMetadataMutation` (authored hook/action re-bind) re-sync from
+     * their own reads exactly as they would after a local write. Registry
+     * first, listeners second — the #5109 invalidate-before-notify rule: a
+     * listener that re-reads must not observe the event and the pre-event
+     * registry at the same time.
+     */
+    private async applyRemoteMetadataMutation(evt: MetadataMutationEvent): Promise<void> {
+        const type = canonicalMetaType(evt.type);
+        const orgId = evt.organizationId ?? null;
+        const repo = this.getOverlayRepo(orgId);
+        const ref = {
+            type,
+            name: evt.name,
+            org: orgId ?? 'env',
+        } as Parameters<typeof repo.get>[0];
+        const current = await repo.get(ref, { state: 'active' });
+        if (current) {
+            // The row's OWN package binding, read from this replica's DB the
+            // way the recovery callers derive it (#4867 / #4636) — the wire
+            // carries no binding, and must not.
+            const packageId = await this.resolveOverlayPackageBinding(type, evt.name, orgId);
+            this.applyRegistryWriteThrough({
+                type,
+                name: evt.name,
+                item: current.body,
+                packageId,
+                organizationId: orgId,
+            });
+        } else {
+            await this.restoreArtifactRegistryView(type, evt.name, orgId);
+        }
+        this.notifyMutationListenersLocal({ ...evt, type });
     }
 
     /**

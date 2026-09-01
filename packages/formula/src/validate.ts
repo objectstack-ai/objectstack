@@ -254,6 +254,105 @@ function boundsHint(source: string): string | null {
   );
 }
 
+/**
+ * cel-js's unknown-call vocabulary, both of its spellings — a bare call
+ * (`` `found no matching overload for 'totallyBogusFn(int, int)'` ``) and a
+ * receiver call (`` `…for 'dyn.nosuchmethod(string)'` ``). Both are emitted from
+ * one template family in `cel-js/lib/operators.js`, and the name we want is the
+ * segment immediately before the argument list, after any receiver-type prefix.
+ *
+ * Anchored on the closing `)'` so the greedy receiver prefix cannot run past the
+ * call into the source excerpt cel-js appends on the following lines.
+ */
+const NO_OVERLOAD_RE = /found no matching overload for '(?:.*[.])?([A-Za-z_$][\w$]*)\(.*?\)'/;
+
+/**
+ * The nearest advertised callable to `name`, or `undefined` when nothing is
+ * close enough that a suggestion beats silence.
+ *
+ * Deliberately STRICTER than {@link nearestName}'s shared budget, and that
+ * difference is the entire reason this function exists rather than a call to
+ * the shared one. `nearest` spends `max(2, floor(name.length / 3))` edits —
+ * right for a field name checked against the handful of fields on one object,
+ * measurably wrong against this catalog: `nearestName('can', CEL_STDLIB_FUNCTIONS)`
+ * answers `'min'`. Two edits on a three-character name, jumping from a
+ * permission verb to a numeric function — a confident suggestion across an
+ * unrelated namespace, which is worse than silence. An author who takes it (an
+ * LLM author above all, following the last sentence it was handed) writes
+ * `min(object, verb)` and is further from working than before it asked.
+ *
+ * The budget here is proportional rather than floored: at most one edit per
+ * three characters of the LONGER name, so at least two thirds of a suggestion
+ * must already be typed. That keeps the case that makes suggesting worthwhile
+ * (`isBlnk` → `isBlank`, one edit in seven) and refuses the measured hazard
+ * (`can` → `min`, two edits in three). Both are pinned in `validate.test.ts`;
+ * a change to this budget that loses either is a regression, not a tuning.
+ *
+ * The distance metric stays the module's one {@link levenshtein} — only the
+ * acceptance budget is class-specific, which is what the hazard is about.
+ */
+function nearestCallable(name: string): string | undefined {
+  let best: string | undefined;
+  let bestDistance = Infinity;
+  for (const candidate of CEL_STDLIB_FUNCTIONS) {
+    const distance = levenshtein(name, candidate);
+    if (distance > Math.floor(Math.max(name.length, candidate.length) / 3)) continue;
+    if (distance >= bestDistance) continue;
+    bestDistance = distance;
+    best = candidate;
+  }
+  return best;
+}
+
+/**
+ * The prescription for the **unknown-name** arm of a `type` refusal — an
+ * expression that is perfectly good CEL and merely calls something by a name
+ * that resolves to nothing in this position.
+ *
+ * The second leg of the repair {@link boundsHint} made for the `bounds` class
+ * (#7073). Until this hint, every unknown-function refusal ended with the same
+ * dialect trailer ("`predicate`s are bare CEL (e.g. `record.rating >= 4`)"),
+ * and that sentence is actively wrong here for exactly the reason it was wrong
+ * for `bounds`: the source already IS bare CEL and parses fine. An author who
+ * obeys the last sentence they were given rewrites the dialect, learns nothing,
+ * and comes back with the same unresolvable name. The front half (cel-js's own
+ * `found no matching overload for '…'`) was right all along and is kept
+ * verbatim; only the prescription lied.
+ *
+ * ### Why the name must be checked against the advertised catalog first
+ *
+ * cel-js emits ONE message shape for two different faults: a name that resolves
+ * to nothing (`upperr(record.name)`) and a real function handed arguments no
+ * overload accepts (`upper(1, 2)` → `found no matching overload for
+ * 'upper(int, int)'`). Telling the second author that `upper` "is not a
+ * callable name" would be a fresh false statement in place of a merely useless
+ * one, so an advertised name falls through to the existing trailer untouched.
+ *
+ * ### Why the wording is "not a callable name HERE"
+ *
+ * {@link CEL_STDLIB_FUNCTIONS} is a curated bare-callable subset, not an oracle
+ * for existence — 33 further names cel-js registers are callable only on a
+ * receiver (`record.name.split(',')` works; bare `split(…)` faults here and
+ * lands in this arm). So the message may say the name cannot be called in this
+ * position, and may point at what IS advertised, but must not claim the name
+ * does not exist. For the same reason it names no size: what the catalog
+ * contains is being adjudicated separately, and a message asserting a count
+ * would be falsified by that ruling.
+ */
+function unknownFunctionHint(celMessage: string): string | null {
+  const name = NO_OVERLOAD_RE.exec(celMessage)?.[1];
+  if (!name || CEL_STDLIB_FUNCTIONS.includes(name)) return null;
+  const suggestion = nearestCallable(name);
+  return (
+    `\`${name}\` is not a callable name here — a NAME fault, not a dialect mistake, so ` +
+    `re-spelling the expression will not fix it.` +
+    (suggestion ? ` Did you mean \`${suggestion}\`?` : '') +
+    ` The callable names this platform advertises for authoring are the \`functions\` list ` +
+    `\`introspectScope\` returns (\`CEL_STDLIB_FUNCTIONS\`) — pick one of those, or precompute ` +
+    `the value in a stored field and reference that field instead.`
+  );
+}
+
 function checkFieldExistence(source: string, schema: ExprSchemaHint | undefined, errors: ExprValidationError[]): void {
   if (!schema?.fields || schema.fields.length === 0) return;
   const known = new Set(schema.fields);
@@ -400,9 +499,22 @@ export function validateExpression(
   if (!compiled.ok) {
     // #7073 — a bounds refusal gets the SIZE prescription, never the dialect
     // trailer: the source is already bare CEL, so "write bare CEL" is advice
-    // that cannot succeed. Checked first because the class is certain (it comes
-    // from the engine's own verdict) while the braces hint is a heuristic.
-    const hint = (compiled.error.kind === 'bounds' ? boundsHint(source) : null) ?? bracesHint(source);
+    // that cannot succeed. #13821 routes the `type` class the same way for the
+    // same reason, one class per arm. Both are checked before the braces hint
+    // because the class is certain (it comes from the engine's own verdict)
+    // while the braces hint is a heuristic.
+    //
+    // A `type` fault that names no unresolvable call — an operator or ternary
+    // mismatch (`1 + 'a'`, `no such overload: int + string`), or a real function
+    // handed wrong arguments — returns null from `unknownFunctionHint` and keeps
+    // the existing trailer: this arm has a name to hand back or it says nothing.
+    const classHint =
+      compiled.error.kind === 'bounds'
+        ? boundsHint(source)
+        : compiled.error.kind === 'type'
+          ? unknownFunctionHint(compiled.error.message)
+          : null;
+    const hint = classHint ?? bracesHint(source);
     errors.push({
       source,
       message:

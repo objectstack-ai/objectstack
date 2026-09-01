@@ -633,3 +633,157 @@ describe('cascadeDeleteRelations — [#9689] authored set_null on master_detail 
         expect(all.filter((m) => m.includes("deleteBehavior: 'set_null'"))).toHaveLength(0);
     });
 });
+
+// [#13644] The DECLARED referential-cleanup marker — `HookContext.
+// referentialFieldClear` — populated on EVERY reference-cleanup write the
+// engine issues, as the read-only projection of the operation-private
+// `__referentialFieldClear` the #3023 pin above holds on the envelope.
+//
+// Why this pin exists, and why its caller context carries a full identity: the
+// filer's corrected measurement (#13644) showed the engine builds the cleanup
+// write as `{ ...callerContext, transaction, __referentialFieldClear: true }`
+// — it INHERITS whatever identity the caller supplied — so on the path a real
+// request takes (a REST DELETE carrying a userId) `ctx.user`, `ctx.session`
+// and `ctx.input` are IDENTICAL between the engine's cascade and a user's
+// hand-clear of the same lookup. There is no app-observable discriminator at
+// all except this key, which is why "the schema declares it" alone would be
+// worthless: an engine that stopped populating any one write site would
+// silently return every guard to that state. Hence one pin per write site
+// (scalar clear, multi-value member removal), each beside its hand-clear
+// control under the SAME identity, plus the one-fact-two-faces consistency
+// leg against the envelope marker.
+describe('cascadeDeleteRelations — [#13644] every reference-cleanup write carries the declared ctx.referentialFieldClear', () => {
+    let engine: ObjectQL;
+
+    // The REST-shaped caller envelope — the corrected measurement's row 1,
+    // the one on which every other context member is identical between
+    // cascade and hand-clear.
+    const CALLER = { userId: 'u1', isSystem: true };
+
+    type Cap = {
+        event: unknown; marker: unknown; hasKey: boolean;
+        sessionUserId: unknown; data: unknown;
+    };
+    const capture = (ctx: any): Cap => ({
+        event: ctx.event,
+        marker: ctx.referentialFieldClear,
+        // Distinguishes ABSENT from present-but-undefined: the contract is
+        // "absent unless true", and a present-but-undefined key would survive
+        // spreads as a phantom member.
+        hasKey: 'referentialFieldClear' in ctx,
+        sessionUserId: ctx.session?.userId,
+        data: ctx.input?.data,
+    });
+
+    beforeEach(async () => {
+        engine = new ObjectQL();
+        const { driver } = makeStubDriver();
+        engine.registerDriver(driver, true);
+        await engine.init();
+        for (const o of [acct, noteOptional, watchlistOptionalMulti]) engine.registry.registerObject(o as any);
+    });
+
+    it('scalar set_null clear: true in BOTH phases with the caller identity inherited; the hand-clear control has no key at all', async () => {
+        const seen: Cap[] = [];
+        engine.on('beforeUpdate', 'note', (ctx: any) => { seen.push(capture(ctx)); });
+        engine.on('afterUpdate', 'note', (ctx: any) => { seen.push(capture(ctx)); });
+        // One fact, two faces: the same writes, observed on the envelope.
+        const ops: Array<{ marker: unknown; data: unknown }> = [];
+        engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+            if (opCtx.operation === 'update' && opCtx.object === 'note') {
+                ops.push({ marker: opCtx.context?.__referentialFieldClear, data: opCtx.data });
+            }
+            await next();
+        });
+
+        const a = await engine.insert('acct', { name: 'Acme' });
+        const n = await engine.insert('note', { body: 'hi', account: a.id });
+
+        // The user's hand-clear of the SAME lookup, under the SAME identity.
+        await engine.update('note', { id: n.id, account: null }, { context: { ...CALLER } } as any);
+        const hand = seen.splice(0);
+        // Restore the reference (and drop that restore's own dispatches) so
+        // the cascade below has a dependent to clear — a nulled slot matches
+        // no probe and the cleanup write would never be issued.
+        await engine.update('note', { id: n.id, account: a.id }, { context: { ...CALLER } } as any);
+        seen.splice(0);
+        // The engine's cascade when the referenced record is deleted.
+        await engine.delete('acct', { where: { id: a.id }, context: { ...CALLER } } as any);
+        const cascade = seen.splice(0);
+
+        expect(hand.length).toBe(2);
+        for (const o of hand) {
+            expect(o.marker, 'hand-clear must not read as a referential cleanup').toBeUndefined();
+            expect(o.hasKey, 'the key must be ABSENT on a hand-clear, not present-but-undefined').toBe(false);
+            expect(o.sessionUserId).toBe('u1');
+        }
+        expect(cascade.length).toBe(2);
+        expect(cascade.map((o) => o.event)).toEqual(['beforeUpdate', 'afterUpdate']);
+        for (const o of cascade) {
+            expect(o.marker, 'the cleanup write carries the declared marker').toBe(true);
+            // The inherited identity — the very thing that erases every other
+            // discriminator — is present alongside the marker.
+            expect(o.sessionUserId).toBe('u1');
+            expect((o.data as any)?.account, 'and this really is the cleanup write').toBeNull();
+        }
+        // Consistency: the declared face is true exactly where the envelope
+        // carries the operation-private marker, write for write. Three update
+        // ops reached the middleware, in order: the hand-clear, the restore,
+        // and the engine's cleanup — only the last rides the marked envelope.
+        expect(ops.length).toBe(3);
+        expect(ops.map((o) => o.marker)).toEqual([undefined, undefined, true]);
+        expect((ops[0].data as any)?.account, 'op 1 is the hand-clear').toBeNull();
+        expect((ops[1].data as any)?.account, 'op 2 is the restore').toBe(a.id);
+        expect((ops[2].data as any)?.account, 'op 3 is the cleanup').toBeNull();
+        // And the cleanup landed.
+        expect((await engine.findOne('note', { where: { id: n.id } }) as any).account).toBeNull();
+    });
+
+    it('multiple:true member removal — the second cleanup write site — carries it identically', async () => {
+        const seen: Cap[] = [];
+        engine.on('beforeUpdate', 'watchlist', (ctx: any) => { seen.push(capture(ctx)); });
+        engine.on('afterUpdate', 'watchlist', (ctx: any) => { seen.push(capture(ctx)); });
+
+        const a = await engine.insert('acct', { name: 'Acme' });
+        const b = await engine.insert('acct', { name: 'Beta' });
+        const w = await engine.insert('watchlist', { accounts: [a.id, b.id] });
+
+        // Hand-edit of the SAME multi-value lookup under the same identity —
+        // the control for THIS write site.
+        await engine.update('watchlist', { id: w.id, accounts: [a.id, b.id] }, { context: { ...CALLER } } as any);
+        const hand = seen.splice(0);
+        await engine.delete('acct', { where: { id: a.id }, context: { ...CALLER } } as any);
+        const cascade = seen.splice(0);
+
+        expect(hand.length).toBe(2);
+        for (const o of hand) {
+            expect(o.marker).toBeUndefined();
+            expect(o.hasKey).toBe(false);
+        }
+        expect(cascade.length).toBe(2);
+        expect(cascade.map((o) => o.event)).toEqual(['beforeUpdate', 'afterUpdate']);
+        for (const o of cascade) {
+            expect(o.marker, 'the member-removal write is a reference-cleanup write too').toBe(true);
+            expect(o.sessionUserId).toBe('u1');
+            expect((o.data as any)?.accounts, 'and it is the remainder write').toEqual([b.id]);
+        }
+        expect((await engine.findOne('watchlist', { where: { id: w.id } }) as any).accounts).toEqual([b.id]);
+    });
+
+    it('an identity-LESS delete still marks its cleanup writes (the marker does not ride the identity)', async () => {
+        // The original card's rig happened to measure exactly this shape (no
+        // userId on the DELETE); pinned so the marker provably keys on the
+        // operation, not on any identity member the envelope may or may not
+        // carry.
+        const seen: Cap[] = [];
+        engine.on('beforeUpdate', 'note', (ctx: any) => { seen.push(capture(ctx)); });
+
+        const a = await engine.insert('acct', { name: 'Acme' });
+        await engine.insert('note', { body: 'hi', account: a.id });
+        await engine.delete('acct', { where: { id: a.id } } as any);
+
+        expect(seen.length).toBe(1);
+        expect(seen[0].marker).toBe(true);
+        expect(seen[0].sessionUserId).toBeUndefined();
+    });
+});

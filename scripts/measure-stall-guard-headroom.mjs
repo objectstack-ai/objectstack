@@ -161,6 +161,45 @@ export const EXIT_REFUSED = 2;
 
 export const DEFAULT_REPO = 'objectstack-ai/objectstack';
 
+/**
+ * The population this tool READS, declared for `scripts/pm/dispatch-gates.mjs`
+ * -- the `ROOT_DIR_WATCH_HINTS` idiom, spelled as a literal array because the
+ * hint extractor reads SOURCE TEXT (`scripts/check-watch-hint-literal.mjs`
+ * holds that spelling for every declarer in the tree).
+ *
+ * ## Why this file declared NOTHING, and why that is not a missing gate name
+ *
+ * `extractWatchHints` scans the module body for path-shaped literals. The only
+ * one this file spelled was `DEFAULT_REPO` above -- `objectstack-ai/objectstack`
+ * -- which contains a slash and is therefore admitted, and which names no
+ * tracked path at all. So the family's ENTIRE declared population reached zero
+ * files, and the derivation printed it as an ordinary silence: the same output
+ * a gate with no literals produces, indistinguishable from it in the brief.
+ *
+ * The real population is not missing from this file, it is spelled in a file
+ * this one IMPORTS. `WORKFLOW_DIR` and `scan` come from
+ * `check-stall-guard-budget.mjs`, which declares `.github/workflows` in its own
+ * module body -- but the import follow REFUSES a target that is itself a
+ * discovered gate file (deliberately: a gate script is left to its own family,
+ * rather than having its population inherited twice under weaker provenance).
+ * The refusal is right; what was missing is this end of it. A gate that reads a
+ * population through a sibling GATE has to declare that population itself.
+ *
+ * ## Why the declaration cannot drift from the read
+ *
+ * The literal is held against `WORKFLOW_DIR` -- the very constant the sweep
+ * joins its paths from -- by the self-test below. A hand-written path that
+ * agreed with the read only on the day it was typed is the shape this idiom
+ * exists to replace, so the pin compares the declaration to the imported
+ * constant rather than to a second copy of the string.
+ *
+ * The guard script `guardDefaults` reads is deliberately NOT declared here: it
+ * is `check-stall-guard-budget.mjs`'s own declared literal, and a card touching
+ * it already derives that family, which reads it for the same defaults. What
+ * this file adds is the surface nothing else covers on its behalf.
+ */
+const ROOT_DIR_WATCH_HINTS = ['.github/workflows/**'];
+
 function repoRoot() {
   return resolve(dirname(fileURLToPath(import.meta.url)), '..');
 }
@@ -679,6 +718,40 @@ export async function selfTest() {
     if (!ok) failures.push(detail ? `${name} -- ${detail}` : name);
   };
   const dirs = [];
+
+  // ── The declared population, held against the constant the sweep READS ────
+  //
+  // Both halves, because either alone passes against the defect. "The
+  // declaration names a directory" is true of any string with a slash in it --
+  // it was true of `objectstack-ai/objectstack`, which is what this family
+  // declared and what reached nothing. "The declaration is not empty" is true
+  // of a stale path. What is asserted is that the declared root IS
+  // `WORKFLOW_DIR`, the constant `scan` joins every workflow path from: move the
+  // read and this reds, in this file, rather than in a dispatch brief nobody
+  // reads as evidence.
+  assert(
+    'the declared watch-hint population is exactly the workflow directory this tool sweeps',
+    ROOT_DIR_WATCH_HINTS.length === 1 && ROOT_DIR_WATCH_HINTS[0] === `${WORKFLOW_DIR}/**`,
+    JSON.stringify({ ROOT_DIR_WATCH_HINTS, WORKFLOW_DIR }),
+  );
+  // …and that the declared form is the SUBTREE spelling, not the bare
+  // directory. The two behave alike in the covering rule today; the glob is
+  // what the idiom's other declarers spell, and `check-watch-hint-literal.mjs`
+  // reads them as one family.
+  assert(
+    'the declared form is the subtree glob, not the walk root itself',
+    !ROOT_DIR_WATCH_HINTS.includes(WORKFLOW_DIR) && ROOT_DIR_WATCH_HINTS.every((h) => h.endsWith('/**')),
+    JSON.stringify(ROOT_DIR_WATCH_HINTS),
+  );
+  // Non-vacuous: the directory really is where this tool's own identity read
+  // goes, not just where the imported sweep looks. `workflowIdentities` readdirs
+  // it directly, and a declaration that described only the imported half would
+  // stop being true the moment that read moved.
+  assert(
+    'and the tool really reads that directory in this checkout',
+    existsSync(join(repoRoot(), WORKFLOW_DIR)),
+    join(repoRoot(), WORKFLOW_DIR),
+  );
 
   const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
   const identities = workflowIdentities(repoRoot(), parse);

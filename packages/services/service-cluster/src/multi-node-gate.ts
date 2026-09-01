@@ -3,16 +3,64 @@
 /**
  * Multi-node authorization gate (open mechanism).
  *
- * The open framework ships **no gate** — multi-node is always allowed. A
+ * The open framework ships **no gate** — and with no gate registered, a
+ * DECLARED multi-node topology (`requested > 1`) is **refused** (#13537). A
  * distribution (e.g. the Enterprise Edition) registers a gate to authorize
  * whether the runtime may enable a multi-node (remote-driver) topology — for
  * example, an EE license check. The framework deliberately knows nothing about
  * *why* a gate allows or denies; it only consults the registered decision.
  *
- * When a gate denies, the caller (e.g. `os serve`) **downgrades to single-node**
- * rather than failing — multi-node is an add-on, not a precondition for the
- * runtime to serve. This is distinct from the split-brain guard, which throws
- * on an outright misconfiguration (memory driver declared multi-node).
+ * ## Why an unregistered gate fails CLOSED for multi-node (#13537)
+ *
+ * Multi-node is a **paid capability** (maintainer ruling 2026-08-31, recorded
+ * on #13537: cloud#1741 affirms multi-node as a paid EE roadmap capability,
+ * with the reference remote driver shipping in the licensed image). The
+ * previous default — allow when no gate is registered — meant every boot
+ * route on which the distribution's registration code did not happen to
+ * execute ran an unlicensed cluster silently: measured on a real
+ * thin-extension EE deployment, a `maxNodes: 1` trial license booted 3
+ * replicas with full cluster coordination and no warning (cloud#1752). An
+ * unregistered gate must not silently mean "permitted" on a licensed
+ * capability, so the default direction is now:
+ *
+ *   - `requested > 1` with no gate → **refused** (the caller drops the remote
+ *     driver and warns; ⛔ see the boot-outcome note below — with a multi-node
+ *     topology declared, that is a boot REFUSAL, not a quiet degrade);
+ *   - `requested` absent or `1` with no gate → allowed, exactly as before.
+ *     A single-replica process declares no multi-node topology, so there is
+ *     nothing for a licence to gate. This keeps the refusal keyed to what the
+ *     operator DECLARED — the same conservative path-A posture as
+ *     `split-brain-guard.ts`, whose `declaresMultiNode` is `replicas > 1`.
+ *
+ * The registration side of the same repair is `multi-node-gate-mount.ts`:
+ * a boot surface hands its host importer to `mountMultiNodeGateFromHost` so
+ * the distribution's gate is loaded on EVERY boot route, instead of only on
+ * the route where one particular app config file happens to execute.
+ *
+ * ## ⛔ What a denial ACTUALLY does at boot — it is not always a degrade
+ *
+ * When a gate denies, the caller (e.g. `os serve`) drops the remote driver and
+ * lets the runtime fall back to the in-process one — multi-node is an add-on,
+ * not a precondition for the runtime to serve.
+ *
+ * ⚠️ This module used to stop there, saying the caller "downgrades to
+ * single-node rather than failing", and to place the split-brain guard as a
+ * DISTINCT concern. Measured on #14116, the two are not independent — they key
+ * off the SAME operator declaration:
+ *
+ *   - denial + no multi-node declared (`requested` absent or 1) → a genuine
+ *     downgrade; the process serves single-node.
+ *   - denial + multi-node declared (`OS_CLUSTER_REPLICAS > 1` /
+ *     `OS_EXPECT_MULTI_NODE=true`) → the in-process fallback trips
+ *     `assertClusterDriverSafeForTopology` in `ClusterServicePlugin.init` and
+ *     the boot is **REFUSED**.
+ *
+ * ⭐ The refusal is correct, and must not be "fixed" by weakening the guard: N
+ * replicas each holding a per-process lock is exactly the silent split-brain
+ * that guard exists to stop. What was wrong was the promise. ⛔ Do not restate
+ * "never bricks" anywhere in this package — for the fail-closed default above,
+ * whose trigger (`requested > 1`) is the guard's trigger, refusal is the
+ * ordinary outcome, not the exception.
  *
  * ## Two different questions (#8367)
  *
@@ -170,6 +218,29 @@ export function registerMultiNodeGate(gate: MultiNodeGate): void {
     registered = gate;
 }
 
+/**
+ * Whether a gate is currently registered **on this module instance**.
+ *
+ * The qualifier is load-bearing: this registry is module-level singleton
+ * state, so a process that holds two instances of this package (e.g. the
+ * CJS/ESM dual-instance split, #13330) holds two independent answers. A
+ * consumer asking "did registration reach the instance I will consult?" must
+ * ask through the same import it consults through — which is exactly how
+ * `mountMultiNodeGateFromHost` uses it.
+ */
+export function hasMultiNodeGate(): boolean {
+    return registered !== undefined;
+}
+
+/**
+ * The `reason` a no-gate refusal carries (#13537). Exported so a distribution
+ * or boot surface can recognize this refusal class without string-matching a
+ * sentence it does not own — e.g. a container entrypoint that discloses a
+ * reduced surface (cloud#1752) can name the unmounted gate precisely.
+ */
+export const MULTI_NODE_NO_GATE_REASON =
+    'no multi-node authorization gate is registered — multi-node is a licensed capability and defaults closed';
+
 /** A positive, finite, whole node count — or `undefined` for "not declared". */
 function normalizeCount(value: number | undefined): number | undefined {
     if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return undefined;
@@ -177,8 +248,10 @@ function normalizeCount(value: number | undefined): number | undefined {
 }
 
 /**
- * Resolve the multi-node decision. With no gate registered (open framework),
- * multi-node is allowed and uncapped.
+ * Resolve the multi-node decision. With no gate registered, a declared
+ * multi-node topology (`requested > 1`) is **refused** (#13537 — see the
+ * module doc's fail-closed section); a single-replica or undeclared count
+ * stays allowed and uncapped.
  *
  * @param requested - How many nodes the caller intends to run, when it knows.
  *   Omit when no count is available; the verdict is then reported uncapped
@@ -191,7 +264,24 @@ function normalizeCount(value: number | undefined): number | undefined {
 export function checkMultiNodeAllowed(requested?: number): ResolvedMultiNodeVerdict {
     const wanted = normalizeCount(requested);
 
-    if (!registered) return { allowed: true, refused: 0, capped: false };
+    if (!registered) {
+        // #13537 — fail closed on the licensed capability: a DECLARED
+        // multi-node topology with no gate registered is refused outright,
+        // in the same shape as a registered gate's outright denial so no
+        // consumer needs a third branch. Undeclared / single-replica input
+        // (`wanted` undefined or 1) keeps the historical allow: it declares
+        // no multi-node topology, so there is nothing to gate.
+        if (wanted !== undefined && wanted > 1) {
+            return {
+                allowed: false,
+                reason: MULTI_NODE_NO_GATE_REASON,
+                admitted: 0,
+                refused: wanted,
+                capped: false,
+            };
+        }
+        return { allowed: true, refused: 0, capped: false };
+    }
 
     const verdict = registered.allowMultiNode(wanted);
 

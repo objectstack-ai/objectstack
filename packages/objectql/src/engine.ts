@@ -3460,6 +3460,31 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * [#13644] Build the declared `HookContext.referentialFieldClear` marker —
+   * the read-only hook-context projection of the operation-private
+   * `__referentialFieldClear` that {@link ObjectQL.cascadeDeleteRelations}
+   * stamps on the cleanup write's ExecutionContext (#3023).
+   *
+   * `true | undefined`, never `false`: the key is ABSENT from every dispatch
+   * whose envelope does not carry the marker, so a handler reads it as
+   * `ctx.referentialFieldClear === true` and an absent key keeps meaning "not
+   * a referential cleanup" — the same back-compatible direction as `dispatch`.
+   *
+   * Why a projection of the ENVELOPE rather than a fresh per-call-site signal:
+   * the `__` key's semantics have always been operation-scoped — the cleanup
+   * context is `{ ...callerContext, transaction, __referentialFieldClear: true }`,
+   * plugin-security's ownership-anchor exemption keys on the envelope, and a
+   * write a hook issues through `ctx.api` during a cleanup dispatch inherits
+   * it — so the declared face projects the fact faithfully instead of quietly
+   * re-scoping it. Consumed by `update()`'s hook-context assembly only: every
+   * reference-cleanup write the engine issues is an update, and the per-row /
+   * after-phase contexts ride the batch context's spread.
+   */
+  private buildReferentialFieldClear(execCtx?: ExecutionContext): true | undefined {
+    return (execCtx as any)?.__referentialFieldClear === true ? true : undefined;
+  }
+
+  /**
    * Build the acting-user object (ADR-0068 EvalUser shape) surfaced to
    * validation-time predicates as `current_user` — notably per-option
    * `visibleWhen` authorization gating (objectui#2284). Returns undefined for
@@ -10327,6 +10352,13 @@ export class ObjectQL implements IObjectQLEngine {
           input: { id, data: opCtx.data, options: opCtx.options },
           session: this.buildSession(opCtx.context),
           provenance: this.buildProvenance(opCtx.context),
+          // [#13644] The declared referential-cleanup marker. Conditional
+          // spread, not a bare assignment: the contract is "absent unless
+          // true", and an explicit `undefined` member would survive the
+          // per-row context spreads as a present-but-undefined key.
+          ...(this.buildReferentialFieldClear(opCtx.context)
+            ? { referentialFieldClear: true as const }
+            : {}),
           user: this.buildUser(opCtx.context),
           api: this.buildHookApi(opCtx.context),
           transaction: opCtx.context?.transaction,
@@ -12103,6 +12135,14 @@ export class ObjectQL implements IObjectQLEngine {
             // rides a server-DERIVED context (set here, never from client input
             // — same trust model as `__expandRead`), so it cannot be forged from
             // a request to bypass the guard on an ordinary write.
+            //
+            // [#13644] This same marker is what `update()`'s hook-context
+            // assembly projects onto the DECLARED `HookContext.
+            // referentialFieldClear` (see buildReferentialFieldClear), so an
+            // app guard can recognise the cleanup without reading an
+            // operation-private key — on the real request path the inherited
+            // caller envelope makes the cleanup otherwise indistinguishable
+            // from a hand-clear of the same lookup.
             const referentialCtx = { ...(context ?? {}), __referentialFieldClear: true } as ExecutionContext;
             if (multiValued) {
               // The FK is a SET, so `set_null` clears the deleted MEMBER, not

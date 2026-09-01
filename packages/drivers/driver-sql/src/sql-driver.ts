@@ -7705,17 +7705,78 @@ export class SqlDriver implements IDataDriver {
   }
 
   /**
-   * Batch-update multiple records by ID.
-   * NOTE: Current implementation performs sequential updates for correctness.
-   * TODO: Optimize with SQL CASE statements or batched transactions for performance.
+   * Batch-update multiple records by ID — atomically, as ONE unit.
+   *
+   * [#13854] The loop itself is unchanged, and deliberately so: each id carries
+   * its OWN patch, so there is no single statement that expresses N different
+   * SET lists (the reason `bulkCreate`'s "send it as one INSERT" shape does not
+   * transfer). What this card changed is the transaction boundary around it.
+   *
+   * ## The defect
+   *
+   * With no boundary, every `update()` autocommitted its own row —
+   * {@link getBuilder} hands back a plain `this.knex` builder whenever
+   * `options.transaction` is unset — so a batch refused partway through left
+   * every row processed BEFORE the refusal permanently committed. The caller
+   * got an exception and the database was left in a state nobody declared:
+   * neither the pre-image nor the post-image. Same defect class #13340/#13435
+   * closed on `driver-memory`'s batch doors; `driver-turso` reaches this door
+   * through `super.bulkUpdate`, which is why the repair belongs to the parent
+   * and patching the subclass would only wait for the next subclass.
+   *
+   * ⚠️ A missing id is NOT the reachable failure on this door, and a pin that
+   * uses one measures nothing: `update()` issues an UPDATE matching zero rows
+   * and returns `null`, which this loop skips (`if (updated)`). That skip is
+   * the established convention #13435's note defers to, and it is unchanged
+   * here. The reachable refusals are the database's own — a unique violation on
+   * a later row, a NOT NULL violation, a bind refusal.
+   *
+   * {@link bulkDelete} needs no such wrapper: it is one `whereIn(...).delete()`
+   * per rotation shard, atomic per shard on its own.
+   *
+   * ## One runner, two meanings — and why the caller's transaction is fenced
+   *
+   * With no caller transaction, `this.knex.transaction()` opens the driver's
+   * own — the shape {@link upsert}'s `verifyIdentity` branch uses. Inside a
+   * caller transaction, `trx.transaction()` opens a knex NESTED transaction: a
+   * `SAVEPOINT`, released on success and rolled back to on failure, the exact
+   * primitive {@link attemptWithoutPoisoning} is built on and which this file
+   * has verified on PG 16 and on better-sqlite3 at pool `max: 1`, where the
+   * savepoint rides the parent's connection and never asks the pool for a
+   * second one.
+   *
+   * ⚠️ Joining the caller's transaction WITHOUT a savepoint — the posture
+   * {@link upsert} takes at its own boundary — would be wrong here, and the
+   * difference is N statements versus one. `upsert` reasons that "the statement
+   * is already transactional", which is true of one statement and false of this
+   * loop: a caller that catches the refusal and commits its transaction anyway
+   * lands precisely the partial batch this card is about. That is reachable on
+   * SQLite and MySQL; Postgres aborts the whole transaction on any statement
+   * error, so it is the one dialect where the hole was already shut by
+   * accident. The savepoint makes "every row applied in THIS call is undone"
+   * true whatever the caller wraps around it, while leaving that transaction
+   * usable — the rollback decision for the caller's OWN work stays the
+   * caller's, which is the half of `upsert`'s reasoning that does transfer.
    */
   async bulkUpdate(object: string, updates: Array<{ id: string | number; data: Record<string, any> }>, options?: DriverOptions): Promise<Record<string, any>[]> {
-    const results: Record<string, any>[] = [];
-    for (const { id, data } of updates) {
-      const updated = await this.update(object, id, data, options);
-      if (updated) results.push(updated);
-    }
-    return results;
+    // An empty batch issues no statement, exactly as before: a BEGIN/COMMIT
+    // pair — and the pool checkout behind it — buys nothing for zero rows.
+    if (updates.length === 0) return [];
+
+    const applyAll = async (scoped: DriverOptions): Promise<Record<string, any>[]> => {
+      const results: Record<string, any>[] = [];
+      for (const { id, data } of updates) {
+        const updated = await this.update(object, id, data, scoped);
+        if (updated) results.push(updated);
+      }
+      return results;
+    };
+
+    // The `(caller's transaction) ?? this.knex` runner idiom this file already
+    // uses (see {@link collidingAutoNumberReservations}); here the choice of
+    // runner is also the choice between a transaction and a savepoint.
+    const runner: Knex | Knex.Transaction = (options?.transaction as Knex.Transaction | undefined) ?? this.knex;
+    return runner.transaction(async (trx) => applyAll({ ...options, transaction: trx }));
   }
 
   async bulkDelete(object: string, ids: Array<string | number>, options?: DriverOptions): Promise<void> {

@@ -3757,7 +3757,10 @@ export function coveringKey(entry, inputPath) {
     // inherits by RUNNING a program is a different claim from one it inherits
     // by importing a module, and a dev reading the line has to be able to go
     // check the right thing (#13511).
-    const edge = entry.hintEdge?.get(hint) === 'run' ? 'the program it runs, ' : '';
+    const edge =
+      { run: 'the program it runs, ', manifest: 'the export surface declared by ' }[
+        entry.hintEdge?.get(hint)
+      ] ?? '';
     return { key: hint, via: `gate source via ${edge}${inherited}` };
   }
   // LAST, and deliberately (#13000). The four keys above are all claims about a
@@ -4283,6 +4286,85 @@ function singleReturnExpressions(source) {
 }
 
 /**
+ * ── The PACKAGE ROOT a gate holds in a PARAMETER: one more spelling of a base
+ *    this resolver already reads (#13518) ─────────────────────────────────────
+ *
+ * `nameInitialisers` reads a base a file BINDS (`const PKG_DIR = …`) and
+ * `singleReturnExpressions` reads one a same-file function RETURNS. The third
+ * spelling is a base a same-file function RECEIVES:
+ *
+ *     const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
+ *     function collectSourceEntries(pkgDir) {
+ *       JSON.parse(readFileSync(resolve(pkgDir, 'package.json'), 'utf8'));   // ← here
+ *     }
+ *     const entries = collectSourceEntries(PKG_DIR);
+ *
+ * `PKG_DIR` resolves; `pkgDir` is the same value under a parameter's name, and
+ * without this hop it comes back "not bound in this file" — so a gate that
+ * reads its package through one helper contributes nothing while the identical
+ * gate that inlines the read contributes everything. Live specimen and the
+ * reason this exists: `packages/spec/scripts/build-export-origins.ts` was the
+ * one member of #13518's six the manifest edge could not reach, for no reason
+ * but that spelling.
+ *
+ * ## Why this cannot move an answer the resolver already gives
+ *
+ * The hop is consulted ONLY where `ctx.names` has no binding at all, which is
+ * exactly the branch that returns `unknown` today. So its whole reachable
+ * effect is `unknown` -> a reading; no in-tree answer can change, and none can
+ * be lost. That is a property of the placement rather than of this tree, and
+ * the self-test pins it in both directions.
+ *
+ * ## Narrowings, each one measured
+ *
+ * EXACTLY ONE CALL SITE. A parameter with two callers has two values and the
+ * scan would have to pick; picking is how a fabricated lead gets minted, and
+ * this file errs at a missing lead everywhere. Two call sites contribute
+ * nothing, and so does a name a second function declares under the same
+ * spelling — the map keeps every binding it sees and the resolver takes it only
+ * when there is one.
+ *
+ * `function` DECLARATIONS ONLY, the same shape `singleReturnExpressions` reads,
+ * and its docblock's argument applies unchanged: one hop is what this tree
+ * writes, and a whole-program analysis is not checkable by a reader.
+ *
+ * POSITIONAL parameters only. A destructured or defaulted parameter carries no
+ * single identifier to bind, so it contributes nothing rather than a guess.
+ */
+function singleCallSiteParameters(source) {
+  const byName = new Map();
+  const declarations = [];
+  for (const m of source.matchAll(/(?:^|[;{}\s])function\s+([A-Za-z_$][\w$]*)\s*\(/g)) {
+    const params = balancedArgText(source, m.index + m[0].length);
+    declarations.push({
+      name: m[1],
+      // A TYPE ANNOTATION is not part of the name: half these gate scripts are
+      // TypeScript, and reading `pkgDir: string` as un-nameable would refuse
+      // the very spelling this hop exists for.
+      params: splitArgList(params.text).map((p) => p.trim().match(/^([A-Za-z_$][\w$]*)\s*(?::|$)/)?.[1] ?? null),
+    });
+  }
+  for (const fn of declarations) {
+    if (!fn.params.some(Boolean)) continue;
+    const sites = [];
+    for (const c of source.matchAll(new RegExp(`(?<![.\\w$])${fn.name}\\s*\\(`, 'g'))) {
+      // The declaration's own parameter list is not a call site.
+      if (/\bfunction\s+$/.test(source.slice(Math.max(0, c.index - 16), c.index))) continue;
+      sites.push(c);
+    }
+    if (sites.length !== 1) continue;
+    const args = splitArgList(balancedArgText(source, sites[0].index + sites[0][0].length).text).map((a) => a.trim());
+    fn.params.forEach((p, i) => {
+      if (!p || !args[i]) return;
+      const list = byName.get(p);
+      if (list) list.push(args[i]);
+      else byName.set(p, [args[i]]);
+    });
+  }
+  return byName;
+}
+
+/**
  * Walk repo-relative segments by one path literal. Returns null when the
  * literal climbs out of the repo or carries a dynamic part this resolver
  * refuses to guess at — the caller turns both into the answers they deserve.
@@ -4439,7 +4521,11 @@ export function resolvePathExpression(expr, ctx, depth = 0) {
 
   if (PLAIN_IDENTIFIER.test(e)) {
     if (ctx.seen.has(e)) return { kind: 'unknown', cycle: true, why: `the binding ${e} resolves through itself` };
-    const inits = ctx.names.get(e);
+    // A PARAMETER is consulted only where nothing BINDS the name, which is the
+    // branch that returned `unknown` before this hop existed — so the hop can
+    // add a reading and can never move one (`singleCallSiteParameters`).
+    const params = ctx.params?.get(e);
+    const inits = ctx.names.get(e) ?? (params?.length === 1 ? params : undefined);
     if (!inits) return { kind: 'unknown', why: `${e} is not bound in this file` };
     ctx.seen.add(e);
     const readings = inits.map((init) => resolvePathExpression(init, ctx, depth + 1));
@@ -4498,6 +4584,7 @@ export function scratchDirSitesInSource(rel, source) {
     fileSegs: rel.split('/'),
     names: nameInitialisers(masked),
     returns: singleReturnExpressions(masked),
+    params: singleCallSiteParameters(masked),
     seen: new Set(),
   };
   const inTree = [];
@@ -4649,6 +4736,7 @@ export function anchoredReadTargets(rel, source, isTracked) {
     fileSegs: rel.split('/'),
     names: nameInitialisers(masked),
     returns: singleReturnExpressions(masked),
+    params: singleCallSiteParameters(masked),
     seen: new Set(),
   };
   const out = [];
@@ -4787,6 +4875,7 @@ export function spawnedProgramTargets(rel, source, isTracked) {
     fileSegs: rel.split('/'),
     names: nameInitialisers(masked),
     returns: singleReturnExpressions(masked),
+    params: singleCallSiteParameters(masked),
     seen: new Set(),
   };
   const out = [];
@@ -4811,6 +4900,143 @@ export function spawnedProgramTargets(rel, source, isTracked) {
     }
   }
   return out;
+}
+
+/**
+ * ── The PACKAGE a gate re-derives from: the fourth edge, and the one that is
+ *    not a program (#13518) ────────────────────────────────────────────────────
+ *
+ * The three follows above all end at a PROGRAM — a module the gate imports, a
+ * file whose program text it opens, a program it spawns — and inherit that
+ * program's declared population. This one ends at DATA: a workspace package's
+ * `package.json`, whose `exports` map is the tree's own declaration of what a
+ * package's public entry points ARE.
+ *
+ * ## The class this closes, and why every member of it fell out at once
+ *
+ * #13518 measured six gates that all re-derive their population from
+ * `@objectstack/spec`'s public export surface — `check:api-surface`,
+ * `check:export-origins`, `check:entry-nameability`, `check:exported-any`,
+ * `check:dual-source-exports`, `check:browser-reachable-entries` — and found
+ * every one of them ABSENT from the derivation for `packages/spec/src/index.ts`,
+ * the entry point that IS their subject. Not six defects: one.
+ *
+ * None of the six spells its subject as a path. Each reads
+ * `<pkg>/package.json`, walks its `exports` map, and resolves each subpath to
+ * a built `dist/*.d.ts` (or, for `build-export-origins.ts`, to
+ * `src/<sub>/index.ts`). So the population is COMPUTED, through the manifest,
+ * and the two places a literal could have carried it both fail:
+ *
+ *   - `dist/` is a build OUTPUT and untracked, so any literal reaching it dies
+ *     in the reachability sweep by construction — `moduleRelativeDirectoryHint`
+ *     already prices this class ("build OUTPUT directories … hints that would
+ *     print and reach nothing");
+ *   - the literals these gates DO write are anchored at a package root
+ *     (`resolve(PKG_DIR, 'src/index.ts')`), and `extractWatchHints` resolves
+ *     against exactly one anchor, the writer's own directory. A literal with no
+ *     `./` prefix is taken from the ROOT, so `'src/index.ts'` becomes the
+ *     repo-root hint `src/index.ts` and reaches nothing. The live proof that
+ *     this is a class and not a story is printed on a SEVENTH gate today:
+ *     `check:generated`'s dead leads are `src/meta-spelling/…`, `api-surface`
+ *     and `export-origins` — three literals alive under `packages/spec/` and
+ *     dead at the root.
+ *
+ * ⛔ The repair is therefore NOT these six names in a table. This lane's triage
+ * has ruled against that three times, on the ground that the same red keeps
+ * shipping under the next gate's name. What is added is an EDGE, and the class
+ * closes with it: any gate that re-derives from a package's export surface
+ * reaches that package's source, today and for every gate written after this
+ * one, with nothing to keep in step.
+ *
+ * ## What is inherited, and why it is read from the MANIFEST and not the gate
+ *
+ * `hintsOfManifest` (in `discoverFamilies`) answers with the package's tracked
+ * SOURCE subtree, and it answers only for a manifest that declares an
+ * `exports` map. That test is a fact of the tree, read from the followed file's
+ * own declaration — the `declaredInheritedPopulation` discipline the other
+ * three follows take, one file kind over — and never a regex over the gate's
+ * prose about what it thinks it reads.
+ *
+ * It is also what makes the edge precise rather than merely broad. Measured on
+ * this tree, 23 families read a tracked `package.json` at an anchored path, and
+ * SEVEN of them read the repo ROOT manifest for the version or the changeset
+ * config. The root manifest declares no `exports`, so all seven inherit
+ * nothing — structurally, not because today's tree happens to be kind.
+ *
+ * ## Narrowings, each one measured
+ *
+ * A TRACKED manifest, RESOLVED and never matched: the same three refusals
+ * `anchoredReadTargets` documents, from the same primitive, because this scan
+ * IS that primitive with one filter on the answer.
+ *
+ * SELF-TESTS MASKED, like the import and spawn follows and unlike the read
+ * scan next door: a manifest a self-test writes into a temp directory is a
+ * FIXTURE, and `check-entry-nameability.ts` builds exactly one. Inheriting a
+ * population from it would hand the gate its own scaffolding.
+ *
+ * NO `<pkg>/src`, NO HINT. A package whose source the tree does not track
+ * contributes nothing rather than a hint that would print and reach nothing —
+ * the direction this file errs in everywhere.
+ *
+ * THE GATE MUST READ THE `exports` MAP, and this narrowing decides the number
+ * rather than tidying it. A manifest is read for many reasons and only one of
+ * them is this class; without the test the edge admits every reader of any
+ * manifest, which is +1678 pairs on this tree and every one of them fabricated.
+ * The three refusals are live, and each was checked at its own declaration site
+ * rather than assumed:
+ *
+ *   check:docs-image-tag      packages/cli/package.json  -> `.version`, because
+ *                             every doc surface pinning a concrete image tag
+ *                             must equal it (#9018). 235 pairs, 0 of
+ *                             `packages/cli/src` ever opened;
+ *   check:authorable-surface  packages/spec/package.json -> `.version`, one
+ *                             line, stamped into the generated schemas;
+ *   check:generated           packages/spec/package.json -> the `scripts` map,
+ *                             reconciling its GATED/NO_GENERATOR ledgers
+ *                             against the npm scripts in BOTH directions.
+ *
+ * All three read a manifest; none reads an export surface. This file refuses
+ * that class on provenance and not on volume — #9964 refused an admission
+ * worth 17 pairs because 8 of them were fabricated. With the test the split is
+ * exact on this tree: 6 families read the map, and all 6 are #13518's six.
+ *
+ * ⚠️ `check:generated` is under-matched for `packages/spec/src` for a DIFFERENT
+ * reason, and this edge is not its repair: its own literals (`api-surface`,
+ * `export-origins`, `src/meta-spelling/…`) are package-root-anchored and die at
+ * the repo root, which is the second half of the diagnosis above and is filed
+ * separately rather than fixed here under a test it does not pass.
+ *
+ * `module.exports` is excluded by name: it is the CJS assignment idiom and says
+ * nothing about a manifest.
+ *
+ * ## Blast radius, measured before the change and after it (987fe370)
+ *
+ * A rule that moves rows moves them for EVERY family, so the price is the
+ * deliverable and not a footnote. Over 199 discovered families and 7762 tracked
+ * files, counted through `coveringKey` — the same key the printed block renders
+ * from — and including the parameter hop `singleCallSiteParameters` adds:
+ *
+ *   (family, file) pairs the derivation covers   166173 -> 172797  (+6624)
+ *   pairs LOST                                                          0
+ *   pairs RE-ATTRIBUTED (same pair, new via)                            0
+ *   families whose VERDICT changes                                      6
+ *
+ * The six are #13518's six, silent -> matched, and they take 1104 pairs each:
+ * the whole of `packages/spec/src`, once, which is the defect exactly. No
+ * family outside the class moves in either direction.
+ *
+ * @param {string} rel  repo-relative path of the gate script
+ * @param {string} source  its contents
+ * @param {(path: string) => boolean} isTracked
+ * @returns {string[]} repo-relative manifest paths, in source order, deduped
+ */
+const PACKAGE_MANIFEST_TARGET = /(?:^|\/)package\.json$/;
+const MANIFEST_EXPORTS_READ = /(?<!\bmodule)\.exports\b|\[\s*(['"`])exports\1\s*\]|\bexports\s*[:?]/;
+
+export function packageManifestTargets(rel, source, isTracked) {
+  const masked = maskSelfTests(maskComments(String(source)));
+  if (!MANIFEST_EXPORTS_READ.test(masked)) return [];
+  return anchoredReadTargets(rel, masked, isTracked).filter((t) => PACKAGE_MANIFEST_TARGET.test(t));
 }
 
 const SCANNED_SOURCE_EXTENSIONS = /\.(?:[cm]?[jt]sx?)$/;
@@ -7320,6 +7546,10 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   // for `readProgramTargetsInSource`: a resolved path the repo does not track is
   // a sandbox destination or a build artifact, never an input a card can edit.
   const trackedSet = tree?.files ?? new Set(trackedFiles());
+  // The directory half of the same listing, for the manifest edge below. Taken
+  // from the tree when there is one and derived from `trackedSet` when there is
+  // not, so the edge answers identically either way.
+  const manifestPrefixes = tree?.prefixes ?? trackedPrefixes([...trackedSet]);
   // A followed module is scanned once however many families import it —
   // invoked-as.mjs is imported by 79 of them.
   const moduleHints = new Map();
@@ -7337,9 +7567,53 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     }
     return moduleHints.get(rel);
   };
+  // A manifest is read once however many families follow it — every gate in
+  // #13518's class follows the same one.
+  const manifestHints = new Map();
+  const hintsOfManifest = (rel) => {
+    if (!manifestHints.has(rel)) {
+      // The followed file's OWN declaration decides what a caller inherits,
+      // exactly as `declaredInheritedPopulation` does for a module — here the
+      // declaration is the `exports` map, and a manifest without one (the repo
+      // ROOT manifest, and every package that publishes no entry points)
+      // declares no export surface and so contributes nothing.
+      let population = [];
+      const dir = rel.slice(0, Math.max(0, rel.length - 'package.json'.length - 1));
+      try {
+        const manifest = JSON.parse(readFileSync(join(ROOT, rel), 'utf8'));
+        const exportsMap = manifest?.exports;
+        if (dir && exportsMap && typeof exportsMap === 'object' && Object.keys(exportsMap).length > 0) {
+          const src = `${dir}/src`;
+          // A tracked prefix that is not itself a tracked file IS a directory —
+          // read off the two sets the sweep already builds, the same test
+          // `moduleRelativeDirectoryHint` makes, so this cannot disagree with
+          // what the reachability half of the tool believes the tree holds.
+          //
+          // Read from `trackedSet` and NOT from the optional `tree`, so a
+          // caller passing no tree gets the same answer. This edge lives in
+          // discovery rather than in `extractWatchHints`, so the purity
+          // argument that makes the tree a parameter THERE does not reach it —
+          // and coupling it to the parameter would make a `tree: null`
+          // discovery a second, quieter derivation. The live cost of getting
+          // this wrong is measured next door: the `moduleRelativeDirectoryHint`
+          // blast-radius pin reads exactly the with-tree/without-tree
+          // difference, and a tree-coupled edge here would show up inside it as
+          // six families that rule never touched.
+          if (manifestPrefixes.has(src) && !trackedSet.has(src)) population = [src];
+        }
+      } catch {
+        // A manifest this scan cannot parse contributes nothing. A missing
+        // lead, never a fabricated one.
+        population = [];
+      }
+      manifestHints.set(rel, population);
+    }
+    return manifestHints.get(rel);
+  };
   for (const entry of byCheck.values()) {
     entry.imports = [];
     entry.runs = [];
+    entry.manifests = [];
     entry.reads = [];
     entry.readOrigin = new Map();
     entry.hintOrigin = new Map();
@@ -7408,6 +7682,15 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
         if (gateFiles.has(ran) || entry.runs.includes(ran)) continue;
         entry.runs.push(ran);
       }
+      // The THIRD edge under the same self-test guard, for the same
+      // invocation-shaped reason the spawn follow states (#13518). The
+      // gate-file refusal the other two make does not apply and is not spelled:
+      // a `package.json` is never a discovered gate file, so there is nothing
+      // to refuse.
+      for (const pkg of packageManifestTargets(f, source, (t) => trackedSet.has(t))) {
+        if (entry.manifests.includes(pkg)) continue;
+        entry.manifests.push(pkg);
+      }
     }
     // The gate's OWN hints keep their order and their place at the FRONT, so
     // every path this derivation already matched keeps the exact key and via
@@ -7430,6 +7713,17 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
         if (own.has(hint) || entry.hintOrigin.has(hint)) continue;
         entry.hintOrigin.set(hint, ran);
         entry.hintEdge.set(hint, 'run');
+        entry.hints.push(hint);
+      }
+    }
+    // LAST of the three follows, on the same rule and for the same reason: a
+    // key an earlier edge already answered keeps the exact hint and via label
+    // it had, so this widening adds leads and never re-attributes one.
+    for (const pkg of entry.manifests) {
+      for (const hint of hintsOfManifest(pkg)) {
+        if (own.has(hint) || entry.hintOrigin.has(hint)) continue;
+        entry.hintOrigin.set(hint, pkg);
+        entry.hintEdge.set(hint, 'manifest');
         entry.hints.push(hint);
       }
     }
@@ -11914,6 +12208,24 @@ function selfTest() {
     return declaredInheritedPopulation(source, spelled)?.population ?? spelled;
   };
   const liveTargets = (rel) => firstPartyImportTargets(rel, liveSource(rel));
+  // The THIRD followed edge (#13518). Its population comes from the manifest's
+  // own `exports` declaration rather than from a module's literals, so the
+  // reconstruction reads it the same way `discoverFamilies` does instead of
+  // routing it through `liveModuleHints`, which would ask a JSON file for
+  // JavaScript literals.
+  const liveManifestHints = (rel) => {
+    const dir = rel.slice(0, Math.max(0, rel.length - 'package.json'.length - 1));
+    if (!dir) return [];
+    let exportsMap;
+    try {
+      exportsMap = JSON.parse(liveSource(rel))?.exports;
+    } catch {
+      return [];
+    }
+    if (!exportsMap || typeof exportsMap !== 'object' || Object.keys(exportsMap).length === 0) return [];
+    const src = `${dir}/src`;
+    return liveTree.prefixes.has(src) && !liveTree.files.has(src) ? [src] : [];
+  };
 
   // The recogniser, on fixture source: one line per refusal, so a widening or
   // a narrowing of the rule fails HERE with its reason named, rather than as a
@@ -11953,6 +12265,7 @@ function selfTest() {
   for (const [check, entry] of liveDiscovery.byCheck) {
     const own = [];
     const direct = [];
+    const manifests = [];
     for (const f of entry.files ?? []) {
       if (!existsSync(join(ROOT, f))) continue;
       const source = liveSource(f);
@@ -11969,12 +12282,21 @@ function selfTest() {
         if (liveGateFiles.has(ran) || direct.includes(ran)) continue;
         direct.push(ran);
       }
+      // The third followed edge (#13518), reconstructed for the same reason as
+      // the other two. It is kept in its OWN list because its population is
+      // read from the followed file's `exports` map, not from its literals.
+      for (const pkg of packageManifestTargets(f, source, (x) => liveTree.files.has(x))) {
+        if (manifests.includes(pkg)) continue;
+        manifests.push(pkg);
+      }
     }
-    // A `--self-test` family follows NEITHER edge (#11404, #13511), so its
-    // expectation is its own hints and nothing else. Reconstructed from the
-    // same `selfTest` flag `discoverFamilies` reads, never from a list here.
+    // A `--self-test` family follows NO edge at all (#11404, #13511, #13518),
+    // so its expectation is its own hints and nothing else. Reconstructed from
+    // the same `selfTest` flag `discoverFamilies` reads, never from a list here.
     const expected = new Set(
-      entry.selfTest ? own : [...own, ...direct.flatMap(liveModuleHints)],
+      entry.selfTest
+        ? own
+        : [...own, ...direct.flatMap(liveModuleHints), ...manifests.flatMap(liveManifestHints)],
     );
     const actual = new Set(entry.hints ?? []);
     if (expected.size !== actual.size || [...actual].some((h) => !expected.has(h))) offReconstruction.push(check);
@@ -11986,7 +12308,8 @@ function selfTest() {
   }
   t(
     "a family's hints are exactly those of the scripts its COMMAND names PLUS those of the first-party modules" +
-      ' those scripts import AND the in-tree programs they run — so a shared enumerator CAN carry a population' +
+      ' those scripts import AND the in-tree programs they run AND the export surface of the packages whose' +
+      ' manifest they read — so a shared enumerator CAN carry a population' +
       ` declaration for its callers (off: ${offReconstruction.join(', ') || 'none'})`,
     offReconstruction.length === 0,
   );
@@ -12377,6 +12700,279 @@ function selfTest() {
   t(
     `and no run-edge hint duplicates a population the gate already declared (${runReattributed.join(' | ') || 'none'})`,
     runReattributed.length === 0,
+  );
+
+  // ── The PACKAGE a gate re-derives from (#13518) ────────────────────────────
+  //
+  // Six gates re-derive their population from `@objectstack/spec`'s public
+  // export surface, and every one of them was ABSENT from the derivation for
+  // `packages/spec/src/index.ts` — the entry point that IS their subject. One
+  // shape, one hole: the population is computed through the manifest's
+  // `exports` map into an untracked `dist/`, so no literal carries it.
+  //
+  // ⛔ Every case below pins the FAMILY BEING PRESENT FOR THE SURFACE, never
+  // that a derivation ran, and the class-level case pins a gate that is in no
+  // table anywhere — because "the six now derive" is satisfied perfectly by six
+  // names in a list, which is the repair this lane has ruled against three
+  // times.
+  const manifestFixture = [
+    "const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');",
+    "const pkg = JSON.parse(readFileSync(resolve(PKG_DIR, 'package.json'), 'utf8'));",
+    'for (const sub of Object.keys(pkg.exports ?? {})) entries[sub] = sub;', // the `exports` read that makes it this class
+    "readFileSync(resolve(PKG_DIR, 'dual-source-exports.baseline.json'), 'utf8');", // tracked, not a manifest
+    "readFileSync(join(ROOT, 'packages/does-not-exist/package.json'), 'utf8');", // resolves, untracked
+  ].join('\n');
+  const manifestOut = packageManifestTargets(
+    'packages/spec/scripts/fixture.ts',
+    manifestFixture,
+    (f) => liveTree.files.has(f),
+  );
+  t(
+    'the manifest scan follows a package manifest read through a resolved package-root binding, and refuses a' +
+      ` non-manifest read and an untracked one (${manifestOut.join(' · ') || 'none'})`,
+    manifestOut.join(' · ') === 'packages/spec/package.json',
+  );
+  // The narrowing that decides the number, on fixture source: the SAME manifest
+  // read, with the `exports` read removed, contributes nothing. No count can
+  // show this — a rule that admitted it would simply look more generous.
+  t(
+    'and the identical manifest read with no `exports` read is refused — a version or scripts reader is not this class',
+    packageManifestTargets(
+      'packages/spec/scripts/fixture.ts',
+      [
+        "const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');",
+        "const version = JSON.parse(readFileSync(resolve(PKG_DIR, 'package.json'), 'utf8')).version;",
+      ].join('\n'),
+      (f) => liveTree.files.has(f),
+    ).length === 0,
+  );
+  t(
+    'and a manifest read inside a self-test body is a fixture the self-test builds, not the gate reaching a package',
+    packageManifestTargets(
+      'packages/spec/scripts/fixture.ts',
+      [
+        "const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');",
+        'function selfTest() {',
+        "  const pkg = JSON.parse(readFileSync(resolve(PKG_DIR, 'package.json'), 'utf8'));",
+        '  return pkg.exports;',
+        '}',
+      ].join('\n'),
+      (f) => liveTree.files.has(f),
+    ).length === 0,
+  );
+  // The parameter hop, isolated. The fixture above reaches the manifest through
+  // a CONSTANT; this one reaches it only through a parameter, which is the
+  // spelling `build-export-origins.ts` uses and the one member of the six that
+  // no other rule here could reach.
+  const paramFixture = (calls) =>
+    [
+      "const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');",
+      'function collect(pkgDir: string) {',
+      "  const pkg = JSON.parse(readFileSync(resolve(pkgDir, 'package.json'), 'utf8'));",
+      '  return pkg.exports;',
+      '}',
+      ...calls,
+    ].join('\n');
+  t(
+    'a package root held in a PARAMETER resolves when the function has exactly one call site',
+    packageManifestTargets(
+      'packages/spec/scripts/fixture.ts',
+      paramFixture(['const entries = collect(PKG_DIR);']),
+      (f) => liveTree.files.has(f),
+    ).join(' · ') === 'packages/spec/package.json',
+  );
+  t(
+    'and TWO call sites contribute nothing rather than a pick — a parameter with two values has no single reading',
+    packageManifestTargets(
+      'packages/spec/scripts/fixture.ts',
+      paramFixture(['const a = collect(PKG_DIR);', "const b = collect('/somewhere/else');"]),
+      (f) => liveTree.files.has(f),
+    ).length === 0,
+  );
+
+  // ── LIVE: the card's six, by name, on the surface that missed ──────────────
+  const SPEC_ENTRY = 'packages/spec/src/index.ts';
+  const EXPORT_SURFACE_SIX = [
+    'check:api-surface',
+    'check:export-origins',
+    'check:entry-nameability',
+    'check:exported-any',
+    'check:dual-source-exports',
+    'check:browser-reachable-entries',
+  ];
+  // The positive control the card carried, and it is load-bearing: it is what
+  // makes the six an ABSENCE rather than a dead query.
+  const SPEC_CONTROL = 'check:strictness-ledger';
+  t(
+    `the tree still has ${SPEC_ENTRY} and all six families plus the control`,
+    liveTree.files.has(SPEC_ENTRY) &&
+      Boolean(liveDiscovery.byCheck.get(SPEC_CONTROL)) &&
+      EXPORT_SURFACE_SIX.every((c) => liveDiscovery.byCheck.get(c)),
+  );
+  const sixVerdicts = EXPORT_SURFACE_SIX.map(
+    (c) => [c, classifyEntry(liveDiscovery.byCheck.get(c), [SPEC_ENTRY]).verdict],
+  );
+  t(
+    `⭐ the spec entry point derives every gate that re-derives from it (${sixVerdicts.map(([c, v]) => `${c}=${v}`).join(' · ')})`,
+    sixVerdicts.every(([, v]) => v === 'matched'),
+  );
+  t(
+    `and the control still derives, so the six are a reading and not a broken probe`,
+    classifyEntry(liveDiscovery.byCheck.get(SPEC_CONTROL), [SPEC_ENTRY]).verdict === 'matched',
+  );
+  // …and green for the RIGHT reason. Without this half every case above passes
+  // on a key the gate already had — the reading that would let someone "fix"
+  // this by widening an unrelated literal.
+  const sixOnOwn = EXPORT_SURFACE_SIX.filter((c) => {
+    const e = liveDiscovery.byCheck.get(c);
+    return (
+      (e.files ?? []).some((f) => hintCovers(f, SPEC_ENTRY)) ||
+      coveringTrigger(e, SPEC_ENTRY) ||
+      coveringJobFilter(e, SPEC_ENTRY) ||
+      (e.hints ?? []).some((h) => !e.hintOrigin.has(h) && hintCovers(h, SPEC_ENTRY))
+    );
+  });
+  t(
+    `and not one of the six reaches the entry point on anything it spells ITSELF, which is why the edge was needed` +
+      ` (${sixOnOwn.join(', ') || 'none'})`,
+    sixOnOwn.length === 0,
+  );
+  t(
+    'and each of the six is derived RUNNABLY, which is what a dev pastes',
+    EXPORT_SURFACE_SIX.every((c) => runnableInvocation(liveDiscovery.byCheck.get(c)).includes(c)),
+  );
+  t(
+    'and the via column names the export surface it re-derives from, not a population the gate declares',
+    EXPORT_SURFACE_SIX.every((c) => {
+      const k = coveringKey(liveDiscovery.byCheck.get(c), SPEC_ENTRY);
+      return (
+        k?.key === 'packages/spec/src' &&
+        k?.via === 'gate source via the export surface declared by packages/spec/package.json'
+      );
+    }),
+  );
+
+  // ⭐ THE CLASS, not the six. A SEVENTH gate of the same shape, written here
+  // and named in no table in this file, reaches the same surface through the
+  // same edge — which is the question the triage ruling asked and the one a
+  // list of six names cannot answer. Deleting the edge reds this case exactly
+  // as it reds the six above.
+  const seventhGate = [
+    "const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');",
+    "const manifest = JSON.parse(readFileSync(resolve(PKG_DIR, 'package.json'), 'utf8'));",
+    'const entries = Object.keys(manifest.exports);',
+  ].join('\n');
+  const seventhManifests = packageManifestTargets(
+    'packages/spec/scripts/check-invented-for-this-case.ts',
+    seventhGate,
+    (f) => liveTree.files.has(f),
+  );
+  const seventhPopulation = seventhManifests.flatMap(liveManifestHints);
+  t(
+    `⭐ a SEVENTH gate of the class, in no table anywhere, inherits the same population automatically` +
+      ` (${seventhManifests.join(' · ') || 'none'} -> ${seventhPopulation.join(' · ') || 'nothing'})`,
+    seventhPopulation.some((h) => hintCovers(h, SPEC_ENTRY)),
+  );
+
+  // Reconstruction: `entry.manifests` is what the scan says over the family's
+  // own files, never a list kept here — the invariant both other edges hold.
+  const offManifests = [];
+  for (const [check, entry] of liveDiscovery.byCheck) {
+    const expected = [];
+    if (!entry.selfTest) {
+      for (const f of entry.files ?? []) {
+        if (!existsSync(join(ROOT, f))) continue;
+        for (const p of packageManifestTargets(f, liveSource(f), (x) => liveTree.files.has(x))) {
+          if (!expected.includes(p)) expected.push(p);
+        }
+      }
+    }
+    if (expected.join(' · ') !== (entry.manifests ?? []).join(' · ')) offManifests.push(check);
+  }
+  t(
+    `a family's manifest targets are exactly what the scan finds in the scripts its COMMAND names` +
+      ` (off: ${offManifests.join(', ') || 'none'})`,
+    offManifests.length === 0,
+  );
+
+  // The `exports` narrowing, live and in both directions. The refusal is only
+  // meaningful if the tree really HAS gates that read a manifest for something
+  // else — and it has three, each verified at its own declaration site.
+  const manifestReaders = [];
+  const manifestNonReaders = [];
+  for (const [check, entry] of liveDiscovery.byCheck) {
+    for (const f of entry.files ?? []) {
+      if (!existsSync(join(ROOT, f))) continue;
+      const source = liveSource(f);
+      const bare = anchoredReadTargets(f, maskSelfTests(source), (x) => liveTree.files.has(x)).filter((x) =>
+        /(?:^|\/)package\.json$/.test(x),
+      );
+      if (bare.length === 0) continue;
+      if (packageManifestTargets(f, source, (x) => liveTree.files.has(x)).length > 0) manifestReaders.push(check);
+      else manifestNonReaders.push(check);
+    }
+  }
+  t(
+    `the live tree HAS gates reading a manifest WITHOUT reading its exports, so the narrowing is not vacuous` +
+      ` (${manifestNonReaders.length}: ${[...new Set(manifestNonReaders)].join(' · ') || 'none'})`,
+    manifestNonReaders.length > 0,
+  );
+  t(
+    'and not one of them inherits a package source — a version or scripts reader stays where it was',
+    [...new Set(manifestNonReaders)].every(
+      (c) => (liveDiscovery.byCheck.get(c)?.manifests ?? []).length === 0,
+    ),
+  );
+  // ⚠️ The follow set is BROADER than the six and that is not a leak: a gate
+  // reading the ROOT manifest's `exports`-shaped keys follows the edge and
+  // inherits nothing (the root declares no `exports`), and two gates that read
+  // the spec manifest already SPELL `packages/spec/src` themselves, so the edge
+  // has nothing left to add for them. What must be exact is the population, not
+  // the follow — so this asserts the six are all IN, and the count that moved
+  // is checked against the six by name below.
+  t(
+    `every one of the six follows the edge (${[...new Set(manifestReaders)].join(' · ') || 'none'})`,
+    EXPORT_SURFACE_SIX.every((c) => manifestReaders.includes(c)),
+  );
+  const manifestInherited = [...liveDiscovery.byCheck].flatMap(([check, e]) =>
+    [...(e.hintEdge ?? new Map())].filter(([, kind]) => kind === 'manifest').map(([h]) => [check, e, h]),
+  );
+  // ⭐ THE CLASS, live. The edge gives a population to the six AND to one gate
+  // the card never named: `check:dual-build-cjs-loads`, which walks the same
+  // `exports` map and `require()`s every published entry (#12971), so the spec
+  // export surface is its subject too. It is here because it re-derives from
+  // that surface, not because anything lists it — which is the triage ruling's
+  // question ("修完之后第七个同类 gate 会不会自动被覆盖") answered by a live
+  // family rather than by an argument. It gains no PAIRS, because its CI job
+  // filter is `packages/**` and already covered them; it gains the right
+  // PROVENANCE, and it is what this case exists to keep honest.
+  const CLASS_SEVENTH = 'check:dual-build-cjs-loads';
+  t(
+    `and every family the edge gives a population to really re-derives from an export surface` +
+      ` (${[...new Set(manifestInherited.map(([c]) => c))].join(' · ') || 'none'})`,
+    manifestInherited.every(([c]) => EXPORT_SURFACE_SIX.includes(c) || c === CLASS_SEVENTH),
+  );
+  t(
+    `⭐ and a SEVENTH live gate the card never named is covered by the same edge (${CLASS_SEVENTH})`,
+    manifestInherited.some(([c]) => c === CLASS_SEVENTH),
+  );
+
+  // Additive BY CONSTRUCTION, the claim the wiring comment makes: the manifest
+  // edge appends AFTER own, imported and run hints, so it can only fill a hole.
+  // Both halves again — "nothing was re-attributed" is satisfied perfectly by a
+  // derivation that answers nothing at all.
+  t(
+    `the manifest edge contributes ${manifestInherited.length} inherited hint(s), so the cases here are not vacuous`,
+    manifestInherited.length > 0,
+  );
+  const manifestReattributed = [];
+  for (const [check, entry, hint] of manifestInherited) {
+    const ownAnswer = (entry.hints ?? []).find((h) => !entry.hintOrigin.has(h) && hintCovers(h, hint));
+    if (ownAnswer) manifestReattributed.push(`${check}: ${hint} was already answered by ${ownAnswer}`);
+  }
+  t(
+    `and no manifest-edge hint duplicates a population the gate already declared (${manifestReattributed.join(' | ') || 'none'})`,
+    manifestReattributed.length === 0,
   );
 
   // ── A followed module's JOIN BASE is not a population (#12500) ─────────────

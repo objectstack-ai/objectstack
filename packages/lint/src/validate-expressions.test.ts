@@ -10,7 +10,12 @@ import { ExpressionInputSchema, ObjectStackSchema } from '@objectstack/spec';
 import { FieldSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
 import { SharingRuleSchema } from '@objectstack/spec/security';
 
-import { validateStackExpressions, FIELD_RULE_BOUND_ROOTS } from './validate-expressions.js';
+import {
+  validateStackExpressions,
+  FIELD_RULE_BOUND_ROOTS,
+  FIELD_RULE_AMBIENT_ROOTS,
+  FIELD_RULE_JUDGED_ROOTS,
+} from './validate-expressions.js';
 import type { ExprIssue } from './validate-expressions.js';
 // [#8405] Cross-site pin only — see the describe block at the bottom of this
 // file. Not otherwise used here; validate-semantic-roles.test.ts owns the
@@ -956,15 +961,19 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
      * resolves in the strict env, so the bare-reference check never fired on it
      * either, and the denylist did not know it.
      *
-     * These tests are written against the IMPORTED `SCOPE_ROOTS`, not a copy of
+     * These tests are written against the IMPORTED vocabulary, not a copy of
      * it, because "a future root is covered for free" is the whole argument for
      * the allowlist and a hand-copied list in the test would assert the opposite
-     * of what it claims — it would go green on a root the rule never saw.
+     * of what it claims — it would go green on a root the rule never saw. Since
+     * #13935 the imported thing is `FIELD_RULE_JUDGED_ROOTS` rather than
+     * `SCOPE_ROOTS`: the judged vocabulary is now the WIDER "bound at some
+     * evaluation site" set, and generating from the baseline would have left
+     * exactly the ambient roots #13935 added out of the table.
      */
-    describe('field-level `*When` roots are an ALLOWLIST over SCOPE_ROOTS (#6713)', () => {
+    describe('field-level `*When` roots are an ALLOWLIST over the judged vocabulary (#6713/#13935)', () => {
       /** The three the surface really binds. Everything else must be rejected. */
       const BOUND = ['record', 'previous', 'parent'] as const;
-      const RESIDUAL = SCOPE_ROOTS.filter((r) => !(BOUND as readonly string[]).includes(r));
+      const RESIDUAL = FIELD_RULE_JUDGED_ROOTS.filter((r) => !(BOUND as readonly string[]).includes(r));
 
       const fieldIssues = (predicate: string, slot = 'visibleWhen') =>
         validateStackExpressions({
@@ -1017,6 +1026,171 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         const hit = fieldIssues("data.type == 'select'");
         expect(hit).toHaveLength(1);
         expect(hit[0]!.message).toContain('`visibleWhen` reads `data`');
+      });
+
+      /**
+       * ── The AMBIENT roots (#13935) ────────────────────────────────────────
+       *
+       * `SCOPE_ROOTS` answers "is this declared platform-wide"; this rule needs
+       * "is this bound at SOME evaluation site". They agreed for 27 roots and
+       * disagreed for `app`, which objectui's `ExpressionProvider` binds on the
+       * very surface an author migrates a rule DOWN from. Falling outside the
+       * membership test sent `app` to the bare-reference check, which
+       * prescribed `record.app` — and following THAT earns `unknown field
+       * \`app\``. The defect is WHICH diagnostic fires, so every assertion here
+       * names the specific diagnostic rather than counting that "something
+       * fired".
+       */
+      describe('ambient roots — bound somewhere, absent from SCOPE_ROOTS (#13935)', () => {
+        /**
+         * The ruling, pinned as a boundary test rather than restated in prose:
+         * the fix widens the vocabulary THIS package assembles and leaves
+         * `@objectstack/formula`'s published accept baseline alone. A future
+         * edit that "simplifies" this by adding `app` to `SCOPE_ROOTS` widens a
+         * published accept set — every surface judging bare identifiers stops
+         * faulting it — and goes red right here.
+         */
+        it('does NOT widen `SCOPE_ROOTS` — the judged set is a strict superset assembled locally', () => {
+          expect([...FIELD_RULE_AMBIENT_ROOTS]).toEqual(['app']);
+          // The baseline is untouched: `app` is still not declared platform-wide.
+          expect(SCOPE_ROOTS).not.toContain('app');
+          // …and the judged vocabulary contains all of it, plus the ambient set.
+          expect(FIELD_RULE_JUDGED_ROOTS).toEqual([...SCOPE_ROOTS, ...FIELD_RULE_AMBIENT_ROOTS]);
+          expect(FIELD_RULE_JUDGED_ROOTS.length).toBe(SCOPE_ROOTS.length + 1);
+        });
+
+        it('gives `app` the SCOPE diagnostic — not the bare-reference prescription', () => {
+          const hit = fieldIssues("app.locale == 'en'");
+          // One verdict, not two: the bare-reference check no longer also fires.
+          // ⛔ Do not soften this to `toBeGreaterThan(0)` — the length IS the
+          // pin that catches the suppression silently missing.
+          expect(hit).toHaveLength(1);
+          expect(hit[0]!.severity).toBe('error');
+          expect(hit[0]!.message).toContain('`visibleWhen` reads `app`');
+          expect(hit[0]!.message).toContain('binds only `record`');
+          // The wording the card was filed about, in both halves: the generic
+          // diagnostic's identity, and the prescription that is actively false.
+          expect(hit[0]!.message).not.toContain('bare reference');
+          expect(hit[0]!.message).not.toContain('Write `record.app`');
+        });
+
+        it('tells `app` the truth about where it binds — ambient, renderer-only', () => {
+          const hit = fieldIssues("app.locale == 'en'");
+          expect(hit[0]!.message).toContain('AMBIENT root');
+          expect(hit[0]!.message).toContain('⛔ Do NOT write `record.app`');
+          // ⛔ NOT the general tier's claim, which is false for an ambient root
+          // in both of its clauses.
+          expect(hit[0]!.message).not.toContain('is declared platform-wide');
+        });
+
+        /**
+         * Why `record.app` had to be refused IN the message rather than merely
+         * left out: it is exactly what the pre-#13935 diagnostic told this
+         * author to write, and it does not work.
+         */
+        it('pins that the OLD prescription was false — `record.app` earns `unknown field`', () => {
+          const hit = fieldIssues('record.app == 1');
+          expect(hit).toHaveLength(1);
+          expect(hit[0]!.message).toContain('unknown field `app`');
+        });
+
+        /**
+         * The discriminator. `current_user` is the positive control that passed
+         * before this card and must keep passing UNCHANGED — same tier, same
+         * prescription. A repair that gave every rejected root the new ambient
+         * wording would satisfy the `app` assertions above and be wrong.
+         */
+        it('leaves the `current_user` control on the USER tier, not the ambient one', () => {
+          const hit = fieldIssues("current_user.id == 'U1'");
+          expect(hit).toHaveLength(1);
+          expect(hit[0]!.message).toContain('`visibleWhen` reads `current_user`');
+          expect(hit[0]!.message).toContain('move the predicate to the option\'s own');
+          expect(hit[0]!.message).not.toContain('AMBIENT root');
+        });
+
+        /**
+         * Tie-break no-regression. `SCOPE_ROOTS` is spliced in FIRST, so a
+         * predicate reading both a baseline root and an ambient one reports the
+         * baseline root — the same root, and the same message, it reported
+         * before #13935 widened the vocabulary.
+         *
+         * The LENGTH is the second half of this pin and it is the half that
+         * moved: before #13935 this predicate earned two issues — the `ctx`
+         * verdict plus a bare reference to `app` prescribing `record.app`, the
+         * exact false advice this card removes. The rule emits one verdict per
+         * slot, so `app` waits its turn rather than being told something untrue.
+         */
+        it('keeps the pre-#13935 tie-break — a baseline root still wins over an ambient one', () => {
+          const hit = fieldIssues("ctx.locale == 'en' && app.locale == 'en'");
+          expect(hit).toHaveLength(1);
+          expect(hit[0]!.message).toContain('`visibleWhen` reads `ctx`');
+          expect(hit[0]!.message).not.toContain('Write `record.app`');
+        });
+
+        /**
+         * …and the second root is not LOST, only deferred: fixing `ctx` earns
+         * `app` its own correct verdict on the next run. Without this the pin
+         * above would be satisfied by a repair that simply dropped the root.
+         */
+        it('reports the ambient root on the next pass, once the baseline root is fixed', () => {
+          const hit = fieldIssues("record.amount > 0 && app.locale == 'en'");
+          expect(hit).toHaveLength(1);
+          expect(hit[0]!.message).toContain('`visibleWhen` reads `app`');
+        });
+
+        /**
+         * Root-vs-MEMBER, at ambient width: `record.app_id` is an ordinary
+         * field name that merely starts like the new root.
+         */
+        it('does NOT trip on a `record` member merely spelled like an ambient root', () => {
+          const issues = validateStackExpressions({
+            objects: [{
+              name: 'showcase_deal',
+              fields: {
+                app_id: { type: 'text' },
+                gate: { type: 'text', visibleWhen: "record.app_id != ''" },
+              },
+            }],
+          }).filter((i) => i.where.includes("field 'gate' visibleWhen"));
+          expect(issues).toHaveLength(0);
+        });
+
+        /**
+         * BLAST RADIUS. The suppression is gated on a field-rule verdict, so it
+         * reaches the field level and nothing else. A per-OPTION `visibleWhen`
+         * is deliberately NOT passed through this rule (options resolve against
+         * the host's predicate scope — see the #6290 note in the field walk),
+         * so `app` there still meets the bare-reference check exactly as it did
+         * before this card. Pinned because "suppress the bare-reference verdict"
+         * is the half of this repair that could quietly go wide.
+         */
+        it('does not reach the per-OPTION surface — `app` there keeps the bare-reference verdict', () => {
+          const hit = validateStackExpressions({
+            objects: [{
+              name: 'showcase_deal',
+              fields: {
+                gate: {
+                  type: 'select',
+                  options: [{ value: 'a', visibleWhen: "app.locale == 'en'" }],
+                },
+              },
+            }],
+          }).filter((i) => i.where.includes('option'));
+          expect(hit).toHaveLength(1);
+          expect(hit[0]!.message).toContain('bare reference `app`');
+        });
+
+        /**
+         * …and a bare FIELD reference on a field-rule slot is untouched: no
+         * ambient root is read, so no verdict fires and nothing is suppressed.
+         * Guards the gate itself — a suppression keyed on the wrong condition
+         * would swallow this and leave the author with silence.
+         */
+        it('leaves a plain bare field reference on a field-rule slot alone', () => {
+          const hit = fieldIssues("nope == 1");
+          expect(hit).toHaveLength(1);
+          expect(hit[0]!.message).toContain('bare reference `nope`');
+        });
       });
 
       /**
@@ -2264,6 +2438,15 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // receiver above) and the provenance index (`unprovisionedIndex` /
       // `anchors`), whose keys are Map/Set methods, never metadata keys.
       'pending', 'celNode', 'celRecv', 'anchors', 'unprovisionedIndex',
+      // [#13935] The field-rule verdict, split into a compute half and a push
+      // half so the walk can tell `check` a verdict was issued. `verdict`'s
+      // keys are this helper's own `{ root, message, source }`, never metadata
+      // keys; `diagnostic` is a formula error STRING and its one "key" is
+      // `String.prototype.startsWith`. Both are named to stay clear of the
+      // `message` / `source` metadata receivers — a local called `message`
+      // here would have been excused into masking a genuine
+      // `validations[].message` read.
+      'verdict', 'diagnostic',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

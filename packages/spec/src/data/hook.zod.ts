@@ -827,6 +827,71 @@ export const HookContextSchema = lazySchema(() => z.object({
     attributedUserId: z.string().optional().describe('The real human credited for a write whose authorization subject was the SYSTEM — e.g. the admin whose better-auth `update-member-role` call the identity adapter executes as `isSystem`. ATTRIBUTION ONLY: the audit writer records it as `sys_audit_log.user_id`; no security middleware reads it, and it never becomes the subject the write is authorized as.'),
   }).optional().describe('Server-stamped write provenance (never client-supplied, never an authorization input)'),
 
+  /**
+   * Referential-Cleanup Marker
+   * `true` exactly when THIS write is the engine's own reference cleanup — the
+   * UPDATE `cascadeDeleteRelations` issues against a row that HOLDS a lookup
+   * whose `deleteBehavior` resolves to `set_null`, while the record it
+   * references is being deleted (clearing the slot, or on a `multiple: true`
+   * lookup removing the deleted member). Absent on every other dispatch; read
+   * it as `ctx.referentialFieldClear === true`.
+   *
+   * ## Why a declared key (#13644)
+   *
+   * The engine builds the cleanup write's context by INHERITING the caller's
+   * envelope (`{ ...callerContext, transaction, __referentialFieldClear: true }`),
+   * so on the path a real request takes — a REST `DELETE` carrying a `userId` —
+   * `ctx.user`, `ctx.session` and `ctx.input` are IDENTICAL between the
+   * engine's cascade and a user's hand-clear of the same lookup (measured on
+   * 17.1.0; the shape difference earlier readings reported was a rig artifact
+   * of a `DELETE` that carried no `userId`). An app guard that freezes settled
+   * records therefore had NO declared way to yield to the cleanup, and a
+   * frozen record could keep the person it references undeletable — a GDPR
+   * erasure with no way to carry it out.
+   *
+   * ## One fact, two faces — this key does not replace `__referentialFieldClear`
+   *
+   * The engine already stamps the operation-private
+   * `__referentialFieldClear: true` on the cleanup write's ExecutionContext.
+   * That key stays: it is the AUTHORIZATION channel — plugin-security's
+   * ownership-anchor exemption reads it off the operation context, before any
+   * hook runs — and the `__` prefix is the platform's own "not part of the
+   * contract" convention (`packages/core/src/security/operation-private-keys.ts`),
+   * which is exactly why an app must not build correctness on it. THIS key is
+   * the declared, read-only projection of the same fact onto the hook context,
+   * populated at the engine's update hook-context assembly whenever the
+   * operation's envelope carries the private marker, and — being declared —
+   * carried across the QuickJS sandbox boundary by contract
+   * (`buildSandboxContext` / `installCtx` in `packages/runtime`), which the
+   * operation-private spelling never was: `buildSandboxApi` can hand a body a
+   * shim with no `executionContext` at all, so a predicate reading the `__`
+   * key could be green in a kernel rig and silently false in production (the
+   * #11552 declared≠observable family). Both faces are pinned together in
+   * objectql's cascade suite; the sandbox face in runtime's
+   * referential-field-clear integration pin.
+   *
+   * ## Trust model
+   *
+   * Server-derived, like `session.isSystem`: the marker is set by the engine at
+   * the cascade site and transports never accept an operation-private key from
+   * a client, so it cannot be forged from a request. A write a hook itself
+   * issues through `ctx.api` DURING a cleanup dispatch runs on the same
+   * inherited envelope and so carries the marker too — the operation-envelope
+   * semantics the `__` key has always had, projected faithfully rather than
+   * re-scoped.
+   *
+   * OPTIONAL for the same reason `dispatch` is: making it required would
+   * reject the partial contexts `HookContextSchema.parse` accepts today. The
+   * engine writes `true` or omits it — it never writes `false`.
+   */
+  referentialFieldClear: z.boolean().optional().describe(
+    "Engine-produced marker: true exactly when this write is the engine's own referential cleanup "
+    + "(the set_null cascade UPDATE clearing — or, for multiple: true, removing the deleted member "
+    + 'from — a lookup that references a record being deleted). Absent on every other write, '
+    + 'including a user hand-clearing the same lookup; read as `ctx.referentialFieldClear === true`. '
+    + 'The declared projection of the operation-private `__referentialFieldClear`, carried across '
+    + 'the sandbox boundary by contract; server-derived and never client-supplied.',
+  ),
 
   /**
    * Transaction Handle

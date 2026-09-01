@@ -135,6 +135,13 @@ export type { UninstallCleanup, UninstallCleanupOutcome } from './protocol.js';
 // against the producer's contract instead of restating it locally.
 export type { DeletePackageRequest, DeletePackageResponse } from './protocol.js';
 export type { MetadataMutationEvent, MetadataMutationProjector, MutationProjectionOutcome } from './protocol.js';
+// [#13331] The cross-node half of the mutation notification: the cluster
+// channel the protocol publishes post-persistence mutations on, and its
+// address-only payload. Exported for the bridge's tests and for any peer-side
+// consumer that must speak the channel by name — the payload is a SIGNAL,
+// never trusted content (receipt re-reads `sys_metadata` locally).
+export { METADATA_MUTATION_CLUSTER_CHANNEL } from './protocol.js';
+export type { ClusterMetadataMutationPayload } from './protocol.js';
 // [#10219] The per-item publish notification the host bridges to the
 // kernel-wide `metadata:reloaded` announce. Exported for the same reason its
 // mutation sibling is: the subscriber lives in another package.
