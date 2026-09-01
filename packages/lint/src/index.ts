@@ -467,6 +467,37 @@ export {
 } from './validate-chart-bindings.js';
 export type { ChartBindingFinding, ChartBindingSeverity } from './validate-chart-bindings.js';
 
+// [#14105] The layer BELOW the chart/widget binding rules above: a dataset's
+// own `include[]`, `dimensions[].field`, `measures[].field` and filter KEYS,
+// resolved against the object graph. Its base-object half is
+// `validateObjectReferences`' `datasets[].object` site.
+export {
+  validateDatasetReferences,
+  DATASET_INCLUDE_UNKNOWN,
+  DATASET_FIELD_UNKNOWN,
+  DATASET_FIELD_NOT_INCLUDED,
+  DATASET_FILTER_FIELD_UNKNOWN,
+} from './validate-dataset-references.js';
+export type { DatasetRefFinding, DatasetRefSeverity } from './validate-dataset-references.js';
+
+// The two reusable seams the rule above is written on, exported because the
+// queued siblings (#14148 widget filter keys + sortBy, #14107 list-view field
+// positions) must reuse ONE mechanism rather than growing a second hop-walker
+// and a second filter-key reader. Both hold mechanism only — no rule ids, no
+// severities, no findings; the judgement stays with the rule that asks.
+export {
+  indexObjectGraph,
+  resolveFieldPath,
+  isUnjudgeable,
+  nearestName,
+  suggestName,
+  listNames,
+  RELATIONSHIP_FIELD_TYPES,
+} from './object-graph.js';
+export type { ObjectGraph, GraphObject, GraphField, FieldPathVerdict } from './object-graph.js';
+export { walkFilterFieldKeys } from './filter-walk.js';
+export type { FilterFieldKey } from './filter-walk.js';
+
 // #4762 — the two STATIC artifacts an object validation rule carries (a
 // `format` rule's `regex`, a `json_schema` rule's `schema`) are fail-OPEN at
 // runtime: one that does not compile is logged and skipped, so the rule is
