@@ -359,7 +359,7 @@ export function assertScimAdminCoherence(pluginConfig?: Partial<AuthPluginConfig
       'surface. Either accept the admin plugin (remove plugins.admin: false, or set it true), or ' +
       'disable SCIM (plugins.scim: false — which also declines the admin plugin it would force on). ' +
       'Refused loudly at construction instead of silently mounting SCIM without its deprovisioning ' +
-      'path (#13816).',
+      'path.',
     );
   }
 }
