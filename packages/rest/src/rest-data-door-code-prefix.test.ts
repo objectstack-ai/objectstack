@@ -84,7 +84,7 @@
  * #13095 spread the same declared-code-anchored strip to
  * `resolveErrorResponse`'s declared-4xx passthrough (and, through the one
  * classification the share family re-dresses, its classified arm), and
- * converged the approvals door's blanket `/^[A-Z_]+:\s*/` strip onto the
+ * converged the approvals door's blanket `^[A-Z_]+:\s*` regex strip onto the
  * code the row answers — so §5's "MEASURED, NOT REPAIRED HERE" case, written
  * to red the day either exit converged, was MOVED deliberately to the
  * CONVERGENCE pin it announced, and §6/§7 pin the moved arms' own anchoring
