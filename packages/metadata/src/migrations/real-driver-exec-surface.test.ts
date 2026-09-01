@@ -26,6 +26,18 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
+// The engine double's write verbs route through the producer's OWN dispatch
+// predicates, so it cannot accept a call `ObjectQL.<verb>` would refuse — the
+// same pinning the sibling suite in this directory carries. Imported from
+// `@objectstack/metadata-core` (a `dependencies` entry here) and not from
+// `@objectstack/objectql`, which depends on this package: that edge would close
+// a cycle turbo rejects.
+import {
+    assertEngineDeleteDispatch,
+    assertEngineFindOnePredicate,
+    assertEngineUpdateDispatch,
+    type EngineFindOneQueryInput,
+} from '@objectstack/metadata-core';
 
 import { dropProjectionTables } from './drop-projection-tables.js';
 import { migrateEnvIdToProjectId } from './migrate-env-id-to-project-id.js';
@@ -63,13 +75,20 @@ function recordingEngine() {
                 inserts.push({ object, row });
                 return { id: `${object}_${inserts.length}`, ...row };
             },
-            async update(object: string, data: any) {
+            async update(object: string, data: any, options?: Record<string, unknown>) {
+                assertEngineUpdateDispatch(data, options);
                 updates.push({ object, data });
                 return data;
             },
             async find() { return []; },
-            async findOne() { return null; },
-            async delete() { return {}; },
+            async findOne(object: string, query?: EngineFindOneQueryInput) {
+                assertEngineFindOnePredicate(object, query);
+                return null;
+            },
+            async delete(_object?: string, options?: Record<string, unknown>) {
+                assertEngineDeleteDispatch(options);
+                return {};
+            },
             async count() { return 0; },
             async aggregate() { return []; },
         } as any,
