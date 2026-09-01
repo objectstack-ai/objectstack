@@ -48,6 +48,15 @@ pnpm typecheck        # turbo typecheck — per-package `tsc --noEmit`; tsup/vit
 pnpm docs:dev         # docs site
 ```
 
+**No formatter of record — `pnpm lint` is the only style authority** (eslint, `eslint.config.mjs`). Prettier is
+deliberately absent: no `.prettierrc*`, no `format` script, nothing invokes or installs it. ⛔ Never
+`prettier --write` a file you touch — its double-quote default against this single-quoted codebase rewrites **every
+string literal**, burying a one-line fix in a whole-file reformat. Its `--check` verdict is no second opinion on your
+edit either: it warns on pristine `main` content for that same default, while the SAME bytes at an out-of-repo path
+(a `/tmp` copy) come back `All matched files use Prettier code style!` — a pass over ZERO files (`--file-info` there
+says `"ignored": true`, and deliberately mangled bytes green identically). `npx prettier --find-config-path AGENTS.md`
+answers `[error] Can not find configure file` at both paths — the honest one (measured 2026-09-01, prettier 3.8.1).
+
 **⛔ Push a WIP commit before every step that takes minutes** — a build, a full test run, a
 gate sweep, an ablation. Not because you are about to wait: because you are about to stop
 being the only copy. The cost rises with how well you are working — a hard card defers
@@ -671,8 +680,6 @@ skills/           # 🤖 Domain skill definitions
 content/docs/     # 📝 Docs content
 ```
 
-Studio UI: `../objectui` (sibling repo).
-
 ---
 
 ## Protocol Domains (`packages/spec/src/`)
@@ -1090,10 +1097,8 @@ next restart rejected its predecessor's data.
 
 **It has teeth**: `pnpm check:startup-registry-verdict` walks the AST for that
 three-part shape and fails on it; accepted exceptions live in the shrink-only,
-hand-edited `scripts/startup-registry-verdict.baseline.json`. Like its durability
-sibling it is deliberately narrow and under-matches on purpose rather than risk a false
-positive — it cannot discover a new seam, only stop known ones from regressing. Found a
-new open registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
+hand-edited `scripts/startup-registry-verdict.baseline.json`. Found a new open
+registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
 
 ---
 
@@ -1144,13 +1149,8 @@ new open registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fi
    bump's `sdui:manifest` second half included — see the Frontend section). Pre-merge check for any removal or rename
    of an exported surface: does the pinned sibling import what you are removing? `git grep` it in `../objectui` at the
    pinned SHA before merging.
-5. **Added or removed a `packages/spec` export? Run `pnpm --filter @objectstack/spec gen:api-surface` and commit the
-   result.** The `TypeScript Type Check` job diffs spec's built export surface against `api-surface/` (one shard per
-   entry point); a new export makes the snapshot stale and turns the job red. It reads the **built `dist`
-   declarations**, so `OS_SKIP_DTS=1` — the flag you reach for to make local builds fast — skips exactly the
-   artifact the gate inspects, and the check passes locally while failing in CI. Same shape for the other
-   generated-artifact gates in that job (`check:docs`, `check:skill-refs`, `check:react-blocks`), which read `src/` and
-   so do reproduce locally.
+5. **Touched `packages/spec`? Regenerate and commit its artifacts before pushing** — § *Touched `packages/spec`*
+   above is the authority; note `OS_SKIP_DTS=1` greens `check:api-surface` locally and reds it in CI.
 6. Update `CHANGELOG.md` / `ROADMAP.md` if user-facing or architectural.
 7. **Delete temporary artifacts** — screenshots, traces, scratch logs, `.playwright-mcp/`, throwaway `tmp*.ts`, ad-hoc
    scripts. Repo must look identical to before, minus intended changes.
