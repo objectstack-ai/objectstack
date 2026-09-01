@@ -99,7 +99,7 @@
  * it. What stays unreported is a dotted path whose head DOES resolve — a
  * separate, larger accept-set narrowing ("a list view compiles no joins, so
  * any dotted reference is refused at query time") whose failure mode is a LOUD
- * 400 rather than the silent-empty class this card gates. Filed as a follow-up
+ * 400 rather than the silent-empty class this card gates. Filed as #14282
  * rather than folded in.
  *
  * ## What this rule deliberately does NOT own
