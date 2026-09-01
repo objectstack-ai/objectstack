@@ -13,12 +13,54 @@
 // exactly as it did.
 import { flush, handle, run, settings } from '@oclif/core';
 
+/**
+ * Long enough for a reader that is merely slow; bounded so a reader that never
+ * reads at all cannot strand the failure path. `flush()` is no help here — it
+ * drains STDOUT, and only on the success path.
+ */
+const STDERR_DRAIN_TIMEOUT_MS = 10_000;
+
+/**
+ * Write to stderr and WAIT for the bytes to reach it.
+ *
+ * ⚠️ `process.stderr.write(x)` followed by an exit is the #6531 defect, and
+ * this shim had it. When stderr is a **pipe** node buffers the write
+ * asynchronously and `process.exit` tears the process down with the buffer only
+ * partly drained; `src/utils/format.ts` carries the whole argument for stdout
+ * (`emitJson`). One thing makes it worse here: `settings.debug` is on, so
+ * oclif's `displayWarnings()` has already queued ~138 KB of `ModuleLoadError`
+ * blocks AHEAD of these lines. Measured on the #12964 repro with a reader that
+ * was not draining: the pipe delivered exactly one 64 KiB buffer and everything
+ * after it was lost — this diagnostic AND oclif's own `command … not found`,
+ * which `handle()` writes a moment later and which the same tear-down takes.
+ * That is why the merge queue saw it and a developer's terminal never does: a
+ * TTY is written synchronously, a captured pipe is not.
+ *
+ * The `write` callback fires only once this chunk **and everything queued ahead
+ * of it** has been handed to the pipe, so awaiting it drains that backlog too —
+ * which is what leaves an empty buffer for `handle()`'s own write. The fix
+ * belongs at the write rather than at the exit because there is no hook between
+ * `handle()`'s `console.error` and its `process.exit`.
+ *
+ * ⛔ Deliberately NOT `process.stderr._handle.setBlocking(true)`: `format.ts`
+ * records why — the same binary runs `os serve` / `os dev`, and a blocking
+ * write to a pipe with a slow reader stalls the event loop.
+ */
+function writeStderr(text) {
+  return new Promise((resolve) => {
+    if (process.stderr.write(text, () => resolve())) return;
+    // Backpressure: the callback lands when the reader catches up. The cap is
+    // unref'd so it never keeps the process alive on its own.
+    setTimeout(resolve, STDERR_DRAIN_TIMEOUT_MS).unref();
+  });
+}
+
 /** See `bin/run.js` — the same lazy import, against `src/` instead of `dist/`. */
 async function announceInvocationFailure(error) {
   try {
     const { invocationFailureLine } = await import('../src/utils/invocation.ts');
     const line = invocationFailureLine(error, process.argv.slice(2));
-    if (line) process.stderr.write(`${line}\n`);
+    if (line) await writeStderr(`${line}\n`);
   } catch {
     // Stay quiet rather than replacing oclif's report with an error about the
     // reporter itself.
@@ -53,9 +95,10 @@ async function announceUnbuiltWorkspace(error) {
       import('../../../scripts/cli-unbuilt-workspace-lead.mjs'),
       import('../src/utils/invocation.ts'),
     ]);
-    for (const line of unbuiltWorkspaceLines(error, moduleLoadFailures, INVOCATION_PREFIX) ?? []) {
-      process.stderr.write(`${line}\n`);
-    }
+    // One write, so the drain that matters happens once, immediately before
+    // `handle()` gets its turn at the same pipe.
+    const lines = unbuiltWorkspaceLines(error, moduleLoadFailures, INVOCATION_PREFIX) ?? [];
+    if (lines.length) await writeStderr(`${lines.join('\n')}\n`);
   } catch {
     // Stay quiet rather than replacing oclif's report with an error about the
     // reporter itself.
