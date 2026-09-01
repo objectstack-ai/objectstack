@@ -69,7 +69,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -125,12 +125,59 @@ function runCli(args: string[], cwd: string, nodeOptions: string | undefined): P
 const PIPE_BUFFER_BYTES = 65_536;
 
 /**
- * How long case 4 refuses to drain. It only has to outlast the child, which
- * takes ~1.4-2.5 s here; the margin is for a loaded runner. Below the child's
- * own 10 s drain budget on purpose, so the fixed child is still waiting — a
- * stall longer than that budget would let it give up and prove nothing.
+ * How long case 4 refuses to drain. Two constraints pin it, and the order is
+ * the whole design:
+ *
+ *   max measured child runtime (2535 ms)  <  STALL_MS  <  the shim's
+ *   no-progress bound (STDERR_DRAIN_STALL_MS, 5 s in `bin/run-dev.js`)
+ *
+ * Below the child's runtime the control cannot bite — the child has to EXIT
+ * while the reader is away for anything to be lost. Above the shim's bound the
+ * fixed child correctly gives up, and the case would red against a working fix.
  */
-const STALL_MS = 8_000;
+const STALL_MS = 4_000;
+
+/** Ceiling for case 5. Far above the shim's 5 s bound, so reaching it means a HANG. */
+const UNREAD_HARD_CAP_MS = 25_000;
+
+interface Lifetime {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  elapsedMs: number;
+}
+
+/**
+ * Run the CLI against a pipe that is never drained, and report only how the
+ * process ENDED. Nothing is read, so the kernel's 64 KiB is the whole absorber
+ * and the child hits real backpressure it can never clear.
+ */
+function runCliAgainstDeadReader(
+  args: string[],
+  cwd: string,
+  nodeOptions: string,
+  mode: 'never-read' | 'destroy-read-end',
+): Promise<Lifetime> {
+  return new Promise((resolvePromise) => {
+    const child = spawn(TSX, [CLI, ...args], {
+      cwd,
+      env: childEnv({ NO_COLOR: '1', NODE_OPTIONS: nodeOptions }),
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    const pipe = child.stderr;
+    if (!pipe) throw new Error('stderr was not piped');
+    if (mode === 'destroy-read-end') pipe.destroy();
+    else pipe.pause();
+
+    const started = Date.now();
+    // Ours, and it must be the ONLY thing that can end a hang — a child that
+    // reaches it is the failure this case exists to catch.
+    const cap = setTimeout(() => child.kill('SIGKILL'), UNREAD_HARD_CAP_MS);
+    child.once('exit', (code, signal) => {
+      clearTimeout(cap);
+      resolvePromise({ code, signal, elapsedMs: Date.now() - started });
+    });
+  });
+}
 
 /**
  * Run the CLI and DO NOT read it for `STALL_MS`, by blocking this thread.
@@ -154,6 +201,8 @@ let unbuilt: Run;
 let built: Run;
 let genuinelyMissing: Run;
 let stalled: Run;
+let unread: Lifetime;
+let closedEnd: Lifetime;
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-run-dev-unbuilt-'));
@@ -161,7 +210,9 @@ beforeAll(async () => {
   built = await runCli(REAL_COMMAND, dir, undefined);
   genuinelyMissing = await runCli(['definitely-not-a-command'], dir, undefined);
   stalled = await runCliWhileParentStalls(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`);
-}, RUN_TIMEOUT_MS * 4);
+  unread = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'never-read');
+  closedEnd = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'destroy-read-end');
+}, RUN_TIMEOUT_MS * 6);
 
 afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
@@ -236,5 +287,41 @@ describe('the same probe, read by a parent that stalls (the merge-queue shape)',
     // removed it, which is what rules that reading out.
     expect(stalled.stderr).toContain('Error: command i18n:extract:nope.ts not found');
     expect(stalled.code).toBe(2);
+  });
+});
+
+describe('the mirror direction: a reader that is never coming back', () => {
+  /**
+   * ⚠️ This case exists because the first fix for the stalled reader above
+   * introduced a HANG here, and every instrument written for that fix pointed
+   * the other way. Waiting for a drain is only safe if something bounds the
+   * wait, and the bound has to be OBSERVED rather than assumed: the version
+   * this replaces armed no bound at all (`write()` returned true, so an early
+   * return skipped it) and read as correct in every stalled-reader test.
+   */
+  it('gives up and exits instead of waiting forever', () => {
+    // A child still alive at the cap was SIGKILLed: signal set, code null.
+    // That is the hang, and it is the whole point of this case.
+    expect(unread.signal).toBeNull();
+    expect(unread.code).toBe(2);
+    expect(unread.elapsedMs).toBeLessThan(UNREAD_HARD_CAP_MS);
+  });
+
+  it('waited for the bound before giving up — proving the detector RAN and TRIPPED', () => {
+    // Requirement of its own, not a restatement: a bound that never runs and a
+    // bound that never trips are indistinguishable from the outside, and both
+    // read as "fine" from the case above alone. Exiting promptly here would
+    // mean the drain was skipped entirely (the pre-fix behaviour); exiting at
+    // all means it did not run forever. Only both together pin the bound.
+    expect(unread.elapsedMs).toBeGreaterThan(STALL_MS);
+  });
+
+  it('a CLOSED read end is released at once, not held for the bound (EPIPE reaches the callback)', () => {
+    // Pins the fast path measured alongside the hang: when the reader is gone
+    // rather than idle, the write callback fires with EPIPE and the wait ends
+    // immediately. A future change to the bound must not quietly make the
+    // closed-reader paths pay it.
+    expect(closedEnd.signal).toBeNull();
+    expect(closedEnd.elapsedMs).toBeLessThan(STALL_MS);
   });
 });

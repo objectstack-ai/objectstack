@@ -14,11 +14,38 @@
 import { flush, handle, run, settings } from '@oclif/core';
 
 /**
- * Long enough for a reader that is merely slow; bounded so a reader that never
- * reads at all cannot strand the failure path. `flush()` is no help here — it
- * drains STDOUT, and only on the success path.
+ * How long stderr may make NO PROGRESS before this shim stops waiting for it.
+ *
+ * A wall-clock deadline is the wrong instrument here: it cannot tell a reader
+ * that is merely SLOW from one that is ABSENT, and those two want opposite
+ * answers — the slow one must be waited for (it is the whole point of this
+ * file), the absent one must never be waited for (nobody is reading, so the
+ * bytes are worthless). Progress separates them exactly: a live reader keeps
+ * draining however slowly, an absent one drains nothing, ever.
+ *
+ * ## Where the number comes from — re-derive, do not bump
+ *
+ *   • A live reader under real load never stalled longer than **61 ms**:
+ *     two samples of a vitest worker's event loop while this package's e2e
+ *     suite ran beside it (12 680 and 9 663 samples of a 10 ms timer;
+ *     p999 = 24/25 ms, max = 61/57 ms).
+ *   • The SHORTEST reader stall that can produce the truncation this file
+ *     exists to prevent is one that outlasts the CLI's own run, because the
+ *     bytes are only lost if the child exits while the reader is away.
+ *     Measured child runtime here: 1.0-2.5 s (max 2535 ms).
+ *
+ * 5 s is ~2x that worst measured child runtime, so a stall long enough to
+ * cause the bug is still waited out, and ~82x the worst measured live-reader
+ * stall, so a merely slow reader is never cut off.
+ *
+ * ⚠️ Exceeding this bound degrades to the behaviour this file had BEFORE the
+ * drain existed — a lossy but prompt exit. It can never degrade to a hang,
+ * which is the property that matters: the failure it replaced was unbounded.
  */
-const STDERR_DRAIN_TIMEOUT_MS = 10_000;
+const STDERR_DRAIN_STALL_MS = 5_000;
+
+/** How often progress is sampled — comfortably under the 61 ms above. */
+const STDERR_DRAIN_POLL_MS = 50;
 
 /**
  * Write to stderr and WAIT for the bytes to reach it.
@@ -48,10 +75,42 @@ const STDERR_DRAIN_TIMEOUT_MS = 10_000;
  */
 function writeStderr(text) {
   return new Promise((resolve) => {
-    if (process.stderr.write(text, () => resolve())) return;
-    // Backpressure: the callback lands when the reader catches up. The cap is
-    // unref'd so it never keeps the process alive on its own.
-    setTimeout(resolve, STDERR_DRAIN_TIMEOUT_MS).unref();
+    let poll;
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearInterval(poll);
+      resolve();
+    };
+
+    // ⛔ The return value is deliberately NOT consulted. `write()` returns true
+    // when the internal buffer sits below the highWaterMark, which is NOT the
+    // same as the bytes having reached the pipe — and an earlier version of this
+    // shim read it as "already flushed" and returned early. Measured: it
+    // returned TRUE with writableLength = 7621, so the bound meant to cap the
+    // wait was never armed at all and a reader that never drained hung the
+    // process indefinitely (observed alive at 25 s, 30 s and 60 s). The
+    // callback is the only thing that means "flushed"; it also fires on EPIPE,
+    // which is what releases the closed-reader paths promptly.
+    process.stderr.write(text, finish);
+
+    let fewestPending = process.stderr.writableLength;
+    let lastProgressAt = Date.now();
+    poll = setInterval(() => {
+      const pending = process.stderr.writableLength;
+      if (pending < fewestPending) {
+        fewestPending = pending;
+        lastProgressAt = Date.now();
+        return;
+      }
+      if (Date.now() - lastProgressAt >= STDERR_DRAIN_STALL_MS) finish();
+    }, STDERR_DRAIN_POLL_MS);
+
+    // ⛔ NOT unref'd, on purpose. `finish()` always clears it, so it cannot
+    // outlive the wait — and an unref'd detector is exactly the silent no-op
+    // this function already shipped once: a bound that never runs is
+    // indistinguishable from one that never trips.
   });
 }
 
