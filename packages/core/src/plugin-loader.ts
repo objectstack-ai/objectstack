@@ -3,6 +3,7 @@
 import { Plugin, PluginContext } from './types.js';
 import type { Logger } from '@objectstack/spec/contracts';
 import { parseSignature } from './security/plugin-artifact-signature.js';
+import { serviceNotRegisteredError } from './service-not-registered.js';
 
 /**
  * Service Lifecycle Types
@@ -205,7 +206,17 @@ export class PluginLoader {
             // Fall back to static service instances
             const instance = this.serviceInstances.get(name);
             if (!instance) {
-                throw new Error(`Service '${name}' not found`);
+                // [#13905] The ONE rejection on this method that means "nothing
+                // was ever registered under this name". Branded so a caller
+                // holding only the rejection can tell it from a service that IS
+                // registered and failed to construct (a factory that threw, a
+                // missing scope id, an unset context, a circular dependency) —
+                // which all reject from below, unbranded, and so stay loud.
+                // The message is unchanged; the discriminator rides beside it.
+                // ⛔ Not message text: see `service-not-registered.ts` for why
+                // this repo does not classify a resolution fault by matching on
+                // it.
+                throw serviceNotRegisteredError(name);
             }
             return instance as T;
         }

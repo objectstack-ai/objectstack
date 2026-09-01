@@ -33,6 +33,39 @@ import { isMissingTableError, isSchemaAlreadyExistsError } from '@objectstack/ty
 import { migrateProjectIdToEnvironmentId } from '../migrations/migrate-project-id-to-environment-id.js';
 
 /**
+ * Canonicalise a driver-materialised timestamp into the ISO-8601 string
+ * `MetadataStats.mtime` is declared as.
+ *
+ * [#13997] `sys_metadata`'s `created_at` / `updated_at` are BUILTIN audit
+ * columns, so no declared-field coercion reaches them and
+ * `SqlDriver#formatOutput` repairs them only inside its `if (this.isSqlite)`
+ * arm. On Postgres and MySQL they arrive out of the record read door as a JS
+ * `Date` — pinned in
+ * `packages/drivers/driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`.
+ * `MetadataStatsSchema.mtime` is `z.string().datetime()`
+ * (`packages/spec/src/system/metadata-persistence.zod.ts`), so a `Date` here
+ * is a silent violation of a declared contract.
+ *
+ * ⚠️ The call below looks redundant against `MetadataRecord`'s static type and
+ * is not: `rowToRecord` reaches its `createdAt` / `updatedAt` through an
+ * unchecked `row.created_at as string | undefined` cast, so the `string` there
+ * is an assertion about a driver row, never a measurement of one. ⛔ Do not
+ * "simplify" this away without fixing that cast.
+ *
+ * ⛔ NOT a tolerant fallback: it converts the one per-dialect materialisation
+ * the driver genuinely produces into the single declared spelling, at the
+ * producer — the same shape the sibling adapters in
+ * `@objectstack/metadata-protocol` apply. Absent column -> `undefined`, so the
+ * caller's existing `?? <default>` chain keeps its current meaning.
+ */
+function canonicalIsoInstant(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === 'string') return value;
+  return String(value);
+}
+
+/**
  * Cache configuration for `DatabaseLoader`.
  *
  * The cache sits in front of `load()`, `loadMany()`, `exists()`, `stat()`,
@@ -914,7 +947,7 @@ export class DatabaseLoader implements MetadataLoader {
 
       const stats: MetadataStats = {
         size: metadataStr.length,
-        mtime: record.updatedAt ?? record.createdAt ?? new Date().toISOString(),
+        mtime: canonicalIsoInstant(record.updatedAt ?? record.createdAt) ?? new Date().toISOString(),
         format: 'json',
         etag: record.checksum,
       };

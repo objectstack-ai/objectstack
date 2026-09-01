@@ -265,8 +265,17 @@ export const STATE_COUNTS_PATH = `packages/spec/liveness/${STATE_COUNTS_FILE}`;
 /** The one command that rewrites it. Named in every failure below. */
 export const STATE_COUNTS_GEN_COMMAND = 'pnpm --filter @objectstack/spec gen:liveness-counts';
 
-/** The four status columns the table published, in the order it published them. */
-export const STATUS_COLUMNS = ['live', 'experimental', 'dead', 'planned'] as const;
+/**
+ * The status columns the table publishes, in the order it publishes them.
+ * `live-elsewhere` is the deliberate fifth (#13483): dead here by measurement,
+ * genuinely enforced in a sibling repo — a verdict that must read as NOT
+ * deletable and must not satisfy `live`'s local-evidence rules (its own
+ * executable criteria live in elsewhere.mts). Widening this list is an
+ * artifact-shape decision (#7377): `StateCountsRow`, `foldStateCounts` and
+ * `renderStateCounts` name every column by hand — move all of them together
+ * with this line, then regenerate.
+ */
+export const STATUS_COLUMNS = ['live', 'experimental', 'live-elsewhere', 'dead', 'planned'] as const;
 export type StatusColumn = (typeof STATUS_COLUMNS)[number];
 
 /** One governed type's counts, exactly as `types.<type>.byStatus` reports them. */
@@ -274,6 +283,7 @@ export interface StateCountsRow {
   type: string;
   live: number;
   experimental: number;
+  'live-elsewhere': number;
   dead: number;
   planned: number;
 }
@@ -298,6 +308,7 @@ export function foldStateCounts(
       type,
       live: b.live ?? 0,
       experimental: b.experimental ?? 0,
+      'live-elsewhere': b['live-elsewhere'] ?? 0,
       dead: b.dead ?? 0,
       planned: b.planned ?? 0,
     };
@@ -307,7 +318,7 @@ export function foldStateCounts(
 /**
  * The fold's own blind spot, made ARITHMETIC (#13083).
  *
- * `foldStateCounts` above reads four names and nothing else, so a `byStatus`
+ * `foldStateCounts` above reads the published names and nothing else, so a `byStatus`
  * bucket it cannot name — a ledger row written `"status": "planed"` — is dropped
  * on the floor. Every check downstream then agrees with every other, because
  * they are all reading the same understated fold: `renderStateCounts` computes
@@ -376,10 +387,10 @@ export function reconcileStateCountTotals({
 
 /** The prescription printed under a total that does not reconcile. */
 export const STATE_COUNTS_TOTALS_GUIDANCE = [
-  'The count columns are a FOLD of four status names, and this is the arithmetic that',
-  'says the fold dropped something (#13083). It is NOT a stale-artifact failure, and',
-  `\`${STATE_COUNTS_GEN_COMMAND}\` is not the repair: the generator folds through`,
-  'exactly the same four names, so it would only re-publish the same understated total.',
+  `The count columns are a FOLD of the ${STATUS_COLUMNS.length} published status names, and this is the`,
+  'arithmetic that says the fold dropped something (#13083). It is NOT a stale-artifact',
+  `failure, and \`${STATE_COUNTS_GEN_COMMAND}\` is not the repair: the generator folds through`,
+  'exactly the same names, so it would only re-publish the same understated total.',
   '',
   'Read the buckets named above:',
   '',
@@ -389,9 +400,10 @@ export const STATE_COUNTS_TOTALS_GUIDANCE = [
   '',
   '  • a status DELIBERATELY added to STATUS_COLUMNS — then the vocabulary grew and',
   '    the fold did not. `StateCountsRow`, `foldStateCounts` and `renderStateCounts`',
-  '    all name the four columns by hand, and a fifth one publishes as a COLUMN, which',
+  '    all name every column by hand, and a new one publishes as a COLUMN, which',
   '    changes what the artifact contains. That is an artifact-shape decision (#7377):',
-  '    make it deliberately, move all four sites together, and regenerate.',
+  '    make it deliberately, move all the named sites together, and regenerate —',
+  '    `live-elsewhere` (#13483) is the precedent to copy.',
   '',
   '⛔ Never satisfy this by editing the artifact. The number it publishes is not the',
   'one in dispute — the population behind it is.',
@@ -413,14 +425,16 @@ export function renderStateCounts(rows: readonly StateCountsRow[]): string {
       type: 'total',
       live: a.live + r.live,
       experimental: a.experimental + r.experimental,
+      'live-elsewhere': a['live-elsewhere'] + r['live-elsewhere'],
       dead: a.dead + r.dead,
       planned: a.planned + r.planned,
     }),
-    { type: 'total', live: 0, experimental: 0, dead: 0, planned: 0 },
+    { type: 'total', live: 0, experimental: 0, 'live-elsewhere': 0, dead: 0, planned: 0 },
   );
 
+  const classifiedOf = (r: StateCountsRow) => STATUS_COLUMNS.reduce((a, c) => a + r[c], 0);
   const body = rows.map(
-    (r) => `| \`${r.type}\` | ${r.live} | ${r.experimental} | ${r.dead} | ${r.planned} | ${r.live + r.experimental + r.dead + r.planned} |`,
+    (r) => `| \`${r.type}\` | ${r.live} | ${r.experimental} | ${r['live-elsewhere']} | ${r.dead} | ${r.planned} | ${classifiedOf(r)} |`,
   );
 
   return [
@@ -451,10 +465,10 @@ export function renderStateCounts(rows: readonly StateCountsRow[]): string {
     'spreads `MetadataProtectionFields`. See the README\'s counting-method section',
     'for both corollaries.',
     '',
-    '| Type | live | exp | dead | planned | classified |',
-    '|---|---|---|---|---|---|',
+    '| Type | live | exp | elsewhere | dead | planned | classified |',
+    '|---|---|---|---|---|---|---|',
     ...body,
-    `| **total** | **${total.live}** | **${total.experimental}** | **${total.dead}** | **${total.planned}** | **${total.live + total.experimental + total.dead + total.planned}** |`,
+    `| **total** | **${total.live}** | **${total.experimental}** | **${total['live-elsewhere']}** | **${total.dead}** | **${total.planned}** | **${classifiedOf(total)}** |`,
     '',
   ].join('\n');
 }

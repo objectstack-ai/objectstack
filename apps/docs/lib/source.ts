@@ -2,12 +2,23 @@ import { docs, blog as blogCollection } from 'fumadocs-mdx:collections/server';
 import { type InferPageType, loader } from 'fumadocs-core/source';
 import { lucideIconsPlugin } from 'fumadocs-core/source/lucide-icons';
 import { i18n } from '@/lib/i18n';
+import { navTitlePlugin } from '@/lib/nav-title';
 
+/**
+ * The docs page tree.
+ *
+ * `navTitlePlugin()` is what lets a page carry a short sidebar label
+ * (`navTitle`) distinct from the `title` every other consumer reads; it is the
+ * ONLY place the page tree's labels are resolved, and `apps/docs/lib/nav-title.ts`
+ * carries the contract and the authoring instructions. Nothing below this line
+ * -- and nothing in `app/**` -- reads `navTitle`; `scripts/check-docs-nav-label.mjs`
+ * holds that.
+ */
 export const source = loader({
   baseUrl: '/docs',
   i18n,
   source: docs.toFumadocsSource(),
-  plugins: [lucideIconsPlugin()],
+  plugins: [lucideIconsPlugin(), navTitlePlugin()],
 });
 
 export const blog = loader({

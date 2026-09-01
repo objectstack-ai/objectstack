@@ -80,11 +80,14 @@ jobs:
           fetch-depth: 0
 
       # Pinned to the same major and spelling as every other setup-node in this
-      # repo. `actions/setup-node@v5`+ defaults `package-manager-cache: true`,
-      # which shells out to pnpm and hard-errors in a job like this one that
-      # installs no package manager — see the Part-of Closing-Keyword Guard's
-      # note for the measured failure. No install step and no corepack: the
-      # script is dependency-free and imports only sibling `scripts/**` modules.
+      # repo, and it keeps its literal `node-version` (rather than
+      # `node-version-file`) for the measured reason the Part-of Closing-Keyword
+      # Guard records: `actions/setup-node@v5`+ defaults
+      # `package-manager-cache: true`, which shells out to pnpm and hard-errors
+      # before any `run:` line when pnpm is not yet on PATH. This job now DOES
+      # acquire pnpm, but strictly after this step — the same order lint.yml has
+      # been green on for months — so nothing here may start depending on pnpm
+      # existing yet.
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
@@ -99,6 +102,79 @@ jobs:
       # INDEPENDENT self-tests, which these are not.
       - name: Guard predicate self-test
         run: node scripts/pm/check-governed-queue-guard.mjs --self-test
+
+      # ── the generator toolchain — the #11705 rows can now actually recompute ─
+      #
+      # The register's `verify` rows (generator-owned files inside `skills/**`)
+      # recompute by running the tree's OWN generator through `pnpm … exec tsx`.
+      # Until now this job installed nothing, so that recompute answered "the
+      # generator toolchain is not available in this environment" on every run
+      # and the path stayed governed — a spec PR carrying its regenerated
+      # `references/_index.md` needed a pinned maintainer approval at merge-group
+      # time even though the seat-side `--test` lifted the same diff in a dev
+      # container. The script header filed that trade as not taken; the
+      # maintainer took it (2026-09-01, verbatim):
+      #
+      #   > 纯生成的指针行(spec 源变更后再生成的 references/_index.md) 不需要我审核吧
+      #
+      # ⭐ NO `--filter` here, deliberately. The set of packages the register's
+      # recompute needs is `GENERATED_SURFACE_EXCEPTIONS[].verify.pkg`, and a
+      # filter list in this file would be a SECOND copy of it — one that goes
+      # stale silently the day a row is added, in the direction that reads as
+      # compliance (the new row's generator fails to spawn, the path stays
+      # governed, and nothing says the install was the reason). A full install
+      # restates nothing, so a register row reaches this job for free — the same
+      # reason the script imports the predicate instead of reimplementing it.
+      # The self-test pins that: every `verify.pkg` in the register must be
+      # covered by the install line below.
+      #
+      # ⛔ NO build step, and that is measured rather than assumed: both `verify`
+      # rows run through `tsx`, which reads the generator's TypeScript sources
+      # and their relative `./lib/*` imports directly — nothing consults any
+      # package's `dist/`. Measured on a warm store: install 7s, the skill-refs
+      # `--check` 1s. A build would be pure cost with nothing depending on it.
+      #
+      # ⭐ EVERY step in this block is `continue-on-error` — this is the load-
+      # bearing half, not defensive decoration. The guard's own promise is that
+      # "a diff that touches nothing governed is never blocked by an outage", and
+      # a hard-failing install would newly make EVERY ordinary queue build depend
+      # on the npm registry and the cache service. With `continue-on-error`, a
+      # broken install degrades to exactly the behaviour this job had before this
+      # block existed: the generator cannot spawn, `runSinkGenerator` returns its
+      # stated "toolchain is not available" reason, and the path stays GOVERNED.
+      # Fail-closed on the governed path, unaffected on the clear one, and the
+      # verdict stays inside the script — where the exit contract lives — instead
+      # of becoming an opaque red step nobody can read a governance answer out of.
+      #
+      # Both legs install. The `pull_request` leg is a FORECAST of the queue
+      # verdict ("the merge-queue run of this same check will REFUSE it"), so a
+      # leg that cannot recompute forecasts a refusal that will not happen — the
+      # false-alarm direction, which trains seats to hold PRs that need no
+      # holding. Same diff, same answer, on both legs and at the seat.
+      - name: Setup pnpm
+        uses: ./.github/actions/setup-pnpm
+        continue-on-error: true
+
+      - name: Get pnpm store directory
+        shell: bash
+        continue-on-error: true
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      # Deliberately the same key as lint.yml's: one store, one entry, and this
+      # job is a cache READER in the steady state rather than a second writer.
+      - name: Setup pnpm cache
+        uses: actions/cache@v6
+        continue-on-error: true
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-v3-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-v3-
+
+      - name: Install dependencies
+        continue-on-error: true
+        run: pnpm install --frozen-lockfile
 
       # The live judgment. Everything it reads arrives through `env:` or the
       # event payload on disk — no `${{ }}` interpolation into the shell line,

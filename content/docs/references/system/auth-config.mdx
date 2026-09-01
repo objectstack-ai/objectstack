@@ -104,6 +104,9 @@ Advanced / low-level Better-Auth options
 | **deviceAuthorization** | `boolean` | optional (default: `false`) | Enable RFC 8628 Device Authorization Grant (CLI / TV-style login) |
 | **admin** | `boolean` | optional (default: `false`) | Enable platform admin operations (ban/unban, set-password, impersonate, set-role) |
 | **phoneNumber** | `boolean` | optional (default: `false`) | Enable phone-number sign-in (phone + password; OTP sign-in/reset when an SMS service is configured) |
+| **scim** | `boolean` | optional | Enable the SCIM 2.0 provisioning surface. Unset: OS_SCIM_ENABLED decides (absent = off); an explicit value wins over the env var. Effective SCIM forces the admin plugin on unless admin is set. |
+| **sso** | `boolean` | optional | Enable enterprise SSO (domain-routed OIDC/SAML sign-in). Unset: OS_SSO_ENABLED decides (absent = off); an explicit value wins over the env var. |
+| **ssoDomainVerification** | `boolean` | optional | Enable DNS domain-verification for SSO providers (requires sso). Unset: OS_SSO_DOMAIN_VERIFICATION decides (absent = off); an explicit value wins over the env var. |
 
 ### Nested Shape: `AuthConfig.session`
 
@@ -211,6 +214,9 @@ OIDC / Generic OAuth2 provider configuration for enterprise SSO
 | **deviceAuthorization** | `boolean` | optional (default: `false`) | Enable RFC 8628 Device Authorization Grant (CLI / TV-style login) |
 | **admin** | `boolean` | optional (default: `false`) | Enable platform admin operations (ban/unban, set-password, impersonate, set-role) |
 | **phoneNumber** | `boolean` | optional (default: `false`) | Enable phone-number sign-in (phone + password; OTP sign-in/reset when an SMS service is configured) |
+| **scim** | `boolean` | optional | Enable the SCIM 2.0 provisioning surface. Unset: OS_SCIM_ENABLED decides (absent = off); an explicit value wins over the env var. Effective SCIM forces the admin plugin on unless admin is set. |
+| **sso** | `boolean` | optional | Enable enterprise SSO (domain-routed OIDC/SAML sign-in). Unset: OS_SSO_ENABLED decides (absent = off); an explicit value wins over the env var. |
+| **ssoDomainVerification** | `boolean` | optional | Enable DNS domain-verification for SSO providers (requires sso). Unset: OS_SSO_DOMAIN_VERIFICATION decides (absent = off); an explicit value wins over the env var. |
 
 
 ---

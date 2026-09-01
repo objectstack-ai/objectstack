@@ -5,10 +5,6 @@ import { retiredKey } from '../shared/retired-key';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { StateMachineSchema } from '../automation/state-machine.zod';
-
-/**
- * AI Model Configuration
- */
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 
@@ -24,6 +20,9 @@ const AGENT_HISTORY =
   'Until this shape was closed these were dropped silently — the agent still registered '
   + 'and still answered, minus whatever the key was meant to configure or constrain.';
 
+/**
+ * AI Model Configuration
+ */
 export const AIModelConfigSchema = lazySchema(() => strictObject({
   surface: 'this model configuration',
   history: AGENT_HISTORY,
