@@ -459,6 +459,7 @@
     "data/HookContext:previous",
     "data/HookContext:provenance",
     "data/HookContext:ql",
+    "data/HookContext:referentialFieldClear",
     "data/HookContext:result",
     "data/HookContext:session",
     "data/HookContext:transaction",
