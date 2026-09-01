@@ -2556,7 +2556,7 @@ export class AuthPlugin implements Plugin {
     // ────────────────────────────────────────────────────────────────────
     // #9941 — organization/add-member. better-auth declares `addMember`
     // WITHOUT an HTTP path (server-only `auth.api.addMember`; measured on the
-    // installed 1.7.1), so the catch-all never mounts it — yet the
+    // then-installed 1.7.1), so the catch-all never mounts it — yet the
     // `sys_member` `add_member` toolbar action has always targeted this URL,
     // and on a multi-org posture it is the only UI path that can attach an
     // existing user to an organization. This mount restores that declared

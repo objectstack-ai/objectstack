@@ -38,7 +38,10 @@ function makeTransactionalEngine(opts: { driverCanTransact?: boolean } = {}) {
     const rollbacks: unknown[] = [];
     const handle = { id: 'trx-1' };
 
-    const insert = vi.fn(async (_object: string, data: any) => {
+    // Third parameter declared because the write path PASSES it and the
+    // assertions below read `call[2]`: a 2-arity mock made that a tuple
+    // with no element at index 2.
+    const insert = vi.fn(async (_object: string, data: any, _options?: any) => {
         if (data?.title === POISON) throw new Error('insert exploded');
         return { id: `rec-${insert.mock.calls.length}`, ...data };
     });

@@ -9,13 +9,13 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 ## Core schemas
 
-- `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Action Parameter Schema
-- `node_modules/@objectstack/spec/src/ui/app.zod.ts` — Base Navigation Item Schema
+- `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Exports: ActionParamSchema, ActionType, ActionLocationSchema, ActionAiSchema, ActionSchema
+- `node_modules/@objectstack/spec/src/ui/app.zod.ts` — Exports: ObjectNavItemSchema, DashboardNavItemSchema, PageNavItemSchema, UrlNavItemSchema, ReportNavItemSchema
 - `node_modules/@objectstack/spec/src/ui/chart.zod.ts` — Unified Chart Type Taxonomy
-- `node_modules/@objectstack/spec/src/ui/component.zod.ts` — Empty Properties Schema
+- `node_modules/@objectstack/spec/src/ui/component.zod.ts` — Exports: PageContainerProps, PageHeaderProps, PageTabsProps, PageCardProps, RecordDetailsProps
 - `node_modules/@objectstack/spec/src/ui/dashboard.zod.ts` — Exports: WidgetColorVariantSchema, WidgetActionTypeSchema, DashboardHeaderActionSchema, DashboardHeaderSchema, DashboardWidgetOptionsSchema
 - `node_modules/@objectstack/spec/src/ui/dataset.zod.ts` — Analytics Dataset — the one semantic layer (ADR-0021).
-- `node_modules/@objectstack/spec/src/ui/page.zod.ts` — Page Region Schema
+- `node_modules/@objectstack/spec/src/ui/page.zod.ts` — Exports: PageRegionSchema, PageComponentType, ElementDataSourceSchema, PageComponentSchema, PageVariableSchema
 - `node_modules/@objectstack/spec/src/ui/report.zod.ts` — Exports: ReportType, ReportChartSchema, ReportSortSchema, JoinedReportBlockSchema, ReportSchema
 - `node_modules/@objectstack/spec/src/ui/view.zod.ts` — View protocol schemas — the `view` metadata type and its three persisted body spellings.
 - `node_modules/@objectstack/spec/src/ui/widget.zod.ts` — Exports: FieldWidgetPropsSchema

@@ -65,10 +65,10 @@
  * measured population was already the whole corpus; only its sketch line,
  * borrowed from a neighbouring tool, said otherwise.
  *
- * ## The two keys, and why they are the build's contract rather than a schema
+ * ## The two INHERITED keys, and why they are the build's contract rather than a schema
  *
  * `fumadocs-core/source/schema` -- the `pageSchema` `apps/docs/source.config.ts`
- * hands to `defineDocs` -- declares:
+ * extends for both roots -- declares:
  *
  *   title:       z.string()             // REQUIRED
  *   description: z.string().optional()  // optional, but typed WHEN PRESENT
@@ -83,6 +83,25 @@
  * be a rule invented here -- the schema growth the card's triage ruled out.
  * `icon`, `full` and `_openapi` are likewise `pageSchema`'s and likewise not
  * asserted, and unknown keys pass because `pageSchema` is not `.strict()`.
+ *
+ * ## The docs root's own key: `navTitle`
+ *
+ * The docs root is no longer handed `pageSchema` bare. It is handed
+ * `docsSchema = pageSchema.extend({ navTitle: z.string().optional() })` -- the
+ * short sidebar label that lets a page's `title` grow for search intent without
+ * the nav growing with it. It is asserted here for the same reason `author` and
+ * `tags` are asserted on the blog root: a typed key a root's schema declares and
+ * this gate does not judge is a key owned by nothing below `Build Docs`.
+ *
+ *   navTitle: z.string().optional()  -> a string WHEN PRESENT
+ *
+ * Presence is deliberately NOT required. `title` is the declared fallback --
+ * resolved in `apps/docs/lib/nav-title.ts` and nowhere else -- so a page without
+ * a `navTitle` is the normal case, not a defect: all 405 pages are that case
+ * today. What the type half catches is the authoring slip that YAML makes silent,
+ * the same one `description` has: an unquoted `navTitle: REST: the short form`
+ * parses as a nested mapping and reaches `docsSchema` as an OBJECT, failing the
+ * site build 30 minutes later instead of here.
  *
  * The type half is not decoration. A parse-only gate is blind to the shape one
  * character away from the defect above, measured with this same parser:
@@ -297,6 +316,27 @@ export const PAGE_KEYS = [
 ];
 
 /**
+ * `docsSchema` = `pageSchema.extend({ navTitle })`, the schema `defineDocs` gets
+ * for `content/docs`. See the header for why presence is not required and what
+ * the type half catches; `apps/docs/lib/nav-title.ts` is the mechanism's
+ * documentation and the one place the `title` fallback is resolved.
+ */
+export const DOCS_KEYS = [
+  ...PAGE_KEYS,
+  {
+    // Presence is deliberately NOT asserted: `title` is the declared fallback,
+    // so a page without one is the normal case (405 of 405 pages today).
+    key: 'navTitle',
+    required: false,
+    ...AS_STRING,
+    detailType:
+      '`docsSchema` declares `navTitle: z.string().optional()`. A `word: word` inside an unquoted ' +
+      'navTitle that YAML can read as a nested mapping yields an object here rather than throwing. ' +
+      'Quote the scalar.',
+  },
+];
+
+/**
  * `blogSchema` = `pageSchema.extend({ author, date, tags })`. Two of the three
  * extras are typed in a way a frontmatter value can violate; see the header for
  * the measurement that puts `date` in `BLOG_KEYS_UNASSERTED` instead.
@@ -357,8 +397,8 @@ export const ROOTS = [
     name: 'docs',
     dir: join(REPO_ROOT, 'content/docs'),
     configExport: 'docs',
-    schemaName: 'pageSchema',
-    keys: PAGE_KEYS,
+    schemaName: 'docsSchema',
+    keys: DOCS_KEYS,
     unasserted: [],
     /** The generated half, reported separately so the verdict says what it read. */
     generatedPrefix: 'references/',
@@ -1163,8 +1203,27 @@ export async function selfTest() {
 
   // The widening must not leak the blog's keys onto the docs root.
   assert(
-    judgeSource(page('title: A\ntags: ai, architecture'), PAGE_KEYS).violations.length === 0,
-    'the blog keys stay on the blog root -- PAGE_KEYS is what `content/docs` is still judged against',
+    judgeSource(page('title: A\ntags: ai, architecture'), DOCS_KEYS).violations.length === 0,
+    'the blog keys stay on the blog root -- DOCS_KEYS is what `content/docs` is judged against',
+  );
+
+  // ...and the docs root's own key must not leak onto the blog root either.
+  assert(
+    judgeSource(page('title: A\nnavTitle:\n  y: 1'), BLOG_KEYS).violations.length === 0,
+    'the docs key stays on the docs root -- BLOG_KEYS does not judge `navTitle`',
+  );
+
+  // `navTitle` is typed WHEN PRESENT and not required. Both halves, observed.
+  const dkinds = (src) => judgeSource(src, DOCS_KEYS).violations.map((v) => v.kind);
+  assert(dkinds(page('title: A')).length === 0, '`navTitle` is not required -- a page without one is clean');
+  assert(dkinds(page('title: A\nnavTitle: REST Endpoints')).length === 0, 'a string `navTitle` is clean');
+  assert(
+    dkinds(page('title: A\nnavTitle:\n  y: 1')).includes('navTitle-not-a-string'),
+    'a `navTitle` YAML reads as a mapping is reported -- the unquoted-colon slip, on the docs root',
+  );
+  assert(
+    dkinds(page('title: A\nnavTitle: 42')).includes('navTitle-not-a-string'),
+    'a numeric `navTitle` is reported -- YAML types an unquoted scalar by its shape',
   );
 
   // ── (10) ROOTS is pinned to `apps/docs/source.config.ts` ────────────────
@@ -1192,21 +1251,32 @@ export async function selfTest() {
       JSON.stringify(dirs.slice().sort()) === declaredDirs,
       `ROOTS mirrors every defineDocs root -- config ${JSON.stringify(dirs.slice().sort())} vs ROOTS ${declaredDirs}`,
     );
-    assert(/schema:\s*pageSchema/.test(config), 'the docs root is still handed `pageSchema` unextended');
-
-    const ext = /const blogSchema = pageSchema\.extend\(\{([\s\S]*?)\}\);/.exec(config);
-    assert(ext !== null, 'blogSchema is still `pageSchema.extend({ ... })`, which is what BLOG_KEYS mirrors');
-    if (ext) {
+    // BOTH roots are now `pageSchema.extend({ ... })`, and each extension's key
+    // set must be accounted for by the root that owns it. The docs root joined
+    // the blog root here when `navTitle` landed: an extension key added in
+    // `source.config.ts` and nowhere else is exactly the unowned-key shape this
+    // leg exists to refuse, and it is now reachable on either root.
+    for (const [schemaName, rootName] of [
+      ['docsSchema', 'docs'],
+      ['blogSchema', 'blog'],
+    ]) {
+      const ext = new RegExp(`const ${schemaName} = pageSchema\\.extend\\(\\{([\\s\\S]*?)\\}\\);`).exec(config);
+      assert(ext !== null, `${schemaName} is still \`pageSchema.extend({ ... })\`, which is what its key contract mirrors`);
+      if (!ext) continue;
       const extKeys = [...new Set([...ext[1].matchAll(/^\s+(\w+):/gm)].map((m) => m[1]))].sort();
-      const blogRoot = ROOTS.find((r) => r.name === 'blog');
+      const root = ROOTS.find((r) => r.name === rootName);
       const accounted = [
-        ...blogRoot.keys.filter((k) => !PAGE_KEYS.includes(k)).map((k) => k.key),
-        ...blogRoot.unasserted.map((u) => u.key),
+        ...root.keys.filter((k) => !PAGE_KEYS.includes(k)).map((k) => k.key),
+        ...root.unasserted.map((u) => u.key),
       ].sort();
       assert(
         JSON.stringify(extKeys) === JSON.stringify(accounted),
-        `every blogSchema extension key is asserted or explicitly unasserted -- config ${JSON.stringify(extKeys)} ` +
+        `every ${schemaName} extension key is asserted or explicitly unasserted -- config ${JSON.stringify(extKeys)} ` +
           `vs accounted ${JSON.stringify(accounted)}`,
+      );
+      assert(
+        new RegExp(`schema:\\s*${schemaName}`).test(config),
+        `the ${rootName} root is still handed \`${schemaName}\``,
       );
     }
   }
@@ -1238,7 +1308,9 @@ export async function selfTest() {
       `page's name) each proved against a readable tree that still returns a verdict, the PER-ROOT floor observed ` +
       `refusing an emptied root in both declaration orders while a sibling root's 12 pages stayed green (the one ` +
       `observation a naive union cannot reproduce) and an empty ROOTS refusing too, the blog root's \`author\` and ` +
-      `\`tags\` observed firing with \`date\` pinned as deliberately unasserted, main() returning 1 rather ` +
+      `\`tags\` observed firing with \`date\` pinned as deliberately unasserted, the docs root's \`navTitle\` ` +
+      `observed firing on a mapping and a number while absence stays clean and neither root's keys leak onto the ` +
+      `other, main() returning 1 rather ` +
       `than throwing on both a violation and a refusal, extraction cross-checked against the docs build's own ` +
       `extractor, ROOTS pinned against every defineDocs call in source.config.ts, and the CI wiring read out of ` +
       `lint.yml.`,

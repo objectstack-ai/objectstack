@@ -1351,9 +1351,10 @@ jobs:
       # start of a nested mapping, and that build was what said so.
       #
       # This reads the corpus with the docs build's OWN extractor regex and the
-      # same `yaml` parser fumadocs resolves, and types the two keys
-      # `pageSchema` declares (`title: z.string()` required,
-      # `description: z.string().optional()` typed when present) — not a schema
+      # same `yaml` parser fumadocs resolves, and types the keys each root's own
+      # schema declares — `pageSchema`'s inherited pair (`title: z.string()`
+      # required, `description: z.string().optional()` typed when present), plus
+      # `docsSchema`'s `navTitle` and `blogSchema`'s `author`/`tags` — not a schema
       # of its own: the shape one character from the original defect PARSES and
       # yields an object, and only the type assertion sees it.
       #
@@ -1372,6 +1373,37 @@ jobs:
         run: |
           node scripts/check-doc-frontmatter.mjs --self-test
           node scripts/check-doc-frontmatter.mjs
+
+      # The docs site's short sidebar label (`navTitle`) reaches the PAGE TREE
+      # and nothing else (#12311). A doc page's `title` serves the SERP title,
+      # the h1, the JSON-LD, `llms.txt` and the Open Graph card; `navTitle` is
+      # the sidebar's own string so #12237 can lengthen titles for search intent
+      # without the nav growing with them.
+      #
+      # Every way of losing that split is silent — a consumer reading the key
+      # "because it is nicer", a second `?? title` fallback appearing at a read
+      # site, a resolver that stops falling back (which costs all 405 pages
+      # their sidebar label), a plugin dropped from `loader()` leaving the key
+      # declared and inert. None of them breaks a type, a link, a build or a
+      # test; the site renders and the only symptom is a string in the wrong
+      # place, on the surfaces crawlers read. So the gate: the key is named in
+      # code by exactly the two files that declare and resolve it, the resolver
+      # is EXECUTED over its fallback cases rather than read, and the one
+      # consumer that reads the page tree (the JSON-LD breadcrumb) is pinned to
+      # `page.data.title`.
+      #
+      # It also watches `fumadocs-core`'s own `pageSchema`/`metaSchema`: 16.14.4
+      # ships no nav-label key, which is why this repo declares one, and the day
+      # an upgrade does the gate says migrate instead of letting ours become the
+      # thing nobody migrated.
+      #
+      # Invoked as `node` rather than a `pnpm check:*` alias: see the GATE
+      # INVOCATION IDIOM note at the top of this file. Filesystem read plus one
+      # type-stripped import; sub-second.
+      - name: Docs nav label stays out of the title surfaces
+        run: |
+          node scripts/check-docs-nav-label.mjs --self-test
+          node scripts/check-docs-nav-label.mjs
 
       # #7484 docs anchors: `lychee.toml` sets `include_fragments = "none"`, so
       # the `Check Documentation Links` job resolves a link's FILE and never its

@@ -3498,13 +3498,23 @@ function runTestModeExitFor(paths) {
   return testVerdict(paths).governed ? EXIT_TEST_GOVERNED : EXIT_TEST_NOT_GOVERNED;
 }
 
-// `invokedDirectly` for the same reason line 810 carries it: this module is
-// imported for its exported predicates (`proxyRearmPlan` — see
-// scripts/pm/ci-failure.mjs), and an unguarded trigger ran THIS file's 77
-// assertions inside the importer's own `--self-test`, printing a second
-// summary and putting an unrelated file's failures on the importer's exit
-// code. A self-test is a mode of the file that is being RUN, never a side
-// effect of importing it.
+// `invokedDirectly` for the same reason the main-invocation guard above
+// carries it: this module is imported for its exported predicates
+// (`proxyRearmPlan` — see scripts/pm/ci-failure.mjs), and an unguarded
+// trigger ran this file's whole self-test inside the importer's own
+// `--self-test`, printing a second summary and putting an unrelated file's
+// failures on the importer's exit code. The suite was 77 assertions at PR
+// #9897, where this guard landed, and is now more than three times that: the
+// 77 is anchored to that PR and frozen as a historical fact, while the
+// multiple is a FLOOR and is written as one on purpose. The live figure is
+// whatever `--self-test` prints from `checked`; it moves on most edits to
+// this file and has never once gone down across this file's history, so a
+// floor stays true where a reading rots. Both figures that stood here had
+// rotted before anyone looked — 77 was written as THIS file's current size
+// and was by then off by a factor of three, and the neighbouring "line 810"
+// had drifted onto unrelated code — so do not "helpfully" refresh either
+// back into a reading. A self-test is a mode of the file that is being RUN,
+// never a side effect of importing it.
 if (invokedDirectly && process.argv.includes('--self-test')) {
   await selfTest();
 }

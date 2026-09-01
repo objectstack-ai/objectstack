@@ -1472,6 +1472,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository-13997-authored-at-canonicalisation.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository-13997-authored-at-canonicalisation.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository-13997-authored-at-canonicalisation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/sys-metadata-repository.contract.test.ts",
       "verb": "delete",
       "pinned": 1

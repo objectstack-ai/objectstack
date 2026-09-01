@@ -74,11 +74,16 @@ describe('validateReadonlyHookWrites - RED: a ctx.api write to a readonly field'
     expect(findings[0].path).toBe('hooks[0].body.source');
     expect(findings[0].message).toContain("'last_activity_date'");
     expect(findings[0].message).toContain('crm_account');
-    // The remedy must name BOTH legitimate channels, not only sudo - telling an
-    // author to elevate is a security-relevant instruction, and the own-hook
-    // stamp is the shape that needs no elevation at all.
+    // [#14010] The remedy is the own-hook stamp, and the hint must say so.
     expect(findings[0].hint).toContain('ctx.input.last_activity_date');
-    expect(findings[0].hint).toContain('sudo');
+    // ...and it must NOT prescribe sudo. This rule reads L2 body sources, which
+    // run in QuickJS, whose ctx.api has no `sudo` - so the hint used to point
+    // 100% of its population at a TypeError (aborting the triggering write,
+    // under the default onError:'abort'). Substring-matching 'sudo' is not
+    // enough to tell "offers it" from "warns against it": the corrected hint
+    // still contains the word. Pin the DIRECTION.
+    expect(findings[0].hint).toMatch(/sudo\(\) is NOT an option|not marshalled into the sandbox/);
+    expect(findings[0].hint).not.toMatch(/make the elevation explicit|write it through ctx\.api\.sudo/);
   });
 
   it('flags updateById, whose payload is argument 1', () => {
@@ -344,7 +349,11 @@ describe('validateReadonlyHookWrites - readonlyWhen is a SECOND shape, not the s
     expect(findings[0].severity).toBe('warning');
     // The own-hook stamp is NOT the remedy here, and the hint must not offer it.
     expect(findings[0].hint).not.toContain('ctx.input.credit_hold');
-    expect(findings[0].hint).toContain('sudo');
+    // [#14010] Nor is sudo, for the sandbox-reachability reason above - so this
+    // hint offers NEITHER, and says which record states the write is safe on.
+    expect(findings[0].hint).toContain('not marshalled into the sandbox');
+    expect(findings[0].hint).not.toMatch(/write it through ctx\.api\.sudo/);
+    expect(findings[0].hint).toContain('readonlyWhen predicate is FALSE');
   });
 
   it('reports a field carrying BOTH flags as the certain (static readonly) finding', () => {

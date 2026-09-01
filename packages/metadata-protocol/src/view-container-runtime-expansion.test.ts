@@ -253,3 +253,145 @@ describe('#7736 a runtime-authored view container is served', () => {
         });
     });
 });
+
+/**
+ * #13407 — the third occurrence of #7736's own defect, and why: #7736's
+ * `hydrateExpandedViewItems` registry-hydration is reached ONLY for an
+ * unscoped (`environmentId === undefined`) kernel writing an env-wide
+ * (`organizationId` unset) row — exactly the one combination the suite above
+ * exercises. Two gates, both correct and untouched here, exclude everything
+ * else: `applyRegistryWriteThrough` never write-through hydrates when
+ * `this.environmentId !== undefined` (a real per-environment/cloud kernel —
+ * `assembleMetadataProtocol`'s own comment: "per-project (cloud) kernels
+ * source metadata from the control plane"), and `hydrateOverlayIntoRegistry`
+ * refuses ANY org-scoped row before ever expanding it ("[#6602] a per-org
+ * overlay is served on demand, never grafted into the registry every org in
+ * this process shares" — ADR-0005). The card's own repro is "a signed-in user
+ * with an ACTIVE ORG" — exactly the excluded case, on any kernel.
+ *
+ * The fix is two independent, additive changes, neither touching either gate:
+ *
+ *  1. Object-name derivation now checks the container's own top-level
+ *     `object` field FIRST (`ViewSchema.object`) — never consulted before.
+ *  2. `getMetaItems` expands a container it reads INLINE, into that request's
+ *     own response only, never into the shared SchemaRegistry — safe for
+ *     isolation because it operates only on rows already scoped to THIS
+ *     request's own org/environment (the pre-existing `queryByOrg` merge).
+ */
+describe('#13407 org-scoped and environment-scoped runtime containers are served', () => {
+    it('derives the object binding from the containers own top-level `object` field, not just `list.data.object`', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        // Saved under a name that is NOT the object, and `list` carries no
+        // `data.object` either — only the container's own top-level `object`
+        // field says what this binds to. Pre-fix this expanded under the
+        // WRONG key (derived from the save name) instead.
+        const bound = {
+            object: 'crm_lead',
+            list: { label: 'All Leads', type: 'grid', columns: [{ field: 'name' }] },
+        };
+        await protocol.saveMetaItem({ type: 'view', name: 'lead_views', item: bound });
+
+        const list: any = await protocol.getMetaItems({ type: 'view' });
+        expect(switcherMatches(list.items, 'crm_lead').map((v: any) => v.name)).toEqual(['crm_lead.default']);
+    });
+
+    it('the cards own repro: a runtime container authored by a signed-in user with an ACTIVE ORG is now served', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        await protocol.saveMetaItem({
+            type: 'view', name: 'crm_lead', item: leadContainer, organizationId: 'org_acme',
+        });
+
+        const list: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
+        const served = switcherMatches(list.items, 'crm_lead').map((v: any) => v.name).sort();
+        expect(served).toEqual(['crm_lead.default', 'crm_lead.pipeline']);
+    });
+
+    it('POSITIVE CONTROL: a pre-existing independent ViewItem for the same object is still served alongside the newly-expanded container', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await protocol.saveMetaItem({
+            type: 'view', name: 'crm_lead', item: leadContainer, organizationId: 'org_acme',
+        });
+        await protocol.saveMetaItem({
+            type: 'view',
+            name: 'crm_lead.mine',
+            item: {
+                name: 'crm_lead.mine', object: 'crm_lead', viewKind: 'list', label: 'My Leads',
+                config: { type: 'grid', data: { provider: 'object', object: 'crm_lead' }, columns: [{ field: 'name' }] },
+            },
+            organizationId: 'org_acme',
+        });
+
+        const list: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
+        const served = switcherMatches(list.items, 'crm_lead').map((v: any) => v.name).sort();
+        // A fix that merely "returned everything" could not distinguish these:
+        // the pre-existing independent item and the two newly-expanded
+        // container items must all be present, distinctly.
+        expect(served).toEqual(['crm_lead.default', 'crm_lead.mine', 'crm_lead.pipeline']);
+    });
+
+    it('ORG ISOLATION HELD: a container authored in org_acme is invisible reading as org_globex, and visible reading as org_acme', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await protocol.saveMetaItem({
+            type: 'view', name: 'crm_lead', item: leadContainer, organizationId: 'org_acme',
+        });
+
+        const globex: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_globex' } as any);
+        expect(switcherMatches(globex.items, 'crm_lead')).toEqual([]);
+
+        const acme: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
+        expect(switcherMatches(acme.items, 'crm_lead')).toHaveLength(2);
+    });
+
+    it('the isolation-safe path never registers an org-scoped expansion into the shared SchemaRegistry', async () => {
+        const { engine, registered } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        await protocol.saveMetaItem({
+            type: 'view', name: 'crm_lead', item: leadContainer, organizationId: 'org_acme',
+        });
+        await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
+
+        // The RESPONSE carries the expansion (re-confirmed above); the SHARED
+        // registry — read by every org/environment this kernel serves — must
+        // carry none of it. This is what makes the fix isolation-safe without
+        // touching either scope gate.
+        expect(registered.get('view')?.size ?? 0).toBe(0);
+    });
+
+    it('an ENVIRONMENT-SCOPED kernel (a real per-project/cloud kernel, `assembleMetadataProtocol`s own construction shape) also serves a runtime-authored container', async () => {
+        const { engine } = makeStubEngine();
+        // #7736's own pin only ever constructed an UNSCOPED protocol
+        // (`environmentId` omitted) — the control-plane instance. This
+        // constructs the OTHER real shape.
+        const protocol = new ObjectStackProtocolImplementation(engine, undefined, 'env_prod_1');
+
+        await protocol.saveMetaItem({ type: 'view', name: 'crm_lead', item: leadContainer });
+        const list: any = await protocol.getMetaItems({ type: 'view' });
+        const served = switcherMatches(list.items, 'crm_lead').map((v: any) => v.name).sort();
+        expect(served).toEqual(['crm_lead.default', 'crm_lead.pipeline']);
+    });
+
+    describe('anti-vacuity — the closure does not become "expand anything"', () => {
+        it('a DIFFERENT object in the SAME org still serves nothing for it', async () => {
+            const { engine } = makeStubEngine();
+            const protocol = new ObjectStackProtocolImplementation(engine);
+            await protocol.saveMetaItem({
+                type: 'view', name: 'crm_lead', item: leadContainer, organizationId: 'org_acme',
+            });
+            const list: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
+            expect(switcherMatches(list.items, 'crm_account')).toEqual([]);
+        });
+
+        it('an org with no container written at all reads empty, not an error', async () => {
+            const { engine } = makeStubEngine();
+            const protocol = new ObjectStackProtocolImplementation(engine);
+            const list: any = await protocol.getMetaItems({ type: 'view', organizationId: 'org_acme' } as any);
+            expect(list.items).toEqual([]);
+        });
+    });
+});
