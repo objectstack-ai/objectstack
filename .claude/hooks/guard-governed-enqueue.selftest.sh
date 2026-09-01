@@ -18,17 +18,13 @@
 # Needs `jq` (to build fixtures) and `node` (the two real predicates run). No
 # pnpm install, no build: measured against a worktree with no `node_modules`.
 #
-# ⚠️ ONE COUPLING, STATED SO A FAILURE IS NOT MISREAD. The
-# `pure-regeneration-only ⇒ ALLOWED` case uses a REAL register-lifted path
-# (`.claude/workflows/docs-accuracy-audit.js`, the #9866 row) rather than a
-# stub, because the requirement under test is precisely "this guard must never
-# re-close the zero-approval path the register clears" and a stub cannot show
-# that. The consequence: the case needs that artifact to be in sync with its own
-# generator on the tree it runs against — which is what the required
-# `check:docs-audit-scope` gate keeps true. If this one case fails while the
-# rest pass, look there first; re-run
-#   node scripts/pm/check-governed-merges.mjs --test .claude/workflows/docs-accuracy-audit.js
-# and read what the register says before touching this matrix or the hook.
+# ⚠️ THE PURE-REGENERATION CASE IS AN AGREEMENT ASSERTION, NOT A FIXED VERDICT,
+# and that is a repair rather than a preference: the first revision of this file
+# hard-coded `expect allow` against the one exception row that was cheap to
+# lift, and that row was retired upstream hours later — the case then went red
+# over a register change the hook had nothing to do with. Copying a verdict out
+# of the register makes this matrix a second register. It now ASKS the register
+# and requires the hook to answer the same way; see that block for the detail.
 
 set -uo pipefail
 
@@ -71,7 +67,15 @@ approved_at() { # approved_at <login> <sha>
 NO_REVIEWS='[]'
 GOVERNED_FILES="$(files_of AGENTS.md packages/spec/src/index.ts)"
 CLEAR_FILES="$(files_of packages/spec/src/index.ts README.md)"
-REGEN_FILES="$(files_of .claude/workflows/docs-accuracy-audit.js)"
+# The incident's own file class, and four of them, the way it actually happened:
+# `skills/*/references/_index.md` is a governed `skills/**` path whose generator
+# (`gen:skill-refs`) owns it, so a byte-exact regeneration is lifted and needs no
+# approval at all. Every path here must be one the generator DECLARES — a skill
+# absent from its map is hand-authored content that stays governed, which is the
+# ruling's own limit and not a bug to route around.
+REGEN_PATHS="skills/objectstack-data/references/_index.md skills/objectstack-query/references/_index.md skills/objectstack-ui/references/_index.md skills/objectstack-api/references/_index.md"
+# shellcheck disable=SC2086
+REGEN_FILES="$(files_of $REGEN_PATHS)"
 
 F_UNAPPROVED="$(fixture governed-unapproved "$GOVERNED_FILES" "$NO_REVIEWS")"
 F_PINNED="$(fixture governed-pinned "$GOVERNED_FILES" "$(approved_at os-zhuang "$HEAD_SHA")")"
@@ -169,13 +173,47 @@ echo "== nothing governed in the diff: allowed, and no review is ever consulted 
 expect allow 'an ordinary diff enqueues freely' \
   "$(mcp $AUTO 14070)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_CLEAR"
 
-echo "== PURE REGENERATION clears with ZERO approvals — the register decides, not this hook =="
-# Real path, real lift (see the coupling note in this file's header): the #9866
-# row, byte-exact against its own generator recomputed on this tree. The hook
-# must never be what re-closes it (maintainer 2026-09-01: 纯生成的指针行 …
-# 不需要我审核吧).
-expect allow 'a governed-register path the generator certifies byte-exact, zero reviews' \
+echo "== PURE REGENERATION: the hook must AGREE with the register, never re-decide =="
+# The requirement (maintainer 2026-09-01: 纯生成的指针行 … 不需要我审核吧) is that
+# this hook never re-closes a zero-approval path the register clears. Pinned
+# against a REAL exception-row candidate, and pinned as AGREEMENT rather than as
+# a fixed verdict, for a reason this matrix learned the hard way: an earlier
+# revision hard-coded `expect allow` on the one row that was cheap to lift, that
+# row was RETIRED upstream the same day (its surface left the governed fence
+# entirely), and the case then failed for a reason that had nothing to do with
+# the hook. A verdict copied from the register is a second register.
+#
+# So: ask the register what it says about this path list on THIS tree, and
+# require the hook to answer the same way.
+#   exit 0 => lifted (the generator toolchain is present and the bytes match)
+#             => the hook MUST allow with zero reviews. This is the branch CI
+#                takes, where dependencies are installed.
+#   exit 3 => not lifted (fail-closed: no toolchain, or a hand edit)
+#             => the hook MUST refuse, exactly as the register asked.
+# Either way the property under test holds: the hook contributes no judgment of
+# its own about the exemption.
+# shellcheck disable=SC2086
+node "$repo_root/scripts/pm/check-governed-merges.mjs" --test $REGEN_PATHS >/dev/null 2>&1
+regen_rc=$?
+if [ "$regen_rc" -eq 0 ]; then
+  regen_want=allow
+  regen_branch='LIFTED — byte-exact regeneration, so zero approvals must pass (the toolchain is present here)'
+else
+  regen_want=block
+  regen_branch="NOT lifted (exit $regen_rc, fail-closed: no generator toolchain, or a hand edit) — the refusal must stand"
+fi
+printf '  ..   register verdict on the four %s: %s\n' 'skills/*/references/_index.md' "$regen_branch"
+expect "$regen_want" 'the hook agrees with the register about an exception-row candidate' \
   "$(mcp $AUTO 14070)" "OS_GOVERNED_ENQUEUE_FIXTURE=$F_REGEN"
+
+# ...and the structural half, which no fixture can go stale on: the ONLY branch
+# that can reach a refusal is the register's own "governed" exit code. Anything
+# the register clears leaves through `exit 0` before a single review is read.
+if grep -qE '^[[:space:]]*0\)[[:space:]]*exit 0' "$hook"; then
+  pass=$((pass + 1)); printf '  ok   wired  a cleared predicate verdict exits before any review is read\n'
+else
+  fail=$((fail + 1)); printf '  FAIL the hook no longer allows unconditionally on a cleared predicate verdict\n'
+fi
 
 echo "== the Bash spellings reach the same decision =="
 expect block 'gh pr merge <n> -R owner/repo' \
@@ -257,7 +295,7 @@ echo "== a generated-exception row on a repo with no checkout to recompute again
 # against another's files would be worse than not answering: fail open, say so.
 expect allow 'an exception-row path in a repo this container cannot resolve' \
   "$(mcp $AUTO 999 objectstack-ai cloud)" \
-  "OS_GOVERNED_ENQUEUE_FIXTURE=$(fixture cross-repo-regen "$(files_of skills/objectstack-spec/references/_index.md)" "$NO_REVIEWS")"
+  "OS_GOVERNED_ENQUEUE_FIXTURE=$(fixture cross-repo-regen "$(files_of skills/objectstack-data/references/_index.md)" "$NO_REVIEWS")"
 
 echo "== the deliberate exception switch =="
 expect allow 'OS_ALLOW_GOVERNED_ENQUEUE=1 on the blocking case' \
