@@ -18,6 +18,10 @@ describe('reference-integrity suite — membership', () => {
       'validateObjectReferences',
       'validateSearchableFields',
       'validateSortableFields',
+      // [#14107] The rest of the same list view's field surface — every
+      // field-naming position the two members above do not own. Placed beside
+      // them because the three walk the identical rungs.
+      'validateListViewFieldRefs',
       'validateActionNameRefs',
       'validatePageFieldBindings',
       'validateChartBindings',

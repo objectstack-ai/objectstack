@@ -29,6 +29,7 @@ import { runRuntimeAuthoringRules } from './runtime-gate.js';
 import { REFERENCE_INTEGRITY_RULES } from './reference-integrity-suite.js';
 import { SORT_FIELD_UNKNOWN, SORT_FIELD_UNSORTABLE } from './validate-sortable-fields.js';
 import { SEARCHABLE_FIELD_UNKNOWN } from './validate-searchable-fields.js';
+import { LIST_VIEW_FIELD_UNKNOWN } from './validate-list-view-field-refs.js';
 
 /** The live object universe the gate resolves against (`RuntimeStackContext.objects`). */
 const objects = [
@@ -127,6 +128,57 @@ describe('a flattened list overlay at the runtime publish gate (#9313)', () => {
     expect(errors, JSON.stringify(errors)).toEqual([]);
   });
 
+  // ── [#14107] the rest of the same overlay's field surface ──
+  //
+  // The two rules above own `sort` and `searchableFields`; every OTHER
+  // field-naming position on the same overlay was resolved by nothing, at this
+  // door as well as at the CLI. Same self rung, same skips, same binding
+  // order — these are the refusal/clean pair that distinguishes a real
+  // crossing from a dispatch-only no-op.
+
+  it('REFUSES a top-level `columns` entry that resolves to no field', () => {
+    const { errors } = gate(overlay({ columns: ['name', 'budgett'] }));
+    const f = errors.find((e) => e.rule === LIST_VIEW_FIELD_UNKNOWN);
+    expect(f, JSON.stringify(errors)).toBeDefined();
+    expect(f!.path).toBe('views[0].columns[1]');
+    expect(f!.where).toContain('flattened list overlay');
+  });
+
+  it('REFUSES a top-level `kanban.groupByField` that resolves to no field', () => {
+    const { errors } = gate(overlay({ kanban: { groupByField: 'statuss', columns: ['name'] } }));
+    const f = errors.find((e) => e.rule === LIST_VIEW_FIELD_UNKNOWN);
+    expect(f, JSON.stringify(errors)).toBeDefined();
+    expect(f!.path).toBe('views[0].kanban.groupByField');
+    expect(f!.message).toContain('Did you mean "status"?');
+  });
+
+  it('REFUSES a top-level `filter` key that resolves to no field', () => {
+    const { errors } = gate(overlay({
+      filter: [{ field: 'budget', operator: 'equals', value: 1 }],
+    }));
+    const f = errors.find((e) => e.rule === LIST_VIEW_FIELD_UNKNOWN);
+    expect(f, JSON.stringify(errors)).toBeDefined();
+    expect(f!.path).toBe('views[0].filter[0].field');
+  });
+
+  it('a fully bound overlay publishes clean across every one of those positions', () => {
+    const result = gate(overlay({
+      columns: ['name', { field: 'status' }],
+      filter: [{ field: 'status', operator: 'equals', value: 'open' }],
+      grouping: { fields: [{ field: 'status' }] },
+      rowColor: { field: 'status' },
+      kanban: { groupByField: 'status', columns: ['name'] },
+      hiddenFields: ['days_open'],
+    }));
+    expect(result.errors, JSON.stringify(result.errors)).toEqual([]);
+    expect(result.rulesRun).toContain('validateReferenceIntegrity');
+  });
+
+  it('a system column in a walked position publishes clean (skip ③)', () => {
+    const { errors } = gate(overlay({ columns: ['name', 'created_at'] }));
+    expect(errors, JSON.stringify(errors)).toEqual([]);
+  });
+
   // ── the granularity wall: exactly two members cross, nothing rides along ──
 
   it('does NOT refuse an overlay for a rowAction naming a stack-level action — no member rides along', () => {
@@ -178,9 +230,19 @@ describe('a flattened list overlay at the runtime publish gate (#9313)', () => {
     // precisely so a fourth crossing has to be argued here; this one's
     // false-positive measurement is `runtime-gate.view-page-refs.test.ts`,
     // which reproduces the phantom findings the collection removes.
+    // [#14107] The fourth crossing, argued here as this list demands. It is the
+    // same KIND of crossing as the first two — a list view's field references,
+    // resolved against `stack.objects`, the one collection every per-write
+    // snapshot carries — so it has no missing-collection false-positive
+    // channel to open; the controls directly below are its measurement, on the
+    // shape the door actually carries. Not crossing it would have been the
+    // #9313 failure inverted: the standalone list view a Studio tenant or an
+    // MCP/AI author writes goes through `PUT /api/v1/meta/view` and no CLI, so
+    // a build-time-only rule never reaches the author who made the typo.
     expect(crossed).toEqual([
       'validateSearchableFields',
       'validateSortableFields',
+      'validateListViewFieldRefs',
       'validateViewPageRefs',
     ]);
     // And every member still judges flow snapshots — the #4463 P1 surface is
