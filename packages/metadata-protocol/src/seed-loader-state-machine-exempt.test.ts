@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { SeedLoaderService } from './seed-loader';
+import { SeedLoaderService } from './seed-loader.js';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 
@@ -193,7 +193,7 @@ describe('seed loader — state_machine initialStates exemption (#3433)', () => 
     // fallback), its options must carry the exemption flag — that is what the
     // engine reads to skip the state_machine rule.
     const writeCalls = [
-      ...(engine.insertMany as any).mock.calls,
+      ...((engine as any).insertMany).mock.calls,
       ...(engine.insert as any).mock.calls,
     ].filter(([obj]) => obj === 'showcase_project');
     expect(writeCalls.length).toBeGreaterThan(0);

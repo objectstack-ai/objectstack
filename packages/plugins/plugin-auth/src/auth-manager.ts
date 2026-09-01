@@ -2101,9 +2101,10 @@ export class AuthManager {
         // resolved `baseURL` origin and treats `trustedOrigins` as purely
         // ADDITIVE, so an empty list and an omitted key are equivalent and
         // both leave exactly the deployment's own origin trusted; every other
-        // origin is refused with `403 INVALID_ORIGIN`. Measured against
-        // better-auth 1.7.1 (`getTrustedOrigins` in `dist/context/helpers.mjs`,
-        // `validateOrigin` in `dist/api/middlewares/origin-check.mjs`).
+        // origin is refused with `403 INVALID_ORIGIN`. Measured against the
+        // then-installed better-auth 1.7.1 (`getTrustedOrigins` in
+        // `dist/context/helpers.mjs`, `validateOrigin` in
+        // `dist/api/middlewares/origin-check.mjs`).
         if (
           process.env.NODE_ENV !== 'production' &&
           !origins.length && (!corsOrigin || corsOrigin === '*')

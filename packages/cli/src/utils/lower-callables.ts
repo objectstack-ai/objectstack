@@ -21,7 +21,32 @@
  * emitting it.
  */
 
-import { extractHookBody } from './extract-hook-body.js';
+import { extractHookBody, HookBodyExtractionError, type HookBodyRefusalKind } from './extract-hook-body.js';
+
+/**
+ * One recorded extraction refusal.
+ *
+ * `origin` and `reason` are unchanged — `os build`'s warn-and-bundle line,
+ * `--strict-body`'s diagnostic and the `--json` payload all read them.
+ * `kind` (#13651) is the classification the refusing rule already had and used
+ * to throw away at the catch below; `freeIdentifiers` is the list
+ * `detectFreeIdentifiers` had already computed. Both are ADDITIVE: nothing here
+ * changes which callables are bundled, or the exit code.
+ *
+ * `kind` is `'unknown'` only for a throw that is not a
+ * {@link HookBodyExtractionError} — i.e. a bug in the extractor rather than a
+ * verdict about the author's handler. It is deliberately NOT folded into
+ * `'unparseable'`: a consumer must be able to tell "the extractor refused this
+ * handler" from "the extractor itself fell over", and silently filing the
+ * second as the first is how an instrument failure gets read as an author
+ * verdict.
+ */
+export interface BodyExtractionWarning {
+  origin: string;
+  reason: string;
+  kind: HookBodyRefusalKind | 'unknown';
+  freeIdentifiers: readonly string[];
+}
 
 export interface LoweringResult {
   /** A deep-cloned, JSON-safe copy of the stack with handlers replaced by strings. */
@@ -33,7 +58,7 @@ export interface LoweringResult {
   /** Number of handlers that successfully emitted a metadata-only `body`. */
   bodyExtracted: number;
   /** Per-extraction failures (still emit handler ref + bundle, but warn). */
-  bodyExtractionWarnings: Array<{ origin: string; reason: string }>;
+  bodyExtractionWarnings: BodyExtractionWarning[];
 }
 
 type AnyFn = (...args: unknown[]) => unknown;
@@ -57,7 +82,7 @@ function uniqueName(base: string, taken: Set<string>): string {
 export function lowerCallables(input: Record<string, unknown>): LoweringResult {
   const functions: Record<string, AnyFn> = {};
   const taken = new Set<string>();
-  const warnings: Array<{ origin: string; reason: string }> = [];
+  const warnings: BodyExtractionWarning[] = [];
   let bodyExtracted = 0;
 
   // Try to extract a metadata-only body from a callable. Returns null if the
@@ -72,7 +97,17 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
       bodyExtracted += 1;
       return { language: 'js', source: ext.source, capabilities: ext.capabilities };
     } catch (err: any) {
-      warnings.push({ origin: originLabel, reason: err?.message ?? String(err) });
+      // ⛔ The catch STAYS. Deleting it would make every refusal fatal and take
+      // the LEGITIMATE fallback-to-bundling path down with the accidental one —
+      // the two share this catch, which is exactly why the refusal now arrives
+      // classified. Telling them apart is the consumer's job (`os lint`), not
+      // this function's: lowering keeps bundling both, at exit 0, unchanged.
+      warnings.push({
+        origin: originLabel,
+        reason: err?.message ?? String(err),
+        kind: err instanceof HookBodyExtractionError ? err.kind : 'unknown',
+        freeIdentifiers: err instanceof HookBodyExtractionError ? err.freeIdentifiers : [],
+      });
       return null;
     }
   }

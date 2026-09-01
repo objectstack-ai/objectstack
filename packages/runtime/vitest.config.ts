@@ -1,5 +1,38 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+// ── #13517: this suite asks the SchemaRegistry for quiet, DECLARATIVELY ─────
+//
+// Measured on THIS suite (one full `pnpm --filter @objectstack/runtime test`,
+// `origin/main` b1b7d6088a): 6,730 lines on the run's stdout, 1,155 of them
+// `[Registry] …`. 4,760 of the rest are the structured logger's `<ts> INFO …`
+// lines, which do not go through `console` at all and are NOT what this key
+// reaches (#13986).
+//
+// ⚠️ Read the share honestly, because this suite is NOT the dogfood one.
+// Against the console-carried population (1,957 lines) `[Registry]` is 1,155 —
+// **59%**, the largest single family but a long way from dogfood's 94.9%. The
+// remaining ~800 are a mixed tail this key cannot reach: `[sql-driver] while
+// creating/syncing table …` column reports, `[HonoServerPlugin] Server
+// stopped`, `Paged read of … is NOT deterministic`, `[action-audit] …` and
+// `[Protocol] DB hydration skipped …`. So the declaration below is worth its
+// line here, and it is also not the whole story here — quieting the rest is a
+// different question about those specific call sites, not a log level.
+//
+// `OS_REGISTRY_LOG` is `@objectstack/objectql`'s OWN published seam for that
+// verbosity (`SchemaRegistryOptions.logLevel` / `REGISTRY_LOG_LEVELS`,
+// registry.ts) — at `warn` the registry's private `log()` returns before
+// writing. What it does NOT silence is the diagnostics: the ADR-0005
+// `[Registry] Collision` lines go through a bare `console.warn` that the level
+// never gates, so a real shadowing still speaks here.
+//
+// ⛔ Two things this deliberately is NOT. It does not move the engine's
+// SHIPPED default (still `'info'` at objectql's registry.ts:1265, unchanged
+// for every production reader), and it does not make library code sniff
+// `process.env.VITEST` — a library that behaves differently under a test
+// runner would make every log reading in tests a reading of something other
+// than production. The request lives HERE, in the harness, where the test
+// author can see it.
+
 import { defineConfig } from 'vitest/config';
 import path from 'node:path';
 
@@ -120,6 +153,11 @@ export default defineConfig({
     // Mechanism + measured costs: examples/app-showcase/vitest.config.ts.
     // Enforced repo-wide by scripts/check-console-intercept-disarm.mjs.
     disableConsoleIntercept: true,
+    // #13517: quiet the registry's per-item registration chatter — the
+    // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
+    // default. Header docblock carries the measurement and the rationale,
+    // including the tail this key does NOT reach in this package.
+    env: { OS_REGISTRY_LOG: 'warn' },
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts'],
