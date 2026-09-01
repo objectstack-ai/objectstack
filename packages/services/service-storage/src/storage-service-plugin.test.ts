@@ -43,8 +43,18 @@ function makeCtx() {
   return ctx;
 }
 
-function makeFakeSettings(initialValues: Record<string, any>) {
+// The real service resolves every key to a full `ResolvedSettingValue`
+// (`{ value, source, … }`) — a fake that dropped `source` would model the
+// exact defect #5536 fixed. Default `'global'` = an admin-saved row, which is
+// what every pre-existing test here meant; the `sources` overrides pin the
+// schema-default (`'default'`) and missing-source (`null` → key omitted)
+// shapes per key.
+function makeFakeSettings(
+  initialValues: Record<string, any>,
+  initialSources?: Record<string, string | null>,
+) {
   let values = { ...initialValues };
+  const sources = initialSources;
   const subs: Array<(ns: string) => void> = [];
   const actions = new Map<string, (input: any) => Promise<any>>();
   return {
@@ -52,7 +62,10 @@ function makeFakeSettings(initialValues: Record<string, any>) {
     get values() { return values; },
     createClient: (_ns: string) => ({}),
     getNamespace: async (_ns: string) => ({
-      values: Object.fromEntries(Object.entries(values).map(([k, v]) => [k, { value: v }])),
+      values: Object.fromEntries(Object.entries(values).map(([k, v]) => {
+        const src = sources && k in sources ? sources[k] : 'global';
+        return [k, src === null ? { value: v } : { value: v, source: src }];
+      })),
     }),
     subscribe: (ns: string, fn: () => void) => { subs.push((n) => { if (n === ns) fn(); }); },
     registerAction: (ns: string, id: string, fn: (input: any) => Promise<any>) => {
@@ -101,6 +114,9 @@ describe('StorageServicePlugin: settings live-wire', () => {
     expect(alias).toBe(canonical);
   });
 
+  // #5536 control: an admin-saved row (`source: 'global'`, the fake's
+  // default) is "configured" under BOTH the old value-presence criterion and
+  // the new authored-source one — behaviour must stay byte-identical.
   it('swaps the inner adapter when storage settings change', async () => {
     const dirA = await fs.mkdtemp(join(tmpdir(), 'oss-a-'));
     const dirB = await fs.mkdtemp(join(tmpdir(), 'oss-b-'));
@@ -150,12 +166,101 @@ describe('StorageServicePlugin: settings live-wire', () => {
     expect(proxy.getInner()).toBe(before);
   });
 
+  // ── #5536: only an AUTHORED value may move the backing store ─────────────
+  //
+  // The two criteria — old "any value non-empty" and new
+  // "source !== 'default'" — AGREE whenever an admin actually saved a value,
+  // so the tests below sit deliberately on the disagreement: a non-empty
+  // value whose source says nobody authored it.
+
+  it('keeps the constructor adapter when every value is a schema default (#5536)', async () => {
+    const dirA = await fs.mkdtemp(join(tmpdir(), 'oss-default-'));
+    const plugin = new StorageServicePlugin({
+      adapter: 'local',
+      local: { rootDir: dirA },
+      registerRoutes: false,
+    });
+    const ctx = makeCtx();
+    // Non-empty values (the manifest defaults) that nobody ever authored:
+    // the old "value present" criterion read this as configured and swapped
+    // the deployment's adapter to the schema default; `source: 'default'`
+    // says no one made that decision.
+    const settings = makeFakeSettings(
+      { adapter: 'local', local_root: './.objectstack/data/uploads', max_upload_mb: 100 },
+      { adapter: 'default', local_root: 'default', max_upload_mb: 'default' },
+    );
+    ctx.registerService('settings', settings);
+
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    const proxy = ctx.getService('storage') as SwappableStorageService;
+    const before = proxy.getInner();
+    await ctx._flushReady();
+    expect(proxy.getInner()).toBe(before);
+    expect(ctx._logs.warn.join('\n')).not.toContain('adapter swapped');
+  });
+
+  it('an authored save that touched no adapter key does not open the swap gate (#5536)', async () => {
+    // The criterion is per-decision, exactly as plugin-email applies it per
+    // key: an admin who saved only the upload limit did not author the
+    // schema-default adapter, so the constructor's store stays.
+    const dirA = await fs.mkdtemp(join(tmpdir(), 'oss-limits-'));
+    const plugin = new StorageServicePlugin({
+      adapter: 'local',
+      local: { rootDir: dirA },
+      registerRoutes: false,
+    });
+    const ctx = makeCtx();
+    const settings = makeFakeSettings(
+      { adapter: 'local', local_root: './.objectstack/data/uploads', max_upload_mb: 50 },
+      { adapter: 'default', local_root: 'default', max_upload_mb: 'global' },
+    );
+    ctx.registerService('settings', settings);
+
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    const proxy = ctx.getService('storage') as SwappableStorageService;
+    const before = proxy.getInner();
+    await ctx._flushReady();
+    expect(proxy.getInner()).toBe(before);
+  });
+
+  it('a snapshot with no source at all lands on the no-swap side (#5536 reverse control)', async () => {
+    // An un-upgraded / non-conforming settings implementation that omits
+    // `source` must land on the conservative side, and the conservative side
+    // here is the one that does NOT move the backing store on unattributable
+    // authorship: files stay reachable through the adapter the deployment
+    // declared, and a real admin save (which always carries `source`) can
+    // still trigger the swap via the subscription.
+    const dirA = await fs.mkdtemp(join(tmpdir(), 'oss-nosrc-a-'));
+    const dirB = await fs.mkdtemp(join(tmpdir(), 'oss-nosrc-b-'));
+    const plugin = new StorageServicePlugin({
+      adapter: 'local',
+      local: { rootDir: dirA },
+      registerRoutes: false,
+    });
+    const ctx = makeCtx();
+    const settings = makeFakeSettings(
+      { adapter: 'local', local_root: dirB },
+      { adapter: null, local_root: null },
+    );
+    ctx.registerService('settings', settings);
+
+    await plugin.init(ctx);
+    await plugin.start(ctx);
+    const proxy = ctx.getService('storage') as SwappableStorageService;
+    const before = proxy.getInner();
+    await ctx._flushReady();
+    expect(proxy.getInner()).toBe(before);
+  });
+
   // ── #4096: the swap decision, and what it says out loud ──────────────────
   //
-  // `hasAny` is true on every boot once the settings service has persisted its
-  // own defaults, so this used to rebuild and swap the adapter unconditionally
-  // and warn that "existing files were NOT migrated" — about a swap from an
-  // adapter to an identically-configured one, on a healthy server, forever.
+  // The old value-presence gate (now the #5536 authored gate) was true on
+  // every boot once an admin save had persisted the namespace, so this used
+  // to rebuild and swap the adapter unconditionally and warn that "existing
+  // files were NOT migrated" — about a swap from an adapter to an
+  // identically-configured one, on a healthy server, forever.
 
   it('neither swaps nor warns when persisted settings match the running adapter', async () => {
     const dir = await fs.mkdtemp(join(tmpdir(), 'oss-same-'));
