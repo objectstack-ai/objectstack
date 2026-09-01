@@ -33,8 +33,11 @@
 // went unchecked until #4080 mapped the asymmetry (a strict removal takes the key
 // out of the walked shape, so the forward pass just stops asking). See orphans.mts.
 //
-// Statuses: live | experimental | planned | dead.  Resolution per property:
+// Statuses: live | experimental | planned | dead | live-elsewhere.  Resolution per property:
 //   ledger entry → spec `.describe()` marker ([EXPERIMENTAL — not enforced]) → UNCLASSIFIED
+// (`live-elsewhere` — dead here by measurement, genuinely enforced in a sibling
+// repo — is ledger-entry-only and carries its own executable criteria; see
+// elsewhere.mts and the wiring in classify(), #13483.)
 //
 // PROVE-IT-RUNS (ADR-0054): a `live` entry may carry a `proof` (a dogfood test
 // reference `<file>#<proof-id>`). For the HIGH-RISK classes bound this phase
@@ -163,6 +166,13 @@ import {
   type VerificationReport,
 } from './verification.mts';
 import { checkCitationLines, checkEvidence, checkEvidenceAnchors, countLines, type EvidenceScan } from './evidence.mts';
+import {
+  ELSEWHERE_EXPIRED_GUIDANCE,
+  ELSEWHERE_GUIDANCE,
+  ELSEWHERE_MAX_AGE_DAYS,
+  LIVE_ELSEWHERE_STATUS,
+  checkElsewhereEntry,
+} from './elsewhere.mts';
 import {
   KEY_MENTION_GUIDANCE,
   findUnanchoredCitations,
@@ -358,8 +368,13 @@ function markerStatus(d: string): string | null {
 //
 // So the scan reads every status whose evidence is a POINTER AT CODE, whatever
 // verdict that pointer supports: `live` (a consumer reads the key), `planned`
-// (a refuser rejects it), `experimental` (declared, not enforced).
-const EVIDENCE_SCANNED_STATUSES = new Set<string>(['live', 'planned', 'experimental']);
+// (a refuser rejects it), `experimental` (declared, not enforced), and
+// `live-elsewhere` (#13483 — a sibling repo's enforcer; its load-bearing
+// pointer is FOREIGN, which the scan counts and never resolves, and any
+// repo-local path such an entry also cites is held to the same standard as
+// everyone else's. What makes the foreign pointer REQUIRED rather than merely
+// counted is the elsewhere check in classify(), not this set).
+const EVIDENCE_SCANNED_STATUSES = new Set<string>(['live', 'planned', 'experimental', 'live-elsewhere']);
 
 // `dead` is OUT, and this is that boundary written into the code rather than
 // left in a PR residual — the half of #13041 that is worth doing whichever way
@@ -593,6 +608,15 @@ const report: any = {
   anchorsChecked: 0, // resolvable local `path#symbol` anchors asked
   anchorsUnresolved: [] as string[], // ...of which this many name a symbol the file does not contain — FAILS
   anchorsMalformed: [] as string[], // an anchor that is not one identifier — also FAILS (silent-degrade guard)
+  // The `live-elsewhere` criteria (#13483) — dead here, enforced in a sibling
+  // repo. The gate cannot resolve the foreign file, so it holds the claim's
+  // SHAPE (foreign pointer, cross-repo scope, dated attestation) and its CLOCK
+  // (the attestation expires). Two lists because the repairs differ in kind:
+  // a malformed row needs writing, an expired one needs a RE-READING of the
+  // foreign enforcer — see elsewhere.mts.
+  elsewhereChecked: 0, // ledger rows carrying the live-elsewhere verdict
+  elsewhereMalformed: [] as string[], // ...missing a foreign pointer / cross-repo scope / verifiedAt — FAILS
+  elsewhereExpired: [] as string[], // ...whose attestation outlived the window — FAILS, demanding re-attestation
 };
 
 // Every classified entry, for the `verifiedAt` fold below. Collected during the
@@ -721,6 +745,27 @@ function classify(type: string, path: string, status: string, led: any, cat: any
     unanchoredObserved.push(
       ...findUnanchoredCitations(`${type}/${path}`, leafKeyOf(path), resolved, contentOf),
     );
+  }
+  // ── the live-elsewhere criteria (#13483) ──
+  // Everything above judges what the entry cites; this judges whether a
+  // live-elsewhere entry carries what its verdict REQUIRES: a foreign-realm
+  // pointer at the enforcer, a declared cross-repo scope, and a dated, unexpired
+  // attestation. Run per row rather than per evidence string, because the
+  // failure this exists to catch is precisely the entry that carries NOTHING —
+  // a bare status would otherwise be the unverified label the card names. It
+  // also deliberately reaches a child inheriting `childrenDefault:
+  // "live-elsewhere"` with no row of its own: a blanket elsewhere-claim over
+  // undated children is the same unfalsifiable shape.
+  if (status === LIVE_ELSEWHERE_STATUS && led !== null) {
+    report.elsewhereChecked++;
+    const found = checkElsewhereEntry({
+      key: `${type}/${path}`,
+      evidence: led?.evidence,
+      evidenceScope: led?.evidenceScope,
+      verifiedAt: led?.verifiedAt,
+    });
+    report.elsewhereMalformed.push(...found.malformed);
+    report.elsewhereExpired.push(...found.expired);
   }
   // ── ADR-0054 prove-it-runs ──
   const boundClass = BOUND_PROOF_PATHS.get(`${type}/${path}`);
@@ -1008,6 +1053,15 @@ const failed =
   // for exactly that citation.
   report.anchorsUnresolved.length > 0 ||
   report.anchorsMalformed.length > 0 ||
+  // ...and the live-elsewhere criteria (#13483). Red from day one on the
+  // zero-census argument: the status and its checks land in one change, so the
+  // gate starts green over a population of exactly the rows migrated with it,
+  // and only a row that drops its criteria — or an attestation that expires —
+  // can red it. Expiry failing the build is the point, not a bug: it is the
+  // only mechanical event this repo can generate about a claim it cannot
+  // re-measure locally (see elsewhere.mts).
+  report.elsewhereMalformed.length > 0 ||
+  report.elsewhereExpired.length > 0 ||
   // ...and the within-file half (#11457). Red rather than ⚠ on the strength of
   // the census that designed it: the signal was measured over the whole ledger
   // BEFORE it was switched on, the seven real rots it found were repaired, the
@@ -1164,6 +1218,26 @@ if (asJson) {
       '   overstated for free.',
     );
   }
+  // The live-elsewhere population (#13483). Printed every run, the two-number
+  // discipline one more time: "no findings" over zero rows is also what a
+  // check wired to nothing prints, so the row count is published beside it.
+  console.log(
+    `live-elsewhere: ${report.elsewhereChecked} entr(ies) carry the verdict (dead here, enforced in a sibling repo), ` +
+    `${report.elsewhereChecked - report.elsewhereMalformed.length - report.elsewhereExpired.length} with a foreign pointer, ` +
+    `cross-repo scope, and an attestation ≤${ELSEWHERE_MAX_AGE_DAYS}d old` +
+    (report.elsewhereMalformed.length ? `, ${report.elsewhereMalformed.length} MALFORMED` : '') +
+    (report.elsewhereExpired.length ? `, ${report.elsewhereExpired.length} EXPIRED` : '') + '.',
+  );
+  if (report.elsewhereMalformed.length) {
+    console.log(`\n✗ ${report.elsewhereMalformed.length} live-elsewhere entr(ies) missing the criteria the verdict requires:`);
+    report.elsewhereMalformed.forEach((s: string) => console.log(`    ${s}`));
+    console.log('\n' + ELSEWHERE_GUIDANCE.map((l) => (l ? `   ${l}` : '')).join('\n'));
+  }
+  if (report.elsewhereExpired.length) {
+    console.log(`\n✗ ${report.elsewhereExpired.length} live-elsewhere attestation(s) older than the ${ELSEWHERE_MAX_AGE_DAYS}d window — re-attestation required:`);
+    report.elsewhereExpired.forEach((s: string) => console.log(`    ${s}`));
+    console.log('\n' + ELSEWHERE_EXPIRED_GUIDANCE.map((l) => (l ? `   ${l}` : '')).join('\n'));
+  }
   if (report.staleEvidence.length) {
     console.log(`\n✗ ${report.staleEvidence.length} ${EVIDENCE_SCANNED_LABEL} entr(ies) cite a file that is missing from THIS repo:`);
     report.staleEvidence.forEach((s: string) => console.log(`    ${s}`));
@@ -1250,7 +1324,10 @@ if (asJson) {
       '   Fix the VALUE in packages/spec/liveness/<type>.json — it is almost always a\n' +
       "   misspelling of the verdict the author meant. ⛔ Never widen STATUS_COLUMNS to\n" +
       '   accept it: that vocabulary is what the generated artifact publishes as columns,\n' +
-      '   and a fifth name there changes the artifact (see the totals failure below).',
+      '   and a new name there changes the artifact (see the totals failure below). A\n' +
+      '   DELIBERATE vocabulary change is a different act with its own checklist —\n' +
+      "   `live-elsewhere` (#13483) is the precedent: the column sites, both evidence-scan\n" +
+      '   sets, and the criteria the new verdict must carry, all moved together.',
     );
   }
   if (report.ungoverned.length) {
@@ -1478,7 +1555,8 @@ if (asJson) {
       `every container inheritance is declared, every ${EVIDENCE_SCANNED_LABEL} entry's repo-local evidence path ` +
       'resolves, every `path:NNN` citation names a line that file actually has, every ' +
       '`path#symbol` anchor names a symbol its file contains, and every cited ' +
-      'file names the property it is evidence for (or is a recorded exemption), all bound ' +
+      'file names the property it is evidence for (or is a recorded exemption), every ' +
+      'live-elsewhere verdict points at a named foreign enforcer under an unexpired attestation, all bound ' +
       'high-risk proofs resolve, every dogfood `@proof:` tag on disk is registered in ' +
       'proof-registry.mts, and the README state table carries a row ' +
       `for each of the ${report.readmeRowCount} governed type(s) it claims to index.`,

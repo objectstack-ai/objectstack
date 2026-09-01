@@ -61,6 +61,13 @@ function fakeEngine() {
       unavailable.delete(name);
       cleared.push(name);
     },
+    // #13578 — the double implements the eviction door for the same reason it
+    // mirrors `registerDriver`'s skip-if-present above: a fake that silently
+    // lacks a member the seam declares turns every assertion about that member
+    // into a vacuous pass. `ConnectionEngineLike` is `Partial<…>`, so an absent
+    // `unregisterDriver` would make the optional call a no-op and the eviction
+    // pins below would hold against a service that evicted nothing.
+    unregisterDriver: (name) => drivers.delete(name),
   };
   return engine;
 }
@@ -989,6 +996,82 @@ describe('retained connection state (framework#3827)', () => {
     await service.disconnect('analytics');
     expect(service.getConnectionState('analytics')).toBeUndefined();
     expect(engine!.unavailable.has('analytics')).toBe(false);
+  });
+
+  // ── #13578: the registry entries this service is responsible for removing ──
+
+  it('#13578 — disconnect() EVICTS the driver, not merely the verdict', async () => {
+    // The reported defect at this seam. `disconnect()` closed the pool and
+    // dropped the retained state, but left the driver instance registered, so
+    // `checkDriversHealth()` — and through it `GET /api/v1/ready` — kept naming
+    // a datasource whose record the admin door had already deleted.
+    const { service, engine } = svc({ factory: fakeFactory() });
+    await service.connect(analytics, { context: { trigger: 'runtime-admin' } });
+    expect(engine!.drivers.has('analytics')).toBe(true);
+
+    await service.disconnect('analytics');
+
+    expect(engine!.drivers.has('analytics')).toBe(false);
+  });
+
+  it('#13578 — evicts ONLY the named datasource', async () => {
+    // Positive control: an eviction that cleared the registry would pass the
+    // pin above and fail this one.
+    const { service, engine } = svc({ factory: fakeFactory() });
+    await service.connect({ ...analytics, name: 'keep' }, { context: { trigger: 'runtime-admin' } });
+    await service.connect({ ...analytics, name: 'drop' }, { context: { trigger: 'runtime-admin' } });
+
+    await service.disconnect('drop');
+
+    expect(engine!.drivers.has('drop')).toBe(false);
+    expect(engine!.drivers.has('keep')).toBe(true);
+  });
+
+  it('#13578 — a connect that throws AFTER registering rolls the registration back', async () => {
+    // The failed-start path the card asked to be walked. Registration happens
+    // partway through `attemptConnect`, so a throw after it used to return
+    // `failed-degraded` while leaving a live entry behind: a datasource the
+    // admin list reports as FAILED whose driver the readiness probe still pings
+    // — an orphan no door could reach.
+    const engine = fakeEngine();
+    engine.registerDatasourceDef = () => {
+      throw new Error('boom — a step after registerDriver failed');
+    };
+    const service = new DatasourceConnectionService({
+      factory: () => fakeFactory(),
+      engine: () => engine,
+    });
+
+    const result = await service.connect(analytics, { context: { trigger: 'runtime-admin' } });
+
+    expect(result.status).toBe('failed-degraded');
+    expect(engine.drivers.has('analytics')).toBe(false);
+    // The rollback must NOT swallow the diagnosis: eviction deliberately leaves
+    // `unavailableDatasources` alone, and the mark is written after it.
+    expect(engine.unavailable.get('analytics')?.kind).toBe('failed');
+  });
+
+  it('#13578 — the rollback never evicts a driver this attempt did not register', async () => {
+    // `registerDriver` keeps the incumbent when a name is already held, so
+    // "we called register" is not evidence that "we registered". Rolling back
+    // on that basis would let one datasource's failed connect evict another
+    // owner's live driver — a worse defect than the leak.
+    const engine = fakeEngine();
+    engine.drivers.set('analytics', { name: 'analytics' });
+    engine.registerDatasourceDef = () => {
+      throw new Error('boom');
+    };
+    const service = new DatasourceConnectionService({
+      factory: () => fakeFactory(),
+      engine: () => engine,
+    });
+
+    // `already-registered` short-circuits before the build, so force the path
+    // by asking for the default-driver branch, whose guard tests for A default
+    // rather than for THIS name.
+    await service.connect(analytics, { context: { trigger: 'runtime-admin' }, asDefault: true });
+
+    expect(engine.drivers.get('analytics')).toEqual({ name: 'analytics' });
   });
 
   it('lists every retained verdict for the admin surface', async () => {

@@ -4,8 +4,10 @@ import { z } from 'zod';
 import { CronExpressionInputSchema } from '../shared/expression.zod';
 
 /**
+ * @module system/cache
+ *
  * Application-Level Cache Protocol
- * 
+ *
  * Multi-tier caching strategy for application data.
  * Supports Memory, Redis, Memcached, and CDN.
  * 

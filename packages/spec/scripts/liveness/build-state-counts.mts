@@ -113,7 +113,7 @@ const rows = foldStateCounts(Object.keys(types), Object.fromEntries(
 // The header's rule is that a RED gate is not fatal here — the gate is red
 // precisely when this artifact needs rewriting. This failure is the exception,
 // and it is the same exception the unparseable report above already carves out:
-// there is nothing to rewrite. The fold that produced `rows` reads four status
+// there is nothing to rewrite. The fold that produced `rows` reads the published status
 // names and drops everything else, so writing now would publish an understated
 // `classified` — and the gate's freshness leg would then compare those bytes
 // against a re-render of the SAME understated fold and call it current. A stale
@@ -134,7 +134,7 @@ if (totalErrors.length) {
 const rendered = renderStateCounts(rows);
 writeFileSync(join(ledgerRoot, STATE_COUNTS_FILE), rendered);
 
-const total = rows.reduce((a, r) => a + r.live + r.experimental + r.dead + r.planned, 0);
+const total = rows.reduce((a, r) => a + r.live + r.experimental + r['live-elsewhere'] + r.dead + r.planned, 0);
 console.log(`✓ wrote ${STATE_COUNTS_PATH}`);
 console.log(`  ${rows.length} governed type(s), ${total} classified propert(ies).`);
 

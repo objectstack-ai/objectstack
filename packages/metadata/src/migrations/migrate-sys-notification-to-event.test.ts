@@ -152,3 +152,134 @@ describe('migrateSysNotificationToEvent', () => {
         expect(result.error).toContain('.raw');
     });
 });
+
+// ---------------------------------------------------------------------------
+// [#13998] What this migration WRITES, when the legacy row hands out a `Date`.
+//
+// `selectLegacyRows` reads through `driver.raw`/`execute` — a door that does
+// not run `formatOutput`, so none of its repairs apply. On SQLite the legacy
+// stamps come back as canonical ISO TEXT and `String(row.created_at)` is the
+// IDENTITY, which is why every case above stayed green while the defect was
+// live. On Postgres and MySQL an instant column materialises as a JS `Date`
+// (pinned in `driver-sql/src/sql-driver-13567-audit-stamp-materialisation.test.ts`),
+// and this migration is one-way: whatever spelling lands is what the platform
+// carries afterwards.
+//
+// `@objectstack/metadata` has no driver dependency and must not grow one — the
+// layering runs the other way — so, exactly like the OCC seam's own regression
+// suite, the discriminating input here is a HAND-MADE `Date`. That is the whole
+// point of these cases: they break the SQLite identity the cases above rely on.
+// ---------------------------------------------------------------------------
+
+/** The instant from the production report, kept verbatim (#13567 / #13382). */
+const REPORTED_INSTANT = '2026-08-30T10:19:25.947Z';
+/** A second instant, so the receipt's `at` cannot pass by matching `created_at`. */
+const REPORTED_READ_INSTANT = '2026-08-31T02:03:04.567Z';
+
+/** Canonical audit-timestamp text — what SQLite stores and what must be written. */
+const ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+/**
+ * Run `body` with the process pinned to `tz`, then restore.
+ *
+ * Forced rather than required so these cases are non-vacuous on any runner:
+ * Test Core runs at UTC, a developer runs at whatever their laptop is set to.
+ * Restoring rather than assuming matters because vitest reuses a worker across
+ * files — a leaked `TZ` would silently re-zone whatever runs next in this
+ * process. Mirrors `underProcessZone` in the driver-side pin.
+ */
+async function underProcessZone<T>(tz: string, body: () => Promise<T> | T): Promise<T> {
+    const previous = process.env.TZ;
+    process.env.TZ = tz;
+    try {
+        return await body();
+    } finally {
+        if (previous === undefined) delete process.env.TZ;
+        else process.env.TZ = previous;
+    }
+}
+
+describe('#13998 the timestamp spelling written into the new rows', () => {
+    it('control — `String(Date)` is NOT the canonical spelling (the input discriminates)', async () => {
+        const value = new Date(REPORTED_INSTANT);
+        expect(value.getMilliseconds(), 'the fixture is vacuous without sub-second digits').toBe(947);
+
+        const spelled = await underProcessZone('Asia/Shanghai', () => String(value));
+        // The prefix only: the trailing `(China Standard Time)` is the one
+        // implementation-defined part of `toString`.
+        expect(spelled.startsWith('Sun Aug 30 2026 18:19:25 GMT+0800')).toBe(true);
+        // Whole seconds in the PROCESS zone: the milliseconds are gone.
+        expect(Date.parse(spelled)).toBe(value.getTime() - value.getMilliseconds());
+        expect(spelled).not.toBe(REPORTED_INSTANT);
+        expect(spelled).not.toMatch(ISO_Z);
+        // …and the canonical rendering of the same instant is zone-independent.
+        expect(value.toISOString()).toBe(REPORTED_INSTANT);
+    });
+
+    it('canonicalises a `Date` created_at/read_at into ISO on inbox, receipt and receipt.at', async () => {
+        const createdAt = new Date(REPORTED_INSTANT);
+        const readAt = new Date(REPORTED_READ_INSTANT);
+        const d = fakeDriver([
+            {
+                id: 'n1', recipient_id: 'u1', type: 'mention', title: 'You were mentioned',
+                body: 'hi', url: '/x', actor_name: 'Ada', is_read: 1,
+                // The discriminating input: what Postgres/MySQL actually hand out.
+                read_at: readAt, created_at: createdAt, organization_id: 'org_1',
+            },
+        ]);
+        const e = fakeEngine();
+
+        const result = await underProcessZone('Asia/Shanghai', () =>
+            migrateSysNotificationToEvent({ driver: d.driver, data: e.engine }));
+
+        expect(result.status).toBe('migrated');
+        expect(result.migrated).toBe(1);
+
+        const inbox = e.inserts.find((i) => i.object === 'sys_inbox_message')!;
+        const receipt = e.inserts.find((i) => i.object === 'sys_notification_receipt')!;
+
+        // Every written stamp is canonical ISO-Z text — not a `Date`, and not a
+        // `Date.prototype.toString` rendering carrying the migrating host's zone.
+        for (const [where, written] of [
+            ['inbox.created_at', inbox.row.created_at],
+            ['receipt.created_at', receipt.row.created_at],
+            ['receipt.at', receipt.row.at],
+        ] as const) {
+            expect(typeof written, `${where} must be written as text`).toBe('string');
+            expect(written as string, `${where} must be canonical ISO-Z`).toMatch(ISO_Z);
+            // The zone the OLD spelling would have baked in is absent.
+            expect(written as string, `${where} must not carry a GMT offset`).not.toContain('GMT');
+        }
+
+        // The instants themselves are preserved to the millisecond — the half
+        // `String(Date)` silently dropped.
+        expect(inbox.row.created_at).toBe(REPORTED_INSTANT);
+        expect(receipt.row.created_at).toBe(REPORTED_INSTANT);
+        expect(receipt.row.at).toBe(REPORTED_READ_INSTANT);
+        // …and `at` is the READ stamp, not `created_at` echoed back.
+        expect(receipt.row.at).not.toBe(receipt.row.created_at);
+
+        // The zone was restored rather than leaked into whatever runs next.
+        expect(process.env.TZ).not.toBe('Asia/Shanghai');
+    });
+
+    it('leaves canonical ISO text exactly as it found it (the SQLite path is unchanged)', async () => {
+        const d = fakeDriver([
+            {
+                id: 'n1', recipient_id: 'u1', type: 'mention', title: 'hi', body: null,
+                url: null, actor_name: null, is_read: 1, read_at: REPORTED_READ_INSTANT,
+                created_at: REPORTED_INSTANT, organization_id: 'org_1',
+            },
+        ]);
+        const e = fakeEngine();
+
+        const result = await migrateSysNotificationToEvent({ driver: d.driver, data: e.engine });
+
+        expect(result.status).toBe('migrated');
+        const inbox = e.inserts.find((i) => i.object === 'sys_inbox_message')!;
+        const receipt = e.inserts.find((i) => i.object === 'sys_notification_receipt')!;
+        expect(inbox.row.created_at).toBe(REPORTED_INSTANT);
+        expect(receipt.row.created_at).toBe(REPORTED_INSTANT);
+        expect(receipt.row.at).toBe(REPORTED_READ_INSTANT);
+    });
+});

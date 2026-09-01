@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { retiredKey } from './retired-key';
 
 /**
+ * @module shared/mapping
+ *
  * Base Field Mapping Protocol
  *
  * Shared by: Connector
