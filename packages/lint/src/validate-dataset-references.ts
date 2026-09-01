@@ -118,12 +118,11 @@
 import { walkFilterFieldKeys } from './filter-walk.js';
 import {
   RELATIONSHIP_FIELD_TYPES,
+  describeFieldPathVerdict,
   indexObjectGraph,
   isUnjudgeable,
-  listNames,
+  joinablePrefixes,
   resolveFieldPath,
-  suggestName,
-  type FieldPathVerdict,
   type ObjectGraph,
 } from './object-graph.js';
 
@@ -170,72 +169,6 @@ function asArray(v: unknown): AnyRec[] {
     return Object.entries(v as AnyRec).map(([name, def]) => ({ name, ...(def as AnyRec) }));
   }
   return [];
-}
-
-/**
- * The relationship prefixes a dataset declared as joinable.
- *
- * ADR-0021: *"Declaring `a.b` implicitly includes the intermediate `a`."* So
- * every PREFIX of every declared path is joinable, not only the paths as
- * written — which is why this expands rather than reading `include` verbatim.
- */
-function joinablePrefixes(include: unknown): ReadonlySet<string> {
-  const prefixes = new Set<string>();
-  if (!Array.isArray(include)) return prefixes;
-  for (const entry of include) {
-    if (typeof entry !== 'string' || !entry) continue;
-    const segments = entry.split('.');
-    for (let i = 1; i <= segments.length; i++) {
-      prefixes.add(segments.slice(0, i).join('.'));
-    }
-  }
-  return prefixes;
-}
-
-/**
- * Turn a resolution verdict into the message half of an existence finding, or
- * `undefined` when the verdict is one no rule may report.
- *
- * Shared by the three positions that resolve a field PATH (dimension, measure,
- * filter key) so they cannot drift into three different accounts of the same
- * miss. The caller supplies `subject` — how the position is named in prose —
- * and owns the rule id, the path and the hint's prescription.
- */
-function existenceMessage(
-  verdict: FieldPathVerdict,
-  path: string,
-  subject: string,
-): { message: string; detail: string } | undefined {
-  switch (verdict.kind) {
-    case 'ok':
-    case 'unknowable':
-    case 'hop-untargeted':
-      return undefined;
-    case 'hop-unknown':
-      return {
-        message:
-          `${subject} "${path}" traverses "${verdict.segment}", which is not a field on object ` +
-          `"${verdict.object}".${suggestName(verdict.segment, verdict.candidates)}`,
-        detail: `Fields on "${verdict.object}": ${listNames(verdict.candidates)}.`,
-      };
-    case 'hop-not-relationship':
-      return {
-        message:
-          `${subject} "${path}" traverses "${verdict.segment}", which is a` +
-          `${verdict.type ? ` \`${verdict.type}\`` : 'n ordinary'} field on object ` +
-          `"${verdict.object}" and not a relationship — there is nothing to join through.`,
-        detail:
-          `Only ${[...RELATIONSHIP_FIELD_TYPES].sort().join(' / ')} fields are traversable ` +
-          `(ADR-0021 derives every join from the object graph; you never write an ON clause).`,
-      };
-    case 'field-unknown':
-      return {
-        message:
-          `${subject} "${path}" is not a field on object "${verdict.object}".` +
-          `${suggestName(verdict.field, verdict.candidates)}`,
-        detail: `Fields on "${verdict.object}": ${listNames(verdict.candidates)}.`,
-      };
-  }
 }
 
 /** The shared consequence sentence — why an unresolved path is not merely inert. */
@@ -309,7 +242,7 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
         return;
       }
 
-      const account = existenceMessage(verdict, entry, `include[${ii}]`);
+      const account = describeFieldPathVerdict(verdict, entry, `include[${ii}]`);
       if (!account) return;
       findings.push({
         severity: 'error',
@@ -342,7 +275,7 @@ export function validateDatasetReferences(stack: AnyRec): DatasetRefFinding[] {
       const verdict = resolveFieldPath(graph, object, written);
       if (isUnjudgeable(verdict) || !verdict) return;
 
-      const account = existenceMessage(verdict, written, subject);
+      const account = describeFieldPathVerdict(verdict, written, subject);
       if (account) {
         findings.push({
           severity: 'error',
