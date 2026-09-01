@@ -75,6 +75,12 @@ export type {
   ProbeInput,
 } from './datasource-admin-service.js';
 
+// Which update actually changes what the live pool was built from (#13804) —
+// exported so a host wiring its own `reregisterPool` seam asks the same
+// question the shipped update path asks, rather than re-deriving the set.
+export { datasourceConnectivityChanged } from './datasource-connectivity-change.js';
+export type { ConnectivityBearingFields } from './datasource-connectivity-change.js';
+
 // Kernel plugin (registers the `'datasource-admin'` service).
 export { DatasourceAdminServicePlugin } from './datasource-admin-plugin.js';
 export type {
