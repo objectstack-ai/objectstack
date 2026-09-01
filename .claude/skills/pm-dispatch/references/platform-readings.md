@@ -144,10 +144,10 @@
   才验」:归零下空结果与真无重复逐字节同形,读作「搜过了,没有」⇒ 重复卡照开、空车道
   照停(实测:控制词对一张刚派发几分钟的卡回 0)。控制词回 0 ⇒ 本会话 search 已坏,**立刻
   换通道,⛔ 不重试**(重试只烧配额);换哪条按上面的探针与降级梯 —— 探针绿走 **REST 列
-  表端点** `GET /repos/{o}/{r}/issues?state=open&labels=a,b&per_page=N`(core 桶、结果**完整**、
-  `labels` 真 AND;`GET /search/issues` **不是**退路,见下条),403 走降级梯 MCP 档(单标签一次
-  读全 + 本地求交 —— ⛔ **不是翻页手扫**:实测 226 张 open 只扫了 100 张,**不完整枚举比零
-  结果更危险**)。⛔ 已推翻别再追:「限定符打零」两次实测反证,限定符只收窄不破坏。
+  表端点** `GET /repos/{o}/{r}/issues?state=open&labels=a,b&per_page=N`(core 桶、 `labels` 真 AND;⛔ 完整性
+  自证:`&page=N` + 总数核对;`GET /search/issues` **不是**退路,见下条),403 走降级梯 MCP 档(单标签一
+  次读全 + 本地求交 —— ⛔ **不是翻页手扫**:实测 226 张 open 只扫了 100 张,**不完整枚举比
+  零结果更危险**)。⛔ 已推翻别再追:「限定符打零」两次实测反证,限定符只收窄不破坏。
 - **会话代理只服务 repo-scoped 路径,`/search/*` 的 403 体解析成净零**:代理回 403 + 体
   `sessions are bound to their configured repositories`,而那是**合法 JSON** —— 读 `total_count` 得 None、
   打印成 `total: None`,与真空集只差一个字符,三连查重于是回三个干净的零,而请求根本没跑

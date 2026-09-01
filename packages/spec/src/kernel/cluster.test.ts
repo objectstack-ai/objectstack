@@ -144,12 +144,12 @@ describe('cluster.zod', () => {
       expect(parsed.useExistingPool).toBe(true);
     });
 
-    it('parses a postgres driver config', () => {
+    it('parses a custom driver config', () => {
       const parsed = ClusterCapabilityConfigSchema.parse({
-        driver: 'postgres',
+        driver: 'custom',
         nodeId: 'node-prod-1',
       });
-      expect(parsed.driver).toBe('postgres');
+      expect(parsed.driver).toBe('custom');
       expect(parsed.nodeId).toBe('node-prod-1');
     });
 
@@ -160,6 +160,30 @@ describe('cluster.zod', () => {
       });
       expect(parsed.driver).toBe('redis');
       expect(parsed.url).toBe('redis://localhost:6379');
+    });
+
+    it('enumerates exactly the drivers that ship plus custom', () => {
+      // Pin the roster: a value must not re-enter this enum without an
+      // implementation behind it (cloud#1626 ruling, 2026-08-24).
+      expect(ClusterDriverSchema.options).toEqual(['memory', 'redis', 'custom']);
+    });
+
+    it('rejects the removed dangling drivers postgres and nats by name', () => {
+      for (const removed of ['postgres', 'nats']) {
+        const result = ClusterDriverSchema.safeParse(removed);
+        expect(result.success).toBe(false);
+        if (!result.success) {
+          const issue = result.error.issues[0];
+          // zod v4 invalid_value issue: `values` is the accept set — the
+          // removed spelling must not be in it.
+          expect(issue.code).toBe('invalid_value');
+          expect((issue as { values?: unknown[] }).values).toEqual([
+            'memory', 'redis', 'custom',
+          ]);
+        }
+        const config = ClusterCapabilityConfigSchema.safeParse({ driver: removed });
+        expect(config.success).toBe(false);
+      }
     });
 
     it('rejects unknown driver', () => {

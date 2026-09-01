@@ -36,6 +36,10 @@
   只进决策箱,⛔ 永不自裁 —— 真正设计分叉照旧升级维护者;轮报设**复审清单**专节(同代
   裁清单强制审计形状)。**三样不变**:受管面照旧 draft-only + 终局两条(人工直合或授权批准
   钉 head 入队,单源见主文件)、⛔ 席位永不代批;FAIL / REWORK 原样;降档保险丝原样。
+- **落地前检三条**(维护者 2026-08-31「同意」):① 席内契约档 PASS 在案(卡上达档裁决评论);②
+  `needs:contract-review` 双载体已清;③ PR 全部 check 全绿(⛔ 非 required 子集)。② 逐对机读
+  `node scripts/pm/check-clause2-carriers.mjs --pair PR-NUMBER`:0 双肢可读且一致 · 4 不一致 · 3 环境答不
+  了 ⛔ 不作干净。转 ready 同笔留 provenance 评论引该 PASS;受管面不适用,draft-only 终局不变。
 - **外部评审链降为可选**(改写 2026-08-27「契约复审也是很重要的职责，也是需要定时处理
   的」所立的定时轮常设归属):分诊定时轮与总监席召唤非放行必要条件,在线时作**事后审计/抽
   查**,其裁决仍被尊重 —— 审计 FAIL 按状态机 label-flip 交回派发席补丁轮;⛔ 不与席内复核
@@ -43,10 +47,9 @@
 
 ## 降档保险丝(机读)
 
-- 席内复核/审计每场前**必调一次 `get_session`**(claude-code-remote MCP,无参)读
-  `external_metadata.last_served_model`,⛔ 自述档位不是读数(静默降档腐蚀的恰是自述;实测与配
-  置档陷阱见 platform-readings);读数 ≠ `CONTRACT_REVIEW_TIER` ⇒ 本席 ⛔ 不自判清标,改走转录
-  核验的 fable 复核子代理 —— 标签在复核完成前原样留置,卡在队列外等待是安全态。
+- 席内复核/审计每场前**必读一次服役档**(读法与陷阱单源见 platform-readings),⛔ 自述档位不
+  是读数(静默降档腐蚀的恰是自述);读数 ≠ `CONTRACT_REVIEW_TIER` ⇒ 本席 ⛔ 不自判清标,改走
+  转录核验的 fable 复核子代理 —— 标签在复核完成前原样留置,卡在队列外等待是安全态。
 - **保险丝只测座位自会话**:`mode:subagent` 里的 `get_session` 量的是**派发会话**(实测:
   钉在地板档的子代理读回父档,⛔ 不作互证),传参只是配置 ⛔ 不作达档读数;
   条款②的 `mode:subagent` 派发照旧恒保留 `needs:contract-review` 至席内复核完成。

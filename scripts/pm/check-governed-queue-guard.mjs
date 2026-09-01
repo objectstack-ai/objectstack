@@ -133,15 +133,20 @@
  *
  * ## The generated-artifact exception is honoured, and that is not optional
  *
- * `.claude/workflows/docs-accuracy-audit.js` holds a required gate's own
- * `--write` artifact, so EVERY page-adding docs PR touches the governed
- * surface (measured 5-for-5 on #9866). A guard that refuses those refuses
- * routine traffic, which is the same poison one level down. The #10277 Option-C
- * exception (maintainer 「10277 同意 C」) is therefore applied here through the
- * register's own `applyGeneratedExceptions`, with provenance recomputed
- * BYTE-EXACT against this build's own base sha — never a stored baseline, and
- * fail-closed on every error path, exactly as the four ruled constraints
- * require.
+ * A generator-owned file sitting inside a governed surface makes routine
+ * traffic cross the fence, and a guard that refuses routine traffic is the same
+ * poison one level down. So the register's provenance exception is applied here
+ * through its own `applyGeneratedExceptions`, with provenance recomputed on this
+ * build's own tree — never a stored baseline, and fail-closed on every error
+ * path, exactly as the ruled constraints require.
+ *
+ * ⚖️ The original case for this — `.claude/workflows/docs-accuracy-audit.js`
+ * holding a required gate's own `--write` artifact, so EVERY page-adding docs PR
+ * touched the governed surface (measured 5-for-5 on #9866) — is GONE, and by a
+ * different remedy: on 2026-09-01 the maintainer ruled that list off the governed
+ * surface entirely (#13591, verbatim 「同意」). Its register row retired with it.
+ * The mechanism stays because the #11705 rows still need it, and because the
+ * shape recurs; ⛔ its absence from a diff is not a reason to relax anything.
  *
  * NOTHING about the exception is decided here: membership is the register's
  * `generatedExceptionFor` and the recompute is its `recomputeProvenanceFor`,

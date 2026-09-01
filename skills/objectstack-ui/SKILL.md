@@ -95,7 +95,7 @@ custom page or form config. Prefer, in order:
    formViews: {
      default: {
        type: 'simple',
-       sections: [{ label: 'Invoice', fields: ['number', 'account'] }],
+       sections: [{ group: 'invoice_header' }],  // a declared fieldGroup
        subforms: [
          { childObject: 'invoice_line', // relationshipField + columns are
            title: 'Line Items',         // derived from the child object;
@@ -208,7 +208,7 @@ export const CaseViews = defineView({
             filter: [{ field: 'status', operator: 'equals', value: 'open' }] },
   },
   formViews: {
-    edit: { type: 'simple', data, sections: [{ label: 'Case', fields: ['subject', 'status'] }] },
+    edit: { type: 'simple', data, sections: [{ group: 'case_detail' }] },
   },
 });
 ```
@@ -641,6 +641,8 @@ export const CrmApp = App.create({
 | `report`    | `reportName`, `label`, `icon`                 | Link to a report |
 | `page`      | `pageName`, `label`, `icon`                   | Link to a custom Page (`type: 'home' | 'list' | ...`) |
 | `url`       | `url`, `label`, `icon`                        | External or custom URL |
+| `action`    | `actionDef` (`{ actionName, params? }`), `label`, `icon` | Run an action instead of navigating |
+| `component` | `componentRef`, `params?`, `label`, `icon`    | Built-in platform component; `componentRef` is a colon-joined registry key (`metadata:resource`), `params` become props |
 | `separator` | —                                             | Visual separator |
 
 > **`requiresObject` / `requiresService`:** Use these on any item that
@@ -945,6 +947,17 @@ at runtime from how heavy the record is + the client viewport, because an author
   via container queries — the same form is 1 column in a narrow drawer and up to 4
   on a wide page. Author *grouping* with `fieldGroups` + `Field.group`; the columns
   adapt themselves.
+- **`sections` are the escape hatch — reach for them last.** The ladder, in
+  order: (1) **derive** — declare `fieldGroups` + `Field.group` and author no
+  `sections` at all; (2) **reference** — when one surface needs a local
+  arrangement, a section may name a declared group, `{ group: 'contact_info' }`,
+  and inherits its members, label and presentation (restating a key the group
+  declares is refused at parse); (3) **enumerate** — `{ label, fields: [...] }`
+  only for a named-customer requirement a group reference genuinely cannot
+  express (a cross-group entry combination, a wizard/pane structure), with that
+  reason in a comment beside it. A hand-enumerated section re-copies membership
+  the object already owns and goes stale on the next field added, so rung 3 is
+  an exception, never a default.
 
 > **Rule of thumb: presentation (surface / width / columns) is not metadata.**
 > Write fields + semantic roles; the renderer decides the pixels. Reach for
@@ -1299,6 +1312,13 @@ src/docs/
 5. **Cross-references** use plain relative links — `[overview](./crm_index.md)`.
    The console rewrites `*.md` → `/docs/<target>` (anchors preserved);
    broken same-package links fail the build.
+
+**Write business concepts, not machine inventories.** A hand-copied table of
+objects, fields or components has no producer and drifts; the self-describing
+metadata is the one source. A doc answers *what is this, what business problem
+does it solve, how do I use it*. Boundary: a fact the reader sees on screen
+(the view list in an app's navigation) is documentable; the semantic layer
+behind the screen is not.
 
 ### Routing model — platform-level viewer, opt-in entry
 
@@ -2035,23 +2055,15 @@ the selected row in `list_item` contexts.
 
 ## Common Pitfalls
 
-1. **Using `provider: 'api'` when `provider: 'object'` is available.**
-   Object provider gives you free filtering, sorting, pagination, and
-   real-time updates.
-
-2. **Putting too many columns in a grid view.**
+1. **Putting too many columns in a grid view.**
    Users rarely need more than 6–8 columns visible by default. Use `hidden`
    for secondary columns.
 
-3. **Forgetting `link: true` on the primary column.**
+2. **Forgetting `link: true` on the primary column.**
    The first meaningful column (usually the name/subject) should be the
    navigation link to the record detail.
 
-4. **Not setting quick filters.**
-   Quick filters dramatically improve usability. Always add at least a
-   "My Records" filter using `$currentUser`.
-
-5. **Putting widget grid placement in `position`.**
+3. **Putting widget grid placement in `position`.**
    The grid-placement field is `layout: { x, y, w, h }` — `position` is not a
    widget key and the closed schema REJECTS it by name (it was silently
    dropped before protocol 17). `layout` is optional: omit it and the widget

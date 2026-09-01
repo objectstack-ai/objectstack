@@ -1037,6 +1037,14 @@ const baseDefaultPermissionSets: PermissionSet[] = [
  * silent privilege difference. The only intended delta is the superuser bits,
  * so the only thing this function may do is remove them.
  *
+ * ⚠️ The copy is SHALLOW and taken at MODULE LOAD, so what it carries over is
+ * the compile-time baseline only — the registry-driven managed-write denies
+ * that `applyManagedWriteDenies` injects into the parent's `objects` at
+ * `kernel:ready` can never propagate here. "Carried over verbatim" holds for
+ * the registry union because the variant is its own member of
+ * `MANAGED_DENY_TARGET_SETS` and receives the same injection directly
+ * (#14029), not because the derivation sees it.
+ *
  * `auto-org-admin-grant` picks between the two by posture: a wall-enforcing
  * posture bounds the bits (grant `organization_admin`); a wall-less one does
  * not (grant this).

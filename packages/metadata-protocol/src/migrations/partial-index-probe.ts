@@ -39,7 +39,15 @@
 
 import { isUniqueViolationError } from '@objectstack/types';
 
-/** Raw-SQL seam. Mirrors `ensureOverlayIndex`: `raw()` first, `execute()` second. */
+import { driverCanRunSql, resolveDriverExec } from './driver-exec.js';
+
+/**
+ * Raw-SQL seam. The surface is resolved by `./driver-exec.ts`: `execute()`
+ * first — the member `IDataDriver` declares non-optionally — then `raw()` as
+ * the fallback for a host or third-party driver that defines it. That module's
+ * header carries the argument; this order is shared with `ensureOverlayIndex`
+ * and `seed-tenancy-backfill.ts`, which used to disagree with it.
+ */
 export type IndexExec = (sql: string) => Promise<unknown>;
 
 /**
@@ -75,8 +83,7 @@ export function resolveIndexExecForTable(engine: unknown, table: string): IndexE
             return undefined;
         }
     };
-    const canRunSql = (d: any): boolean =>
-        !!d && (typeof d.raw === 'function' || typeof d.execute === 'function');
+    const canRunSql = (d: any): boolean => driverCanRunSql(d);
 
     let driver: any = attempt(() => engineAny?.getDriverForObject?.(table));
     if (!canRunSql(driver)) driver = attempt(() => engineAny?.driver);
@@ -91,8 +98,7 @@ export function resolveIndexExecForTable(engine: unknown, table: string): IndexE
         }
     }
     if (!canRunSql(driver)) return undefined;
-    if (typeof driver.raw === 'function') return (sql: string) => driver.raw(sql);
-    return (sql: string) => driver.execute(sql);
+    return resolveDriverExec(driver);
 }
 
 /**

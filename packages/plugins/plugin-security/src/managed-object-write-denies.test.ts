@@ -8,6 +8,7 @@ import {
   MANAGED_DENY_TARGET_SETS,
 } from './managed-object-write-denies.js';
 import { MCP_AGENT_PERMISSION_SET_WRITE, MCP_AGENT_PERMISSION_SET_READ } from '@objectstack/spec/ai';
+import { ORGANIZATION_ADMIN_NO_BYPASS } from '@objectstack/spec';
 
 // Minimal PermissionSet-shaped fixtures (only name + objects matter here).
 const set = (name: string, objects: Record<string, unknown> = {}): any => ({ name, objects });
@@ -25,16 +26,17 @@ const schemas = [
 ];
 
 describe('applyManagedWriteDenies (#3325)', () => {
-  it('injects a read-only-write deny for every better-auth object into the four target sets', () => {
+  it('injects a read-only-write deny for every better-auth object into the five target sets', () => {
     const sets = [
       set('organization_admin'),
+      set(ORGANIZATION_ADMIN_NO_BYPASS), // #14029 — derived at module load, so it needs its own injection
       set('member_default'),
       set('viewer_readonly'),
       set(MCP_AGENT_PERMISSION_SET_WRITE),
     ];
     const res = applyManagedWriteDenies(sets, schemas);
-    // 2 better-auth objects × 4 sets = 8 injections.
-    expect(res.applied).toBe(8);
+    // 2 better-auth objects × 5 sets = 10 injections.
+    expect(res.applied).toBe(10);
     expect(res.skippedExisting).toBe(0);
     for (const s of sets) {
       expect(s.objects.sys_user).toEqual(DENY);
@@ -100,9 +102,20 @@ describe('applyManagedWriteDenies (#3325)', () => {
     expect(() => applyManagedWriteDenies([{ name: 'member_default' } as any], schemas)).not.toThrow();
   });
 
-  it('the target allowlist is exactly the four write-granting sets', () => {
+  it('the target allowlist is exactly the five known sets (see the independent-property pin for the floor)', () => {
+    // Exact membership record. This is deliberately NOT the only pin on the
+    // list: `objects/default-permission-sets.test.ts` derives the required
+    // floor ("holds a write-granting '*' wildcard") from the real default sets
+    // and diffs it against this list, so a set that SHOULD be a member cannot
+    // hide behind an assertion that only restates the list (#14029).
     expect([...MANAGED_DENY_TARGET_SETS].sort()).toEqual(
-      ['member_default', 'organization_admin', 'viewer_readonly', MCP_AGENT_PERMISSION_SET_WRITE].sort(),
+      [
+        'member_default',
+        'organization_admin',
+        ORGANIZATION_ADMIN_NO_BYPASS,
+        'viewer_readonly',
+        MCP_AGENT_PERMISSION_SET_WRITE,
+      ].sort(),
     );
   });
 });

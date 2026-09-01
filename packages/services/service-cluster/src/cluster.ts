@@ -45,8 +45,8 @@ export class ComposedClusterService implements IClusterService {
 
 /**
  * Build an `IClusterService` from a `ClusterCapabilityConfig`. The only
- * driver shipped from this package is `memory`; other drivers (postgres,
- * redis, nats) live in dedicated packages and register themselves via
+ * driver shipped from this package is `memory`; other drivers (e.g.
+ * `redis`) live in dedicated packages and register themselves via
  * `registerClusterDriver()`.
  *
  * @example
@@ -83,7 +83,7 @@ export function defineCluster(
 }
 
 // ---------------------------------------------------------------------------
-// Driver registry (for postgres/redis/nats/custom drivers)
+// Driver registry (for redis/custom drivers)
 // ---------------------------------------------------------------------------
 
 export interface DriverFactoryConfig {
@@ -103,8 +103,8 @@ const driverRegistry = new Map<string, ClusterDriverFactory>();
 
 /**
  * Register a custom cluster driver. Driver packages (e.g.
- * `@objectstack/service-cluster-postgres`) should call this at module
- * load time so `defineCluster({ driver: 'postgres' })` resolves them.
+ * `@objectstack/service-cluster-redis`) should call this at module
+ * load time so `defineCluster({ driver: 'redis' })` resolves them.
  */
 export function registerClusterDriver(
     name: string,

@@ -595,14 +595,17 @@ operator declares a multi-node topology via `OS_EXPECT_MULTI_NODE=true` or
 |--------------|-----------------------|----------------------------|---------------------|----------------|-------------|
 | `memory`     | in-process fan-out    | per-key FIFO queue + TTL   | Map                 | Map of bigints | ✅ `@objectstack/service-cluster` |
 | `redis`      | `PUBLISH`/`SUBSCRIBE` (at-most-once) | `SET … NX PX` + Lua release/renew | `WATCH`/`MULTI` | `INCRBY`       | ✅ `@objectstack/service-cluster-redis` |
-| `postgres`   | `LISTEN/NOTIFY`       | advisory locks             | dedicated KV table  | sequence       | ❌ not built |
-| `nats`       | NATS subjects + JetStream | KV bucket lock         | KV bucket           | KV INCR        | ❌ not built |
 
-Only `memory` and `redis` are implemented. `postgres` and `nats` are accepted
-by `ClusterDriverSchema` but no package provides them — `defineCluster()`
-throws `Cluster driver "<name>" is not registered` for either. The `custom`
-driver value resolves whatever a plugin registered via
-`registerClusterDriver(name, factory)`.
+`ClusterDriverSchema` accepts exactly the drivers that ship — `memory` and
+`redis` — plus `custom`, which resolves whatever a plugin registered via
+`registerClusterDriver(name, factory)`. It used to also accept `postgres` and
+`nats` with no package behind either, so a schema-valid config reached
+`defineCluster()`'s unconditional `Cluster driver "<name>" is not registered`
+throw; both values were removed from the enum (maintainer ruling on cloud#1626,
+2026-08-24 — a schema-valid value must not be an unconditional runtime throw).
+Their design sketches — `postgres` as `LISTEN/NOTIFY` + advisory locks + a KV
+table + a sequence, `nats` as subjects + JetStream KV — stay recorded in
+Phase 5 below for whoever builds one.
 
 The `redis` driver is the recommended starting point for production
 ObjectStack deployments: it accepts a pre-built ioredis client via
@@ -704,8 +707,11 @@ of the declarative wiring below exists yet.
 Postgres driver downgraded to community/optional — useful for the
 "one binary, one container" deployment archetype that wants to skip
 Redis. NATS deferred until a customer reports throughput needs that
-exceed Redis PUBSUB. No protocol changes required at that point — only
-a new implementation that calls `registerClusterDriver()`.
+exceed Redis PUBSUB. A community driver ships under `driver: 'custom'`
+via `registerClusterDriver()` with no protocol change; a first-party
+driver restores its enum value in the same release that ships the
+implementation (the cloud#1626 ruling records that reversal condition —
+the value returns only with an implementation behind it).
 
 ## 11. Non-goals (v1)
 

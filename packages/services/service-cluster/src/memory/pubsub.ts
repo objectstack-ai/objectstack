@@ -22,8 +22,8 @@ import type {
  *     to at that moment is a silent no-op. This matches what `IPubSub`
  *     documents: no shipped driver exceeds at-most-once, so handlers must be
  *     idempotent **and** tolerate loss.
- *   - No cross-process delivery — use the redis/postgres/nats driver for
- *     real multi-node setups.
+ *   - No cross-process delivery — use the redis driver (or a registered
+ *     custom driver) for real multi-node setups.
  */
 export interface MemoryPubSubOptions {
     /** Optional error sink for handler exceptions. Defaults to console.error. */
