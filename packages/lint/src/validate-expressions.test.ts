@@ -1113,11 +1113,29 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
          * predicate reading both a baseline root and an ambient one reports the
          * baseline root — the same root, and the same message, it reported
          * before #13935 widened the vocabulary.
+         *
+         * The LENGTH is the second half of this pin and it is the half that
+         * moved: before #13935 this predicate earned two issues — the `ctx`
+         * verdict plus a bare reference to `app` prescribing `record.app`, the
+         * exact false advice this card removes. The rule emits one verdict per
+         * slot, so `app` waits its turn rather than being told something untrue.
          */
         it('keeps the pre-#13935 tie-break — a baseline root still wins over an ambient one', () => {
           const hit = fieldIssues("ctx.locale == 'en' && app.locale == 'en'");
           expect(hit).toHaveLength(1);
           expect(hit[0]!.message).toContain('`visibleWhen` reads `ctx`');
+          expect(hit[0]!.message).not.toContain('Write `record.app`');
+        });
+
+        /**
+         * …and the second root is not LOST, only deferred: fixing `ctx` earns
+         * `app` its own correct verdict on the next run. Without this the pin
+         * above would be satisfied by a repair that simply dropped the root.
+         */
+        it('reports the ambient root on the next pass, once the baseline root is fixed', () => {
+          const hit = fieldIssues("record.amount > 0 && app.locale == 'en'");
+          expect(hit).toHaveLength(1);
+          expect(hit[0]!.message).toContain('`visibleWhen` reads `app`');
         });
 
         /**
@@ -1138,15 +1156,40 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
         });
 
         /**
-         * The suppression is scoped to the root this rule CLAIMED — an
-         * unrelated bare field reference in the same predicate keeps its own
-         * verdict, which is the one that names the author's other mistake.
+         * BLAST RADIUS. The suppression is gated on a field-rule verdict, so it
+         * reaches the field level and nothing else. A per-OPTION `visibleWhen`
+         * is deliberately NOT passed through this rule (options resolve against
+         * the host's predicate scope — see the #6290 note in the field walk),
+         * so `app` there still meets the bare-reference check exactly as it did
+         * before this card. Pinned because "suppress the bare-reference verdict"
+         * is the half of this repair that could quietly go wide.
          */
-        it('suppresses only the claimed root — a second bare reference still reports', () => {
-          const hit = fieldIssues("app.locale == 'en' && nope == 1");
-          expect(hit.map((i) => i.message).join('\n')).toContain('bare reference `nope`');
-          expect(hit.some((i) => i.message.includes('`visibleWhen` reads `app`'))).toBe(true);
-          expect(hit.some((i) => i.message.includes('bare reference `app`'))).toBe(false);
+        it('does not reach the per-OPTION surface — `app` there keeps the bare-reference verdict', () => {
+          const hit = validateStackExpressions({
+            objects: [{
+              name: 'showcase_deal',
+              fields: {
+                gate: {
+                  type: 'select',
+                  options: [{ value: 'a', visibleWhen: "app.locale == 'en'" }],
+                },
+              },
+            }],
+          }).filter((i) => i.where.includes('option'));
+          expect(hit).toHaveLength(1);
+          expect(hit[0]!.message).toContain('bare reference `app`');
+        });
+
+        /**
+         * …and a bare FIELD reference on a field-rule slot is untouched: no
+         * ambient root is read, so no verdict fires and nothing is suppressed.
+         * Guards the gate itself — a suppression keyed on the wrong condition
+         * would swallow this and leave the author with silence.
+         */
+        it('leaves a plain bare field reference on a field-rule slot alone', () => {
+          const hit = fieldIssues("nope == 1");
+          expect(hit).toHaveLength(1);
+          expect(hit[0]!.message).toContain('bare reference `nope`');
         });
       });
 
@@ -2395,6 +2438,15 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // receiver above) and the provenance index (`unprovisionedIndex` /
       // `anchors`), whose keys are Map/Set methods, never metadata keys.
       'pending', 'celNode', 'celRecv', 'anchors', 'unprovisionedIndex',
+      // [#13935] The field-rule verdict, split into a compute half and a push
+      // half so the walk can tell `check` a verdict was issued. `verdict`'s
+      // keys are this helper's own `{ root, message, source }`, never metadata
+      // keys; `diagnostic` is a formula error STRING and its one "key" is
+      // `String.prototype.startsWith`. Both are named to stay clear of the
+      // `message` / `source` metadata receivers — a local called `message`
+      // here would have been excused into masking a genuine
+      // `validations[].message` read.
+      'verdict', 'diagnostic',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

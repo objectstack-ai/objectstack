@@ -810,19 +810,26 @@ export function fieldRuleRootIssue(
         // the bare-reference check, and the second diagnostic it earns
         // (`unknown field`) names a different problem than the one they have.
         //
-        // `page.zod` / `ExpressionProvider` are spelled WITHOUT their
-        // extensions for the same reason `sectionFields` and `*.form` are
-        // above: this is a STRING literal, and #5017's receiver scan strips
-        // comments but not strings.
+        // The spec module is named in PROSE ("the page-component schema")
+        // rather than as a path, and `ExpressionProvider` carries no extension,
+        // for the same reason `sectionFields` and `*.form` above do not: this
+        // is a STRING literal, and #5017's receiver scan strips comments but
+        // not strings, so a `page.zod` inside the message registers `page` as a
+        // read receiver of this rule. Measured — it went red on the first run,
+        // exactly as the two siblings did.
+        //
+        // `record.` + the root is assembled with `+` for the same scan: written
+        // as one template literal, `record.${'$'}{root}` reads as a member
+        // access off a `record` receiver, because `$` is an identifier char.
         ? `\`${root}\` is NOT declared platform-wide — it is an AMBIENT root, mounted only by ` +
           `the renderer (objectui app-shell's \`ExpressionProvider\` binds it beside ` +
-          `\`current_user\` / \`user\` / \`ctx\` / \`os\` / \`data\` / \`features\`; \`page.zod\` ` +
-          `records the ambient set as renderer behaviour and explicitly NOT ` +
+          `\`current_user\` / \`user\` / \`ctx\` / \`os\` / \`data\` / \`features\`, and the spec's ` +
+          `page-component schema records that ambient set as renderer behaviour, explicitly NOT ` +
           `contract-guaranteed). So it resolves in a form VIEW's own field predicate and on no ` +
           `server path at all, while a field-level object rule is server-enforced. ` +
-          `⛔ Do NOT write \`record.${root}\`: \`${root}\` is not a field on this object, so that ` +
-          `spelling only trades this diagnostic for an \`unknown field\` error on \`${root}\`. ` +
-          `Rewrite the ` +
+          `⛔ Do NOT write \`` + 'record.' + `${root}\`: \`${root}\` is not a field on this ` +
+          `object, so that spelling only trades this diagnostic for an \`unknown field\` error ` +
+          `on \`${root}\`. Rewrite the ` +
           `predicate against \`record\` (plus \`previous\`, and \`parent\` on a master-detail line ` +
           `item), or leave the \`${root}\`-dependent decision on the view's own field predicate ` +
           `where \`${root}\` IS bound — renderer-only, enforcing nothing server-side.`
@@ -843,18 +850,23 @@ export function fieldRuleRootIssue(
 
 /**
  * [#13935] Does this `@objectstack/formula` error carry the bare-reference
- * verdict for `root`?
+ * verdict for one of `roots`?
  *
- * Matched on the message's opening clause because that diagnostic carries no
- * code to filter on — `validateExpression` pushes `{ source, message }` and
- * nothing else. The fragility that buys is bounded and made LOUD rather than
- * left silent: a reword upstream makes the suppression miss, an ambient root
- * then earns two diagnostics instead of one, and the `toHaveLength(1)`
- * assertions in the residual-root table go red. ⛔ Do not soften those to
+ * Matched on the diagnostic's opening clause because it carries no code to
+ * filter on — `validateExpression` pushes `{ source, message }` and nothing
+ * else. The fragility that buys is bounded and made LOUD rather than left
+ * silent: a reword upstream makes the suppression miss, an ambient root then
+ * earns two diagnostics instead of one, and the `toHaveLength(1)` assertions
+ * in the residual-root table go red. ⛔ Do not soften those to
  * `toBeGreaterThan(0)` — the length is the pin.
+ *
+ * The parameter is `diagnostic` rather than `message` so #5017's receiver scan
+ * reads the `.startsWith` below as this file's own plumbing instead of as a
+ * read off a `message` metadata receiver, which is a real key elsewhere in the
+ * spec (`validations[].message`).
  */
-function isBareReferenceTo(message: string, root: string): boolean {
-  return message.startsWith(`bare reference \`${root}\``);
+function isBareReferenceToAny(diagnostic: string, roots: readonly string[]): boolean {
+  return roots.some((root) => diagnostic.startsWith(`bare reference \`${root}\``));
 }
 
 /**
@@ -978,16 +990,28 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     objectName?: string,
     scope: 'record' | 'flattened' = 'flattened',
     /**
-     * [#13935] A root the field-rule check has already claimed at this site.
-     * Its bare-reference error is dropped here so the two partitions stay
-     * DISJOINT — the invariant this rule's docblock has always asserted, which
-     * used to hold for free (every judged root was a `SCOPE_ROOTS` member, and
-     * a declared root never trips the bare-reference check) and stops holding
-     * for free the moment the judged vocabulary is wider than the baseline.
-     * Without it an ambient root earns BOTH verdicts, one of which is the
-     * false `record.<root>` prescription this card exists to remove.
+     * [#13935] Set when the field-rule check has issued a verdict for this
+     * site. Bare-reference errors naming an AMBIENT root are dropped so the
+     * two partitions stay DISJOINT — the invariant this rule's docblock has
+     * always asserted, which used to hold for free (every judged root was a
+     * `SCOPE_ROOTS` member, and a declared root never trips the bare-reference
+     * check) and stops holding for free the moment the judged vocabulary is
+     * wider than the baseline. Without it an ambient root earns BOTH verdicts,
+     * one of which is the false `record.<root>` prescription this card exists
+     * to remove.
+     *
+     * The suppressed set is the ambient roots rather than only the root the
+     * verdict NAMED, and the difference shows up when one predicate reaches
+     * for two rejected roots. This rule emits one verdict per slot, so with
+     * `ctx.locale == 'en' && app.locale == 'en'` the tie-break names `ctx` and
+     * `app` would otherwise keep its bare-reference — re-emitting the exact
+     * false prescription, on the exact root, that this card removes. Suppressed,
+     * the author fixes `ctx`, re-runs, and `app` earns its own correct verdict:
+     * the same one-root-at-a-time iteration this rule already does for two
+     * baseline roots. Baseline roots need no entry — being declared in the
+     * strict env, they never trip the bare-reference check at all.
      */
-    claimedRoot?: string,
+    fieldRuleVerdictIssued?: boolean,
   ): void => {
     if (raw == null) return;
     const fields = objectName ? fieldIndex.get(objectName) : undefined;
@@ -997,7 +1021,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string },
       objectName ? { objectName, fields, fieldTypes, scope } : { scope });
     for (const e of res.errors) {
-      if (claimedRoot && isBareReferenceTo(e.message, claimedRoot)) continue;
+      if (fieldRuleVerdictIssued && isBareReferenceToAny(e.message, FIELD_RULE_AMBIENT_ROOTS)) continue;
       issues.push({ where, message: e.message, source: e.source, severity: 'error' });
     }
     for (const w of res.warnings) issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
@@ -1225,7 +1249,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         // root this rule has claimed so the two partitions stay disjoint; the
         // push order below is the pre-#13935 one.
         const verdict = fieldRuleRootVerdict(key, raw);
-        check(where, raw, objectName, 'record', verdict?.root);
+        check(where, raw, objectName, 'record', verdict !== null);
         if (verdict) {
           issues.push({ where, message: verdict.message, source: verdict.source, severity: 'error' });
         }
