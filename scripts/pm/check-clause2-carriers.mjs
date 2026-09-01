@@ -91,6 +91,47 @@
  * the one thing the whole clause-② chain forbids. Same call H31 makes, for the
  * same reason.
  *
+ * **It does not read verdict comments, and the PASS half of the recovery rule
+ * stays human.** `references/contract-review.md` states the human reading as
+ * 「PASS + 无标 + head 未动 = 已清标非被剥;head 后移或无结论才重挂」. C3
+ * mechanizes the second and third conjuncts — 无标, from the labels, and
+ * head 未动, from the head commit's date — and deliberately not the first:
+ * #12409 measured a strict `Contract review: PASS` marker at 5 of 35 removals
+ * against 26 for an "any PASS token" reading, i.e. a check that can barely fail,
+ * and reading a verdict to clear a gate is the 自查放行 this file already
+ * refuses. Consequence for a reader of exit 0: it means "the gate was bound by
+ * the discipline and cleared, and nothing has moved since", NEVER "the review
+ * passed". Precondition ① of the landing check is still a human reading a PASS
+ * comment on the card.
+ *
+ * ## How a COMPLETED review is told from a gate that never ran (#14155)
+ *
+ * A `Clause-②: yes` declaration is HISTORY — it stays on the thread forever. The
+ * label is STATE — a completed review clears it from both carriers, by rule. So
+ * every clause-② pair that completes its review lands in exactly the shape C3
+ * hunts: declared `yes`, gate on neither carrier. Measured 2026-09-01 on PR
+ * #13864 / card #13657 — PASS at head `9af92aa3`, both carriers cleared nine
+ * seconds apart, C3 fired on the legitimate clear. Read literally that made the
+ * landing check's precondition ② unsatisfiable after its own clear: `--pair`
+ * could only answer 0 in the window BETWEEN the PASS and the clear, which is the
+ * wrong order, and every landed pair kept its C3 row on every later sweep.
+ *
+ * The evidence that separates the two needs no verdict comment: the **label
+ * event stream** on each carrier. A gate that was bound leaves a `labeled`; a
+ * review that completed leaves an `unlabeled`; a fail-open leaves neither. C3
+ * therefore reads both carriers' streams and answers four distinguishable
+ * states — never hung (the fail-open, the row as it was), hung-then-cleared with
+ * the head unmoved (the completed state: clean), hung-then-cleared with the head
+ * moved since (the 重挂-owed state), and bound on one carrier only (one removal
+ * where a legitimate clear leaves two — the strip signature). An unreadable
+ * stream is UNJUDGED, never clean.
+ *
+ * **The cost stays bounded**: streams are fetched for pairs already in C3's
+ * candidate shape (declared `yes`, bare on both carriers) and for nobody else,
+ * and the head commit only once both carriers read cleared. `needsGateHistory`
+ * is the one predicate the reader and the UNJUDGED accounting share, so the set
+ * that owes a stream and the set that gets one cannot drift apart.
+ *
  * ## Exit codes — the refusal to read as clean, in one table
  *
  * Sweep mode (default, and `--json`):
@@ -112,7 +153,14 @@
  * `--pair` is a PREDICATE about the pair named on the command line — a fact
  * about THAT PR, which is why it may answer adversely where the sweep may not.
  * It shares 1/2/3 with the sweep and adds one code of its own:
- *   0  the pair's clause-② limbs are legible and its carriers agree.
+ *   0  the pair's clause-② limbs are legible and its carriers agree — which
+ *      INCLUDES the completed state: a declared `yes` whose gate was hung on
+ *      both carriers, cleared from both, and whose head has not moved since
+ *      (#14155). ⚠️ 0 is not "the review passed"; the PASS reading is human and
+ *      is precondition ① of the landing check, not this exit code.
+ *   2  also the answer when a C3 candidate's event stream or head commit could
+ *      not be read: an unread stream is not a never-hung gate, so it is UNJUDGED
+ *      rather than either verdict.
  *   4  they do not. Deliberately NOT 3: a verdict about the PAIR must be
  *      impossible to confuse with "the environment could not answer", so a
  *      seat reading `$?` cannot turn a refusal into a clearance. And ⛔ never
@@ -139,6 +187,7 @@ import {
   EXIT_PREREQUISITE_NOT_MET,
   PROXY_FLAG,
   governingClaim,
+  isGateSemanticLabel,
   labelNames,
   prDeliversCard,
   proxyRearmPlan,
@@ -443,30 +492,196 @@ export function c2DeclarationUnreadable(pair) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The gate's HISTORY — what tells a completed review from one that never ran
+// ---------------------------------------------------------------------------
+
 /**
- * C3 — a declared `yes` with the gate on NEITHER carrier.
+ * The gate's history on ONE carrier, read from that carrier's own label events.
  *
- * The fail-open direction, and the one a carrier COMPARISON is structurally
- * blind to: agreement on absence is H31's silent case. Measured live on PR
- * #13910 / card #13476 (2026-08-31), where the author had identified their own
- * change as clause-② and written it down, and not one of the three mechanisms
- * that exist to catch that was in a state to fire.
+ * ⚠️ The rows arrive OLDEST FIRST, so a caller that reads only the first page
+ * of a long carrier gets the oldest events and never sees the removal — which
+ * reads as "still hung" or "never hung" depending on the truncation point. The
+ * live reader below therefore pages to exhaustion and hands `null` when it
+ * could not; ⛔ a short read is never a history.
+ *
+ * Sorted here rather than trusted: the endpoint's order is documented, but this
+ * function is also fed self-test fixtures, and a reading that depends on the
+ * caller's ordering is a reading that breaks silently when the caller changes.
+ *
+ * @param {{event?: string, created_at?: string, label?: {name?: string},
+ *          actor?: {login?: string}}[]|null} events — that carrier's event
+ *   rows, or `null` when the stream could NOT be read.
+ * @returns {{ state: 'never-hung' }
+ *          | { state: 'hung', at: string, actor: string|null }
+ *          | { state: 'cleared', at: string, actor: string|null }
+ *          | { state: 'unreadable' }}
  */
-export function c3DeclaredYesUngated(pair) {
+export function carrierGateHistory(events) {
+  if (!Array.isArray(events)) return { state: 'unreadable' };
+  const gate = [];
+  for (const e of events) {
+    if (!e || (e.event !== 'labeled' && e.event !== 'unlabeled')) continue;
+    // The SAME label constant H31 and H35 read, imported, never restated.
+    if (!isGateSemanticLabel(e.label?.name)) continue;
+    const ms = Date.parse(e.created_at ?? '');
+    // ⛔ An undated gate event is not a droppable row: dropping it would move
+    // the "last event" and could turn a live hang into a clear. Refuse instead.
+    if (!Number.isFinite(ms)) return { state: 'unreadable' };
+    gate.push({ verb: e.event, at: String(e.created_at), actor: e.actor?.login ?? null, ms });
+  }
+  if (gate.length === 0) return { state: 'never-hung' };
+  gate.sort((a, b) => a.ms - b.ms);
+  const last = gate[gate.length - 1];
+  return { state: last.verb === 'labeled' ? 'hung' : 'cleared', at: last.at, actor: last.actor };
+}
+
+/**
+ * Is this pair in C3's candidate shape — the ONLY shape whose event streams are
+ * read?
+ *
+ * The cost bound, stated as a predicate so the live reader and the UNJUDGED
+ * accounting cannot disagree about which pairs owe an event stream. A pair that
+ * declared `no`, or that still carries the gate on either carrier, is answered
+ * from the labels alone and costs nothing extra.
+ */
+export function needsGateHistory(pair) {
   const d = cardDeclaration(pair?.cardComments ?? null);
-  if (d.state !== 'declared' || d.value !== 'yes') return null;
+  if (d.state !== 'declared' || d.value !== 'yes') return false;
   const onCard = gated(pair?.cardLabels);
   const onPr = gated(pair?.prLabels);
-  if (onCard === null || onPr === null) return null;
-  if (onCard || onPr) return null;
-  return (
-    `card #${pair.card} declares \`Clause-②: yes\` while NEITHER it nor its delivering open PR ` +
-    `#${pair.pr}${pair.draft ? ' (draft)' : ''} carries \`${CONTRACT_REVIEW_LABEL}\` — the gate ` +
-    'the declaration is supposed to bind is absent from both carriers, so the content limb fired ' +
-    'in prose and nothing downstream is holding the door. ⚠️ A comparison of the two carriers ' +
-    'cannot see this: agreement on ABSENCE is its silent case, which is why the declaration is ' +
-    `read here rather than inferred from the labels. ${NEVER_WRITES}`
-  );
+  if (onCard === null || onPr === null) return false; // already UNJUDGED on labels.
+  return !onCard && !onPr;
+}
+
+/**
+ * What the two event streams say about the gate this declaration should bind.
+ *
+ * ⭐ The distinction #14155 filed: a `Clause-②: yes` declaration is HISTORY and
+ * stays on the thread forever, while the label is STATE that a completed review
+ * clears from both carriers by rule — so every pair that completes its review
+ * lands in the same shape as the fail-open C3 hunts, and before this function
+ * the two were indistinguishable. The label EVENTS separate them without going
+ * anywhere near a verdict comment: a gate that was bound leaves a `labeled`, and
+ * a review that completed leaves an `unlabeled` on each carrier.
+ *
+ * ⛔ This is NOT the PASS half. The recovery rule in `references/contract-review.md`
+ * reads 「PASS + 无标 + head 未动 = 已清标非被剥」; the PASS conjunct stays human,
+ * because #12409 measured PASS-token matching as a check that can barely fail
+ * and this file's own header bans verdict-reading as 自查放行. What is
+ * mechanized here is the other two conjuncts — 无标 and head 未动 — and a clean
+ * answer therefore means "the gate was bound and cleared by the discipline, and
+ * nothing has moved since", never "the review passed".
+ *
+ * @returns {{ state: 'not-candidate' }
+ *          | { state: 'unreadable', gaps: string[] }
+ *          | { state: 'never-hung' }
+ *          | { state: 'still-hung' }
+ *          | { state: 'half-bound', bound: 'card'|'pr', at: string }
+ *          | { state: 'completed', clearedAt: string }
+ *          | { state: 'moved-after-clear', clearedAt: string, headAt: string }}
+ */
+export function gateBindingState(pair) {
+  if (!needsGateHistory(pair)) return { state: 'not-candidate' };
+  const card = carrierGateHistory(pair?.cardEvents ?? null);
+  const pr = carrierGateHistory(pair?.prEvents ?? null);
+
+  const gaps = [];
+  if (card.state === 'unreadable') gaps.push(`card #${pair?.card}'s label event stream`);
+  if (pr.state === 'unreadable') gaps.push(`PR #${pair?.pr}'s label event stream`);
+  if (gaps.length > 0) return { state: 'unreadable', gaps };
+
+  if (card.state === 'never-hung' && pr.state === 'never-hung') return { state: 'never-hung' };
+  // Both carriers are bare NOW (that is the candidate shape), so a trailing
+  // `labeled` means the stream and the labels disagree — a read this file will
+  // not reconcile by picking a winner.
+  if (card.state === 'hung' || pr.state === 'hung') return { state: 'still-hung' };
+  if (card.state === 'never-hung' || pr.state === 'never-hung') {
+    const bound = card.state === 'cleared' ? 'card' : 'pr';
+    return { state: 'half-bound', bound, at: bound === 'card' ? card.at : pr.at };
+  }
+
+  // Both cleared. The conservative anchor is the EARLIER removal: a review
+  // concluded before either carrier was touched, so motion after the first
+  // clear is motion after the conclusion.
+  const clearedMs = Math.min(Date.parse(card.at), Date.parse(pr.at));
+  const clearedAt = Date.parse(card.at) <= Date.parse(pr.at) ? card.at : pr.at;
+  const headAt = pair?.headCommittedAt ?? null;
+  const headMs = Date.parse(headAt ?? '');
+  if (!Number.isFinite(headMs)) {
+    return { state: 'unreadable', gaps: [`PR #${pair?.pr}'s head commit date`] };
+  }
+  if (headMs > clearedMs) return { state: 'moved-after-clear', clearedAt, headAt: String(headAt) };
+  return { state: 'completed', clearedAt };
+}
+
+/**
+ * C3 — a declared `yes` whose gate is on NEITHER carrier, refined by the event
+ * stream into the states that shape actually covers.
+ *
+ * The fail-open direction is the one a carrier COMPARISON is structurally blind
+ * to: agreement on absence is H31's silent case. Measured live on PR #13910 /
+ * card #13476 (2026-08-31), where the author had identified their own change as
+ * clause-② and written it down, and not one of the three mechanisms that exist
+ * to catch that was in a state to fire.
+ *
+ * ⚠️ But bare-on-both is also where a LEGITIMATELY cleared pair lands, measured
+ * on PR #13864 / card #13657 (2026-09-01, #14155): review PASS at head
+ * `9af92aa3`, both carriers cleared in one stroke nine seconds apart, and C3
+ * fired on the completed state. Read literally, that made the landing check's
+ * ② unsatisfiable after its own clear — the check could only pass in the window
+ * between PASS and clear, which is the wrong order. The event stream is what
+ * tells the two apart, so this row now fires on three distinguishable adverse
+ * states and stays silent on the completed one.
+ */
+export function c3DeclaredYesUngated(pair) {
+  const binding = gateBindingState(pair);
+  if (binding.state === 'not-candidate') return null;
+  if (binding.state === 'unreadable') return null; // UNJUDGED by the caller — never silently clean.
+  if (binding.state === 'completed') return null; // ⭐ #14155: the completed state, and the only clean one.
+
+  const head = `card #${pair.card} declares \`Clause-②: yes\` while NEITHER it nor its delivering open PR #${pair.pr}${pair.draft ? ' (draft)' : ''} carries \`${CONTRACT_REVIEW_LABEL}\``;
+  const readsEvents =
+    'The label EVENT STREAM on both carriers is what separates this from a legitimately cleared ' +
+    'pair — a completed review clears the gate from both carriers by rule, so the declaration ' +
+    '(history, permanent) outliving the label (state, cleared) is the NORMAL end state and is not ' +
+    'reported here. ⛔ No verdict comment is read to reach that: the PASS half stays human.';
+
+  switch (binding.state) {
+    case 'moved-after-clear':
+      return (
+        `${head} — the gate WAS bound and cleared (last removal ${binding.clearedAt}), but the PR's ` +
+        `head has MOVED since: its head commit is dated ${binding.headAt}. The review that cleared ` +
+        'this gate judged a different tree, so the clear no longer covers what would land. This is ' +
+        'the 重挂-owed state the recovery rule already names — 「head 后移或无结论才重挂」 — and ' +
+        `the re-hang is a seat's act, not this script's. ${readsEvents} ${NEVER_WRITES}`
+      );
+    case 'half-bound':
+      return (
+        `${head} — and the gate was bound on the ${binding.bound === 'card' ? 'CARD' : 'PR'} carrier ` +
+        `only (cleared ${binding.at}), with no hang ever recorded on the other. ${DUAL_CARRIER} One ` +
+        'removal where a legitimate clear leaves two is the strip signature, so this pair cannot be ' +
+        'read as a completed review. ⚠️ The repo-wide, windowed form of this question is H35 in ' +
+        '`check-half-states.mjs`, which judges removals against the 同笔 stroke window; this row is ' +
+        'the per-pair form and is unbounded in time, so it also sees a pair gated long before that ' +
+        `window opened. ${readsEvents} ${NEVER_WRITES}`
+      );
+    case 'still-hung':
+      return (
+        `${head} — yet the label event stream ends on a HANG for at least one carrier, so the two ` +
+        'readings of the same gate disagree: the labels say bare, the events say hung. One of them ' +
+        'is stale, and this file does not pick a winner by fiat — re-read both carriers before ' +
+        `treating this pair as either gated or clear. ${readsEvents} ${NEVER_WRITES}`
+      );
+    default:
+      return (
+        `${head}, and the event stream shows the gate was NEVER HUNG on either carrier — the ` +
+        'gate the declaration is supposed to bind was never bound at all, so the content limb fired ' +
+        'in prose and nothing downstream is holding the door. ⚠️ A comparison of the two carriers ' +
+        'cannot see this: agreement on ABSENCE is its silent case, which is why the declaration is ' +
+        `read here rather than inferred from the labels. ${readsEvents} ${NEVER_WRITES}`
+      );
+  }
 }
 
 /** Every row for one pair, in reporting order. */
@@ -493,6 +708,13 @@ export function pairUnjudged(pair) {
   if (!Array.isArray(pair?.cardLabels)) gaps.push(`card #${pair?.card}'s labels`);
   if (!Array.isArray(pair?.prLabels)) gaps.push(`PR #${pair?.pr}'s labels`);
   if (!Array.isArray(pair?.cardComments)) gaps.push(`card #${pair?.card}'s comment thread`);
+  // The gate history is owed by C3 CANDIDATES only — the cost bound and the
+  // accounting read one predicate, so a pair can never owe a stream the live
+  // reader was never going to fetch. An unread stream is not a never-hung gate.
+  if (gaps.length === 0) {
+    const binding = gateBindingState(pair);
+    if (binding.state === 'unreadable') gaps.push(...binding.gaps);
+  }
   if (gaps.length === 0) return null;
   return (
     `pair PR #${pair?.pr} / card #${pair?.card} — UNJUDGED: ${gaps.join(', ')} could not be read. ` +
@@ -628,11 +850,60 @@ async function listOpenPulls(repo) {
 }
 
 /**
+ * The page cap on ONE carrier's label event stream.
+ *
+ * Events arrive OLDEST FIRST, so the reading needs the LAST page, not the
+ * first: a stream read short does not merely lose detail, it loses the removal
+ * and reads as a live hang or a never-hung gate. Ten pages is 1,000 events on a
+ * single card, well past anything the board produces; a carrier that exceeds it
+ * is answered `null` → UNJUDGED, never clean (#4690).
+ */
+export const EVENT_PAGE_CAP = 10;
+
+/**
+ * One carrier's gate history, paged to exhaustion — or `null`.
+ *
+ * ⛔ Never a partial array: a caller cannot tell a short read from a quiet
+ * carrier, and the whole point of this stream is to distinguish "no hang" from
+ * "hang I did not read".
+ */
+async function readCarrierEvents(repo, number) {
+  const out = [];
+  for (let page = 1; page <= EVENT_PAGE_CAP; page++) {
+    const batch = await restOrNull(`/repos/${repo}/issues/${number}/events?per_page=100&page=${page}`);
+    if (!Array.isArray(batch)) return null;
+    out.push(...batch);
+    if (batch.length < 100) return out;
+  }
+  return null; // cap hit: the tail is unread, so the history is unread.
+}
+
+/**
+ * The head commit's date, for the head-motion half — or `null`.
+ *
+ * ⚠️ The boundary, stated where the reading is taken: this is COMMIT METADATA,
+ * not a push timestamp. A normal push writes the committer date at push time,
+ * which is what makes the reading work; a force-push that lands a deliberately
+ * backdated commit would read as unmoved. The unforgeable alternative
+ * (`head_ref_force_pushed`) lives only on the TIMELINE endpoint, which caps at
+ * 250 events and truncates SILENTLY — and a capped read backing a CLEAN verdict
+ * is the fail-open shape this family refuses everywhere else, so the exact,
+ * uncapped, one-request reading is preferred with its residual hole named. The
+ * PASS conjunct of the recovery rule stays human and is what closes it.
+ */
+async function readHeadCommitDate(repo, sha) {
+  if (!sha) return null;
+  const commit = await restOrNull(`/repos/${repo}/commits/${sha}`);
+  return commit?.commit?.committer?.date ?? null;
+}
+
+/**
  * Gather the pairs and everything each row needs.
  *
  * A PR's delivering card is read from the PR body/branch, so the card set is
  * whatever those name — no open-issue listing is paged for it. That keeps the
- * sweep's cost at one PR listing plus two reads per pair.
+ * sweep's cost at one PR listing plus two reads per pair, plus — for the C3
+ * candidates ALONE — their two event streams and one head commit.
  */
 async function gather(repo, prFilter = null) {
   const pulls = (await listOpenPulls(repo)).filter((pr) => (prFilter ? pr.number === prFilter : true));
@@ -650,10 +921,27 @@ async function gather(repo, prFilter = null) {
         pr: pr.number,
         draft: Boolean(pr.draft),
         card: Number(n),
+        headSha: pr?.head?.sha ?? null,
         prLabels: Array.isArray(pr.labels) ? labelNames(pr) : null,
         cardLabels: card && Array.isArray(card.labels) ? labelNames(card) : null,
         cardComments: Array.isArray(comments) ? comments : null,
       });
+    }
+  }
+
+  // Second pass — the gate history, for the C3 candidates and nobody else.
+  // `needsGateHistory` is the SAME predicate the UNJUDGED accounting reads, so
+  // the set that owes a stream and the set that gets one cannot drift apart.
+  for (const pair of pairs) {
+    if (!needsGateHistory(pair)) continue;
+    pair.cardEvents = await readCarrierEvents(repo, pair.card);
+    pair.prEvents = await readCarrierEvents(repo, pair.pr);
+    // The head commit is owed only once both carriers read CLEARED — the one
+    // state whose verdict turns on head motion.
+    const card = carrierGateHistory(pair.cardEvents);
+    const prHist = carrierGateHistory(pair.prEvents);
+    if (card.state === 'cleared' && prHist.state === 'cleared') {
+      pair.headCommittedAt = await readHeadCommitDate(repo, pair.headSha);
     }
   }
   return { pulls, pairs };
@@ -813,13 +1101,92 @@ export function selfTest() {
   t('…and the unjudged accounting names the thread that could not be read', says(pairUnjudged(pair({ cardComments: null })), 'comment thread'));
 
   // -- C3, the direction a carrier comparison cannot see ----------------------
-  const ungated = c3DeclaredYesUngated(pair({ prLabels: [], cardLabels: [], cardComments: [CLAIM('Clause-②: yes')] }));
-  t('a declared `yes` with the gate on neither carrier produces a C3 row', typeof ungated === 'string');
+  // A declared `yes`, bare on both carriers — C3's candidate shape. The event
+  // stream is what says WHICH of the four states this is.
+  const declaredYes = (o) => pair({ prLabels: [], cardLabels: [], cardComments: [CLAIM('Clause-②: yes')], ...o });
+  const EV = (verb, at, actor = 'os-support-ai') => ({
+    event: verb,
+    created_at: at,
+    label: { name: CONTRACT_REVIEW_LABEL },
+    actor: { login: actor },
+  });
+  // The 2026-09-01 measurement (#14155), verbatim: PR #13864 / card #13657.
+  const CARD_HUNG = EV('labeled', '2026-08-31T16:55:54Z', 'os-warren');
+  const CARD_CLEARED = EV('unlabeled', '2026-09-01T08:54:47Z');
+  const PR_HUNG = EV('labeled', '2026-08-31T15:19:53Z', 'claude[bot]');
+  const PR_CLEARED = EV('unlabeled', '2026-09-01T08:54:56Z');
+  const HEAD_AT_PASS = '2026-09-01T08:16:59Z'; // head 9af92aa3, the tree the review judged.
+
+  const neverHung = declaredYes({ cardEvents: [], prEvents: [] });
+  const ungated = c3DeclaredYesUngated(neverHung);
+  t('a declared `yes` the events show was NEVER HUNG still produces a C3 row', typeof ungated === 'string');
   t('…and says why a carrier comparison cannot see it', says(ungated, 'agreement on ABSENCE'));
+  t('…and says in as many words that the gate was never bound', says(ungated, 'NEVER HUNG'));
   t('a declared `no` with no gate anywhere is NOT a C3 row — that is a decision', c3DeclaredYesUngated(pair({ cardComments: [CLAIM('Clause-②: no')] })) === null);
   t('a declared `yes` WITH the gate hung is not a C3 row', c3DeclaredYesUngated(pair({ prLabels: [L], cardLabels: [L], cardComments: [CLAIM('Clause-②: yes')] })) === null);
   t('an ABSENT declaration is not a C3 row — C2 owns that fact, and no row owns it twice', c3DeclaredYesUngated(pair({ cardComments: [CLAIM('Domain: x')] })) === null);
   t('an unreadable carrier never manufactures a C3 row', c3DeclaredYesUngated(pair({ cardLabels: null, cardComments: [CLAIM('Clause-②: yes')] })) === null);
+
+  // -- #14155: the COMPLETED state, and the three it must stay distinct from --
+  const completed = declaredYes({
+    pr: 13864,
+    card: 13657,
+    cardEvents: [CARD_HUNG, CARD_CLEARED],
+    prEvents: [PR_HUNG, PR_CLEARED],
+    headCommittedAt: HEAD_AT_PASS,
+  });
+  t('⭐ the measured 2026-09-01 clear (#13864/#13657) produces NO C3 row — the completed state is clean', c3DeclaredYesUngated(completed) === null, JSON.stringify(gateBindingState(completed)));
+  t('…and the pair is CLEAN overall, not merely C3-silent', pairRows(completed).length === 0 && pairUnjudged(completed) === null);
+  t('…and the disposition names it `completed`, anchored on the earlier removal', gateBindingState(completed).state === 'completed' && gateBindingState(completed).clearedAt === '2026-09-01T08:54:47Z');
+  t('…which is exactly what the landing check\'s ② could never answer before', gateBindingState(completed).state !== 'never-hung');
+
+  const movedAfter = declaredYes({
+    cardEvents: [CARD_HUNG, CARD_CLEARED],
+    prEvents: [PR_HUNG, PR_CLEARED],
+    headCommittedAt: '2026-09-01T10:30:00Z', // a commit landed AFTER the clear.
+  });
+  const movedRow = c3DeclaredYesUngated(movedAfter);
+  t('a cleared gate whose head MOVED afterwards is adverse, not clean', typeof movedRow === 'string');
+  t('…and is named as the 重挂-owed state the recovery rule already carries', says(movedRow, '重挂') && says(movedRow, 'head 后移'));
+  t('…and quotes both dates, so the reader can check the ordering', says(movedRow, '2026-09-01T10:30:00Z') && says(movedRow, '2026-09-01T08:54:47Z'));
+  t('…and the re-hang is never performed from here', says(movedRow, '自查放行'));
+  t('the head-motion comparison is against the EARLIER removal — motion after the first clear counts', gateBindingState(declaredYes({
+    cardEvents: [CARD_HUNG, CARD_CLEARED],
+    prEvents: [PR_HUNG, PR_CLEARED],
+    headCommittedAt: '2026-09-01T08:54:50Z', // between the two removals.
+  })).state === 'moved-after-clear');
+
+  const halfBound = declaredYes({ cardEvents: [CARD_HUNG, CARD_CLEARED], prEvents: [] });
+  const halfRow = c3DeclaredYesUngated(halfBound);
+  t('a gate bound on ONE carrier only is adverse — one removal where a clear leaves two', typeof halfRow === 'string');
+  t('…and names the strip signature the dual-carrier rule already states', says(halfRow, 'strip signature') && says(halfRow, '两边都挂好'));
+  t('…and points at H35 rather than re-judging the windowed repo-wide form', says(halfRow, 'H35'));
+  t('…in both directions', gateBindingState(declaredYes({ cardEvents: [], prEvents: [PR_HUNG, PR_CLEARED] })).bound === 'pr');
+
+  t('an UNREADABLE stream is never a never-hung gate — it is UNJUDGED (#4690)', c3DeclaredYesUngated(declaredYes({ cardEvents: null, prEvents: [] })) === null);
+  t('…and the unjudged accounting names the stream that could not be read', says(pairUnjudged(declaredYes({ cardEvents: null, prEvents: [] })), 'label event stream'));
+  t('…so an unread stream can never render as a clean pair', pairUnjudged(declaredYes({ cardEvents: [CARD_HUNG, CARD_CLEARED], prEvents: null })) !== null);
+  t('a cleared pair whose HEAD COMMIT could not be read is UNJUDGED, not clean', says(pairUnjudged(declaredYes({ cardEvents: [CARD_HUNG, CARD_CLEARED], prEvents: [PR_HUNG, PR_CLEARED], headCommittedAt: null })), 'head commit date'));
+  t('labels bare but the stream ending on a HANG is a disagreement, reported not resolved', says(c3DeclaredYesUngated(declaredYes({ cardEvents: [CARD_HUNG], prEvents: [PR_HUNG, PR_CLEARED] })), 'the labels say bare, the events say hung'));
+
+  // -- the event reader itself ------------------------------------------------
+  t('an empty stream reads NEVER HUNG — readable, and nothing was hung', carrierGateHistory([]).state === 'never-hung');
+  t('a null stream reads UNREADABLE — the distinction the whole row turns on', carrierGateHistory(null).state === 'unreadable');
+  t('the LAST event decides, and the reader sorts rather than trusting arrival order', carrierGateHistory([CARD_CLEARED, CARD_HUNG]).state === 'cleared' && carrierGateHistory([CARD_HUNG, CARD_CLEARED]).state === 'cleared');
+  t('…so a newest-first page cannot invert the verdict', carrierGateHistory([CARD_CLEARED, CARD_HUNG]).at === CARD_CLEARED.created_at);
+  t('a re-hung gate reads HUNG, not cleared', carrierGateHistory([CARD_HUNG, CARD_CLEARED, EV('labeled', '2026-09-01T09:30:00Z')]).state === 'hung');
+  t('⛔ events for OTHER labels are not the gate\'s history', carrierGateHistory([{ event: 'labeled', created_at: '2026-08-31T08:00:18Z', label: { name: 'priority:p1' } }]).state === 'never-hung');
+  t('⛔ non-label events are ignored', carrierGateHistory([{ event: 'ready_for_review', created_at: '2026-08-31T08:00:18Z' }]).state === 'never-hung');
+  t('⛔ an UNDATED gate event refuses the whole reading — dropping it could move the last event', carrierGateHistory([CARD_HUNG, { event: 'unlabeled', created_at: null, label: { name: CONTRACT_REVIEW_LABEL } }]).state === 'unreadable');
+  t('the gate label is the sibling\'s constant, not a second spelling', carrierGateHistory([EV('labeled', '2026-08-31T16:55:54Z')]).state === 'hung');
+
+  // -- the cost bound, stated as one predicate both sides read ---------------
+  t('a declared `no` owes NO event stream — the cost bound', needsGateHistory(pair({ cardComments: [CLAIM('Clause-②: no')] })) === false);
+  t('a pair still carrying the gate owes none either', needsGateHistory(pair({ prLabels: [L], cardLabels: [L], cardComments: [CLAIM('Clause-②: yes')] })) === false);
+  t('an ABSENT declaration owes none — C2 already owns that pair', needsGateHistory(pair({ cardComments: [CLAIM('Domain: x')] })) === false);
+  t('only the C3 candidate shape owes one', needsGateHistory(declaredYes({})) === true);
+  t('…and a pair that owes nothing is never UNJUDGED for a stream it was never going to be asked for', pairUnjudged(pair({ cardComments: [CLAIM('Clause-②: no')] })) === null);
+  t('the page cap exists, because the stream arrives OLDEST FIRST and a short read loses the removal', Number.isInteger(EVENT_PAGE_CAP) && EVENT_PAGE_CAP > 0);
 
   // -- the #13910 specimen, end to end ---------------------------------------
   const specimen = pair({ pr: 13910, card: 13476, prLabels: [], cardLabels: [L], cardComments: [CLAIM('Domain: `domain:engine`')] });
@@ -847,7 +1214,8 @@ export function selfTest() {
   }
   console.log(
     `✓ check-clause2-carriers self-test: ${cases.length} cases pass (fixed-spelling reader, the ` +
-      'four declaration states, the 2026-08-31 seven-pair replay, and the exit register).',
+      'four declaration states, the 2026-08-31 seven-pair replay, the four gate-binding states ' +
+      'replayed from the 2026-09-01 clear, and the exit register).',
   );
   return 0;
 }
