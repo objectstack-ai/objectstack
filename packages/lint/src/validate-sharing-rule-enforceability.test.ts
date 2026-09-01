@@ -484,7 +484,14 @@ describe('SHARING_RULE_RUNTIME_VARIABLE_CONDITION — the hint qualifies its RLS
   });
 
   it('names the open capability gap rather than inventing a mechanism', () => {
-    expect(hintOf()).toMatch(/#14103/);
+    const hint = hintOf();
+    // Described in WORDS, never as a tracker id: this string reaches authors
+    // and generated surfaces, and none of them can resolve `#NNNN`
+    // (`check:doc-authoring`, maintainer ruling 2026-08-12). The `#14103`
+    // anchor lives in an adjacent source comment instead.
+    expect(hint).toMatch(/known gap in the platform/);
+    expect(hint).toMatch(/leave the grant unauthored rather than widening it/);
+    expect(hint).not.toMatch(/#\d{3,}/);
   });
 });
 

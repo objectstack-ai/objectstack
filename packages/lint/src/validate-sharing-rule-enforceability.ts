@@ -461,6 +461,11 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
       'condition is never seeded as a permissive match-all).';
 
     if (result.reason === 'unresolved-variable') {
+      // The record-relative-recipient gap the hint's last sentence describes is
+      // tracked at #14103. The id lives HERE and not in the string: a runtime
+      // message reaches authors and generated surfaces, and none of them can
+      // resolve `#NNNN` (`check:doc-authoring`, maintainer ruling 2026-08-12).
+      // The reader who CAN resolve it is reading this source.
       findings.push({
         severity: 'error',
         rule: SHARING_RULE_RUNTIME_VARIABLE_CONDITION,
@@ -492,7 +497,9 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
           '"this record\'s approver"), no mechanism expresses it today — `sharedWith` recipients ' +
           'resolve tenant-wide, so reaching for `position` shares every matched row with EVERY holder ' +
           'of that position (the skip-level, the manager two teams over): an over-broad grant, not the ' +
-          'narrower one you meant. That gap is tracked at #14103.',
+          'narrower one you meant. That is a known gap in the platform, not something a different ' +
+          'spelling of this rule can close — leave the grant unauthored rather than widening it, and ' +
+          'ask for record-relative sharing recipients.',
       });
       return;
     }
