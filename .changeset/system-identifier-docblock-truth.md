@@ -16,9 +16,12 @@ its `os-dev-report` comment is the measurement of record, taken on `origin/main`
 schema: select option values (`SelectOptionSchema.value`). Eight are validated by
 `SnakeCaseIdentifierSchema` or by an inline flat regex that forbids dots outright,
 and event keys went to the sibling `EventNameSchema`, since retired unbound
-(#13613). The docblock ships into `@objectstack/spec`'s `.d.ts`, so the false map
-was reaching consumers' editor tooltips and — the reason the card was filed —
-every AI generator that reads it as authority on where the grammar applies.
+(#13613). The reach is in-repo, measured: tsup's declaration emit does not carry
+this file's docblocks into the published `.d.ts`, so no consumer tooltip changes
+— the readers being corrected are the ones working in this source, which is the
+reason the card was filed: an AI generator reads this docblock as authority on
+where the grammar applies, and a docblock governing one surface while claiming
+eleven is a false map of the contract.
 
 The rewritten docblock states, for today's tree:
 
