@@ -448,6 +448,9 @@ importers:
       '@objectstack/metadata':
         specifier: workspace:*
         version: link:../metadata
+      '@objectstack/metadata-core':
+        specifier: workspace:*
+        version: link:../metadata-core
       '@objectstack/metadata-protocol':
         specifier: workspace:*
         version: link:../metadata-protocol
