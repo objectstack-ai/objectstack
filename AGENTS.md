@@ -301,15 +301,15 @@ localStorage / auth gotchas.
     land, split the governed files into their own PR. **Those four lift only for an authorized approval pinned to the
     current head** (2026-08-27; guard 2026-08-28): APPROVED, by an account in `GOVERNED_APPROVERS`
     (`scripts/pm/check-governed-queue-guard.mjs`), `commit_id` = that sha — then the queue lands it, re-validating as
-    it merges, and any later push expires it. Even a **pure-regeneration** PR requests its pinned approval proactively,
-    before queueing — the queue-time leg installs no dependencies and never evaluates the byte-equality lift
-    (2026-08-29). Unpinned, the maintainer's bypass direct merge (人工直合) is the only landing. ⛔ **No agent seat
-    submits an approving review on a governed-surface PR, under any account** — an authorized account is
-    agent-operated too. Nothing else substitutes: under #13 an accepted ADR *is* the decision, so merging one is the act
-    of adopting a governance position — the one class of change about which "CI is green" carries no information at
-    all (a thorough, fully-green ADR draft has been closed by the maintainer on demand grounds no gate could evaluate).
-    The other surfaces are reserved for a reason of the same shape, spelled out in the audit header below; the published
-    catalog also lands in codebases this repo cannot see.
+    it merges, and any later push expires it. Hand-authored governed content needs that approval; a PR whose only
+    governed paths are register rows the queue leg regenerates byte-exact clears with zero approvals (2026-09-01) — an
+    uncertified recompute, drift or a hand-authored sibling keeps it governed. Unpinned, the maintainer's bypass direct
+    merge (人工直合) is the only landing. ⛔ **No agent seat submits an approving review on a governed-surface PR,
+    under any account** — an authorized account is agent-operated too. Nothing else substitutes: under #13 an accepted
+    ADR *is* the decision, so merging one is the act of adopting a governance position — the one class of change about
+    which "CI is green" carries no information at all (a thorough, fully-green ADR draft has been closed by the
+    maintainer on demand grounds no gate could evaluate). The other surfaces are reserved for a reason of the same
+    shape, spelled out in the audit header below; the published catalog also lands in codebases this repo cannot see.
 
     **Already armed or queued when you read this?** ⚠️ Converting the PR back to **draft** is the only action that
     reliably removes it from the merge queue; `disable_pr_auto_merge` alone drops the arming but **not** queue

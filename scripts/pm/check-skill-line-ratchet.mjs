@@ -248,7 +248,25 @@ export const CEILINGS = new Map([
   // or folded; the residual +6 could not be paid without deleting ruled clauses
   // (refused on the state-machine precedent). Landed count, headroom 0, same
   // convention.
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 57],
+  // Raised 57 → 60 by the clear-equals-land CRITERIA encoding — the 清标即落地
+  // section gains the arm-precondition list it never carried: an in-seat at-tier
+  // PASS on record, `needs:contract-review` cleared on BOTH carriers, and ALL of
+  // the PR's checks green (never the required subset), with the per-pair
+  // mechanical reading (`check-clause2-carriers --pair`) and its exit register,
+  // and the governed-surface boundary restated as unchanged. The rule is the
+  // 2026-08-31 director batch #17 ruling, verbatim and untranslated: 「同意」,
+  // which ordered the text into THIS file and THIS section; the raise itself is
+  // authorized by the maintainer on 2026-09-01, director decision batch A,
+  // verbatim and untranslated: 「同意。」 — that ruling also chose the FULL
+  // encoding over the 58-line bare minimum, so the two extra lines are ruled
+  // content, not slack. Paid in place first: the downgrade-fuse bullet's
+  // restatement of the served-tier READING collapsed to the platform-readings
+  // pointer it already carried (4 lines → 3, 437 B → 353 B), the one real
+  // deletion the surface had; the residual +4 could not be paid without deleting
+  // a ruled clause, and the nearest candidates were the governed-surface
+  // boundary and the terminal clause (refused on the state-machine precedent).
+  // Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 60],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
@@ -437,10 +455,10 @@ export const CEILINGS = new Map([
   // prose amended to the 2026-08-27 approve-gated queue ruling — the superseded
   // "Reviewed + approved + fully green does not override this" replaced by the
   // GOVERNED_APPROVERS pinned-approval landing path, the agent-never-approves
-  // prohibition, and the pure-regeneration proactive-approval line (the queue
-  // leg installs no dependencies, so the byte-equality lift never evaluates at
-  // queue time); § Skills' twin sentence reconditioned in place at net 0. All
-  // three PD #14 paragraphs measure 0 lossless-rewrap headroom under wrapLine
+  // prohibition, and the pure-regeneration proactive-approval line (the queue leg
+  // then installed nothing, so the byte-equality lift never evaluated; SUPERSEDED
+  // 2026-09-01/#14067); § Skills' twin sentence reconditioned in place at net 0.
+  // All three PD #14 paragraphs measure 0 lossless-rewrap headroom under wrapLine
   // and the card's seven-cut ledger was exhausted first: held draft +2, the
   // proactive-approval rider +2 (a 161-byte minimal variant still wraps to +2;
   // anything smaller drops ruled content), fold 0. Maintainer batch ruling
