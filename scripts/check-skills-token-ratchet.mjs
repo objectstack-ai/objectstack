@@ -234,15 +234,16 @@ export const CEILING_BASIS = {
   bundleExtension: 'c026b0d2d',
 };
 
-/**
- * Measured counts, in the convention above. SHRINK-ONLY: lower freely, and see
- * the header for what the other direction costs.
- *
- * Basis: `main` = 465bfce90 for every file, EXCEPT the two files PR #10402
- * touches (`objectstack-data`, `objectstack-platform`), measured from that PR's
- * branch head `7228d6c25` — see {@link CEILING_BASIS}.
- */
 // ── The 2026-08-31 app-repo-principles raise, shared by five rows below ─────
+//
+// ⚠️ PLACEMENT IS LOAD-BEARING: this block sits ABOVE the doc comment below, not
+// between it and the declaration. check-ratchet-remedy-authority.mjs anchors this
+// gate's expanding-remedy offer by finding SHRINK testimony within 400 chars of a
+// `CEILINGS` mention in source, and that testimony is the "SHRINK-ONLY" line in
+// that doc comment. Inserting prose between the two pushed it out of the window
+// and flipped this gate's classification from `marked` to `excluded` — a MISCLASSIFIED
+// failure, i.e. the farm reporting that a gate silently left the convention.
+// Measured both ways while landing this raise. Keep new prose on this side.
 //
 // The maintainer ruled that day that the way a metadata app works is itself
 // published-skill material. Verbatim and untranslated:
@@ -270,6 +271,15 @@ export const CEILING_BASIS = {
 // headroom across three rows absorb part of the growth, so the ceilings move by
 // 900 while the bundle grows by 927. The raising PR's body carries the same
 // arithmetic, per-file and summed.
+
+/**
+ * Measured counts, in the convention above. SHRINK-ONLY: lower freely, and see
+ * the header for what the other direction costs.
+ *
+ * Basis: `main` = 465bfce90 for every file, EXCEPT the two files PR #10402
+ * touches (`objectstack-data`, `objectstack-platform`), measured from that PR's
+ * branch head `7228d6c25` — see {@link CEILING_BASIS}.
+ */
 export const CEILINGS = new Map([
   // Every row re-measured after the internal issue-id strip — see
   // CEILING_BASIS.strippedInternalIds. `(was N)` is the ceiling this replaced.
