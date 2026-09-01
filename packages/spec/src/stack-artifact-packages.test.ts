@@ -314,11 +314,19 @@ describe('ADR-0130 D4 — `packages` has a declared composition rule', () => {
     expect(warnings.some((w: string) => w.includes("'packages'"))).toBe(false);
   });
 
-  it('leaves the singular `manifest` pick-one semantics alone', () => {
-    // ADR-0130's follow-up row 3 (a `composeStacks` preserve mode) is a
-    // separate, additive card. Until it lands, composing two stacks that each
-    // declare only `manifest` still keeps ONE — pinned so the follow-up is a
-    // visible change rather than a silent one.
+  it('leaves the singular `manifest` pick-one semantics alone BY DEFAULT', () => {
+    // ⚠️ UPDATED, on purpose, by ADR-0130's follow-up row 3 — the card that
+    // added `composeStacks`' preserve mode. This pin was written to make that
+    // follow-up a VISIBLE change rather than a silent one, so here is what it
+    // now records: the assertions below did not move. Preserve is **opt-in**
+    // (`{ manifest: 'preserve' }`), the default is still `'last'`, and a caller
+    // that passes no options gets byte-for-byte what it got before — one
+    // manifest kept, and NO `packages` key minted underneath it.
+    //
+    // Only the pin's stated reason changed: "until the follow-up lands" became
+    // "the follow-up landed and deliberately did not touch this path". The
+    // preserve mode's own behaviour is pinned in
+    // `compose-stacks-manifest-preserve.test.ts`.
     const composed = composeStacks([raw({ manifest: crmManifest }), raw({ manifest: cpqManifest })]);
 
     expect(composed.manifest?.id).toBe('com.example.crm.cpq');

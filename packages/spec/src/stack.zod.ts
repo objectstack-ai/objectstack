@@ -1844,12 +1844,50 @@ export const ComposeStacksOptionsSchema = lazySchema(() => z.object({
 
   /**
    * Which manifest to keep when multiple stacks provide one.
-   * - `'first'` — Use the first manifest found.
-   * - `'last'`  — Use the last manifest found (default).
-   * - A number  — Use the manifest from the stack at the given index.
+   *
+   * - `'first'`    — Use the first manifest found.
+   * - `'last'`     — Use the last manifest found (default).
+   * - A number     — Use the manifest from the stack at the given index.
+   * - `'preserve'` — Keep them ALL (ADR-0130 follow-up row 3). See below.
+   *
+   * ## `'preserve'` — the pick becomes additive instead of lossy
+   *
+   * The three values above are a deliberate **pick-one**: composition keeps one
+   * manifest and the other N−1 package identities are gone from the output.
+   * That is correct for the case they were written for (several stacks
+   * assembled into ONE published package) and wrong for the case ADR-0130
+   * introduces — a release artifact that **carries** N packages, each of which
+   * keeps its own identity so a product can be split into modules without
+   * renaming a single object.
+   *
+   * `'preserve'` composes the artifact's package list instead of discarding it:
+   * every input stack contributes its packages to `packages` (ADR-0130 D4), in
+   * stack order, each element the `{ manifest: … }` wrapper object
+   * {@link ArtifactPackageEntrySchema} declares.
+   *
+   * Which entries a stack contributes is **D4's read-both rule applied to the
+   * inputs**, not a second rule invented here:
+   *
+   * - stack declares `packages` → those entries;
+   * - stack declares no `packages` → its singular `manifest` as a
+   *   **single-element list**.
+   *
+   * So a stack that carries both does not contribute its manifest twice, and a
+   * plain single-`manifest` stack — every stack written before ADR-0130 — folds
+   * in as exactly one package.
+   *
+   * ⚠️ `'preserve'` is **additive, not a replacement**: the singular `manifest`
+   * is still selected, by the same `'last'` rule as the default, so the output
+   * is the default's output **plus** the package list. The artifact keeps an
+   * artifact-level identity (ADR-0130 D6 — one artifact, one version) and no
+   * consumer reading `composed.manifest` sees a key disappear. Nothing is
+   * registered twice: D4's read-both rule says a `packages`-carrying artifact
+   * is read through `packages`, and `manifest` is the fallback branch for
+   * artifacts that have none.
+   *
    * @default 'last'
    */
-  manifest: z.union([z.enum(['first', 'last']), z.number().int().min(0)]).default('last'),
+  manifest: z.union([z.enum(['first', 'last', 'preserve']), z.number().int().min(0)]).default('last'),
 
   /**
    * Optional namespace prefix (reserved for Phase 2 — Marketplace isolation).
@@ -1933,11 +1971,14 @@ const COMPOSE_KEY_DISPOSITIONS: Record<keyof ObjectStackDefinition, ComposeDispo
   // delivers. Declared here in the change that declares the key, as the table's
   // docblock requires.
   //
-  // ⚠️ This does NOT repair `manifest:`'s deliberate pick-one semantics above
-  // (`selectManifest`, first/last): two stacks that each declare only the
-  // SINGULAR `manifest` still lose N−1 of them. Teaching `composeStacks` a
-  // preserve mode that folds those into `packages` is ADR-0130's follow-up row
-  // 3 — additive, and its own card. ⛔ Not done here.
+  // ⚠️ This disposition governs stacks that already CARRY a `packages` list.
+  // It does not, on its own, repair `manifest:`'s deliberate pick-one semantics
+  // above (`selectManifest`, first/last): two stacks that each declare only the
+  // SINGULAR `manifest` would still lose N−1 of them. Folding those in is the
+  // `manifest: 'preserve'` option (ADR-0130 follow-up row 3), which is opt-in
+  // and composes `packages` itself — see `preservePackageEntries`. Concat stays
+  // the rule for every other strategy, and preserve's own output concatenates
+  // in stack order too, so the two agree rather than compete.
   packages: 'concat',
   datasources: 'concat',
   datasourceMapping: 'concat',
@@ -2267,6 +2308,50 @@ function selectManifest(
 }
 
 /**
+ * The artifact package list for `manifest: 'preserve'` (ADR-0130 D4, follow-up
+ * row 3).
+ *
+ * Every input stack contributes, in stack order, by **D4's read-both rule** —
+ * the same rule the load path applies to an artifact, applied here to each
+ * composition input, so composition and loading cannot disagree about what "the
+ * packages of this stack" means:
+ *
+ * - `packages` present → its entries;
+ * - `packages` absent  → the singular `manifest` as a single-element list.
+ *
+ * A stack carrying both therefore contributes its list once, not its list plus
+ * its manifest — no de-duplication pass is needed, because nothing is emitted
+ * twice in the first place.
+ *
+ * Entries are emitted as the `{ manifest: … }` wrapper object
+ * {@link ArtifactPackageEntrySchema} declares, never a flat inlined manifest
+ * body: that wrapper is the structural position ADR-0130 D4 reserves so a
+ * future `{ ref, integrity }` external segment stays an ADDITIVE key. ⛔ The
+ * shape is not re-derived here — a second declaration of one shape is the drift
+ * ADR-0116 exists about.
+ *
+ * A `packages` value that is not an array cannot be iterated; `defineStack`
+ * rejects that shape, so it is reachable only via `strict: false` or a
+ * hand-built object, and the concat pass has already warned about it by the
+ * time this runs. Such a stack falls back to the `manifest` branch rather than
+ * contributing nothing — preserve's whole job is to not lose an identity.
+ *
+ * @internal
+ */
+function preservePackageEntries(stacks: ObjectStackDefinition[]): ArtifactPackageEntry[] {
+  const entries: ArtifactPackageEntry[] = [];
+  for (const stack of stacks) {
+    const declared = (stack as Record<string, unknown>).packages;
+    if (Array.isArray(declared)) {
+      entries.push(...(declared as ArtifactPackageEntry[]));
+      continue;
+    }
+    if (stack.manifest) entries.push({ manifest: stack.manifest });
+  }
+  return entries;
+}
+
+/**
  * Declaratively compose multiple stack definitions into a single unified stack.
  *
  * This eliminates the manual `...spread` merging pattern when combining
@@ -2274,7 +2359,9 @@ function selectManifest(
  *
  * **Array fields** (apps, views, dashboards, etc.) are concatenated in order.
  * **Objects** are merged according to the `objectConflict` strategy.
- * **Manifest** is selected based on the `manifest` option.
+ * **Manifest** is selected based on the `manifest` option — or, with
+ * `manifest: 'preserve'`, every input's package identity is additionally folded
+ * into `packages` (ADR-0130 D4) instead of N−1 of them being discarded.
  * **Single-valued configuration** (`i18n`, `api`, `server`, `runtimeModule`) is
  * neither overridden nor merged: identical declarations pass through, and two
  * stacks declaring *different* values throw an error naming both stacks
@@ -2299,6 +2386,10 @@ function selectManifest(
  *
  * // Merge strategy — fields from later stacks are shallow-merged
  * const combined = composeStacks([crm, todo], { objectConflict: 'merge' });
+ *
+ * // Preserve — one artifact carrying BOTH package identities (ADR-0130 D4)
+ * const artifact = composeStacks([crm, cpq], { manifest: 'preserve' });
+ * artifact.packages; // [{ manifest: crmManifest }, { manifest: cpqManifest }]
  * ```
  */
 export function composeStacks(
@@ -2312,8 +2403,14 @@ export function composeStacks(
 
   const composed: Record<string, unknown> = {};
 
-  // 1. Manifest — pick based on strategy
-  composed.manifest = selectManifest(stacks, opts.manifest);
+  // 1. Manifest — pick based on strategy.
+  //
+  //    `'preserve'` is additive over the default rather than a fourth pick: the
+  //    singular `manifest` is still selected by `'last'`, so a preserve
+  //    composition's output is the default's output PLUS the package list built
+  //    in step 3a. The artifact keeps an artifact-level identity (ADR-0130 D6)
+  //    and no consumer reading `composed.manifest` loses a key.
+  composed.manifest = selectManifest(stacks, opts.manifest === 'preserve' ? 'last' : opts.manifest);
 
   // 2. Objects — use conflict strategy
   const objects = mergeObjects(stacks, opts.objectConflict);
@@ -2337,6 +2434,21 @@ export function composeStacks(
     if (declared.length !== arrays.length) {
       warnMalformedCollectionKey(field);
     }
+  }
+
+  // 3a. `manifest: 'preserve'` — fold every input's package identity into the
+  //     artifact package list (ADR-0130 D4, follow-up row 3).
+  //
+  //     Deliberately AFTER the concat pass, which owns `packages`' declared
+  //     disposition and its malformed-value warning. For stacks that already
+  //     carry `packages`, preserve emits the same concatenation the pass just
+  //     computed; what it adds is the single-`manifest` stacks the pass has
+  //     nothing to concatenate for. Left undefined when there is nothing to
+  //     preserve, so composing manifest-less stacks does not mint an empty
+  //     array where today there is no key at all.
+  if (opts.manifest === 'preserve') {
+    const preserved = preservePackageEntries(stacks);
+    if (preserved.length > 0) composed.packages = preserved;
   }
 
   // 4. Named handler functions — merged by name (#5005).
