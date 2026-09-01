@@ -310,8 +310,8 @@ describe('ADR-0130 D4 — `packages` has a declared composition rule', () => {
       raw({ manifest: cpqManifest }),
     ]);
 
-    const warnings = warnSpy.mock.calls.map((c) => String(c[0]));
-    expect(warnings.some((w) => w.includes("'packages'"))).toBe(false);
+    const warnings: string[] = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+    expect(warnings.some((w: string) => w.includes("'packages'"))).toBe(false);
   });
 
   it('leaves the singular `manifest` pick-one semantics alone', () => {

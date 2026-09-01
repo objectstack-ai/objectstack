@@ -215,6 +215,8 @@ export const ArtifactPackageEntrySchema = lazySchema(() => strictObject({
 }).describe('One package carried by a release artifact (ADR-0130 D4)'));
 
 export type ArtifactPackageEntry = z.input<typeof ArtifactPackageEntrySchema>;
+/** Post-parse shape of {@link ArtifactPackageEntry} — defaults applied, transforms run (ADR-0122). */
+export type ArtifactPackageEntryParsed = z.infer<typeof ArtifactPackageEntrySchema>;
 
 /**
  * ObjectStack Ecosystem Definition

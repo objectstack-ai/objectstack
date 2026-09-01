@@ -10,6 +10,7 @@
     "Agent": "src/ai/agent.zod.ts#Agent (type)",
     "ApplyConversionsOptions": "src/conversions/apply.ts#ApplyConversionsOptions (interface)",
     "ArtifactPackageEntry": "src/stack.zod.ts#ArtifactPackageEntry (type)",
+    "ArtifactPackageEntryParsed": "src/stack.zod.ts#ArtifactPackageEntryParsed (type)",
     "ArtifactPackageEntrySchema": "src/stack.zod.ts#ArtifactPackageEntrySchema (const)",
     "AssembledViewArtifact": "src/ui/assembled-views.zod.ts#AssembledViewArtifact (type)",
     "AssembledViewArtifactParsed": "src/ui/assembled-views.zod.ts#AssembledViewArtifactParsed (type)",
