@@ -649,6 +649,73 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'vocabulary. If a transport ever ANSWERS with this fact, the verdict becomes ' +
             'pending-registration and the code belongs in the ledger batch.',
     },
+    // [ADR-0130 D4] The artifact load path's three wrapper refusals, added with the
+    // N-package load path itself. The pre-HTTP reasoning is the one the rows above
+    // cite; what is specific to these three is the second half recorded in each `why`
+    // — the one door that can reach them catches them and answers with its own
+    // registered code, so they are not demoted at a door, they never reach one.
+    {
+        code: 'INVALID_ARTIFACT_PACKAGES',
+        file: 'packages/objectql/src/artifact-packages.ts',
+        shape: 'codehelper',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'The refusal for an artifact whose `packages` key is present but not an array. Raised by ' +
+            '`resolveArtifactPackageOrder`, which the `manifest` service calls on every `register()` ' +
+            '(ADR-0130 D4/D5). Measured on this tree, that service has three callers and none of them puts ' +
+            'this code on a wire: `packages/runtime/src/app-plugin.ts` registers at boot inside plugin init, ' +
+            'where a throw aborts boot before any HTTP boundary exists; the rehydrate loop in ' +
+            '`packages/cloud-connection/src/marketplace-install-local-plugin.ts` catches per entry and logs; ' +
+            'and the HTTP install route in that same file catches and answers with its OWN registered ' +
+            '`PLUGIN_REGISTER_FAILED` at 422, interpolating this refusal\'s MESSAGE into that envelope. So the ' +
+            'code reaches a reader only inside a message string, never as `error.code` — not demoted at a ' +
+            'door, absent from the wire entirely. Its `status: 422` is the ADR-0112 envelope shape this ' +
+            'repo\'s rejection tests assert on, not evidence of a door. If an install door ever answers with ' +
+            'this code itself, the verdict becomes pending-registration and it belongs in the ledger batch.'
+    },
+    {
+        code: 'INVALID_ARTIFACT_PACKAGE_ENTRY',
+        file: 'packages/objectql/src/artifact-packages.ts',
+        shape: 'codehelper',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'The refusal for a `packages[]` element that is not a `{ manifest: … }` wrapper, or whose ' +
+            'manifest carries no usable package id. Raised by `resolveArtifactPackageOrder`, which the ' +
+            '`manifest` service calls on every `register()` (ADR-0130 D4/D5). Measured on this tree, that ' +
+            'service has three callers and none of them puts this code on a wire: ' +
+            '`packages/runtime/src/app-plugin.ts` registers at boot inside plugin init, where a throw aborts ' +
+            'boot before any HTTP boundary exists; the rehydrate loop in ' +
+            '`packages/cloud-connection/src/marketplace-install-local-plugin.ts` catches per entry and logs; ' +
+            'and the HTTP install route in that same file catches and answers with its OWN registered ' +
+            '`PLUGIN_REGISTER_FAILED` at 422, interpolating this refusal\'s MESSAGE into that envelope. So the ' +
+            'code reaches a reader only inside a message string, never as `error.code` — not demoted at a ' +
+            'door, absent from the wire entirely. Its `status: 422` is the ADR-0112 envelope shape this ' +
+            'repo\'s rejection tests assert on, not evidence of a door. If an install door ever answers with ' +
+            'this code itself, the verdict becomes pending-registration and it belongs in the ledger batch.'
+    },
+    {
+        code: 'DUPLICATE_ARTIFACT_PACKAGE',
+        file: 'packages/objectql/src/artifact-packages.ts',
+        shape: 'codehelper',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'The refusal for one artifact declaring the same package id twice — raised rather than ' +
+            'deduplicated so a dropped body cannot go unnoticed. Raised by `resolveArtifactPackageOrder`, ' +
+            'which the `manifest` service calls on every `register()` (ADR-0130 D4/D5). Measured on this ' +
+            'tree, that service has three callers and none of them puts this code on a wire: ' +
+            '`packages/runtime/src/app-plugin.ts` registers at boot inside plugin init, where a throw aborts ' +
+            'boot before any HTTP boundary exists; the rehydrate loop in ' +
+            '`packages/cloud-connection/src/marketplace-install-local-plugin.ts` catches per entry and logs; ' +
+            'and the HTTP install route in that same file catches and answers with its OWN registered ' +
+            '`PLUGIN_REGISTER_FAILED` at 422, interpolating this refusal\'s MESSAGE into that envelope. So the ' +
+            'code reaches a reader only inside a message string, never as `error.code` — not demoted at a ' +
+            'door, absent from the wire entirely. Its `status: 422` is the ADR-0112 envelope shape this ' +
+            'repo\'s rejection tests assert on, not evidence of a door. If an install door ever answers with ' +
+            'this code itself, the verdict becomes pending-registration and it belongs in the ledger batch.'
+    },
     // ── [#13233] field-level catalogs, reached by the OBJECT-LITERAL helper ──
     //
     // The 29 rows below are the whole verdict cost of widening `codehelper` to
