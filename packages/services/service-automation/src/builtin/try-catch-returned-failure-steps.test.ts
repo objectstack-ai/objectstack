@@ -333,8 +333,12 @@ describe('#14184 a no-catch try_catch keeps the record of the writes its try reg
         "Node 'guard' failed: try_catch 'guard': catch region failed — "
           + "Node 'handler' failed: boom: at least one recipient is required",
       );
-      // This return is a different one and this card does not touch it: it
-      // still carries no `childSteps`, so the log keeps no try-region steps.
+      // A DIFFERENT return, and this card does not touch it: it still carries
+      // no `childSteps`, so the log keeps no try-region steps. That is the same
+      // defect one path over and it is filed as #14222, not endorsed here —
+      // closing it needs a `partialSteps` sink for the catch region, which is a
+      // new seam rather than a mirror of this change. Whoever fixes #14222
+      // updates this pin deliberately.
       expect((record?.steps ?? []).filter(s => s.regionKind === 'try')).toHaveLength(0);
     });
   });
