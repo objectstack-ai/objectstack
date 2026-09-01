@@ -421,10 +421,10 @@ export const CEILINGS = new Map([
   // prose amended to the 2026-08-27 approve-gated queue ruling — the superseded
   // "Reviewed + approved + fully green does not override this" replaced by the
   // GOVERNED_APPROVERS pinned-approval landing path, the agent-never-approves
-  // prohibition, and the pure-regeneration proactive-approval line (the queue
-  // leg installs no dependencies, so the byte-equality lift never evaluates at
-  // queue time); § Skills' twin sentence reconditioned in place at net 0. All
-  // three PD #14 paragraphs measure 0 lossless-rewrap headroom under wrapLine
+  // prohibition, and the pure-regeneration proactive-approval line (the queue leg
+  // then installed nothing, so the byte-equality lift never evaluated; SUPERSEDED
+  // 2026-09-01/#14067); § Skills' twin sentence reconditioned in place at net 0.
+  // All three PD #14 paragraphs measure 0 lossless-rewrap headroom under wrapLine
   // and the card's seven-cut ledger was exhausted first: held draft +2, the
   // proactive-approval rider +2 (a 161-byte minimal variant still wraps to +2;
   // anything smaller drops ruled content), fold 0. Maintainer batch ruling

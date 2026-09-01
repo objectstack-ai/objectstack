@@ -8,20 +8,39 @@
 //
 // Usage:
 //   node scripts/docs-audit/check-audit-scope.mjs              # verify; exit 1 naming every drifted entry
-//   node scripts/docs-audit/check-audit-scope.mjs --write      # regenerate the block in place
-//   node scripts/docs-audit/check-audit-scope.mjs --self-test  # pin the parser/renderer/differ + the read-only routing
+//   node scripts/docs-audit/check-audit-scope.mjs --write      # regenerate the artifact from the filesystem
+//   node scripts/docs-audit/check-audit-scope.mjs --self-test  # pin the parser/renderer/differ + the read-only routing + the injection contract
 //
-// ## Why this exists (#4851)
+// ## Where the list lives, and why it moved (#13591; maintainer 2026-09-01, 「同意」)
 //
-// `.claude/workflows/docs-accuracy-audit.js` carries the full list of hand-written
-// docs inline, as `ALL_HANDWRITTEN`. It has to: a workflow script runs inside a
-// `node:vm` context whose only globals are `log/phase/console/budget/setTimeout/
-// clearTimeout` plus `agent/parallel/pipeline/workflow/args`, with `codeGeneration`
-// disabled — no `require`, no `import`, no filesystem, no `eval`. The script
-// therefore cannot enumerate `content/docs/**` itself, and cannot read the list
-// from a JSON artifact either.
+// THE single source is `scripts/docs-audit/handwritten-docs.json` — one generated
+// file, derived from the filesystem here and consumed by two readers: this gate, and
+// whoever invokes the `docs-accuracy-audit` workflow, who reads it and hands the list
+// to the workflow body as `args.handwritten`.
 //
-// So the list was hand-kept, with a comment asking the next author to "keep in sync
+// It used to be inline in `.claude/workflows/docs-accuracy-audit.js`, as
+// `ALL_HANDWRITTEN`, and the argument for that was real as far as it went: a workflow
+// script runs inside a `node:vm` context whose only globals are `log/phase/console/
+// budget/setTimeout/clearTimeout` plus `agent/parallel/pipeline/workflow/args`, with
+// `codeGeneration` disabled — no `require`, no `import`, no filesystem, no `eval`. The
+// body can neither enumerate `content/docs/**` nor open a JSON file.
+//
+// What that argument missed is that the body does not have to do the reading. `args`
+// IS an injection channel: the runner delivers it verbatim from the invocation, so the
+// file read happens in the CALLER, outside the sandbox, and the list arrives as data.
+// The sandbox stays exactly as FS-blind as before.
+//
+// The cost of the inline form was paid by every unrelated PR. `.claude/**` is a
+// governed surface — human-merge-only, never armed, never queued — so adding one
+// customer documentation page forced an edit to a governed file, through a bookkeeping
+// list that merely happened to live there. Worse, it was invisible at dispatch time:
+// nothing in such a card's file list showed a governed path until the gate ran. The
+// maintainer ruled the list off that surface; the governed register itself is untouched,
+// and narrowing it was considered and explicitly rejected.
+//
+// ## Why the list is generated at all (#4851)
+//
+// It was once hand-kept, with a comment asking the next author to "keep in sync
 // with `affected-docs.mjs --all`" — a promise nothing checked. It rotted, in BOTH
 // directions, and neither direction announced itself:
 //
@@ -51,9 +70,23 @@
 // rather than re-deriving it. One definition of "hand-written doc", one place to
 // change it; a second walk here would be the next thing to drift out of sync.
 //
-// `--write` regenerates the inline block from that derivation, so the array is a
-// generated artifact that happens to live inside a hand-written file. Hand-editing
-// it is never necessary and this check will reject it.
+// `--write` regenerates the artifact from that derivation, byte for byte. Hand-editing
+// it is never necessary and this check will reject it — including a merely reordered
+// list, because a hand-edited artifact has stopped being generated output whatever it
+// happens to contain.
+//
+// ## The injection contract is checked by RUNNING the workflow, not by grepping it
+//
+// Moving the list out creates one failure mode that did not exist before: the workflow
+// could stop reading what it is handed — an edit that renames the arg, reinstates a
+// default, or drops the refusal — and this gate would still report the artifact in
+// sync with `content/docs/` while every full audit ran over nothing, or over whatever
+// stale shape the body invented. The artifact being correct says nothing about the body
+// consuming it. So `checkScopeInjection` runs the real workflow against stub agents and
+// observes what it does with an injected list, with a scoped list, and with neither;
+// `--self-test` then mutates each of those behaviours out of an in-memory copy and
+// requires the check to go red, because a guard nobody has seen fail is a guard nobody
+// has tested (#4868).
 //
 // ## Release-owned pages: in scope, read-only (#4920)
 //
@@ -116,8 +149,22 @@ const AGENTS_REL = 'AGENTS.md';
  * a file that does not exist. The self-test pins both halves.
  */
 export const ROOT_FILE_WATCH_HINTS = ['AGENTS.md/**'];
-const BEGIN = '// <generated:docs-audit-scope>';
-const END = '// </generated:docs-audit-scope>';
+
+/**
+ * THE single source: the one hand-kept-nowhere, generated-here list of hand-written
+ * docs. Two readers — this gate, and the caller that hands it to the workflow body.
+ * Deliberately outside `.claude/**` and outside every other governed glob (see the
+ * header): an audit's page list is bookkeeping, and it must not make an unrelated
+ * docs PR human-merge-only.
+ */
+export const SCOPE_ARTIFACT_REL = 'scripts/docs-audit/handwritten-docs.json';
+
+/**
+ * The `args` key the workflow body reads its full scope from. Named here because
+ * `checkScopeInjection` asserts against the REAL workflow through it: rename the arg
+ * in one place and the observed run stops matching, which is the point.
+ */
+export const SCOPE_ARG = 'handwritten';
 
 /**
  * The release-owned boundary — the path column of AGENTS.md's RELEASE-OWNED guardrail
@@ -129,85 +176,74 @@ export const isReleaseOwned = (doc) => doc.startsWith(RELEASE_OWNED_PREFIX);
 
 const args = process.argv.slice(2);
 
-// --- block extraction / rendering -------------------------------------------
+// --- the artifact: parsing / rendering ---------------------------------------
 
 /**
- * The generated block's body (everything strictly between the markers), or throw.
+ * The doc paths declared by the artifact, or throw.
  *
- * A missing marker is a HARD failure, not a skip. This gate's whole subject is a
- * list that quietly stopped matching reality; a version of it that shrugs when it
- * cannot find that list would reproduce the defect one level up (#4690's shape:
+ * An unreadable or shapeless artifact is a HARD failure, not a skip. This gate's whole
+ * subject is a list that quietly stopped matching reality; a version of it that shrugs
+ * when it cannot find that list would reproduce the defect one level up (#4690's shape:
  * no manifest, exit 0).
  */
-export function extractBlock(source) {
-  const begin = source.indexOf(BEGIN);
-  const end = source.indexOf(END);
-  if (begin === -1 || end === -1 || end < begin) {
-    throw new Error(
-      `${WORKFLOW_REL}: could not find the generated scope block. Expected a region ` +
-        `delimited by "${BEGIN}" and "${END}". The audit workflow's default scope is ` +
-        `generated by this script; if the block was renamed or removed, restore it (or ` +
-        `update the markers here) — do NOT hand-maintain the list.`,
-    );
-  }
-  return source.slice(begin + BEGIN.length, end);
-}
-
-/** The doc paths declared inside the generated block. */
-export function parseBlock(source) {
-  const body = extractBlock(source);
-  // No doc path contains `]`, so "up to the first bracket" is unambiguous — and it
-  // parses the legacy single-line form too, so an old block is reported as drift
-  // rather than as a parse crash.
-  const m = body.match(/const ALL_HANDWRITTEN = (\[[^\]]*])/);
-  if (!m) {
-    throw new Error(
-      `${WORKFLOW_REL}: the generated scope block contains no \`const ALL_HANDWRITTEN = [...]\` ` +
-        `array literal. Regenerate it with \`node scripts/docs-audit/check-audit-scope.mjs --write\`.`,
-    );
-  }
-  // The rendered form keeps a trailing comma on the last entry (smaller diffs when a
-  // doc is added); that is the one thing between it and plain JSON, so drop it.
-  const json = m[1].replace(/,(\s*])$/, '$1');
+export function parseArtifact(source) {
   let parsed;
   try {
-    parsed = JSON.parse(json);
+    parsed = JSON.parse(source);
   } catch (e) {
     throw new Error(
-      `${WORKFLOW_REL}: ALL_HANDWRITTEN is not a plain array of string literals (${e.message}). ` +
-        `It is generated output — regenerate with \`--write\` rather than hand-editing it.`,
+      `${SCOPE_ARTIFACT_REL}: not valid JSON (${e.message}). It is generated output — ` +
+        `regenerate it with \`node scripts/docs-audit/check-audit-scope.mjs --write\` rather ` +
+        `than hand-editing it.`,
     );
   }
-  return parsed;
+  const docs = parsed?.docs;
+  if (!Array.isArray(docs) || docs.some((d) => typeof d !== 'string')) {
+    throw new Error(
+      `${SCOPE_ARTIFACT_REL}: no \`docs\` array of string paths. That array IS the audit ` +
+        `scope — the workflow is handed it as \`args.${SCOPE_ARG}\` and this gate holds it ` +
+        `equal to content/docs/. Regenerate with \`--write\`.`,
+    );
+  }
+  return docs;
 }
 
 /**
- * The exact text the block must contain for a given doc set. Byte-comparing against
+ * The exact bytes the artifact must contain for a given doc set. Byte-comparing against
  * this is what makes hand-edits — including a merely reordered list — visible.
+ *
+ * The `readme` block is part of the generated bytes on purpose: JSON carries no
+ * comments, and an artifact that cannot say what it is invites the next reader to treat
+ * it as a hand-kept list, which is the exact thing it exists to stop being.
  */
-export function renderBlock(docs) {
-  const entries = [...docs].sort();
-  return [
-    '',
-    '// GENERATED — do not hand-edit. `node scripts/docs-audit/check-audit-scope.mjs --write`',
-    '// derives this from the filesystem (every content/docs/**/*.mdx except',
-    '// references/, via `affected-docs.mjs --all`); the same script run without',
-    '// --write fails CI when the two disagree in either direction. See #4851: this',
-    '// list was hand-kept, 16 entries pointed at files that no longer existed and 48',
-    '// existing docs were absent from it, and a "FULL audit" reported green over both.',
-    'const ALL_HANDWRITTEN = [',
-    ...entries.map((d) => `  ${JSON.stringify(d)},`),
-    ']',
-    '',
-  ].join('\n');
-}
-
-/** Splice a freshly rendered block back into the workflow source. */
-export function replaceBlock(source, docs) {
-  const begin = source.indexOf(BEGIN);
-  const end = source.indexOf(END);
-  if (begin === -1 || end === -1 || end < begin) throw new Error('missing markers'); // extractBlock already explains
-  return source.slice(0, begin + BEGIN.length) + renderBlock(docs) + source.slice(end);
+export function renderArtifact(docs) {
+  return `${JSON.stringify(
+    {
+      readme: [
+        'GENERATED — do not hand-edit. `node scripts/docs-audit/check-audit-scope.mjs --write`',
+        'derives this from the filesystem (every content/docs/**/*.mdx except references/,',
+        'via `affected-docs.mjs --all`); the same script without --write is a CI gate that',
+        'fails when this file and content/docs/ disagree in EITHER direction.',
+        '',
+        'THIS FILE IS THE SINGLE SOURCE for "which docs are hand-written". Two consumers:',
+        '  1. .claude/workflows/docs-accuracy-audit.js — its body runs in a sandbox with no',
+        '     filesystem, so the CALLER reads this file and passes `docs` as args.handwritten.',
+        '  2. scripts/docs-audit/check-audit-scope.mjs — the gate that keeps it honest.',
+        'There is deliberately no second copy anywhere; one subject, one list.',
+        '',
+        'It lives here, outside .claude/** and outside every other governed surface, by',
+        'maintainer ruling (2026-09-01). Inline, it made every PR that added a documentation',
+        'page a human-merge-only PR — a governed edit forced by bookkeeping, invisible until',
+        'the gate ran. Moving it is NOT a narrowing of the governed register, which is',
+        'unchanged; do not treat this file as precedent for relocating anything else.',
+      ],
+      generator: 'node scripts/docs-audit/check-audit-scope.mjs --write',
+      gate: 'pnpm check:docs-audit-scope',
+      docs: [...docs].sort(),
+    },
+    null,
+    2,
+  )}\n`;
 }
 
 // --- the comparison ----------------------------------------------------------
@@ -465,6 +501,103 @@ export async function checkReadOnlyRouting(source) {
   return problems;
 }
 
+/** The two probe docs, as a list handed in the way a real full audit hands one in. */
+const INJECTION_PROBE = [PROBE_EDITABLE, PROBE_RELEASE];
+
+/**
+ * The injection contract, observed on a real run.
+ *
+ * The artifact being in sync with `content/docs/` says NOTHING about the workflow body
+ * consuming it — that is the one new failure mode created by moving the list out, and
+ * it is silent by construction: a body that ignored `args.${SCOPE_ARG}` would leave this
+ * gate green while every full audit ran over the wrong set. Grepping the source cannot
+ * tell a working read from a dead one, so this observes behaviour: what a handed-in list
+ * is actually audited, what a run with nothing handed in does, and whether the narrowing
+ * channel still narrows.
+ *
+ * Returns a list of human-readable problems; empty means the contract holds.
+ */
+export async function checkScopeInjection(source) {
+  const problems = [];
+  const stub = ({ prompt, phase, schema }) =>
+    phase === 'Scope Preflight' ? preflightResponse(prompt) : stubFor(schema, { doc: '' });
+  const audits = (calls) => calls.filter((c) => c.phase === 'Audit & Fix');
+
+  // 1. The injected list IS the scope, and the run says which list it audited.
+  const injected = await runWorkflow(source, { workflowArgs: { [SCOPE_ARG]: INJECTION_PROBE }, respond: stub });
+  if (injected.error) {
+    problems.push(`the workflow threw on a run whose scope was handed in as args.${SCOPE_ARG}: ${injected.error.message}`);
+  } else {
+    const seen = audits(injected.calls);
+    if (seen.length !== INJECTION_PROBE.length) {
+      problems.push(
+        `args.${SCOPE_ARG} carried ${INJECTION_PROBE.length} doc(s) but ${seen.length} reached an ` +
+          'audit-phase agent — the body is not auditing what it was handed',
+      );
+    }
+    if (!injected.logs.some((l) => l.includes('FULL audit') && l.includes(SCOPE_ARTIFACT_REL))) {
+      problems.push(
+        `a run scoped by args.${SCOPE_ARG} did not report itself as a FULL audit naming ` +
+          `${SCOPE_ARTIFACT_REL} — the summary has to say which list it audited, or a truncated ` +
+          'list reads exactly like the whole corpus',
+      );
+    }
+  }
+
+  // 2. Nothing handed in must REFUSE, naming the artifact and the arg. A body that
+  //    invents a default here is how the list silently rots back into existence.
+  for (const [label, workflowArgs] of [
+    ['no args at all', undefined],
+    ['an args object carrying neither key', {}],
+  ]) {
+    const bare = await runWorkflow(source, { workflowArgs, respond: stub });
+    if (!bare.error) {
+      problems.push(
+        `${label}: the workflow ran instead of refusing — with no list handed in it cannot know ` +
+          'what "everything" is, so whatever it audited it would report as a result',
+      );
+      continue;
+    }
+    if (!bare.error.message.includes(SCOPE_ARTIFACT_REL) || !bare.error.message.includes(`args.${SCOPE_ARG}`)) {
+      problems.push(
+        `${label}: the refusal names neither ${SCOPE_ARTIFACT_REL} nor args.${SCOPE_ARG}, so it does ` +
+          `not tell the caller what to pass — got: ${bare.error.message.slice(0, 160)}`,
+      );
+    }
+    if (audits(bare.calls).length) problems.push(`${label}: audit-phase agents were spawned before the refusal`);
+  }
+
+  // 3. A malformed injected list is a CALLER BUG, never an empty audit.
+  for (const [label, value] of [
+    ['an empty array', []],
+    ['a bare string', PROBE_EDITABLE],
+    ['an array holding a non-string', [PROBE_EDITABLE, 7]],
+  ]) {
+    const bad = await runWorkflow(source, { workflowArgs: { [SCOPE_ARG]: value }, respond: stub });
+    if (!bad.error) {
+      problems.push(`args.${SCOPE_ARG} = ${label} did not fail the run — an audit of nothing must never report success`);
+    } else if (!bad.error.message.includes(`args.${SCOPE_ARG}`)) {
+      // It failed, but not BY NAME. A body with no shape guard still dies somewhere
+      // downstream on a malformed list, with a message that sends the caller reading
+      // the audit instead of their own invocation.
+      problems.push(
+        `args.${SCOPE_ARG} = ${label} failed without naming args.${SCOPE_ARG} as the caller bug — ` +
+          `got: ${bad.error.message.slice(0, 160)}`,
+      );
+    }
+  }
+
+  // 4. The narrowing channel still narrows, and does not claim to be a full audit.
+  const scoped = await runWorkflow(source, { workflowArgs: { docs: [PROBE_EDITABLE] }, respond: stub });
+  if (scoped.error) {
+    problems.push(`args.docs no longer scopes a run: ${scoped.error.message}`);
+  } else if (scoped.logs.some((l) => l.includes('FULL audit'))) {
+    problems.push('a run scoped by args.docs called itself a FULL audit — the two channels have collapsed into one');
+  }
+
+  return problems;
+}
+
 // --- main --------------------------------------------------------------------
 
 // Exports bindings, so an import for those exports alone must run nothing (#10667).
@@ -483,37 +616,62 @@ if (isEntrypoint(import.meta.url)) {
   }
 }
 
+/** The artifact's bytes, or null when it does not exist yet (`--write` seeds it). */
+function readArtifact(artifactPath) {
+  try {
+    return readFileSync(artifactPath, 'utf8');
+  } catch (e) {
+    if (e?.code === 'ENOENT') return null;
+    throw e;
+  }
+}
+
 async function main() {
   const workflowPath = join(REPO_ROOT, WORKFLOW_REL);
+  const artifactPath = join(REPO_ROOT, SCOPE_ARTIFACT_REL);
   const source = readFileSync(workflowPath, 'utf8');
   const derived = deriveDocs();
 
   if (args.includes('--write')) {
-    const before = parseBlock(source);
-    writeFileSync(workflowPath, replaceBlock(source, derived));
+    const existing = readArtifact(artifactPath);
+    const before = existing === null ? [] : parseArtifact(existing);
+    writeFileSync(artifactPath, renderArtifact(derived));
     const { dead, unlisted } = diffScope(before, derived);
     console.log(
-      `✓ regenerated ${WORKFLOW_REL} scope: ${derived.length} hand-written doc(s) ` +
+      `✓ regenerated ${SCOPE_ARTIFACT_REL}: ${derived.length} hand-written doc(s) ` +
         `(+${unlisted.length} added, -${dead.length} removed).`,
     );
     return;
   }
 
-  const listed = parseBlock(source);
+  const raw = readArtifact(artifactPath);
+  if (raw === null) {
+    console.error(
+      `✗ ${SCOPE_ARTIFACT_REL} does not exist.\n\n` +
+        `  That file is THE single source for the audit's page scope — the workflow is handed\n` +
+        `  its \`docs\` array as \`args.${SCOPE_ARG}\`, and this gate holds it equal to content/docs/.\n` +
+        `  A missing subject is a RED result, never a pass by vacancy.\n\n` +
+        `  Fix: node scripts/docs-audit/check-audit-scope.mjs --write\n`,
+    );
+    process.exit(1);
+  }
+  const listed = parseArtifact(raw);
   const { dead, unlisted, duplicates } = diffScope(listed, derived);
-  // Byte-compare too: correct paths in a hand-edited shape still means the block
+  // Byte-compare too: correct paths in a hand-edited shape still means the artifact
   // stopped being generated output, and the next `--write` would churn.
-  const blockDrift = extractBlock(source) !== renderBlock(derived);
+  const blockDrift = raw !== renderArtifact(derived);
 
   if (!dead.length && !unlisted.length && !duplicates.length && !blockDrift) {
     console.log(
-      `✓ docs-accuracy-audit scope is in sync with content/docs/: ${listed.length} hand-written doc(s).`,
+      `✓ docs-accuracy-audit scope is in sync with content/docs/: ${listed.length} hand-written doc(s) ` +
+        `(${SCOPE_ARTIFACT_REL}).`,
     );
     await checkReleaseOwned(source, derived);
+    await checkInjection(source);
     return;
   }
 
-  console.error(`✗ ${WORKFLOW_REL}: ALL_HANDWRITTEN has drifted from content/docs/.\n`);
+  console.error(`✗ ${SCOPE_ARTIFACT_REL}: the hand-written doc list has drifted from content/docs/.\n`);
   if (dead.length) {
     console.error(
       `  ${dead.length} listed path(s) do not exist — an audit agent pointed at one reads\n` +
@@ -536,8 +694,8 @@ async function main() {
   }
   if (!dead.length && !unlisted.length && !duplicates.length && blockDrift) {
     console.error(
-      '  The listed paths are correct but the block does not match its rendered form —\n' +
-        '  ordering, formatting or the header comment was hand-edited.\n',
+      '  The listed paths are correct but the file does not match its rendered form —\n' +
+        '  ordering, formatting or the readme block was hand-edited.\n',
     );
   }
   console.error('  Fix: node scripts/docs-audit/check-audit-scope.mjs --write');
@@ -611,6 +769,29 @@ async function checkReleaseOwned(source, derived) {
   );
 }
 
+/**
+ * The other half of "one list, correctly consumed": the artifact is in sync, and the
+ * workflow really reads what it is handed. Neither implies the other.
+ */
+async function checkInjection(source) {
+  const problems = await checkScopeInjection(source);
+  if (problems.length) {
+    console.error(`✗ ${WORKFLOW_REL}: it does not consume the scope it is handed.\n`);
+    for (const p of problems) console.error(`    - ${p}`);
+    console.error(
+      `\n  Observed by running the workflow against stub agents. ${SCOPE_ARTIFACT_REL} is THE\n` +
+        `  single source; the body runs in a sandbox with no filesystem, so the caller reads that\n` +
+        `  file and hands the list in as \`args.${SCOPE_ARG}\`. An artifact in sync with content/docs/\n` +
+        `  proves nothing about a body that has stopped reading it.\n`,
+    );
+    process.exit(1);
+  }
+  console.log(
+    `✓ scope injection is live: the workflow audits the list handed in as args.${SCOPE_ARG}, ` +
+      `and refuses an invocation that hands in no scope at all.`,
+  );
+}
+
 // --- self-test ---------------------------------------------------------------
 
 /**
@@ -644,32 +825,28 @@ async function selfTest() {
   };
 
   const docs = ['content/docs/a.mdx', 'content/docs/b.mdx'];
-  const file = `header\n${BEGIN}${renderBlock(docs)}${END}\nfooter\n`;
+  const artifact = renderArtifact(docs);
 
-  check('parseBlock round-trips the rendered block', docs, parseBlock(file));
-  check('renderBlock sorts', ['a', 'b'], parseBlock(`${BEGIN}${renderBlock(['b', 'a'])}${END}`));
+  check('parseArtifact round-trips the rendered artifact', docs, parseArtifact(artifact));
+  check('renderArtifact sorts', ['a', 'b'], parseArtifact(renderArtifact(['b', 'a'])));
+  check('renderArtifact is order-insensitive byte-for-byte', artifact, renderArtifact([...docs].reverse()));
+  // The artifact carries no comments (JSON), so the bytes have to say what it is —
+  // otherwise the next reader treats a generated file as a hand-kept one.
   check(
-    'replaceBlock preserves the surrounding file',
-    ['header', 'footer', ''],
-    (() => {
-      const out = replaceBlock(file, ['content/docs/c.mdx']);
-      return [out.split('\n')[0], out.split('\n').at(-2), out.split('\n').at(-1)];
-    })(),
+    'the rendered artifact declares itself the single source and names its consumer arg',
+    [true, true, true],
+    [artifact.includes('SINGLE SOURCE'), artifact.includes(`args.${SCOPE_ARG}`), artifact.includes('--write')],
   );
-  check('replaceBlock installs the new list', ['content/docs/c.mdx'], parseBlock(replaceBlock(file, ['content/docs/c.mdx'])));
+  check('…and ends with exactly one trailing newline', [true, false], [artifact.endsWith('}\n'), artifact.endsWith('\n\n')]);
 
   // A gate that cannot find its subject must fail, not pass. This is the exact
   // failure mode the gate exists to prevent, applied to the gate itself.
-  throws('missing markers throw', () => extractBlock('no markers here'), 'could not find the generated scope block');
+  throws('unparseable JSON throws', () => parseArtifact('{ not json'), 'not valid JSON');
+  throws('an artifact with no docs array throws', () => parseArtifact('{"readme":[]}'), 'no `docs` array of string paths');
   throws(
-    'a block with no array literal throws',
-    () => parseBlock(`${BEGIN}\n// nothing here\n${END}`),
-    'no `const ALL_HANDWRITTEN = [...]` array literal',
-  );
-  throws(
-    'a hand-edited (non-JSON) array literal throws',
-    () => parseBlock(`${BEGIN}\nconst ALL_HANDWRITTEN = [\n  'a.mdx',\n]\n${END}`),
-    'not a plain array of string literals',
+    'a docs array holding a non-string throws',
+    () => parseArtifact('{"docs":["content/docs/a.mdx",7]}'),
+    'no `docs` array of string paths',
   );
 
   // Both directions of drift, each pinned on its own — #4851 asked only about
@@ -727,18 +904,32 @@ async function selfTest() {
 
   throws(
     'a workflow without the prefix constant throws',
-    () => parseReleaseOwnedPrefix('const ALL_HANDWRITTEN = []'),
+    () => parseReleaseOwnedPrefix('const SCOPE_SOURCE = ""'),
     'no `const RELEASE_OWNED_PREFIX',
   );
 
   const workflowSource = readFileSync(join(REPO_ROOT, WORKFLOW_REL), 'utf8');
+
+  // The list left this file by ruling, and nothing may quietly bring it back: a second
+  // copy inside the sandbox body is the "one subject, two hand-kept lists" bill again,
+  // and this time it would also restore the governed-edit toll on every docs PR.
+  check(
+    'the workflow body carries no inline copy of the list',
+    [false, false],
+    [/const ALL_HANDWRITTEN\s*=/.test(workflowSource), workflowSource.includes('generated:docs-audit-scope')],
+  );
+  check(
+    'the workflow names the artifact it is handed, and the arg it arrives in',
+    [true, true],
+    [workflowSource.includes(SCOPE_ARTIFACT_REL), workflowSource.includes(`const SCOPE_ARG = '${SCOPE_ARG}'`)],
+  );
 
   // (1) Still in scope. #4920's rejected option was deleting these pages from the
   //     audit; that would show up right here, as an empty list.
   check(
     'release pages are still IN the audit scope',
     true,
-    parseBlock(workflowSource).filter(isReleaseOwned).length > 0,
+    parseArtifact(readFileSync(join(REPO_ROOT, SCOPE_ARTIFACT_REL), 'utf8')).filter(isReleaseOwned).length > 0,
   );
 
   // (2) …and routed read-only, observed on a real run of the workflow.
@@ -764,6 +955,57 @@ async function selfTest() {
     const problems = await checkReadOnlyRouting(mutated);
     if (!problems.length) {
       console.error(`  ✗ mutation "${label}": checkReadOnlyRouting stayed GREEN with the read-only channel broken`);
+      failed++;
+    }
+  }
+
+  // --- the injection contract (#13591) ---------------------------------------
+  //
+  // Same discipline, one layer over: the list now arrives from outside, so the thing
+  // that can silently break is the BODY's consumption of it, not the list. Observed on
+  // the real workflow, then broken four ways in memory — each way is a shape a
+  // plausible future edit takes, and each must be seen to go red.
+  check('the workflow consumes the scope it is handed', [], await checkScopeInjection(workflowSource));
+
+  const injectionMutants = [
+    // The read goes dead: the body is handed a list and ignores it.
+    ['the injected list is ignored', [
+      ['args && Array.isArray(args[SCOPE_ARG]) && args[SCOPE_ARG].length ? args[SCOPE_ARG] : null', 'null'],
+    ]],
+    // The refusal is replaced by a silent default — an audit of nothing, reported as a
+    // result. This is the exact shape the loud-failure rule above exists to stop.
+    ['a silent default replaces the no-scope refusal', [
+      ['if (!SCOPED && !HANDWRITTEN) {', 'if (false) {'],
+      ['const DOCS = SCOPED ?? HANDWRITTEN', 'const DOCS = SCOPED ?? HANDWRITTEN ?? []'],
+    ]],
+    // The summary stops saying WHICH list it audited: a truncated hand-in then reads
+    // exactly like the whole corpus.
+    ['the FULL-audit line stops naming the scope source', [
+      [' — FULL audit (whole hand-written set from ${SCOPE_SOURCE})', ' — FULL audit'],
+    ]],
+    // The shape guard goes: a malformed hand-in dies somewhere downstream instead of
+    // naming the caller's own key.
+    ['the malformed-list guard is removed', [
+      ["for (const key of ['docs', SCOPE_ARG]) {", 'for (const key of []) {'],
+    ]],
+  ];
+  for (const [label, replacements] of injectionMutants) {
+    total++;
+    let mutated = workflowSource;
+    let missed = null;
+    for (const [from, to] of replacements) {
+      const next = mutated.replace(from, to);
+      if (next === mutated) { missed = from; break; }
+      mutated = next;
+    }
+    if (missed !== null) {
+      console.error(`  ✗ injection mutation "${label}" did not apply (anchor not found: ${JSON.stringify(missed)}) — it cannot prove anything. Update the mutation to match the current source.`);
+      failed++;
+      continue;
+    }
+    const problems = await checkScopeInjection(mutated);
+    if (!problems.length) {
+      console.error(`  ✗ injection mutation "${label}": checkScopeInjection stayed GREEN with the hand-in broken`);
       failed++;
     }
   }

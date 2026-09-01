@@ -1,7 +1,7 @@
 export const meta = {
   name: 'docs-accuracy-audit',
-  description: 'Audit + fix hand-written ObjectStack docs against actual implementation, with adversarial verification. Scope with args.docs; defaults to all hand-written docs.',
-  whenToUse: 'Periodic or change-scoped documentation accuracy verification. Pass args.docs = [paths] to scope (e.g. output of scripts/docs-audit/affected-docs.mjs); omit for a full audit of every hand-written doc.',
+  description: 'Audit + fix hand-written ObjectStack docs against actual implementation, with adversarial verification. Scope with args.docs, or hand in the whole set as args.handwritten.',
+  whenToUse: 'Periodic or change-scoped documentation accuracy verification. Pass args.docs = [paths] to scope (e.g. output of scripts/docs-audit/affected-docs.mjs). For a FULL audit pass args.handwritten = the `docs` array of scripts/docs-audit/handwritten-docs.json — this body has no filesystem, so the full set has to be handed in.',
   phases: [
     { title: 'Scope Preflight', detail: 'resolve every doc path on disk; abort naming any that does not exist' },
     { title: 'Audit & Fix', detail: 'one agent per doc: read, locate implementation, apply evidence-backed edits — except release-owned pages, which are reviewed read-only and produce findings to file as issues' },
@@ -9,222 +9,31 @@ export const meta = {
   ],
 }
 
-// Default scope = every hand-written doc (content/docs/** minus references/). Callers
-// normally pass a scoped subset via args.docs (e.g. only docs whose backing packages/
-// code changed).
+// Default scope = every hand-written doc (content/docs/** minus references/). It is NOT
+// inline here: it is HANDED IN as `args.handwritten` by whoever invokes this workflow.
+// Callers normally pass a narrower `args.docs` instead (e.g. only the docs whose backing
+// packages/ code changed).
 //
-// The list is inline because it has to be: a workflow script runs in a `node:vm`
-// context whose only globals are log/phase/console/budget/timers plus agent/parallel/
-// pipeline/workflow/args, with code generation disabled — no require, no import, no
-// filesystem. It cannot enumerate content/docs/ itself, nor read a JSON artifact.
+// The read happens OUTSIDE this body, and it has to. A workflow script runs in a
+// `node:vm` context whose only globals are log/phase/console/budget/timers plus
+// agent/parallel/pipeline/workflow/args, with code generation disabled — no require, no
+// import, no filesystem. `args` is the ONE channel through which data reaches this body,
+// so the file read is the caller's and the list arrives at invocation time.
 //
-// So it is GENERATED instead: `node scripts/docs-audit/check-audit-scope.mjs --write`
-// derives it from the filesystem, and the same script without --write is a CI gate
-// (`pnpm check:docs-audit-scope`) that fails when the block and content/docs/ disagree
-// in EITHER direction. It used to be hand-kept behind a "keep in sync" comment, and by
-// #4851 had rotted both ways at once — 16 entries pointing at files that no longer
-// existed (the whole renamed protocol/objectos → protocol/kernel directory among them)
-// and 48 existing docs missing from it — with every full-audit run reporting green.
-// <generated:docs-audit-scope>
-// GENERATED — do not hand-edit. `node scripts/docs-audit/check-audit-scope.mjs --write`
-// derives this from the filesystem (every content/docs/**/*.mdx except
-// references/, via `affected-docs.mjs --all`); the same script run without
-// --write fails CI when the two disagree in either direction. See #4851: this
-// list was hand-kept, 16 entries pointed at files that no longer existed and 48
-// existing docs were absent from it, and a "FULL audit" reported green over both.
-const ALL_HANDWRITTEN = [
-  "content/docs/ai/actions-as-tools.mdx",
-  "content/docs/ai/agents.mdx",
-  "content/docs/ai/connect-mcp.mdx",
-  "content/docs/ai/index.mdx",
-  "content/docs/ai/knowledge-rag.mdx",
-  "content/docs/ai/natural-language-queries.mdx",
-  "content/docs/ai/skills-reference.mdx",
-  "content/docs/ai/skills.mdx",
-  "content/docs/ai/tools.mdx",
-  "content/docs/api/client-sdk.mdx",
-  "content/docs/api/data-api.mdx",
-  "content/docs/api/data-flow.mdx",
-  "content/docs/api/declarative-endpoints.mdx",
-  "content/docs/api/environment-routing.mdx",
-  "content/docs/api/error-catalog.mdx",
-  "content/docs/api/error-handling-client.mdx",
-  "content/docs/api/error-handling-server.mdx",
-  "content/docs/api/index.mdx",
-  "content/docs/api/metadata-api.mdx",
-  "content/docs/api/plugin-endpoints.mdx",
-  "content/docs/api/wire-format.mdx",
-  "content/docs/automation/approvals.mdx",
-  "content/docs/automation/connectors.mdx",
-  "content/docs/automation/email-templates.mdx",
-  "content/docs/automation/flows.mdx",
-  "content/docs/automation/hook-bodies.mdx",
-  "content/docs/automation/hooks.mdx",
-  "content/docs/automation/index.mdx",
-  "content/docs/automation/jobs.mdx",
-  "content/docs/automation/webhooks.mdx",
-  "content/docs/automation/workflows.mdx",
-  "content/docs/build-without-code.mdx",
-  "content/docs/capabilities/ai.mdx",
-  "content/docs/capabilities/analytics.mdx",
-  "content/docs/capabilities/approvals.mdx",
-  "content/docs/capabilities/automation.mdx",
-  "content/docs/capabilities/data.mdx",
-  "content/docs/capabilities/forms.mdx",
-  "content/docs/capabilities/index.mdx",
-  "content/docs/capabilities/integrations.mdx",
-  "content/docs/capabilities/permissions.mdx",
-  "content/docs/capabilities/request-template.mdx",
-  "content/docs/capabilities/views.mdx",
-  "content/docs/concepts/architecture.mdx",
-  "content/docs/concepts/design-principles.mdx",
-  "content/docs/concepts/index.mdx",
-  "content/docs/concepts/metadata-driven.mdx",
-  "content/docs/concepts/metadata-lifecycle.mdx",
-  "content/docs/concepts/north-star.mdx",
-  "content/docs/data-modeling/analytics.mdx",
-  "content/docs/data-modeling/drivers.mdx",
-  "content/docs/data-modeling/external-datasources.mdx",
-  "content/docs/data-modeling/field-type-decision-tree.mdx",
-  "content/docs/data-modeling/field-types.mdx",
-  "content/docs/data-modeling/fields.mdx",
-  "content/docs/data-modeling/formulas.mdx",
-  "content/docs/data-modeling/import-mappings.mdx",
-  "content/docs/data-modeling/index.mdx",
-  "content/docs/data-modeling/indexing.mdx",
-  "content/docs/data-modeling/object-extensions.mdx",
-  "content/docs/data-modeling/objects.mdx",
-  "content/docs/data-modeling/queries.mdx",
-  "content/docs/data-modeling/relationships.mdx",
-  "content/docs/data-modeling/schema-design.mdx",
-  "content/docs/data-modeling/seed-data.mdx",
-  "content/docs/data-modeling/validation-rules.mdx",
-  "content/docs/data-modeling/validation.mdx",
-  "content/docs/deployment/backup-restore.mdx",
-  "content/docs/deployment/cli.mdx",
-  "content/docs/deployment/environment-variables.mdx",
-  "content/docs/deployment/index.mdx",
-  "content/docs/deployment/production-readiness.mdx",
-  "content/docs/deployment/publish-and-preview.mdx",
-  "content/docs/deployment/seed-tenancy-repair.mdx",
-  "content/docs/deployment/self-hosting.mdx",
-  "content/docs/deployment/single-project-mode.mdx",
-  "content/docs/deployment/tenancy-modes.mdx",
-  "content/docs/deployment/troubleshooting.mdx",
-  "content/docs/deployment/validating-metadata.mdx",
-  "content/docs/getting-started/build-with-claude-code.mdx",
-  "content/docs/getting-started/common-patterns.mdx",
-  "content/docs/getting-started/examples.mdx",
-  "content/docs/getting-started/glossary.mdx",
-  "content/docs/getting-started/how-ai-development-works.mdx",
-  "content/docs/getting-started/index.mdx",
-  "content/docs/getting-started/quick-reference.mdx",
-  "content/docs/getting-started/quick-start.mdx",
-  "content/docs/getting-started/your-first-project.mdx",
-  "content/docs/index.mdx",
-  "content/docs/kernel/architecture.mdx",
-  "content/docs/kernel/cluster.mdx",
-  "content/docs/kernel/contracts/auth-service.mdx",
-  "content/docs/kernel/contracts/cache-service.mdx",
-  "content/docs/kernel/contracts/data-engine.mdx",
-  "content/docs/kernel/contracts/index.mdx",
-  "content/docs/kernel/contracts/metadata-service.mdx",
-  "content/docs/kernel/contracts/storage-service.mdx",
-  "content/docs/kernel/events.mdx",
-  "content/docs/kernel/index.mdx",
-  "content/docs/kernel/runtime-services/audit-service.mdx",
-  "content/docs/kernel/runtime-services/data-service.mdx",
-  "content/docs/kernel/runtime-services/email-service.mdx",
-  "content/docs/kernel/runtime-services/examples.mdx",
-  "content/docs/kernel/runtime-services/index.mdx",
-  "content/docs/kernel/runtime-services/queue-service.mdx",
-  "content/docs/kernel/runtime-services/settings-service.mdx",
-  "content/docs/kernel/runtime-services/sharing-service.mdx",
-  "content/docs/kernel/runtime-services/sms-service.mdx",
-  "content/docs/kernel/runtime-services/storage-service.mdx",
-  "content/docs/kernel/runtime-services/versioning.mdx",
-  "content/docs/kernel/services-checklist.mdx",
-  "content/docs/kernel/services.mdx",
-  "content/docs/permissions/access-matrix.mdx",
-  "content/docs/permissions/access-recipes.mdx",
-  "content/docs/permissions/administrator-guide.mdx",
-  "content/docs/permissions/attachments-access.mdx",
-  "content/docs/permissions/authentication.mdx",
-  "content/docs/permissions/authorization.mdx",
-  "content/docs/permissions/capabilities.mdx",
-  "content/docs/permissions/delegated-administration.mdx",
-  "content/docs/permissions/explain.mdx",
-  "content/docs/permissions/field-level-security.mdx",
-  "content/docs/permissions/index.mdx",
-  "content/docs/permissions/permission-metadata.mdx",
-  "content/docs/permissions/permission-sets.mdx",
-  "content/docs/permissions/permissions-matrix.mdx",
-  "content/docs/permissions/positions.mdx",
-  "content/docs/permissions/profiles.mdx",
-  "content/docs/permissions/record-view-auditing.mdx",
-  "content/docs/permissions/rls.mdx",
-  "content/docs/permissions/sharing-rules.mdx",
-  "content/docs/permissions/sso.mdx",
-  "content/docs/permissions/system-context.mdx",
-  "content/docs/permissions/tenant-audit-census.mdx",
-  "content/docs/plugins/adding-a-metadata-type.mdx",
-  "content/docs/plugins/anatomy.mdx",
-  "content/docs/plugins/development.mdx",
-  "content/docs/plugins/index.mdx",
-  "content/docs/plugins/packages.mdx",
-  "content/docs/protocol/backward-compatibility.mdx",
-  "content/docs/protocol/diagram.mdx",
-  "content/docs/protocol/index.mdx",
-  "content/docs/protocol/kernel/config-resolution.mdx",
-  "content/docs/protocol/kernel/error-handling.mdx",
-  "content/docs/protocol/kernel/http-protocol.mdx",
-  "content/docs/protocol/kernel/i18n-standard.mdx",
-  "content/docs/protocol/kernel/index.mdx",
-  "content/docs/protocol/kernel/lifecycle.mdx",
-  "content/docs/protocol/kernel/metadata-service.mdx",
-  "content/docs/protocol/kernel/plugin-spec.mdx",
-  "content/docs/protocol/kernel/realtime-protocol.mdx",
-  "content/docs/protocol/knowledge.mdx",
-  "content/docs/protocol/objectql/index.mdx",
-  "content/docs/protocol/objectql/query-syntax.mdx",
-  "content/docs/protocol/objectql/schema.mdx",
-  "content/docs/protocol/objectql/security.mdx",
-  "content/docs/protocol/objectql/state-machine.mdx",
-  "content/docs/protocol/objectql/types.mdx",
-  "content/docs/protocol/objectui/actions.mdx",
-  "content/docs/protocol/objectui/concept.mdx",
-  "content/docs/protocol/objectui/index.mdx",
-  "content/docs/protocol/objectui/layout-dsl.mdx",
-  "content/docs/protocol/objectui/record-alert.mdx",
-  "content/docs/protocol/objectui/widget-contract.mdx",
-  "content/docs/releases/implementation-status.mdx",
-  "content/docs/releases/index.mdx",
-  "content/docs/releases/v12.mdx",
-  "content/docs/releases/v13.mdx",
-  "content/docs/releases/v14.mdx",
-  "content/docs/releases/v15.mdx",
-  "content/docs/releases/v16.mdx",
-  "content/docs/releases/v17.mdx",
-  "content/docs/releases/v9.mdx",
-  "content/docs/ui/actions.mdx",
-  "content/docs/ui/apps.mdx",
-  "content/docs/ui/audience-based-interfaces.mdx",
-  "content/docs/ui/create-vs-edit-form.mdx",
-  "content/docs/ui/dashboards.mdx",
-  "content/docs/ui/doc-pages.mdx",
-  "content/docs/ui/field-grouping-and-order.mdx",
-  "content/docs/ui/forms.mdx",
-  "content/docs/ui/index.mdx",
-  "content/docs/ui/pages.mdx",
-  "content/docs/ui/public-data-collection.mdx",
-  "content/docs/ui/react-pages.mdx",
-  "content/docs/ui/reports.mdx",
-  "content/docs/ui/setup-app.mdx",
-  "content/docs/ui/translations.mdx",
-  "content/docs/ui/views.mdx",
-  "content/docs/upgrading.mdx",
-]
-// </generated:docs-audit-scope>
+// THE single source is the artifact named below: one generated file, derived from the
+// filesystem by `node scripts/docs-audit/check-audit-scope.mjs --write` and held equal to
+// content/docs/ in BOTH directions by `pnpm check:docs-audit-scope`. It is deliberately
+// not kept here — an audit's page list is routine bookkeeping, and keeping it in this tree
+// made every PR that adds a documentation page edit a governed file for no other reason.
+//
+// Before it was generated at all it was hand-kept behind a "keep in sync" comment, and it
+// rotted both ways at once: 16 entries pointing at files that no longer existed (a whole
+// renamed directory among them) and 48 existing docs missing from it — while every
+// full-audit run reported green, because a doc path that resolves to nothing produces an
+// agent that reads nothing and reports "0 fixes". One generated source held equal to the
+// filesystem in both directions is what keeps that from recurring, wherever it lives.
+const SCOPE_SOURCE = 'scripts/docs-audit/handwritten-docs.json'
+const SCOPE_ARG = 'handwritten'
 
 // --- Release-owned pages are IN SCOPE but READ-ONLY (#4920) -------------------
 //
@@ -242,13 +51,13 @@ const ALL_HANDWRITTEN = [
 //
 // The ruling on #4920 was NOT to drop them from scope. Dropping them would leave
 // some of the most-read pages in the docs permanently unaudited, and would create a
-// SECOND definition of "which docs does this workflow cover" alongside the generated
-// block above — #4851 had just finished paying for what happens when one subject has
-// two hand-kept lists. So the scope is unchanged and only the DELIVERABLE forks:
+// SECOND definition of "which docs does this workflow cover" alongside the scope
+// source above — the repo had just finished paying for what happens when one subject
+// has two hand-kept lists. So the scope is unchanged and only the DELIVERABLE forks:
 // findings to file as issues, instead of edits written to disk.
 //
 // The fork has to be decidable inside the workflow VM (no filesystem, no require, no
-// import — see the note on the generated block), which a path prefix is. And the
+// import — see the note on the scope source above), which a path prefix is. And the
 // prefix is not a curation of the guardrail, it is the guardrail's own path column
 // copied verbatim, so there is still exactly one definition of "release-owned".
 // `scripts/docs-audit/check-audit-scope.mjs` anchors the two together and goes red if
@@ -257,37 +66,56 @@ const ALL_HANDWRITTEN = [
 const RELEASE_OWNED_PREFIX = 'content/docs/releases/'
 const isReleaseOwned = (doc) => doc.startsWith(RELEASE_OWNED_PREFIX)
 
-// Scope resolution. Omitting `args` entirely is the legitimate "audit
-// everything" invocation; supplying `args` but not a usable `args.docs` array
-// is a CALLER BUG and must say so.
+// Scope resolution. Two channels, and NEITHER has a default: `args.docs` is the
+// caller's narrowing, `args.handwritten` is the full hand-written set handed in from
+// the artifact named above. An invocation carrying neither is refused by name.
 //
-// This used to be a single `?:` that fell back to ALL_HANDWRITTEN for both
-// cases. The Workflow tool delivers `args` verbatim, so passing a JSON-encoded
-// STRING instead of an object — an easy mistake, and one the tool's own docs
-// warn about — left `args.docs` undefined, the ternary silently widened a
-// 12-doc request to all 147, and the run burned ~294 agents on work nobody
-// asked for. Nothing in the output said the scope had been ignored. Failing
-// loudly costs one retry; failing quietly cost an hour.
-if (args !== undefined && args !== null) {
-  if (typeof args === 'string') {
+// There is deliberately no "omit args and audit everything" path any more. There
+// cannot be one — this body has no filesystem, so with nothing handed in it has no
+// idea what "everything" is, and the only shapes it could invent are a silent audit
+// of nothing and a stale list. Refusing costs one retry and says exactly what to pass.
+//
+// Supplying `args` but not a usable array is a CALLER BUG and must say so. This used
+// to be a single `?:` that fell back to the inline list for both cases. The Workflow
+// tool delivers `args` verbatim, so passing a JSON-encoded STRING instead of an object
+// — an easy mistake, and one the tool's own docs warn about — left `args.docs`
+// undefined, the ternary silently widened a 12-doc request to the whole corpus, and
+// the run burned ~294 agents on work nobody asked for. Nothing in the output said the
+// scope had been ignored. Failing loudly costs one retry; failing quietly cost an hour.
+const HOW_TO_PASS =
+  'Read `' + SCOPE_SOURCE + '` OUTSIDE the workflow and pass its `docs` array as ' +
+  'args.' + SCOPE_ARG + ' for a full audit, or pass args.docs = [paths] to scope the run.'
+
+if (typeof args === 'string') {
+  throw new Error(
+    '[docs-accuracy-audit] `args` arrived as a string, not an object — pass a real JSON ' +
+    'value (e.g. {"docs": ["content/docs/a.mdx"]}), not a JSON-encoded string. ' + HOW_TO_PASS,
+  )
+}
+for (const key of ['docs', SCOPE_ARG]) {
+  const value = args === undefined || args === null ? undefined : args[key]
+  if (value !== undefined && (!Array.isArray(value) || value.length === 0 || value.some((d) => typeof d !== 'string'))) {
     throw new Error(
-      '[docs-accuracy-audit] `args` arrived as a string, not an object — pass a real JSON ' +
-      'value (e.g. {"docs": ["content/docs/a.mdx"]}), not a JSON-encoded string. ' +
-      'Refusing to silently audit all ' + ALL_HANDWRITTEN.length + ' docs instead.',
-    )
-  }
-  if (args.docs !== undefined && (!Array.isArray(args.docs) || args.docs.length === 0)) {
-    throw new Error(
-      '[docs-accuracy-audit] `args.docs` must be a non-empty array of doc paths; got ' +
-      JSON.stringify(args.docs) + '. Omit `args` entirely to audit all ' +
-      ALL_HANDWRITTEN.length + ' hand-written docs.',
+      '[docs-accuracy-audit] `args.' + key + '` must be a non-empty array of doc paths; got ' +
+      JSON.stringify(value) + '. ' + HOW_TO_PASS,
     )
   }
 }
-const DOCS = args && Array.isArray(args.docs) && args.docs.length ? args.docs : ALL_HANDWRITTEN
+
+const SCOPED = args && Array.isArray(args.docs) && args.docs.length ? args.docs : null
+const HANDWRITTEN = args && Array.isArray(args[SCOPE_ARG]) && args[SCOPE_ARG].length ? args[SCOPE_ARG] : null
+if (!SCOPED && !HANDWRITTEN) {
+  throw new Error(
+    '[docs-accuracy-audit] no scope was handed in: this invocation carries neither `args.docs` ' +
+    'nor `args.' + SCOPE_ARG + '`. This body runs in a sandbox with no filesystem, so it cannot ' +
+    'enumerate content/docs/ or read the list itself — the caller must hand it in. ' + HOW_TO_PASS,
+  )
+}
+
+const DOCS = SCOPED ?? HANDWRITTEN
 const WRITABLE_DOCS = DOCS.filter((d) => !isReleaseOwned(d))
 const READONLY_DOCS = DOCS.filter(isReleaseOwned)
-log(`scope: ${DOCS.length} doc(s)${DOCS === ALL_HANDWRITTEN ? ' — FULL audit (no args.docs given)' : ''}`)
+log(`scope: ${DOCS.length} doc(s)${DOCS === HANDWRITTEN ? ` — FULL audit (whole hand-written set from ${SCOPE_SOURCE})` : ''}`)
 if (READONLY_DOCS.length) {
   log(
     `  of which ${READONLY_DOCS.length} release-owned page(s) under ${RELEASE_OWNED_PREFIX} — ` +
@@ -297,10 +125,10 @@ if (READONLY_DOCS.length) {
 
 // --- Scope preflight: every path in scope must resolve to a real file ---------
 //
-// `pnpm check:docs-audit-scope` already keeps ALL_HANDWRITTEN honest in CI, but it
-// can only see the DEFAULT list. A caller-supplied `args.docs` — the normal way this
-// workflow is invoked — is checked by nothing, and a bad path there fails exactly the
-// way #4851's stale list did: the audit agent finds no file, reports `fixCount: 0`,
+// `pnpm check:docs-audit-scope` already holds the scope source equal to content/docs/
+// in CI, but it can only see THAT list. A caller-supplied `args.docs` — the normal way
+// this workflow is invoked — is checked by nothing, and a bad path there fails exactly
+// the way a stale list did before the gate existed: the agent finds no file, reports `fixCount: 0`,
 // and the run summary shows a doc that was "audited clean". So resolve the scope
 // first and refuse to start if anything in it is missing.
 //
@@ -369,10 +197,10 @@ if (preflight.missing.length) {
     `[docs-accuracy-audit] ${preflight.missing.length} of ${DOCS.length} doc path(s) in scope ` +
     'do not exist:\n  ' + preflight.missing.join('\n  ') +
     '\n\nRefusing to run: an audit agent pointed at a non-existent file reads nothing and ' +
-    'reports "0 fixes", so the run would report success over docs nobody looked at (#4851 — ' +
-    'that is how #4781 and #4817 survived ~2 months of green full audits). If these came from ' +
-    'args.docs, fix the caller; if they came from the default list, run ' +
-    '`node scripts/docs-audit/check-audit-scope.mjs --write`.',
+    'reports "0 fixes", so the run would report success over docs nobody looked at — that is ' +
+    'how two real accuracy defects survived ~2 months of green full audits. If these came from ' +
+    `args.docs, fix the caller; if they came from ${SCOPE_SOURCE}, that artifact is stale — run ` +
+    '`node scripts/docs-audit/check-audit-scope.mjs --write` and hand in the regenerated list.',
   )
 }
 log(`preflight: all ${preflight.present.length} path(s) resolve (via \`${preflight.command}\`)`)

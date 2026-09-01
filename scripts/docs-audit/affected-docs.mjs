@@ -236,7 +236,7 @@ let diffBaseRef = null;
  * the audit scoping command still returns them and they keep getting audited. #4920
  * considered excluding them and REJECTED it: the most-read pages in the docs would go
  * permanently unaudited and silently, and a second definition of "docs this tooling
- * covers" would grow next to the generated block. What forks is the DELIVERABLE — the
+ * covers" would grow next to the generated scope artifact. What forks is the DELIVERABLE — the
  * drift comment tells the reader to file an issue instead of editing (#6893: a comment
  * listing `content/docs/releases/v17.mdx` next to editable pages steers a dev who
  * treats the list as a worklist straight into the one edit the repo forbids).
