@@ -680,7 +680,7 @@ describe('cascadeDeleteRelations — [#13644] every reference-cleanup write carr
         const { driver } = makeStubDriver();
         engine.registerDriver(driver, true);
         await engine.init();
-        for (const o of [acct, noteOptional, watchlistOptionalMulti]) engine.registry.registerObject(o);
+        for (const o of [acct, noteOptional, watchlistOptionalMulti]) engine.registry.registerObject(o as any);
     });
 
     it('scalar set_null clear: true in BOTH phases with the caller identity inherited; the hand-clear control has no key at all', async () => {
