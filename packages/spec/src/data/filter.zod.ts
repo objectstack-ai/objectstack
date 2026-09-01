@@ -994,7 +994,11 @@ export const SpecialOperatorSchema = lazySchema(() => z.object({
   /** Is null check - SQL: IS NULL (true) / IS NOT NULL (false) | MongoDB: field: null */
   $null: z.boolean().optional(),
   
-  /** Field exists check (primarily for NoSQL) - MongoDB: $exists */
+  /**
+   * Field HAS A VALUE (`!= null`) — the inverse of `$null`, never key presence.
+   * Lowered to `IS NOT NULL` (true) / `IS NULL` (false) on SQL and to
+   * `{$ne: null}` / `{$eq: null}` on MongoDB.
+   */
   $exists: z.boolean().optional(),
 }));
 
