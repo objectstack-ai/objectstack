@@ -201,7 +201,13 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
       manifest: 'preserve',
     });
 
-    for (const entry of packagesOf(composed) ?? []) {
+    // The count first, deliberately: a `for` over an absent list is vacuously
+    // green, so without this line the pin would pass on an implementation where
+    // preserve does nothing at all. (It did — measured in this card's ablation
+    // leg, which is how the line got here.)
+    const entries = packagesOf(composed);
+    expect(entries).toHaveLength(2);
+    for (const entry of entries ?? []) {
       expect(ArtifactPackageEntrySchema.safeParse(entry).success).toBe(true);
     }
     // The negative half: an entry that WERE the flat body would not parse.
@@ -232,6 +238,10 @@ describe("ADR-0130 row 3 — `manifest: 'preserve'` keeps all N identities", () 
     const preserved = composeStacks(stacks, { manifest: 'preserve' });
     const byDefault = composeStacks(stacks);
 
+    // "Additive" is only a claim if something was added: assert the addition
+    // before asserting that nothing else moved — otherwise this pin is green on
+    // an implementation that adds nothing (measured in the ablation leg).
+    expect(idsOf(preserved)).toEqual(['com.example.crm', 'com.example.crm.cpq']);
     expect(preserved.manifest?.id).toBe('com.example.crm.cpq');
     expect(preserved.manifest).toEqual(byDefault.manifest);
     // Stated as the whole-object relation, so "additive" is a machine
