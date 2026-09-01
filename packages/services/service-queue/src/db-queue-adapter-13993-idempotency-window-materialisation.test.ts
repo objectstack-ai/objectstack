@@ -28,28 +28,43 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import {
+  assertEngineDeleteDispatch,
+  assertEngineUpdateDispatch,
+} from '@objectstack/objectql';
 import { DbQueueAdapter } from './db-queue-adapter.js';
 
-/** Minimal engine double — only the surface `publish()` touches. */
+/**
+ * Minimal engine double — only the surface `publish()` touches. `update()` and
+ * `delete()` are unreachable from `publish()`, but they still open with the
+ * engine's own dispatch predicates so this fake can never drift looser than
+ * ObjectQL's contract (`check:engine-double-contract`).
+ */
 function makeFakeEngine(seed: any[] = []) {
   const rows: any[] = [...seed];
   return {
     rows,
     async find(_table: string, opts: any = {}) {
-      let out = opts?.where
-        ? rows.filter((r) => Object.entries(opts.where).every(([k, v]) => r[k] === v))
+      const out = opts?.where
+        ? rows.filter((r) => Object.entries(opts.where).every(([k, v]) => {
+            // Refuse combinators rather than reading them as field names.
+            if (k.startsWith('$')) throw new Error(`fake engine: unsupported operator ${k}`);
+            return r[k] === v;
+          }))
         : [...rows];
-      if (opts?.limit) out = out.slice(0, opts.limit);
-      return out;
+      // The caller's bound, by PRESENCE — `limit: 0` must bound to zero rows.
+      return typeof opts?.limit === 'number' ? out.slice(0, opts.limit) : out;
     },
     async insert(_table: string, data: any) {
       rows.push({ ...data });
       return { id: data.id };
     },
-    async update(): Promise<never> {
+    async update(_table: string, data: any, options?: any): Promise<never> {
+      assertEngineUpdateDispatch(data, options);
       throw new Error('not reachable from publish()');
     },
-    async delete(): Promise<never> {
+    async delete(_table: string, options?: any): Promise<never> {
+      assertEngineDeleteDispatch(options);
       throw new Error('not reachable from publish()');
     },
   };
