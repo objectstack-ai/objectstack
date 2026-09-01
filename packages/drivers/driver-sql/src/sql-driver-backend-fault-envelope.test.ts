@@ -162,8 +162,12 @@ describe(`[#8931] driver-sql — the terminal backend-fault envelope (${cell.lab
   // a query or two down a connection this hook already opened, so their cost
   // model really is the fast one. But the live cost did not disappear — it
   // lives HERE: a full connect cycle, two drops, `initObjects(...)` schema-sync
-  // DDL and two inserts, all against the cell's live server, on vitest's
-  // inherited 5000ms default. Budgeting the it() blocks would have been wrong;
+  // DDL and two inserts, all against the cell's live server. ⚠️ A hook inherits
+  // `hookTimeout`, NOT `testTimeout` — measured in this package's config, an
+  // unbudgeted hook dies at 10000ms ("Hook timed out in 10000ms"), not at the
+  // 5000ms an unbudgeted it() gets. Ten seconds is still the wrong ceiling for
+  // this much live work, and the third argument does lift it (measured).
+  // Budgeting the it() blocks would have been wrong;
   // leaving the hook unbudgeted just moved the exposure one scope outward.
   // Budgeting hooks is established practice in this package (see the beforeAll
   // hooks in sql-driver-diagnostic-value-probe, sql-driver-12380-json-roundtrip,
