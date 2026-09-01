@@ -170,6 +170,16 @@ describe.skipIf(!PG_URL)('#10995 — live Postgres, driver told about the object
 
   // ── §3 The other posture with the same empty registry: DDL REFUSED ───────
 
+  // ── Why the it() below carries an explicit 60_000 budget (#14100) ──
+  // Unlike §1–§2, which reuse the connection the beforeAll opened, §3 builds a
+  // SECOND live driver (`guest`) inside its own body and runs an out-of-band
+  // `create table` through it — a full connect cycle plus DDL, paid by this
+  // test alone. With no third argument vitest applies its own 5000ms default —
+  // a number nobody chose for that work, and one that reddens unrelated PRs
+  // when the runner is merely a bit slow. Sized to match this package's
+  // live-DDL siblings (#13902 / #13688). ⛔ NOT a claim that this test is known
+  // to be slow: it was found by an AST walk over the package, never by a
+  // measured timeout here.
   it('§3 a datasource we are a guest in registers its objects even though DDL is refused', async () => {
     // `schemaMode !== 'managed'` (ADR-0015): `initObjects` must still refuse the
     // DDL — and must no longer leave the driver ignorant of the objects it was
@@ -188,7 +198,7 @@ describe.skipIf(!PG_URL)('#10995 — live Postgres, driver told about the object
     } finally {
       await guest.disconnect();
     }
-  });
+  }, 60_000);
 });
 
 // ── §4 The SQLite path is unchanged ────────────────────────────────────────

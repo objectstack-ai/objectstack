@@ -156,6 +156,16 @@ describe(`sql-driver — attemptWithoutPoisoning (${pgCell.available ? 'live pos
   // The mechanism itself, pinned directly: this is what makes the SECOND
   // speculative site (`SELECT … FOR UPDATE`, which has no `ON CONFLICT` form)
   // safe as well. Postgres-only for the same reason as above.
+  // ── Why the it() below carries an explicit 60_000 budget (#14100) ──
+  // It constructs a FRESH `new SqlDriver(pgCell.config())` against the live
+  // Postgres cell inside its own body, then creates and drops a probe table, so
+  // the connect cycle and its DDL are paid PER TEST rather than once in a hook.
+  // With no third argument vitest applies its own 5000ms default — a number
+  // nobody chose for that work, and one that reddens unrelated PRs when the
+  // runner is merely a bit slow. Sized to match this package's live-DDL
+  // siblings (#13902 / #13688). ⛔ NOT a claim that this test is known to be
+  // slow: it was found by an AST walk over the package, never by a measured
+  // timeout here.
   it.skipIf(!pgCell.available)(
     'leaves the surrounding transaction usable after a statement error',
     async () => {
@@ -195,5 +205,6 @@ describe(`sql-driver — attemptWithoutPoisoning (${pgCell.available ? 'live pos
         await driver.disconnect();
       }
     },
+    60_000,
   );
 });
