@@ -515,13 +515,62 @@ function importJobUndoable(row: any): boolean {
     return !!log && (log.created.length > 0 || log.updated.length > 0);
 }
 
+/**
+ * The canonical ISO-8601 spelling of a timestamp column read back through the
+ * engine's record read door, for a DTO field whose contract declares a string.
+ *
+ * [#13994] The input domain is what a DRIVER materialises into such a column,
+ * and it is dialect-dependent — measured, not guessed:
+ *
+ *  - **JS `Date`** — `driver-sql` on Postgres and MySQL. `timestamptz` /
+ *    `DATETIME(3)` are instants and the driver materialises them as `Date` on
+ *    purpose (`SqlDriver.withPostgresCalendarDayAsText` says so in as many
+ *    words); `driver-mongodb` stamps `new Date()` and BSON round-trips it.
+ *    `formatOutput`'s two timestamp repairs — the `AUDIT_TIMESTAMP_COLUMNS`
+ *    pass and the `normalizeSqliteDatetimeOutput` pass over `datetimeFields` —
+ *    both sit INSIDE its `if (this.isSqlite)` arm, so neither runs here. ⚠️ A
+ *    declared `Field.datetime` is therefore NOT protected on Postgres/MySQL.
+ *  - **`string`, already canonical ISO-8601 UTC** — `driver-sql` on SQLite and
+ *    its `driver-turso` / `driver-sqlite-wasm` siblings, and `driver-memory`.
+ *    Passed through unchanged, so a canonical row is a fixed point.
+ *  - **anything else** a host stamps into the column — rendered as before.
+ *
+ * Why this is not `String(v)`: on a `Date`, `String` runs
+ * `Date.prototype.toString`, which drops milliseconds and bakes in the PROCESS
+ * timezone with no `Z` — `"Sun Aug 30 2026 18:19:25 GMT+0800 (China Standard
+ * Time)"` where the contract promises `"2026-08-30T10:19:25.947Z"`. That value
+ * is not `Date.parse`-safe for a client doing strict ISO parsing, and it moves
+ * with the server's zone. SQLite hands back canonical text, so `String()` was
+ * an identity there and every development environment stayed green — the same
+ * camouflage that made the OCC seam a production bug (#13382).
+ *
+ * Why not simply DELETE the `String()` and let `JSON.stringify` serialise the
+ * bare `Date` through `toJSON()`: that emits the right text but changes the
+ * value's static type from `string` to `string | Date`, widening a declared
+ * contract that three independent declarations spell as `string` —
+ * `ImportJobProgressSchema` / `ImportJobSummarySchema`
+ * (`@objectstack/spec`, `z.string()`, "ISO 8601"), the `ImportJobProgress`
+ * the client SDK returns, and objectui's `ImportJobProgressInfo`. The
+ * declaration is right; the emitted value was wrong. This makes the value what
+ * the declaration already says.
+ *
+ * Same three branches as the landed normaliser in
+ * `@objectstack/metadata-protocol`'s `protocol.ts` (`occurredAt`) — ONE
+ * spelling repo-wide for this repair, deliberately not a fourth variant.
+ */
+function canonicalIsoStamp(value: unknown): string {
+    if (typeof value === 'string') return value;
+    if (value instanceof Date) return value.toISOString();
+    return String(value ?? '');
+}
+
 /** Map a persisted `sys_import_job` row to the ImportJobProgress DTO. */
 function importJobToProgress(row: any): Record<string, any> {
     const total = Number(row?.total_rows ?? 0);
     const processed = Number(row?.processed_rows ?? 0);
     return {
         undoable: importJobUndoable(row),
-        ...(row?.reverted_at ? { revertedAt: String(row.reverted_at) } : {}),
+        ...(row?.reverted_at ? { revertedAt: canonicalIsoStamp(row.reverted_at) } : {}),
         jobId: String(row?.id ?? ''),
         object: String(row?.object_name ?? ''),
         status: String(row?.status ?? 'pending'),
@@ -535,9 +584,9 @@ function importJobToProgress(row: any): Record<string, any> {
         errors: Number(row?.error_count ?? 0),
         percentComplete: total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : (processed > 0 ? 100 : 0),
         ...(row?.error ? { error: String(row.error) } : {}),
-        ...(row?.started_at ? { startedAt: String(row.started_at) } : {}),
-        ...(row?.completed_at ? { completedAt: String(row.completed_at) } : {}),
-        createdAt: String(row?.created_at ?? ''),
+        ...(row?.started_at ? { startedAt: canonicalIsoStamp(row.started_at) } : {}),
+        ...(row?.completed_at ? { completedAt: canonicalIsoStamp(row.completed_at) } : {}),
+        createdAt: canonicalIsoStamp(row?.created_at),
     };
 }
 
