@@ -332,9 +332,11 @@ export const CEILINGS = new Map([
   // with the frame it amends — the #5130 drift is exactly a frame-semantics change
   // that skipped this mirror. +152 tokens across both copies, compressed to the
   // minimal anchor form; the raising PR's body carries the arithmetic.
-  // 14391 -> 14549: the axis WEIGHTING joined the decision frame (maintainer
-  // ruling 2026-09-01, verbatim and untranslated: 「四维分析中，长期合理应该权重最
-  // 高，至少50%」 — long-term soundness carries the highest weight, at least 50%).
+  // 14391 -> 14549: the axis WEIGHTING joined the decision frame — long-term
+  // soundness carries the highest weight, at least 50%. Maintainer ruling
+  // 2026-09-01, verbatim and untranslated (kept on ONE line, #11106: a governed
+  // quotation that soft-breaks stops being findable by the things that grep it):
+  // 「四维分析中，长期合理应该权重最高，至少50%」
   // Same shape and same reason as the +152 row above it: this file carries TWO
   // enforced frame copies (check:skill-frame-sync COPIES), and a rule that
   // changes WHICH RECOMMENDATION the frame yields is exactly the #5130 drift
