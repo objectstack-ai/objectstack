@@ -13,17 +13,21 @@ ObjectStack follows strict backward compatibility guarantees to ensure predictab
 
 ## Versioning Strategy
 
-ObjectStack follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PATCH`):
+<Callout type="warn">
+**While the launch window is open, a breaking change ships as a MINOR release — not a MAJOR one.** Every published `@objectstack/*` package versions in lockstep, so the version number alone is not an upgrade-safety signal. This rule is in force today and overrides the MAJOR/MINOR mapping in the tables below wherever they disagree; read [Launch Window](#launch-window-minor-releases-can-contain-breaking-changes) at the end of this page before you plan an upgrade.
+</Callout>
+
+ObjectStack follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PATCH`). The table below describes what each component means; the launch-window rule above governs which component a breaking change actually lands in today.
 
 | Version Component | When Incremented | Guarantee |
 |:---|:---|:---|
 | **MAJOR** (X.0.0) | Incompatible API changes | May contain breaking changes |
-| **MINOR** (0.X.0) | New features, backward-compatible | Existing code continues to work |
+| **MINOR** (0.X.0) | New features — and, during the launch window, breaking changes | Existing code may require migration; the [release notes](/docs/releases) lead with what broke |
 | **PATCH** (0.0.X) | Bug fixes, backward-compatible | No behavior changes, only fixes |
 
 ### SemVer Guarantees
 
-- **Zod schemas** are part of the public API surface. Adding optional properties is a MINOR change; removing or renaming properties is a MAJOR change.
+- **Zod schemas** are part of the public API surface. Adding optional properties is a MINOR change; removing or renaming properties is a breaking change, which during the launch window also ships in a MINOR release.
 - **TypeScript types** inferred from Zod (`z.infer<typeof Schema>`) follow the same guarantees as their source schemas.
 - **Helper functions** (e.g., `defineStack`, `defineStudioPlugin`) maintain their call signatures within a MAJOR version.
 - **Input formats** — `defineStack()` accepts both array and map (Record) format for all named metadata collections. Both formats are guaranteed stable within a MAJOR version.
@@ -58,11 +62,14 @@ When a feature, schema property, or API is deprecated, ObjectStack follows a str
 - Code examples are updated to use the replacement
 - CLI tooling may provide automated migration commands
 
-### Phase 3: Removal (next MAJOR release)
+### Phase 3: Removal (MINOR release, during the launch window)
 
 - Deprecated feature is removed from the schema
 - TypeScript types no longer include the property
 - Runtime code no longer supports the feature
+- The removal is called out in the [release notes](/docs/releases) and marked `**BREAKING**` in the changeset
+
+Shipped examples: `17.2.0` retired `http_request_errors_total` and `sys_position.permissions` under [ADR-0049](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0049-no-unenforced-security-properties.md) enforce-or-remove, and `15.1.0` removed `tenancy.strategy` and `tenancy.crossTenantAccess` — all three in **Minor Changes** sections.
 
 ### Timeline Summary
 
@@ -70,11 +77,11 @@ When a feature, schema property, or API is deprecated, ObjectStack follows a str
 flowchart TD
     A["v3.2.0 — feature deprecated (warning emitted)"] --> B["v3.3.0 — migration period continues"]
     B --> C["v3.4.0 — migration continues (minimum 2 minor releases)"]
-    C --> D["v4.0.0 — feature removed (earliest possible removal)"]
+    C --> D["v3.5.0 — feature removed (earliest possible removal, MINOR)"]
 ```
 
 <Callout type="warn">
-**Minimum guarantee:** Deprecated features survive for at least **2 MINOR releases** before they can be removed in the next MAJOR version.
+**Minimum guarantee:** Deprecated features survive for at least **2 MINOR releases** before they can be removed. During the launch window the removal itself lands in a MINOR release, so a MINOR bump is where you should expect a removal to arrive.
 </Callout>
 
 ---
@@ -83,14 +90,16 @@ flowchart TD
 
 ### What Constitutes a Breaking Change
 
-| Change Type | Breaking? | Version Impact |
+Read the **Breaking?** column, not the version number: during the launch window every row below — breaking or not — ships in a MINOR or PATCH release, so the bump size does not tell you whether you have work to do.
+
+| Change Type | Breaking? | Version Impact (launch window) |
 |:---|:---|:---|
-| Removing a schema property | **Yes** | MAJOR |
-| Renaming a schema property | **Yes** | MAJOR |
-| Changing a property from optional to required | **Yes** | MAJOR |
-| Narrowing a type (e.g., `string` → `enum`) | **Yes** | MAJOR |
-| Removing an enum value | **Yes** | MAJOR |
-| Changing default values | **Yes** | MAJOR |
+| Removing a schema property | **Yes** | MINOR |
+| Renaming a schema property | **Yes** | MINOR |
+| Changing a property from optional to required | **Yes** | MINOR |
+| Narrowing a type (e.g., `string` → `enum`) | **Yes** | MINOR |
+| Removing an enum value | **Yes** | MINOR |
+| Changing default values | **Yes** | MINOR |
 | Adding a new optional property | No | MINOR |
 | Adding a new enum value | No | MINOR |
 | Widening a type (e.g., `enum` → `string`) | No | MINOR |
@@ -101,10 +110,9 @@ flowchart TD
 ### Breaking Change Process
 
 1. **RFC (Request for Comments)** — Breaking changes are proposed as GitHub issues with the `breaking-change` label.
-2. **Review Period** — Minimum 30-day community review period.
-3. **Deprecation** — The old behavior is deprecated in a MINOR release (see timeline above).
-4. **Migration Guide** — A detailed migration guide is published before the MAJOR release.
-5. **Release** — Breaking change ships in the next MAJOR version.
+2. **Deprecation** — The old behavior is deprecated in a MINOR release (see timeline above).
+3. **Migration Guide** — A detailed migration guide is published before the removal lands, in the release notes for the version that carries it.
+4. **Release** — During the launch window the breaking change ships in the next **MINOR** version, carrying a changeset entry marked `**BREAKING**`. `scripts/check-changeset-no-major.mjs` fails any pull request that declares a `major` bump, because under lockstep one `major` would promote all 69 published packages.
 
 ---
 
@@ -163,7 +171,7 @@ The `@objectstack/spec` package provides additional stability guarantees:
 ### Export Stability
 
 - All public exports are listed in the package's `index.ts` barrel files
-- Removing an export is always a MAJOR change
+- Removing an export is always a breaking change; during the launch window it ships in a MINOR release
 - Internal modules (prefixed with `_` or in `internal/` directories) are not covered by SemVer guarantees
 
 ### Runtime Behavior
@@ -196,7 +204,7 @@ MAJOR releases do still happen — 17.0.0 was cut precisely because its breaking
 
 ### When it stops applying
 
-The versioning tables and deprecation timeline above describe the policy in its settled form; they take full effect when the launch window closes and a breaking change once again requires a MAJOR. Until then, **this section is the operative rule wherever the two disagree.**
+The tables and deprecation timeline above now state this rule directly, so the page no longer contradicts itself. Classic SemVer — where a breaking change once again requires a MAJOR — is the settled form the project returns to once the launch window closes; the condition that closes the window is tracked separately and is deliberately not stated here. Until it closes, **this section is the operative rule wherever any part of this page disagrees.**
 
 ---
 

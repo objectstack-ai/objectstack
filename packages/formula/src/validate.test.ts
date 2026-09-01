@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { validateExpression, introspectScope, expectedDialect, inferExpressionType } from './validate';
+import {
+  validateExpression,
+  introspectScope,
+  expectedDialect,
+  inferExpressionType,
+  nearestName,
+  CEL_STDLIB_FUNCTIONS,
+} from './validate';
 import { firstUndeclaredReference } from './cel-engine';
 
 describe('validateExpression (ADR-0032)', () => {
@@ -196,6 +203,122 @@ describe('validateExpression (ADR-0032)', () => {
       const message = validateExpression('predicate', OVER_AST_NODES).errors[0].message;
       expect(message).toMatch(/changes how they combine at this authoring site/);
       expect(message).not.toMatch(/widen|grant|permission/i);
+    });
+  });
+
+  // #13821 — the second leg of #7073. An unknown-function refusal is graded
+  // `type` by the engine's own `check()`, so before this it fell through to
+  // `bracesHint` (null, no brace) and out to the dialect trailer: "predicates
+  // are bare CEL" handed to an author whose source already IS bare CEL and
+  // parses fine. The guard itself was and stays correct — only the sentence the
+  // author is told to act on was wrong.
+  //
+  // These assert the SPECIFIC prescription, not merely that an error fires; an
+  // error already fired before the repair. And the `bounds` control below is
+  // load-bearing: it proves a new class was routed rather than the shared tail
+  // replaced for everyone.
+  describe('unknown function vs dialect: the prescription follows the fault class (#13821)', () => {
+    const dialectTrailer = (role: 'predicate' | 'value') =>
+      ` — ${role}s are bare CEL (e.g. \`record.rating >= 4\`).`;
+
+    it.each([
+      { name: 'a receiver call', source: "record.x.nosuchmethod('a')", fn: 'nosuchmethod' },
+      { name: 'a bare call', source: 'totallyBogusFn(1,2)', fn: 'totallyBogusFn' },
+      { name: 'a call nested in a conjunction', source: "record.a == 1 && zzzznope(record.b)", fn: 'zzzznope' },
+      { name: 'a receiver-only cel-js name used bare', source: "split(record.name, ',') == ['a']", fn: 'split' },
+    ])('names the unresolvable function and points at the callable set — $name', ({ source, fn }) => {
+      const r = validateExpression('predicate', source);
+      expect(r.ok).toBe(false);
+      expect(r.errors).toHaveLength(1);
+      const { message } = r.errors[0];
+      // The front half — cel-js's own vocabulary, matching the runtime fault — is kept.
+      expect(message).toMatch(/^invalid CEL predicate: found no matching overload for /);
+      // The prescription NAMES the function that did not resolve…
+      expect(message).toContain(`\`${fn}\` is not a callable name here`);
+      expect(message).toMatch(/NAME fault, not a dialect mistake/);
+      // …and points at the callable set, via the introspection API that publishes it.
+      expect(message).toContain('`introspectScope`');
+      expect(message).toContain('`CEL_STDLIB_FUNCTIONS`');
+      // ⛔ The defect itself: the dialect trailer must NOT reach this class.
+      expect(message).not.toContain(dialectTrailer('predicate'));
+      expect(message).not.toMatch(/bare CEL/);
+    });
+
+    it('applies to the `value` role too — one producer, all ~10 slots', () => {
+      const r = validateExpression('value', 'nosuchfn(1)');
+      expect(r.ok).toBe(false);
+      expect(r.errors[0].message).toMatch(/^invalid CEL value:/);
+      expect(r.errors[0].message).toContain('`nosuchfn` is not a callable name here');
+      expect(r.errors[0].message).not.toContain(dialectTrailer('value'));
+    });
+
+    // ⛔ The message may never state how many functions the catalog holds: what
+    // the catalog contains is being adjudicated separately, and a sentence
+    // asserting a count would be falsified by that ruling without failing here.
+    it('refers to the callable set without asserting its size', () => {
+      const message = validateExpression('predicate', 'totallyBogusFn(1,2)').errors[0].message;
+      expect(message).not.toMatch(/\b\d+\s+(?:functions|names|entries)\b/);
+    });
+
+    // did-you-mean is measured dangerous, so both directions are pinned. The
+    // threshold is the whole safety argument; either case flipping is a
+    // regression, not a tuning.
+    describe('did-you-mean is thresholded (both measured cases pinned)', () => {
+      it('suggests on a real typo: `isBlnk` → `isBlank`', () => {
+        const message = validateExpression('predicate', 'isBlnk(record.name)').errors[0].message;
+        expect(message).toContain('`isBlnk` is not a callable name here');
+        expect(message).toContain('Did you mean `isBlank`?');
+      });
+
+      it('stays SILENT on a distant match: `can` must never be answered with `min`', () => {
+        // `nearestName('can', CEL_STDLIB_FUNCTIONS)` is `'min'` — two edits on a
+        // three-character name, a jump from a permission verb to a numeric
+        // function. Worse than silence: an author who takes it writes
+        // `min(object, verb)`.
+        const message = validateExpression('predicate', 'current_user.can(object, verb)').errors[0].message;
+        expect(message).toContain('`can` is not a callable name here');
+        expect(message).not.toMatch(/Did you mean/);
+        expect(message).not.toMatch(/`min`/);
+      });
+
+      it('leaves the shared `nearestName` budget alone — this class narrows locally', () => {
+        // The hazard is this catalog's, not the heuristic's: field-name
+        // suggestions keep the shared budget. If this ever stops answering
+        // `'min'`, the local threshold is no longer the thing protecting the
+        // message and the pin above has quietly become vacuous.
+        expect(nearestName('can', CEL_STDLIB_FUNCTIONS)).toBe('min');
+        expect(nearestName('isBlnk', CEL_STDLIB_FUNCTIONS)).toBe('isBlank');
+      });
+    });
+
+    // The flipped pins. The refusal surface may never shrink, and this arm may
+    // never speak for faults it cannot name.
+    it('keeps the dialect trailer on a real function given arguments no overload accepts', () => {
+      // Same cel-js message SHAPE, different fault: `upper` exists. Calling it
+      // "not a callable name" would replace a useless sentence with a false one.
+      const r = validateExpression('predicate', 'upper(1, 2)');
+      expect(r.ok).toBe(false);
+      expect(r.errors[0].message).toMatch(/found no matching overload for 'upper\(int, int\)'/);
+      expect(r.errors[0].message).toContain(dialectTrailer('predicate'));
+      expect(r.errors[0].message).not.toMatch(/NAME fault/);
+    });
+
+    it.each([
+      { name: 'an operator type mismatch', source: "1 + 'a'" },
+      { name: 'a ternary branch mismatch', source: "record.rating >= 4 ? 1 : 'x'" },
+    ])('keeps the dialect trailer on a `type` fault that names no call — $name', ({ source }) => {
+      const r = validateExpression('predicate', source);
+      expect(r.ok).toBe(false);
+      expect(r.errors[0].message).toContain(dialectTrailer('predicate'));
+      expect(r.errors[0].message).not.toMatch(/NAME fault/);
+    });
+
+    it('leaves the `bounds` prescription untouched — a new class was routed, not the shared tail replaced', () => {
+      const overBudget = Array.from({ length: 80 }, (_, i) => `record.f${i} == ${i}`).join(' && ');
+      const message = validateExpression('predicate', overBudget).errors[0].message;
+      expect(message).toMatch(/SIZE fault, not a dialect mistake/);
+      expect(message).toMatch(/Shrink it/);
+      expect(message).not.toMatch(/NAME fault/);
     });
   });
 

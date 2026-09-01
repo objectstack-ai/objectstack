@@ -38,7 +38,7 @@
 // The trace, measured on `origin/main` — all four routes fold at the producer
 // ---------------------------------------------------------------------------
 // `applyObjectRegistryMutation` has exactly ONE caller
-// (`applyRegistryWriteThrough`), which has exactly FOUR:
+// (`applyRegistryWriteThrough`), which has exactly FIVE:
 //
 //   1. `saveMetaItem`            passes `singularTypeForRepo`, and the method
 //                                already ran `canonicalizeMetaRequestType`.
@@ -53,6 +53,13 @@
 //                                over a value read from the stored row.
 //   4. `rollbackMetaItem`        binds `singularType = request.type` AFTER
 //                                `canonicalizeMetaRequestType` (#8819).
+//   5. `applyRemoteMetadataMutation` (#13331) folds at the call site through
+//                                `canonicalMetaType` (the complete map,
+//                                #9161) — the event crossed a PROCESS
+//                                boundary (a peer replica's cluster publish),
+//                                so this caller folds rather than trusting
+//                                the wire, even though every in-tree
+//                                publisher emits the already-folded singular.
 //
 // Both fold maps resolve the plural — `PLURAL_TO_SINGULAR.objects === 'object'`
 // and `canonicalMetaUrlType('objects') === 'object'` — so no route can deliver
@@ -126,7 +133,7 @@
 //   6. Comment stripper neutered to return '' -> RED in §4
 //      (non-vacuity: the expected count is ONE, not zero)
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { PLURAL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/shared';
@@ -462,6 +469,52 @@ describe('[#8862] every object registry write-through registers under the singul
         expect(res.success).toBe(true);
         expect(objectKeys(registeredItems)).toEqual(['object']);
     });
+
+    // ── route 5: applyRemoteMetadataMutation, plural over the WIRE ──────────
+    //
+    // The one route whose input crosses a process boundary (#13331): a peer's
+    // cluster publish. Every in-tree publisher emits the folded singular, so
+    // a plural here means a foreign or future producer — the call-site fold
+    // through `canonicalMetaType` is what keeps such a message from minting a
+    // plural registry key. Driven through the real subscribe path, not by
+    // reaching into the private method.
+    it('a remote mutation addressed `objects` registers `object`', async () => {
+        const { protocol, registeredItems } = makeProtocol();
+        // The row a converging peer would find in its own (shared) DB.
+        await protocol.saveMetaItem({
+            type: 'object', name: 'ticket', item: objectBody('ticket'),
+            packageId: PKG, mode: 'publish',
+        });
+        registeredItems.length = 0;
+
+        let deliver: ((msg: { channel: string; payload: unknown; publishedAt: number }) => void) | undefined;
+        const pubsub = {
+            publish: async () => {},
+            subscribe: (_channel: string, handler: (msg: never) => void) => {
+                deliver = handler as typeof deliver;
+                return () => {};
+            },
+            close: async () => {},
+        };
+        protocol.attachMetadataMutationPubSub(pubsub, 'node-local');
+
+        deliver!({
+            channel: 'metadata.mutated',
+            payload: {
+                originNode: 'node-peer',
+                event: { type: 'objects', name: 'ticket', state: 'active', organizationId: null },
+            },
+            publishedAt: Date.now(),
+        });
+        // The applier is fire-and-forget on the subscribe path; its work is a
+        // short chain of already-resolved fakes, so settle it via the queue.
+        await vi.waitFor(() => expect(registeredItems.length).toBeGreaterThan(0));
+
+        expect(objectKeys(registeredItems)).toEqual(['object']);
+        expect(registeredItems).not.toContainEqual(
+            expect.objectContaining({ type: 'objects' }),
+        );
+    });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -490,9 +543,9 @@ describe('[#8862] the `applyRegistryWriteThrough` caller set stays closed', () =
         'utf8',
     );
 
-    it('has exactly four call sites, all traced in this file’s header', () => {
+    it('has exactly five call sites, all traced in this file’s header', () => {
         const callSites = source.match(/this\.applyRegistryWriteThrough\(/g) ?? [];
-        expect(callSites).toHaveLength(4);
+        expect(callSites).toHaveLength(5);
     });
 
     it('`applyObjectRegistryMutation` is reached only through the write-through', () => {

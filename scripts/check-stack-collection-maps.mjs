@@ -311,8 +311,32 @@ export function tupleFirstItems(body) {
 }
 
 /**
+ * Top-level keys that MATCH the `z.array(<Something>Schema)` shape below and are
+ * nevertheless NOT metadata collections — so no site is expected to enumerate
+ * them, and their absence is not drift.
+ *
+ * ⚠️ Adding a name here is a claim, and the bar is high: it means the key does
+ * not name a metadata TYPE that the eight sites route, register, categorise or
+ * demonstrate. Get it wrong and a real collection silently leaves the reference
+ * set, which is this gate's own failure mode (an empty set reconciles against
+ * everything). The shape discriminator below stays the rule; this is the
+ * declared, reasoned exception list, and it is deliberately a list of names
+ * rather than a second heuristic.
+ *
+ * - `packages` (ADR-0130 D4) carries package MANIFESTS — the release artifact's
+ *   co-owning packages — not authored metadata of some type. It has no singular
+ *   metadata-type name (nothing in `PLURAL_TO_SINGULAR`), no artifact
+ *   subdirectory, no `registerInMemory` kind and no map/record authoring form.
+ *   Every one of the eight sites is correct to omit it, so counting it would
+ *   manufacture eight simultaneous deviations and drive eight waiver rows that
+ *   each assert the opposite of the truth.
+ */
+const NON_COLLECTION_ARRAY_KEYS = new Set(['packages']);
+
+/**
  * The stack-collection set: top-level `ObjectStackDefinitionSchema` keys whose
- * value is `z.array(<Something>Schema)`.
+ * value is `z.array(<Something>Schema)`, minus the declared
+ * {@link NON_COLLECTION_ARRAY_KEYS}.
  *
  * That shape is the discriminator, and it is what keeps this mechanical instead
  * of a second hand-maintained list: `plugins` (`z.array(z.unknown())`),
@@ -334,7 +358,8 @@ export function stackCollections(stackSource) {
   if (!shape) return null;
   return objectEntries(shape.body)
     .filter(({ value }) => /^z\.array\(\s*[A-Za-z_$][\w$]*Schema\s*\)/.test(value))
-    .map(({ key }) => key);
+    .map(({ key }) => key)
+    .filter((key) => !NON_COLLECTION_ARRAY_KEYS.has(key));
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -868,10 +893,19 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
   requires: z.array(z.string()).optional(),
   devPlugins: z.array(z.union([ManifestSchema, z.string()])).optional(),
   api: z.object({ nested: z.array(NestedSchema) }).optional(),
+  packages: z.array(ArtifactPackageEntrySchema).optional(),
   data: z.array(SeedSchema).optional(),
 }).superRefine(gates));
 `;
   eq('stackCollections() takes z.array(<X>Schema) only', stackCollections(stack), ['objects', 'data']);
+  // `packages` (ADR-0130 D4) matches the shape discriminator and is excluded by
+  // name — pinned here so the exclusion cannot be deleted quietly, and so the
+  // synthetic source above shows the exact declaration it is answering.
+  eq(
+    'stackCollections() drops a declared NON_COLLECTION_ARRAY_KEYS member',
+    stackCollections(stack).includes('packages'),
+    false,
+  );
   eq('stackCollections() returns null when the anchor is gone', stackCollections('export const Other = 1;'), null);
   eq(
     'stackCollections() returns null when the shape argument is missing',
@@ -956,7 +990,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
     for (const f of failures) console.error(`  • ${f}\n`);
     return 1;
   }
-  console.log('✓ check-stack-collection-maps --self-test: 15 assertions over synthetic sources');
+  console.log('✓ check-stack-collection-maps --self-test: 16 assertions over synthetic sources');
   return 0;
 }
 

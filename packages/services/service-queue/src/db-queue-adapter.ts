@@ -22,6 +22,57 @@ import {
 const QUEUE_TABLE = 'sys_job_queue';
 
 /**
+ * [#13993] An ISO-8601 date-time that denotes an ABSOLUTE instant — it
+ * carries an explicit `Z` or a numeric offset, so reading it never consults
+ * the process timezone. Same shape as the OCC seam's `ABSOLUTE_ISO_INSTANT`
+ * (#13382, `packages/metadata-protocol/src/protocol.ts`): a string this
+ * pattern rejects does not denote an instant and is not guessed at.
+ */
+const ABSOLUTE_ISO_INSTANT =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * [#13993] A `created_at` as a driver hands it out of the record read door,
+ * read as epoch milliseconds — or null when the value does not denote an
+ * instant.
+ *
+ * `created_at` is a builtin audit column: it is not in `datetimeFields`, so no
+ * declared-field coercion reaches it, and the dialects genuinely disagree on
+ * its materialisation (the domain below is the one #13382 measured and #13973
+ * re-measured, pinned in `driver-sql`'s
+ * `sql-driver-13567-audit-stamp-materialisation.test.ts`):
+ *
+ *  - **JS `Date`** — Postgres / MySQL (`timestamptz` / `DATETIME(3)` are
+ *    instants and the driver materialises them as `Date` on purpose;
+ *    `SqlDriver.withPostgresCalendarDayAsText` says so in as many words).
+ *  - **canonical ISO-8601 UTC text** — SQLite and its turso / sqlite-wasm
+ *    siblings, and `driver-memory`. This adapter writes `toISOString()`.
+ *  - **`number`, epoch milliseconds** — a pre-canonical or hand-migrated
+ *    SQLite column; the legacy datetime repair is keyed on declared
+ *    `Field.datetime` columns, and the engine-injected audit columns are not
+ *    in that set.
+ *  - **anything else** — not an instant. Returns null, and the caller treats
+ *    the row as OUTSIDE the window: the dedup window is measured on the
+ *    `created_at` axis, so a row that cannot be placed on that axis cannot be
+ *    inside it (and duplicate delivery is tolerated by contract — see
+ *    `claimBatch` — while "suppress forever" is the very defect #13993
+ *    removes).
+ */
+function createdAtInstantMs(value: unknown): number | null {
+  let ms: number;
+  if (value instanceof Date) {
+    ms = value.getTime();
+  } else if (typeof value === 'number') {
+    ms = value;
+  } else if (typeof value === 'string' && ABSOLUTE_ISO_INSTANT.test(value.trim())) {
+    ms = Date.parse(value.trim());
+  } else {
+    return null;
+  }
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
  * How long a `completed` row survives before the platform Reaper deletes it.
  *
  * Read from the object's own ADR-0057 declaration
@@ -247,7 +298,7 @@ export class DbQueueAdapter implements IQueueService {
     // constructor — which makes "the reaper deleted a row the dedup check
     // needed" unrepresentable rather than merely unlikely.
     if (opts.idempotencyKey) {
-      const windowStart = new Date(now.getTime() - this.opts.idempotencyWindowMs).toISOString();
+      const windowStartMs = now.getTime() - this.opts.idempotencyWindowMs;
       const existing = await this.engine.find(QUEUE_TABLE, {
         where: {
           queue,
@@ -259,7 +310,16 @@ export class DbQueueAdapter implements IQueueService {
       });
       const blocking = (existing ?? []).find((row: any) => {
         if (row.status === 'pending' || row.status === 'running') return true;
-        return String(row.created_at ?? '') >= windowStart;
+        // [#13993] Compare INSTANTS, not strings (#13382's shape). The old
+        // `String(row.created_at) >= windowStart` was a lexicographic compare
+        // whose left side, on Postgres/MySQL, is a `Date.toString()` starting
+        // with a weekday LETTER — unconditionally above the ISO text's digit —
+        // so every terminal row blocked forever and publish() silently
+        // enqueued nothing. An instant compare gives every materialisation the
+        // same verdict; a row whose created_at denotes no instant cannot be
+        // inside the window (see createdAtInstantMs).
+        const createdAtMs = createdAtInstantMs(row.created_at);
+        return createdAtMs !== null && createdAtMs >= windowStartMs;
       });
       if (blocking) return String(blocking.id);
     }

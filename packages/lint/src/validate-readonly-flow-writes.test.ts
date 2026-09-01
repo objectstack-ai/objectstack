@@ -146,6 +146,46 @@ describe('validateReadonlyFlowWrites', () => {
     expect(findings[0].message).toContain('#3042');
   });
 
+  // The hint is the WHOLE product of an advisory rule - the finding blocks
+  // nothing, so the sentence is all the author acts on. This one used to read
+  // "run the flow runAs:'system'", which is advice to widen a write's
+  // privileges for NO behaviour change: the conditional strip has no `isSystem`
+  // guard at all, so the elevated run drops the field on a locked record
+  // exactly as the user run does.
+  it('does NOT offer elevation as the remedy — runAs:system does not waive the conditional lock', () => {
+    const [finding] = validateReadonlyFlowWrites({
+      objects: [opportunityObject],
+      flows: [flowWith({ amount: 5000 }, { runAs: 'user' })],
+    });
+
+    // The refusal, and the reason that makes it checkable rather than a slogan.
+    // Pinned against "LOCK 2 - isSystem does NOT exempt a caller-supplied value"
+    // in `engine-readonly-when-derived-writes.test.ts`, and the strict-mode
+    // sibling's "covers readonlyWhen too - the arm a trusted (isSystem) caller
+    // can still hit".
+    expect(finding.hint).toContain('Elevation is not a workaround here');
+    expect(finding.hint).toContain('NOT waived by a system context');
+    expect(finding.hint).not.toMatch(/run the flow runAs:'system'/);
+
+    // The two remedies that DO work, both named — the same pair the action and
+    // hook siblings offer. (2) is #9107: the strip judges the CALLER's entry
+    // payload, so a hook-derived value lands even on a locked record ("THE
+    // REPORT: a hook-derived value on a TRUE readonlyWhen field now LANDS").
+    expect(finding.hint).toContain('readonlyWhen predicate is FALSE');
+    expect(finding.hint).toContain('beforeUpdate hook');
+    expect(finding.hint).toContain('does land, even on a locked record');
+
+    // The static-`readonly` sibling hint keeps recommending runAs:'system',
+    // because for THAT strip elevation really is the intended channel. The two
+    // disagree for a reason; pinned here so a future sweep cannot flatten them.
+    const staticFinding = validateReadonlyFlowWrites({
+      objects: [opportunityObject],
+      flows: [flowWith({ approval_status: 'approved' }, { runAs: 'user' })],
+    })[0];
+    expect(staticFinding.rule).toBe(FLOW_UPDATE_READONLY_FIELD);
+    expect(staticFinding.hint).toContain("runAs:'system'");
+  });
+
   it('separates readonly (error) + readonlyWhen (warning) + plain (clean) in one node', () => {
     const findings = validateReadonlyFlowWrites({
       objects: [opportunityObject],
