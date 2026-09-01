@@ -1,8 +1,15 @@
 ---
-"@objectstack/rest": patch
+"@objectstack/rest": minor
 ---
 
 fix(rest): the shipped `objectQLProvider` stops collapsing "the engine is wired and broke" into "no engine is wired" (#13904)
+
+Runtime behaviour change on a public REST door, shipped as `minor` under the
+repo's launch-window convention — the same convention the #13476 family's
+changeset (`engine-unresolvable-fails-loud.md`, PR #13910) and #13279's name
+for the identical class of change on this same door. This change additionally
+moves one row refused → served (a factory-registered engine now resolves and
+serves), so it sits strictly inside the class that convention governs.
 
 `rest-api-plugin.ts` handed `RestServer` an engine provider shaped
 `try { return ctx.getService('objectql'); } catch { return undefined; }`. The
