@@ -405,7 +405,11 @@ describe('ObjectQL Engine', () => {
         beforeEach(async () => {
             engine.registerDriver(mockDriver, true);
             await engine.init();
-            vi.mocked(SchemaRegistry.getObject).mockReturnValue({ name: 'task', fields: { title: { type: 'text' } } } as any);
+            // [#13657] `stamped` is declared because this suite's own
+            // `beforeInsert` hook writes it, and the post-hook door now judges
+            // the hook's output against this map. The subject — one dispatch
+            // per row, single-record context shape — is untouched.
+            vi.mocked(SchemaRegistry.getObject).mockReturnValue({ name: 'task', fields: { title: { type: 'text' }, stamped: { type: 'text' } } } as any);
         });
 
         it('fires beforeInsert/afterInsert once per row with the single-record context shape', async () => {
