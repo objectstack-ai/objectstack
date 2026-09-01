@@ -223,9 +223,9 @@ describe('the prescriptions', () => {
  */
 
 const COUNTS = [
-  { type: 'object', live: 49, experimental: 0, dead: 0, planned: 1 },
-  { type: 'field', live: 66, experimental: 0, dead: 0, planned: 0 },
-  { type: 'api', live: 25, experimental: 0, dead: 0, planned: 2 },
+  { type: 'object', live: 49, experimental: 0, 'live-elsewhere': 0, dead: 0, planned: 1 },
+  { type: 'field', live: 66, experimental: 0, 'live-elsewhere': 0, dead: 0, planned: 0 },
+  { type: 'api', live: 25, experimental: 0, 'live-elsewhere': 0, dead: 0, planned: 2 },
 ];
 
 /** The 2-column README the split produced — prose only, no numbers. */
@@ -240,7 +240,16 @@ describe('foldStateCounts', () => {
       field: { live: 66 },
     });
     expect(rows.map((r) => r.type)).toEqual(['field', 'object']);
-    expect(rows[1]).toEqual({ type: 'object', live: 49, experimental: 0, dead: 0, planned: 1 });
+    expect(rows[1]).toEqual({ type: 'object', live: 49, experimental: 0, 'live-elsewhere': 0, dead: 0, planned: 1 });
+  });
+
+  // The fifth column (#13483) folds like the other four — a bucket the fold
+  // could not name is exactly the #13083 shape this file exists to prevent.
+  it('folds a live-elsewhere bucket into its own column', () => {
+    const rows = foldStateCounts(['manifest'], {
+      manifest: { live: 22, 'live-elsewhere': 1, dead: 15 },
+    });
+    expect(rows[0]).toEqual({ type: 'manifest', live: 22, experimental: 0, 'live-elsewhere': 1, dead: 15, planned: 0 });
   });
 
   // "Not measured" and "measured as nothing" must not render the same. A skipped
@@ -249,15 +258,26 @@ describe('foldStateCounts', () => {
   it('renders a type the report does not carry as zeroes rather than skipping it', () => {
     const rows = foldStateCounts(['object', 'ghost'], { object: { live: 49 } });
     expect(rows.map((r) => r.type)).toEqual(['object', 'ghost']);
-    expect(rows[1]).toEqual({ type: 'ghost', live: 0, experimental: 0, dead: 0, planned: 0 });
+    expect(rows[1]).toEqual({ type: 'ghost', live: 0, experimental: 0, 'live-elsewhere': 0, dead: 0, planned: 0 });
   });
 });
 
 describe('renderStateCounts', () => {
   it('publishes a row per type, a classified column, and a total', () => {
     const out = renderStateCounts(COUNTS);
-    expect(out).toContain('| `object` | 49 | 0 | 0 | 1 | 50 |');
-    expect(out).toContain('| **total** | **140** | **0** | **0** | **3** | **143** |');
+    expect(out).toContain('| Type | live | exp | elsewhere | dead | planned | classified |');
+    expect(out).toContain('| `object` | 49 | 0 | 0 | 0 | 1 | 50 |');
+    expect(out).toContain('| **total** | **140** | **0** | **0** | **0** | **3** | **143** |');
+  });
+
+  // The fifth column counts into `classified` like the other four (#13483) —
+  // an elsewhere-verdict is a CLASSIFIED property, precisely not a gap.
+  it('counts live-elsewhere into the row and total classified sums', () => {
+    const out = renderStateCounts([
+      { type: 'manifest', live: 22, experimental: 0, 'live-elsewhere': 1, dead: 15, planned: 0 },
+    ]);
+    expect(out).toContain('| `manifest` | 22 | 0 | 1 | 15 | 0 | 38 |');
+    expect(out).toContain('| **total** | **22** | **0** | **1** | **15** | **0** | **38** |');
   });
 
   it('says it is generated and names the one command that rewrites it', () => {
@@ -454,7 +474,7 @@ describe('reconcileStateCountTotals — the fold must not lose a property', () =
   // the fold that drops the value must not be able to disagree about the four
   // names. Pinned because a second copy is exactly how the two come apart.
   it('measures against the published vocabulary, not a second copy of it', () => {
-    expect([...STATUS_COLUMNS]).toEqual(['live', 'experimental', 'dead', 'planned']);
+    expect([...STATUS_COLUMNS]).toEqual(['live', 'experimental', 'live-elsewhere', 'dead', 'planned']);
     const errors = reconcileStateCountTotals({
       governed: ['object'],
       byStatus: { object: { live: 1, planed: 1 } },
@@ -472,7 +492,7 @@ describe('the totals prescription', () => {
     const text = STATE_COUNTS_TOTALS_GUIDANCE.join('\n');
     expect(text).toContain(STATE_COUNTS_GEN_COMMAND);
     expect(text).toContain('is not the repair');
-    expect(text).toContain('the same four names');
+    expect(text).toContain('exactly the same names');
   });
 
   it('forbids widening the vocabulary to get green, and forbids editing the artifact', () => {

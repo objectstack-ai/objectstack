@@ -66,7 +66,7 @@ function setChildEvidence(root: string, type: string, prop: string, child: strin
  * set itself is pinned against the gate's source in the population block below —
  * so widening or narrowing the scan has to move both, deliberately.
  */
-const SCANNED_LABEL = "'live' / 'planned' / 'experimental'";
+const SCANNED_LABEL = "'live' / 'planned' / 'experimental' / 'live-elsewhere'";
 
 function summaryLine(output: string): string {
   return output.split('\n').find((l) => l.startsWith('evidence paths:')) ?? '';
@@ -434,7 +434,7 @@ describe('check:liveness — the evidence-scan population (#13041)', () => {
   it('declares every status either scanned or explicitly unscanned, and prints the population', () => {
     const src = readFileSync(GATE, 'utf8');
     expect(src).toContain(
-      "const EVIDENCE_SCANNED_STATUSES = new Set<string>(['live', 'planned', 'experimental']);",
+      "const EVIDENCE_SCANNED_STATUSES = new Set<string>(['live', 'planned', 'experimental', 'live-elsewhere']);",
     );
     expect(src).toContain("const EVIDENCE_UNSCANNED_STATUSES = new Set<string>(['dead']);");
 
@@ -443,6 +443,122 @@ describe('check:liveness — the evidence-scan population (#13041)', () => {
     // The gate's own output is where the population is published — a reader of a
     // green run should not have to open the source to learn what was scanned.
     expect(summaryLine(output)).toContain(`declared by ${SCANNED_LABEL} entries`);
+  });
+});
+
+// #13483 — the `live-elsewhere` criteria. The status says "dead here by
+// measurement, enforced in a sibling repo", and the gate cannot resolve the
+// foreign file — so what it enforces is the SHAPE of the claim (a
+// foreign-realm pointer, a declared cross-repo scope, a dated attestation) and
+// its CLOCK (the attestation expires). Every case runs the REAL gate via
+// `--ledger-root`, for the #5623 reason each block above states, and every
+// mutation targets `manifest/runtime` — the row the status shipped with — so
+// each run has exactly one cause for its verdict.
+describe('check:liveness — the live-elsewhere criteria (#13483)', () => {
+  let tmp: string;
+
+  beforeAll(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), 'os-liveness-elsewhere-'));
+  });
+  afterAll(() => rmSync(tmp, { recursive: true, force: true }));
+
+  /** Copy the real ledgers and rewrite fields of one property in the copy. */
+  function withProp(name: string, type: string, prop: string, edit: (entry: any) => void): string {
+    const root = path.join(tmp, name);
+    cpSync(LEDGERS, root, { recursive: true });
+    const file = path.join(root, `${type}.json`);
+    const ledger = JSON.parse(readFileSync(file, 'utf8'));
+    edit(ledger.props[prop]);
+    writeFileSync(file, `${JSON.stringify(ledger, null, 2)}\n`);
+    return root;
+  }
+
+  // The control, and the population line. The shipped `manifest.runtime` row is
+  // the day-one population, so a green run must show it counted AND satisfied —
+  // "no findings" over zero rows is also what a check wired to nothing prints.
+  it('is green on the shipped ledgers and publishes the population beside the verdict', () => {
+    const root = path.join(tmp, 'verbatim');
+    cpSync(LEDGERS, root, { recursive: true });
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(0);
+    const line = output.split('\n').find((l) => l.startsWith('live-elsewhere:')) ?? '';
+    const m = /live-elsewhere: (\d+) entr\(ies\) carry the verdict .*?, (\d+) with a foreign pointer/.exec(line);
+    expect(m, line).not.toBeNull();
+    expect(Number(m![1])).toBeGreaterThanOrEqual(1);
+    expect(m![2]).toBe(m![1]);
+    expect(line).not.toContain('MALFORMED');
+    expect(line).not.toContain('EXPIRED');
+  });
+
+  it('FAILS when the evidence attributes no path to a foreign realm — the unverified label itself', () => {
+    const root = withProp('no-foreign', 'manifest', 'runtime', (e) => {
+      e.evidence = 'enforced at the cloud marketplace publish gate (trust the note)';
+    });
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('live-elsewhere entr(ies) missing the criteria the verdict requires');
+    expect(output).toContain('manifest/runtime → cites no foreign-attributed path');
+    expect(output).toContain('Do not satisfy this from memory');
+  });
+
+  it('FAILS when evidenceScope contradicts the verdict — in-repo is well-formed and wrong here', () => {
+    // `in-repo` passes the producer report's vocabulary check, so the exit code
+    // has exactly one cause: the elsewhere criterion.
+    const root = withProp('wrong-scope', 'manifest', 'runtime', (e) => {
+      e.evidenceScope = 'in-repo';
+    });
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('manifest/runtime → evidenceScope is "in-repo"');
+  });
+
+  it('FAILS when verifiedAt is absent — legal on every other status, unfalsifiable on this one', () => {
+    const root = withProp('undated', 'manifest', 'runtime', (e) => {
+      delete e.verifiedAt;
+    });
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('manifest/runtime → carries no verifiedAt');
+  });
+
+  it('FAILS when the attestation outlives the window, demanding a re-reading', () => {
+    const root = withProp('expired', 'manifest', 'runtime', (e) => {
+      e.verifiedAt = '2026-01-01'; // fixed date, only ever further past the 180d window
+    });
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('live-elsewhere attestation(s) older than the 180d window — re-attestation required');
+    expect(output).toContain('manifest/runtime → attested 2026-01-01');
+    // The prescription must survive with the check: the wrong repair here is a
+    // bare re-stamp, which is the "trust the prose" downgrade the status ends.
+    expect(output).toContain('re-stamp without re-reading');
+    expect(output).toContain('needs-user-decision');
+  });
+
+  it('reports a MALFORMED verifiedAt once, under the verification heading — never twice', () => {
+    // One rot, one heading (the lineCountOf contract): the bad date fails the
+    // gate through the verification report; the elsewhere headings must not
+    // double-report it as undated or expired.
+    const root = withProp('malformed-date', 'manifest', 'runtime', (e) => {
+      e.verifiedAt = 'not-a-date';
+    });
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain('malformed `verifiedAt` value(s)');
+    expect(output).not.toContain('live-elsewhere attestation(s) older');
+    expect(output).not.toContain('carries no verifiedAt');
+  });
+
+  it('holds a live-elsewhere entry\'s LOCAL citations to the scanned-status standard', () => {
+    // Membership in EVIDENCE_SCANNED_STATUSES, observed through behaviour: a
+    // repo-local path cited beside the foreign pointer must resolve. The `;`
+    // ends the realm's scope, so the rotted path is attributed to THIS repo.
+    const root = withProp('local-rot', 'manifest', 'runtime', (e) => {
+      e.evidence = `cloud: packages/service-cloud/src/plugin-permission-audit.ts#auditPluginPermissions; ${ROTTED}:10 (a local claim gone stale)`;
+    });
+    const { status, output } = runGate(root);
+    expect(status, output).toBe(1);
+    expect(output).toContain(`manifest/runtime → ${ROTTED}`);
   });
 });
 
@@ -747,7 +863,7 @@ describe('check:liveness — an unrecognized ledger `status` (#13083)', () => {
   it("FAILS and names the row when a ledger `status` is misspelled", () => {
     const { status, output } = runGate(typodRoot('d1-names-the-row'));
     expect(status, output).toBe(1);
-    expect(output).toContain('whose `status` is not one of live / experimental / dead / planned');
+    expect(output).toContain('whose `status` is not one of live / experimental / live-elsewhere / dead / planned');
     expect(output).toContain('field/useGrouping → "planed"');
   });
 
