@@ -52,6 +52,14 @@
 # into GitHub's autocomplete. Their leftover label OBJECTS may still exist in
 # the repos; deleting those objects is a separate, deliberate PM action.
 #
+# ⛔ One RETIRED ROUTING label is held on those same two terms — deliberately
+# absent, object deliberately kept — but is recorded beside the `repo:*` rows
+# further down rather than in this paragraph: `repo:objectstack`, retired from
+# circulation 2026-09-01. It is filed there because this paragraph answers
+# "what is retired?", while the question that actually recreates a label is
+# "should there be a fourth `repo:*` row?" — and that one is only ever asked
+# where those rows are.
+#
 # Requires the `gh` CLI. Where only the GitHub MCP tools are available, mirror
 # these creations through them — the protocol is identical.
 #
@@ -293,6 +301,48 @@ gh label create needs:contract-review -R objectstack-ai/objectstack -c d93f0b -d
 gh label create repo:objectui -R objectstack-ai/objectstack -c fbca04 -d "Seam card: cross-repo ordering with objectui is the substance (pure objectui fixes live in objectui)" 2>/dev/null || true
 gh label create repo:cloud    -R objectstack-ai/objectstack -c c5def5 -d "Seam card: cross-repo ordering with cloud is the substance (pure cloud fixes live in cloud)" 2>/dev/null || true
 gh label create repo:hotcrm   -R objectstack-ai/objectstack -c fbca04 -d "Seam card: cross-repo ordering with hotcrm is the substance (pure hotcrm fixes live in hotcrm)" 2>/dev/null || true
+
+# ⛔ There is no fourth `repo:*` row, and that absence is now DECLARED rather
+# than merely true: `repo:objectstack` is RETIRED FROM CIRCULATION — triage
+# ruling on #13991, 2026-09-01, verbatim: 「裁定:方向 2(退役)。一个在自己每一个
+# 承载卡上都零信息、又反转家族语义的标签,声明它只是把例外写进文档;退役它把家族
+# 恢复成单义。」
+#
+# The retirement SHAPE differs from the retired lanes in the header, and that
+# difference is why this block exists at all. Those lanes were created by this
+# file once and had their rows deleted. `repo:objectstack` never had a row: the
+# object was auto-created by a hand-application (the grey / empty-description
+# drift the header describes), so its absence here was UNDECLARED, and a reader
+# of the three rows above could not tell an oversight from a decision — the
+# honest default reading being oversight. This block is the decision, written
+# where a future author would otherwise supply the missing row.
+#
+# The two measured grounds, both from #13991 and the triage sweep on it:
+#   1. ZERO INFORMATION ON EVERY CARRIER. All 4 open carriers — #12237, #12238,
+#      #12243, #12311, label sets read 2026-08-31 — already carry
+#      `documentation` + `domain:devx`, which fully determines their routing.
+#      The label adds nothing on any card that has it.
+#   2. IT INVERTS THE FAMILY. Each row above says "the ordering is cross-repo,
+#      the audience is elsewhere"; a `repo:` label naming THIS repo says the
+#      opposite. Declaring it instead (the rejected option) would have bought a
+#      documented exception in exchange for no routing power at all.
+#
+# ⛔ Retirement here means STOP CIRCULATING, never delete. The label OBJECT
+# stays: deleting it would strip the label from CLOSED cards as well and
+# destroy the record of what was routed this way — the header's rule, unchanged
+# by this row, and a separate deliberate PM action either way. Being absent from
+# this file, it is a label `--reconcile` does not name, so it can be neither
+# recreated nor description-aligned. That is the intended end state.
+#
+# ⛔ Two acts this record deliberately does NOT perform. Stripping the label off
+# those 4 live carriers is a BOARD act for the PM at the landing window —
+# nothing in this file ever hangs or clears a label on a card (the
+# needs:contract-review block above states the same discipline). And the
+# `repo:*` predicate in `scripts/pm/check-half-states.mjs` H14 stays LITERAL:
+# narrowing it is a predicate change ruled on #13992, never a side effect of a
+# vocabulary record. SKILL.md names no `repo:objectstack` (checked 2026-09-01),
+# so the BY-PR prose sync the domain-lane block below requires has, here,
+# nothing to carry.
 
 # pm:seat marks a SEAT REGISTRY post — the protocol carrier, not dispatchable
 # work (SKILL.md state model): one post per seat, its body is the single-writer
