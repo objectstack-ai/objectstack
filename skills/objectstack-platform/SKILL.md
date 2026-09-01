@@ -49,6 +49,28 @@ they live in one skill.
 
 ---
 
+## The App / Platform Boundary
+
+An ObjectStack app is a **simplified implementation of business features**:
+author metadata under the platform's spec, guided by these skills, and check it
+with the `os` commands ([Verify your work](#verify-your-work)). Never rebuild
+what the platform owns.
+
+- **Business features belong in the app; capability belongs in the platform.**
+  A missing default, a wrong diagnostic, a shape the spec refuses — the fix is
+  upstream. Raise it there; do not compensate for it here.
+- **A platform defect means waiting for the platform fix.** No defensive coding,
+  no shape tolerance, no hand-written predicate re-implementing a platform rule,
+  and never "land the half we can" — that spends the contract-first option and
+  leaves a decision half-executed. Record the block against the platform issue
+  so it is machine-visible; before resuming, confirm the version you **pin**
+  carries the fix (merged upstream ≠ present on your pin) and re-run the
+  defect's own reproduction.
+- **A bad platform default is a default to fix**, not something to work around
+  at every call site.
+
+---
+
 ## The Template
 
 `blank` is the only template `create-objectstack` offers, and it is the default:

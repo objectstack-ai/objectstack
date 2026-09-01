@@ -291,6 +291,12 @@ export const Invoice = ObjectSchema.create({
 - Use `requiredWhen` for conditional requiredness; the ObjectQL validator
   enforces it on submit. The `conditionalRequired` alias was REMOVED in
   protocol 17 — emitting it is a parse error.
+- **Choose by intent — invariant or transition gate.** A fact that must hold for
+  *every stored record* is an invariant: express it in `validations[]`. A
+  condition on a *transition* ("required once the record reaches `paid`") is
+  `requiredWhen` / field bounds, which let already-stored rows through. A
+  transition gate written as an invariant bricks existing data; an invariant
+  written as a transition gate never enforces itself.
 - For inline `master_detail` grids, predicates are evaluated row-by-row against
   the child row's `record`, so line-item rules should live on child fields.
 - For complex predicates, load **objectstack-formula** and emit CEL via

@@ -95,7 +95,7 @@ custom page or form config. Prefer, in order:
    formViews: {
      default: {
        type: 'simple',
-       sections: [{ label: 'Invoice', fields: ['number', 'account'] }],
+       sections: [{ group: 'invoice_header' }],  // a declared fieldGroup
        subforms: [
          { childObject: 'invoice_line', // relationshipField + columns are
            title: 'Line Items',         // derived from the child object;
@@ -208,7 +208,7 @@ export const CaseViews = defineView({
             filter: [{ field: 'status', operator: 'equals', value: 'open' }] },
   },
   formViews: {
-    edit: { type: 'simple', data, sections: [{ label: 'Case', fields: ['subject', 'status'] }] },
+    edit: { type: 'simple', data, sections: [{ group: 'case_detail' }] },
   },
 });
 ```
@@ -945,6 +945,17 @@ at runtime from how heavy the record is + the client viewport, because an author
   via container queries — the same form is 1 column in a narrow drawer and up to 4
   on a wide page. Author *grouping* with `fieldGroups` + `Field.group`; the columns
   adapt themselves.
+- **`sections` are the escape hatch — reach for them last.** The ladder, in
+  order: (1) **derive** — declare `fieldGroups` + `Field.group` and author no
+  `sections` at all; (2) **reference** — when one surface needs a local
+  arrangement, a section may name a declared group, `{ group: 'contact_info' }`,
+  and inherits its members, label and presentation (restating a key the group
+  declares is refused at parse); (3) **enumerate** — `{ label, fields: [...] }`
+  only for a named-customer requirement a group reference genuinely cannot
+  express (a cross-group entry combination, a wizard/pane structure), with that
+  reason in a comment beside it. A hand-enumerated section re-copies membership
+  the object already owns and goes stale on the next field added, so rung 3 is
+  an exception, never a default.
 
 > **Rule of thumb: presentation (surface / width / columns) is not metadata.**
 > Write fields + semantic roles; the renderer decides the pixels. Reach for
@@ -1299,6 +1310,13 @@ src/docs/
 5. **Cross-references** use plain relative links — `[overview](./crm_index.md)`.
    The console rewrites `*.md` → `/docs/<target>` (anchors preserved);
    broken same-package links fail the build.
+
+**Write business concepts, not machine inventories.** A hand-copied table of
+objects, fields or components has no producer and drifts; the self-describing
+metadata is the one source. A doc answers *what is this, what business problem
+does it solve, how do I use it*. Boundary: a fact the reader sees on screen
+(the view list in an app's navigation) is documentable; the semantic layer
+behind the screen is not.
 
 ### Routing model — platform-level viewer, opt-in entry
 
