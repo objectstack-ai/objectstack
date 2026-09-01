@@ -642,14 +642,17 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `9602dc820`; re-derived at that pin 2026-08-28 —
-     * `containers.tsx` is byte-identical to the one at `190fbd01d`, so both
-     * anchors below are unmoved, and both were re-READ there rather than
-     * inferred from that identity): `containers.tsx:662-668` renders
+     * (`.objectui-sha` = `d8ec8d6d4`; re-derived at that pin 2026-09-01 —
+     * `containers.tsx` DID change across the move off `9602dc820`, so both
+     * anchors below were re-derived rather than carried over, the icon block
+     * moving `662-668` → `729-735` and the registration input `721` → `788`,
+     * both shifted by insertions above them with the cited text unchanged;
+     * both were re-READ there, never inferred): `containers.tsx:729-735`
+     * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0
      * opacity-70`, `aria-hidden`), and the renderer's registration publishes
-     * the key to the Studio block designer at `:721` (the `items` input,
+     * the key to the Studio block designer at `:788` (the `items` input,
      * documented as `[{ label, value?, icon?, count?, visibleWhen?, children
      * }]`).
      *
@@ -1698,14 +1701,17 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `9602dc820`; re-derived at that pin 2026-08-28 —
-     * `containers.tsx` is byte-identical to the one at `190fbd01d`, so both
-     * anchors below are unmoved, and both were re-READ there rather than
-     * inferred from that identity): `containers.tsx:851-857` renders
+     * (`.objectui-sha` = `d8ec8d6d4`; re-derived at that pin 2026-09-01 —
+     * `containers.tsx` DID change across the move off `9602dc820`, so both
+     * anchors below were re-derived rather than carried over, the icon block
+     * moving `851-857` → `918-924` and the registration input `898` → `965`,
+     * both shifted by insertions above them with the cited text unchanged;
+     * both were re-READ there, never inferred): `containers.tsx:918-924`
+     * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `AccordionTrigger`, grouped with the label in the trigger's one wrapping
      * span, and the renderer's registration publishes the key to the Studio
-     * block designer at `:898` (the `items` input, documented as
+     * block designer at `:965` (the `items` input, documented as
      * `[{ label, icon?, collapsed?, children }]`).
      *
      * Vocabulary is Lucide, resolved through objectui's `LazyIcon`
@@ -1875,9 +1881,12 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `9602dc820`; re-derived at that pin 2026-08-28 — the
-   * read point MOVED rather than died, and the anchors below now hop into a
-   * second file): `components/src/renderers/form/
+   * (`.objectui-sha` = `d8ec8d6d4`; re-derived at that pin 2026-09-01 —
+   * `button.tsx` and `resolve-icon.ts` are both byte-identical to the ones at
+   * `9602dc820` and every anchor below is unmoved, each one re-READ at the new
+   * pin rather than carried on that identity (#10274). The read point MOVED
+   * rather than died on the earlier hop onto `9602dc820`, which is why the
+   * anchors below span a second file): `components/src/renderers/form/
    * button.tsx:36` resolves `schema.icon` through the shared `resolveIcon`,
    * and `:57` / `:59` render it on either side of the label per
    * `iconPosition` (`mr-2 h-4 w-4` left, `ml-2 h-4 w-4` right), both
@@ -2456,12 +2465,15 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `9602dc820`; re-derived at that pin 2026-08-28 — of the
+   * (`.objectui-sha` = `d8ec8d6d4`; re-derived at that pin 2026-09-01 — of the
    * files in the chain below, `index.tsx` DID change across the move off
-   * `190fbd01d` and its anchor moved `161` → `204`, while `ObjectMetricWidget
-   * .tsx`, `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx` are
-   * byte-identical to the ones at `190fbd01d`; every anchor below was re-READ
-   * at the new pin rather than inferred from that identity), and the chain runs
+   * `9602dc820` while `ObjectMetricWidget.tsx`, `MetricWidget.tsx`,
+   * `MetricCard.tsx` and `lazy-icon.tsx` are byte-identical to the ones at
+   * `9602dc820`; this time NO anchor moved, `index.tsx`'s included — its
+   * `object-metric` registration begins at `:194` and the icon input still
+   * lands on `:204`, the change to that file sitting elsewhere in it. Every
+   * anchor below was re-READ at the new pin rather than inferred from either
+   * that identity or that unchanged number), and the chain runs
    * three files:
    * `plugin-dashboard/src/index.tsx:204` publishes it as a designer input
    * (`Icon (Lucide name)`) on the registered `object-metric` block;
