@@ -463,18 +463,28 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
  * maintenance burden onto the three roots that are pinned by three anchors and
  * change only when the evaluators do.
  *
- * The membership test is `SCOPE_ROOTS` minus the allowlist, taken from
- * `@objectstack/formula` rather than restated here (#6713 published it for
- * this consumer) — one list, one definition, no drift. It deliberately is NOT
- * `firstUndeclaredReference`, the declaredness oracle the sibling visibility
- * rule uses, and the difference is a measured false positive rather than a
- * preference: the strict env also declares CEL's TYPE names, so
- * `type(record.x) == string` reports `string` as a root that "resolves".
- * Judging by declaredness would reject that legitimate predicate; judging by
- * `SCOPE_ROOTS` membership does not. Everything the oracle owns and this list
+ * The membership test is {@link FIELD_RULE_JUDGED_ROOTS} minus the allowlist.
+ * Its bulk is `SCOPE_ROOTS`, taken from `@objectstack/formula` rather than
+ * restated here (#6713 published it for this consumer) — one list, one
+ * definition, no drift — plus the ambient roots #13935 measured outside that
+ * baseline; see "Why the judged vocabulary is WIDER than `SCOPE_ROOTS`" below.
+ * It deliberately is NOT `firstUndeclaredReference`, the declaredness oracle
+ * the sibling visibility rule uses, and the difference is a measured false
+ * positive rather than a preference: the strict env also declares CEL's TYPE
+ * names, so `type(record.x) == string` reports `string` as a root that
+ * "resolves". Judging by declaredness would reject that legitimate predicate;
+ * judging by membership does not. Everything the oracle owns and this list
  * does not — bare field references, comprehension-macro variables — keeps
  * falling to the bare-reference check, which has the right prescription for
  * it. The two partitions are disjoint and there is no gap between them.
+ *
+ * ⚠️ That disjointness used to hold for FREE and no longer does. While every
+ * judged root was a `SCOPE_ROOTS` member it was declared in the strict env, so
+ * the bare-reference check could not fire on it whatever this rule decided.
+ * An AMBIENT root is undeclared there, so both checks see it — the walk
+ * suppresses the bare-reference verdict for a root this rule has claimed
+ * (`claimedRoot` on the `check` closure) to keep the invariant true by
+ * construction instead of by coincidence.
  *
  * ## Why it is an error and not a warning
  *
@@ -617,14 +627,76 @@ function rulePredicates(rule: AnyRec, path: string): Array<{ label: string; raw:
  *  - **`data`** gets the metadata-form-vs-runtime-form explanation, because
  *    that is what the mistake IS — the same key name, the other form kind's
  *    root;
+ *  - **`app` and the other AMBIENT roots** get the renderer-mounted
+ *    explanation and an explicit refusal of `record.<root>` (#13935, below);
  *  - **everything else** gets the general rewrite, phrased without claiming
  *    which other surface the author copied it from.
+ *
+ * ## Why the judged vocabulary is WIDER than `SCOPE_ROOTS` (#13935)
+ *
+ * `SCOPE_ROOTS` was the membership test until #13935, and it is the wrong
+ * question by one word: it answers "is this root declared PLATFORM-WIDE",
+ * while the rule needs "is this root bound at SOME evaluation site". The two
+ * agreed for 27 roots and then disagreed for `app` — bound by objectui's
+ * `ExpressionProvider` on the very surface an author migrates a rule DOWN
+ * from, absent from the baseline. Falling outside the membership test sent it
+ * to the bare-reference check, whose prescription is "Write `record.app`" —
+ * and following that earns ``unknown field `app` `` from the field-existence
+ * pass one line up. A first diagnostic that is actively false about where the
+ * root binds, and a wasted correction cycle.
+ *
+ * `SCOPE_ROOTS`' own docblock made this measurable rather than a matter of
+ * taste: its `current_user` entry claims to be "the last one this list was
+ * missing (#6290)". `app` is that sentence's second counterexample — the same
+ * mechanism (#6713's point: a hand-maintained list doing a per-surface job
+ * drifts), a second sighting, not an analogy to the first.
+ *
+ * ⛔ The repair deliberately does NOT add `app` to `SCOPE_ROOTS`. That list is
+ * the published strict-lint accept baseline in `@objectstack/formula`, so
+ * adding a root there stops EVERY surface that judges bare identifiers from
+ * faulting it — a widened public accept set, to fix one surface's diagnostic.
+ * The judged vocabulary is assembled HERE, where the per-surface question is
+ * asked, and `SCOPE_ROOTS` is left as the proper subset it already is.
  */
 /**
  * The roots a field-level `*When` predicate binds. Everything else in
- * `SCOPE_ROOTS` is rejected — see the allowlist section above.
+ * {@link FIELD_RULE_JUDGED_ROOTS} is rejected — see the allowlist section above.
  */
 export const FIELD_RULE_BOUND_ROOTS = ['record', 'previous', 'parent'] as const;
+/**
+ * Roots bound at some evaluation site that `SCOPE_ROOTS` does not declare
+ * (#13935) — the difference between "declared platform-wide" and "bound
+ * somewhere", which is the question this rule actually asks.
+ *
+ * The in-repo source is `packages/spec/src/ui/page.zod` — the `visibleWhen`
+ * docblock's **"Ambient roots — renderer behaviour, NOT contract-guaranteed"**
+ * section, which names `app`, `features` and `os.user` as mounted by
+ * app-shell's `ExpressionProvider`, measured at a pinned objectui sha. Only
+ * `app` lands here: `features` and `os` are already `SCOPE_ROOTS` members, so
+ * the intersection of "ambient" and "not in the baseline" is this one root.
+ * That spec section is deliberately the anchor rather than objectui's list —
+ * a lint package reaching across repos for a vocabulary is how the drift this
+ * constant exists to stop gets one repo wider.
+ *
+ * ⚠️ Membership here says only that SOMETHING binds the root, which is exactly
+ * what earns the scope diagnostic instead of the bare-reference one. It is not
+ * a claim that the FIELD level binds it — that is {@link FIELD_RULE_BOUND_ROOTS},
+ * and it is unchanged.
+ */
+export const FIELD_RULE_AMBIENT_ROOTS = ['app'] as const;
+/**
+ * "Roots bound at some evaluation site" — the vocabulary this rule judges
+ * against, of which `SCOPE_ROOTS` is a proper subset (#13935).
+ *
+ * `SCOPE_ROOTS` comes FIRST so the tie-break in {@link fieldRuleRootIssue} —
+ * "anything else falls back to `SCOPE_ROOTS` order" — keeps its exact
+ * pre-#13935 precedence: a predicate reading both a baseline root and an
+ * ambient one reports the baseline root, the same root it reported before.
+ */
+export const FIELD_RULE_JUDGED_ROOTS: readonly string[] = [
+  ...SCOPE_ROOTS,
+  ...FIELD_RULE_AMBIENT_ROOTS,
+];
 /**
  * ADR-0068 D1's four user spellings, in the order the message's tie-break
  * prefers them (canonical first — the #6585 ordering, with `os` appended so
@@ -698,10 +770,10 @@ export function fieldRuleRootIssue(
 ): { root: string; message: string } | null {
   const roots = collectCelRootIdentifiers(source);
   if (!roots.ok) return null;
-  // Filtered through SCOPE_ROOTS, in SCOPE_ROOTS order — so a bare field
+  // Filtered through the judged vocabulary, in its order — so a bare field
   // reference (owned by the bare-reference check one line up) and a CEL type
   // name (`type(record.x) == string`) can never land here.
-  const kept = SCOPE_ROOTS.filter(
+  const kept = FIELD_RULE_JUDGED_ROOTS.filter(
     (r) => !(FIELD_RULE_BOUND_ROOTS as readonly string[]).includes(r) && roots.roots.includes(r),
   );
   if (kept.length === 0) return null;
@@ -729,7 +801,39 @@ export function fieldRuleRootIssue(
         `being edited); ` +
         `this is an OBJECT field, whose runtime form binds the row as \`record\` — one key name, ` +
         `two form kinds, two roots. Rewrite \`data.<key>\` as \`record.<field>\`.`
-      : `\`${root}\` is declared platform-wide and bound at OTHER evaluation sites (flow, ` +
+      : (FIELD_RULE_AMBIENT_ROOTS as readonly string[]).includes(root)
+        // #13935 — the AMBIENT tier. Everything the general clause below says
+        // is false about these roots: they are NOT declared platform-wide, and
+        // the sites that bind them are renderer-side, not flow/automation. The
+        // `record.<root>` rewrite is refused IN THE MESSAGE rather than merely
+        // omitted, because that is the advice this author just followed out of
+        // the bare-reference check, and the second diagnostic it earns
+        // (`unknown field`) names a different problem than the one they have.
+        //
+        // The spec module is named in PROSE ("the page-component schema")
+        // rather than as a path, and `ExpressionProvider` carries no extension,
+        // for the same reason `sectionFields` and `*.form` above do not: this
+        // is a STRING literal, and #5017's receiver scan strips comments but
+        // not strings, so a `page.zod` inside the message registers `page` as a
+        // read receiver of this rule. Measured — it went red on the first run,
+        // exactly as the two siblings did.
+        //
+        // `record.` + the root is assembled with `+` for the same scan: written
+        // as one template literal, `record.${'$'}{root}` reads as a member
+        // access off a `record` receiver, because `$` is an identifier char.
+        ? `\`${root}\` is NOT declared platform-wide — it is an AMBIENT root, mounted only by ` +
+          `the renderer (objectui app-shell's \`ExpressionProvider\` binds it beside ` +
+          `\`current_user\` / \`user\` / \`ctx\` / \`os\` / \`data\` / \`features\`, and the spec's ` +
+          `page-component schema records that ambient set as renderer behaviour, explicitly NOT ` +
+          `contract-guaranteed). So it resolves in a form VIEW's own field predicate and on no ` +
+          `server path at all, while a field-level object rule is server-enforced. ` +
+          `⛔ Do NOT write \`` + 'record.' + `${root}\`: \`${root}\` is not a field on this ` +
+          `object, so that spelling only trades this diagnostic for an \`unknown field\` error ` +
+          `on \`${root}\`. Rewrite the ` +
+          `predicate against \`record\` (plus \`previous\`, and \`parent\` on a master-detail line ` +
+          `item), or leave the \`${root}\`-dependent decision on the view's own field predicate ` +
+          `where \`${root}\` IS bound — renderer-only, enforcing nothing server-side.`
+        : `\`${root}\` is declared platform-wide and bound at OTHER evaluation sites (flow, ` +
         `automation, screen and action predicates), never at the field level. Rewrite the ` +
         `predicate against \`record\` (plus \`previous\`, and \`parent\` on a master-detail line ` +
         `item), or move the decision to a surface that binds \`${root}\`.`;
@@ -742,6 +846,27 @@ export function fieldRuleRootIssue(
       `${FIELD_RULE_SLOT_CONSEQUENCE[slot] ?? FIELD_RULE_SLOT_CONSEQUENCE_GENERIC}. ` +
       prescription,
   };
+}
+
+/**
+ * [#13935] Does this `@objectstack/formula` error carry the bare-reference
+ * verdict for one of `roots`?
+ *
+ * Matched on the diagnostic's opening clause because it carries no code to
+ * filter on — `validateExpression` pushes `{ source, message }` and nothing
+ * else. The fragility that buys is bounded and made LOUD rather than left
+ * silent: a reword upstream makes the suppression miss, an ambient root then
+ * earns two diagnostics instead of one, and the `toHaveLength(1)` assertions
+ * in the residual-root table go red. ⛔ Do not soften those to
+ * `toBeGreaterThan(0)` — the length is the pin.
+ *
+ * The parameter is `diagnostic` rather than `message` so #5017's receiver scan
+ * reads the `.startsWith` below as this file's own plumbing instead of as a
+ * read off a `message` metadata receiver, which is a real key elsewhere in the
+ * spec (`validations[].message`).
+ */
+function isBareReferenceToAny(diagnostic: string, roots: readonly string[]): boolean {
+  return roots.some((root) => diagnostic.startsWith(`bare reference \`${root}\``));
 }
 
 /**
@@ -864,6 +989,29 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     raw: unknown,
     objectName?: string,
     scope: 'record' | 'flattened' = 'flattened',
+    /**
+     * [#13935] Set when the field-rule check has issued a verdict for this
+     * site. Bare-reference errors naming an AMBIENT root are dropped so the
+     * two partitions stay DISJOINT — the invariant this rule's docblock has
+     * always asserted, which used to hold for free (every judged root was a
+     * `SCOPE_ROOTS` member, and a declared root never trips the bare-reference
+     * check) and stops holding for free the moment the judged vocabulary is
+     * wider than the baseline. Without it an ambient root earns BOTH verdicts,
+     * one of which is the false `record.<root>` prescription this card exists
+     * to remove.
+     *
+     * The suppressed set is the ambient roots rather than only the root the
+     * verdict NAMED, and the difference shows up when one predicate reaches
+     * for two rejected roots. This rule emits one verdict per slot, so with
+     * `ctx.locale == 'en' && app.locale == 'en'` the tie-break names `ctx` and
+     * `app` would otherwise keep its bare-reference — re-emitting the exact
+     * false prescription, on the exact root, that this card removes. Suppressed,
+     * the author fixes `ctx`, re-runs, and `app` earns its own correct verdict:
+     * the same one-root-at-a-time iteration this rule already does for two
+     * baseline roots. Baseline roots need no entry — being declared in the
+     * strict env, they never trip the bare-reference check at all.
+     */
+    fieldRuleVerdictIssued?: boolean,
   ): void => {
     if (raw == null) return;
     const fields = objectName ? fieldIndex.get(objectName) : undefined;
@@ -872,7 +1020,10 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     const fieldTypes = objectName ? fieldTypeIndex.get(objectName) : undefined;
     const res = validateExpression('predicate', raw as string | { dialect?: string; source?: string },
       objectName ? { objectName, fields, fieldTypes, scope } : { scope });
-    for (const e of res.errors) issues.push({ where, message: e.message, source: e.source, severity: 'error' });
+    for (const e of res.errors) {
+      if (fieldRuleVerdictIssued && isBareReferenceToAny(e.message, FIELD_RULE_AMBIENT_ROOTS)) continue;
+      issues.push({ where, message: e.message, source: e.source, severity: 'error' });
+    }
     for (const w of res.warnings) issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
     // [#8116] Provenance rides every object-bound predicate this helper
     // validates, whichever scope: the `record`/`previous` roots are explicit
@@ -884,13 +1035,21 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
   /**
    * The metadata-walk half: locate the source, then defer to the shared
    * {@link fieldRuleRootIssue} for the verdict and the message.
+   *
+   * [#13935] Split into a COMPUTE half and a PUSH half. The compute half runs
+   * before {@link check} so the claimed root can be handed to it, while the
+   * push half still runs after, keeping the emitted order of the two
+   * diagnostics exactly as it was — a slot can carry a field-rule verdict AND
+   * an unrelated field-existence error, and tests index into that order.
    */
-  const checkFieldRuleRoot = (where: string, slot: string, raw: unknown): void => {
+  const fieldRuleRootVerdict = (
+    slot: string,
+    raw: unknown,
+  ): { root: string; message: string; source: string } | null => {
     const source = celSourceOf(raw);
-    if (!source) return;
+    if (!source) return null;
     const issue = fieldRuleRootIssue(slot, source);
-    if (!issue) return;
-    issues.push({ where, message: issue.message, source, severity: 'error' });
+    return issue ? { ...issue, source } : null;
   };
 
   /**
@@ -1084,8 +1243,16 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       // record-scoped — a bare ref silently fails the rule (required/readonly
       // not enforced = data-integrity hole). #1928 class, same as actions.
       for (const key of ['requiredWhen', 'readonlyWhen', 'conditionalRequired', 'visibleWhen'] as const) {
-        check(`object '${objectName}' · field '${fname}' ${key}`, (f as AnyRec)[key], objectName, 'record');
-        checkFieldRuleRoot(`object '${objectName}' · field '${fname}' ${key}`, key, (f as AnyRec)[key]);
+        const where = `object '${objectName}' · field '${fname}' ${key}`;
+        const raw = (f as AnyRec)[key];
+        // [#13935] Verdict FIRST, emitted second. `check` needs to know which
+        // root this rule has claimed so the two partitions stay disjoint; the
+        // push order below is the pre-#13935 one.
+        const verdict = fieldRuleRootVerdict(key, raw);
+        check(where, raw, objectName, 'record', verdict !== null);
+        if (verdict) {
+          issues.push({ where, message: verdict.message, source: verdict.source, severity: 'error' });
+        }
       }
       // [#6290] Per-OPTION `visibleWhen` — a `select`/`multiselect`/`radio`
       // option's own predicate (`SelectOptionSchema.visibleWhen`,

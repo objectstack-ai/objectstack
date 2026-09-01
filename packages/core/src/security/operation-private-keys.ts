@@ -24,7 +24,12 @@
  *    `__expandRead` marks a read as a lookup EXPANSION sub-read (it no longer
  *    relaxes any gate — #7626 removed that waiver — but it still travels with
  *    one operation and must not be inherited by another), `__referentialFieldClear`
- *    authorizes the referential-clear write.
+ *    authorizes the referential-clear write. [#13644] The latter also has a
+ *    DECLARED, read-only projection — `HookContext.referentialFieldClear`
+ *    (`@objectstack/spec/data`), populated by objectql's `update()` assembly
+ *    and carried across the sandbox boundary by contract — which is what an
+ *    APP reads; the `__` key here remains the engine/middleware authorization
+ *    channel, and this file's stripping rule is unchanged by the projection.
  *
  * plugin-security is the PRODUCER of that vocabulary and would be the most
  * honest owner of the rule for consuming it, but none of the three consumers

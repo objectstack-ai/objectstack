@@ -280,8 +280,14 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   '@objectstack/driver-sqlite-wasm': [
     '@objectstack/core', '@objectstack/driver-sql', '@objectstack/formula', '@objectstack/spec',
   ],
+  // [#13513] `@objectstack/verify` shrank out of this entry when
+  // `src/date-bucket-parity.test.ts` moved to `packages/qa/dogfood`. That test
+  // was the driver's only importer of it, and its devDependency was the one
+  // edge that made this workspace's manifest graph cyclic
+  // (runtime -peer(optional)-> driver-turso -dev-> verify -dep-> runtime), which
+  // left every `pnpm --filter 'PKG^...' build` with no topological order.
   '@objectstack/driver-turso': [
-    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/spec', '@objectstack/verify',
+    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/spec',
   ],
   '@objectstack/embedder-openai': ['@objectstack/spec'],
   '@objectstack/example-crm': ['@objectstack/driver-sql', '@objectstack/objectql', '@objectstack/spec'],

@@ -337,9 +337,8 @@ describe('validateReadonlyHookWrites - GREEN: nothing statically knowable is gue
 });
 
 describe('validateReadonlyHookWrites - readonlyWhen is a SECOND shape, not the same verdict', () => {
-  // #9107: readonlyWhen strips per record STATE, and it strips a
-  // beforeUpdate-derived value too. So the write is conditional, not certain -
-  // warning, exactly as the flow sibling grades it.
+  // readonlyWhen strips per record STATE, so the write is conditional, not
+  // certain - warning, exactly as the flow sibling grades it.
   it('grades a readonlyWhen field as an advisory warning, not an error', () => {
     const findings = validateReadonlyHookWrites(
       crmStack("await ctx.api.object('crm_account').update({ credit_hold: true });"),
@@ -347,13 +346,39 @@ describe('validateReadonlyHookWrites - readonlyWhen is a SECOND shape, not the s
     expect(findings).toHaveLength(1);
     expect(findings[0].rule).toBe(HOOK_API_UPDATE_READONLY_WHEN_FIELD);
     expect(findings[0].severity).toBe('warning');
-    // The own-hook stamp is NOT the remedy here, and the hint must not offer it.
-    expect(findings[0].hint).not.toContain('ctx.input.credit_hold');
-    // [#14010] Nor is sudo, for the sandbox-reachability reason above - so this
-    // hint offers NEITHER, and says which record states the write is safe on.
-    expect(findings[0].hint).toContain('not marshalled into the sandbox');
-    expect(findings[0].hint).not.toMatch(/write it through ctx\.api\.sudo/);
-    expect(findings[0].hint).toContain('readonlyWhen predicate is FALSE');
+  });
+
+  // The hint is the WHOLE product of an advisory rule - the finding blocks
+  // nothing, so the sentence is all the author acts on. Both remedies it names
+  // are pinned against the engine, and the one it refuses to name is the one
+  // that would cost the author a privilege widening for no behaviour change.
+  it('offers the beforeUpdate-derived stamp as the remedy, and does NOT offer elevation', () => {
+    const [finding] = validateReadonlyHookWrites(
+      crmStack("await ctx.api.object('crm_account').update({ credit_hold: true });"),
+    );
+
+    // Remedy (1): the record states on which the write is safe.
+    expect(finding.hint).toContain('readonlyWhen predicate is FALSE');
+
+    // Remedy (2). #9107 made the conditional strip judge the CALLER's entry
+    // snapshot, so a hook-DERIVED value survives on a locked record - pinned in
+    // `engine-readonly-when-derived-writes.test.ts` as "THE REPORT: a
+    // hook-derived value on a TRUE readonlyWhen field now LANDS". The hint used
+    // to assert the opposite and thereby rule out the one remedy that works.
+    expect(finding.hint).toContain('beforeUpdate hook');
+    expect(finding.hint).toContain('does land, even on a locked record');
+    expect(finding.hint).not.toMatch(/strips even a beforeUpdate-derived value/);
+    expect(finding.hint).not.toMatch(/own-hook stamp is NOT a workaround/);
+
+    // NOT elevation, for two independent reasons, both stated. `sudo()` is
+    // unreachable from a body ([#14010] - QuickJS `ctx.api` carries no `sudo`),
+    // AND a system context does not waive the conditional lock anyway ("LOCK 2 -
+    // isSystem does NOT exempt a caller-supplied value"). The second reason is
+    // what makes this hint's refusal survive if the first is ever fixed.
+    expect(finding.hint).toContain('Elevation is not a workaround here');
+    expect(finding.hint).toContain('not marshalled into the sandbox');
+    expect(finding.hint).toContain('does not waive the conditional lock');
+    expect(finding.hint).not.toMatch(/write it through ctx\.api\.sudo/);
   });
 
   it('reports a field carrying BOTH flags as the certain (static readonly) finding', () => {

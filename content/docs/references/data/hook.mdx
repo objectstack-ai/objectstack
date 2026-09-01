@@ -36,6 +36,7 @@ const result = HookContextSchema.parse(data);
 | **dispatch** | `{ mode: Enum<'record' \| 'per-row'>; index: integer; scope: Record<string, any> }` | optional | How this hook call relates to the caller's write (engine-produced) |
 | **session** | `{ userId?: string; actor?: string; organizationId?: string; accessToken?: string; … }` | optional | Current session context |
 | **provenance** | `{ flowRunId?: string; attributedUserId?: string }` | optional | Server-stamped write provenance (never client-supplied, never an authorization input) |
+| **referentialFieldClear** | `boolean` | optional | Engine-produced marker: true exactly when this write is the engine's own referential cleanup (the set_null cascade UPDATE clearing — or, for multiple: true, removing the deleted member from — a lookup that references a record being deleted). Absent on every other write, including a user hand-clearing the same lookup; read as `ctx.referentialFieldClear === true`. The declared projection of the operation-private `__referentialFieldClear`, carried across the sandbox boundary by contract; server-derived and never client-supplied. |
 | **transaction** | `any` | optional | Database transaction handle |
 | **ql** | `any` | ✅ | ObjectQL Engine Reference |
 | **api** | `any` | optional | Cross-object data access (IScopedContext — `object(name)` + `transaction(cb)`) |
