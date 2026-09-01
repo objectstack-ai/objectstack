@@ -46,13 +46,29 @@
 //     flagged. Exactly the reason the flow sibling skips `create_record`.
 //
 //   - Only a NON-ELEVATED `ctx.api`. `ScopedContext.sudo()` returns a context
-//     with `isSystem: true`, which the strip skips entirely - the hook-side
-//     analogue of a flow's `runAs:'system'`, and the intended channel for
-//     "users cannot edit this, but automation maintains it". A `.sudo()` chain
+//     with `isSystem: true`, which the strip skips entirely. A `.sudo()` chain
 //     is structurally invisible to the extractor (its `api-crud-literal`
 //     matcher requires a literal `ctx.api` receiver, and `ctx.api.sudo()` is a
 //     CallExpression), so elevated writes cannot be flagged even by accident.
 //     Measured, not assumed - `validate-readonly-hook-writes.test.ts` pins it.
+//
+//     ⚠️ [#14010] What that exclusion must NOT become is a recommendation, and
+//     until this edit both hints below made it one. This rule reads L2
+//     (`language:'js'`) BODIES - `extractHookBodyWriteSet` parses
+//     `hooks[i].body.source` and nothing else - and a body runs in QuickJS,
+//     whose VM-side `ctx.api` carries `object()` and the transaction leaves and
+//     NO `sudo` (`installCtx` in runtime/src/sandbox/quickjs-runner.ts; pinned
+//     exhaustively in `quickjs-runner.test.ts`). `sudo()` is real only on the
+//     HOST `ScopedContext` handed to an in-process `handler`. So the prescribed
+//     remedy was a `TypeError` for 100% of this rule's population - and under a
+//     hook's default `onError: 'abort'` that aborts the triggering write, which
+//     is a gating rule pointing at a dead feature. The exclusion stands (an
+//     elevated write is genuinely not stripped); the ADVICE does not.
+//
+//     A hook still has no DECLARED elevation knob - there is no hook-side
+//     `runAs` - so the honest hint is the own-hook stamp, and #14010 is where
+//     the missing knob is argued. Issue ids stay in this comment, out of the
+//     message an author reads and cannot act on.
 //
 //   - Only a LITERAL object name and a LITERAL payload key. A dynamic object
 //     (`ctx.api.object(name)`) or a non-literal payload yields no extraction at
@@ -286,11 +302,11 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
             `on every non-system trigger the engine strips readonly keys from that UPDATE payload - ` +
             `the write never lands, while the call still returns success.`,
           hint:
-            `If automation is meant to maintain '${w.field}', either stamp it on the record's OWN hook ` +
-            `(ctx.input.${w.field} = ... in beforeInsert/beforeUpdate survives the strip, and is the ` +
-            `recommended shape), or make the elevation explicit with ctx.api.sudo().object('${objectName}') ` +
-            `- deliberately, since sudo bypasses the acting user's row and field permissions for that write. ` +
-            `Otherwise drop readonly:true from '${w.field}'.`,
+            `If automation is meant to maintain '${w.field}', stamp it on the record's OWN hook - ` +
+            `ctx.input.${w.field} = ... in beforeInsert/beforeUpdate survives the strip, and is the ` +
+            `recommended shape. Note that ctx.api.sudo() is NOT an option from a body: sudo() lives on ` +
+            `the in-process ScopedContext and is not marshalled into the sandbox, so calling it here is a ` +
+            `TypeError at run time. Otherwise drop readonly:true from '${w.field}'.`,
         });
       } else if (meta.readonlyWhen) {
         reported.add(dedupeKey);
@@ -307,9 +323,9 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
             `write may silently not land depending on the record's state.`,
           hint:
             `readonlyWhen strips even a beforeUpdate-derived value, so an own-hook stamp is NOT a ` +
-            `workaround here. If automation must maintain '${w.field}' regardless of record state, write it ` +
-            `through ctx.api.sudo(). Otherwise confirm this call only targets records whose readonlyWhen ` +
-            `predicate is FALSE.`,
+            `workaround here - and neither is ctx.api.sudo(), which is not marshalled into the sandbox ` +
+            `(calling it from a body is a TypeError at run time). Confirm this call only targets records ` +
+            `whose readonlyWhen predicate is FALSE, or drop '${w.field}' from this payload.`,
         });
       }
     }

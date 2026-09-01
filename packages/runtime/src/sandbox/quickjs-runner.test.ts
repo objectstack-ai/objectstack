@@ -203,6 +203,91 @@ describe('QuickJSScriptRunner — L2 hook script', () => {
     expect(extraMembers).toEqual([]);
   });
 
+  // ── the `ctx.api` surface, and `sudo`'s absence from it (#14010) ─────────
+  //
+  // Same defect shape as the `crypto.hash` pins above, one layer out: a member
+  // that is REAL on the host object and simply not marshalled into the VM.
+  // `buildSandboxApi` (runtime/src/sandbox/body-runner.ts) hands a hook body the
+  // engine's own `ScopedContext`, which HAS `sudo()` (objectql/src/engine.ts);
+  // `installCtx` then rebuilds a VM-side `ctx.api` carrying `object` and the
+  // transaction surface only. So the same handler source passes a native
+  // `hook.handler(ctx)` test and TypeErrors once the build lowers it into a
+  // body - and under a hook's default `onError: 'abort'` that aborts the
+  // triggering write. Green tests, dead feature.
+  //
+  // This pin is the ABSENCE, recorded. It is not an argument that the absence
+  // is wrong: putting privilege escalation on the documented body surface is a
+  // maintainer call (`packages/spec/src/contracts/scoped-context.ts` says so in
+  // as many words), and a hook has no declared `runAs` to authorize it with.
+  // What the absence must never again be is UNDECLARED - it was documented as
+  // working, and `os build` lowered handlers into it.
+
+  it('the VM ctx.api exposes exactly object + the transaction surface, under ANY grant (#14010)', async () => {
+    const allGrants = ['api.read', 'api.write', 'api.transaction', 'crypto.uuid', 'log'] as const;
+    // A host api that DOES carry sudo - the real ScopedContext does, so this is
+    // the production shape, not a stripped-down double. Any leak of the host
+    // object into the VM would show up here as an extra key.
+    const api = {
+      object: (_n: string) => ({ count: () => 1 }),
+      sudo: () => ({ object: (_n: string) => ({ update: () => 1 }) }),
+    };
+
+    const keys = await runner.runScript(
+      {
+        language: 'js',
+        source: 'return Object.keys(ctx.api).sort().join(",");',
+        capabilities: [...allGrants],
+      },
+      ctx({ api }),
+      hookOpts,
+    );
+    // Exhaustive on purpose, exactly like the ctx.crypto pin: a new member has
+    // to come through a review that also updates this list.
+    expect(keys.value).toBe('__txBegin,__txCommit,__txRollback,object,transaction');
+
+    // The specific regression, and the reason the host double above carries a
+    // real `sudo`: the member is NOT missing upstream, it stops at the VM
+    // boundary. A body cannot reach it by any spelling.
+    const typeofSudo = await runner.runScript(
+      {
+        language: 'js',
+        source: 'return typeof ctx.api.sudo;',
+        capabilities: [...allGrants],
+      },
+      ctx({ api }),
+      hookOpts,
+    );
+    expect(typeofSudo.value).toBe('undefined');
+  });
+
+  it('a body calling ctx.api.sudo() fails - it does not silently no-op (#14010)', async () => {
+    // The runtime half of the story the CLI now refuses to lower
+    // (`extract-hook-body.ts` FORBIDDEN_PATTERNS). Pinned because the failure
+    // MODE matters: a throw is recoverable and visible, whereas a silent no-op
+    // would leave the computed column null for the life of the app.
+    let elevated = 0;
+    const api = {
+      object: (_n: string) => ({ update: () => 1 }),
+      sudo: () => {
+        elevated++;
+        return { object: (_n: string) => ({ update: () => 1 }) };
+      },
+    };
+    await expect(
+      runner.runScript(
+        {
+          language: 'js',
+          source: "await ctx.api.sudo().object('crm_account').update({ grade: 'A' }); return 1;",
+          capabilities: ['api.read', 'api.write'],
+        },
+        ctx({ api }),
+        hookOpts,
+      ),
+    ).rejects.toThrow(/sudo/);
+    // And the host's real sudo was never reached through the VM.
+    expect(elevated).toBe(0);
+  });
+
   it('reports script-thrown errors with origin name', async () => {
     await expect(
       runner.runScript(

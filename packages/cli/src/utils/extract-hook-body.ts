@@ -14,7 +14,7 @@
  * For v1 we apply a deliberately simple **regex allow-list** over the
  * extracted body — full TypeScript AST analysis is deferred to v2. Anything
  * the regex rejects (top-level `import`, `require(` / esbuild's `__require(`,
- * `fetch(`, `process.*`, `globalThis.*`, `eval`, `new Function`) makes
+ * `fetch(`, `process.*`, `globalThis.*`, `eval`, `new Function`, `.sudo(`) makes
  * extraction **throw**.
  *
  * ⚠️ What that throw costs the BUILD depends on the flag, and the two outcomes
@@ -85,6 +85,35 @@ const FORBIDDEN_PATTERNS: Array<{ rx: RegExp; reason: string }> = [
   { rx: /\bglobalThis\s*\./, reason: '`globalThis` access is not allowed in hook/action bodies' },
   { rx: /\beval\s*\(/, reason: '`eval()` is not allowed in hook/action bodies' },
   { rx: /\bnew\s+Function\s*\(/, reason: '`new Function()` is not allowed in hook/action bodies' },
+  // [#14010] `sudo()` exists on the HOST `ScopedContext` and is NOT marshalled
+  // into the VM, so lowering a handler that calls it turns working in-process
+  // code into a `TypeError` that only production sees. Refusing here is what
+  // makes the two runtimes agree: the callable is still registered in
+  // `functions` and still shipped through the `.mjs` bundle by `lowerCallables`,
+  // so the handler keeps running in-process where `sudo()` is real — the build
+  // just declines to ALSO emit it as a body that cannot run.
+  //
+  // Same family as the `crypto.hash` retirement three lines into
+  // CAPABILITY_PATTERNS below (#4391): a member advertised ahead of its
+  // implementation, where the build-time inference was the amplifier rather
+  // than the safety net. The difference is the remedy — `crypto.hash` had no
+  // working channel to fall back to, this one does.
+  //
+  // Receiver-loose, like the `.object(...)` / `.title(...)` capability patterns:
+  // a local alias (`const api = ctx.api; api.sudo()`) must not slip through,
+  // and over-refusal is the SAFE direction here (the handler is bundled and
+  // works; it is only `--strict-body`, which demands a body for every callable,
+  // that turns this into a hard failure — correctly, since a body needing
+  // elevation genuinely cannot be one).
+  {
+    rx: /\.\s*sudo\s*\(/,
+    reason:
+      '`sudo()` is not reachable from a sandboxed body — the VM\'s `ctx.api` carries only `object()` '
+      + 'and `transaction()`, so the call is a TypeError at run time (and under a hook\'s default '
+      + '`onError: \'abort\'` that aborts the triggering write). Stamp the value from the record\'s own '
+      + 'before-hook (`ctx.input.<field> = ...`), or leave this handler bundled so it runs in-process '
+      + 'where `sudo()` exists',
+  },
 ];
 
 const CAPABILITY_PATTERNS: Array<{ rx: RegExp; cap: 'api.read' | 'api.write' | 'crypto.uuid' | 'log' }> = [
