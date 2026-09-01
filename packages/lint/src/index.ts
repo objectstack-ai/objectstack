@@ -427,6 +427,22 @@ export type {
   SortableFieldSeverity,
 } from './validate-sortable-fields.js';
 
+// [#14107] The rest of the list view's field surface — the two rules above own
+// `sort` and `searchableFields`; this one owns every OTHER position that names
+// a field on the bound object (columns, filter keys, grouping, row colour,
+// user filters, and every binding inside the kanban / calendar / gantt /
+// timeline / gallery / map / tree blocks). Resolution goes through the shared
+// `object-graph.ts` seam (#14105/#14148), on the HEAD segment — see that
+// module's dotted-path note.
+export {
+  validateListViewFieldRefs,
+  LIST_VIEW_FIELD_UNKNOWN,
+} from './validate-list-view-field-refs.js';
+export type {
+  ListViewFieldRefFinding,
+  ListViewFieldRefSeverity,
+} from './validate-list-view-field-refs.js';
+
 export { validateActionNameRefs, ACTION_NAME_UNDEFINED } from './validate-action-name-refs.js';
 export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-action-name-refs.js';
 
