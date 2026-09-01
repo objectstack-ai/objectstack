@@ -528,6 +528,18 @@ export default defineConfig({
         find: /^@objectstack\/plugin-auth$/,
         replacement: path.resolve(__dirname, '../plugins/plugin-auth/src/index.ts'),
       },
+      // `src/utils/protocol-version-gap.test.ts` (#13860) exercises the upgrade
+      // advisory, whose verdict comes from `checkProtocolCompat` — the platform's
+      // single reader of `engines.protocol`. The advisory is a thin direction
+      // check over that handshake, so a test resolving the handshake through
+      // `exports` to metadata-core's **dist** would be a verdict about build
+      // state: the range grammar it actually pins would be whatever was last
+      // compiled, and the dangerous half is not an error but a green run against
+      // a stale artifact.
+      {
+        find: /^@objectstack\/metadata-core$/,
+        replacement: path.resolve(__dirname, '../metadata-core/src/index.ts'),
+      },
     ],
   },
   test: {
