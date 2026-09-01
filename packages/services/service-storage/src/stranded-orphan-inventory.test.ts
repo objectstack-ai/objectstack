@@ -505,3 +505,138 @@ describe("[#10950] the sweep cannot nominate a stranded orphan — the card's pr
     expect(report.stranded).toBe(1);
   });
 });
+// ── [#13996] `createdAt` across the dialect divergence ──────────────────────
+
+/**
+ * What `samples[].createdAt` is, per runtime shape of `created_at`.
+ *
+ * ## Why this file could not have caught the defect before
+ *
+ * `created_at` is a BUILTIN audit column, so no declared-field coercion
+ * reaches it and `SqlDriver#formatOutput` repairs it only inside its
+ * `if (this.isSqlite)` arm. The record read door therefore hands it back as
+ * canonical ISO-Z TEXT on SQLite and as a JS `Date` on Postgres and MySQL —
+ * pinned at that door, per dialect, in driver-sql's
+ * `sql-driver-13567-audit-stamp-materialisation.test.ts` (§B0/§B1).
+ *
+ * ⚠️ This repo's default test backend is SQLite, and every fixture above
+ * spells `created_at` as an ISO STRING — the one shape the old
+ * `typeof row.created_at === 'string'` guard accepted. So the guard dropped
+ * the field for every row on both production default drivers while every pin
+ * here stayed green. The discriminating input is a `Date`, and until this
+ * block nothing in this file produced one.
+ *
+ * ## What each case is worth as evidence
+ *
+ * - POSITIVE is the only case that changes verdict with the repair: red
+ *   before it (`undefined`), green after.
+ * - CONTROL is a declared REGRESSION CONTROL and ⛔ NOT ablation evidence:
+ *   it is green in both directions by construction, because the SQLite shape
+ *   already worked. It exists to pin that the repair added an accepted shape
+ *   and changed nothing about the one that already round-tripped.
+ * - REVERSE CONTROL guards the `String(…)` trap: the arm that makes the
+ *   `occurred_at` shape work for a non-optional field would spell the literal
+ *   `"undefined"` / `"Invalid Date"` into an operator's report here.
+ */
+describe('[#13996] `samples[].createdAt` — the driver-dependent runtime type of `created_at`', () => {
+  /** Canonical audit-timestamp text: what SQLite stores and `toISOString()` emits. */
+  const ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+  /** Sub-second digits are load-bearing — `String(Date)` drops exactly these. */
+  const INSTANT = '2026-08-30T10:19:25.947Z';
+
+  it('POSITIVE — a JS `Date` (the Postgres/MySQL shape) is reported as canonical ISO-Z text', async () => {
+    const engine = inventoryEngine({
+      files: [strandedRow('os13996_pg', { created_at: new Date(INSTANT) })],
+    });
+
+    const report = await inventoryStrandedFileOrphans(engine);
+
+    expect(report.stranded).toBe(1);
+    expect(report.samples).toHaveLength(1);
+    const sample = report.samples[0];
+    // The whole defect, in one assertion: this was `undefined` for EVERY row
+    // on both live dialects, for a field the walk explicitly projects.
+    expect(
+      sample.createdAt,
+      'the driver handed `created_at` out as a Date and the sample dropped it',
+    ).toBe(INSTANT);
+    expect(typeof sample.createdAt).toBe('string');
+    expect(sample.createdAt).toMatch(ISO_Z);
+  });
+
+  it('POSITIVE — it is the `toISOString()` spelling, not `String(Date)`: the milliseconds survive', async () => {
+    const value = new Date(INSTANT);
+    expect(value.getMilliseconds(), 'the fixture is vacuous without sub-second digits').toBe(947);
+
+    const report = await inventoryStrandedFileOrphans(
+      inventoryEngine({ files: [strandedRow('os13996_ms', { created_at: value })] }),
+    );
+    const spelled = report.samples[0].createdAt as string;
+
+    // `String(Date)` renders whole seconds in the PROCESS zone (§A2 of the
+    // driver pin). Naming the instant exactly is what separates the two.
+    expect(Date.parse(spelled), 'the reported stamp names the row instant').toBe(value.getTime());
+    expect(spelled).not.toBe(String(value));
+    expect(Date.parse(String(value))).toBe(value.getTime() - value.getMilliseconds());
+  });
+
+  it('CONTROL (⛔ not ablation evidence — green both directions) — an ISO string is passed through byte-for-byte', async () => {
+    // The SQLite shape, which already worked. Asserted as the WHOLE sample so
+    // a change to any neighbouring field would show up here too.
+    const report = await inventoryStrandedFileOrphans(
+      inventoryEngine({ files: [strandedRow('os13996_sqlite')] }),
+    );
+
+    expect(report.samples).toEqual([
+      {
+        fileId: 'os13996_sqlite',
+        key: 'attachments/os13996_sqlite.bin',
+        name: 'os13996_sqlite.bin',
+        size: 1024,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      },
+    ]);
+  });
+
+  it('CONTROL — passthrough is TOTAL over strings: a non-canonical stamp is not re-parsed or re-spelled', async () => {
+    // Today any string reaches the report unchanged, including a naive-UTC
+    // spelling. The repair adds an accepted shape; it must not quietly start
+    // validating or normalising the shape that already round-tripped.
+    for (const text of ['2026-01-01 00:00:00', 'not-a-timestamp', '']) {
+      const report = await inventoryStrandedFileOrphans(
+        inventoryEngine({ files: [strandedRow('os13996_text', { created_at: text })] }),
+      );
+      expect(report.samples[0].createdAt, `passthrough of ${JSON.stringify(text)}`).toBe(text);
+    }
+  });
+
+  it('REVERSE CONTROL — an absent, null or unusable stamp stays `undefined`, never a spelled-out one', async () => {
+    const absent = strandedRow('os13996_absent');
+    delete (absent as Record<string, unknown>).created_at;
+
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['absent', absent],
+      ['null', strandedRow('os13996_null', { created_at: null })],
+      // `instanceof Date` is TRUE for this one, and `toISOString()` THROWS on
+      // it — the case that would take the whole inventory down.
+      ['Invalid Date', strandedRow('os13996_nat', { created_at: new Date('not a date') })],
+      // Epoch millis: a shape no dialect produces here, kept `undefined`
+      // rather than stringified into a timestamp position.
+      ['epoch millis', strandedRow('os13996_num', { created_at: Date.parse(INSTANT) })],
+    ];
+
+    for (const [label, row] of cases) {
+      const report = await inventoryStrandedFileOrphans(inventoryEngine({ files: [row] }));
+
+      expect(report.stranded, `${label}: the row is still inventoried`).toBe(1);
+      const sample = report.samples[0];
+      expect(sample.createdAt, `${label}: an absent stamp must stay absent`).toBeUndefined();
+      // Spelled out explicitly: these two strings are what a bare `String(…)`
+      // terminal arm would put where an operator reads a timestamp.
+      expect(sample.createdAt).not.toBe('Invalid Date');
+      expect(sample.createdAt).not.toBe('undefined');
+      // …and dropping the stamp must not drop the row's identity with it.
+      expect(sample.fileId, `${label}: fileId`).toBe(row.id);
+    }
+  });
+});

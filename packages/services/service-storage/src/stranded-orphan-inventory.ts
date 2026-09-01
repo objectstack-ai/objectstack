@@ -169,6 +169,57 @@ function usableSize(value: unknown): number | undefined {
 }
 
 /**
+ * `created_at` as canonical ISO-8601-Z text, whichever shape the driver handed
+ * it out AS — and `undefined` when the row carries no usable stamp.
+ *
+ * ## Why a `typeof v === 'string'` test alone is wrong here
+ *
+ * `created_at` is a BUILTIN audit column: it is not in `datetimeFields`, so no
+ * declared-field coercion reaches it, and `SqlDriver#formatOutput` repairs the
+ * audit columns only inside its `if (this.isSqlite)` arm. So the read door the
+ * walk below goes through hands this value back as canonical ISO-Z TEXT on
+ * SQLite and as a JS `Date` on Postgres and MySQL — the production default
+ * drivers. Pinned per dialect, at that door, in driver-sql's
+ * `sql-driver-13567-audit-stamp-materialisation.test.ts` (§B1).
+ *
+ * A bare string test therefore answers FALSE for EVERY row on the live
+ * dialects: a field the walk explicitly projects (`fields: [… 'created_at']`)
+ * was asked for from the driver and then silently discarded, so every sample
+ * in the operator's report carried `createdAt: undefined` there while looking
+ * correct on the SQLite the tests run. The sibling guards on `key` and `name`
+ * are NOT this — those are text columns on every dialect. Only the timestamp
+ * straddles the divergence, which is why reading the code did not show it.
+ *
+ * ## Why the consumer owes the canonical spelling
+ *
+ * Normalising at the driver's read door instead would reverse the deliberate
+ * `withPostgresCalendarDayAsText` decision — that a `timestamptz` IS an
+ * instant and a `Date` is the right materialisation for it. So the repair is
+ * the one `@objectstack/metadata-protocol` already carries for `occurred_at`:
+ * accept both shapes where the value is consumed.
+ *
+ * ⛔ NOT `row.created_at ?? undefined`. That reads as fixed and is worse: it
+ * puts a raw `Date` into a field declared `string | undefined`, trading a
+ * dropped field for a wrong type.
+ *
+ * ⛔ And the terminal arm is `undefined`, not `String(value)`. This field is
+ * optional where `occurredAt` is not, and `String()` over a null or an Invalid
+ * Date spells the literal `"undefined"` / `"Invalid Date"` into an operator's
+ * report in the position a timestamp is read from — a stamp that is absent
+ * must stay absent.
+ */
+function usableCreatedAt(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (value instanceof Date) {
+    // An Invalid Date IS `instanceof Date`, and `toISOString()` THROWS on it
+    // (RangeError) rather than returning something odd. One unparseable stamp
+    // must not take down a read-only inventory of the whole `sys_file` table.
+    return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  }
+  return undefined;
+}
+
+/**
  * Count the `sys_file` rows that the forward-only fixes (#10171, #10240) would
  * have tombstoned had they existed when the rows were orphaned, and that the
  * reap guard would then confirm.
@@ -264,7 +315,7 @@ export async function inventoryStrandedFileOrphans(
           key: typeof row.key === 'string' ? row.key : undefined,
           name: typeof row.name === 'string' ? row.name : undefined,
           size,
-          createdAt: typeof row.created_at === 'string' ? row.created_at : undefined,
+          createdAt: usableCreatedAt(row.created_at),
         });
       }
     }
