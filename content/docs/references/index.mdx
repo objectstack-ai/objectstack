@@ -1,6 +1,6 @@
 ---
 title: Protocol Reference
-description: Every schema published by @objectstack/spec — 1598 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1591 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -29,11 +29,11 @@ counts are sums of the rows they head. Regenerate with
 | [Kernel Protocol](/docs/references/kernel) | 30 | 163 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
 | [QA Protocol](/docs/references/qa) | 1 | 8 | Declarative test suites — scenarios, steps, actions and assertions. |
 | [Security Protocol](/docs/references/security) | 5 | 29 | Permission sets, row-level security, sharing rules, tenancy posture. |
-| [Shared Protocol](/docs/references/shared) | 8 | 32 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
+| [Shared Protocol](/docs/references/shared) | 7 | 25 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 36 | 291 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 153 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **200** | **1598** | 14 protocol modules |
+| **Total** | **199** | **1591** | 14 protocol modules |
 
 ---
 
@@ -286,17 +286,16 @@ Permission sets, row-level security, sharing rules, tenancy posture.
 
 ## Shared Protocol
 
-**Source:** `packages/spec/src/shared/` · **Import:** `@objectstack/spec/shared` · **8 pages, 32 schemas**
+**Source:** `packages/spec/src/shared/` · **Import:** `@objectstack/spec/shared` · **7 pages, 25 schemas**
 
 Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums.
 
 | File | Schemas |
 | :--- | :--- |
-| [`branded-types.zod.ts`](/docs/references/shared/branded-types) | `AppName`, `FieldName`, `FlowName`, `ObjectName`, `RoleName`, `ViewName` |
 | [`enums.zod.ts`](/docs/references/shared/enums) | `IsolationLevelEnum`, `MutationEventEnum`, `SortDirectionEnum`, `SortItem` |
 | [`expression.zod.ts`](/docs/references/shared/expression) | `CronExpressionInput`, `Expression`, `ExpressionDialect`, `ExpressionInput`, `ExpressionMeta`, `Predicate`, `PredicateInput`, `TemplateExpressionInput` |
 | [`http.zod.ts`](/docs/references/shared/http) | `CorsConfig`, `HttpMethod`, `HttpMethodSubset`, `HttpRequest`, `RateLimitConfig`, `StaticMount` |
-| [`identifiers.zod.ts`](/docs/references/shared/identifiers) | `EventName`, `MetadataItemName`, `SnakeCaseIdentifier`, `SystemIdentifier` |
+| [`identifiers.zod.ts`](/docs/references/shared/identifiers) | `MetadataItemName`, `SnakeCaseIdentifier`, `SystemIdentifier` |
 | [`mapping.zod.ts`](/docs/references/shared/mapping) | `FieldMapping` |
 | [`metadata-types.zod.ts`](/docs/references/shared/metadata-types) | `BaseMetadataRecord`, `MetadataFormat` |
 | [`protection.zod.ts`](/docs/references/shared/protection) | `Protection` |

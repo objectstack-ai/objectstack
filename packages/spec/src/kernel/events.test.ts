@@ -128,16 +128,30 @@ describe('EventSchema', () => {
     expect(() => EventSchema.parse(event)).not.toThrow();
   });
 
-  it('should validate event name format (snake_case with dots)', () => {
-    const validNames = [
+  // [#13613] `name` carried `EventNameSchema`'s dot-notation grammar until
+  // ADR-0049 enforce-or-remove retired it: no runtime consumer ever parsed
+  // through this schema, and the platform-checked event vocabulary is the
+  // closed `DataEventType` / `BulkDataEventType` enums (api/events.zod.ts).
+  // This pin holds the WIDENING: spellings the retired grammar refused
+  // (PascalCase, kebab-case, leading digit/dot) now parse — a regression to a
+  // schema-level grammar here should be a deliberate ruling, not drift.
+  it('accepts event names as plain strings — the dot-notation grammar is retired (#13613)', () => {
+    const names = [
+      // conventional dot-notation spellings (valid before and after)
       'user.created',
       'account.updated',
       'opportunity.stage.changed',
       'payment.webhook.received',
       'data_import.completed',
+      // spellings the retired EventNameSchema grammar refused
+      'User.Created', // PascalCase
+      'user-created', // kebab-case
+      'userCreated',  // camelCase
+      '123.invalid',  // starts with number
+      '.invalid',     // starts with dot
     ];
 
-    validNames.forEach(name => {
+    names.forEach(name => {
       const event = {
         name,
         payload: {},
@@ -147,24 +161,6 @@ describe('EventSchema', () => {
         },
       };
       expect(() => EventSchema.parse(event)).not.toThrow();
-    });
-  });
-
-  it('should reject invalid event name formats', () => {
-    const invalidNames = [
-      'User.Created', // PascalCase
-      'user-created', // kebab-case
-      'userCreated',  // camelCase
-      '123.invalid',  // starts with number
-      '.invalid',     // starts with dot
-    ];
-
-    invalidNames.forEach(name => {
-      expect(() => EventSchema.parse({
-        name,
-        payload: {},
-        metadata: { source: 'system', timestamp: '2024-01-15T10:30:00Z' },
-      })).toThrow();
     });
   });
 

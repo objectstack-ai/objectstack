@@ -2,18 +2,14 @@
   "description": "Ratchet manifest of every JSON Schema emitted by scripts/build-schemas.ts for one category. Sharded by category (#5837); the gate reads the whole json-schema.manifest/ directory as ONE set. Auto-appended when new schemas are added (commit the change). A listed schema that a build no longer emits fails gen:schema. DELETING a key is gated too (#4725): the removal is measured against this directory at the merge base with origin/main — which the commit under test cannot rewrite — and every def that leaves the published set must be declared in RETIRED_DEFS_BY_MAJOR (src/migrations/registry.ts), or in RENAMED_DEFS (scripts/lib/renamed-defs.ts) when it is a rename rather than a removal. See #2978, #4725.",
   "category": "shared",
   "schemas": [
-    "shared/AppName",
     "shared/BaseMetadataRecord",
     "shared/CorsConfig",
     "shared/CronExpressionInput",
-    "shared/EventName",
     "shared/Expression",
     "shared/ExpressionDialect",
     "shared/ExpressionInput",
     "shared/ExpressionMeta",
     "shared/FieldMapping",
-    "shared/FieldName",
-    "shared/FlowName",
     "shared/HttpMethod",
     "shared/HttpMethodSubset",
     "shared/HttpRequest",
@@ -21,18 +17,15 @@
     "shared/MetadataFormat",
     "shared/MetadataItemName",
     "shared/MutationEventEnum",
-    "shared/ObjectName",
     "shared/Predicate",
     "shared/PredicateInput",
     "shared/Protection",
     "shared/RateLimitConfig",
-    "shared/RoleName",
     "shared/SnakeCaseIdentifier",
     "shared/SortDirectionEnum",
     "shared/SortItem",
     "shared/StaticMount",
     "shared/SystemIdentifier",
-    "shared/TemplateExpressionInput",
-    "shared/ViewName"
+    "shared/TemplateExpressionInput"
   ]
 }

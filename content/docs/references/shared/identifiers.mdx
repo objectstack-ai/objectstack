@@ -12,21 +12,12 @@ description: Identifiers protocol schemas
 ## TypeScript Usage
 
 ```typescript
-import { EventNameSchema, MetadataItemNameSchema, SnakeCaseIdentifierSchema, SystemIdentifierSchema } from '@objectstack/spec/shared';
-import type { EventName, MetadataItemName, SnakeCaseIdentifier, SystemIdentifier } from '@objectstack/spec/shared';
+import { MetadataItemNameSchema, SnakeCaseIdentifierSchema, SystemIdentifierSchema } from '@objectstack/spec/shared';
+import type { MetadataItemName, SnakeCaseIdentifier, SystemIdentifier } from '@objectstack/spec/shared';
 
 // Validate data
-const result = EventNameSchema.parse(data);
+const result = MetadataItemNameSchema.parse(data);
 ```
-
----
-
-## EventName
-
-Event name (lowercase with dot notation for namespacing)
-
-**Type:** `string`
-
 
 ---
 

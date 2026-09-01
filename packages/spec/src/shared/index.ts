@@ -10,7 +10,11 @@ export * from './mapping.zod';
 export * from './http.zod';
 export * from './enums.zod';
 export * from './metadata-types.zod';
-export * from './branded-types.zod';
+// [#13612] `branded-types.zod` (the six branded identifier schemas) was retired
+// under ADR-0049 enforce-or-remove — no schema ever composed a brand, so the
+// promised compile-time safety was unobtainable. The real identifier contracts
+// live at the surfaces themselves: inline regexes on object/field/flow names,
+// bare `SnakeCaseIdentifierSchema` on app and position names.
 export * from './suggestions.zod';
 export * from './error-map.zod';
 export * from './external-errors';
