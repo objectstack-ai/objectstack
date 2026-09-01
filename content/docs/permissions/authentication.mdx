@@ -850,11 +850,12 @@ fallback: omit it and the member simply joins no team.
 
 <Callout type="warn" title="This is an ObjectStack mount, not a better-auth route">
 better-auth declares `addMember` as a **server-only** API with no HTTP path of
-its own — measured on 1.7.1, where `addMember` builds its endpoint with no path
-argument while every sibling in the same module (`/organization/remove-member`,
-`/organization/list-members`, `/organization/leave`, …) passes one. So the
-vendor's documentation does not list this URL, and an audit that enumerates
-better-auth's mounted surface will not find it there either. ObjectStack mounts it ahead of the
+its own — measured on the then-installed 1.7.1, where `addMember` builds its
+endpoint with no path argument while every sibling in the same module
+(`/organization/remove-member`, `/organization/list-members`,
+`/organization/leave`, …) passes one. So the vendor's documentation does not
+list this URL, and an audit that enumerates better-auth's mounted surface will
+not find it there either. ObjectStack mounts it ahead of the
 catch-all and wraps the vendor's server-only endpoint; the vendor's own checks
 (already-a-member, membership limit, team resolution, hooks) are not
 reimplemented.

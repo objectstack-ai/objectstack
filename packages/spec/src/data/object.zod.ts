@@ -2257,12 +2257,32 @@ const ObjectSchemaBase = strictObject(
      */
     redactFields: z.array(z.string()).optional().describe('Field names removed from records served via a share token'),
     /**
-     * Optional CEL/JSONLogic predicate evaluated against the candidate
-     * record when a link is created. When the predicate returns false,
-     * the create call fails with 422 (e.g. "draft records cannot be
-     * shared"). Evaluator is the same one used by sharing rules.
+     * Optional CEL predicate over the candidate record. It is a STANDING
+     * policy about which records may be reached anonymously, and the platform
+     * holds it at BOTH points in a link's life (#13608):
+     *
+     *   - **at mint** — `createLink` refuses with 422 when the predicate is
+     *     false (e.g. "draft records cannot be shared") and writes no link row;
+     *   - **at redemption** — every `resolveToken` re-evaluates it against the
+     *     record it is about to serve. A record that STOPS qualifying (an
+     *     `audience` flipped to internal, a `status` reverted to draft) stops
+     *     being served through links minted while it did qualify.
+     *
+     * ⚠️ Tightening this policy therefore cuts off already-minted links, on
+     * purpose — no revocation step, no grace period. That is the point of a
+     * standing policy, and it is a behaviour change for deployments that
+     * shipped before #13608.
+     *
+     * Fail-CLOSED at both points: a predicate that does not compile, that
+     * faults on the record, or that answers anything other than `true` refuses
+     * rather than assuming consent. The redemption refusal is deliberately
+     * INDISTINGUISHABLE from a revoked, expired or unknown token — an
+     * anonymous holder is told nothing about why a link died; that reason goes
+     * to the server-side log.
+     *
+     * Evaluator is the same one used by sharing rules.
      */
-    eligibility: z.string().optional().describe('CEL expression that must evaluate to true on the target record'),
+    eligibility: z.string().optional().describe('CEL expression that must evaluate to true on the target record. Enforced at BOTH points in a link\'s life: when the link is minted, and again on every redemption — a record that stops qualifying stops being served through links already minted for it. Fail-closed: a predicate that will not compile, or that faults on the record, refuses.'),
   }).optional().describe('Public share-link policy (Notion/Figma-style link sharing)'),
 
   // [ADR-0085] The former `detail: { … }.passthrough()` UI-hints block is

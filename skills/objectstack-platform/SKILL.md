@@ -101,6 +101,7 @@ my-app/
     │   └── index.ts
     ├── dashboards/           # Optional: dashboards
     ├── reports/              # Optional: reports
+    ├── datasets/             # Optional: analytics datasets
     ├── i18n/                 # Optional: translation bundles
     └── handlers/             # Optional: runtime hook handlers
 ```

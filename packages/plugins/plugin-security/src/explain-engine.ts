@@ -40,6 +40,7 @@ import type {
 } from '@objectstack/spec/security';
 import type { PermissionEvaluator } from './permission-evaluator.js';
 import { superuserBypassBitForOperation } from './permission-evaluator.js';
+import { RLS_DENY_FILTER } from './rls-compiler.js';
 import {
   unresolvedPostureExplainDetail,
   type UnresolvedPostureCause,
@@ -118,9 +119,61 @@ function derivePosture(context: any): AuthzPosture {
   });
 }
 
-/** True iff a composed filter is the zero-rows deny sentinel. */
+/**
+ * The `explain`/sharing zero-rows deny sentinel — the one named in the PUBLISHED
+ * `readFilter` contract (`ExplainDecisionSchema.readFilter`,
+ * `ExplainRecordAttributionSchema.rowFilter`), produced by plugin-sharing's
+ * `buildReadFilter`/`buildWriteFilter` and by this engine's own
+ * `computeRlsFilter` catch fallback in §9 below.
+ */
+const DENY_ALL_SENTINEL_ID = '__deny_all__';
+
+/**
+ * True iff `filter` is THAT sentinel specifically — the narrow question, kept
+ * apart from {@link isDenyAll} because §9's payload collapse is keyed to this
+ * one value and must NOT follow the widened recognition (see below).
+ */
+function isDenyAllSentinel(filter: unknown): boolean {
+  return !!filter && typeof filter === 'object' && (filter as { id?: unknown }).id === DENY_ALL_SENTINEL_ID;
+}
+
+/**
+ * True iff `filter` is plugin-security's fail-closed RLS sentinel
+ * (`RLS_DENY_FILTER`) — an `id` equality against a UUID-shaped string no record
+ * can carry, so the SQL layer returns zero rows without raising.
+ *
+ * Identity is decided on the sentinel's own VALUE, not on its shape — the same
+ * rule `isTenantWallDenial` states (ADR-0123 D2), and for the same reason:
+ * producers SPREAD the frozen constant (`{ ...RLS_DENY_FILTER }`), so a
+ * reference check would answer `false` for every real denial.
+ */
+function isRlsDenySentinel(filter: unknown): boolean {
+  return !!filter && typeof filter === 'object' && (filter as { id?: unknown }).id === RLS_DENY_FILTER.id;
+}
+
+/**
+ * [#13639] True iff a composed filter denies EVERY row — whichever of the two
+ * sentinels the platform composed. ⭐ This is THE question the engine asks, and
+ * every deny-recognition site routes through it.
+ *
+ * It used to recognise `__deny_all__` alone, and the object-level `rls` verdict
+ * in §9 compared the same literal a second time, INLINE. So a fail-closed RLS
+ * denial — the "no active organization" path, which composes `RLS_DENY_FILTER`
+ * and is guaranteed to return zero rows — was reported as verdict `narrows`
+ * with `decision.allowed: TRUE`. That is not an imprecise label; it is an
+ * affirmatively wrong answer about a request that cannot return a row, handed
+ * to the operator debugging exactly "why does this user see nothing?".
+ *
+ * ⛔ Recognition is deliberately all this widening does. The two sentinels are
+ * NOT merged (`__deny_all__` is in the published spec schema and docs;
+ * `__rls_deny__` is pinned as a bound SQL parameter by service-analytics and
+ * dispatched on by value by `isTenantWallDenial`), and §9's payload
+ * replacement is NOT extended to `__rls_deny__` — a deployment that receives
+ * `{ id: '__rls_deny__:…' }` in `readFilter` today keeps receiving it. Both of
+ * those are deployment-facing changes recorded on #13639 as the maintainer's.
+ */
 function isDenyAll(filter: unknown): boolean {
-  return !!filter && typeof filter === 'object' && (filter as any).id === '__deny_all__';
+  return isDenyAllSentinel(filter) || isRlsDenySentinel(filter);
 }
 
 /** Explain-operation → engine-operation (the middleware's vocabulary). */
@@ -1294,7 +1347,7 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
   try {
     agentFilter = await deps.computeRlsFilter(sets, object, dataOp, context);
   } catch {
-    agentFilter = { id: '__deny_all__' };
+    agentFilter = { id: DENY_ALL_SENTINEL_ID };
   }
   // [ADR-0090 D10] AND the delegator's read filter into the composite — the
   // delegated principal sees only rows BOTH principals may see.
@@ -1303,14 +1356,19 @@ export async function explainAccess(deps: ExplainEngineDeps, input: ExplainInput
     try {
       delegatorFilter = await deps.computeRlsFilter(delegatorSets, object, dataOp, delegatorContextForRls);
     } catch {
-      delegatorFilter = { id: '__deny_all__' };
+      delegatorFilter = { id: DENY_ALL_SENTINEL_ID };
     }
   }
   const filterParts = [agentFilter, delegatorFilter].filter(Boolean) as Record<string, unknown>[];
   let readFilter: Record<string, unknown> | null | undefined =
     filterParts.length === 0 ? undefined : filterParts.length === 1 ? filterParts[0] : { $and: filterParts };
-  const denyAll = filterParts.some((f) => (f as any).id === '__deny_all__');
-  if (denyAll) readFilter = { id: '__deny_all__' };
+  const denyAll = filterParts.some(isDenyAll);
+  // [#13639] The verdict above is value-agnostic; this payload collapse is NOT.
+  // It rewrites the published `readFilter` into the documented `__deny_all__`
+  // shape, so it stays keyed to the sentinel that shape already names. An
+  // `__rls_deny__` denial is now reported as `denies` while `readFilter` keeps
+  // reporting the predicate that was ACTUALLY composed.
+  if (filterParts.some(isDenyAllSentinel)) readFilter = { id: DENY_ALL_SENTINEL_ID };
   layers.push({
     layer: 'rls',
     verdict: denyAll ? 'denies' : readFilter ? 'narrows' : 'not_applicable',
