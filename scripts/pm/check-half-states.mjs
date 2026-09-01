@@ -888,6 +888,7 @@
 
 import process from 'node:process';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 
@@ -8274,6 +8275,407 @@ export function normalizeProvenance(text) {
     .slice(0, 300);
 }
 
+// ---------------------------------------------------------------------------
+// The ROW-FAMILY REGISTRY and the trim's priority order (#13947)
+//
+// ## The defect this answers, in triage's words
+//
+// 「族内按重要性裁,族外按运气裁」 — the in-family caps are semantic, the
+// cross-family cut was positional. This file already carries a whole rank of
+// per-family ceilings — `BLOCKING_DEPENDENT_LIST_CAP`, `H19_TARGET_LIST_CAP`,
+// `H20_BRANCH_LIST_CAP`, `H36_SAMPLE_PATHS`, `H37_MEMBER_LIST_CAP`,
+// `H17_INDEX_ROW_CAP`, `H40_ROW_CAP` — and every one of them answers "which of
+// THIS family's rows matter most". The body trim answered a different question,
+// "which rows happened to be laid out first", and on the measured run that cost
+// 157 of 231 findings, including every H31 row on the board.
+//
+// Two mechanisms land here and they are not interchangeable:
+//
+//   1. `HALF_STATE_FAMILY_BAND` + `familyRank` — the trim now eats the tail of
+//      a list ordered by what a row IS.
+//   2. `familyLedger` + `renderFamilyLedger` — an UNCONDITIONAL per-family
+//      computed/rendered table, reserved out of the budget like the H17 index
+//      and the H40 section, so a family whose rows were all eaten is still
+//      legible AS a family with rows. Ordering alone cannot do this: it moves
+//      which rows are lost, never whether their loss is readable.
+//
+// ⚠️ The band assignment is a SEMANTIC JUDGMENT the file did not previously
+// hold, and it is written here — one table, greppable, beside the codes it
+// ranks — rather than scattered through the predicates, precisely so it can be
+// argued with. The ruling that seeds it is the lane's remedy ruling: gate-
+// semantic families outrank inventory/hygiene ones. Everything below that line
+// is this change's proposal, and moving a code between bands is a one-line edit
+// with a self-test that says what moved.
+// ---------------------------------------------------------------------------
+
+/**
+ * The bands, most-protected first. `rank` is the sort key; `what` is the
+ * question a band answers, and is what a future author should read before
+ * placing a new family.
+ *
+ * `unregistered` sits SECOND on purpose. A family nobody classified is the one
+ * whose severity is unknown, and this file's standing doctrine is that an
+ * unknown reading must never present as a clean one (#4690) — so an
+ * unclassified family is protected from the trim rather than sacrificed to it,
+ * and the ledger flags it so the protection is temporary by construction.
+ */
+export const HALF_STATE_FAMILY_BANDS = Object.freeze([
+  Object.freeze({
+    name: 'gate',
+    rank: 0,
+    what: 'the row\'s subject is a GATE that may have been stripped or split — its absence reads as a green light',
+  }),
+  Object.freeze({
+    name: 'unregistered',
+    rank: 1,
+    what: 'no band was declared for this code — severity unknown, so protected and flagged rather than trimmed',
+  }),
+  Object.freeze({
+    name: 'stall',
+    rank: 2,
+    what: 'a card or PR whose forward motion is STOPPED or misrouted, and which nothing else will move',
+  }),
+  Object.freeze({
+    name: 'state',
+    rank: 3,
+    what: 'contradictory or half-written label/claim state on a live card — readable and repairable from the board',
+  }),
+  Object.freeze({
+    name: 'inventory',
+    rank: 4,
+    what: 'a census, a cache or residue — an inventory of a population rather than an alarm about one card',
+  }),
+]);
+
+/** The band a family whose code carries no registry entry falls into. */
+export const UNREGISTERED_FAMILY_BAND = 'unregistered';
+
+/**
+ * Every row family this file emits, and the band that governs its survival.
+ *
+ * ⛔ NOT every `H` code: `H17` (the trigger-file index), `H39` (the closed-
+ * residue census) and `H40` (dangling references) render as reserved SECTIONS
+ * and never as finding rows, so the trim cannot reach them and they take no
+ * band. `familyRegistryCoverage` proves this list equals the codes the sweep
+ * actually pushes, read off this file's own source — a new family added
+ * without a band fails the self-test rather than inheriting one silently.
+ *
+ * The three anchors for the band calls, each traceable:
+ *
+ *   gate      H31/H35 — the two-carrier gate comparison and the gate-removal
+ *             event. Their own headers say why: 「闸门被剥不是红灯是放行」, and
+ *             「被剥」 and 「从未挂过」 are indistinguishable in the evidence.
+ *             A row that is the only reader able to tell a stripped gate from
+ *             an ungated card cannot be the row that arrival order eats.
+ *   stall     the card is stopped and no later sweep frees it: a block that
+ *             outlived or mis-names its blocker (H19/H26/H28), a dispatch that
+ *             never reached a branch or whose claimant is gone (H20/H27/H33),
+ *             a PR that cannot land (H12/H16/H36), a seat or lane not moving
+ *             (H32/H38), a `pm:blocked` card with no machine-readable line at
+ *             all (H4).
+ *   state     the board contradicts itself on a live card, and the repair is
+ *             on the board: label pairs, claim shapes, aged states.
+ *   inventory triage's own examples of the class gate rows outrank — the
+ *             `pm:blocking` cache (H14/H15), closed-card residue (H22), the
+ *             seat-sticker pair (H5/H6), the important-parked list (H11).
+ */
+export const HALF_STATE_FAMILY_BAND = Object.freeze({
+  H31: 'gate',
+  H35: 'gate',
+
+  H4: 'stall',
+  H12: 'stall',
+  H16: 'stall',
+  H19: 'stall',
+  H20: 'stall',
+  H26: 'stall',
+  H27: 'stall',
+  H28: 'stall',
+  H32: 'stall',
+  H33: 'stall',
+  H36: 'stall',
+  H38: 'stall',
+
+  H1: 'state',
+  H2: 'state',
+  H3: 'state',
+  H7: 'state',
+  H8: 'state',
+  H9: 'state',
+  H10: 'state',
+  H13: 'state',
+  H18: 'state',
+  H21: 'state',
+  H23: 'state',
+  H24: 'state',
+  H25: 'state',
+  H29: 'state',
+  H30: 'state',
+  H34: 'state',
+  H37: 'state',
+
+  H5: 'inventory',
+  H6: 'inventory',
+  H11: 'inventory',
+  H14: 'inventory',
+  H15: 'inventory',
+  H22: 'inventory',
+});
+
+const FAMILY_BAND_RANK = new Map(HALF_STATE_FAMILY_BANDS.map((b) => [b.name, b.rank]));
+
+/** The band a finding code belongs to; an unregistered code is named as such. */
+export function familyBand(code) {
+  return HALF_STATE_FAMILY_BAND[String(code ?? '')] ?? UNREGISTERED_FAMILY_BAND;
+}
+
+/** The trim's sort key for a finding code — lower survives longer. */
+export function familyRank(code) {
+  return FAMILY_BAND_RANK.get(familyBand(code)) ?? FAMILY_BAND_RANK.get(UNREGISTERED_FAMILY_BAND);
+}
+
+/** `H31` -> 31, for a stable secondary order; an unparseable code sorts last. */
+function familyNumber(code) {
+  const m = /^H(\d+)$/.exec(String(code ?? ''));
+  return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * The ledger's own render ceiling, in the tradition of every other cap in this
+ * file. The registry holds far fewer families than this, so the cap can only
+ * ever bite on a run carrying a crowd of UNREGISTERED codes — which sort into
+ * the protected band above and therefore render before the cap can reach them.
+ */
+export const FAMILY_LEDGER_ROW_CAP = 64;
+
+/** Families named inline in the trim callout before it degrades to a count. */
+export const FAMILY_LEDGER_CALLOUT_CAP = 12;
+
+/**
+ * The declared worst-case size of the rendered ledger, in bytes — the number
+ * the body-size argument rests on. It is PINNED by a self-test that BUILDS the
+ * worst case and measures it, never left as a claim. The arithmetic:
+ *
+ *   heading + intro prose         ~1.1 KB, fixed
+ *   table rows                    ≤ FAMILY_LEDGER_ROW_CAP (64) × ~48 B ≈ 3.1 KB
+ *   trim callout                  ≤ FAMILY_LEDGER_CALLOUT_CAP (12) × ~26 B + prose
+ *   unregistered callout          ≤ FAMILY_LEDGER_CALLOUT_CAP (12) × ~8 B + prose
+ *   computed-0 line               ≤ registry size (37) × ~8 B + prose
+ *
+ * Measured on the constructed worst case: 2,285 B with every one of the 37
+ * registered families carrying 999 rows, 3,754 B with enough unregistered
+ * codes on top to reach `FAMILY_LEDGER_ROW_CAP`. 6,000 is the declared ceiling
+ * above both, and it is under an EIGHTH of `MARKDOWN_BODY_BUDGET` (60,000) —
+ * and reserved out of that budget, so the 5,536-byte headroom between the
+ * budget and `ISSUE_BODY_LIMIT` (65,536) is untouched by it.
+ *
+ * ⚠️ The GUARANTEE is not this constant. `renderMarkdown` reserves the ledger's
+ * own exact upper bound for the run in hand (`familyLedgerReservation`) BEFORE
+ * it lays out a single finding row. The constant is the ceiling a reviewer can
+ * check by hand; the per-run reservation is what makes the body fit.
+ */
+export const FAMILY_LEDGER_WORST_CASE_BYTES = 6000;
+
+/**
+ * Which codes the sweep actually pushes as finding rows, read off this file's
+ * own source, and how that set compares with the registry.
+ *
+ * A source scan rather than a runtime hook, for the reason AGENTS.md gives for
+ * the cross-package-test-input detector: a detector with no dependencies cannot
+ * itself fail to resolve. The alternative — trusting a new family's author to
+ * remember a second edit — is exactly the "declared ≠ enforced" shape this file
+ * spends 16,000 lines refusing.
+ *
+ * @param {string} [source] — defaults to this file. Injectable so the self-test
+ *   can drive the parser over fixtures without writing to disk.
+ * @returns {{ emitted: string[], missing: string[], extra: string[] }}
+ */
+export function familyRegistryCoverage(source) {
+  const text =
+    typeof source === 'string' ? source : readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const emitted = new Set();
+  // Lazy, bounded, and anchored on the push itself: the first element is `issue`,
+  // `pr`, `card`, `removal.issue` or an inline object literal, so the code is
+  // found by scanning forward to the first quoted `H<digits>` inside the call.
+  const re = /findings\.push\(\[[\s\S]{0,400}?['"](H\d+)['"]/g;
+  let m;
+  while ((m = re.exec(text))) emitted.add(m[1]);
+  const registered = new Set(Object.keys(HALF_STATE_FAMILY_BAND));
+  const byNumber = (a, b) => familyNumber(a) - familyNumber(b);
+  return {
+    emitted: [...emitted].sort(byNumber),
+    missing: [...emitted].filter((c) => !registered.has(c)).sort(byNumber),
+    extra: [...registered].filter((c) => !emitted.has(c)).sort(byNumber),
+  };
+}
+
+/**
+ * The per-family accounting behind the ledger section.
+ *
+ * @param {Array} sortedRows — findings in the order `renderMarkdown` laid them
+ *   out, so `renderedCount` is a prefix length rather than a set membership
+ *   test. Passing the UNSORTED list would silently attribute the rendered rows
+ *   to the wrong families.
+ * @param {number} renderedCount — how many of those rows reached the body.
+ */
+export function familyLedger(sortedRows, renderedCount) {
+  const rows = Array.isArray(sortedRows) ? sortedRows : [];
+  const shown = Math.max(0, Math.min(rows.length, renderedCount ?? rows.length));
+  const seen = new Map();
+  for (let i = 0; i < rows.length; i++) {
+    const code = String(rows[i]?.[1] ?? '');
+    let entry = seen.get(code);
+    if (!entry) {
+      entry = { code, band: familyBand(code), computed: 0, rendered: 0 };
+      seen.set(code, entry);
+    }
+    entry.computed++;
+    if (i < shown) entry.rendered++;
+  }
+  const families = [...seen.values()].sort(
+    (a, b) =>
+      familyRank(a.code) - familyRank(b.code) ||
+      familyNumber(a.code) - familyNumber(b.code) ||
+      (a.code < b.code ? -1 : a.code > b.code ? 1 : 0),
+  );
+  const silent = Object.keys(HALF_STATE_FAMILY_BAND)
+    .filter((code) => !seen.has(code))
+    .sort((a, b) => familyNumber(a) - familyNumber(b));
+  return {
+    families,
+    silent,
+    trimmed: families.filter((e) => e.rendered < e.computed),
+    unregistered: families.filter((e) => e.band === UNREGISTERED_FAMILY_BAND).map((e) => e.code),
+    computed: rows.length,
+    rendered: shown,
+  };
+}
+
+/**
+ * An upper bound on the rendered ledger's length for THIS run, over every
+ * outcome the trim could produce.
+ *
+ * The circle to close: the ledger must be reserved out of the budget before the
+ * rows are laid out, but its `rendered` column and its trim callout are only
+ * known after. A bound resolves it, and the bound is exact rather than a
+ * padded guess, because only two things vary with the outcome:
+ *
+ *   the `rendered` cell — `0 ≤ rendered ≤ computed`, so its width never exceeds
+ *     `digits(computed)`; the widest it can be beyond the `0` rendered in the
+ *     probe is `digits(computed) - 1` per row, and again per callout entry.
+ *   the callout block — present only when something was trimmed, and LONGEST
+ *     when everything was: `rendered = 0` names the most families, carries the
+ *     largest `+N more`, and reports the largest family count.
+ *
+ * So the `rendered = 0` probe plus that digit slack bounds every intermediate
+ * outcome. The `rendered = computed` probe is taken too and the larger wins —
+ * it is provably the shorter of the two today (no callout), and taking the max
+ * keeps the bound correct if a later edit adds prose to only one branch.
+ *
+ * ⛔ Not a claim to be trusted on the strength of this comment: a self-test
+ * drives EVERY `shown` value from 0 to the row count and asserts the render
+ * fits the bound.
+ *
+ * @param {Array} rows — the sorted findings, as `renderMarkdown` laid them out.
+ * @param {(count: number) => string} ledgerText — the renderer, curried by the
+ *   caller so the bound and the real render can never drift apart.
+ */
+export function familyLedgerReservation(rows, ledgerText) {
+  const probe = familyLedger(rows, 0);
+  const widen = (e) => String(e.computed).length - 1;
+  const table = probe.families.slice(0, FAMILY_LEDGER_ROW_CAP).reduce((s, e) => s + widen(e), 0);
+  const callout = probe.families
+    .slice(0, FAMILY_LEDGER_CALLOUT_CAP)
+    .reduce((s, e) => s + widen(e), 0);
+  return Math.max(ledgerText(0).length, ledgerText(rows.length).length) + table + callout;
+}
+
+/**
+ * The ledger section — markdown only, and the asymmetry is the point: this
+ * section exists to make a TRIM legible, and `renderPlain` never trims. Adding
+ * a terminal half would print a table nobody's report needs and would change
+ * bytes every seat reads today.
+ *
+ * The load-bearing sentence is the last one. Without it a reader still cannot
+ * separate "H31 computed nothing" from "H31's rows were among the omitted" —
+ * the table answers it for families WITH rows, and that sentence answers it for
+ * families without.
+ */
+export function renderFamilyLedger(ledger) {
+  if (!ledger) return [];
+  const out = [
+    '### Family ledger — computed vs rendered, every row family (#13947)',
+    '',
+    'What each row family COMPUTED this sweep, and how much of it reached the list above.' +
+      ' `rendered` below `computed` means the body\'s size trim ate the difference; the full list is' +
+      ' in the workflow run log. This table is RESERVED out of the render budget BEFORE the finding' +
+      ' rows are laid out — the same reservation the H17 index, the H39 census and the H40 section' +
+      ' hold — so the trim can never be what removes it. Rows above are ordered by the same band' +
+      ' shown here (`HALF_STATE_FAMILY_BAND`), highest band first, so a row survives the trim on' +
+      ' what it IS rather than on how many unrelated rows were laid out before it.',
+    '',
+  ];
+
+  if (ledger.trimmed.length > 0) {
+    const named = ledger.trimmed
+      .slice(0, FAMILY_LEDGER_CALLOUT_CAP)
+      .map((e) => `\`${e.code}\` (${e.rendered}/${e.computed})`)
+      .join(', ');
+    const rest = ledger.trimmed.length - Math.min(ledger.trimmed.length, FAMILY_LEDGER_CALLOUT_CAP);
+    out.push(
+      `⚠️ **${ledger.trimmed.length} family(ies) had rows omitted by the body trim**: ${named}` +
+        `${rest > 0 ? `, +${rest} more in the table` : ''}.`,
+      '',
+    );
+  }
+
+  if (ledger.families.length === 0) {
+    out.push('_No row family computed a finding this sweep._');
+  } else {
+    const shown = ledger.families.slice(0, FAMILY_LEDGER_ROW_CAP);
+    out.push('| family | band | computed | rendered |', '|:--|:--|--:|--:|');
+    for (const e of shown) {
+      const flag = e.band === UNREGISTERED_FAMILY_BAND ? ' ⚠️' : '';
+      out.push(`| \`${e.code}\`${flag} | ${e.band} | ${e.computed} | ${e.rendered} |`);
+    }
+    if (ledger.families.length > shown.length) {
+      out.push(
+        `| … ${ledger.families.length - shown.length} further family(ies) | omitted at ` +
+          '`FAMILY_LEDGER_ROW_CAP` | | |',
+      );
+    }
+  }
+
+  if (ledger.unregistered.length > 0) {
+    const named = ledger.unregistered
+      .slice(0, FAMILY_LEDGER_CALLOUT_CAP)
+      .map((c) => `\`${c}\``)
+      .join(', ');
+    const rest =
+      ledger.unregistered.length - Math.min(ledger.unregistered.length, FAMILY_LEDGER_CALLOUT_CAP);
+    out.push(
+      '',
+      `⚠️ ${ledger.unregistered.length} family(ies) carry NO band in \`HALF_STATE_FAMILY_BAND\`:` +
+        ` ${named}${rest > 0 ? `, +${rest} more in the table` : ''}. They are sorted just below the` +
+        ' gate band so an unclassified severity is protected rather than trimmed — register them.',
+    );
+  }
+
+  out.push(
+    '',
+    ledger.silent.length > 0
+      ? `_Computed 0 row(s) this sweep, and therefore absent from the table (${ledger.silent.length}): ` +
+        `${ledger.silent.map((c) => `\`${c}\``).join(', ')}. These families were EVALUATED and found ` +
+        'nothing — they have no rows to omit. Every family that computed a row is IN the table with ' +
+        'its count, whether or not the trim left any of that row family in the body above, so a ' +
+        'family missing from the list of findings is never ambiguous between the two readings._'
+      : '_Every registered family computed at least one row this sweep, so none is absent from the ' +
+        'table. A family that had computed nothing would be named here instead of being silently ' +
+        'indistinguishable from one whose rows the trim removed._',
+  );
+  return out;
+}
+
 /**
  * The anchor-body report.
  *
@@ -8281,9 +8683,12 @@ export function normalizeProvenance(text) {
  * medium: this body is READ AT A FOLD and TRIMMED AT A CAP. A P0-SUSPECT row
  * sitting at position 38 of 40 — or trimmed off the end entirely — is exactly
  * the silence this sweeper's standing caller exists to end, so loud rows sort
- * first and are therefore the last things truncation could ever reach. Within
- * each band the issue-number order is preserved, so the list is still stable
- * run to run and diffable in the anchor's edit history.
+ * first and are therefore the last things truncation could ever reach. Below
+ * those two bands the order is the FAMILY BAND (#13947) and only then the issue
+ * number, so the trim eats the least gate-bearing rows rather than the ones
+ * that happened to be laid out last. Within one family the issue-number order
+ * is preserved, so the list is still stable run to run and diffable in the
+ * anchor's edit history.
  *
  * The header is deliberately restated every run rather than left as a
  * hand-written preamble the workflow must not clobber: the body is owned by
@@ -8303,6 +8708,7 @@ export function renderMarkdown(findings, counts, options = {}) {
     (a, b) =>
       Number(isLoudFinding(b[2])) - Number(isLoudFinding(a[2])) ||
       Number(isUnjudgedFinding(b[2])) - Number(isUnjudgedFinding(a[2])) ||
+      familyRank(a[1]) - familyRank(b[1]) ||
       a[0].number - b[0].number,
   );
   const loudCount = rows.filter(([, , msg]) => isLoudFinding(msg)).length;
@@ -8371,19 +8777,32 @@ export function renderMarkdown(findings, counts, options = {}) {
   ];
   const indexText = indexBlock.length > 0 ? `\n\n${indexBlock.join('\n')}` : '';
 
+  // The family ledger is reserved the same way, and it poses a problem the
+  // other sections do not: its size depends on the trim's OUTCOME, which is not
+  // known until after the rows are laid out. `familyLedgerReservation` closes
+  // that circle with a bound rather than a guess — see its header — and
+  // reserving that bound BEFORE the first row is what makes this section
+  // unconditional by construction rather than by hope (#13947).
+  const ledgerText = (count) => {
+    const lines = renderFamilyLedger(familyLedger(rows, count));
+    return lines.length > 0 ? `\n\n${lines.join('\n')}` : '';
+  };
+  const ledgerReservation = familyLedgerReservation(rows, ledgerText);
+
   if (rows.length === 0) {
     head.push(
       '✅ No half-states found in this sweep. This line means the board was READ and is clean — a sweep' +
         ' that could not RUN replaces this whole body with a prerequisite/failure report instead, so a' +
         ' green anchor is never the sound of a broken sweeper.',
     );
-    return `${head.join('\n')}${indexText}`;
+    return `${head.join('\n')}${ledgerText(0)}${indexText}`;
   }
 
   head.push('### Findings', '', '');
   const body = head.join('\n');
   const rendered = [];
-  let used = body.length + indexText.length;
+  let shown = rows.length;
+  let used = body.length + indexText.length + ledgerReservation;
   for (let i = 0; i < rows.length; i++) {
     const [issue, code, msg] = rows[i];
     const line = `- **${code}** [#${issue.number}](${issue.html_url}) — ${msg}`;
@@ -8392,12 +8811,13 @@ export function renderMarkdown(findings, counts, options = {}) {
     const notice = `\n- _… ${rows.length - i} further row(s) omitted to fit GitHub's issue-body limit; the full list is in the workflow run log._`;
     if (used + line.length + 1 + notice.length > MARKDOWN_BODY_BUDGET) {
       rendered.push(notice.slice(1));
+      shown = i;
       break;
     }
     rendered.push(line);
     used += line.length + 1;
   }
-  return `${body}${rendered.join('\n')}${indexText}`;
+  return `${body}${rendered.join('\n')}${ledgerText(shown)}${indexText}`;
 }
 
 /**
