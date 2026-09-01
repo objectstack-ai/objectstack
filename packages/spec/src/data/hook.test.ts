@@ -440,6 +440,40 @@ describe('HookContextSchema', () => {
     });
   });
 
+  // [#13644] The declared referential-cleanup marker. The parse legs matter
+  // because this schema is non-strict in the STRIPPING sense: an UNDECLARED
+  // key is silently dropped by `.parse()` (the `roles` tombstone above is the
+  // history), so "the engine sets it" is worthless unless the schema declares
+  // it — a parsed context would lose the key and every guard downstream would
+  // read undefined. The populate and sandbox halves are pinned where they can
+  // execute (objectql's cascade suite; runtime's QuickJS integration pin).
+  describe('Referential-Cleanup Marker (#13644)', () => {
+    it('keeps referentialFieldClear through a parse, typed — the guard idiom evaluates on the parsed value', () => {
+      const context = HookContextSchema.parse({
+        object: 'note',
+        event: 'beforeUpdate',
+        input: { id: 'n1', data: { account: null }, options: {} },
+        referentialFieldClear: true,
+        ql: {},
+      });
+
+      // Typed read, no cast — the declaration is what makes this compile.
+      expect(context.referentialFieldClear === true).toBe(true);
+    });
+
+    it('is ABSENT — never false — on a context that does not carry it', () => {
+      const context = HookContextSchema.parse({
+        object: 'note',
+        event: 'beforeUpdate',
+        input: { id: 'n1', data: { account: null }, options: {} },
+        ql: {},
+      });
+
+      expect(context.referentialFieldClear).toBeUndefined();
+      expect('referentialFieldClear' in context).toBe(false);
+    });
+  });
+
   describe('Input Parameters', () => {
     it('should accept find input', () => {
       const context = HookContextSchema.parse({

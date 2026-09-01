@@ -725,6 +725,12 @@ function buildSandboxContext(
     // dispatches for one write, and its params bag has no caller options.
     dispatch,
     inputOptions,
+    // [#13644] The declared referential-cleanup marker, carried across the
+    // sandbox boundary BY CONTRACT — copied only in its declared shape
+    // (`true`), the same unrecognised-shape rule as `dispatch` above: anything
+    // else is left ABSENT, so `ctx.referentialFieldClear === true` reads "not
+    // a referential cleanup" exactly as the spec prescribes.
+    ...(engineCtx?.referentialFieldClear === true ? { referentialFieldClear: true } : {}),
     crypto: globalThis.crypto,
   };
 }
