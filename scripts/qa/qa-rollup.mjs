@@ -875,6 +875,12 @@ function assert(cond, msg, failures) {
   return cond ? 1 : 0;
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'qa-rollup self-test reached its verdict';
+
 async function selfTest() {
   const failures = [];
   let checked = 0;
@@ -1123,6 +1129,8 @@ async function selfTest() {
   console.log(
     `✓ qa-rollup --self-test: ${checked} assertions over ${FIXTURE_TITLES.length} canonical shapes and ${RETIRED_TITLES.length} retired ones`,
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 // The guard comes FIRST, then the mode. The other order — `--self-test`
@@ -1132,6 +1140,15 @@ async function selfTest() {
 // (this branch does not exit on success) and shows only as foreign output on
 // the importer's stdout.
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) await selfTest();
+  if (process.argv.includes('--self-test')) {
+    if ((await selfTest()) !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ qa-rollup self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  }
   else await main(process.argv.slice(2));
 }

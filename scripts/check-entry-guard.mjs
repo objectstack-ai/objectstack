@@ -625,6 +625,13 @@ function list() {
 // Self-test -- fixture sources, not this tree
 // ---------------------------------------------------------------------------
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 export function selfTest() {
   const cases = [];
   const t = (name, ok, detail) => cases.push({ name, ok: Boolean(ok), detail });
@@ -807,10 +814,23 @@ export function selfTest() {
       `and the import-safety rule recognised on both sides (dispatch/exit/argv-branch/try rejected; declarations, non-exporters and all three guard spellings accepted) — ` +
       `plus the dispatch-gates scan surface, derived from the walked root and held apart from the baseline roster.`,
   );
+  selfTestReachedVerdict = true;
   return 0;
 }
 
 if (isEntrypoint(import.meta.url)) {
   const argv = process.argv;
-  process.exit(argv.includes('--self-test') ? selfTest() : argv.includes('--list') ? list() : main());
+  if (argv.includes('--self-test')) {
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-entry-guard self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    process.exit(selfTestCode);
+  }
+  process.exit(argv.includes('--list') ? list() : main());
 }

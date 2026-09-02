@@ -751,6 +751,12 @@ function verify() {
 // class (a comment, a string literal that is not a specifier, a relative path
 // that stays inside the package) gets a negative one.
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-examples-live-imports self-test reached its verdict';
+
 function selfTest() {
   const apps = [
     { dir: 'examples/app-showcase', name: '@objectstack/example-showcase' },
@@ -908,6 +914,8 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`\nAll ${cases.length} self-test cases passed.`);
+
+  return SELF_TEST_VERDICT;
 }
 
 const argv = process.argv.slice(2);
@@ -916,7 +924,16 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 
 if (!invokedDirectly) {
   // imported as a module — expose the exports and do nothing else
-} else if (argv.includes('--self-test')) selfTest();
+} else if (argv.includes('--self-test')) {
+    if (selfTest() !== SELF_TEST_VERDICT) {
+        console.error(
+            '\n✗ check-examples-live-imports self-test: selfTest() returned without reaching its verdict,\n'
+                + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+    }
+}
 else if (argv.includes('--list')) list();
 else if (argv.includes('--json')) {
   const { rows, unresolved } = collect();

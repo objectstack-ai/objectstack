@@ -675,6 +675,12 @@ function stubFetch({ existing = {}, failCreateFor = new Set() } = {}) {
   return { impl, calls };
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'release-github-releases self-test reached its verdict';
+
 async function selfTest() {
   /** @type {string[]} */
   const failures = [];
@@ -957,13 +963,22 @@ async function selfTest() {
     `✓ release-github-releases --self-test: ${assertions} assertions ` +
       `(real packages/spec/CHANGELOG.md 17.0.0-rc.2 section = ${measure(rc2 ?? '')} chars -> ${measure(big.body)}, limit ${BODY_LIMIT})`,
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 const invokedDirectly = isEntrypoint(import.meta.url);
 if (invokedDirectly) {
   try {
     if (process.argv.includes('--self-test')) {
-      await selfTest();
+      if ((await selfTest()) !== SELF_TEST_VERDICT) {
+        console.error(
+          '\n✗ release-github-releases self-test: selfTest() returned without reaching its verdict,\n'
+            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+            + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+      }
     } else {
       await main({ dryRun: process.argv.includes('--dry-run') });
     }

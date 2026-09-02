@@ -547,6 +547,13 @@ export function render(result, { verbose = false } = {}) {
 // CLI
 // ---------------------------------------------------------------------------
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 async function main(argv) {
   const has = (f) => argv.includes(f);
   const val = (f, d) => {
@@ -564,7 +571,18 @@ async function main(argv) {
     );
     return 0;
   }
-  if (has('--self-test')) return selfTest();
+  if (has('--self-test')) {
+      const selfTestCode = selfTest();
+      if (!selfTestReachedVerdict) {
+          console.error(
+              '\n✗ check-prerelease-pin-watch self-test: selfTest() returned without reaching its verdict,\n'
+                  + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                  + 'that never finished as a self-test that passed.\n',
+          );
+          process.exit(1);
+      }
+      return selfTestCode;
+  }
 
   const strict = has('--strict');
   const asJson = has('--json');
@@ -991,6 +1009,7 @@ function selfTest() {
     return 1;
   }
   console.log('✓ check-prerelease-pin-watch --self-test: all checks passed');
+  selfTestReachedVerdict = true;
   return 0;
 }
 

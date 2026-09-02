@@ -6,12 +6,18 @@
 # exits before doing any work, which is every commit that did not just merge a
 # generator-owned artifact (#4675).
 #
-# One commit is exempt, and only one: the MERGE commit itself, which the
-# sanctioned landing sequence (`scripts/pm/os-regen-merge.sh`, step 3) commits
-# BEFORE regenerating, so that "what main brought" stays readable apart from
-# "what the change produces". That commit records a deferral instead of being
-# refused; the immediately following commit must discharge it, and
-# `.githooks/pre-push` refuses the push if none ever does (#8047).
+# One commit is exempt, and only one: a MERGE commit finished BY HAND, with
+# `MERGE_HEAD` present at commit time — a conflicted merge an operator
+# resolves and finishes with `git commit`. That commit records a deferral
+# instead of being refused; the immediately following commit must discharge
+# it, and `.githooks/pre-push` refuses the push if none ever does (#8047).
+#
+# The sanctioned landing sequence (`scripts/pm/os-regen-merge.sh`) does NOT
+# hit that exemption: its step 1 merge auto-commits with no hook run at all
+# (see below), so the marker is untouched going into step 3, whose commit is
+# an ORDINARY one this hook refuses on purpose — that refusal is the designed
+# collection point, "what main brought" read apart from "what the change
+# produces" by the fallback it prints, not a deferral.
 #
 # ⚠️ git does not run this hook for a merge it completes ITSELF — only for one
 # you finish with `git commit`. A clean auto-committed merge therefore lands

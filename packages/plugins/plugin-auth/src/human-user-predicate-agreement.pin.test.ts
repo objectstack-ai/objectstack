@@ -114,6 +114,25 @@ function makeQl(userRows: unknown[]) {
     sys_permission_set: [],
     sys_user: userRows.map((r) => (r && typeof r === 'object' ? { ...(r as object) } : r)) as any[],
     sys_user_permission_set: [],
+    // [#14348] Every probed row that CAN hold an account gets one.
+    //
+    // This probe reads plugin-security's human verdict indirectly, as
+    // `report.adminPromoted`, and since #14348 promotion is a conjunction:
+    // human AND holds a `sys_account` (a login). Leaving this table empty would
+    // make every row fail the second conjunct, so the probe would report
+    // "non-human" for rows both owners call human — a disagreement that is not
+    // there. Modelling the account keeps the HUMAN PREDICATE the only
+    // discriminator, which is what this file measures.
+    //
+    // Rows with no usable `id` get no account, because nothing could key one to
+    // them; that class is handled explicitly below rather than silently.
+    sys_account: userRows
+      .filter((r) => !!r && typeof r === 'object' && (r as any).id !== undefined && (r as any).id !== null)
+      .map((r) => ({
+        id: `acc_${String((r as any).id)}`,
+        user_id: (r as any).id,
+        provider_id: 'credential',
+      })),
   };
   return {
     tables,
@@ -141,6 +160,21 @@ const ADMIN_SET = { name: 'admin_full_access', label: 'Administrator' } as any;
 /**
  * plugin-security's verdict on a single row, read through the published
  * `bootstrapPlatformAdmin` entry point.
+ *
+ * ⚠️ [#14348] This is a PROXY, and it now carries more than the human
+ * predicate. `adminPromoted` means "human AND holds a `sys_account`", because
+ * the `single`-posture promotion moved off "the oldest human row" and onto "the
+ * oldest human that can authenticate" — a directory row seeded through
+ * `defineStack({ data })` is older than any account, so the old rule granted
+ * platform admin to a row nobody can sign in as.
+ *
+ * `makeQl` therefore models an account for every row that can key one, which
+ * holds the second conjunct constant and leaves the human predicate as the only
+ * discriminator this file measures. `isHumanUser` itself is UNCHANGED by
+ * #14348, and so is `isHumanUserRow`; nothing about the invariant moved.
+ *
+ * ⛔ Do not "simplify" this by dropping the account modelling: the tests would
+ * go red reporting a predicate disagreement that does not exist.
  */
 async function securityVerdict(row: unknown): Promise<{ human: boolean; reason?: string }> {
   const ql = makeQl([row]);
@@ -152,7 +186,7 @@ async function securityVerdict(row: unknown): Promise<{ human: boolean; reason?:
  * The shared corpus. Every entry is a shape a `sys_user` read can really
  * return, and each names the property it is here to hold.
  */
-const CORPUS: { name: string; row: unknown }[] = [
+const CORPUS: { name: string; row: unknown; idLessFailClosed?: true }[] = [
   {
     name: 'an ordinary human account',
     row: { id: 'usr_alice', role: 'member', email: 'alice@example.test' },
@@ -190,8 +224,11 @@ const CORPUS: { name: string; row: unknown }[] = [
     row: { id: `${SystemUserId.SYSTEM}_2`, role: 'member', email: 'frank@example.test' },
   },
   {
+    // [#14348] Human to BOTH predicates, and deliberately NOT probed through
+    // promotion — see the dedicated branch in the agreement loop below.
     name: 'a row with neither id nor role',
     row: { email: 'ghost@example.test' },
+    idLessFailClosed: true,
   },
   { name: 'a null row', row: null },
   { name: 'an undefined row', row: undefined },
@@ -269,7 +306,65 @@ describe('human-user predicate agreement — plugin-security `isHumanUser` vs pl
     }
   });
 
-  for (const { name, row } of CORPUS) {
+  for (const { name, row, idLessFailClosed } of CORPUS) {
+    if (idLessFailClosed) {
+      /**
+       * [#14348] The one corpus row this probe cannot read a predicate verdict
+       * from — and why that is NOT a predicate disagreement.
+       *
+       * Both owners call `{ email: 'ghost@example.test' }` HUMAN, and they
+       * still agree: nothing in #14348 touched either predicate. What changed
+       * is the PROXY. Promotion is now "human AND can authenticate", and the
+       * second conjunct is unanswerable for a row with no `id`: there is no key
+       * to hang a `sys_account` on, so no account can exist and none can be
+       * modelled above. Reading `adminPromoted` here would therefore report the
+       * missing conjunct as a missing predicate agreement.
+       *
+       * So this row asserts the OUTCOME instead, and the outcome is
+       * fail-closed on purpose. A row with no `id` cannot hold an exercisable
+       * grant: the pre-#14348 code promoted it by writing
+       * `sys_user_permission_set.user_id = undefined` — a grant addressed to
+       * nobody, in the table whose whole job is to say who may administer the
+       * platform. Refusing it is the same direction this file's own
+       * NON_OBJECT_CORPUS already fixed ("for a promotion predicate the safe
+       * answer to malformed input is no"), applied to the one malformed shape
+       * that is a real object.
+       *
+       * ⛔ This is NOT licence to relax the agreement assertion for any other
+       * row. Every id-bearing row still proves the two predicates agree, and
+       * `no_authenticable_user` is asserted below precisely so this case cannot
+       * pass on a harness that failed earlier for some unrelated reason.
+       */
+      it(`fails closed on ${name} — id-less, so no account can key to it (#14348)`, async () => {
+        const authSays = isHumanUserRow(row);
+        const security = await securityVerdict(row);
+
+        // The predicates still agree that this row is human: asserted on the
+        // owner side so a regression there cannot hide behind this case.
+        expect(
+          authSays,
+          'plugin-auth isHumanUserRow must still call an id-less human row HUMAN',
+        ).toBe(true);
+
+        // ...and promotion still refuses it, for the second conjunct.
+        expect(
+          security.human,
+          `an id-less row must NOT be promoted: the grant row it would write is\n` +
+            `addressed to \`user_id: undefined\`, which no principal can ever exercise.\n` +
+            `  row:    ${JSON.stringify(row)}\n` +
+            `  reason: ${security.reason ?? 'none'}`,
+        ).toBe(false);
+
+        // Prove the refusal came from the authenticable filter and not from an
+        // earlier branch — the same anti-vacuity discipline the loop below uses.
+        expect(
+          security.reason,
+          'refusal did not come from the authenticable filter',
+        ).toBe('no_authenticable_user');
+      });
+      continue;
+    }
+
     it(`agrees on ${name}`, async () => {
       const authSays = isHumanUserRow(row);
       const security = await securityVerdict(row);
