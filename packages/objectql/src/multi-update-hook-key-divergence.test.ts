@@ -333,7 +333,7 @@ describe('[#14099] a row-invariant rewrite is never refused, however its values 
  * ──────────────────────────────────────────────────────────────────────────── */
 
 describe('[#14099] same key + per-row VALUES still passes — D3’s declared cost', () => {
-  it('a per-row derived value is NOT refused, and row 1’s value reaches every row', async () => {
+  it('a per-row derived value is NOT refused, and the LAST dispatch’s value reaches every row', async () => {
     // ⚠️ This is the ruling's named blind spot, pinned so it cannot change by
     // accident in either direction. It is filed as its own finding with a
     // measured instance; ⛔ it is NOT widened into this card, and ⛔ the fix is

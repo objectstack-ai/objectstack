@@ -60,11 +60,20 @@
  * ## What is NOT covered, named rather than hidden
  *
  * A hook that writes the SAME key on every row but with per-row VALUES (a
- * per-row derived priority, say) passes this test and still applies the first
- * row's value to every matched row. That is D3's cost by design; the ruling
- * carries it openly and points at the prescription below as the exit. This
- * module does not widen to cover it, and a future author reaching for a value
- * comparison to close it must re-read the two measurements above first.
+ * per-row derived priority, say) passes this test and still applies ONE row's
+ * value to every matched row. The ruling's own sentence says "the first row's
+ * value"; the engine's MEASURED behaviour is the LAST dispatch's, because the
+ * per-row rewrites accumulate onto one payload in dispatch order and the last
+ * assignment to a key is what the single `SET` clause carries. Pinned in both
+ * suites — `bulk-write-per-row-hooks.test.ts`'s D3 case reads
+ * `['stamped-2','stamped-2']`, and this module's own residue pin reads `low`
+ * on the row whose own dispatch derived `high`. Which row wins changes nothing
+ * about the ruling's verdict; it is corrected here because a docblock naming
+ * the wrong row sends the next author hunting for a per-row seam that does not
+ * exist. That is D3's cost by design; the ruling carries it openly and points
+ * at the prescription below as the exit. This module does not widen to cover
+ * it, and a future author reaching for a value comparison to close it must
+ * re-read the two measurements above first.
  *
  * ## Divergence is `union` minus `intersection`
  *
