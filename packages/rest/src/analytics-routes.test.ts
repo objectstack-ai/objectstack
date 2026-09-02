@@ -41,7 +41,7 @@ function buildServer(analyticsProvider?: any, protocol: any = mockProtocol()) {
   (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();
   const route = rest.getRoutes().find((r) => r.method === 'POST' && r.path.endsWith('/analytics/dataset/query'));
-  return { route };
+  return { route, rest };
 }
 
 describe('POST /analytics/dataset/query', () => {
@@ -127,6 +127,82 @@ describe('POST /analytics/dataset/query', () => {
 
     expect(res.statusCode).toBe(200);
     expect(queryDataset.mock.calls[0][0]).not.toHaveProperty('_diagnostics');
+  });
+
+  // ── the localization door (#14253) ─────────────────────────────────────────
+  //
+  // A dataset's dimension and measure labels are drawn on the DASHBOARD, and
+  // they reach it through THIS route, not through `/meta/datasets`:
+  // `AnalyticsService` copies `dataset.measures[].label` onto
+  // `AnalyticsResult.fields[].label` ("for legends/KPIs"). Translating only the
+  // metadata read would have closed the door nobody draws through.
+  //
+  // The bundle is served through the SAME `II18nService` shape the `/meta`
+  // routes read (`getLocales` + `getTranslations`), so this pins the wiring
+  // rather than a second resolution path.
+  const zhI18n = () => ({
+    getLocales: () => ['zh-CN'],
+    getTranslations: (locale: string) => (locale === 'zh-CN'
+      ? {
+        datasets: {
+          sales: {
+            label: '销售',
+            dimensions: { region: { label: '区域' } },
+            measures: { revenue: { label: '营业额' } },
+          },
+        },
+      }
+      : {}),
+  });
+
+  it('localizes a SAVED dataset before it is compiled, so measure labels reach the chart translated', async () => {
+    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockResolvedValue({ items: [{ ...inlineDataset }] }) };
+    const queryDataset = vi.fn().mockResolvedValue({ rows: [], fields: [] });
+    const { route, rest } = buildServer(async () => ({ queryDataset }), protocol);
+    (rest as any).resolveI18nService = async () => zhI18n();
+    const res = mockRes();
+    await route!.handler(
+      { method: 'POST', params: {}, headers: { 'accept-language': 'zh-CN' }, body: { datasetName: 'sales', selection } } as any,
+      res,
+    );
+
+    expect(res.statusCode).toBe(200);
+    const passed = queryDataset.mock.calls[0][0];
+    expect(passed.label).toBe('销售');
+    expect(passed.measures.find((m: any) => m.name === 'revenue').label).toBe('营业额');
+    expect(passed.dimensions.find((d: any) => d.name === 'region').label).toBe('区域');
+    // The semantic contract is untouched — only the copy moved.
+    expect(passed.object).toBe('opportunity');
+    expect(passed.measures[0].aggregate).toBe('sum');
+  });
+
+  it('leaves a saved dataset alone when the request names no locale', async () => {
+    const protocol = { ...mockProtocol(), getMetaItems: vi.fn().mockResolvedValue({ items: [{ ...inlineDataset }] }) };
+    const queryDataset = vi.fn().mockResolvedValue({ rows: [], fields: [] });
+    const { route, rest } = buildServer(async () => ({ queryDataset }), protocol);
+    (rest as any).resolveI18nService = async () => zhI18n();
+    const res = mockRes();
+    await route!.handler({ method: 'POST', params: {}, headers: {}, body: { datasetName: 'sales', selection } } as any, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(queryDataset.mock.calls[0][0].label).toBe('Sales');
+  });
+
+  // ⛔ The INLINE branch is the Studio preview posting the draft the designer
+  // is editing: it carries no saved name to address a bundle entry with, and
+  // overwriting its copy would misreport what is about to be saved.
+  it('does NOT localize an INLINE draft, even when the bundle has an entry for that name', async () => {
+    const queryDataset = vi.fn().mockResolvedValue({ rows: [], fields: [] });
+    const { route, rest } = buildServer(async () => ({ queryDataset }));
+    (rest as any).resolveI18nService = async () => zhI18n();
+    const res = mockRes();
+    await route!.handler(
+      { method: 'POST', params: {}, headers: { 'accept-language': 'zh-CN' }, body: { dataset: { ...inlineDataset }, selection } } as any,
+      res,
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(queryDataset.mock.calls[0][0].label).toBe('Sales');
   });
 
   it('returns 404 for an unknown datasetName', async () => {

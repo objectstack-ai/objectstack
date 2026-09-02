@@ -90,10 +90,11 @@ Translation data for a single object
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
-| **_views** | `Record<string, { label?: string; description?: string; emptyState?: object }>` | optional | View translations keyed by view name |
+| **_views** | `Record<string, { label?: string; description?: string; emptyState?: object; bulkActions?: Record<string, object> }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+| **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
 
 ### Nested Shape: `ObjectTranslationData.fields[string]`
 
@@ -113,6 +114,7 @@ Translation data for a single field
 | **label** | `string` | optional | Translated view label |
 | **description** | `string` | optional | Translated view description |
 | **emptyState** | `{ title?: string; message?: string }` | optional | Translated empty-state copy shown when the view has no rows |
+| **bulkActions** | `Record<string, { label?: string; confirmText?: string; confirmLabel?: string; params?: Record<string, object> }>` | optional | Selection-bar translations keyed by bulk-action def name (`BulkActionDefSchema.name`) |
 
 ### Nested Shape: `ObjectTranslationData._actions[string]`
 
@@ -137,6 +139,12 @@ Translation data for a single field
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated tab label |
+
+### Nested Shape: `ObjectTranslationData._validations[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **message** | `string` | optional | Translated rejection message — overlays the rule's authored `message` on every rejected write |
 
 
 ---
@@ -225,6 +233,7 @@ Translation data for objects, apps, and UI messages
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object> }>` | optional | Dashboard translations keyed by dashboard name |
+| **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; screens?: Record<string, object> }>` | optional | Screen-flow translations keyed by flow name |
 | **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
@@ -241,10 +250,11 @@ Translation data for a single object
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
-| **_views** | `Record<string, { label?: string; description?: string; emptyState?: object }>` | optional | View translations keyed by view name |
+| **_views** | `Record<string, { label?: string; description?: string; emptyState?: object; bulkActions?: Record<string, object> }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+| **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
 
 ### Nested Shape: `TranslationData.apps[string]`
 
@@ -273,6 +283,15 @@ Translation data for a single object
 | **description** | `string` | optional | Translated dashboard description |
 | **actions** | `Record<string, { label?: string }>` | optional | Header action label translations keyed by action url/key |
 | **widgets** | `Record<string, { title?: string; description?: string; subCaption?: string }>` | optional | Widget translations keyed by widget id |
+
+### Nested Shape: `TranslationData.datasets[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated dataset label |
+| **description** | `string` | optional | Translated dataset description |
+| **dimensions** | `Record<string, { label?: string }>` | optional | Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`) |
+| **measures** | `Record<string, { label?: string }>` | optional | Measure translations keyed by measure name (`DatasetMeasureSchema.name`) |
 
 ### Nested Shape: `TranslationData.pages[string]`
 
@@ -364,6 +383,7 @@ One locale of translations — the `translation` metadata type
 | **messages** | `Record<string, string>` | optional | UI message translations keyed by message ID |
 | **globalActions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Global action translations keyed by action name |
 | **dashboards** | `Record<string, { label?: string; description?: string; actions?: Record<string, object>; widgets?: Record<string, object> }>` | optional | Dashboard translations keyed by dashboard name |
+| **datasets** | `Record<string, { label?: string; description?: string; dimensions?: Record<string, object>; measures?: Record<string, object> }>` | optional | Analytics dataset translations keyed by dataset name |
 | **pages** | `Record<string, { label?: string; description?: string; title?: string; subtitle?: string; … }>` | optional | Page translations keyed by page name |
 | **flows** | `Record<string, { label?: string; screens?: Record<string, object> }>` | optional | Screen-flow translations keyed by flow name |
 | **settings** | `Record<string, { title?: string; description?: string; groups?: Record<string, object>; keys?: Record<string, object>; … }>` | optional | Settings manifest translations keyed by namespace |
@@ -390,10 +410,11 @@ Translation data for a single object
 | **pluralLabel** | `string` | optional | Translated plural label |
 | **description** | `string` | optional | Translated object description |
 | **fields** | `Record<string, { label?: string; help?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Field-level translations |
-| **_views** | `Record<string, { label?: string; description?: string; emptyState?: object }>` | optional | View translations keyed by view name |
+| **_views** | `Record<string, { label?: string; description?: string; emptyState?: object; bulkActions?: Record<string, object> }>` | optional | View translations keyed by view name |
 | **_actions** | `Record<string, { label?: string; description?: string; confirmText?: string; successMessage?: string; … }>` | optional | Action translations keyed by action name |
 | **_sections** | `Record<string, { label?: string; description?: string }>` | optional | Section translations keyed by section name |
 | **_tabs** | `Record<string, { label?: string }>` | optional | Filter-preset tab translations keyed by tab name |
+| **_validations** | `Record<string, { message?: string }>` | optional | Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`) |
 
 ### Nested Shape: `TranslationItem.apps[string]`
 
@@ -422,6 +443,15 @@ Translation data for a single object
 | **description** | `string` | optional | Translated dashboard description |
 | **actions** | `Record<string, { label?: string }>` | optional | Header action label translations keyed by action url/key |
 | **widgets** | `Record<string, { title?: string; description?: string; subCaption?: string }>` | optional | Widget translations keyed by widget id |
+
+### Nested Shape: `TranslationItem.datasets[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Translated dataset label |
+| **description** | `string` | optional | Translated dataset description |
+| **dimensions** | `Record<string, { label?: string }>` | optional | Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`) |
+| **measures** | `Record<string, { label?: string }>` | optional | Measure translations keyed by measure name (`DatasetMeasureSchema.name`) |
 
 ### Nested Shape: `TranslationItem.pages[string]`
 

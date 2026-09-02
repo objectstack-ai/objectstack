@@ -136,6 +136,7 @@
     "ElementImagePropsSchema (const)",
     "ElementMetadataViewerPropsSchema (const)",
     "ElementNumberProps (type)",
+    "ElementNumberPropsParsed (type)",
     "ElementNumberPropsSchema (const)",
     "ElementRecordPickerProps (type)",
     "ElementRecordPickerPropsSchema (const)",

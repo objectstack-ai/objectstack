@@ -15,13 +15,45 @@
 // file (frontmatter included) is written there, otherwise it goes to stdout
 // after the bump line is emitted to stderr instead.
 //
-// EXIT CODES. 2 means "the range is not walkable in this checkout" — the caller
-// degrades, loudly. That contract is unchanged and covers both of its causes.
-// `--check-walkable` derives nothing and only answers the precondition, and it
-// SPLITS the two so a caller can pick the right remedy: 2 = an endpoint is
-// missing (fetch it, or this is the initial pin), 3 = both endpoints are here
-// but the history STOPS INSIDE the range (deepen it) — see #9408 and
-// `findRangeTruncation`.
+// EXIT CODES. 2 and 3 both mean "the range is not walkable in this checkout",
+// and they SPLIT the two causes so a caller can name the right remedy: 2 = an
+// endpoint is missing as a commit object (fetch it, or this is the initial pin),
+// 3 = both endpoints are here but the history STOPS INSIDE the range — see
+// #9408 and `findRangeTruncation`. `--check-walkable` derives nothing and only
+// answers the precondition; the deriving path writes no artifact on either.
+//
+// WHAT A CALLER OWES ON 2 AND 3 IS THE SAME (#14178): repair the input and ask
+// again — never derive something weaker. Both causes are one `git fetch` apart
+// from a complete answer, and the re-ask (not the fetch's status) settles it.
+//
+// WHY AN ABSENT ENDPOINT IS THE SAME FAILURE AS A TRUNCATED WALK (#14178)
+// -----------------------------------------------------------------------
+// #9408 taught this file to detect the truncated walk and taught the bump to
+// DEEPEN instead of degrading. But the endpoint guard returned one step earlier:
+// on a shallow clone whose boundary sits AFTER `from`, the `from` object is
+// absent outright, the guard returned 2, and the deepen was never considered.
+// `bump-objectui.sh` then wrote its degraded record with the DEFAULT level.
+//
+// Measured on a throwaway objectui (5 commits, 4 releasing changesets, one of
+// them author-annotated breaking), cloned `--depth 2` so `from` is absent, same
+// range and same command before and after `git fetch --unshallow`:
+//
+//   shallow, deepen allowed : bump `patch`, 1-line degraded list, exit 0
+//   unshallowed             : bump `minor`, 4 releasing, 1 breaking, ADR-0087
+//                             placeholder emitted
+//
+// The degraded entry does label itself degraded, so nothing lies — but the LEVEL
+// is a default nobody declared, it publishes into @objectstack/console's
+// CHANGELOG, every declared-breaking entry is invisible in it, and the ADR-0087
+// disposition prompt never fires because the degraded changeset declares nothing
+// breaking. The same shape #4731 named: a record that reads like a declaration.
+//
+// So an absent endpoint is reported exactly like a truncated walk — as a
+// PREREQUISITE the caller must repair — and the caller deepens and re-asks on
+// both. When the re-ask still fails, the bump REFUSES rather than emitting a
+// level nobody declared (triage ruling, 2026-09-01): no record beats a wrong
+// one, and the refusal removes the degraded-unwalkable path instead of adding a
+// fourth state to it.
 //
 // WHY THIS EXISTS (#4731)
 // -----------------------
@@ -558,6 +590,88 @@ export function describeTruncation({ objectuiRoot, from, to, truncation }) {
 }
 
 /**
+ * Are both endpoints of `from..to` present as commit OBJECTS in this checkout?
+ * (#14178)
+ *
+ * The other half of the walkability precondition, and the one that used to be
+ * answered one step too early. `findRangeTruncation` asks whether the walk
+ * BETWEEN the endpoints completes; this asks whether the endpoints are here to
+ * walk between at all. A shallow clone whose boundary sits AFTER `from` fails
+ * THIS test, never the other one — `rev-list from..to` cannot even start — and
+ * that is the case a `--depth` clone produces by default.
+ *
+ * Reported rather than thrown, and reported per endpoint, because the two are
+ * not the same fact: an absent `from` on the pin bump is the ordinary shallow
+ * checkout (deepen it), while an absent `to` is a revision this checkout has
+ * never seen (fetch it). The caller picks the remedy from the answer, and the
+ * RE-CHECK after that remedy — never the fetch's exit status — decides whether
+ * it worked (the C17 lesson, which measured `fetch --unshallow` exiting 0 while
+ * changing nothing).
+ *
+ * `git()` inherits our stderr by default, so the probe captures it instead: git
+ * prints its own `fatal: Not a valid object name …` for a failure this function
+ * exists to REPORT, and an unexplained `fatal:` above a full explanation is the
+ * #6175 shape (a handled condition that reads like a crash). The captured text
+ * is re-emitted inside the refusal by `describeAbsentEndpoints`, where it names
+ * WHICH failure this was — absent, corrupt, or an unresolvable rev.
+ *
+ * @returns {{ absent: boolean, endpoints: Array<{ role: string, rev: string, diagnostic: string }>, shallow: boolean }}
+ */
+export function findAbsentEndpoints(objectuiRoot, from, to) {
+  /** @type {Array<{ role: string, rev: string, diagnostic: string }>} */
+  const endpoints = [];
+  for (const [role, rev] of [
+    ['from', from],
+    ['to', to],
+  ]) {
+    try {
+      git(objectuiRoot, ['cat-file', '-e', `${rev}^{commit}`], { captureStderr: true });
+    } catch (err) {
+      endpoints.push({ role, rev, diagnostic: gitDiagnostic(err) });
+    }
+  }
+  let shallow = false;
+  try {
+    shallow = git(objectuiRoot, ['rev-parse', '--is-shallow-repository']).trim() === 'true';
+  } catch {
+    // Enriches the diagnostic only — the verdict above never depends on it, the
+    // same separation `findRangeTruncation` keeps.
+  }
+  return { absent: endpoints.length > 0, endpoints, shallow };
+}
+
+/**
+ * The operator-facing account of an absent endpoint: what, where, and the fix.
+ *
+ * Deliberately shaped like `describeTruncation`: the two are one class of
+ * failure with two causes, and a caller that treats them alike must be able to
+ * read them alike. `PREREQUISITE NOT MET` is the repo's vocabulary for "the
+ * measurement never happened" — the one verdict that must never be mistaken for
+ * either a pass or a finding.
+ */
+export function describeAbsentEndpoints({ objectuiRoot, from, to, absence }) {
+  const { endpoints, shallow } = absence;
+  const roles = endpoints.map((e) => `${e.role}=${e.rev.slice(0, 12)}`).join(', ');
+  const lines = [
+    `✗ objectui-changeset-digest: PREREQUISITE NOT MET — ${endpoints.length === 1 ? 'an endpoint' : 'both endpoints'} of ` +
+      `${from.slice(0, 12)}..${to.slice(0, 12)} ${endpoints.length === 1 ? 'is' : 'are'} not present as a commit ` +
+      `object in ${objectuiRoot}.`,
+    `  missing here${shallow ? ' (this is a shallow clone)' : ''}: ${roles}`,
+    `  Nothing can be derived from a range one of whose ends is absent, and a`,
+    `  degraded record derived anyway would carry a bump level nobody declared`,
+    `  (objectstack#14178). This is the SAME class as a range that stops inside`,
+    `  itself (objectstack#9408): repair the input, then ask again.`,
+    `  Fix it: git -C ${objectuiRoot} fetch --unshallow   (a shallow clone)`,
+    `      or: git -C ${objectuiRoot} fetch origin        (an object never fetched)`,
+  ];
+  for (const e of endpoints) {
+    lines.push(`  git on ${e.role} (${e.rev.slice(0, 12)}):`);
+    lines.push(e.diagnostic);
+  }
+  return lines.join('\n');
+}
+
+/**
  * Collect the `.changeset/*.md` files ADDED over `from..to`, newest first.
  *
  * Walks the log rather than diffing the two endpoints: a changeset consumed by
@@ -734,6 +848,14 @@ export function classifyRange({ objectuiRoot, from, to }) {
   // Placing it here is what makes "never fabricate" structural rather than a
   // habit each caller has to remember — the same argument that put the releasing
   // criterion itself in this function.
+  // #14178: the OTHER half of the same precondition, asked in the same place and
+  // for the same reason. An absent endpoint reaches `rev-list` as a bare git
+  // `fatal:` — a failure, but an unnamed one, and the caller cannot tell it from
+  // a broken checkout. Named here, both consumers get the same account.
+  const absence = findAbsentEndpoints(objectuiRoot, from, to);
+  if (absence.absent) {
+    throw new Error(describeAbsentEndpoints({ objectuiRoot, from, to, absence }));
+  }
   const truncation = findRangeTruncation(objectuiRoot, from, to);
   if (truncation.truncated) {
     throw new Error(describeTruncation({ objectuiRoot, from, to, truncation }));
@@ -1027,13 +1149,15 @@ function main(argv) {
     console.error(`✗ objectui-changeset-digest: no objectui checkout at ${objectuiRoot}`);
     return 2;
   }
-  try {
-    git(objectuiRoot, ['cat-file', '-e', `${from}^{commit}`]);
-    git(objectuiRoot, ['cat-file', '-e', `${to}^{commit}`]);
-  } catch {
-    console.error(
-      `✗ objectui-changeset-digest: cannot walk ${from.slice(0, 12)}..${to.slice(0, 12)} in ${objectuiRoot}`,
-    );
+  // #14178: an absent endpoint is a PREREQUISITE the caller must repair — the
+  // same class as the truncated walk below, reported the same way and answered
+  // with the same remedy. It used to be a one-line "cannot walk" with no cause,
+  // no remedy and no distinction between "shallow, deepen it" and "this checkout
+  // has never seen that revision", which is what let the caller treat it as
+  // grounds to DEGRADE rather than to fetch and ask again.
+  const absence = findAbsentEndpoints(objectuiRoot, from, to);
+  if (absence.absent) {
+    console.error(describeAbsentEndpoints({ objectuiRoot, from, to, absence }));
     return 2;
   }
 
@@ -1546,28 +1670,61 @@ function selfTest() {
     );
     check('the pin file is updated', readFileSync(join(fwRun, '.objectui-sha'), 'utf8').trim() === head);
 
-    // --- degraded range: the fallback must SAY it is degraded --------------
-    const fwDegraded = join(tmp, 'fw-degraded');
+    // --- an unwalkable range: REFUSE, loudly (#14178) -----------------------
+    // This case used to assert the degraded artifact. The artifact is gone: its
+    // bump level was the `patch` DEFAULT, indistinguishable in the published
+    // CHANGELOG from a level objectui declared. What the case still asserts is
+    // the half that mattered — the failure is loud, named, and takes the
+    // operator to a remedy — plus the #10797 invariant the refusal now owes.
+    const fwDegraded = join(tmp, 'fw-unwalkable');
     mkdirSync(join(fwDegraded, 'scripts'), { recursive: true });
     mkdirSync(join(fwDegraded, '.changeset'), { recursive: true });
     writeFileSync(join(fwDegraded, '.objectui-sha'), `${'0'.repeat(40)}\n`);
     for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
       writeFileSync(join(fwDegraded, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
     }
-    execFileSync('bash', [join(fwDegraded, 'scripts', 'bump-objectui.sh'), '--no-commit', head], {
-      encoding: 'utf8',
-      env: { ...process.env, OBJECTUI_ROOT: ui },
-    });
-    const degraded = readFileSync(
-      join(fwDegraded, '.changeset', `console-${head.slice(0, 12)}.md`),
-      'utf8',
+    const unwalkableRun = spawnSync(
+      'bash',
+      [join(fwDegraded, 'scripts', 'bump-objectui.sh'), '--no-commit', head],
+      { encoding: 'utf8', env: { ...process.env, OBJECTUI_ROOT: ui, GIT_TERMINAL_PROMPT: '0' } },
     );
+    const unwalkableCs = join(fwDegraded, '.changeset', `console-${head.slice(0, 12)}.md`);
     check(
-      'an unwalkable range degrades LOUDLY, not silently',
-      degraded.includes('could not be walked') &&
-        degraded.includes('**Degraded list**') &&
-        degraded.includes('NOT a\ncomplete account'),
-      degraded,
+      'an unwalkable range REFUSES loudly — non-zero, no artifact, pin untouched',
+      unwalkableRun.status !== 0 &&
+        !existsSync(unwalkableCs) &&
+        readFileSync(join(fwDegraded, '.objectui-sha'), 'utf8') === `${'0'.repeat(40)}\n` &&
+        unwalkableRun.stderr.includes('REFUSING to bump') &&
+        unwalkableRun.stderr.includes('cannot be walked'),
+      `status=${unwalkableRun.status} wrote=${existsSync(unwalkableCs)}\n${unwalkableRun.stderr}`,
+    );
+
+    // --- the INITIAL pin still degrades, and says so ------------------------
+    // The one degraded artifact #14178 kept, so it needs the coverage the
+    // removed ones had: there is no previous SHA, hence no range, hence no
+    // remedy to name and nothing being guessed about a walk. A refusal here
+    // would make the first-ever pin impossible to write.
+    const fwInitial = join(tmp, 'fw-initial-pin');
+    mkdirSync(join(fwInitial, 'scripts'), { recursive: true });
+    mkdirSync(join(fwInitial, '.changeset'), { recursive: true });
+    for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
+      writeFileSync(join(fwInitial, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
+    }
+    const initialRun = spawnSync(
+      'bash',
+      [join(fwInitial, 'scripts', 'bump-objectui.sh'), '--no-commit', head],
+      { encoding: 'utf8', env: { ...process.env, OBJECTUI_ROOT: ui, GIT_TERMINAL_PROMPT: '0' } },
+    );
+    const initialCs = join(fwInitial, '.changeset', `console-${head.slice(0, 12)}.md`);
+    const initialBody = existsSync(initialCs) ? readFileSync(initialCs, 'utf8') : '';
+    check(
+      'the INITIAL pin (no .objectui-sha at all) still writes a DEGRADED entry that says why',
+      initialRun.status === 0 &&
+        initialBody.includes('**Degraded list**') &&
+        initialBody.includes('this is the initial pin') &&
+        initialBody.includes('NOT a\ncomplete account') &&
+        !initialBody.includes('could not be walked'),
+      `status=${initialRun.status}\n${initialBody}\n${initialRun.stderr}`,
     );
 
     // --- #6175: a range whose `to` endpoint is a RELEASE COMMIT -------------
@@ -2399,7 +2556,13 @@ function selfTest() {
       `credited=${sinkCredited} attributed=${attributedToSink}`,
     );
 
-    // ---- #9408 through the shell driver: degrade, and say WHICH failure -----
+    // ---- #9408 through the shell driver: REFUSE, and say WHICH failure ------
+    //
+    // These four used to pin the DEGRADED artifact this input produced. #14178
+    // removed that path: the artifact carried a bump level nobody declared
+    // (`patch`) into published CHANGELOG text, and no record beats a wrong one.
+    // What survives unchanged is everything that made the old artifact readable
+    // — WHICH failure this was, and the remedy — now said in a refusal.
     const fwTrunc = join(tmp, 'fw-truncated');
     mkdirSync(join(fwTrunc, 'scripts'), { recursive: true });
     mkdirSync(join(fwTrunc, '.changeset'), { recursive: true });
@@ -2407,37 +2570,37 @@ function selfTest() {
     for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
       writeFileSync(join(fwTrunc, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
     }
+    const truncPinBefore = readFileSync(join(fwTrunc, '.objectui-sha'), 'utf8');
     // OBJECTUI_NO_DEEPEN=1 on purpose: a self-test must never reach the network,
     // and this run is also the opt-out's only coverage.
     const truncBump = spawnSync('bash', [join(fwTrunc, 'scripts', 'bump-objectui.sh'), '--no-commit', c6to], {
       encoding: 'utf8',
       env: { ...process.env, OBJECTUI_ROOT: ui6, OBJECTUI_NO_DEEPEN: '1' },
     });
-    const truncCs = readFileSync(join(fwTrunc, '.changeset', `console-${c6to.slice(0, 12)}.md`), 'utf8');
+    const truncCsPath = join(fwTrunc, '.changeset', `console-${c6to.slice(0, 12)}.md`);
     check(
-      '#9408 C13 a truncated range takes the DEGRADED path instead of shipping a complete-looking record',
-      truncBump.status === 0 &&
-        truncCs.includes('**Degraded list**') &&
-        truncCs.includes('NOT a\ncomplete account'),
-      `status=${truncBump.status}\n${truncCs}`,
+      '#9408/#14178 C13 a truncated range REFUSES instead of shipping any record — no changeset file at all',
+      truncBump.status !== 0 && !existsSync(truncCsPath),
+      `status=${truncBump.status} wrote=${existsSync(truncCsPath)}\n${truncBump.stderr}`,
     );
     check(
-      '#9408 C14 the degraded artifact says WHICH failure it was, and names the fix',
-      // #4731 requires a degraded list to be distinguishable from a complete
-      // one. A truncated range must further be distinguishable from an absent
-      // endpoint: the remedies differ, and only one of them is a fetch away.
-      truncCs.includes('STOPS INSIDE') &&
-        truncCs.includes('fetch') &&
-        truncCs.includes('objectstack#9408') &&
-        !truncCs.includes('this is the initial pin'),
-      truncCs,
+      '#9408/#14178 C14 the refusal says WHICH failure it was, and names the fix',
+      // A refusal must be distinguishable from every other refusal: this one is
+      // a truncated walk, not an absent endpoint, and only one remedy applies.
+      truncBump.stderr.includes('REFUSING to bump') &&
+        truncBump.stderr.includes('STOPS INSIDE') &&
+        truncBump.stderr.includes('fetch --unshallow') &&
+        truncBump.stderr.includes('objectstack#9408'),
+      truncBump.stderr,
     );
     check(
-      '#9408 C15 the degraded artifact carries ONLY the tip subject — it never lists the truncated walk',
-      truncCs.includes('feat(core): fifth (#4005)') &&
-        !truncCs.includes('Upstream change number 3') &&
-        !truncCs.includes('Upstream change number 5'),
-      truncCs,
+      '#9408/#10797/#14178 C15 the refused run left NO half-applied state — .objectui-sha is byte-identical',
+      // The refusal is asked ABOVE the pin write for exactly this reason. It is
+      // the same invariant #10797 pinned for an unreadable commit object, now
+      // owed by a second refusal — and the one thing a "just exit 1" fix would
+      // have broken silently.
+      readFileSync(join(fwTrunc, '.objectui-sha'), 'utf8') === truncPinBefore,
+      `before=${JSON.stringify(truncPinBefore)} after=${JSON.stringify(readFileSync(join(fwTrunc, '.objectui-sha'), 'utf8'))}`,
     );
     check(
       '#9408 C16 the OPT-OUT is reported, not silent',
@@ -2464,18 +2627,16 @@ function selfTest() {
       encoding: 'utf8',
       env: { ...process.env, OBJECTUI_ROOT: ui6, GIT_TERMINAL_PROMPT: '0' },
     });
-    const noopDeepenCs = readFileSync(
-      join(fwTrunc2, '.changeset', `console-${c6to.slice(0, 12)}.md`),
-      'utf8',
-    );
+    const noopDeepenCsPath = join(fwTrunc2, '.changeset', `console-${c6to.slice(0, 12)}.md`);
     check(
-      '#9408 C17 a deepen that exits 0 WITHOUT repairing the range still degrades — the re-check decides, not the fetch status',
-      noopDeepen.status === 0 &&
+      '#9408/#14178 C17 a deepen that exits 0 WITHOUT repairing the range still refuses — the re-check decides, not the fetch status',
+      noopDeepen.status !== 0 &&
         noopDeepen.stdout.includes('deepening') &&
         !noopDeepen.stdout.includes('the range walks completely now') &&
-        noopDeepenCs.includes('**Degraded list**') &&
-        noopDeepenCs.includes('STOPS INSIDE'),
-      `status=${noopDeepen.status}\nSTDOUT:${noopDeepen.stdout}\nSTDERR:${noopDeepen.stderr}\n${noopDeepenCs}`,
+        noopDeepen.stderr.includes('REFUSING to bump') &&
+        noopDeepen.stderr.includes('STOPS INSIDE') &&
+        !existsSync(noopDeepenCsPath),
+      `status=${noopDeepen.status}\nSTDOUT:${noopDeepen.stdout}\nSTDERR:${noopDeepen.stderr}\nwrote=${existsSync(noopDeepenCsPath)}`,
     );
     check(
       '#9408 C18 the truncated tree is STILL truncated afterwards — the no-op fetch is pinned as a no-op',
@@ -2487,6 +2648,230 @@ function selfTest() {
     // Leave the fixture complete, so nothing added after this group inherits a
     // truncated tree by accident.
     rmSync(shallowFile, { force: true });
+
+    // ---- #14178: an ABSENT endpoint is the same failure, one step earlier ---
+    //
+    // #9408's group above synthesizes its truncation by writing `.git/shallow`,
+    // which keeps both endpoints present as objects. That is the SECOND of the
+    // two ways a shallow checkout breaks a pin range, and the rarer one. The
+    // FIRST is what `git clone --depth N` produces every time: the boundary sits
+    // AFTER the old pin, so the `from` object is not in the store at all — and
+    // that case returned from the endpoint guard before `findRangeTruncation`
+    // ever ran, so the deepen the script advertises was never reached.
+    //
+    // THE FIXTURE IS A REAL SHALLOW CLONE, not a hand-written `.git/shallow`,
+    // because the repair is the thing under test: `fetch --unshallow` needs a
+    // remote to deepen FROM. It is a `file://` remote, so this stays offline by
+    // construction — a self-test must never reach the network.
+    //
+    // BOTH DIRECTIONS, as always: the refusal cases sit beside a run that
+    // deepens and derives the COMPLETE record, asserted equal to the record the
+    // same range yields in a full clone. A guard that refused everything would
+    // pass every refusal case here and fail that one.
+    const uiUp = join(tmp, 'objectui-upstream');
+    mkdirSync(join(uiUp, '.changeset'), { recursive: true });
+    const gUp = (...args) => git(uiUp, args);
+    gUp('init', '-q', '-b', 'main');
+    gUp('config', 'user.email', 'selftest@objectstack.ai');
+    gUp('config', 'user.name', 'self test');
+    gUp('config', 'commit.gpgsign', 'false');
+    let upN = 0;
+    const commitUp = (subject, level, breaking = false) => {
+      upN += 1;
+      writeFileSync(join(uiUp, `src-${upN}.ts`), `${upN}\n`);
+      writeFileSync(
+        join(uiUp, '.changeset', `entry-${upN}.md`),
+        `---\n"@object-ui/core": ${level}\n---\n\n${subject}\n` +
+          (breaking ? '\n**BREAKING** the old prop is gone.\n' : ''),
+      );
+      gUp('add', '-A');
+      gUp('commit', '-q', '-m', subject);
+      return gUp('rev-parse', 'HEAD').trim();
+    };
+    // The LEVEL is the point of this fixture: the range declares `minor`, while
+    // the degraded path this card removed emitted the `patch` default. A range
+    // that declared `patch` would make every assertion below vacuous.
+    const upFrom = commitUp('feat(core): the pinned starting point (#5001)', 'patch');
+    commitUp('fix(core): a patch change (#5002)', 'patch');
+    commitUp('feat(grid): a MINOR change nobody would call patch (#5003)', 'minor');
+    commitUp('refactor(layout): drop PageNodeRenderer (#5004)', 'minor', true);
+    const upTo = commitUp('feat(core): the tip (#5005)', 'patch');
+
+    const cloneUi = (name, depth) => {
+      const dir = join(tmp, name);
+      const args = ['clone', '-q'];
+      if (depth) args.push('--depth', String(depth));
+      args.push(pathToFileURL(uiUp).href, dir);
+      execFileSync('git', args, { encoding: 'utf8' });
+      // A real checkout has this ref, and #10495's reachability report keys on
+      // it — without it these cases would bury their assertions under warnings.
+      git(dir, ['update-ref', 'refs/remotes/origin/main', upTo]);
+      return dir;
+    };
+    // `--depth 2` leaves the tip and its parent: `to` is present, `from` is not.
+    const uiShallow = cloneUi('objectui-depth2', 2);
+    const uiFull = cloneUi('objectui-full', 0);
+
+    const fromPresent = (root, rev) => {
+      try {
+        git(root, ['cat-file', '-e', `${rev}^{commit}`], { captureStderr: true });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    let truncationCouldAnswer = true;
+    try {
+      findRangeTruncation(uiShallow, upFrom, upTo);
+    } catch {
+      truncationCouldAnswer = false;
+    }
+    check(
+      '#14178 S1 the fixture is the OTHER shallow shape: `from` is ABSENT, and #9408’s test cannot even answer here',
+      // Why the absent test must run FIRST: `rev-list from..to` needs `from`.
+      // Ordering the two the other way round would answer this input with a git
+      // `fatal:` from inside the truncation probe — a failure, but an unnamed
+      // one, and the caller could not tell it from a broken checkout.
+      !fromPresent(uiShallow, upFrom) &&
+        fromPresent(uiShallow, upTo) &&
+        git(uiShallow, ['rev-parse', '--is-shallow-repository']).trim() === 'true' &&
+        truncationCouldAnswer === false,
+      `fromPresent=${fromPresent(uiShallow, upFrom)} toPresent=${fromPresent(uiShallow, upTo)} truncationAnswered=${truncationCouldAnswer}`,
+    );
+    const absence = findAbsentEndpoints(uiShallow, upFrom, upTo);
+    const absenceFull = findAbsentEndpoints(uiFull, upFrom, upTo);
+    check(
+      '#14178 S2 findAbsentEndpoints NAMES which endpoint is missing, knows the clone is shallow — and clears the full clone',
+      absence.absent === true &&
+        absence.endpoints.length === 1 &&
+        absence.endpoints[0].role === 'from' &&
+        absence.endpoints[0].rev === upFrom &&
+        absence.endpoints[0].diagnostic.includes('Not a valid object name') &&
+        absence.shallow === true &&
+        absenceFull.absent === false,
+      `${JSON.stringify({ absent: absence.absent, roles: absence.endpoints.map((e) => e.role), shallow: absence.shallow, full: absenceFull.absent })}`,
+    );
+    const absentProbe = (extraArgs, root = uiShallow) =>
+      spawnSync(
+        process.execPath,
+        [selfPath, '--objectui-root', root, '--framework-root', fwPlain, '--from', upFrom, '--to', upTo, ...extraArgs],
+        { encoding: 'utf8' },
+      );
+    const absentWalkable = absentProbe(['--check-walkable']);
+    check(
+      '#14178 S3 --check-walkable exits 2 on an absent endpoint, reports PREREQUISITE NOT MET and names the remedy, deriving nothing',
+      absentWalkable.status === 2 &&
+        absentWalkable.stderr.includes('PREREQUISITE NOT MET') &&
+        absentWalkable.stderr.includes('fetch --unshallow') &&
+        absentWalkable.stdout === '',
+      `status=${absentWalkable.status} stdout=${JSON.stringify(absentWalkable.stdout)}\n${absentWalkable.stderr}`,
+    );
+    const absentOut = join(tmp, 'cli-absent-endpoint.md');
+    const absentDeriving = absentProbe(['--out', absentOut]);
+    check(
+      '#14178 S4 the DERIVING path refuses with 2 and writes NO artifact at all',
+      absentDeriving.status === 2 && !existsSync(absentOut),
+      `status=${absentDeriving.status} wrote=${existsSync(absentOut)}`,
+    );
+    let absentClassifyThrew = '';
+    try {
+      classifyRange({ objectuiRoot: uiShallow, from: upFrom, to: upTo });
+    } catch (err) {
+      absentClassifyThrew = String(err?.message ?? err);
+    }
+    check(
+      '#14178 S5 the SHARED implementation refuses — so objectui-range.mjs cannot derive from it either',
+      absentClassifyThrew.includes('PREREQUISITE NOT MET') &&
+        absentClassifyThrew.includes(upFrom.slice(0, 12)),
+      absentClassifyThrew,
+    );
+
+    // S6 — THE CARD'S REPRODUCTION, end to end through the shell driver.
+    const mkFwFor = (name, pinSha) => {
+      const dir = join(tmp, name);
+      mkdirSync(join(dir, 'scripts'), { recursive: true });
+      mkdirSync(join(dir, '.changeset'), { recursive: true });
+      writeFileSync(join(dir, '.objectui-sha'), `${pinSha}\n`);
+      for (const f of ['bump-objectui.sh', 'objectui-changeset-digest.mjs', 'invoked-as.mjs']) {
+        writeFileSync(join(dir, 'scripts', f), readFileSync(join(__dirname, f), 'utf8'));
+      }
+      return dir;
+    };
+    const runShellBump = (fwDir, uiRoot, extraEnv = {}) =>
+      spawnSync('bash', [join(fwDir, 'scripts', 'bump-objectui.sh'), '--no-commit', upTo], {
+        encoding: 'utf8',
+        env: { ...process.env, OBJECTUI_ROOT: uiRoot, GIT_TERMINAL_PROMPT: '0', ...extraEnv },
+      });
+    const csName = `console-${upTo.slice(0, 12)}.md`;
+
+    const fwFull = mkFwFor('fw-absent-control-full', upFrom);
+    const fullRun = runShellBump(fwFull, uiFull);
+    const fullCs = existsSync(join(fwFull, '.changeset', csName))
+      ? readFileSync(join(fwFull, '.changeset', csName), 'utf8')
+      : '';
+    const fwDeepen = mkFwFor('fw-absent-deepen', upFrom);
+    const deepenRun = runShellBump(fwDeepen, uiShallow);
+    const deepenCs = existsSync(join(fwDeepen, '.changeset', csName))
+      ? readFileSync(join(fwDeepen, '.changeset', csName), 'utf8')
+      : '';
+    check(
+      '#14178 S6 an absent endpoint now DEEPENS and re-asks — the shallow checkout derives the same record as a full clone, `minor` not the `patch` default',
+      // The measured before/after, in one assertion. Before this card the same
+      // input wrote a one-line degraded entry declaring `patch`, exited 0, and
+      // never printed the ADR-0087 prompt (which keys on a declared-breaking
+      // changeset, and the degraded one declared none).
+      deepenRun.status === 0 &&
+        deepenRun.stdout.includes('deepening') &&
+        deepenRun.stdout.includes('the range walks completely now') &&
+        deepenCs.includes('"@objectstack/console": minor') &&
+        deepenCs.includes('**BREAKING**') &&
+        deepenCs.includes('adr-0087: TODO') &&
+        !deepenCs.includes('Degraded list') &&
+        fullRun.status === 0 &&
+        deepenCs === fullCs,
+      `deepenStatus=${deepenRun.status} fullStatus=${fullRun.status} identical=${deepenCs === fullCs}\nSTDOUT:${deepenRun.stdout}\nSTDERR:${deepenRun.stderr}\n${deepenCs}`,
+    );
+    check(
+      '#14178 S6b the deepen really repaired the CHECKOUT — the fixture is no longer shallow and `from` is present',
+      // The positive guard on S6: without it S6 would also pass if the record
+      // had come from somewhere other than the repaired history.
+      git(uiShallow, ['rev-parse', '--is-shallow-repository']).trim() === 'false' &&
+        fromPresent(uiShallow, upFrom),
+    );
+
+    // S7 — the same input with the opt-out set. Its own clone: S6 deepened the
+    // one above, and a fixture that quietly stopped reproducing the defect is
+    // how this whole group could go green over nothing.
+    const uiShallow2 = cloneUi('objectui-depth2-nodeepen', 2);
+    const fwNoDeepen = mkFwFor('fw-absent-no-deepen', upFrom);
+    const pinBefore = readFileSync(join(fwNoDeepen, '.objectui-sha'), 'utf8');
+    const noDeepenRun = runShellBump(fwNoDeepen, uiShallow2, { OBJECTUI_NO_DEEPEN: '1' });
+    check(
+      '#14178 S7 absent endpoint + OBJECTUI_NO_DEEPEN=1 ⇒ REFUSAL: non-zero, no changeset, and the pin file byte-identical',
+      noDeepenRun.status !== 0 &&
+        !existsSync(join(fwNoDeepen, '.changeset', csName)) &&
+        readFileSync(join(fwNoDeepen, '.objectui-sha'), 'utf8') === pinBefore &&
+        noDeepenRun.stderr.includes('REFUSING to bump') &&
+        noDeepenRun.stderr.includes('NOTHING WAS WRITTEN') &&
+        noDeepenRun.stderr.includes('OBJECTUI_NO_DEEPEN=1 was set'),
+      `status=${noDeepenRun.status} wrote=${existsSync(join(fwNoDeepen, '.changeset', csName))}\n${noDeepenRun.stderr}`,
+    );
+
+    // S8 — a deepen that CANNOT repair the range: the old pin names a commit
+    // that exists nowhere, in a clone that is not shallow at all. `--unshallow`
+    // is not the remedy here and the refusal must not claim it is.
+    const bogusPin = '0'.repeat(40);
+    const fwBogus = mkFwFor('fw-absent-bogus-pin', bogusPin);
+    const bogusRun = runShellBump(fwBogus, uiFull);
+    check(
+      '#14178 S8 an absent endpoint a deepen cannot repair still refuses — and says the clone is NOT shallow rather than prescribing --unshallow as the fix',
+      bogusRun.status !== 0 &&
+        !existsSync(join(fwBogus, '.changeset', csName)) &&
+        readFileSync(join(fwBogus, '.objectui-sha'), 'utf8') === `${bogusPin}\n` &&
+        bogusRun.stderr.includes('REFUSING to bump') &&
+        bogusRun.stderr.includes('NOT shallow'),
+      `status=${bogusRun.status}\n${bogusRun.stderr}`,
+    );
 
     // ---- #10495: is the revision being PINNED actually on objectui main? ----
     // `bump-objectui.sh` pins `git rev-parse HEAD` of the operator's checkout.
