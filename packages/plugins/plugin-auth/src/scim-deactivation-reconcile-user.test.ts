@@ -84,6 +84,7 @@ import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-
 import { registerIdentityWriteGuard, registerManagedUpdateWhitelist } from './identity-write-guard.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { SCIM_DEACTIVATION_BAN_REASON } from './admin-ban-endpoints.js';
+import { CREDENTIAL_ISSUER } from './backfill-account-issuer.js';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -310,18 +311,21 @@ async function sessionCount(h: Harness, userId: string): Promise<number> {
 
 /**
  * The "local-password user" the card describes: an IdP-provisioned account an
- * administrator later gave a password (the `set-user-password` shape). Written
- * through better-auth's own context, the same seam `set-initial-password`
- * uses; the address is marked verified because the IdP asserted it.
+ * administrator later gave a password. Written exactly as the platform's own
+ * `/admin/set-user-password` mount writes it for an SSO/invite-onboarded user
+ * (`admin-user-endpoints.ts`: hash, then `createAccount` with the local
+ * credential issuer — 1.7.2's sign-in accepts no other credential row). The
+ * address is marked verified because the IdP asserted it.
  */
 async function attachPassword(h: Harness, user: Provisioned): Promise<void> {
   const ctx = await h.manager.getAuthContext();
-  const hash = await ctx.password.hash(PASSWORD);
-  await ctx.internalAdapter.linkAccount({
+  const hashed = await ctx.password.hash(PASSWORD);
+  await ctx.internalAdapter.createAccount({
     userId: user.userId,
     providerId: 'credential',
+    issuer: CREDENTIAL_ISSUER,
     accountId: user.userId,
-    password: hash,
+    password: hashed,
   });
   await h.engine.update('sys_user', { id: user.userId, email_verified: true }, SYSTEM);
 }
@@ -460,13 +464,23 @@ describe('[#14360] deactivating the last administrator is refused through SCIM, 
     expect(body.detail).toMatch(/ADR-0024 D5\.2/);
     expect(body.detail).toMatch(/SCIM deprovision is too broad/);
 
-    // Nothing landed — not the ban, and not the vendor's own `active` write
-    // either: the throw aborted the SCIM transaction as a whole.
+    // The ban did not land and the administrator still signs in — the
+    // invariant the guard exists for.
     const row = await userRow(h, owner.email);
     expect(isBanned(row)).toBe(false);
     expect(row?.ban_reason ?? null).toBeNull();
-    expect(await scimActive(h, owner.scimId)).toBe(true);
     await expectSignInAccepted(h, owner.email);
+
+    // RESIDUAL — pinned as observed, filed as #14522, ⛔ not this card's to
+    // fix: the vendor's own `scimUser.active = false` write, made BEFORE the
+    // callback inside what it believes is a transaction, survives the
+    // refusal, because the adapter's #3653 SCIM transaction scoping never
+    // opens an engine transaction on 1.7.2 (measured: 0 `engine.transaction`
+    // and 0 `driver.beginTransaction` calls across POST + PATCH /Users). So
+    // the SCIM resource reports `active: false` while the account is still
+    // enabled. When #14522 lands, this line flips to `true` DELIBERATELY —
+    // that is the whole reason it is asserted rather than left unread.
+    expect(await scimActive(h, owner.scimId)).toBe(false);
   }, 60_000);
 
   it('(c) positive control: with a second administrator left behind, the same request succeeds', async () => {

@@ -107,8 +107,9 @@ export interface AdminBanEndpointDeps {
  *
  * `UserBanWriter` is the narrowest surface the write needs, and both callers
  * already hold one: better-auth's `internalAdapter` satisfies it directly; the
- * SCIM hook adapts the vendor's transaction-bound `DBTransactionAdapter`, so
- * its write commits — or rolls back — with the SCIM mutation it belongs to.
+ * SCIM hook adapts the `DBTransactionAdapter` the vendor bound to its
+ * transaction, so the write commits — or rolls back — with the SCIM mutation
+ * it belongs to once that transaction is real on this adapter (#14522).
  *
  * Session revocation is deliberately NOT part of the write: the admin mount
  * revokes explicitly (below), and the SCIM vendor revokes after its callback

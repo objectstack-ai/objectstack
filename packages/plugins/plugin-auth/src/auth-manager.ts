@@ -4901,9 +4901,20 @@ export class AuthManager {
    * `APIError`, the vendor re-throws `APIError`s unchanged out of this
    * callback (`runSCIMApplicationCallback`, measured on 1.7.2 — any other
    * throw becomes a SCIM 500 "SCIM identity reconciliation failed" carrying
-   * the original as `cause`), the transaction rolls back, and the IdP
-   * receives a SCIM error with `status: "403"` and the guard's own
-   * explanation. The account stays active; nothing is skipped silently.
+   * the original as `cause`), and the IdP receives a SCIM error with
+   * `status: "403"` and the guard's own explanation. The ban is ONE write,
+   * so it never half-lands: the account stays enabled and nothing is
+   * skipped silently.
+   *
+   * ⚠️ What does NOT roll back today: the vendor runs this callback inside
+   * `runWithTransaction`, which on this adapter is a real engine transaction
+   * only while `scimRequestScope` is set — and that scope, stamped inside
+   * `verifyBearerToken`, is not observed at write time on 1.7.2 (measured:
+   * zero `engine.transaction` calls across a SCIM POST + PATCH; #14522). So
+   * the vendor's own `scimUser.active = false` write, made before this
+   * callback, survives a refusal and the SCIM resource reads inactive while
+   * the account is enabled. #14522 owns that seam; the #14360 suite pins the
+   * residual so its fix flips the pin deliberately.
    *
    * Deliberately NOT applied here: the last-LOCAL-credential guard the admin
    * mount re-runs (`isLastLocalCredentialHolder`). That guard protects the
@@ -4914,10 +4925,10 @@ export class AuthManager {
    * never applied it on the SCIM path either — the vendor wrote the column
    * straight through the adapter.
    *
-   * Every read and write goes through `context.database` — the vendor's
-   * transaction-bound adapter — never through an `internalAdapter` resolved
-   * outside it, so the ban commits or rolls back with the SCIM mutation it
-   * belongs to.
+   * Every read and write goes through `context.database` — the adapter the
+   * vendor bound to its transaction — never through an `internalAdapter`
+   * resolved outside it, so the moment #14522 makes that transaction real,
+   * the ban commits or rolls back with the SCIM mutation it belongs to.
    */
   private async reconcileScimUserLifecycle(
     state: SCIMIdentityState,
