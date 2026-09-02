@@ -179,6 +179,13 @@ async function main() {
  * (a `@objectstack/*` scope glob in the pinning prose, a by-name exclusion in
  * the derivation) is invisible to any fixture whose names all start with `@`.
  */
+
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'publish-smoke-pack self-test reached its verdict';
+
 function selfTest() {
   const cases = [];
   const check = (name, fn) => {
@@ -244,11 +251,20 @@ function selfTest() {
   console.log('publish-smoke-pack self-test');
   for (const line of cases) console.log(line);
   console.log(process.exitCode === 1 ? 'SELF-TEST FAILED' : `SELF-TEST PASSED (${cases.length} cases)`);
+
+  return SELF_TEST_VERDICT;
 }
 
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    selfTest();
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ publish-smoke-pack self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
   } else {
     main().catch((err) => {
       console.error(err.stack ?? String(err));

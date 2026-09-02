@@ -3,10 +3,12 @@ name: objectstack-i18n
 description: >
   Author ObjectStack translation bundles — object/field labels, view text,
   app navigation strings, automation messages — and configure locale
-  fallback, coverage reporting, and the per-locale source layout. Use when
-  the user is adding `*.translation.ts` files, wiring a new locale, or
-  resolving missing-translation warnings. Do not use for general i18n
-  library questions unrelated to ObjectStack bundles.
+  fallback, coverage reporting, and the source layout. Use when the user is
+  adding `*.translation.ts` files, authoring a `translation` metadata item in
+  the Studio or through the metadata API, shipping a generated bundle from a
+  package or plugin, wiring a new locale, or resolving missing-translation
+  warnings. Do not use for general i18n library questions unrelated to
+  ObjectStack bundles.
 license: Apache-2.0
 compatibility: Requires @objectstack/spec 17.x (Zod v4 schemas)
 metadata:
@@ -17,54 +19,6 @@ metadata:
 ---
 
 # Internationalization — ObjectStack I18n Protocol
-
-Expert instructions for designing internationalization (i18n) and localization (l10n)
-strategies using the ObjectStack specification. This skill covers translation bundle
-structures, locale configuration, object-first translation patterns, coverage detection,
-and integration with the I18nService.
-
----
-
-## When to Use This Skill
-
-- You are **configuring i18n** for a new ObjectStack project.
-- You need to **create translation bundles** for multiple locales.
-- You are designing **object-first translation structures** (per-object translation files).
-- You need to **detect missing translations** (`os i18n check` coverage analysis).
-- You are extending the service contract with **AI translation suggestions** (TMS / machine-translation integrations).
-- You are implementing **locale-specific formatting** (dates, numbers, currency).
-  Related: workspace regional defaults (`timezone`, `locale`, `currency`) live in the
-  tenant-scoped `localization` settings, are resolved onto each request's
-  `ExecutionContext`, and are exposed at `GET /api/v1/auth/me/localization`; a currency
-  field falls back to `localization.currency` when it omits its own (ADR-0053).
-- You need to understand **translation file organization strategies** (bundled, per_locale, per_namespace).
-
----
-
-## Core Concepts
-
-### Translation Architecture Overview
-
-1. **Runtime format — `objects.*` (`TranslationData`)**: each locale is authored as one
-   `TranslationData` value. All translatable content for an object (label, fields,
-   options, views, sections, tabs, actions) is grouped under `objects.{object_name}`,
-   with global groups (`apps`, `messages`, `globalActions`, `dashboards`, `pages`,
-   `flows`, `settings`, `metadataForms`, `settingsCommon`) at the top level.
-
-2. **Bundle registration**: per-locale files are assembled with
-   `defineTranslationBundle({ en, 'zh-CN': … })` into a `TranslationBundle`
-   (locale code → `TranslationData`) and registered via
-   `defineStack({ translations: [...] })`. This is the format the runtime resolvers,
-   `os i18n extract`, `os i18n check`, and the example apps all use.
-
-3. **Coverage detection**: `os i18n check` compares registered bundles against source
-   metadata to report missing keys per locale.
-
-4. **Runtime authoring — `TranslationItem`**: a `translation` metadata item authored
-   in the Studio / metadata API carries the **same** `objects.*` groups plus the
-   `locale` it translates. There is only one shape; see "Authoring at Runtime" below.
-
----
 
 ## Translation Configuration
 
@@ -93,58 +47,6 @@ export default defineStack({
 | `fallbackLocale` | `string` | optional | Fallback when translation missing |
 
 > **BCP-47 Locale Codes**: Use standard locale tags (e.g., `en-US`, `zh-CN`, `pt-BR`, `en-GB`).
-
----
-
-## File Organization Strategies
-
-### 1. Bundled (Single File)
-
-All locales in one file. Best for small projects with few objects.
-
-```
-src/translations/
-  crm.translation.ts        # { en: {...}, "zh-CN": {...} }
-```
-
-**When to use:** Fewer than 5 objects, 2-3 locales, < 200 translation keys total.
-
-### 2. Per-Locale (Recommended)
-
-One file per locale containing all namespaces. Recommended when a single locale file stays under ~500 lines.
-
-```
-src/translations/
-  en.ts                     # TranslationData for English
-  zh-CN.ts                  # TranslationData for Chinese
-  ja-JP.ts                  # TranslationData for Japanese
-```
-
-**When to use:** Medium projects (5-20 objects), 3-5 locales, organized by language.
-
-### 3. Per-Namespace (Enterprise)
-
-One file per namespace (object) per locale. Aligns with Salesforce DX and ServiceNow conventions.
-
-```
-i18n/
-  en/
-    account.json            # ObjectTranslationData
-    contact.json
-    common.json             # messages + app labels
-  zh-CN/
-    account.json
-    contact.json
-    common.json
-```
-
-**When to use:** Large projects (20+ objects), 5+ locales, team collaboration, CI/CD pipelines.
-
-> These are **authoring conventions**: your import graph assembles whichever layout you
-> choose into the `TranslationBundle` values you register on the stack.
-> `FileI18nAdapter`'s `localesDir` loads only flat top-level `{locale}.json` files
-> (subdirectories are skipped) — a per-namespace tree must be assembled by your own
-> imports or build step.
 
 ---
 
@@ -267,11 +169,9 @@ Top-level groups alongside `objects`: `apps` (label, description, navigation),
 `messages`, `globalActions` (object-less actions), `dashboards`, `pages`, `flows`,
 `settings`, `metadataForms`, `settingsCommon`.
 
-> **Validation messages are not a translation group.** `validationMessages` was
-> removed in spec 17.0.0 — nothing ever read it, so a translated rule
-> message was stored and never shown. Author the message on the rule itself
-> (`object.validations[].message`), which the engine returns on every rejected
-> write.
+> `validationMessages` is not a translation group — it was removed in spec 17.0.0.
+> Author the message on the rule itself (`object.validations[].message`), which the
+> engine returns on every rejected write.
 
 For the exact Zod shape (and any field that may have been added since), read
 `node_modules/@objectstack/spec/src/system/translation.zod.ts` —
@@ -298,67 +198,37 @@ parse, ship, and resolve to nothing.
 
 `os validate` / `os lint` / `os compile` check this direction and report it as
 warnings (`translation-target-unknown`, `translation-option-key-unknown`): a key
-naming an object, field, view, action, param, section, app, nav item, dashboard,
-widget or flow screen that does not exist is listed alongside the names that do.
-A bundle keyed to something since renamed still parses — the label just renders
-silently in its source locale while every neighbouring one resolves.
+naming an object, field, view, tab, action, param, section, app, nav item,
+dashboard, widget or flow screen that does not exist is listed alongside the names
+that do. A bundle keyed to something since renamed still parses — the label just
+renders silently in its source locale while every neighbouring one resolves.
+
+---
+
+## File Organization Strategies
+
+Layout is an **authoring convention**: whichever one you pick, your own import graph
+assembles it into the `TranslationBundle` you register on the stack — nothing loads a
+directory tree for you.
+
+| Layout | Files | Use when |
+|:--|:--|:--|
+| Bundled | one `crm.translation.ts` holding every locale | under 5 objects, 2-3 locales |
+| Per-locale (recommended) | `src/translations/{en,zh-CN,ja-JP}.ts` + `index.ts` | 5-20 objects, 3-5 locales |
+| Per-namespace | `i18n/{locale}/{object}.json`, assembled by your own imports | 20+ objects, 5+ locales |
 
 ---
 
 ## Authoring at Runtime: the `translation` Item
 
-Translations do not have to ship as files. A **`translation` metadata item** —
-created in the Studio, through the metadata API, or by an agent — is one
-locale's worth of the **same** `objects.*` groups documented above, plus the
-`locale` it translates. There is exactly one shape; nothing converts between
-formats.
-
-<!-- os:check -->
-```typescript
-import { defineTranslation } from '@objectstack/spec/system';
-
-export default defineTranslation({
-  locale: 'zh-CN',
-  objects: {
-    account: {
-      label: '客户',
-      pluralLabel: '客户',
-      fields: {
-        name: { label: '客户名称', help: '公司或组织的法定名称' },
-        industry: { label: '行业', options: { tech: '科技', finance: '金融' } },
-        status: { options: { active: '活跃', inactive: '停用' } },
-      },
-      _views: { all_accounts: { label: '全部客户' } },
-      _sections: { basic_info: { label: '基本信息' } },
-      _actions: {
-        merge: { label: '合并客户', confirmText: '此操作无法撤销，确认合并？' },
-      },
-    },
-  },
-  apps: { crm: { label: '客户关系管理', navigation: { home: { label: '首页' } } } },
-  messages: { 'common.save': '保存' },
-});
-```
-
-Rules that differ from a file bundle:
-
-- **`locale` is required.** A file bundle names its locales as map keys; an item
-  carries its own. The sync falls back to a BCP-47-looking item *name*, then skips
-  the item with an `[i18n] … — skipped` warning nobody watches.
-- **One locale per item.** Author `zh-CN` and `ja-JP` as two items.
-- Published items are loaded at boot and on every publish (no restart), and
-  layer **over** the file bundles — an authored value wins over a shipped one
-  for the same key; deleting the item restores the shipped value.
-
-Exact Zod shape: `node_modules/@objectstack/spec/src/system/translation.zod.ts` —
-`TranslationItemSchema`.
-
-### Retired: the `o.*` dialect
-
-A second object-first shape keyed on `o.{object_name}` (with `app`, `nav`,
-`dashboard`, `reports`, `notifications`, `errors`, `_globalOptions`, `_meta`,
-`namespace`, `_actions.confirmMessage`) was once documented for Studio authoring.
-**No resolver ever read it**, and both doors now reject it — files included.
+Translations do not have to ship as files. A **`translation` metadata item** — created in
+the Studio, through the metadata API, or by an agent — carries one locale's worth of the
+**same** `objects.*` groups documented above plus the `locale` it translates. `locale` is
+required, one locale per item, and published items load at boot and on every publish,
+layering **over** the file bundles (delete the item and the shipped value returns). There
+is exactly one shape; nothing converts between formats. Author with `defineTranslation`;
+exact Zod shape is `TranslationItemSchema` in
+`node_modules/@objectstack/spec/src/system/translation.zod.ts`.
 
 ---
 
@@ -454,21 +324,6 @@ workflows at `os i18n check` / `os lint --i18n-strict` instead.
 
 ---
 
-## AI-Powered Translation Suggestions
-
-`II18nService.suggestTranslations(locale, items)` is an optional contract method
-that enriches diff items with `aiSuggested` / `aiConfidence`. It is
-**contract-only today**: no shipped adapter implements it, and there is no CLI
-command for it. Implement it on a custom adapter to integrate:
-
-- Translation Management Systems (TMS) like Phrase, Crowdin, Lokalise
-- Machine translation APIs (Google Translate, DeepL)
-- Internal translation memory databases
-
-> **Best Practice:** Review and approve machine suggestions before committing them.
-
----
-
 ## Integration with II18nService
 
 ### Service Contract
@@ -503,30 +358,12 @@ The contract also declares optional methods — `getFieldLabels`, `getCoverage`,
 as extension points for a custom workbench or TMS adapter. (`getAppBundle` /
 `loadAppBundle` went with the `o.*` shape they returned.)
 
-### Plugin Setup
+### Registration
 
-```typescript
-import { ObjectKernel } from '@objectstack/core';
-import { I18nServicePlugin } from '@objectstack/service-i18n';
-
-const kernel = new ObjectKernel();
-kernel.use(new I18nServicePlugin({
-  defaultLocale: 'en',
-  localesDir: './i18n',
-  fallbackLocale: 'en',
-  registerRoutes: true,  // Auto-register REST endpoints
-  basePath: '/api/v1/i18n',
-}));
-
-await kernel.bootstrap();
-
-const i18n = kernel.getService<II18nService>('i18n');
-```
-
-> `localesDir` loads only flat, top-level `{locale}.json` files from the directory
-> (subdirectories are skipped). `registerRoutes: true` (the default) self-registers
-> `GET {basePath}/locales`, `/translations/:locale`, and `/labels/:object/:locale`
-> once an HTTP server is available.
+You do not wire this plugin: `os serve` registers `I18nServicePlugin` itself whenever the
+stack config carries `translations` or `i18n` (kernel bootstrap is
+**objectstack-platform → Runtime Boot Sequence**). It self-registers
+`GET /api/v1/i18n/locales`, `/translations/:locale` and `/labels/:object/:locale`.
 
 ---
 
@@ -544,12 +381,18 @@ This writes `<locale>.objects.generated.ts` TypeScript modules (not JSON), plus 
 `<locale>.metadata-forms.generated.ts` companion unless `--no-metadata-forms` —
 the default locale is filled from schema labels, other locales follow `--fill`
 (`empty | default | todo`). `os i18n extract --help` lists the rest: `--filter`,
-`--default-locale`, `--no-merge`, `--source-hashes`, `--dry-run`, `--json`, …
+`--default-locale`, `--no-merge`, `--objects-only`, `--source-hashes`, `--dry-run`,
+`--json`, …
+
+⚠️ **`--objects-only` is on by DEFAULT**, so extract writes only the `objects` /
+`globalActions` subtree — while `os i18n check` also demands `app`, `navigation`,
+`dashboard`, `widget`, `page` and `flow` keys. Run the workflow as written and coverage
+reports gaps the extract never scaffolded. Pass `--no-objects-only` to include those
+groups, or author them by hand.
 
 ### 2. Translate
 
-Fill in the values manually. (AI suggestion is a contract-only concept —
-`suggestTranslations()` has no CLI and no shipped implementation.)
+Fill in the values manually.
 
 ### 3. Verify Coverage
 
@@ -559,29 +402,45 @@ os i18n check --locales=zh-CN
 
 Add `--strict` / `--threshold=95` in CI to fail on locale gaps.
 
-### 4. Commit & Register
+### 4. Register
 
-Commit the translation files, import them into your bundle, and register it via
-`defineStack({ translations: [...] })`.
+A stack registers its bundles with `defineStack({ translations: [...] })`. A **package or
+plugin shipping its own generated bundle** — the most common shape in this repo — has one
+more step: a generated module exports an objects *subtree*
+(`NonNullable<TranslationData['objects']>`), not a `TranslationData`, so it must be
+wrapped before it is a bundle at all.
+
+```typescript
+// src/translations/index.ts
+import { defineTranslationBundle } from '@objectstack/spec';
+import type { TranslationData } from '@objectstack/spec/system';
+import { withSourceFallback } from '@objectstack/platform-objects/apps';
+import { enObjects } from './en.objects.generated.js';
+import { zhCNObjects } from './zh-CN.objects.generated.js';
+import { zhCNGeneratedSourceHashes } from './zh-CN.source-hashes.generated.js';
+
+const enSource: TranslationData = { objects: enObjects };
+
+export const StorageTranslations = defineTranslationBundle({
+  en: enSource,
+  // 4th argument = the `--source-hashes` companion. Without it a leaf whose SOURCE has
+  // moved goes on serving the superseded fill under a green `os i18n check` forever.
+  // The 3rd stays undefined: it judges hand-authored `apps` / `dashboards` / `pages`,
+  // which a fully generated set does not have.
+  'zh-CN': withSourceFallback({ objects: zhCNObjects }, enSource, undefined, zhCNGeneratedSourceHashes),
+});
+```
+
+A plugin that owns its objects loads that bundle from its own `kernel:ready` hook rather
+than registering it on the stack: `i18n.loadTranslations(locale, data)` deep-merges, so
+every plugin contributes its own `objects.*` slice.
 
 ---
 
-## CRM I18n Blueprint
+## Shipped examples
 
-`examples/app-crm` ships the bundled layout (one `crm.translation.ts`, `en` +
-`zh-CN`); `examples/app-todo` the per-locale one (`{en,zh-CN,ja-JP}.ts` + `index.ts`).
-
-Use this structure for metadata apps:
-
-| Layer | CRM Pattern |
-|:--|:--|
-| Stack config | `i18n` with an explicit locale list; the source layout is a convention |
-| Translation assembly | One `defineTranslationBundle` call — inline locales, or importing per-locale files |
-| Locale content | Object-scoped translations (`objects.crm_account.fields.*`, `_views`, `_actions`) + global app/messages |
-| Naming integrity | Translation object/field keys exactly match metadata machine names |
-
-For new locales, copy one locale file as a baseline, then run `os i18n check`
-before release.
+`examples/app-crm` — the bundled layout (one `crm.translation.ts`, `en` + `zh-CN`).
+`examples/app-todo` — the per-locale layout (`{en,zh-CN,ja-JP}.ts` + `index.ts`).
 
 ---
 
@@ -605,103 +464,21 @@ Same rule for its sibling keys: `app` → `apps`, `nav` →
 `_globalOptions` → `objects.<obj>.fields.<field>.options`, `_meta.locale` →
 top-level `locale`, and `_actions.confirmMessage` → `_actions.confirmText`.
 
-### ❌ Mismatched Object Names
-
-Translation keys must match metadata exactly:
-
-```typescript
-// Metadata
-{ name: 'project_task' }
-
-// Translation (WRONG)
-{ objects: { projectTask: { label: '项目任务' } } }
-
-// Translation (CORRECT)
-{ objects: { project_task: { label: '项目任务' } } }
-```
-
-### ❌ Hardcoded Option Values
-
-Always use lowercase machine values for options:
-
-```typescript
-// Metadata
-options: [
-  { value: 'in_progress', label: 'In Progress' },
-]
-
-// Translation (WRONG)
-options: { 'In Progress': '进行中' }
-
-// Translation (CORRECT)
-options: { in_progress: '进行中' }
-```
-
 ### ❌ Ignoring Coverage Reports
 
 Run `os i18n check` before releases; `extract --check` is what sees staleness.
 
 ---
 
-## Quick-Start Template
-
-One compact per-locale file — assemble locales with `defineTranslationBundle` and
-register via `defineStack({ translations: [...] })` as shown in
-"Authoring Translation Bundles" above:
-
-<!-- os:check -->
-```typescript
-// src/translations/zh-CN.ts
-import type { TranslationData } from '@objectstack/spec/system';
-
-export const zhCN: TranslationData = {
-  objects: {
-    account: {
-      label: '客户',
-      pluralLabel: '客户',
-      fields: {
-        name: { label: '客户名称' },
-        email: { label: '邮箱', placeholder: '输入邮箱地址' },
-        status: {
-          label: '状态',
-          options: {
-            active: '活跃',
-            inactive: '停用',
-          },
-        },
-      },
-      _views: {
-        all_accounts: { label: '全部客户' },
-      },
-    },
-  },
-
-  apps: {
-    crm: { label: '客户关系管理' },
-  },
-
-  messages: {
-    'common.save': '保存',
-    'common.cancel': '取消',
-  },
-};
-```
-
----
-
 ## Verify your work
 
-After editing a `*.translation.ts` bundle:
-
 ```bash
-os i18n check   # translation coverage vs the default locale (missing-key report)
-os validate     # the bundle conforms to the protocol schema (no artifact)
-# or: os build  # the same schema gate, plus emits dist/
+os i18n check   # coverage: which keys are missing, per locale
+os validate     # the bundle conforms to the protocol schema
 ```
 
-`os i18n check` lists keys missing per locale; `os lint --i18n-strict` turns
-coverage gaps into hard errors. In a scaffolded project the schema gate is
-`npm run validate`. See objectstack-platform → **Verify your work**.
+`os lint --i18n-strict` turns coverage gaps into hard errors. For the build and scaffold
+gates see objectstack-platform → **Verify your work**.
 
 ---
 

@@ -47,7 +47,7 @@ export const HOOKS_PATH = '/api/v1/automation/hooks/:flowName/:hookId';
  */
 export class ApiTriggerPlugin implements Plugin {
     name = 'com.objectstack.trigger.api';
-    type = 'standard';
+    type = 'standard' as const;
     version = '1.0.0';
     dependencies = ['com.objectstack.service.queue'];
 

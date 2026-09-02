@@ -1113,6 +1113,13 @@ export function buildDigest({
 // CLI
 // ---------------------------------------------------------------------------
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function main(argv) {
   const has = (f) => argv.includes(f);
   const val = (f, d) => {
@@ -1131,7 +1138,18 @@ function main(argv) {
     return 0;
   }
 
-  if (has('--self-test')) return selfTest();
+  if (has('--self-test')) {
+      const selfTestCode = selfTest();
+      if (!selfTestReachedVerdict) {
+          console.error(
+              '\n✗ objectui-changeset-digest self-test: selfTest() returned without reaching its verdict,\n'
+                  + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                  + 'that never finished as a self-test that passed.\n',
+          );
+          process.exit(1);
+      }
+      return selfTestCode;
+  }
 
   const objectuiRoot = val('--objectui-root', join(REPO_ROOT, '..', 'objectui'));
   const frameworkRoot = val('--framework-root', REPO_ROOT);
@@ -3281,6 +3299,7 @@ function selfTest() {
     return 1;
   }
   console.log('✓ objectui-changeset-digest --self-test: all checks passed');
+  selfTestReachedVerdict = true;
   return 0;
 }
 

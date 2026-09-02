@@ -226,7 +226,7 @@ export class HonoServerPlugin implements Plugin {
      * kernel name this plugin when a consumer requires one before it inits.
      */
     providesServices = ['http.server', 'http-server'];
-    type = 'server';
+    type = 'server' as const;
     version = '0.9.0';
 
     // No endpoint-priority constants: three of them (DEFAULT/CORE/DISCOVERY)

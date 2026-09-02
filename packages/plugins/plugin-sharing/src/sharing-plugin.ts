@@ -322,7 +322,7 @@ export async function backfillRetiredAccessLevels(
 export class SharingServicePlugin implements Plugin {
   name = 'com.objectstack.service.sharing';
   version = '1.0.0';
-  type = 'standard';
+  type = 'standard' as const;
   dependencies = ['com.objectstack.engine.objectql'];
 
   private readonly options: SharingPluginOptions;

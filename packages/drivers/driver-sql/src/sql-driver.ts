@@ -70,6 +70,7 @@ import {
   isUnbackedConflictTargetError,
   uniqueViolationColumn,
   resolveTenancyPosture,
+  declareTargetedTable,
 } from '@objectstack/types';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { nextUtcCalendarDay } from '@objectstack/core';
@@ -828,12 +829,39 @@ function unresolvableFilterColumnError(object: string, column: string | null): E
  * invisible to serialisation, which is the same reasoning
  * {@link WITHHELD_FILTER_DIAGNOSTIC} applies one refusal over.
  *
+ * # The targeted table is declared on the envelope, and never in the message
+ *
+ * [#13438] `isMissingTableError(error, readObject)` compares the dialect phrase
+ * against the name the CALLER read — its API object name — and for a federated
+ * object (ADR-0015) that is not the name in the statement: {@link
+ * SqlDriver.getBuilder} targets `external.remoteName`. A genuinely absent
+ * remote therefore raised a phrase naming `legacy_orders` against a caller
+ * naming `crm_order`, and the #13324 comparison read a real missing table as
+ * "about something else" — loud, for the one case the licence exists for.
+ * Nothing at a call site can fold that away: the mapping lives on this
+ * instance.
+ *
+ * Maintainer ruling 2026-09-01 (option 2 on the card): the driver DECLARES the
+ * table its statement targeted, and the predicate prefers the declared name
+ * over the caller's. `targetedTable` is that name, resolved by
+ * {@link SqlDriver.backendStatementFault} exactly as `getBuilder` resolves it,
+ * so it is the table the statement was compiled against and not a
+ * re-derivation. It travels under `@objectstack/types`' `DRIVER_TARGETED_TABLE`
+ * symbol, non-enumerable — the same carrier discipline as `cause` above, for
+ * the same reason: the physical table is precisely what the composed message
+ * withholds, and a member that serialised would put it back on the wire. ⛔ It
+ * is never written into the message; the disclosure clause below stands.
+ *
  * @param object - the API object name the caller asked for. Its own vocabulary,
  *                 never the physical table: see the message note below.
  * @param cause  - the dialect error, kept whole for the log and for
  *                 cause-following predicates.
+ * @param targetedTable - the physical table the failed statement was compiled
+ *                 against: a federated object's `external.remoteName`,
+ *                 otherwise the object's own name. Declared on the envelope for
+ *                 `isMissingTableError`; never echoed.
  */
-function backendStatementFaultError(object: string, cause: unknown): Error {
+function backendStatementFaultError(object: string, cause: unknown, targetedTable: string): Error {
   // ⛔ No dialect text reaches the caller — not the statement, not the quoted
   // references, not the `$n` placeholders, not the backend's own prose. The
   // ruling's disclosure clause, and it is why this message is COMPOSED rather
@@ -862,6 +890,8 @@ function backendStatementFaultError(object: string, cause: unknown): Error {
     writable: true,
     configurable: true,
   });
+  // [#13438] Code-readable, serialisation-invisible — see the section above.
+  declareTargetedTable(err, targetedTable);
   return err;
 }
 
@@ -8027,7 +8057,13 @@ export class SqlDriver implements IDataDriver {
         'and on the dialects that inline them the bound literals too (#7929, #8931): ' +
         `${typeof detail === 'string' ? detail : String(error)}`,
     );
-    return backendStatementFaultError(object, error);
+    // [#13438] The table the statement was compiled against, resolved the way
+    // {@link SqlDriver.getBuilder} resolves it — a federated object's
+    // `external.remoteName`, otherwise the object's own name — because every
+    // read exit that reaches here built its statement through `getBuilder`.
+    // Declared on the envelope for `isMissingTableError`; never in the message.
+    const targetedTable = this.physicalTableByObject[object] ?? object;
+    return backendStatementFaultError(object, error, targetedTable);
   }
 
   async count(object: string, query?: DriverQuery, options?: DriverOptions): Promise<number> {

@@ -43,6 +43,53 @@ import {
 } from '../utils/format.js';
 import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
 
+/**
+ * The artifact's package entries, as `{ index, id, body }` (ADR-0130 D4).
+ *
+ * Reads the PARSED stack, so what is walked here is exactly what the artifact
+ * will carry — `ArtifactPackageSchema` has already judged every entry by the
+ * time this runs, which is why nothing here re-checks the shape.
+ */
+function artifactPackages(parsed: Record<string, unknown>): Array<{
+  index: number;
+  id: string;
+  body: Record<string, unknown>;
+}> {
+  const declared = parsed.packages;
+  if (!Array.isArray(declared)) return [];
+  return declared.map((entry, index) => {
+    const body = (entry as { manifest?: Record<string, unknown> }).manifest ?? {};
+    const id = typeof body.id === 'string' && body.id !== ''
+      ? body.id
+      : (typeof body.name === 'string' ? body.name : `packages[${index}]`);
+    return { index, id, body };
+  });
+}
+
+/**
+ * One assembled package body, re-read as the STACK it was assembled from.
+ *
+ * The author-time rules read a stack: collections at the top level and the
+ * package identity under `manifest`. An assembled body is that same content
+ * with the manifest fields flattened over the top (`{ ...manifest, ...stack }`
+ * — `AppPlugin`'s shape, declared by `AssembledPackageBodySchema`), so undoing
+ * the flatten is one key: the body IS its own manifest.
+ *
+ * ⛔ No key list is transcribed here on purpose. Splitting the body back into
+ * "manifest fields" and "collections" would need a second copy of the key set
+ * `AssembledPackageBodySchema` derives, and the rules do not need the split —
+ * they read collections off the top level (already there) and identity off
+ * `manifest` (a superset of the manifest, and `ManifestSchema` is an open
+ * object).
+ */
+function packageBodyAsStack(body: Record<string, unknown>): Record<string, unknown> {
+  return { ...body, manifest: body };
+}
+
+/** Identity of one finding, for the per-package de-duplication below. */
+const findingKey = (f: { rule: string; where: string; path: string; message: string }): string =>
+  `${f.rule}\u0000${f.where}\u0000${f.path}\u0000${f.message}`;
+
 export default class Compile extends Command {
   static override description = 'Compile ObjectStack configuration to JSON artifact';
 
@@ -326,6 +373,77 @@ export default class Compile extends Command {
         // `issues`, so the pointer resolves to a complete view of THIS list.
         printAuthoringRuleErrors(ruleErrors, { remedy: JSON_FULL_LIST_REMEDY });
         this.exit(1);
+      }
+
+      // 3b-ii. [ADR-0130 D4] The SAME rule table, once per PACKAGE.
+      //
+      //     A project is N `defineStack` packages composed with
+      //     `composeStacks(…, { manifest: 'preserve' })`. Composition FLATTENS
+      //     every collection to the top level, so the run above judges the
+      //     union — which is strictly more permissive than the packages it was
+      //     built from. A rule that asks "does this stack's app navigation
+      //     point at an object this stack defines?" is satisfied by the union
+      //     for a package that carries neither half; per package it is not.
+      //     Since the artifact registers PER PACKAGE (D4/D5), the per-package
+      //     answer is the one the runtime will live with.
+      //
+      //     ⛔ The same `runAuthoringRules('build', …)` call, not a copy: which
+      //     rules run on a build is `lint/authoring-rules.ts`' single table
+      //     (#4409), and a second call site choosing its own subset is how
+      //     `os build` came to be the weakest of the three authoring gates in
+      //     the first place.
+      //
+      //     DE-DUPLICATED against the union run, because the union contains
+      //     every package's items: without this, a two-package project reports
+      //     every finding twice and the author cannot tell a real per-package
+      //     finding from an echo. What survives the filter is exactly the set
+      //     the union could not see.
+      const packageEntries = artifactPackages(result.data as Record<string, unknown>);
+      if (packageEntries.length > 0) {
+        if (!flags.json) {
+          printStep(`Running author-time rules per package (${packageEntries.length})...`);
+        }
+        const alreadyReported = new Set(findings.map(findingKey));
+        const perPackageErrors: Array<{ package: string } & typeof ruleErrors[number]> = [];
+        for (const pkg of packageEntries) {
+          const asStack = packageBodyAsStack(pkg.body);
+          const pkgFindings = runAuthoringRules('build', {
+            normalized: asStack,
+            parsed: asStack,
+            sduiManifest: resolveSduiManifest(),
+          }).filter((f) => !alreadyReported.has(findingKey(f)));
+          for (const f of pkgFindings) alreadyReported.add(findingKey(f));
+          const split = splitBySeverity(pkgFindings);
+          ruleAdvisories = [
+            ...ruleAdvisories,
+            ...split.advisories.map((a) => ({ ...a, where: `package '${pkg.id}' — ${a.where}` })),
+          ];
+          perPackageErrors.push(
+            ...split.errors.map((e) => ({ ...e, package: pkg.id, where: `package '${pkg.id}' — ${e.where}` })),
+          );
+        }
+        if (perPackageErrors.length > 0) {
+          if (flags.json) {
+            await emitJson(
+              {
+                success: false,
+                error: 'author-time rules failed for one or more packages',
+                issues: perPackageErrors,
+                warnings: warningsSoFar(),
+                conversions: conversionNotices,
+              },
+              0,
+              { compact: true },
+            );
+            this.exit(1);
+          }
+          console.log('');
+          printError(
+            `Author-time rules failed inside the artifact's packages (${perPackageErrors.length} issue${perPackageErrors.length > 1 ? 's' : ''})`,
+          );
+          printAuthoringRuleErrors(perPackageErrors, { remedy: JSON_FULL_LIST_REMEDY });
+          this.exit(1);
+        }
       }
 
       // 3c. [#3366] Installable-provider preflight. Every capability the app

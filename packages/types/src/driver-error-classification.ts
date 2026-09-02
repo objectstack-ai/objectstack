@@ -405,21 +405,103 @@ const MISSING_TABLE: DriverErrorSignature = {
 const MAX_CAUSE_DEPTH = 4;
 
 /**
+ * [#13438] The physical table a driver's statement TARGETED, declared on the
+ * error envelope by the producer that knows it.
+ *
+ * `readObject` closed the #13324 hole for callers that can name what they read
+ * — and left a residual one layer down. A caller names its OBJECT (the API
+ * name); a driver compiles the statement against the PHYSICAL table, and for a
+ * federated object (ADR-0015, `external.remoteName`) those are two different
+ * names. `driver-sql` reads `crm_order` from `legacy_orders`, so when that
+ * remote is genuinely absent the dialect phrase names `legacy_orders`, the
+ * caller names `crm_order`, and the comparison called a real missing table
+ * "about something else" — loud, for the one case the licence was built for.
+ *
+ * Nothing at a call site can fold that away: the mapping lives on the driver
+ * instance, and asking every caller to consult it is the guessing this channel
+ * exists to remove (maintainer ruling 2026-09-01, option 2 on the card). So the
+ * fact is declared where it is known — the driver that composed the envelope
+ * stamps the table its statement targeted onto it — and the predicate PREFERS
+ * a declared table over the caller-supplied `readObject`. The caller never
+ * needs to know a federated object's remote name, and a driver that declares
+ * nothing gets exactly the #13324 behaviour.
+ *
+ * A symbol key from the global registry, held non-enumerable: the carrier
+ * discipline `driver-sql` already applies to its withheld-diagnostic symbols
+ * and to the envelope's own `cause`. Readable by code; invisible to
+ * `JSON.stringify`, `{ ...err }`, `Object.keys`, `for…in` and the
+ * structured-clone boundary — so the physical table name, the very thing the
+ * envelope's composed message withholds, can never ride back onto a wire that
+ * serialises the error. `Symbol.for` so a duplicated copy of this package
+ * resolves the same key.
+ *
+ * ⚠️ A declaration is EVIDENCE, so it also narrows the one-argument form: an
+ * envelope declaring `legacy_orders` whose dialect phrase names some other
+ * relation reads not-benign even with no `readObject` — the driver supplied
+ * the fact the caller could not. That is the #13324 verdict reached without
+ * the caller's help, in the direction the module docblock calls cheap.
+ */
+export const DRIVER_TARGETED_TABLE: symbol = Symbol.for('objectstack.driver.targetedTable');
+
+/**
+ * Declare, on `error`, the physical table the statement that raised it targeted.
+ *
+ * The producer's half of {@link DRIVER_TARGETED_TABLE} — for a driver composing
+ * an error envelope over a dialect failure. `table` is the name the statement
+ * was compiled against (a federated object's `external.remoteName`, otherwise
+ * the object's own table), bare: the comparison folds away schema and database
+ * qualifiers on both sides, so none is needed here.
+ *
+ * Non-enumerable and non-writable, and the FIRST declaration wins: the actor
+ * that compiled the statement is the one that knows its target, and a later,
+ * more distant wrapper re-declaring it would be re-introducing the guess. (The
+ * predicate applies the same rule across a `cause` chain: the declaration
+ * NEAREST the dialect phrase is the one compared.) An empty or non-string
+ * `table` declares nothing — silently, because this runs on an error path
+ * where a thrown `TypeError` would replace the envelope it was meant to
+ * annotate; the predicate then falls back to `readObject` exactly as if no
+ * driver had spoken.
+ *
+ * @returns `error`, for chaining.
+ */
+export function declareTargetedTable<E extends object>(error: E, table: string): E {
+    if (typeof table !== 'string' || table === '') return error;
+    if (targetedTableOf(error) !== null) return error;
+    Object.defineProperty(error, DRIVER_TARGETED_TABLE, { value: table, enumerable: false });
+    return error;
+}
+
+/**
+ * The table `error` declares its statement targeted, or `null` when it declares
+ * none — the reading half of {@link declareTargetedTable}. Tolerant of bare
+ * input: any non-object, and any object without a non-empty string under the
+ * key, is "no declaration".
+ */
+export function targetedTableOf(error: unknown): string | null {
+    if (error === null || (typeof error !== 'object' && typeof error !== 'function')) return null;
+    const table = (error as Record<symbol, unknown>)[DRIVER_TARGETED_TABLE];
+    return typeof table === 'string' && table !== '' ? table : null;
+}
+
+/**
  * The {@link DriverErrorSignature.excludes.namesAnotherRelation} channel, in the
  * one place both the string and the object node reach it.
  *
- * Guards the caller-supplied half rather than trusting it: the parameter is
- * optional on the public predicate, so `undefined` (a caller that cannot name
- * what it read) and a non-string (a stale positional `depth` argument from
- * before this parameter existed) must both mean "no evidence", never "loud".
+ * `relation` is the name the phrase must be about: the table the node (or an
+ * outer node) DECLARED its statement targeted (#13438), else the caller's
+ * `readObject`. Guards the caller-supplied half rather than trusting it: the
+ * parameter is optional on the public predicate, so `undefined` (a caller that
+ * cannot name what it read) and a non-string (a stale positional `depth`
+ * argument from before this parameter existed) must both mean "no evidence",
+ * never "loud".
  */
 function excludedByReadObject(
     message: string,
     signature: DriverErrorSignature,
-    readObject: string | undefined,
+    relation: string | undefined,
 ): boolean {
-    if (typeof readObject !== 'string' || readObject === '') return false;
-    return signature.excludes?.namesAnotherRelation?.(message, readObject) === true;
+    if (typeof relation !== 'string' || relation === '') return false;
+    return signature.excludes?.namesAnotherRelation?.(message, relation) === true;
 }
 
 /**
@@ -435,6 +517,12 @@ function excludedByReadObject(
  * direction: an error that positively identifies as "a column of an existing
  * relation" *is* that error, whatever it wraps; and stopping can only ever
  * subtract benign verdicts, never add one.
+ *
+ * `readObject` is the relation the phrase is compared against at this node —
+ * the caller's own name at the top of the chain, or, once a node has DECLARED
+ * the table its statement targeted (#13438), that declaration for the node and
+ * everything it wraps. A string node cannot declare anything and compares
+ * against what it inherited.
  */
 function matchesDriverError(
     error: unknown,
@@ -458,11 +546,17 @@ function matchesDriverError(
         cause?: unknown;
     };
 
+    // [#13438] A declared target replaces the caller's name outright — from
+    // this node down, the phrase is compared against what the driver compiled
+    // the statement for. The NEAREST declaration to the phrase wins, because
+    // that is the actor that knows.
+    const relation = targetedTableOf(err) ?? readObject;
+
     const excludes = signature.excludes;
     if (excludes) {
         if (typeof err.code === 'string' && excludes.codes.has(err.code)) return false;
         if (typeof err.message === 'string' && excludes.matchesMessage(err.message)) return false;
-        if (typeof err.message === 'string' && excludedByReadObject(err.message, signature, readObject))
+        if (typeof err.message === 'string' && excludedByReadObject(err.message, signature, relation))
             return false;
     }
 
@@ -471,7 +565,7 @@ function matchesDriverError(
     if (typeof err.message === 'string' && signature.message.test(err.message)) return true;
 
     // Drivers commonly re-throw with the original attached as `cause`.
-    return matchesDriverError(err.cause, signature, depth + 1, readObject);
+    return matchesDriverError(err.cause, signature, depth + 1, relation);
 }
 
 /**
@@ -518,14 +612,42 @@ export function isSchemaAlreadyExistsError(error: unknown, depth = 0): boolean {
  * is that the narrowing is opt-in per call site: a new caller that forgets it
  * silently gets the old, wider verdict.
  *
+ * [#13440] That last sentence is no longer only a warning. In-repo callers are
+ * held to it by `driver-error-classification.callers.test.ts`, which walks every
+ * TypeScript source under `packages/` and fails any call of this function that
+ * omits `readObject` or passes it as `undefined`/`null`. The exemption is this
+ * module's own contract tests, which exercise the one-argument PUBLISHED form on
+ * purpose; read that file's header before adding to the exemption, because
+ * widening it is how the enforcement becomes prose again. External consumers are
+ * untouched: the signature below is unchanged, and the gate binds only callers
+ * inside this repository.
+ *
+ * [#13438] `readObject` is the caller's name for what it read, and for a
+ * federated object (ADR-0015) that is not the name the driver put in the
+ * statement — `crm_order` reads `external.remoteName: 'legacy_orders'`, so a
+ * genuinely absent remote raised a phrase naming `legacy_orders` against a
+ * caller naming `crm_order`, and the #13324 comparison read it loud. A driver
+ * that knows the table it targeted now DECLARES it on the envelope
+ * ({@link declareTargetedTable}), and a declared table is preferred over
+ * `readObject` outright: the phrase is compared against the declared name, and
+ * the caller-supplied one is not consulted at that node or below it. Absent a
+ * declaration the comparison is the #13324 one, unchanged. Two consequences,
+ * both pinned: a genuinely absent federated remote reads benign again without
+ * the caller learning the mapping; and — because a declaration is evidence the
+ * caller did not have — an envelope whose phrase names a relation other than
+ * its declared table reads NOT benign even through the one-argument form.
+ *
  * @param error - The value thrown by a driver/engine read (`find`, `findOne`, …).
  * @param readObject - The object/table whose emptiness the caller is about to
  *          treat as the truth — its own API name is fine, the comparison folds
  *          away schema qualifiers, the legacy `ns__short` prefix and case.
  *          Omitted (or not a string) means "cannot say", never "be loud".
+ *          Superseded, at any node of the `cause` chain that declares the
+ *          table its statement targeted, by that declaration (#13438).
  * @param depth - Internal `cause`-chain recursion counter; callers pass nothing.
  * @returns `true` only when the error positively identifies as
- *          table/relation-does-not-exist **for `readObject`**.
+ *          table/relation-does-not-exist **for the table that was read** —
+ *          the declared target where a driver supplied one, else `readObject`.
  */
 export function isMissingTableError(error: unknown, readObject?: string, depth = 0): boolean {
     return matchesDriverError(error, MISSING_TABLE, depth, readObject);

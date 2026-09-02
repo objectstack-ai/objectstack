@@ -585,6 +585,157 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       });
       expect(issues.filter((i) => i.severity !== 'warning')).toEqual([]);
     });
+
+    /**
+     * ── #14288 — the same warning on the #4027 descriptor-declared slots ─────
+     *
+     * The warning is about the SCOPE, not the key it was authored under, and
+     * the engine measurement says both `predicate` slots on the ledger share
+     * the run's ONE flattened variable map:
+     *
+     *  • `decision.conditions[].expression` — the decision executor
+     *    (`builtin/logic-nodes.ts`) evaluates against the very `variables`
+     *    parameter the engine hands every node executor, which is the same Map
+     *    object `seedRunVariables` built and a node `condition` is judged
+     *    against. Nothing on the path clones or narrows it.
+     *  • `screen.fields[].visibleWhen` — `refuseInvalidScreenInput` evaluates
+     *    against `run.variables` (the persisted snapshot of that same seeded
+     *    map) with the submitted bag overlaid. A SUPERSET, so the shadow still
+     *    reaches it; the overlay is the screen's own collected values and can
+     *    never hand back the bound-object field the variable displaced.
+     *
+     * `loop.collection` / `map.collection` are `flow-template`, not
+     * `predicate`, and the slot loop skips them before this pass — so they are
+     * deliberately absent here.
+     */
+    describe('reaches the descriptor-declared predicate slots (#14288)', () => {
+      // ── slot kind 1: screen field visibleWhen ──
+      it('warns on a screen field `visibleWhen` reading a shadowed bare name', () => {
+        const issues = validateStackExpressions({
+          objects: [{ name: 'duly_assignment', fields: shadowFields }],
+          flows: [{
+            name: 'record_change',
+            variables: [{ name: 'status', type: 'text' }],
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'duly_assignment' } },
+              {
+                id: 'ask',
+                type: 'screen',
+                config: { fields: [{ name: 'note', type: 'text', visibleWhen: 'status == "dispatched"' }] },
+              },
+            ],
+            edges: [],
+          }],
+        });
+        expect(issues).toHaveLength(1);
+        expect(issues[0].severity).toBe('warning');
+        expect(issues[0].where).toContain("node 'ask'");
+        // The located slot, indexed into the repeater — same label the #4027
+        // dialect check reports, so both findings point at one place.
+        expect(issues[0].where).toContain('screen field visibleWhen');
+        expect(issues[0].where).toContain('config.fields[0].visibleWhen');
+        expect(issues[0].message).toMatch(/BOTH a declared flow variable and a field on `duly_assignment`/);
+      });
+
+      // NEGATIVE CONTROL — a screen predicate reading a name that is only a
+      // FIELD. This is the canon-taught form; warning here would be exactly the
+      // over-reach options A and B were excluded for.
+      it('stays silent on a screen `visibleWhen` whose bare name is a FIELD ONLY', () => {
+        const issues = validateStackExpressions({
+          objects: [{ name: 'duly_assignment', fields: shadowFields }],
+          flows: [{
+            name: 'record_change',
+            variables: [{ name: 'retry_count', type: 'number' }],
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'duly_assignment' } },
+              {
+                id: 'ask',
+                type: 'screen',
+                config: { fields: [{ name: 'note', type: 'text', visibleWhen: 'status == "dispatched"' }] },
+              },
+            ],
+            edges: [],
+          }],
+        });
+        expect(issues).toHaveLength(0);
+      });
+
+      // ── slot kind 2: decision branch expression ──
+      it('warns on a decision branch expression reading a shadowed bare name', () => {
+        const issues = validateStackExpressions({
+          objects: [{ name: 'duly_assignment', fields: shadowFields }],
+          flows: [{
+            name: 'record_change',
+            variables: [{ name: 'amount', type: 'number' }],
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'duly_assignment' } },
+              {
+                id: 'check',
+                type: 'decision',
+                config: { conditions: [{ label: 'Large', expression: 'amount > 100000' }] },
+              },
+            ],
+            edges: [],
+          }],
+        });
+        expect(issues).toHaveLength(1);
+        expect(issues[0].severity).toBe('warning');
+        expect(issues[0].where).toContain("node 'check'");
+        expect(issues[0].where).toContain('decision branch expression');
+        expect(issues[0].where).toContain('config.conditions[0].expression');
+        expect(issues[0].message).toMatch(/bare reference `amount`/);
+      });
+
+      // NEGATIVE CONTROL — an ordinary flow-variable read on the same slot.
+      it('stays silent on a decision expression whose bare name is a VARIABLE ONLY', () => {
+        const issues = validateStackExpressions({
+          objects: [{ name: 'duly_assignment', fields: shadowFields }],
+          flows: [{
+            name: 'record_change',
+            variables: [{ name: 'batch_size', type: 'number' }],
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'duly_assignment' } },
+              {
+                id: 'check',
+                type: 'decision',
+                config: { conditions: [{ label: 'Large', expression: 'batch_size > 0' }] },
+              },
+            ],
+            edges: [],
+          }],
+        });
+        expect(issues).toHaveLength(0);
+      });
+
+      // Option C's severity floor holds on the new call site too: the slots
+      // gain a warning and nothing else. A `toHaveLength(1)` above would still
+      // pass if that one issue were an error, so this asserts it separately.
+      it('is advisory only on the descriptor slots — never an error', () => {
+        const issues = validateStackExpressions({
+          objects: [{ name: 'duly_assignment', fields: shadowFields }],
+          flows: [{
+            name: 'record_change',
+            variables: [{ name: 'status', type: 'text' }, { name: 'amount', type: 'number' }],
+            nodes: [
+              { id: 'start', type: 'start', config: { objectName: 'duly_assignment' } },
+              {
+                id: 'ask',
+                type: 'screen',
+                config: { fields: [{ name: 'note', type: 'text', visibleWhen: 'status == "dispatched"' }] },
+              },
+              {
+                id: 'check',
+                type: 'decision',
+                config: { conditions: [{ label: 'Large', expression: 'amount > 100000' }] },
+              },
+            ],
+            edges: [],
+          }],
+        });
+        expect(issues).toHaveLength(2);
+        expect(issues.filter((i) => i.severity !== 'warning')).toEqual([]);
+      });
+    });
   });
 
   // #1928 tier 4 — a text/boolean field used with an arithmetic/ordering

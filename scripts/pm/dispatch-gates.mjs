@@ -17,6 +17,26 @@
  *   node scripts/pm/dispatch-gates.mjs --repo <owner>/<name> ...  # refuse unless this checkout IS that repo
  *   node scripts/pm/dispatch-gates.mjs --self-test
  *
+ * ## Run --self-test DETACHED on an agent container (#14281)
+ *
+ * The battery re-spawns this tool's own CLI as a child process many times —
+ * deliberate (see `check-dispatch-gates.mjs`'s header for why a self-test this
+ * size is not fixture-only) — and on an agent container that makes the full
+ * run longer than the container's foreground command cap, which SIGTERMs a
+ * run past it. Do not run `--self-test` (or `pnpm check:pm-dispatch-gates`,
+ * which is exactly that flag) in the foreground there. Detach it and poll the
+ * log instead:
+ *
+ *   nohup pnpm check:pm-dispatch-gates > /tmp/pm-dispatch-gates.log 2>&1 &
+ *
+ * then tail the log file until it stops growing. Each case's `✓`/`✗` line
+ * prints the moment that case is decided, so a run killed mid-battery — by
+ * this cap, or by anything else — still leaves every case decided before the
+ * kill in the log, readable as a partial result rather than a silent zero. The
+ * measured runtime and case count are not repeated here — they move with the
+ * tree and belong to a named commit, not to this header (see #14281 for the
+ * reading that motivated this section).
+ *
  * ## Harvest the machine-readable modes, never this prose (#13462)
  *
  * The matched block renders in TWO spellings — `pnpm check:NAME` and
@@ -360,6 +380,71 @@ import { invokedAs, isEntrypoint } from '../invoked-as.mjs';
 export { isExtractConfigPath, isMetadataFormModulePath };
 
 const ROOT = new URL('../..', import.meta.url).pathname;
+
+// ── The source maskers are memoised, because discovery masks each file ~12x ──
+//
+// PROFILED, not guessed. `discoverFamilies` hands the SAME source string to six
+// analysers in one pass of its per-family loop — `extractWatchHints`,
+// `readProgramTargetsInSource`, `payloadEnvDependence`, `firstPartyImportTargets`,
+// `spawnedProgramTargets` and `packageManifestTargets` — and every one of them
+// re-derives the masked body from scratch, two of them twice (they mask, then
+// hand the masked text to `anchoredReadTargets`, which masks again). One source
+// therefore pays `maskComments` about seven times and `maskSelfTests` about five,
+// per discovery, for bytes that cannot have changed in between.
+//
+// The cost that buys: a V8 CPU profile of ONE `discoverFamilies()` call on this
+// tree — 201 families, 196 distinct gate sources, 11.8 MB of them — spent 14.3 s,
+// of which `maskSelfTests` was 4.5 s of self time (31.7%) and the `maskComments`
+// inside those six analysers most of another 5.2 s. That is the largest single
+// entry in the profile, and all of it above the first pass is repetition.
+//
+// So the maskers are memoised on their INPUT STRING. Both are pure functions of
+// that string, and JavaScript strings are immutable, so a memo is
+// observationally identical to calling through: same bytes in, same bytes out,
+// and no caller can edit the shared result under another. ⛔ This changes
+// nothing about WHAT is masked, scanned or discovered — it is the same
+// derivation run once instead of a dozen times, which is the only kind of
+// speed-up this tool may take.
+//
+// The bound is in BYTES rather than entries because the corpora these run over
+// differ by three orders of magnitude: the gate set is ~12 MB and fits whole, so
+// repeated discoveries in one process reuse it, while a tracked-corpus sweep
+// would otherwise grow the cache without limit. Eviction is oldest-first, and a
+// miss after eviction is a recomputation — never a different answer.
+const MASK_MEMO_BYTE_BUDGET = 32 * 1024 * 1024;
+
+function memoiseMask(compute) {
+  const cache = new Map();
+  let bytes = 0;
+  return (source) => {
+    // A non-string argument is passed straight through: today's behaviour is
+    // whatever the masker does with it, and a memo must not be the thing that
+    // decides otherwise.
+    if (typeof source !== 'string') return compute(source);
+    const hit = cache.get(source);
+    if (hit !== undefined) return hit;
+    const value = compute(source);
+    cache.set(source, value);
+    bytes += source.length + value.length;
+    // `Map` iterates in insertion order, so the first key is the oldest.
+    while (bytes > MASK_MEMO_BYTE_BUDGET && cache.size > 1) {
+      const oldest = cache.keys().next().value;
+      bytes -= oldest.length + cache.get(oldest).length;
+      cache.delete(oldest);
+    }
+    return value;
+  };
+}
+
+/** `maskComments`, memoised — see the block above. */
+const maskedComments = memoiseMask((source) => maskComments(source));
+
+/**
+ * `maskSelfTests(maskComments(source))`, memoised — see the block above. It
+ * composes through `maskedComments` rather than calling `maskComments` again, so
+ * the comment mask is derived once for the callers that want each half.
+ */
+const maskedModuleBody = memoiseMask((source) => maskSelfTests(maskedComments(source)));
 
 // ── What a gate that IMPORTS this module inherits (#11556) ─────────────────
 //
@@ -1518,7 +1603,7 @@ const PAYLOAD_ENV_ACCESS = new RegExp(
  * the difference between classifying a gate and classifying its docblock.
  */
 export function payloadEnvDependence(scriptSource) {
-  const body = maskSelfTests(maskComments(String(scriptSource)));
+  const body = maskedModuleBody(String(scriptSource));
   return PAYLOAD_ENV_ACCESS.test(body) ? WORKFLOW_PAYLOAD_ENV : null;
 }
 
@@ -2312,6 +2397,7 @@ const COMPOUND_ANCHOR_LEDGER = [
   ['scripts/check-regen-pending.mjs', 'prePushIsArmedSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'decisionTableSelfTest', false],
   ['scripts/check-turbo-task-graph.mjs', 'runSelfTest', false],
+  ['scripts/check-workspace-manifest-cycles.mjs', 'runSelfTest', false],
   ['scripts/check-self-test-wired.mjs', 'carriesSelfTest', true],
   ['scripts/check-self-test-workflow-commands.mjs', 'runSelfTest', true],
   ['scripts/check-step-collectors.mjs', 'selfTestTargets', true],
@@ -2345,7 +2431,7 @@ export const COMPOUND_ANCHOR_KEYS = new Map(
  */
 export function compoundAnchorDecls(source) {
   const scan = scanSource(source);
-  const decommented = maskComments(source);
+  const decommented = maskedComments(source);
   const out = [];
   for (const m of decommented.matchAll(SELF_TEST_DECL)) {
     if (scan.comment[m.index] || scan.literal[m.index]) continue;
@@ -2938,7 +3024,7 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  * have to remember to do it.
  */
 export function extractWatchHints(scriptSource, scriptPath = null, { tree = null } = {}) {
-  const moduleBody = maskSelfTests(maskComments(scriptSource));
+  const moduleBody = maskedModuleBody(scriptSource);
   const hints = new Set();
   for (const m of moduleBody.matchAll(/['"`]([^'"`\n]{2,120})['"`]/g)) {
     const raw = m[1];
@@ -3154,7 +3240,7 @@ export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}
   // The same masking hint extraction uses, for the same reason: an import
   // written out in a docblock, or one inside a self-test fixture, is a
   // specifier this script NAMES rather than one it loads.
-  const body = maskSelfTests(maskComments(String(source)));
+  const body = maskedModuleBody(String(source));
   const specifiers = new Set();
   for (const m of body.matchAll(IMPORT_FROM_SPECIFIER)) specifiers.add(m[2]);
   for (const m of body.matchAll(SIDE_EFFECT_IMPORT)) specifiers.add(m[2]);
@@ -5213,7 +5299,7 @@ function combineReadings(readings, name) {
  * own repo-relative path — the anchor spellings resolve against it.
  */
 export function scratchDirSitesInSource(rel, source) {
-  const masked = maskComments(String(source));
+  const masked = maskedComments(String(source));
   // A call spelled inside a STRING is a fixture, not a call — this module's own
   // self-test plants fixture sources as string literals, and read as code they
   // reported four sites in a file that creates none of them. Comments are
@@ -5373,7 +5459,7 @@ export function readProgramTargetsInSource(rel, source, isTracked) {
 
 /** Every TRACKED file the source opens at a path anchored to its own location. */
 export function anchoredReadTargets(rel, source, isTracked) {
-  const masked = maskComments(String(source));
+  const masked = maskedComments(String(source));
   const { literal } = scanSource(masked);
   const ctx = {
     fileSegs: rel.split('/'),
@@ -5512,7 +5598,7 @@ export function spawnedProgramTargets(rel, source, isTracked) {
   // follow inherits a POPULATION, and a spawn written inside a self-test body
   // is a fixture the self-test drives rather than the gate's work. The read
   // scan next door wants the opposite from the same bytes, and says so.
-  const masked = maskSelfTests(maskComments(String(source)));
+  const masked = maskedModuleBody(String(source));
   const { literal } = scanSource(masked);
   const ctx = {
     fileSegs: rel.split('/'),
@@ -5696,7 +5782,7 @@ const PACKAGE_MANIFEST_TARGET = /(?:^|\/)package\.json$/;
 const MANIFEST_EXPORTS_READ = /(?<!\bmodule)\.exports\b|\[\s*(['"`])exports\1\s*\]|\bexports\s*[:?]/;
 
 export function packageManifestTargets(rel, source, isTracked) {
-  const masked = maskSelfTests(maskComments(String(source)));
+  const masked = maskedModuleBody(String(source));
   if (!MANIFEST_EXPORTS_READ.test(masked)) return [];
   return anchoredReadTargets(rel, masked, isTracked).filter((t) => PACKAGE_MANIFEST_TARGET.test(t));
 }
@@ -6614,7 +6700,7 @@ export function stampsAnErrorCodeLiteral(path, readSource = readTrackedSource) {
   // Comments are masked for the reason the gate masks them: a code DISCUSSED in
   // prose is not a code stamped in source. This narrows nothing the gate would
   // have reported, so it costs no recall in the expensive direction.
-  const masked = maskComments(source);
+  const masked = maskedComments(source);
   return CODE_STAMP_POSITION.test(masked) || CODE_CONSTANT_BINDING.test(masked);
 }
 
@@ -7849,6 +7935,26 @@ export function residueLines(
 // ---------------------------------------------------------------------------
 
 /**
+ * The single source of truth for the model tier the PM lane's governance
+ * reads — clause ②'s CONTRACT-REVIEW tier: the tier a card that changes
+ * contract accept/reject behaviour or widens the public surface must be
+ * dispatched at, and the tier the `needs:contract-review` re-review sub-round
+ * must itself be running at (its opening self-check reads this). Declared HERE
+ * and only here, as a constant, so a model upgrade is a one-line change in one
+ * file — the clause-① mandate rows below read it, the self-test compares
+ * against it, and the PM skill's prose names it, so the model id is spelled as
+ * a VALUE on this one line and nowhere else across `scripts/pm/**` and
+ * `.claude/skills/pm-dispatch/**` (a second value site is what let this
+ * constant drift from the served tier unnoticed). The comparison against the
+ * served tier is EXACT, never a family or prefix floor — widening a governance
+ * gate's accept set is the maintainer's decision, not a refresh-time
+ * convenience. The review label deliberately names WHAT is reviewed, never a
+ * model (maintainer, 2026-08-16: 「needs:fable-review 这个标签不好,下次模型升级怎么办」).
+ * Rulebook: `.claude/skills/pm-dispatch/SKILL.md` 「入队与落地」 — the clause-② gate and the `needs:contract-review` review-chain bullets.
+ */
+export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
+
+/**
  * The globs that MANDATE a model tier for any card whose file surface touches
  * them, as DATA. This is the one list in this file besides CHANGE_KIND_GATES,
  * and it is here for the same reason: it is enumerable, so a guard can hold it.
@@ -7881,7 +7987,7 @@ export function residueLines(
  * about paths:
  *
  *   - clause ①, encoded below: a card editing the PM lane's PROTOCOL-SEMANTIC
- *     surfaces is `claude-fable-5` — the pm-dispatch SKILL.md main file, every
+ *     surfaces is `CONTRACT_REVIEW_TIER` — the pm-dispatch SKILL.md main file, every
  *     file carrying an enforced copy of the decision frame (the COPIES table
  *     of check:skill-frame-sync), and the dev-agent definition. Narrowed from
  *     "the whole skill tree, references included" by the maintainer's
@@ -7891,7 +7997,7 @@ export function residueLines(
  *     file-surface predicate, and exactly what this script takes as argv;
  *   - clause ②, NOT encoded and deliberately not: a card that changes contract
  *     accept/reject behaviour or widens the public surface is also
- *     `claude-fable-5`. That is judged from the card's CONTENT — what the change
+ *     `CONTRACT_REVIEW_TIER`. That is judged from the card's CONTENT — what the change
  *     does to the contract — and a path cannot answer it. An ordinary-looking
  *     surface (one package's source file) is the NORMAL shape of a clause-②
  *     card. The closest a path can honestly get is SUSPICION:
@@ -7975,34 +8081,20 @@ export function residueLines(
 export const MANDATORY_TIER_GLOBS = [
   {
     glob: '.claude/skills/pm-dispatch/SKILL.md',
-    tier: 'claude-fable-5',
+    tier: CONTRACT_REVIEW_TIER,
     why: 'clause ① of the model-tiering ruling (narrowed to protocol semantics, 2026-08-20): the PM dispatch skill MAIN file is the lane\'s own operating protocol and a wrong edit propagates to every later dispatch — references/** dropped out of the path mandate that day',
   },
   {
     glob: '.claude/agents/os-dev.md',
-    tier: 'claude-fable-5',
+    tier: CONTRACT_REVIEW_TIER,
     why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and it carries an enforced copy of the decision frame',
   },
   {
     glob: 'skills/objectstack-pm-dispatch/SKILL.md',
-    tier: 'claude-fable-5',
+    tier: CONTRACT_REVIEW_TIER,
     why: 'clause ① (2026-08-20 narrowing): the published PM skill carries two enforced copies of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
   },
 ];
-
-/**
- * Clause ②'s single source of truth for the CONTRACT-REVIEW tier: the tier a
- * card that changes contract accept/reject behaviour or widens the public
- * surface must be dispatched at, and the tier the `needs:contract-review`
- * re-review sub-round must itself be running at (its opening self-check reads
- * this). Declared HERE and only here, as a constant, so a model upgrade is a
- * one-line change in one file. The review label deliberately names WHAT is
- * reviewed, never a model (maintainer, 2026-08-16: 「needs:fable-review 这个标
- * 签不好,下次模型升级怎么办」), and the PM skill's prose points at this
- * constant instead of spelling a model name.
- * Rulebook: `.claude/skills/pm-dispatch/SKILL.md` 「入队与落地」 — the clause-② gate and the `needs:contract-review` review-chain bullets.
- */
-export const CONTRACT_REVIEW_TIER = 'claude-fable-5';
 
 /**
  * The globs that make a surface a clause-② SUSPECT — a HINT, never a verdict.
@@ -10032,7 +10124,19 @@ export function bannerLines({ identity, paths = [], drift = null }) {
 
 function selfTest() {
   const cases = [];
-  const t = (name, cond) => cases.push([name, cond]);
+  // Stream the verdict the moment it is decided (#14281) rather than only at
+  // the tail: every `t()` call evaluates `cond` eagerly at the call site, so
+  // the line below is not a preview of the tail loop's output — it prints the
+  // SAME verdict, just however many calls earlier than a buffered run did. A
+  // run that dies mid-battery (the container's foreground cap SIGTERMs a run
+  // past ~10 minutes; see check-dispatch-gates.mjs's header for the detached
+  // workaround) used to leave zero case lines; now the log already carries
+  // every case decided before the kill. `cases` still collects every entry —
+  // the tail's `failed`/`length` summary reads it unchanged.
+  const t = (name, cond) => {
+    cases.push([name, cond]);
+    console.log(`  ${cond ? '✓' : '✗'} ${name}`);
+  };
 
   const wf = [
     'jobs:',
@@ -15200,12 +15304,12 @@ function selfTest() {
   // mandate, and the ordinary surface that must NOT be mandated (a tool that
   // mandates everything is ignored, which loses the guardrail by the other road).
   const fableOf = (paths) => deriveTier(paths);
-  t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === 'claude-fable-5');
-  t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === 'claude-fable-5');
-  t('the published PM skill (two enforced frame copies) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === 'claude-fable-5');
+  t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
+  t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === CONTRACT_REVIEW_TIER);
+  t('the published PM skill (two enforced frame copies) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).mandatory === false);
   const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/agents/os-dev.md']);
-  t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === 'claude-fable-5');
+  t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === CONTRACT_REVIEW_TIER);
   t('the mixed verdict reports the offending path, not just the verdict', mixed.hits.length === 1 && mixed.hits[0].path.endsWith('.claude/agents/os-dev.md'));
   t('an ordinary surface carries no path-derived mandate', fableOf(['packages/spec/src/data/filter.zod.ts']).mandatory === false);
   t("this tool's own file is not mandatory — the card that added this section reads itself correctly", fableOf(['scripts/pm/dispatch-gates.mjs']).mandatory === false);
@@ -15218,7 +15322,7 @@ function selfTest() {
   // The rendering is where the invariant is actually delivered: the claim
   // comment quotes THESE lines.
   const mandLines = tierLines(mixed).join('\n');
-  t('the mandatory rendering names the tier', mandLines.includes('claude-fable-5'));
+  t('the mandatory rendering names the tier', mandLines.includes(CONTRACT_REVIEW_TIER));
   t('the mandatory rendering says MANDATORY in a word a reader cannot skim past', mandLines.includes('MANDATORY'));
   t('the mandatory rendering shows its provenance — the path and the glob that covered it', mandLines.includes("- .claude/agents/os-dev.md ⇢ '.claude/agents/os-dev.md'"));
   t('the mandatory rendering names every sanctioned exit, so a downgrade needs a stated reason', mandLines.includes('quota exemption') && mandLines.includes('opus, never lower') && mandLines.includes('one-line-class') && mandLines.includes('proactive low-headroom'));
@@ -15239,7 +15343,7 @@ function selfTest() {
   let ambiguityRefused = false;
   try {
     deriveTier(['.claude/skills/pm-dispatch/SKILL.md'], [
-      { glob: '.claude/skills/pm-dispatch/**', tier: 'claude-fable-5', why: 'a' },
+      { glob: '.claude/skills/pm-dispatch/**', tier: CONTRACT_REVIEW_TIER, why: 'a' },
       { glob: '.claude/skills/**', tier: 'opus', why: 'b' },
     ]);
   } catch {
@@ -15277,7 +15381,7 @@ function selfTest() {
     /* frameFiles stays empty and the cases below fail loudly */
   }
   t('the frame-sync COPIES table is readable and non-empty, so the pin below is not vacuous', frameProbe.status === 0 && Array.isArray(frameFiles) && frameFiles.length > 0);
-  t(`every frame-sync-enforced copy is fable-mandated (unmandated: ${frameFiles.filter((f) => !deriveTier([f]).mandatory).join(', ') || 'none'})`, frameFiles.length > 0 && frameFiles.every((f) => deriveTier([f]).tier === 'claude-fable-5'));
+  t(`every frame-sync-enforced copy is fable-mandated (unmandated: ${frameFiles.filter((f) => !deriveTier([f]).mandatory).join(', ') || 'none'})`, frameFiles.length > 0 && frameFiles.every((f) => deriveTier([f]).tier === CONTRACT_REVIEW_TIER));
   t('the SKILL.md main file and the dev-agent definition are declared in their own right, not only via the frame table', MANDATORY_TIER_GLOBS.some((g) => g.glob === '.claude/skills/pm-dispatch/SKILL.md') && MANDATORY_TIER_GLOBS.some((g) => g.glob === '.claude/agents/os-dev.md'));
 
   // ── Clause-② suspicion (the enqueue-gate card): hit / no hit / wording ────
@@ -16829,10 +16933,12 @@ function selfTest() {
     }
   }
 
+  // The per-case line already printed inside `t()`, streamed as each verdict
+  // was decided (#14281) — this tail is the summary only, unchanged in shape
+  // and wording from the pre-streaming version.
   let failed = 0;
-  for (const [name, cond] of cases) {
+  for (const [, cond] of cases) {
     if (!cond) failed++;
-    console.log(`  ${cond ? '✓' : '✗'} ${name}`);
   }
   if (failed) {
     console.error(`✗ dispatch-gates self-test: ${failed} of ${cases.length} case(s) failed.`);

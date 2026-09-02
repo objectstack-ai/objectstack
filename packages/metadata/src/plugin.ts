@@ -262,7 +262,7 @@ export interface MetadataPluginOptions {
 
 export class MetadataPlugin implements Plugin {
     name = 'com.objectstack.metadata';
-    type = 'standard';
+    type = 'standard' as const;
     version = '1.0.0';
     /**
      * Services init() UNCONDITIONALLY registers (ADR-0116, #4131) — lets the

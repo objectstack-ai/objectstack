@@ -521,6 +521,12 @@ function report({ list = false } = {}) {
 // the reconciler at both sides of every decision they make, so a refactor that
 // neuters either fails HERE rather than turning every future PR green.
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-driver-memory-census self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   const expect = (label, cond) => { if (!cond) failures.push(label); };
@@ -734,6 +740,8 @@ function selfTest() {
       + 'proves discovery reaches every ruled consumer in the real tree, and holds the ruled set to the '
       + 'rulings that admitted it — a claim that survives the set shrinking to empty.',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 const argv = process.argv.slice(2);
@@ -742,5 +750,14 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 
 if (!invokedDirectly) {
   // imported as a module — expose the exports and do nothing else
-} else if (argv.includes('--self-test')) selfTest();
+} else if (argv.includes('--self-test')) {
+  if (selfTest() !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ check-driver-memory-census self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
+}
 else report({ list: argv.includes('--list') });

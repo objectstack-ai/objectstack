@@ -71,7 +71,7 @@ export interface ObservabilityServicePluginOptions {
 export class ObservabilityServicePlugin implements Plugin {
     name = 'com.objectstack.observability.service';
     version = '1.0.0';
-    type = 'standard';
+    type = 'standard' as const;
 
     private readonly options: ObservabilityServicePluginOptions;
 

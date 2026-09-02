@@ -16,6 +16,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { AutomationEngine, registerScreenNodes } from '@objectstack/service-automation';
 import { APPROVAL_REVISE_NODE_TYPE } from '@objectstack/spec/automation';
+import { BUILTIN_OPERATION_MESSAGES } from '@objectstack/spec/system';
 import { ApprovalService } from './approval-service.js';
 import { registerApprovalNode } from './approval-node.js';
 import { bindApprovalLockHook, APPROVALS_HOOK_PACKAGE } from './lifecycle-hooks.js';
@@ -368,6 +369,148 @@ describe('Send back for revision (ADR-0044)', () => {
 
     // The window is closed: resubmit is no longer possible.
     await expect(service.resubmit(req.id, { actorId: 'submitter' }, asUser('submitter'))).rejects.toThrow(/INVALID_STATE/);
+  });
+
+  describe('the #3424 override reaches `pending` only — override-recall of a `returned` request is refused (#12775)', () => {
+    // Maintainer ruling 2026-09-02 (via the director seat): the status-blind
+    // override short-circuit in `recall` is re-scoped to `pending`, spelled
+    // exactly as `attachViewers` computes `viewer.can_override`, so the gate,
+    // the `isOverrideActor` doc block and the viewer flag agree at one point.
+    // Before, the short-circuit sat above ADR-0044's widened state check and
+    // admitted an override actor on `returned` too — a reach no UI ever
+    // offered (the flag is ANDed with `status === 'pending'` where it is
+    // computed) and no pin ever held. The narrowing is deliberate and
+    // declared as a behaviour change in the package changeset; this block is
+    // the pin on it, with its reverse checks.
+    //
+    // Both #3424 override postures are exercised. This harness's requests
+    // carry no organization: a tenant admin qualifies as an override actor on
+    // them (`isOverrideActor`: a null-org request is global), and — as the
+    // `can_override` pin above notes — `loadRequest` narrows by the CALLER's
+    // org, so neither context carries a `tenantId` (the ADR-0095 `posture` is
+    // the tenant-admin signal here). Neither is the submitter, who is
+    // `submitter`.
+    const PLATFORM_ADMIN = { isSystem: false, userId: 'root', positions: [], permissions: ['admin_full_access'] } as any;
+    const TENANT_ADMIN = { isSystem: false, userId: 'org_owner', posture: 'TENANT_ADMIN', positions: [], permissions: [] } as any;
+    /**
+     * `@objectstack/rest`'s `handleApprovalError` derives 403 + the ADR-0112
+     * wire code `FORBIDDEN` from this prefix and strips it off the body — the
+     * prefix IS the status/code contract at the service seam.
+     */
+    const WIRE_CODE = /^FORBIDDEN:\s/;
+    const NOT_SUBMITTER = `FORBIDDEN: ${BUILTIN_OPERATION_MESSAGES.en.approval_recall_not_submitter}`;
+    const refusalOf = (p: Promise<unknown>) => p.then(() => null, (e: any) => e);
+
+    /** A pending request on `x1`, with the REAL record-lock hook bound. */
+    async function pendingRequest() {
+      registerReviseFlow();
+      const { runId, req } = await startFlow();
+      let hook: ((ctx: any) => Promise<void>) | undefined;
+      bindApprovalLockHook({
+        registerHook: (_e: string, h: any) => { hook = h; },
+        unregisterHooksByPackage: () => 0,
+        find: fake.find.bind(fake),
+      } as any, noopLogger);
+      expect(hook).toBeDefined();
+      const editAttempt = () => hook!({
+        object: 'fin_expense',
+        input: { id: 'x1', data: { amount: 1200 } },
+        session: { isSystem: false, positions: [] },
+      });
+      return { runId, req, editAttempt };
+    }
+
+    /** The same request, sent back by its approver: `returned`, unlocked (ADR-0044). */
+    async function returnedRequest() {
+      const opened = await pendingRequest();
+      await service.sendBack(opened.req.id, { actorId: 'u1' }, asUser('u1'));
+      const row = await service.getRequest(opened.req.id, SYSTEM_CTX);
+      expect(row!.status).toBe('returned');
+      return opened;
+    }
+
+    const runStatus = async () => (await automation.listRuns('expense_approval'))[0].status;
+
+    it('the narrowing: an override actor is refused on `returned` with the non-submitter refusal, and nothing moves', async () => {
+      const { req, editAttempt } = await returnedRequest();
+      await expect(editAttempt()).resolves.toBeUndefined();         // returned → unlocked (ADR-0044)
+      const runBefore = await runStatus();
+
+      for (const [label, actor, actorId] of [['platform admin', PLATFORM_ADMIN, 'root'], ['tenant admin', TENANT_ADMIN, 'org_owner']] as const) {
+        // The viewer flag the gate now agrees with, read by the same actor.
+        const seen = await service.getRequest(req.id, actor);
+        expect(seen!.status, label).toBe('returned');
+        expect(seen!.viewer!.can_override, label).toBe(false);
+
+        const err = await refusalOf(service.recall(req.id, { actorId, comment: 'rescue' }, actor));
+        expect(err, label).toBeInstanceOf(Error);
+        // The EXISTING non-submitter refusal, envelope and sentence: the
+        // `FORBIDDEN:` prefix is what REST maps to 403 + code `FORBIDDEN`;
+        // the sentence is the operation catalog's (#11993). No new code.
+        expect(err.message, label).toMatch(WIRE_CODE);
+        expect(err.message, label).toBe(NOT_SUBMITTER);
+      }
+
+      // Nothing moved: status, the action ledger, the record lock, the run.
+      const after = await service.getRequest(req.id, SYSTEM_CTX);
+      expect(after!.status).toBe('returned');
+      expect(await actionsOf(req.id)).not.toContain('recall');
+      await expect(editAttempt()).resolves.toBeUndefined();         // still unlocked — the refusal touched no lock
+      expect(await runStatus()).toBe(runBefore);
+      expect(await runStatus()).not.toBe('cancelled');
+      // The window is still open for its owner.
+      await service.resubmit(req.id, { actorId: 'submitter' }, asUser('submitter'));
+      const round2 = await pendingReq();
+      expect(round2.id).not.toBe(req.id);
+      expect((await service.getRequest(round2.id, SYSTEM_CTX))?.round).toBe(2);
+    });
+
+    it('reverse check: the same override actor still recalls the same request while `pending`, and the flag says so', async () => {
+      const { req, editAttempt } = await pendingRequest();
+      await expect(editAttempt()).rejects.toThrow(/RECORD_LOCKED/);   // pending → locked
+      const seen = await service.getRequest(req.id, PLATFORM_ADMIN);
+      expect(seen!.status).toBe('pending');
+      expect(seen!.viewer!.can_override).toBe(true);
+
+      const out = await service.recall(req.id, { actorId: 'root', comment: 'unstaffed role' }, PLATFORM_ADMIN);
+      expect(out.request.status).toBe('recalled');
+      expect(out.resumed).toBe(true);                                   // resumed down the reject branch
+      expect(await actionsOf(req.id)).toContain('recall');
+      await expect(editAttempt()).resolves.toBeUndefined();            // the #3424 release still happens
+    });
+
+    it('reverse check (tenant admin): admitted on `pending` too — the narrowing is about status, not posture', async () => {
+      const { req } = await pendingRequest();
+      const out = await service.recall(req.id, { actorId: 'org_owner' }, TENANT_ADMIN);
+      expect(out.request.status).toBe('recalled');
+      expect(await actionsOf(req.id)).toContain('recall');
+    });
+
+    it("the submitter's own revise-window recall is untouched (ADR-0044)", async () => {
+      const { runId, req } = await returnedRequest();
+      const out = await service.recall(req.id, { actorId: 'submitter', comment: 'never mind' }, asUser('submitter'));
+      expect(out.request.status).toBe('recalled');
+      expect(out.resumed).toBe(false);                                  // terminally cancelled, not resumed
+      expect(out.runId).toBe(runId);
+      expect(await runStatus()).toBe('cancelled');
+      expect(await actionsOf(req.id)).toContain('recall');
+    });
+
+    it('control: a non-submitter without the override is refused on `returned` exactly as before — same envelope, same sentence', async () => {
+      const { req } = await returnedRequest();
+      // The approver who sent it back: not the submitter, holds no override.
+      const plain = await refusalOf(service.recall(req.id, { actorId: 'u1' }, asUser('u1')));
+      expect(plain).toBeInstanceOf(Error);
+      expect(plain.message).toMatch(WIRE_CODE);
+      expect(plain.message).toBe(NOT_SUBMITTER);
+      // The override actor's refusal on `returned` is byte-identical to it:
+      // the narrowing added no refusal shape, it routed one more caller
+      // through the existing one.
+      const admin = await refusalOf(service.recall(req.id, { actorId: 'root' }, PLATFORM_ADMIN));
+      expect(admin.message).toBe(plain.message);
+      expect((await service.getRequest(req.id, SYSTEM_CTX))!.status).toBe('returned');
+      expect(await actionsOf(req.id)).not.toContain('recall');
+    });
   });
 
   it('refuses resubmit while another pending request collides on the record (run stays resumable)', async () => {
