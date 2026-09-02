@@ -153,10 +153,6 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.options.color": {
         label: "Color de opción"
       },
-      "fields.options.icon": {
-        label: "Icono",
-        helpText: "Nombre de icono Lucide"
-      },
       "fields.options.description": {
         label: "Descripción"
       },
