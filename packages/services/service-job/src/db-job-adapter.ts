@@ -75,11 +75,11 @@ function uid(prefix: string): string {
  * DbJobAdapter — IJobService that persists job registry and execution
  * history to ObjectQL while delegating timer mechanics downwards.
  *
- * Every SCHEDULED fire goes to the `cron` adapter callers supply — both
- * `cron` and `interval` schedules — because that adapter is the one that
- * leader-elects each fire against the cluster lock (#13686); `inner`
+ * Every SCHEDULED fire goes to the `cron` adapter callers supply — `cron`,
+ * `interval` and `once` schedules alike — because that adapter is the one that
+ * leader-elects each fire against the cluster lock (#13686, #13918); `inner`
  * (`IntervalJobAdapter`) keeps the registration for `trigger()` / `replay()`
- * and owns the timer only for the schedule types nothing else can run. See
+ * and owns the timer only when no `cron` adapter was assembled at all. See
  * {@link DbJobAdapter.schedule} for the routing and its no-cron fallbacks.
  *
  * Persisted side effects:
@@ -121,20 +121,32 @@ export class DbJobAdapter implements IJobService {
 
   /**
    * Register `name`, and decide WHICH adapter owns its scheduled fire — which
-   * is the same thing as deciding whether that fire is leader-elected (#13686).
+   * is the same thing as deciding whether that fire is leader-elected (#13686,
+   * #13918).
    *
    * `CronJobAdapter` is the only adapter here that holds a cluster lock, and it
-   * takes that lock in `runScheduled()` — the single path BOTH its cron limb and
-   * its interval limb fire through. `IntervalJobAdapter` has no lock at all. So on
+   * takes that lock in `runScheduled()` — the single path ALL THREE of its limbs
+   * fire through, `once` included. `IntervalJobAdapter` has no lock at all. So on
    * a multi-replica deployment the routing below *is* the leader election: every
    * schedule type this adapter hands to `inner` runs on every replica at once.
    * `interval` used to be one of them, which made #2219's declared "leader-elect
    * scheduled cron/interval jobs across the cluster" true of only its cron half —
    * measured in the field as one tick executing N times, its duplicate writes
    * visible wherever per-handler business de-duplication did not happen to cover
-   * them (three recipients, six notification rows, 54 ms apart).
+   * them (three recipients, six notification rows, 54 ms apart). `once` was the
+   * last one left (#13918), and the worst-shaped of the three: a one-shot has no
+   * later tick during which a business-level de-duplication marker could win, so
+   * every replica's copy lands inside the same short window.
    *
-   * Both delegated types are ALSO registered in `inner` — via
+   * **`once` is AT-MOST-ONCE per cluster, and deliberately so** (maintainer
+   * ruling 2026-09-01). Election decides *who* fires, never *that* the fire
+   * survives: there is no second deadline, so a leader that dies mid-fire loses
+   * the fire outright and nothing re-arms it. That takes nothing away — today's
+   * unelected `setTimeout` is not persisted either and the same crash loses it on
+   * every replica at once — so no re-arm, no "release the lease only on success",
+   * and no persistence is built here for a scenario no measured consumer has.
+   *
+   * All three delegated types are ALSO registered in `inner` — via
    * {@link IntervalJobAdapter.register}, which stores without arming a timer, so
    * one process never ends up holding an elected timer and an unelected one for
    * the same job. That registration is what keeps `trigger()`, `replay()`,
@@ -143,12 +155,18 @@ export class DbJobAdapter implements IJobService {
    * an operator asking THIS node to run the job now.
    *
    * **Without a `cron` adapter** (`enableCron: false`, or its construction threw)
-   * the two types part company, because their fallbacks are not the same choice: a
+   * the types part company, because their fallbacks are not the same choice: a
    * `cron` schedule cannot run here at all, so it is warned about and left to
-   * manual triggering, whereas an `interval` schedule still fires on `inner`'s own
-   * timer exactly as it did before this routing existed. Unelected, so it is warned
-   * about too — but silently dropping a job an assembly CAN run is not an
-   * improvement on running it more often than intended.
+   * manual triggering, whereas `interval` and `once` schedules still fire on
+   * `inner`'s own timer exactly as they did before this routing existed —
+   * silently dropping a job an assembly CAN run is not an improvement on running
+   * it more often than intended. `interval` says so in a `warn`; `once`
+   * deliberately does NOT, and the asymmetry is about FREQUENCY, not about one
+   * being less worth saying: interval registrations are per-plugin-startup and
+   * countable, while `once` registrations are per-occurrence — the wait-node arms
+   * one per suspended flow run (`service-automation`
+   * `builtin/wait-node.ts`) — so the same line there is a per-run log flood, and
+   * the way to make everyone skim `warn` is to write one on a hot path.
    */
   async schedule(name: string, schedule: JobSchedule, handler: JobHandler, options?: JobScheduleOptions): Promise<void> {
     const wrapped = this.wrap(name, handler, 'schedule', options);
@@ -162,7 +180,7 @@ export class DbJobAdapter implements IJobService {
       );
       // Still record in inner so trigger() works
       await this.inner.register(name, schedule, wrapped, downstream);
-    } else if (schedule.type === 'interval' && this.cron) {
+    } else if ((schedule.type === 'interval' || schedule.type === 'once') && this.cron) {
       // The leader-elected path — same one cron takes, for the same reason.
       await this.cron.schedule(name, schedule, wrapped, downstream);
       await this.inner.register(name, schedule, wrapped, downstream);
