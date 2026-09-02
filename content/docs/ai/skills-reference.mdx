@@ -205,7 +205,7 @@ Upgrade an ObjectStack metadata project across a protocol major — run the dete
 
 Use when a project is on an older protocol major and must move to the current one, when `@objectstack/spec` was bumped across a major and metadata or code stopped parsing, when a parse or `tsc` error quotes a `[REMOVED]` prescription, or when asked to "upgrade to v17" / "升级到 v17" / "一键升级元数据项目".
 
-Do not use to author new metadata (the domain skills cover that), to design a retirement in the ObjectStack platform repo itself (that is the platform's own internal playbook), or to hand-write a rewrite the conversion chain already applies — running the chain is always the first step, never a fallback.
+Do not use to author new metadata (the domain skills cover that), or to reconcile physical database drift (that is objectstack-platform's `os migrate plan` / `os migrate apply`).
 
 **Tags:** `upgrade`, `migration`, `protocol`, `major`, `retired-keys`, `tombstone`, `conversions`, `validate`, `report`
 
