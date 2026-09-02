@@ -1,0 +1,46 @@
+{
+  "type": "route_generation",
+  "_note": "RouteGenerationConfigSchema — packages/spec/src/api/rest-server.zod.ts#RouteGenerationConfigSchema, the `routes` sub-object of RestServerConfig. It is not a metadata type, not a request body and not a manifest: it is part of the REST server's CONSTRUCTION ARGUMENT, so no registry has ever held it and no ratchet rooted in one could ask who reads it. The ledger governs it through the gate's SPEC_ONLY_SCHEMAS override, the same route `query` / `qa` / `manifest` take; check-liveness.mts carries the rationale, including why the four sub-objects are rooted separately instead of the whole RestServerConfigSchema (the walk drills one level, and rooting on the whole config would leave `metadata.endpoints.schema` and `batch.operations.upsertMany` with no row of their own). Seeded 2026-09-02 from the census filed with #14369, which is the second half of #11984's measurement: that PR made RestServer.normalizeConfig PARSE and CONSUME this sub-object instead of casting it. That settles accept/reject — an out-of-enum or out-of-range value is now refused at construction instead of sitting in the normalized config as if it were declared — and that is ALL it settles. Executing a declared contract does not give a key a consumer, which is exactly the distinction this file records. Every key in this file is `dead`, and that is the finding: the whole sub-object is parsed, defaulted and normalized into `this.config.routes`, and nothing ever reads it back. `routes.excludeObjects: ['sys_log']` excludes nothing; `routes.nameTransform: 'plural'` still mounts every route under the object's raw name. This file RECORDS status; it decides nothing. The enforce-or-remove call per dead key (ADR-0049) is a follow-up on the human floor — the enforce route is a feature per key, and for a key that is published in an `@example` or in the generated reference docs the remove route is a capability retirement, not a tidy-up. `routes.*` in particular reads as designed-but-never-wired: enforcing it is real work in route generation and changes the mounted surface. Census method and scope, re-run at 2514d49f3 (2026-09-02): read sites in packages/rest/src non-test sources, excluding NormalizedRestServerConfig's type declaration and normalizeConfig itself (a key the normalizer writes into its own output is not thereby read); comments excluded; plus a repo-wide grep outside packages/spec and rest-server.ts, which finds only changesets, the generated reference docs and the #11984 refusal tests. objectui @d4c6a86 is clean (0 hits for every key here). The closed cloud runtime was not reachable from the measuring container, so the declared scope stays in-repo rather than claiming a sweep that was not run.",
+  "props": {
+    "includeObjects": {
+      "status": "dead",
+      "verifiedAt": "2026-09-02",
+      "evidenceScope": "in-repo",
+      "note": "0 read sites at 2514d49f3. Normalized into `this.config.routes.includeObjects` and never consulted: route registration iterates the registered objects with no include filter, so an author who names three objects still gets routes for all of them. Dead at the CONSUMER — the authored value arrives intact and is simply never read."
+    },
+    "excludeObjects": {
+      "status": "dead",
+      "verifiedAt": "2026-09-02",
+      "evidenceScope": "in-repo",
+      "note": "0 read sites at 2514d49f3. Same shape as `includeObjects`: normalized, never consulted, so an excluded object is still mounted. This key is the one customer-visible member of the ten: RestServerConfigSchema's own `@example` advertises `routes: { excludeObjects: ['system_log'] }`, and the generated reference page (content/docs/references/api/rest-server.mdx) repeats the declaration — published prose promising a capability the runtime does not deliver. Fixing that example belongs to whichever limb this key lands on, not here."
+    },
+    "nameTransform": {
+      "status": "dead",
+      "verifiedAt": "2026-09-02",
+      "evidenceScope": "in-repo",
+      "note": "0 read sites at 2514d49f3. Repo-wide there are no reads outside packages/spec and rest-server.ts either. The enum is enforced at the door since #11984 — `'snake_case'` is refused at construction — but no route builder transforms a name, so `'plural'`, `'kebab-case'` and `'camelCase'` all mount exactly what `'none'` mounts. An enum that is validated and then ignored is the clearest case in this file of accept/reject and liveness being different questions."
+    },
+    "overrides": {
+      "children": {
+        "enabled": {
+          "status": "dead",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "note": "0 read sites at 2514d49f3. The per-object `overrides` record is normalized and never read, so no object's routes can be turned off through it. ⚠️ Do not read the `overrides` hits in packages/rest/src as consumers of this key: rest-server.ts#registerDataActionEndpoints reads `body.overrides` off a REQUEST BODY, and http-request-test-builder.ts takes an `overrides` argument — different keys with the same name."
+        },
+        "basePath": {
+          "status": "dead",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "note": "0 read sites at 2514d49f3. Inherits the container's fate: the record is never read, so a per-object custom base path changes no mounted path. The live base path is `crud.dataPrefix` (see the crud_endpoints ledger), which is deployment-wide rather than per-object."
+        },
+        "operations": {
+          "status": "dead",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "note": "0 read sites at 2514d49f3. The per-object operation switches are never read. The operation switches that ARE read are the deployment-wide `crud.operations.*` (crud_endpoints ledger) — this key is their per-object counterpart and it does nothing."
+        }
+      }
+    }
+  }
+}

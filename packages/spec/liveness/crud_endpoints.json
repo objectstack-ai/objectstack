@@ -1,0 +1,92 @@
+{
+  "type": "crud_endpoints",
+  "_note": "CrudEndpointsConfigSchema — packages/spec/src/api/rest-server.zod.ts#CrudEndpointsConfigSchema, the `crud` sub-object of RestServerConfig. It is not a metadata type, not a request body and not a manifest: it is part of the REST server's CONSTRUCTION ARGUMENT, so no registry has ever held it and no ratchet rooted in one could ask who reads it. The ledger governs it through the gate's SPEC_ONLY_SCHEMAS override, the same route `query` / `qa` / `manifest` take; check-liveness.mts carries the rationale, including why the four sub-objects are rooted separately instead of the whole RestServerConfigSchema (the walk drills one level, and rooting on the whole config would leave `metadata.endpoints.schema` and `batch.operations.upsertMany` with no row of their own). Seeded 2026-09-02 from the census filed with #14369, which is the second half of #11984's measurement: that PR made RestServer.normalizeConfig PARSE and CONSUME this sub-object instead of casting it. That settles accept/reject — an out-of-enum or out-of-range value is now refused at construction instead of sitting in the normalized config as if it were declared — and that is ALL it settles. Executing a declared contract does not give a key a consumer, which is exactly the distinction this file records. Mixed: `operations.*` and `dataPrefix` gate and shape the mounted CRUD surface, while `patterns` and `objectParamStyle` are normalized and never read. This file RECORDS status; it decides nothing. The enforce-or-remove call per dead key (ADR-0049) is a follow-up on the human floor — the enforce route is a feature per key, and for a key that is published in an `@example` or in the generated reference docs the remove route is a capability retirement, not a tidy-up. Census method and scope, re-run at 2514d49f3 (2026-09-02): read sites in packages/rest/src non-test sources, excluding NormalizedRestServerConfig's type declaration and normalizeConfig itself (a key the normalizer writes into its own output is not thereby read); comments excluded; plus a repo-wide grep outside packages/spec and rest-server.ts, which finds only changesets, the generated reference docs and the #11984 refusal tests. objectui @d4c6a86 is clean (0 hits for every key here). The closed cloud runtime was not reachable from the measuring container, so the declared scope stays in-repo rather than claiming a sweep that was not run.",
+  "props": {
+    "operations": {
+      "children": {
+        "create": {
+          "status": "live",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/rest/src/rest-server.ts#registerCrudEndpoints (`if (operations.create)` gates the POST data route mount — an author who sets it false gets no create route at all)",
+          "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+          "note": "Per key, not per object: since ADR-0122 `crud.operations` is the author state, so the parse applies each `.default(true)` whenever the object is present and normalizeConfig covers the one case the schema leaves open (an absent `operations` object)."
+        },
+        "read": {
+          "status": "live",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/rest/src/rest-server.ts#registerCrudEndpoints (`if (operations.read)` gates the GET-by-id route mount)",
+          "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+          "note": "Same shape as `create`."
+        },
+        "update": {
+          "status": "live",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/rest/src/rest-server.ts#registerCrudEndpoints (`if (operations.update)` gates the PATCH route mount)",
+          "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+          "note": "Same shape as `create`."
+        },
+        "delete": {
+          "status": "live",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/rest/src/rest-server.ts#registerCrudEndpoints (`if (operations.delete)` gates the DELETE route mount)",
+          "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+          "note": "Same shape as `create`."
+        },
+        "list": {
+          "status": "live",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/rest/src/rest-server.ts#registerCrudEndpoints (`if (operations.list)` gates the list route mounts)",
+          "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+          "note": "Same shape as `create`."
+        }
+      }
+    },
+    "patterns": {
+      "children": {
+        "method": {
+          "status": "dead",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "note": "0 read sites at 2514d49f3. The `patterns` record is normalized into `this.config.crud.patterns` and never read: every CRUD route is mounted from the hard-coded method/path pairs in rest-server.ts#registerCrudEndpoints, so a custom pattern changes nothing. The four rows here are that one container's members — `patterns` is dead as a whole, and each member is recorded so the verdict is falsifiable per key rather than inherited. Related: #14365 asks a different question about this same key (its z.record input type demands all five operations); that is a declaration defect, not a liveness one, and is not re-derived here."
+        },
+        "path": {
+          "status": "dead",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "note": "0 read sites at 2514d49f3. See `patterns.method`: the container is never read, so a custom URL path pattern is accepted, validated and ignored."
+        },
+        "summary": {
+          "status": "dead",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "note": "0 read sites at 2514d49f3. See `patterns.method`. Additionally documentation-shaped: nothing in the served OpenAPI document reads a configured per-operation summary — that document is the pre-generated @objectstack/spec contract enriched at request time."
+        },
+        "description": {
+          "status": "dead",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "note": "0 read sites at 2514d49f3. See `patterns.summary`."
+        }
+      }
+    },
+    "dataPrefix": {
+      "status": "live",
+      "verifiedAt": "2026-09-02",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/rest/src/rest-server.ts#registerCrudEndpoints (`const dataPath = \\`${basePath}${crud.dataPrefix}\\`` — the base every data route is mounted under); also packages/rest/src/rest-server.ts#registerDataActionEndpoints, packages/rest/src/rest-server.ts#registerSharingEndpoints and packages/rest/src/rest-server.ts#registerBatchEndpoints (each builds its own dataPath the same way), and packages/rest/src/rest-server.ts#registerDiscoveryEndpoints (advertises it as `routes.data`)",
+      "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+      "note": "Five independent consumers, so this key is live in the strong sense: changing it moves the mounted paths AND the advertised discovery document together."
+    },
+    "objectParamStyle": {
+      "status": "dead",
+      "verifiedAt": "2026-09-02",
+      "evidenceScope": "in-repo",
+      "note": "0 read sites at 2514d49f3. Repo-wide there are no reads outside packages/spec and rest-server.ts either. Every CRUD route takes the object name as a PATH segment; `'query'` is accepted, validated against the enum since #11984, and mounts exactly what `'path'` mounts. Enforcing it would be a second routing shape for every data route, which is why the call is a follow-up and not a ledger decision."
+    }
+  }
+}

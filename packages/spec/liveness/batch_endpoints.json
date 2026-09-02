@@ -1,0 +1,62 @@
+{
+  "type": "batch_endpoints",
+  "_note": "BatchEndpointsConfigSchema — packages/spec/src/api/rest-server.zod.ts#BatchEndpointsConfigSchema, the `batch` sub-object of RestServerConfig. It is not a metadata type, not a request body and not a manifest: it is part of the REST server's CONSTRUCTION ARGUMENT, so no registry has ever held it and no ratchet rooted in one could ask who reads it. The ledger governs it through the gate's SPEC_ONLY_SCHEMAS override, the same route `query` / `qa` / `manifest` take; check-liveness.mts carries the rationale, including why the four sub-objects are rooted separately instead of the whole RestServerConfigSchema (the walk drills one level, and rooting on the whole config would leave `metadata.endpoints.schema` and `batch.operations.upsertMany` with no row of their own). Seeded 2026-09-02 from the census filed with #14369, which is the second half of #11984's measurement: that PR made RestServer.normalizeConfig PARSE and CONSUME this sub-object instead of casting it. That settles accept/reject — an out-of-enum or out-of-range value is now refused at construction instead of sitting in the normalized config as if it were declared — and that is ALL it settles. Executing a declared contract does not give a key a consumer, which is exactly the distinction this file records. Mixed: `maxBatchSize`, `enableBatchEndpoint` and three of the four `operations.*` switches are read; `operations.upsertMany` and `defaultAtomic` are not. This file RECORDS status; it decides nothing. The enforce-or-remove call per dead key (ADR-0049) is a follow-up on the human floor — the enforce route is a feature per key, and for a key that is published in an `@example` or in the generated reference docs the remove route is a capability retirement, not a tidy-up. Census method and scope, re-run at 2514d49f3 (2026-09-02): read sites in packages/rest/src non-test sources, excluding NormalizedRestServerConfig's type declaration and normalizeConfig itself (a key the normalizer writes into its own output is not thereby read); comments excluded; plus a repo-wide grep outside packages/spec and rest-server.ts, which finds only changesets, the generated reference docs and the #11984 refusal tests. objectui @d4c6a86 is clean (0 hits for every key here). The closed cloud runtime was not reachable from the measuring container, so the declared scope stays in-repo rather than claiming a sweep that was not run.",
+  "props": {
+    "maxBatchSize": {
+      "status": "live",
+      "verifiedAt": "2026-09-02",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/rest/src/rest-server.ts#registerBatchEndpoints (`const maxBatch = batch.maxBatchSize ?? 200` — the cap every batch request is measured against)",
+      "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+      "note": "Live and load-bearing since #11984 gave it a real parse: before that a configured `0` was the live cap, because `0` is not nullish."
+    },
+    "enableBatchEndpoint": {
+      "status": "live",
+      "verifiedAt": "2026-09-02",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/rest/src/rest-server.ts#registerBatchEndpoints (`if (batch.enableBatchEndpoint && this.protocol.batchData)` gates the generic POST /data/:object/batch mount)",
+      "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+      "note": "Gates a mount, and the second conjunct is a runtime capability rather than a second authored input, so no producer beyond the config threading is needed."
+    },
+    "operations": {
+      "children": {
+        "createMany": {
+          "status": "live",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/rest/src/rest-server.ts#registerBatchEndpoints (`if (operations.createMany && this.protocol.createManyData)` gates the POST /data/:object/createMany mount)",
+          "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+          "note": "Gates a mount."
+        },
+        "updateMany": {
+          "status": "live",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/rest/src/rest-server.ts#registerBatchEndpoints (`if (operations.updateMany && this.protocol.updateManyData)` gates the POST /data/:object/updateMany mount)",
+          "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+          "note": "Gates a mount."
+        },
+        "deleteMany": {
+          "status": "live",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/rest/src/rest-server.ts#registerBatchEndpoints (`if (operations.deleteMany && this.protocol.deleteManyData)` gates the POST /data/:object/deleteMany mount)",
+          "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+          "note": "Gates a mount."
+        },
+        "upsertMany": {
+          "status": "dead",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "note": "0 read sites at 2514d49f3. Its three siblings each gate a route mount; this one gates nothing, because there is no upsertMany route to gate — the switch was declared for a batch operation that was never built (`this.protocol` has createManyData / updateManyData / deleteManyData and no upsert counterpart). `operations.upsertMany: false` therefore disables nothing and `true` enables nothing."
+        }
+      }
+    },
+    "defaultAtomic": {
+      "status": "dead",
+      "verifiedAt": "2026-09-02",
+      "evidenceScope": "in-repo",
+      "note": "0 read sites at 2514d49f3. Repo-wide there are no reads outside packages/spec and rest-server.ts either. The key is normalized into `this.config.batch.defaultAtomic` and no batch handler consults it, so `batch.defaultAtomic: false` changes no batch's transaction mode. A switch whose describe() promises a transaction default while the transaction default is decided elsewhere is the false-compliance shape this ledger exists to surface, which is why it is recorded rather than left to a reader's grep."
+    }
+  }
+}
