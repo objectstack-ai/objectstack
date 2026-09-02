@@ -587,7 +587,7 @@ function selfTest() {
     + '`exists-key-presence` (#13582 — the `$exists` key-presence family); '
     + '`exists-portability` (#13745 — the `(NoSQL)` portability gloss: 8 NoSQL hits over 7 corpus '
     + 'files, 2 of them within 4 lines of `$exists` and BOTH legitimate, 0 baseline entries); '
-    + '`regex-retired` (#13745 — the retired `$regex` spelling: 5 hits over 3 corpus files, ALL '
+    + '`regex-retired` (#13745 — the retired `$regex` spelling: 8 hits over 3 corpus files, ALL '
     + 'of them legitimate retirement notices, 0 baseline entries); '
     + '`section-visiblewhen-unbound` (#13745 — #13532\'s section-binding claims: 88 `visibleWhen` '
     + 'hits over 21 corpus files, 0 sites at every window from 4 to 40, 0 baseline entries)',
