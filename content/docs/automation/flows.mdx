@@ -411,7 +411,15 @@ Runs its `body` region once per item of a collection, binding the current item
     maxIterations: 500,           // hard cap (clamped to the engine ceiling)
     body: {                       // single-entry/single-exit region
       nodes: [
-        { id: 'send', type: 'script', label: 'Notify', config: { /* … */ } },
+        // Per-iteration containment — see the subsection below. A body node that
+        // can fail, wrapped in nothing, ends the WHOLE run at the first failure.
+        {
+          id: 'guard', type: 'try_catch', label: 'Guarded iteration',
+          config: {
+            try: { nodes: [{ id: 'send', type: 'script', label: 'Notify', config: { /* … */ } }], edges: [] },
+            catch: { nodes: [{ id: 'handled', type: 'assignment', label: 'Handled' }] },
+          },
+        },
       ],
       edges: [],
     },
@@ -421,6 +429,77 @@ Runs its `body` region once per item of a collection, binding the current item
 
 A `loop` node with **no `body`** keeps the legacy flat-graph behavior — the
 container is additive.
+
+#### Per-iteration containment: `loop { try_catch { … } }`
+
+A `loop` body has **no error handling of its own**. The container iterates with a
+bare `await`, so a body node that returns `success: false` (or throws) propagates
+straight out of the loop and ends the run: every later item is never processed,
+and the work already done is not even reported. Measured on the engine — a 5-item
+sweep whose 3rd item fails touched 3 items, reported `acted: 0`, and finished
+`status: failed`.
+
+The containment spelling is a `try_catch` **inside the body**, one per iteration.
+Measured with the same 5-item sweep: all 5 iterations run, items 4 and 5 are
+processed, and the run completes.
+
+```typescript
+{
+  id: 'each_case',
+  type: 'loop',
+  label: 'For each breached case',
+  config: {
+    collection: '{cases}',
+    iteratorVariable: 'currentCase',
+    body: {
+      nodes: [
+        {
+          id: 'guard',
+          type: 'try_catch',
+          label: 'Guarded iteration',
+          config: {
+            try: {
+              nodes: [
+                {
+                  id: 'notify_owner', type: 'notify', label: 'Notify owner',
+                  config: { title: 'SLA breach', recipients: ['{currentCase.owner}'] },
+                },
+              ],
+              edges: [],
+            },
+            // The shortest handler that works: ONE bare `assignment` node with no
+            // `config` at all. `edges` omitted; `errorVariable` omitted (it
+            // defaults to `$error`).
+            catch: { nodes: [{ id: 'handled', type: 'assignment', label: 'Handled' }] },
+          },
+        },
+      ],
+      edges: [],
+    },
+  },
+}
+```
+
+**A `catch` region cannot be empty.** `FlowRegionSchema.nodes` is `.min(1)`, so
+only the last row below is usable:
+
+| `catch` spelling | result |
+|:---|:---|
+| omitted entirely | parses — and contains **nothing**: the container fails through exactly like an unwrapped node |
+| `catch: {}` | rejected — `catch.nodes`: expected array, received undefined |
+| `catch: { nodes: [] }` | rejected — `catch.nodes`: too small, expected at least 1 item |
+| `catch: { nodes: [ …one node… ] }` | parses, and contains |
+
+Two authoring-time lint rules cover this pair (both warnings, so neither fails a
+build): `flow-loop-body-uncontained` names a loop body running a node that can
+fail with no `try_catch` between the loop and it, and
+`flow-try-catch-without-catch` names the near-miss — a `try_catch` whose `catch`
+is absent, which gives **zero** containment while looking like containment. A
+`retry` policy does not substitute: it re-runs the `try` region and then fails
+anyway.
+
+Deliberately letting the sweep stop at the first failure is a legitimate choice —
+that is why both rules warn rather than gate.
 
 ### Parallel block
 
@@ -464,6 +543,14 @@ events).
   },
 }
 ```
+
+`catch` is optional in the schema, and omitting it is the trap: with no `catch`
+the container **fails** when the `try` region fails, so the failure propagates
+exactly as if nothing had been wrapped (measured — the no-`catch` run and the
+unwrapped control produce identical output). `retry` only delays that. The
+`flow-try-catch-without-catch` lint rule names the shape at authoring time; the
+minimal handler is one bare `assignment` node, as shown under "Per-iteration
+containment" above.
 
 > BPMN `parallel_gateway` / `join_gateway` / `boundary_event` remain in the
 > protocol as the **interop** representation and map onto these constructs on

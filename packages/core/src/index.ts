@@ -10,6 +10,13 @@
 export * from './kernel-base.js';
 export * from './kernel.js';
 export * from './plugin-order.js';
+// ADR-0130 D4/D5 — the ONE reader of a release artifact's `packages[]`, and the
+// ONE place it is ordered. It lives here rather than beside a reader because it
+// has two of them in packages that cannot import each other (`@objectstack/
+// objectql`'s load path and `@objectstack/metadata`'s artifact door), and
+// because the ordering it performs is `resolvePluginOrder` directly above.
+// `@objectstack/objectql` re-exports it, so its published surface is unchanged.
+export * from './artifact-packages.js';
 export * from './lite-kernel.js';
 export * from './types.js';
 export * from './logger.js';
