@@ -59,6 +59,8 @@
  * to resolve against the docs tree.
  */
 
+import { AUTO_GENERATED_BANNER } from './generated-output';
+
 /** One generated reference page, as the root index needs to describe it. */
 export interface RootIndexPage {
   /** Page slug — the last segment of `/docs/references/<category>/<slug>`. */
@@ -172,7 +174,7 @@ export function renderRootIndex(input: RootIndexInput): string {
   mdx += `title: Protocol Reference\n`;
   mdx += `description: Every schema published by @objectstack/spec — ${totalSchemas} schemas across ${plural(sections.length, 'protocol module')}\n`;
   mdx += `---\n\n`;
-  mdx += `{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}\n\n`;
+  mdx += AUTO_GENERATED_BANNER;
   mdx += `${input.prose.intro}\n`;
 
   mdx += `<Callout type="info">\n`;
