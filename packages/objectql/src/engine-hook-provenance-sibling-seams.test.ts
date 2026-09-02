@@ -67,7 +67,12 @@ function makeDriver() {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(object: string, ast: any) {
-      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      const rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      // The caller's bound, applied AFTER the filter and by PRESENCE
+      // (`check:objectql-double-limit`): a double that silently ignores `limit`
+      // answers with more rows than the engine asked for, and a test written
+      // against it passes for a reason the real driver does not share.
+      return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
     },
     async findOne(object: string, ast: any) {
       for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return r;
