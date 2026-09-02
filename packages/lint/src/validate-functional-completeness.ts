@@ -116,11 +116,13 @@ export function validateFunctionalCompleteness(stack: unknown): FunctionalComple
   // is `validate-object-references`' finding.
   const objectsByName = new Map(entriesOf(stack.objects).map((o) => [o.name, o.def]));
   const strName = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
-  const boundObjectOf = (view: AnyRec, container: AnyRec): AnyRec | undefined => {
-    const own = isRec(view.data) ? strName(view.data.object) : undefined;
-    const name = own ?? strName(container.objectName) ?? strName(container.object);
-    return name ? objectsByName.get(name) : undefined;
-  };
+  const byName = (name: string | undefined): AnyRec | undefined =>
+    name ? objectsByName.get(name) : undefined;
+  /** A list view's own `data.object` retarget (ADR-0047), when it declares one. */
+  const ownObjectOf = (view: AnyRec): string | undefined =>
+    (isRec(view.data) ? strName(view.data.object) : undefined);
+  const boundObjectOf = (view: AnyRec, container: AnyRec): AnyRec | undefined =>
+    byName(ownObjectOf(view) ?? strName(container.objectName) ?? strName(container.object));
   for (const [vi, container] of entriesOf(stack.views).entries()) {
     const where = container.def.object ? `view container "${container.name}"` : `view container [${vi}]`;
     if (isRec(container.def.list)) {
@@ -137,6 +139,45 @@ export function validateFunctionalCompleteness(stack: unknown): FunctionalComple
         checkViewCompleteness(lv.def, boundObjectOf(lv.def, container.def)),
         `${where} › listViews.${lv.name}`,
         `views[${vi}].listViews${lv.key}`,
+      );
+    }
+  }
+
+  // ── List views: the OBJECT-NESTED container → objects[].list /
+  //    objects[].listViews.* (ADR-0017 "Object has-many View") ─────────────
+  //
+  // The same two slots, reached through the other authorable door. An object
+  // carries its own view container — `lint-view-refs`'s `containerFromObject`
+  // pulls `list` / `listViews` straight off the object definition, and the
+  // ADR-0017 loader's `isAggregatedViewContainer` / `expandViewContainer`
+  // register the expansion — so a `timeline` / `gantt` / `tree` authored here
+  // reaches exactly the renderer the top-level container's copy reaches. The
+  // walk above stopped at `stack.views`, which made this gate report coverage
+  // it did not have: green, and blind to the other half of the stack.
+  //
+  // Bound object: the object the container belongs to, unless the view's own
+  // `data.object` retargets it (ADR-0047) — the resolution
+  // `validate-list-view-field-refs` uses on this identical rung
+  // (`listViewObject(lv) ?? objName`). Location grammar is this file's own,
+  // shared with the field walk directly above: a positional `objects[<i>]`
+  // (both spellings normalize to one ordered list) and the slot's authored
+  // key.
+  for (const [oi, obj] of entriesOf(stack.objects).entries()) {
+    const where = `object "${obj.name}"`;
+    if (isRec(obj.def.list)) {
+      push(
+        out,
+        checkViewCompleteness(obj.def.list, byName(ownObjectOf(obj.def.list) ?? obj.name)),
+        `${where} › list`,
+        `objects[${oi}].list`,
+      );
+    }
+    for (const lv of entriesOf(obj.def.listViews)) {
+      push(
+        out,
+        checkViewCompleteness(lv.def, byName(ownObjectOf(lv.def) ?? obj.name)),
+        `${where} › listViews.${lv.name}`,
+        `objects[${oi}].listViews${lv.key}`,
       );
     }
   }
