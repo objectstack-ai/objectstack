@@ -19184,6 +19184,23 @@ export class ObjectStackProtocolImplementation implements
                     // env-wide?", and an env-wide row reverted by an org-scoped
                     // caller skipped the heal entirely while answering success.
                     await this.restoreArtifactRegistryView(it.type, it.name, itemOrgId);
+                    // [#14179] …and announce it on the ONE choke point,
+                    // {@link emitMetadataMutation}, exactly as the sibling
+                    // delete caller {@link deleteMetaItem} does after its own
+                    // `repo.delete` + heal. GATED ON `current` for the same
+                    // reason that sibling's row-absent exit is silent: with no
+                    // row to remove nothing mutated, and a `deleted` signal
+                    // there would wake every peer to converge on a no-op. The
+                    // heal above still runs unconditionally — it is a
+                    // self-heal, not a mutation.
+                    if (current) {
+                        this.emitMetadataMutation({
+                            type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
+                            name: it.name,
+                            state: 'deleted',
+                            organizationId: itemOrgId,
+                        });
+                    }
                     reverted.push({ type: it.type, name: it.name, action: 'removed' });
                 } else if (restoreToVersion !== null) {
                     // Edited an existing artifact → restore the pre-commit body.
@@ -19268,6 +19285,18 @@ export class ObjectStackProtocolImplementation implements
                         // [#7559] …and now that is what it actually IS. This line
                         // said "the row's OWN scope" while passing the REQUEST's
                         // org; the resolution above is what makes the comment true.
+                        organizationId: itemOrgId,
+                    });
+                    // [#14179] The restore limb's half of the same repair: a
+                    // revert is a live write, so it funnels through the ONE
+                    // choke point {@link emitMetadataMutation} like every
+                    // other authoring surface. Same singular key the
+                    // write-through just registered under, same per-item
+                    // scope, `state: 'active'` for a restored row.
+                    this.emitMetadataMutation({
+                        type: PLURAL_TO_SINGULAR[it.type] ?? it.type,
+                        name: it.name,
+                        state: 'active',
                         organizationId: itemOrgId,
                     });
                     reverted.push({ type: it.type, name: it.name, action: 'restored' });
@@ -19635,6 +19664,21 @@ export class ObjectStackProtocolImplementation implements
                 ...(request.actor ? { actor: request.actor } : {}),
                 source: 'protocol.rollbackMetaItem',
                 note: `restored from version ${request.toVersion}`,
+            });
+            // [#14179] A rollback is a live write like any other (#4521, the
+            // line the write-through above is made under) — so it announces
+            // itself on the ONE choke point, {@link emitMetadataMutation}, the
+            // way its emitting siblings do. Boot-cached consumers wired to
+            // `onMetadataMutation` re-bind on the RESTORED body, and the
+            // #13331 cluster leg fans the same signal out to peers; without
+            // this line both halves saw a rollback as nothing at all. `state`
+            // is `'active'` because the restore leaves an active row, and the
+            // scope is the row's own — the same one the write-through got.
+            this.emitMetadataMutation({
+                type: singularType,
+                name: request.name,
+                state: 'active',
+                organizationId: orgId,
             });
             return {
                 success: true,
@@ -20330,6 +20374,22 @@ export class ObjectStackProtocolImplementation implements
                     request.organizationId ?? null,
                 );
             }
+
+            // [#14179] A real deletion announces itself on the ONE choke
+            // point, {@link emitMetadataMutation} — the repository path's
+            // row-deleted exit does, and this one performs the same removal
+            // (the row goes, the storage may go, the registry view is healed)
+            // for the code-only types that path cannot serve. Mirrors that
+            // sibling exactly: same `state: 'deleted'`, same singular key,
+            // same org scope this branch deleted under. Only the exit that
+            // really removed a row emits; the row-absent miss above returns
+            // before this line and stays silent, as its repository twin does.
+            this.emitMetadataMutation({
+                type: singularTypeForRepo,
+                name: request.name,
+                state: 'deleted',
+                organizationId: request.organizationId ?? null,
+            });
 
             return {
                 success: true,
