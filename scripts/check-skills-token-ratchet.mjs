@@ -431,7 +431,6 @@ export const CEILINGS = new Map([
   ['skills/objectstack-query/rules/pagination.md', 1382],
 
   // objectstack-automation
-  ['skills/objectstack-automation/evals/README.md', 414],
   ['skills/objectstack-automation/evals/approvals/test-revise-loop.md', 1329],
 
   // objectstack-ui — the two authored eval files; its `references/react-blocks.md`
