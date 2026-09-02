@@ -3,16 +3,22 @@
 /**
  * #8195 — every auth email names the deployment-default locale.
  *
- * Maintainer ruling 2026-08-13: the recipient locale is the **deployment
- * default**, read from `II18nService.getDefaultLocale()` and resolved at the
- * plugin layer; `Accept-Language` is rejected; no `sys_user.locale` column.
+ * Maintainer ruling 2026-09-02 (#14319), which SUPERSEDED the 2026-08-13 one
+ * this file was written against: a request-triggered auth email takes the
+ * caller's own `Accept-Language` first (only when it names a locale in
+ * `AUTH_EMAIL_TEMPLATE_LOCALES`), and the deployment default second. The
+ * 2026-08-13 ruling had made the deployment default the whole answer and
+ * rejected `Accept-Language` outright. Still no `sys_user.locale` column —
+ * that half stayed deferred. The ruling text of record lives on
+ * `AuthManager.setDefaultEmailLocale` / `authEmailLocaleFromRequest`; the
+ * request rung's own cases are the last describe block in this file.
  *
  * Before this, no `sendTemplate` call in `auth-manager.ts` passed a `locale`,
  * so `EmailService`'s ladder always resolved `en-US` and the localized rows
  * were unreachable through the platform's own send path — a zh-CN deployment
  * received English credential mail while its UI spoke Chinese.
  *
- * This file owns the SENDING half: that all five sites name the locale, that
+ * This file owns the SENDING half: that all five sites name a locale, that
  * an unconfigured deployment still names nothing, and that the catalog spelling
  * (`en`) is mapped onto the row spelling (`en-US`). The template half — that a
  * row actually exists in each locale and reads naturally — is
@@ -20,7 +26,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { AuthManager, normalizeAuthEmailLocale } from './auth-manager';
+import { AuthManager, normalizeAuthEmailLocale, authEmailLocaleFromRequest } from './auth-manager';
 
 vi.mock('better-auth', () => ({
   betterAuth: vi.fn(() => ({ handler: vi.fn(), api: {} })),
@@ -250,5 +256,202 @@ describe('#8195 — normalizeAuthEmailLocale', () => {
     const sent = await driveAllFive('en');
     expect(sent).toHaveLength(5);
     for (const input of sent) expect(input.locale).toBe('en-US');
+  });
+});
+
+// ── #14319 — the request rung ──────────────────────────────────────────────
+
+/**
+ * Maintainer ruling 2026-09-02, quoted verbatim and untranslated:
+ *
+ * > 注册 / 登录 / 重置密码等由请求触发的 auth 邮件，语言优先取请求的
+ * > `Accept-Language`（命中 `AUTH_EMAIL_TEMPLATE_LOCALES` 才生效），其次才是
+ * > 部署默认（`localization.locale` → `i18n.defaultLocale`）。
+ *
+ * Asserted at the LOCALE named on the send, which is this layer's whole output.
+ * That a `zh-CN` row then renders a Chinese subject and no en-US text is
+ * `plugin-email/src/auth-templates-locales.test.ts`, which owns the row half;
+ * the two together are the card's acceptance criterion.
+ *
+ * The four sends driven here are the ones where the requester IS the recipient.
+ * The invitation is asserted to ABSTAIN in its own case below — better-auth
+ * hands it a request too, but it is the inviter's.
+ */
+async function driveWithHeader(
+  deploymentLocale: string | undefined,
+  header: string | undefined,
+) {
+  const { capturedConfig, sent } = await boot(deploymentLocale);
+  const request =
+    header === undefined
+      ? undefined
+      : new Request('http://x/any', { headers: { 'accept-language': header } });
+
+  // Measured better-auth 1.7.x shapes, NOT assumed: reset / verify / invitation
+  // receive `ctx.request`, magic-link receives the endpoint `ctx`, and the
+  // change-email notice fires from the global after-hook's `ctx`.
+  await capturedConfig.emailAndPassword.sendResetPassword(
+    { user: USER, url: 'http://x/reset', token: 't' },
+    request,
+  );
+  await capturedConfig.emailVerification.sendVerificationEmail(
+    { user: USER, url: 'http://x/verify', token: 't' },
+    request,
+  );
+
+  const org = capturedConfig.plugins.find((p: any) => p.id === 'organization');
+  await org._opts.sendInvitationEmail(
+    {
+      email: 'invitee@example.com',
+      invitation: { id: 'inv1', organizationId: 'o1', role: 'member' },
+      organization: { name: 'Northwind' },
+      inviter: { user: { email: 'dana@example.com', name: 'Dana' } },
+    },
+    request,
+  );
+
+  const magic = capturedConfig.plugins.find((p: any) => p.id === 'magic-link');
+  await magic._opts.sendMagicLink(
+    { email: 'ada@example.com', url: 'http://x/magic', token: 't' },
+    request ? { request } : undefined,
+  );
+
+  await capturedConfig.hooks.after({
+    path: '/change-email',
+    body: { newEmail: 'new@example.com' },
+    request,
+    context: {
+      __osChangeEmailFrom: { email: 'ada@example.com', name: 'Ada', id: 'u1' },
+      returned: { status: true },
+    },
+  });
+
+  const byTemplate = (name: string) => sent.find((x: any) => x.template === name);
+  return {
+    sent,
+    /** The four sends whose recipient is the requester. */
+    requesterIsRecipient: [
+      'auth.password_reset',
+      'auth.verify_email',
+      'auth.magic_link',
+      'auth.email_change_notice',
+    ].map((t) => byTemplate(t)!),
+    invitation: byTemplate('auth.invitation')!,
+  };
+}
+
+describe('#14319 — Accept-Language outranks the deployment default', () => {
+  const prevMcpEnv = process.env.OS_MCP_SERVER_ENABLED;
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.env.OS_MCP_SERVER_ENABLED = 'false';
+  });
+  afterEach(() => {
+    if (prevMcpEnv === undefined) delete process.env.OS_MCP_SERVER_ENABLED;
+    else process.env.OS_MCP_SERVER_ENABLED = prevMcpEnv;
+  });
+
+  it('a zh-CN caller gets zh-CN even though the deployment speaks English', async () => {
+    // The card's repro: Chinese browser, English deployment default. Before
+    // this ruling every one of these read `en-US`.
+    const { sent, requesterIsRecipient } = await driveWithHeader('en', 'zh-CN,zh;q=0.9,en;q=0.8');
+    // A send that never happened would make the locale assertion vacuous.
+    expect(sent).toHaveLength(5);
+    for (const input of requesterIsRecipient) {
+      expect(input.locale, `${input.template} did not follow the request`).toBe('zh-CN');
+    }
+  });
+
+  it.each(['ja-JP', 'es-ES', 'en-US'])('and the same for a %s caller', async (tag) => {
+    const { requesterIsRecipient } = await driveWithHeader('zh-CN', tag);
+    for (const input of requesterIsRecipient) expect(input.locale).toBe(tag);
+  });
+
+  it('a caller who asked for nothing falls back to the deployment default', async () => {
+    const { sent, requesterIsRecipient } = await driveWithHeader('zh-CN', undefined);
+    expect(sent).toHaveLength(5);
+    for (const input of requesterIsRecipient) expect(input.locale).toBe('zh-CN');
+  });
+
+  it.each(['fr-FR', 'de', 'pt-BR', '*'])(
+    'a caller asking for %s — a locale we ship no auth row for — falls back to the deployment default',
+    async (tag) => {
+      // The ruling's "命中 AUTH_EMAIL_TEMPLATE_LOCALES 才生效" half. Honouring
+      // an unshipped tag would name a row that does not exist, which is the
+      // row-locale vs filter-locale split all over again.
+      const { requesterIsRecipient } = await driveWithHeader('zh-CN', tag);
+      for (const input of requesterIsRecipient) expect(input.locale).toBe('zh-CN');
+    },
+  );
+
+  it('with NO deployment default and an unshipped request, nothing is named at all', async () => {
+    // Both rungs silent ⇒ absent key, which is what EmailService's ladder
+    // contract ("no locale means the DOCUMENTED default") is written against.
+    const { requesterIsRecipient } = await driveWithHeader(undefined, 'fr-FR');
+    for (const input of requesterIsRecipient) {
+      expect(input.locale).toBeUndefined();
+      expect(Object.prototype.hasOwnProperty.call(input, 'locale')).toBe(false);
+    }
+  });
+
+  it('the INVITATION abstains — the request belongs to the inviter, not the invitee', async () => {
+    const { invitation } = await driveWithHeader('zh-CN', 'en-US');
+    // An English-speaking admin must not force English on their Chinese
+    // workspace's invitees; this send keeps the deployment rung.
+    expect(invitation.locale).toBe('zh-CN');
+  });
+
+  it('naming a request locale does not disturb the rest of the payload', async () => {
+    const { requesterIsRecipient } = await driveWithHeader('en', 'zh-CN');
+    const reset = requesterIsRecipient.find((x: any) => x.template === 'auth.password_reset')!;
+    expect(reset.data.resetUrl).toBe('http://x/reset');
+    expect(reset.relatedObject).toBe('sys_user');
+    expect(reset.relatedId).toBe('u1');
+  });
+});
+
+describe('#14319 — authEmailLocaleFromRequest', () => {
+  it('reads a Web Request and strips the quality weights', () => {
+    const req = new Request('http://x/', { headers: { 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' } });
+    expect(authEmailLocaleFromRequest(req)).toBe('zh-CN');
+  });
+
+  it('reads a better-auth endpoint ctx too — the shape sendMagicLink is handed', () => {
+    // Measured, not assumed: magic-link/index.mjs calls `sendMagicLink({...}, ctx)`.
+    const req = new Request('http://x/', { headers: { 'accept-language': 'ja-JP' } });
+    expect(authEmailLocaleFromRequest({ request: req })).toBe('ja-JP');
+  });
+
+  it('reads a plain header bag, either spelling', () => {
+    expect(authEmailLocaleFromRequest({ headers: { 'accept-language': 'es-ES' } })).toBe('es-ES');
+    expect(authEmailLocaleFromRequest({ headers: { 'Accept-Language': 'es-ES' } })).toBe('es-ES');
+  });
+
+  it('promotes a bare language to the row we ship for it', () => {
+    expect(authEmailLocaleFromRequest({ headers: { 'accept-language': 'zh' } })).toBe('zh-CN');
+    expect(authEmailLocaleFromRequest({ headers: { 'accept-language': 'en' } })).toBe('en-US');
+  });
+
+  it('refuses a locale we ship no auth row for, rather than naming a missing row', () => {
+    for (const tag of ['fr-FR', 'de', 'pt-BR', 'en-GB']) {
+      expect(authEmailLocaleFromRequest({ headers: { 'accept-language': tag } })).toBeUndefined();
+    }
+  });
+
+  it('treats an absent, empty or wildcard header as no preference', () => {
+    expect(authEmailLocaleFromRequest(undefined)).toBeUndefined();
+    expect(authEmailLocaleFromRequest(null)).toBeUndefined();
+    expect(authEmailLocaleFromRequest({})).toBeUndefined();
+    expect(authEmailLocaleFromRequest({ headers: {} })).toBeUndefined();
+    expect(authEmailLocaleFromRequest({ headers: { 'accept-language': '' } })).toBeUndefined();
+    expect(authEmailLocaleFromRequest({ headers: { 'accept-language': '*' } })).toBeUndefined();
+  });
+
+  it('never throws when the header bag itself is hostile', () => {
+    // A vendor changing the shape it hands a callback must degrade to the
+    // deployment default, never fail the send.
+    const hostile = { headers: { get() { throw new Error('boom'); } } };
+    expect(() => authEmailLocaleFromRequest(hostile)).not.toThrow();
+    expect(authEmailLocaleFromRequest(hostile)).toBeUndefined();
   });
 });
