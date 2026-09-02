@@ -26,45 +26,54 @@
  * admin owns them a re-run is a no-op. `managedBy` and `sys_*` tables are
  * skipped (their ownership, if any, is platform-controlled).
  *
- * ## [#14530] One PREDICATE write per unowned shape, never a write per row
+ * ## [#14530] PAGED predicate writes, never a write per row
  *
  * This used to scan each object twice at `limit: 10_000` and then issue one
  * **single-id** `update` per matched id — up to 20 000 writes for one object.
- * Every one of those is a full engine write (middleware chain, validation,
- * hook dispatch, driver round trip), and the batch existed only in this loop,
- * where nothing downstream could see it: plugin-sharing's `rule-hooks.ts`
- * already routes a write whose row set exceeds `RULE_RECOMPUTE_ROW_CAP` into
- * one set-based revoke plus one queued `evaluateAllRulesForObject`, but that
- * branch reads ONE write's row set, and each of these writes legitimately
- * carried a single row. Batching in the caller is what lets the machinery
- * already built for this shape do its job — no change to `plugin-sharing`.
+ * Every one of those is a full engine write (middleware chain, validation, hook
+ * dispatch, driver round trip), and the batch existed only in this loop, where
+ * nothing downstream could see it: plugin-sharing's `rule-hooks.ts` already
+ * routes a write whose row set exceeds its recompute cap (1 000) into one
+ * set-based revoke plus one queued `evaluateAllRulesForObject`, but that branch
+ * reads ONE write's row set, and each of these writes legitimately carried a
+ * single row. Batching in the caller is what lets machinery already built for
+ * this shape do its job — with no change to `plugin-sharing`.
  *
- * The two scans are gone with the loop. The predicates they resolved are the
- * predicates the writes now carry, one write each, so the matched set is
- * unchanged row for row: `owner_id IS NULL`, then `owner_id = usr_system`.
- * They stay two narrow writes rather than one `OR`/`IN` predicate for the
- * reason the scans were two — driver portability — and they remain disjoint in
- * this order, because the first write leaves `adminUserId` (never `usr_system`,
- * refused above) where the NULLs were.
+ * The unit of work is now a PAGE, not a row: read at most
+ * {@link CLAIM_PAGE_ROWS} unowned ids, re-own them with one predicate write,
+ * repeat until the predicate is exhausted. Two predicates per object
+ * (`owner_id IS NULL`, then `owner_id = usr_system`), each paged, so the matched
+ * set is the same set the old two-scan rule resolved — row for row — while the
+ * write count falls from N to ceil(N / {@link CLAIM_PAGE_ROWS}) per predicate.
+ * The predicates stay two narrow reads rather than one `OR`/`IN` for the reason
+ * the old scans were two (driver portability), and they stay disjoint in this
+ * order, because the NULL pass lands `adminUserId` — never `usr_system`, that
+ * target is refused at the top of this function.
  *
- * The count reported per object is the affected-row count the predicate write
- * resolves (#4639), not a length this function counted for itself.
+ * ### Why paged rather than one unbounded predicate write
  *
- * ### The bound moved, and it did not get smaller
+ * A predicate write carries no `limit`, so "one write per object" reads as the
+ * obvious shape — and it is refused on exactly the objects that need it most.
+ * `beforeUpdate`/`afterUpdate` hooks are contracted to fire PER MATCHED ROW on a
+ * predicate write (ADR-0058, bulk-write addendum D6), so the engine refuses one
+ * **whole** above {@link MAX_BULK_PER_ROW_HOOK_ROWS}; every object carries such
+ * hooks in practice, since objectql's own audit-stamp builtin is registered on
+ * `'*'`. Measured: 21 000 unowned rows re-owned **nothing at all**, where the
+ * pre-#14530 loop re-owned 10 000 of them. This function decides `owner_id`,
+ * which is a record-access field, so "the object was not claimed" is a
+ * permission outcome, not an observability detail. Paging keeps the batch AND
+ * the coverage: every page is one set-based write, sized under the engine's
+ * ceiling by construction, and the loop ends when the predicate stops matching.
  *
- * A predicate write carries no `limit`, so nothing here truncates at 10 000 any
- * more. What bounds it now is the engine's own ceiling: a predicate write on an
- * object carrying `beforeUpdate`/`afterUpdate` hooks — which every object does,
- * objectql's own audit-stamp builtin is registered on `'*'` — is REFUSED whole
- * above `MAX_BULK_PER_ROW_HOOK_ROWS` (10 000), because those hooks are
- * contracted to fire per matched row. So the reachable population per predicate
- * per run is the same 10 000 the scan limit allowed; what changed is that
- * exceeding it is now LOUD (the engine's refusal names the count, the ceiling
- * and both routes out, and this function logs it per object) instead of a
- * silent partial claim of the first 10 000 rows.
+ * The page size is derived from that ceiling rather than chosen: half of it
+ * leaves room for a driver's own bound-parameter limits and for the ceiling
+ * being the engine's answer to a different question, while staying well above
+ * plugin-sharing's 1 000-row recompute cap — so a page is still large enough to
+ * take the trailing-batch branch rather than N per-row recomputes.
  */
 
 import type { ServiceObject } from '@objectstack/spec/data';
+import { MAX_BULK_PER_ROW_HOOK_ROWS } from '@objectstack/spec/data';
 import { SystemUserId } from '@objectstack/spec/system';
 
 interface ClaimOwnershipOptions {
@@ -77,9 +86,34 @@ interface ClaimOwnershipOptions {
 const SYSTEM_CTX = { isSystem: true };
 
 /**
+ * Rows re-owned by one predicate write.
+ *
+ * Derived from the engine's per-row hook ceiling, never a free literal: that
+ * ceiling is what refuses an over-sized predicate write, so the page size has to
+ * move with it. Half of it is the margin — a driver's bound-parameter limit
+ * applies to the `id IN (…)` list this sends, and the ceiling answers a question
+ * about hook fan-out rather than about statement width. Still far above
+ * plugin-sharing's 1 000-row recompute cap, so a full page is seen as a batch by
+ * the trailing-batch branch instead of being recomputed row by row.
+ */
+const CLAIM_PAGE_ROWS = Math.floor(MAX_BULK_PER_ROW_HOOK_ROWS / 2);
+
+/**
+ * Pages one predicate may claim before this function gives up on it.
+ *
+ * Termination does not depend on this: a page that re-owns rows makes them stop
+ * matching the predicate, so the set strictly shrinks, and a page that re-owns
+ * none breaks out below. The belt exists for the one shape that reasoning does
+ * not cover — a driver that reports an affected count for rows it did not write
+ * — where the alternative is a boot that never finishes. Hitting it is reported
+ * loudly, never silently.
+ */
+const MAX_CLAIM_PAGES = 1_000;
+
+/**
  * "Unowned", as two driver-portable predicates rather than one `OR`/`IN`.
  *
- * Order is load-bearing: the NULL write lands `adminUserId` — which cannot be
+ * Order is load-bearing: the NULL pass lands `adminUserId` — which cannot be
  * `usr_system` (refused at the top of {@link claimSeedOwnership}) — so the two
  * matched sets stay disjoint and their counts sum without double-counting a row.
  */
@@ -115,6 +149,84 @@ function affectedRowCount(value: unknown): number | undefined {
   return value;
 }
 
+/** Ids from a `find` result, tolerating both the array and `{ records }` shapes. */
+function idsFrom(rows: any): string[] {
+  const list: any[] = Array.isArray(rows)
+    ? rows
+    : Array.isArray(rows?.records)
+      ? rows.records
+      : [];
+  const out: string[] = [];
+  for (const r of list) if (r?.id) out.push(String(r.id));
+  return out;
+}
+
+/**
+ * Re-own every row matching one unowned predicate, one page per write.
+ *
+ * Returns the SUM of the affected-row counts the page writes resolved — never a
+ * length this function counted for itself, and never just the last page's.
+ */
+async function claimPredicate(
+  ql: any,
+  objectName: string,
+  where: Record<string, unknown>,
+  adminUserId: string,
+  logger: ClaimOwnershipOptions['logger'],
+): Promise<number> {
+  let total = 0;
+  for (let page = 0; page < MAX_CLAIM_PAGES; page += 1) {
+    const ids = idsFrom(
+      await ql.find(
+        objectName,
+        { where, limit: CLAIM_PAGE_ROWS, fields: ['id'] },
+        { context: SYSTEM_CTX },
+      ),
+    );
+    if (ids.length === 0) return total;
+
+    const affected = await ql.update(
+      objectName,
+      { owner_id: adminUserId },
+      { where: { id: { $in: ids } }, multi: true, context: SYSTEM_CTX },
+    );
+    const count = affectedRowCount(affected);
+    if (count === undefined) {
+      // "Unknown", never "none": the page very likely WAS re-owned, so this
+      // neither adds a number it cannot attest nor re-reads a predicate whose
+      // state it does not know. What is already counted stays counted.
+      logger?.warn?.(
+        `[security] claimSeedOwnership could not read an affected-row count for ${objectName} ` +
+          '— the page was re-owned but this run cannot say how many, and paging stops here',
+        { object: objectName, where, page, result: typeof affected },
+      );
+      return total;
+    }
+    if (count === 0) {
+      // The read found rows and the write moved none of them: a write-scoping
+      // middleware narrowed the set to nothing. Re-reading the same predicate
+      // would return the same page forever, so stop — loudly, because "we
+      // could not claim these" is not the same as "there was nothing here".
+      logger?.warn?.(
+        `[security] claimSeedOwnership matched ${ids.length} unowned row(s) on ${objectName} ` +
+          'but re-owned none of them; those rows stay unowned',
+        { object: objectName, where, page, matched: ids.length },
+      );
+      return total;
+    }
+    total += count;
+    // A short page is the last page: the predicate had fewer rows left than one
+    // page holds, so re-reading it would only confirm the emptiness.
+    if (ids.length < CLAIM_PAGE_ROWS) return total;
+  }
+  logger?.warn?.(
+    `[security] claimSeedOwnership stopped after ${MAX_CLAIM_PAGES} page(s) on ${objectName}; ` +
+      'unowned rows may remain and the next run will claim them',
+    { object: objectName, where, pages: MAX_CLAIM_PAGES },
+  );
+  return total;
+}
+
 /**
  * Re-own every orphan seed row (owner_id NULL or usr_system) to `adminUserId`.
  *
@@ -124,8 +236,9 @@ function affectedRowCount(value: unknown): number | undefined {
  *   (c) are not `external` (federated remote-table bindings — read-only, DDL
  *       forbidden, and their `owner_id` is not ours to reassign),
  *   (d) declare an `owner_id` field,
- * and re-owns the unowned rows as `isSystem` with one predicate write per
- * {@link UNOWNED_PREDICATES} entry. Returns a per-object summary.
+ * and re-owns the unowned rows as `isSystem` with paged predicate writes, one
+ * page per write per {@link UNOWNED_PREDICATES} entry. Returns a per-object
+ * summary whose `count` is the sum of every page's affected-row count.
  */
 export async function claimSeedOwnership(
   ql: any,
@@ -134,9 +247,9 @@ export async function claimSeedOwnership(
 ): Promise<{ object: string; count: number }[]> {
   const logger = options.logger;
   if (!adminUserId || adminUserId === SystemUserId.SYSTEM) return [];
-  // Only `update` is required now that the scans are gone: this function asks
-  // the engine for exactly one capability, so the guard names exactly that one.
-  if (!ql || typeof ql.update !== 'function') return [];
+  if (!ql || typeof ql.update !== 'function' || typeof ql.find !== 'function') {
+    return [];
+  }
   const registry = (ql as any).registry;
   if (!registry || typeof registry.getAllObjects !== 'function') {
     logger?.warn?.('[security] claimSeedOwnership: registry unavailable');
@@ -162,21 +275,7 @@ export async function claimSeedOwnership(
     let updated = 0;
     for (const where of UNOWNED_PREDICATES) {
       try {
-        const affected = await ql.update(
-          schema.name,
-          { owner_id: adminUserId },
-          { where, multi: true, context: SYSTEM_CTX },
-        );
-        const count = affectedRowCount(affected);
-        if (count === undefined) {
-          logger?.warn?.(
-            `[security] claimSeedOwnership could not read an affected-row count for ${schema.name} ` +
-              '— the rows were re-owned but this run cannot say how many',
-            { object: schema.name, where, result: typeof affected },
-          );
-          continue;
-        }
-        updated += count;
+        updated += await claimPredicate(ql, schema.name, where, adminUserId, logger);
       } catch (e) {
         // Best-effort per predicate, exactly as the per-id loop was: one
         // predicate that cannot land must not cost the object its other one,
