@@ -115,6 +115,13 @@ export const Account = ObjectSchema.create({
   // Task/Project: a re-entrant lifecycle (a churned account can be won
   // back). Demonstrates the guardrail is just a per-field validation rule
   // on the object — no separate metadata type, no separate file.
+  //
+  // #14518 — every `message` below is emitted VERBATIM unless the bundle
+  // carries `objects.showcase_account._validations.<rule>.message` (#14253),
+  // which is the one way a refusal escapes the caller's language while the
+  // platform's own refusals arrive translated. All seven are in
+  // `src/system/translations/index.ts`; the bundle WINS, so rewording a
+  // sentence here without rewording it there makes this text dead.
   validations: [
     {
       type: 'state_machine' as const,
@@ -180,6 +187,13 @@ export const Account = ObjectSchema.create({
       // non-churned account must NOT carry a stale churn reason. The
       // `otherwise` branch only flags an explicitly-set reason (it `has()`-
       // guards the absent case), so ordinary non-churned writes are untouched.
+      //
+      // The message on THIS rule never reaches a caller: `checkConditional`
+      // either returns nothing or delegates to the branch, and the branch's
+      // own `name` is what `objects.<o>._validations.<rule>.message` is keyed
+      // by. So the two branches below each need their own bundle entry —
+      // translating `churn_reason_consistency` alone would translate the one
+      // sentence nobody reads (#14518).
       type: 'conditional' as const,
       name: 'churn_reason_consistency',
       label: 'Churn Reason Consistency',
