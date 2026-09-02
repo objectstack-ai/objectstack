@@ -273,8 +273,10 @@ export type ClockTimeValue = z.input<typeof ClockTimeValueSchema>;
 export const LocationValueSchema = lazySchema(() => strictObject(
   {
     surface: 'this location value',
-    history: 'Until #13802 an undeclared key on a location value was silently dropped — the value '
-      + 'parsed green with the key gone, so the mistake surfaced only as a blank on screen.',
+    // Customer-facing text: no issue ids (the anchor is the JSDoc above).
+    history: 'Until this shape was closed, an undeclared key on a location value was silently '
+      + 'dropped — the value parsed green with the key gone, so the mistake surfaced only as a '
+      + 'blank on screen.',
     // The retired spec-only spelling (see the module header). Edit distance
     // cannot reach `latitude` → `lat`; the value contract has refused the pair
     // since ADR-0104 D1, so the rename is the one an author actually needs.
@@ -316,9 +318,10 @@ export type LocationValue = z.input<typeof LocationValueSchema>;
 export const AddressSchema = lazySchema(() => strictObject(
   {
     surface: 'this address value',
-    history: 'Until #13802 an undeclared key on an address value was silently dropped — the value '
-      + 'parsed green with the key gone, so a misspelled postal code surfaced only as an empty '
-      + 'box on screen (#13388).',
+    // Customer-facing text: no issue ids (the anchors are in the JSDoc above).
+    history: 'Until this shape was closed, an undeclared key on an address value was silently '
+      + 'dropped — the value parsed green with the key gone, so a misspelled postal code surfaced '
+      + 'only as an empty box on screen.',
     // `zipCode` is the spelling the address widget wrote for a release
     // (objectstack#5143) — a different WORD for the declared key, which edit
     // distance cannot reach. The rename names the key the contract lands on.

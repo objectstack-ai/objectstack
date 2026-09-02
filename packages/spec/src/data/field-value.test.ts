@@ -292,6 +292,8 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     expect(seed.keys).toEqual(['postal_code']);
     expect(seed.message).toContain('this address value');
     expect(seed.message).toContain('Did you mean `postal_code` → `postalCode`?');
+    // Customer-facing refusal text carries no internal issue id (check:doc-authoring's rule).
+    expect(seed.message).not.toMatch(/#\d+/);
 
     // The spelling the address widget wrote for a release (objectstack#5143):
     // a different WORD, reachable only through the curated alias.
@@ -303,6 +305,7 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     expect(geo.code).toBe('unrecognized_keys');
     expect(geo.keys).toEqual(['heading', 'speed']);
     expect(geo.message).toContain('this location value');
+    expect(geo.message).not.toMatch(/#\d+/);
 
     // The retired spec-only spelling carries its rename (an alias — edit
     // distance cannot reach `latitude` → `lat`). It is ALSO a missing-pair
