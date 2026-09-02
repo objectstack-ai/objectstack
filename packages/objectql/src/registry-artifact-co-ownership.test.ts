@@ -252,7 +252,13 @@ describe('ADR-0130 D1 — the relaxation does not widen the same-id reinstall ex
    * owned objects through the registry's own primitive with the same arguments
    * `registerApp` passes.
    */
-  const install = (manifest: ReturnType<typeof crmCore>, scope?: { packageIds: string[] }) => {
+  const install = (
+    // Structural, not `ReturnType<typeof crmCore>`: the fixtures differ in their
+    // field shapes, and a parameter typed to one of them would reject the other
+    // for a reason that has nothing to do with what this suite asserts.
+    manifest: { id: string; namespace: string; objects?: Array<{ name: string }> },
+    scope?: { packageIds: string[] },
+  ) => {
     registry.installPackage(manifest as never, undefined, scope);
     for (const obj of manifest.objects ?? []) {
       registry.registerObject(obj as never, manifest.id, manifest.namespace, 'own');
