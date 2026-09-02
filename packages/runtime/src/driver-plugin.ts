@@ -18,7 +18,7 @@ import { Plugin, PluginContext } from '@objectstack/core';
  */
 export class DriverPlugin implements Plugin {
     name: string;
-    type = 'driver';
+    type = 'driver' as const;
     version = '1.0.0';
 
     private driver: any;

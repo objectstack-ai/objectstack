@@ -55,7 +55,7 @@ const INTERVAL_MS = 1000;
 /** Counts the drift checker's reads, so "still ticking" is measurable. */
 class FakeFederationPlugin implements Plugin {
     name = 'test.federation';
-    type = 'standard';
+    type = 'standard' as const;
     version = '1.0.0';
     providesServices = ['external-datasource', 'metadata'];
     validateAllCalls = 0;
