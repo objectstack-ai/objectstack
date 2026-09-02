@@ -936,12 +936,6 @@ function structuredCodeAnswer(
             },
         };
     }
-    // [#14541] Gated on `!isSandboxOrigin` because this arm used to sit BELOW
-    // the sandbox unwrap door and now sits above it. The clause is that
-    // position, written down: the sentence this arm ships is `error.message`,
-    // which for a sandboxed producer is the QuickJS DEBUG WRAPPER, and the
-    // unwrap door owns that producer (#11588 / #7543). Without it, lifting the
-    // arm would ship the wrapper on both doors.
     // [#3770] Object does not exist — thrown by the protocol's registry gate
     // (`assertObjectRegistered`, which covers every data entry point) and by
     // `cloneData`. Mapped to the SAME envelope the driver-string branch below
@@ -950,6 +944,12 @@ function structuredCodeAnswer(
     // point of #3770 is that this 404 no longer depends on a driver erroring
     // on a missing table. Must precede the generic 4xx passthrough, which
     // would otherwise ship the internal SCREAMING_CASE code verbatim.
+    // [#14541] Gated on `!isSandboxOrigin` because this arm used to sit BELOW
+    // the sandbox unwrap door and now sits above it. The clause is that
+    // position, written down: the sentence this arm ships is `error.message`,
+    // which for a sandboxed producer is the QuickJS DEBUG WRAPPER, and the
+    // unwrap door owns that producer (#11588 / #7543). Without it, lifting the
+    // arm would ship the wrapper on both doors.
     if (error?.code === 'OBJECT_NOT_FOUND' && !isSandboxOrigin(error)) {
         const name = error?.object ?? object;
         return {
@@ -961,12 +961,6 @@ function structuredCodeAnswer(
             },
         };
     }
-    // [#14541] Gated on `!isSandboxOrigin` because this arm used to sit BELOW
-    // the sandbox unwrap door and now sits above it. The clause is that
-    // position, written down: the sentence this arm ships is `error.message`,
-    // which for a sandboxed producer is the QuickJS DEBUG WRAPPER, and the
-    // unwrap door owns that producer (#11588 / #7543). Without it, lifting the
-    // arm would ship the wrapper on both doors.
     // [#4134] Unknown field named by a READ — the protocol's list normalizer
     // refusing to lower a query parameter that matches no field into an
     // implicit filter that could only ever match zero rows. Emitted in the SAME
@@ -974,6 +968,9 @@ function structuredCodeAnswer(
     // form of the identical mistake), so one condition has one wire shape no
     // matter which layer noticed it. Must precede the generic 4xx passthrough,
     // which would ship the message but drop `field`.
+    // [#14541] `!isSandboxOrigin`: the same clause as the arm above, for the
+    // same reason — this arm ships `error.message`, and the unwrap door owns
+    // the sandboxed producer.
     if (error?.code === 'INVALID_FIELD' && !isSandboxOrigin(error)) {
         const name = error?.object ?? object;
         return {
