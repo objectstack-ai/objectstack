@@ -181,6 +181,24 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // the whole repo and reads every matching source file.
     globs: ['packages/**/*.ts'],
   },
+  '@objectstack/types': {
+    // src/driver-error-classification.callers.test.ts is the #13440 gate: it
+    // walks every TypeScript source under `packages/` and fails any call of
+    // `isMissingTableError` that does not name the object being read.
+    //
+    // The whole subtree rather than `packages/**/*.ts`, for the reason the
+    // `skills/**` glob on @objectstack/spec gives: the walk READS DIRECTORIES
+    // (`readdirSync` from `packages/` down), and a glob that names only files
+    // does not cover a directory listing -- `coversDirectory` is the check. A
+    // new package directory changes this gate's verdict, so it is an input.
+    //
+    // The radius stops at `packages/**` on purpose: the test anchors its repo
+    // root by ARITHMETIC off this package's own manifest rather than by walking
+    // to a workspace-root marker file, so it names no root-level path and this
+    // entry adds no new top-level root for `check-ci-filter-parity.mjs` to want
+    // in ci.yml's `crosspkg:` filter. Its own header records that trade.
+    globs: ['packages/**'],
+  },
   '@objectstack/cli': {
     // src/commands/serve-verify-security-parity.contract.test.ts diffs
     // cli's serve.ts against verify's harness.ts.

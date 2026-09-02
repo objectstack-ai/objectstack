@@ -518,6 +518,16 @@ export function isSchemaAlreadyExistsError(error: unknown, depth = 0): boolean {
  * is that the narrowing is opt-in per call site: a new caller that forgets it
  * silently gets the old, wider verdict.
  *
+ * [#13440] That last sentence is no longer only a warning. In-repo callers are
+ * held to it by `driver-error-classification.callers.test.ts`, which walks every
+ * TypeScript source under `packages/` and fails any call of this function that
+ * omits `readObject` or passes it as `undefined`/`null`. The exemption is this
+ * module's own contract tests, which exercise the one-argument PUBLISHED form on
+ * purpose; read that file's header before adding to the exemption, because
+ * widening it is how the enforcement becomes prose again. External consumers are
+ * untouched: the signature below is unchanged, and the gate binds only callers
+ * inside this repository.
+ *
  * @param error - The value thrown by a driver/engine read (`find`, `findOne`, …).
  * @param readObject - The object/table whose emptiness the caller is about to
  *          treat as the truth — its own API name is fine, the comparison folds

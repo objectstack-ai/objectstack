@@ -69,6 +69,17 @@
         "$TURBO_ROOT$/packages/**/*.ts"
       ]
     },
+    "@objectstack/types#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/**"
+      ]
+    },
     "@objectstack/cli#test": {
       "dependsOn": ["build"],
       "outputs": [],
