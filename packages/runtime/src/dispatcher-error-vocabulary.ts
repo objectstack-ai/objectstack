@@ -744,6 +744,38 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'evidence of a door. If an install door ever answers with this code itself, the verdict becomes ' +
             'pending-registration and it belongs in the ledger batch.'
     },
+    {
+        code: 'OBJECT_OWNERSHIP_CONFLICT',
+        file: 'packages/objectql/src/registry.ts',
+        shape: 'classfield',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'ADR-0029 D3 — the refusal for a package claiming `own` on an object name a DIFFERENT package ' +
+            'already owns, raised by `SchemaRegistry.registerObject` (#14367; the ONE spelling of this ' +
+            'refusal — the ADR-0029 D9 §6.1 late-install branch beside it re-classifies a tenant-authored ' +
+            'sitting owner and refuses nothing). Measured on this tree, every path to it either aborts boot ' +
+            'or catches below any door. `ObjectQL.registerApp` (`packages/objectql/src/engine.ts`) lets it ' +
+            'propagate to `ManifestService.register()` (`packages/objectql/src/plugin.ts`), whose callers ' +
+            'are the population the three ADR-0130 rows above record: boot-time `manifest.register()` ' +
+            'inside plugin init (`packages/runtime/src/app-plugin.ts`, the platform app plugins, the ' +
+            'service plugins), where a throw aborts boot before any HTTP boundary exists; the rehydrate ' +
+            'loop in `packages/cloud-connection/src/marketplace-install-local-plugin.ts`, which catches per ' +
+            'entry and logs; and the import route in that same file, which catches and answers with its ' +
+            'OWN registered `PLUGIN_REGISTER_FAILED` at 422, interpolating this refusal\'s MESSAGE into ' +
+            'that envelope. Every other caller catches it in-process: `ObjectQL.registerPlugin` ' +
+            '(`logger.warn`), the `ObjectQLPlugin` metadata bridge\'s reload ingest and `subscribe(\'object\')` ' +
+            'handler (`logger.warn`), and `metadata-protocol`\'s `applyObjectRegistryMutation` ' +
+            '(`console.warn`) and `loadMetaFromDb` (the per-record `errors` count). The two HTTP install ' +
+            'sites — `POST /packages` in `packages/runtime/src/domains/packages.ts` and ' +
+            '`protocol.installPackage` — call `SchemaRegistry.installPackage`, which records the package ' +
+            'and never calls `registerObject`, so neither can raise it; `MetadataFacade.register(\'object\')` ' +
+            'would propagate it, and has no production instantiation. So the code reaches a reader only ' +
+            'inside a message string, never as `error.code`. Its `status: 422` is the ADR-0112 envelope ' +
+            'shape this repo\'s rejection tests assert on, not evidence of a door. If a door ever answers ' +
+            'with this code itself, the verdict becomes pending-registration and it belongs in the ledger ' +
+            'batch.'
+    },
     // ── [#13233] field-level catalogs, reached by the OBJECT-LITERAL helper ──
     //
     // The 29 rows below are the whole verdict cost of widening `codehelper` to
