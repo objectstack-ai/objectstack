@@ -536,6 +536,18 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     const scope = ctx.getReadScope?.(tableName);
     if (scope != null) {
       const { sql: scopeSql, params: scopeParams } = compileScopedFilterToSql(scope, tableName);
+      // [#13926] The same door guard `execute()` trusts (`withReadScope`,
+      // #13640), at the ECHO's own merge — so one read scope gets ONE verdict
+      // on this strategy, whichever face the caller asked for. Without it the
+      // echo COMPILED the `$not`-over-`$in: []` family into a predicate that
+      // admits every row (`NOT (owner IS NOT NULL AND 1 = 0)`) while
+      // `execute()` refused the same scope — measured end-to-end in
+      // `read-scope-vacancy-three-faces.test.ts`. AFTER the compiler on
+      // purpose: the shapes the compiler already refuses (`$nin: []` at any
+      // depth, the bare array) keep their #13571 messages, so each door stays
+      // distinguishable in the operator's log, and the guard closes exactly
+      // the shapes that compile-but-vacate.
+      assertReadScopeCannotVacate(scope, tableName);
       if (scopeSql) {
         let i = 0;
         // `compileScopedFilterToSql` emits `?`; renumber into this builder's $N.
