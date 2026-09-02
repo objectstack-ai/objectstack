@@ -252,8 +252,11 @@ describe('the nightly sweep survives an ARTIFACT-served boot (#14257)', () => {
     // The artifact path is not a variant of the in-process boot, it is a
     // strictly NARROWER one: `objectstack build` emits `functions` into a
     // sibling runtime module exporting only `{ functions, meta }`, the artifact
-    // JSON carries no `onEnable`, and `mergeRuntimeModule`
-    // (`packages/runtime/src/load-artifact-bundle.ts`) merges only `functions`.
+    // JSON carries no `onEnable`, and `mergeRuntimeModule` (the merge step
+    // `@objectstack/runtime` runs on a loaded artifact bundle) merges only
+    // `functions`. Its file is deliberately NOT spelled as a repo path here:
+    // `check:cross-package-test-inputs` reads a path literal in a test as a
+    // real input, and this test does not read that file.
     //
     // So this reaches the handler exactly the way that boot does — out of the
     // `functions` entry, the one thing an artifact carries — having called
