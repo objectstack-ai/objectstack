@@ -15,7 +15,7 @@
   "scripts": {
     "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit && pnpm check:test-typecheck",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.typecheck.json && pnpm check:test-typecheck",
     "check:test-typecheck": "tsx ../../../scripts/check-test-typecheck.mts --self-test && tsx ../../../scripts/check-test-typecheck.mts --package packages/plugins/plugin-hono-server --project tsconfig.test.json"
   },
   "dependencies": {
