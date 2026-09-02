@@ -66,11 +66,14 @@ interface FieldDef {
    * ⚠️ Truthiness rather than `!== undefined`, and that difference is load
    * bearing rather than inherited. Measured on `FieldSchema` built from this
    * tree: `{ type: 'lookup' }` with NO `reference`, and `{ type: 'lookup',
-   * reference: '' }`, both parse SUCCESSFULLY — the "required for these types"
-   * in the spec's own prose is not enforced by the schema. So a lookup that
-   * points nowhere is a shape an author can really publish, and it must not
-   * get `idx_FIELD_lookup`: an index for a join whose target is undeclared
-   * costs writes and buys no read. Truthiness declines exactly that shape.
+   * reference: '' }`, are BOTH REFUSED — `custom` on the `reference` path,
+   * since #13927 made the "required for these types" in the spec's own prose
+   * enforced (it parsed successfully until then). The shape still reaches this
+   * arm regardless, because metadata gets here without meeting Zod at all —
+   * `syncSchema(object, schema: unknown)` casts and forwards verbatim — and it
+   * must not get `idx_FIELD_lookup`: an index for a join whose target is
+   * undeclared costs writes and buys no read. Truthiness declines exactly that
+   * shape.
    */
   reference?: unknown;
   multiple?: boolean;
@@ -110,9 +113,9 @@ interface ObjectDef {
  *
  * ## Why the DDL seam needs a door the schema already has
  *
- * `reference` is the only relationship spelling the spec declares;
- * `reference_to` is a REJECTED ALIAS, not a normalised one. Measured against
- * `@objectstack/spec` built from this tree:
+ * `reference` is the only relationship spelling the spec declares. ON THE
+ * AUTHORING FACE `reference_to` is a REJECTED ALIAS, not a normalised one.
+ * Measured against `@objectstack/spec` built from this tree:
  *
  * ```
  * FieldSchema.safeParse({ name:'company_id', type:'lookup', reference_to:'company' })
@@ -121,6 +124,21 @@ interface ObjectDef {
  *       Did you mean `reference_to` -> `reference`? Until this shape was closed
  *       these were dropped silently ..."
  * ```
+ *
+ * ⚠️ That verdict is the authoring face and only the authoring face — do NOT
+ * read this door as "a stored `reference_to` stays verbatim forever". #13700
+ * landed the `field-reference-to-alias` conversion (`toMajor: 18`,
+ * `retiredFromLoadPath: true`, in `packages/spec/src/conversions/registry.ts`),
+ * and its docblock already states the split this comment has to be read
+ * against: the entry "covers the two paths that serve or rewrite EXISTING data
+ * — stored rehydration and `os migrate meta`", where the key is NORMALISED to
+ * `reference` rather than refused, while "the DDL doors above keep guarding
+ * the third path (metadata handed straight to a driver, around both the gate
+ * and the stored pass); they are downstream of this entry, not replaced by
+ * it." This door is one of those DDL doors — and the third path is exactly the
+ * one this driver sits on, since `syncSchema(object, schema: unknown)` casts
+ * and forwards verbatim with no Zod and no stored pass. Refused when authored,
+ * rewritten when already at rest, refused again here.
  *
  * Until this door, the driver read `reference_to` and ONLY `reference_to`, as
  * the gate on the field-level join index below. So one key had TWO doors with
