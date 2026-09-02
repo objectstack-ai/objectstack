@@ -1,0 +1,27 @@
+{
+  "name": "@objectstack/example-multi-package",
+  "version": "0.0.1",
+  "description": "One release artifact carrying TWO packages that share a namespace (ADR-0130 D4) — the producer-side fixture for `packages[]`",
+  "license": "Apache-2.0",
+  "private": true,
+  "main": "./objectstack.config.ts",
+  "types": "./objectstack.config.ts",
+  "exports": {
+    ".": "./objectstack.config.ts",
+    "./objectstack.config": "./objectstack.config.ts"
+  },
+  "scripts": {
+    "dev": "objectstack dev",
+    "start": "objectstack start",
+    "build": "objectstack build",
+    "validate": "objectstack validate",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@objectstack/spec": "workspace:*"
+  },
+  "devDependencies": {
+    "@objectstack/cli": "workspace:*",
+    "typescript": "^6.0.3"
+  }
+}

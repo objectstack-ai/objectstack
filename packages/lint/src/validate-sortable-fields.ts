@@ -233,6 +233,8 @@
  */
 
 import { isVirtualSearchField } from '@objectstack/spec/data';
+
+import { suggestName } from './object-graph.js';
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
@@ -338,38 +340,6 @@ function readSortKeys(declared: unknown): SortKey[] {
   return [];
 }
 
-/** Levenshtein-bounded "did you mean?" over the object's own field names. */
-function suggest(target: string, known: Iterable<string>): string {
-  let best: string | undefined;
-  let bestScore = Infinity;
-  for (const candidate of known) {
-    const d = distance(target, candidate);
-    if (d < bestScore) {
-      bestScore = d;
-      best = candidate;
-    }
-  }
-  const limit = Math.max(2, Math.floor(target.length / 3));
-  return best && bestScore <= limit ? ` Did you mean "${best}"?` : '';
-}
-
-function distance(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  let prev = Array.from({ length: n + 1 }, (_, j) => j);
-  for (let i = 1; i <= m; i++) {
-    const curr = [i, ...new Array<number>(n).fill(0)];
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
-    }
-    prev = curr;
-  }
-  return prev[n];
-}
-
 /**
  * Check ONE authored `sort` declaration against the object it is bound to —
  * the shared core behind every list-view surface that declares an ordering.
@@ -467,7 +437,7 @@ export function checkSortDeclaration(
           `"${objectName}". The runtime refuses the sort rather than dropping it: ` +
           `every load of this view answers 400 INVALID_SORT (#6994), because a sort ` +
           `is the view's FIRST fetch and not an optional interaction.` +
-          (dotted ? '' : suggest(head, known)),
+          (dotted ? '' : suggestName(head, known)),
         hint:
           (dotted
             ? `'sort' reaches only whole columns of "${objectName}" itself, never a ` +
