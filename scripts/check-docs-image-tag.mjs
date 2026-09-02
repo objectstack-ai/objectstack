@@ -333,6 +333,54 @@ const PROSE_VERSION_LITERAL = /\d+\.\d+\.\d+/;
  */
 const LIVE_CONTROL = { file: 'docker/README.md', metavariable: 'X.Y.Z' };
 
+
+// ---------------------------------------------------------------------------
+// The driver-promise limb (#14510).
+// ---------------------------------------------------------------------------
+
+/**
+ * The image's SQL-driver list, read from BOTH files that state it.
+ *
+ * `docker/Dockerfile` installs the drivers; `docker/README.md` publishes which
+ * ones it installs. The maintainer ruling on #14510 made that README list "a
+ * public promise ... maintained from now on", and a promise with nothing holding
+ * it to the artifact is the same silent-drift shape the two limbs above exist
+ * for: an author who adds `tedious` to the install line, or drops `mysql2` from
+ * it, leaves valid Docker syntax and valid Markdown behind, and the README goes
+ * on advertising a dialect the image can no longer reach. The reader finds out
+ * at boot, with `Cannot find module`, which is exactly how #14510 was found.
+ *
+ * So the two are compared to each other rather than to a third list kept here:
+ * this gate owns no opinion about WHICH drivers belong in the image (that is the
+ * ruling's), only that the file which installs them and the file which promises
+ * them cannot disagree.
+ *
+ * Both sides are ANCHORED for the same reason the pin patterns are. The
+ * Dockerfile anchor is the global-install command itself; the README anchor is
+ * the section heading, and only the FIRST table under it is read -- the prose
+ * below that table deliberately names drivers the image does NOT carry
+ * (`tedious`, `@objectstack/driver-turso`), and a looser reader would parse those
+ * as promises and redden the gate for saying something true.
+ */
+export const DRIVER_PROMISE = {
+  dockerfile: 'docker/Dockerfile',
+  readme: 'docker/README.md',
+  /** The README section whose first table lists what the image installs. */
+  heading: '## Database drivers in the image',
+  /** The Dockerfile command that installs them. Matched on a trimmed line. */
+  installPrefix: 'RUN npm install -g',
+  /**
+   * Installed packages that are NOT drivers.
+   *
+   * `@objectstack/cli` is the runtime itself and is pinned by the build arg, not
+   * by a driver range; the pin limb above already owns it. Listing it here rather
+   * than filtering on "has an interpolation in its range" keeps the exclusion
+   * about WHAT the package is, so a future `@objectstack/cli@17.2.0` spelled
+   * concretely stays excluded for the same reason it is today.
+   */
+  ignoreInstalled: ['@objectstack/cli'],
+};
+
 /** The repo this script lives in -- resolved from the script, so cwd cannot lie. */
 function scriptRepoRoot() {
   return join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -574,6 +622,255 @@ export function checkProseClaims({ claims, root }) {
   return { findings, stats };
 }
 
+
+/**
+ * Split a package spec into its name and its version range.
+ *
+ * Scope-aware: the `@` that opens `@objectstack/cli` is not a separator, so the
+ * split is on the LAST `@` at a non-zero index. A spec with no such `@` has no
+ * range at all, which is a finding rather than a default -- see DRIVER-UNRANGED.
+ *
+ * @param {string} spec
+ * @returns {{ name: string, range: string }}
+ */
+export function splitPackageSpec(spec) {
+  const at = spec.lastIndexOf('@');
+  if (at <= 0) return { name: spec, range: '' };
+  return { name: spec.slice(0, at), range: spec.slice(at + 1) };
+}
+
+/**
+ * The drivers `docker/Dockerfile`'s global install puts into the image.
+ *
+ * Line continuations are joined before tokenising, because the install list is
+ * one package per line -- reading only the anchor line would see the CLI and
+ * none of the drivers, i.e. report an empty list over a populated one.
+ *
+ * The command is cut at the first `&&`: `npm cache clean --force` follows on the
+ * same logical line and its tokens are not packages.
+ *
+ * @param {string} text
+ * @returns {{ found: boolean, line: number, drivers: { name: string, range: string, raw: string }[] }}
+ */
+export function extractInstalledDrivers(text) {
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => line.trim().startsWith(DRIVER_PROMISE.installPrefix));
+  if (start === -1) return { found: false, line: 0, drivers: [] };
+
+  let joined = '';
+  for (let index = start; index < lines.length; index++) {
+    const line = lines[index];
+    const continues = /\\\s*$/.test(line);
+    joined += `${continues ? line.replace(/\\\s*$/, '') : line} `;
+    if (!continues) break;
+  }
+
+  const command = joined.split('&&')[0];
+  const drivers = [];
+  for (const token of command.trim().split(/\s+/)) {
+    // Quotes are how a `^` range survives some shells; they are not part of the
+    // spec. `RUN`, `npm`, `install` and the global flag are the command itself.
+    const spec = token.replace(/^["']|["']$/g, '');
+    if (spec === '' || spec.startsWith('-')) continue;
+    if (['RUN', 'npm', 'install'].includes(spec)) continue;
+    const { name, range } = splitPackageSpec(spec);
+    if (DRIVER_PROMISE.ignoreInstalled.includes(name)) continue;
+    drivers.push({ name, range, raw: spec });
+  }
+  return { found: true, line: start + 1, drivers };
+}
+
+/**
+ * The drivers `docker/README.md` promises, read from the first table under the
+ * driver heading.
+ *
+ * Only the LAST cell of each data row is read, and only its first backticked
+ * token: the other cells carry `OS_DATABASE_URL` schemes, which are backticked
+ * too and are not package specs.
+ *
+ * @param {string} text
+ * @returns {{ found: boolean, line: number, drivers: { name: string, range: string, raw: string, line: number }[] }}
+ */
+export function extractPromisedDrivers(text) {
+  const lines = text.split('\n');
+  const start = lines.findIndex((line) => line.trim() === DRIVER_PROMISE.heading);
+  if (start === -1) return { found: false, line: 0, drivers: [] };
+
+  const drivers = [];
+  let seenTable = false;
+  let rowIndex = 0;
+  for (let index = start + 1; index < lines.length; index++) {
+    const line = lines[index].trim();
+    if (!line.startsWith('|')) {
+      if (seenTable) break; // the table ended; the prose after it is not a promise
+      continue;
+    }
+    seenTable = true;
+    rowIndex++;
+    // Row 1 is the header, row 2 the `|:---|` separator.
+    if (rowIndex <= 2) continue;
+    const cells = line.replace(/^\||\|$/g, '').split('|');
+    const backticked = cells[cells.length - 1].match(/`([^`]+)`/);
+    if (!backticked) continue;
+    const { name, range } = splitPackageSpec(backticked[1]);
+    drivers.push({ name, range, raw: backticked[1], line: index + 1 });
+  }
+  return { found: true, line: start + 1, drivers };
+}
+
+/**
+ * Assert that the image's install line and the README's published list name the
+ * same drivers at the same ranges.
+ *
+ * @param {{ root: string }} options
+ * @returns {{ findings: Finding[], stats: Record<string, number> }}
+ */
+export function checkDriverPromise({ root }) {
+  /** @type {Finding[]} */
+  const findings = [];
+  const stats = { installed: 0, promised: 0, matched: 0 };
+
+  /** @type {Record<string, string | null>} */
+  const texts = {};
+  for (const key of ['dockerfile', 'readme']) {
+    const file = DRIVER_PROMISE[key];
+    const full = join(root, file);
+    if (!existsSync(full)) {
+      findings.push({
+        kind: 'MISSING-SURFACE',
+        file,
+        line: 0,
+        detail:
+          'named by DRIVER_PROMISE but not present in the tree, so the image driver list has only one '
+          + 'side left and nothing to compare it against. Re-point the entry, or delete this limb in the '
+          + 'same change so the shrinkage is visible in the diff.',
+      });
+      texts[key] = null;
+      continue;
+    }
+    texts[key] = readFileSync(full, 'utf8');
+  }
+  if (texts.dockerfile === null || texts.readme === null) return { findings, stats };
+
+  const installed = extractInstalledDrivers(texts.dockerfile);
+  const promised = extractPromisedDrivers(texts.readme);
+
+  if (!installed.found) {
+    findings.push({
+      kind: 'DRIVER-ANCHOR-LOST',
+      file: DRIVER_PROMISE.dockerfile,
+      line: 0,
+      detail:
+        `no line starts with '${DRIVER_PROMISE.installPrefix}', so this gate cannot see what the image `
+        + 'installs and would report OK over a comparison it never made. Either the install was re-spelled '
+        + '-- re-anchor DRIVER_PROMISE.installPrefix -- or the image stopped installing drivers, in which '
+        + `case delete the '${DRIVER_PROMISE.heading}' section of ${DRIVER_PROMISE.readme} and this limb in `
+        + 'the same change.',
+    });
+  }
+  if (!promised.found) {
+    findings.push({
+      kind: 'DRIVER-ANCHOR-LOST',
+      file: DRIVER_PROMISE.readme,
+      line: 0,
+      detail:
+        `carries no '${DRIVER_PROMISE.heading}' heading, so the drivers ${DRIVER_PROMISE.dockerfile} installs `
+        + 'are not published anywhere a deployer reads. The #14510 ruling made that list a PUBLIC PROMISE: '
+        + 'the image advertises a `postgres://` invocation in this very file, and a reader has no other way '
+        + 'to know whether the driver behind it is in the image or something they must install.',
+    });
+  }
+  if (!installed.found || !promised.found) return { findings, stats };
+
+  stats.installed = installed.drivers.length;
+  stats.promised = promised.drivers.length;
+
+  if (installed.drivers.length === 0) {
+    findings.push({
+      kind: 'DRIVER-LIST-EMPTY',
+      file: DRIVER_PROMISE.dockerfile,
+      line: installed.line,
+      detail:
+        'installs no driver alongside the CLI. `@objectstack/driver-sql` declares `pg`, `mysql2` and '
+        + '`tedious` as OPTIONAL peer dependencies and npm skips optional peers, so an install line carrying '
+        + 'only the CLI produces an image that fails fast on every `postgres://` and `mysql://` URL -- the '
+        + 'defect #14510 filed. An empty list is not a passing comparison; it is this gate asserting nothing.',
+    });
+  }
+  if (promised.drivers.length === 0) {
+    findings.push({
+      kind: 'DRIVER-LIST-EMPTY',
+      file: DRIVER_PROMISE.readme,
+      line: promised.line,
+      detail:
+        `the '${DRIVER_PROMISE.heading}' section has no table row naming a driver package in backticks, so `
+        + 'the promise is a heading with nothing under it and the comparison below has one empty side. Each '
+        + "row's LAST cell must carry the package spec, e.g. `pg@^8.0.0`.",
+    });
+  }
+  if (installed.drivers.length === 0 || promised.drivers.length === 0) return { findings, stats };
+
+  const promisedByName = new Map(promised.drivers.map((driver) => [driver.name, driver]));
+  const installedByName = new Map(installed.drivers.map((driver) => [driver.name, driver]));
+
+  for (const driver of installed.drivers) {
+    if (driver.range === '') {
+      findings.push({
+        kind: 'DRIVER-UNRANGED',
+        file: DRIVER_PROMISE.dockerfile,
+        line: installed.line,
+        detail:
+          `installs '${driver.raw}' with no version range, so every rebuild of this image -- including a `
+          + 'CVE backfill of an OLD release -- picks up whatever major is newest that day. The ranges belong '
+          + "in the install line and must be `@objectstack/driver-sql`'s own optional-peer ranges, so the "
+          + 'image satisfies the driver contract rather than a second one invented here.',
+      });
+    }
+    const match = promisedByName.get(driver.name);
+    if (!match) {
+      findings.push({
+        kind: 'DRIVER-UNDOCUMENTED',
+        file: DRIVER_PROMISE.readme,
+        line: promised.line,
+        detail:
+          `${DRIVER_PROMISE.dockerfile}:${installed.line} installs '${driver.raw}', which the promise table `
+          + 'does not list. Every driver in the image is part of what the image IS -- it changes which '
+          + 'databases a deployment can reach, and it is carried by every user of the image including the '
+          + 'ones who will never use it. Add the row, or take the package back out of the install line.',
+      });
+      continue;
+    }
+    stats.matched++;
+    if (match.range !== driver.range) {
+      findings.push({
+        kind: 'DRIVER-RANGE-MISMATCH',
+        file: DRIVER_PROMISE.readme,
+        line: match.line,
+        detail:
+          `promises '${match.raw}' but ${DRIVER_PROMISE.dockerfile}:${installed.line} installs `
+          + `'${driver.raw}'. The published range is the half a reader plans an upgrade against, so the two `
+          + 'must move together -- a README a major behind the image is worse than no README, because it '
+          + 'reads as checked.',
+      });
+    }
+  }
+
+  for (const driver of promised.drivers) {
+    if (installedByName.has(driver.name)) continue;
+    findings.push({
+      kind: 'DRIVER-OVERPROMISED',
+      file: DRIVER_PROMISE.readme,
+      line: driver.line,
+      detail:
+        `promises '${driver.raw}', which ${DRIVER_PROMISE.dockerfile}:${installed.line} does not install. `
+        + 'A reader who believes this row hands the image a URL it cannot serve and gets '
+        + "`Cannot find module '" + driver.name + "'` at boot. Either install it, or delete the row.",
+    });
+  }
+
+  return { findings, stats };
+}
+
 // ---------------------------------------------------------------------------
 // Loading the expected version.
 // ---------------------------------------------------------------------------
@@ -618,7 +915,7 @@ export function loadExpectedVersion(file) {
  * Named unconditionally, zeroes included: the live corpus is green, so the only
  * thing distinguishing "8 pins were compared" from "the loop never ran" is this.
  */
-export function summarise(stats, expected, proseStats) {
+export function summarise(stats, expected, proseStats, driverStats) {
   const pins = (
     `${stats.read}/${stats.surfaces} enumerated surface(s) read, `
     + `${stats.compared} concrete pin(s) compared against ${VERSION_SOURCE} ${expected}, `
@@ -631,15 +928,25 @@ export function summarise(stats, expected, proseStats) {
   // as a verdict, because this same line is printed under a FAILING run -- saying
   // "read as version-free" there would have the scope line contradict the findings
   // directly above it.
-  return (
+  const withProse = (
     `${pins}; ${proseStats.matched} anchored prose claim(s) from `
     + `${proseStats.claims} enumerated claim site(s) scanned for concrete versions`
   );
+  if (!driverStats) return withProse;
+  // Same bargain a third time: "2 drivers were compared" and "the anchors matched
+  // nothing" are the two readings of this limb's green, and only the counts tell
+  // them apart. Worded as COMPARED, not as agreed, because this line also prints
+  // above a list of DRIVER-* findings.
+  return (
+    `${withProse}; ${driverStats.installed} driver(s) installed by ${DRIVER_PROMISE.dockerfile} `
+    + `compared against ${driverStats.promised} promised in ${DRIVER_PROMISE.readme} `
+    + `(${driverStats.matched} matched by name)`
+  );
 }
 
-function report(findings, stats, expected, proseStats) {
+function report(findings, stats, expected, proseStats, driverStats) {
   if (findings.length === 0) {
-    console.log(`check-docs-image-tag: OK (${summarise(stats, expected, proseStats)}).`);
+    console.log(`check-docs-image-tag: OK (${summarise(stats, expected, proseStats, driverStats)}).`);
     return 0;
   }
   const byKind = findings.reduce((acc, finding) => {
@@ -665,7 +972,17 @@ function report(findings, stats, expected, proseStats) {
       + 'it. Use `X.Y.Z` / `X.Y` / `X` / `latest`.\n',
     );
   }
-  console.error(`Scope of this run: ${summarise(stats, expected, proseStats)}.`);
+  if (findings.some((finding) => finding.kind.startsWith('DRIVER-'))) {
+    console.error(
+      "A DRIVER-* finding is about the image's PUBLISHED driver list (#14510). docker/Dockerfile's "
+      + `\`${DRIVER_PROMISE.installPrefix}\` line and docker/README.md's "${DRIVER_PROMISE.heading.replace(/^#+\s*/, '')}" `
+      + 'table state the same fact to two audiences and must move in the same commit. Fixing it by '
+      + 'deleting the table is not a fix: the ruling on #14510 made that list a maintained public promise, '
+      + 'because the image advertises a `postgres://` invocation that only works if the driver is inside '
+      + 'it.\n',
+    );
+  }
+  console.error(`Scope of this run: ${summarise(stats, expected, proseStats, driverStats)}.`);
   return 1;
 }
 
@@ -1156,8 +1473,242 @@ async function selfTest() {
         + `got ${liveProse.stats.matched}. A shortfall means a page was reworded past its anchor.`,
     );
 
+
+    // ── The driver-promise limb (#14510) ────────────────────────────────────
+    //
+    // Same bargain as the two limbs above: a clean pair that must stay SILENT
+    // while demonstrably having looked, then one deliberate defect per finding
+    // kind, then a live control so the enumeration cannot rot into a no-op.
+    //
+    // The clean fixture reproduces every shape the real files carry -- the CLI
+    // pinned by an interpolated build arg, the `&&` tail, quoted ranges, the
+    // scheme cells (backticked, and NOT package specs), and the prose below the
+    // table naming drivers the image does NOT carry. Each of those has been a
+    // plausible way to mis-parse this pair, so each is asserted rather than
+    // reasoned about.
+    const driverDockerfile = (installLines) => [
+      '# comment mentioning pg and mysql2, which must not be parsed',
+      'FROM node:22-slim',
+      'ARG OS_CLI_VERSION=latest',
+      ...installLines,
+      'USER node',
+      '',
+    ].join('\n');
+
+    const CLEAN_INSTALL = [
+      'RUN npm install -g \\',
+      '      @objectstack/cli@${OS_CLI_VERSION} \\',
+      '      "pg@^8.0.0" \\',
+      '      "mysql2@^3.0.0" \\',
+      ' && npm cache clean --force',
+    ];
+
+    const driverReadme = (rows, { heading = DRIVER_PROMISE.heading, trailer = true } = {}) => [
+      '# Image',
+      '',
+      '## Tags',
+      '',
+      '| Tag | Meaning |',
+      '|:---|:---|',
+      '| `X.Y.Z` | Exact release |',
+      '',
+      heading,
+      '',
+      '**This list is a public promise.**',
+      '',
+      '| `OS_DATABASE_URL` scheme | Driver package installed in the image |',
+      '|:---|:---|',
+      ...rows,
+      '',
+      ...(trailer
+        ? ['**Not in the image:** `tedious` and `@objectstack/driver-turso`.', '']
+        : []),
+      '## Something else',
+      '',
+    ].join('\n');
+
+    const CLEAN_ROWS = [
+      '| `postgres://`, `postgresql://` | `pg@^8.0.0` |',
+      '| `mysql://`, `mysql2://` | `mysql2@^3.0.0` |',
+    ];
+
+    const driverFixture = (name, installLines, rows, readmeOptions) => {
+      write(`${name}/${DRIVER_PROMISE.dockerfile}`, driverDockerfile(installLines));
+      write(`${name}/${DRIVER_PROMISE.readme}`, driverReadme(rows, readmeOptions));
+      return checkDriverPromise({ root: join(dir, name) });
+    };
+
+    const driverClean = driverFixture('drv-clean', CLEAN_INSTALL, CLEAN_ROWS);
+    assert(
+      driverClean.findings.length === 0,
+      `an agreeing Dockerfile/README pair reports zero findings -- got ${JSON.stringify(driverClean.findings.map((f) => `${f.kind}@${f.file}:${f.line}`))}`,
+    );
+    // ...and it really did look. Both sides non-zero and MATCHED is the assertion
+    // that separates "the lists agree" from "neither list was found".
+    assert(
+      driverClean.stats.installed === 2 && driverClean.stats.promised === 2 && driverClean.stats.matched === 2,
+      'the clean run compared 2 installed against 2 promised and matched both -- '
+        + `got ${JSON.stringify(driverClean.stats)}`,
+    );
+
+    // The exclusions, asserted directly rather than inferred from the green above.
+    const cleanInstalled = extractInstalledDrivers(driverDockerfile(CLEAN_INSTALL));
+    assert(
+      cleanInstalled.drivers.map((d) => d.raw).join(',') === 'pg@^8.0.0,mysql2@^3.0.0',
+      `the install line yields exactly the two driver specs, quotes stripped -- got ${JSON.stringify(cleanInstalled.drivers.map((d) => d.raw))}`,
+    );
+    assert(
+      !cleanInstalled.drivers.some((d) => d.name === '@objectstack/cli'),
+      'the CLI is not a driver: an interpolated `@objectstack/cli@${OS_CLI_VERSION}` must be excluded by NAME, '
+        + 'or this limb would demand a README row for the runtime itself',
+    );
+    assert(
+      !cleanInstalled.drivers.some((d) => ['cache', 'clean', 'force', 'npm'].includes(d.name)),
+      `the \`&& npm cache clean --force\` tail contributes no packages -- got ${JSON.stringify(cleanInstalled.drivers.map((d) => d.name))}`,
+    );
+    const cleanPromised = extractPromisedDrivers(driverReadme(CLEAN_ROWS));
+    assert(
+      cleanPromised.drivers.map((d) => d.raw).join(',') === 'pg@^8.0.0,mysql2@^3.0.0',
+      `the promise table yields exactly the two specs from its LAST cells -- got ${JSON.stringify(cleanPromised.drivers.map((d) => d.raw))}`,
+    );
+    assert(
+      !cleanPromised.drivers.some((d) => d.name.includes('://')),
+      'the backticked `OS_DATABASE_URL` schemes in the first cell are not package specs -- reading them as '
+        + `promises would redden every honest table. Got ${JSON.stringify(cleanPromised.drivers.map((d) => d.name))}`,
+    );
+    assert(
+      !cleanPromised.drivers.some((d) => d.name === 'tedious' || d.name === '@objectstack/driver-turso'),
+      'the "Not in the image" prose BELOW the table is not a promise -- only the first table under the '
+        + `heading is read. Got ${JSON.stringify(cleanPromised.drivers.map((d) => d.name))}`,
+    );
+    assert(
+      extractPromisedDrivers(driverReadme(CLEAN_ROWS)).drivers[0].line
+        === driverReadme(CLEAN_ROWS).split('\n').findIndex((l) => l.includes('`pg@^8.0.0`')) + 1,
+      'a promised driver reports the 1-based line of its own table row, so DRIVER-RANGE-MISMATCH points at '
+        + 'the row an author must edit',
+    );
+    assert(
+      splitPackageSpec('@objectstack/driver-turso@^17.2.0').name === '@objectstack/driver-turso'
+        && splitPackageSpec('pg@^8.0.0').range === '^8.0.0'
+        && splitPackageSpec('tedious').range === '',
+      'a spec splits on the LAST `@` at a non-zero index, so a scoped name survives and a bare name has no '
+        + 'range',
+    );
+
+    // One deliberate defect per finding kind.
+    const driverUndocumented = driverFixture('drv-undoc', CLEAN_INSTALL, [CLEAN_ROWS[0]]);
+    assert(
+      driverUndocumented.findings.length === 1
+        && driverUndocumented.findings[0].kind === 'DRIVER-UNDOCUMENTED',
+      'a driver installed but absent from the table is DRIVER-UNDOCUMENTED -- otherwise the image grows a '
+        + `dependency every user carries, unpublished. Got ${JSON.stringify(driverUndocumented.findings)}`,
+    );
+
+    const driverOverpromised = driverFixture('drv-over', CLEAN_INSTALL, [
+      ...CLEAN_ROWS,
+      '| `mssql://` | `tedious@^18.0.0` |',
+    ]);
+    assert(
+      driverOverpromised.findings.length === 1
+        && driverOverpromised.findings[0].kind === 'DRIVER-OVERPROMISED',
+      'a row promising a driver the image does not install is DRIVER-OVERPROMISED -- this is the finding '
+        + `that stands between a reader and a boot-time \`Cannot find module\`. Got ${JSON.stringify(driverOverpromised.findings)}`,
+    );
+
+    const driverRange = driverFixture('drv-range', CLEAN_INSTALL, [
+      '| `postgres://` | `pg@^7.0.0` |',
+      CLEAN_ROWS[1],
+    ]);
+    assert(
+      driverRange.findings.length === 1 && driverRange.findings[0].kind === 'DRIVER-RANGE-MISMATCH',
+      'the same package at a different range is DRIVER-RANGE-MISMATCH -- a set comparison alone would call '
+        + `this pair agreed. Got ${JSON.stringify(driverRange.findings)}`,
+    );
+
+    const driverUnranged = driverFixture('drv-unranged', [
+      'RUN npm install -g \\',
+      '      @objectstack/cli@${OS_CLI_VERSION} \\',
+      '      pg \\',
+      '      "mysql2@^3.0.0" \\',
+      ' && npm cache clean --force',
+    ], CLEAN_ROWS);
+    assert(
+      driverUnranged.findings.some((finding) => finding.kind === 'DRIVER-UNRANGED'),
+      'an install with no version range is DRIVER-UNRANGED -- a CVE backfill of an OLD release would '
+        + `otherwise pick up whatever major is newest that day. Got ${JSON.stringify(driverUnranged.findings.map((f) => f.kind))}`,
+    );
+
+    const driverNoHeading = driverFixture('drv-noheading', CLEAN_INSTALL, CLEAN_ROWS, {
+      heading: '## Some other section',
+    });
+    assert(
+      driverNoHeading.findings.length === 1
+        && driverNoHeading.findings[0].kind === 'DRIVER-ANCHOR-LOST'
+        && driverNoHeading.findings[0].file === DRIVER_PROMISE.readme,
+      'a README that lost the promise heading is DRIVER-ANCHOR-LOST, not a pass -- this is the exact state '
+        + `the tree was in before #14510. Got ${JSON.stringify(driverNoHeading.findings)}`,
+    );
+    assert(
+      driverNoHeading.stats.installed === 0 && driverNoHeading.stats.promised === 0,
+      'a lost anchor contributes nothing to the counts, so the scope line cannot overstate what was compared',
+    );
+
+    const driverNoInstall = driverFixture('drv-noinstall', ['RUN echo hello'], CLEAN_ROWS);
+    assert(
+      driverNoInstall.findings.some(
+        (finding) => finding.kind === 'DRIVER-ANCHOR-LOST' && finding.file === DRIVER_PROMISE.dockerfile,
+      ),
+      'a Dockerfile whose install line was re-spelled past the anchor is DRIVER-ANCHOR-LOST -- otherwise '
+        + `this limb reports OK over a comparison it never made. Got ${JSON.stringify(driverNoInstall.findings.map((f) => f.kind))}`,
+    );
+
+    const driverEmptyInstall = driverFixture('drv-emptyinstall', [
+      'RUN npm install -g @objectstack/cli@${OS_CLI_VERSION} \\',
+      ' && npm cache clean --force',
+    ], CLEAN_ROWS);
+    assert(
+      driverEmptyInstall.findings.some((finding) => finding.kind === 'DRIVER-LIST-EMPTY'),
+      'an install line carrying only the CLI is DRIVER-LIST-EMPTY -- two empty-ish sides must not compare '
+        + `equal, which is the vacuous green this limb would otherwise have. Got ${JSON.stringify(driverEmptyInstall.findings.map((f) => f.kind))}`,
+    );
+
+    const driverEmptyTable = driverFixture('drv-emptytable', CLEAN_INSTALL, []);
+    assert(
+      driverEmptyTable.findings.some(
+        (finding) => finding.kind === 'DRIVER-LIST-EMPTY' && finding.file === DRIVER_PROMISE.readme,
+      ),
+      'a promise heading with no driver rows under it is DRIVER-LIST-EMPTY -- a heading is not a promise. '
+        + `Got ${JSON.stringify(driverEmptyTable.findings.map((f) => f.kind))}`,
+    );
+
+    write('drv-missing/docker/README.md', driverReadme(CLEAN_ROWS));
+    const driverMissing = checkDriverPromise({ root: join(dir, 'drv-missing') });
+    assert(
+      driverMissing.findings.length === 1
+        && driverMissing.findings[0].kind === 'MISSING-SURFACE'
+        && driverMissing.findings[0].file === DRIVER_PROMISE.dockerfile,
+      `a vanished side of the pair is MISSING-SURFACE, not a skip. Got ${JSON.stringify(driverMissing.findings)}`,
+    );
+
+    // ── The LIVE driver control (#14510, in situ) ───────────────────────────
+    //
+    // The fixtures prove the limb can go red. This proves it is pointed at the
+    // real pair, which still carries a real list -- the assertion that catches
+    // both files being rewritten past their anchors at once, which no hermetic
+    // fixture can see.
+    const liveDrivers = checkDriverPromise({ root: scriptRepoRoot() });
+    assert(
+      liveDrivers.findings.length === 0,
+      `the live docker/ pair agrees -- got ${JSON.stringify(liveDrivers.findings.map((f) => `${f.kind}@${f.file}:${f.line}`))}`,
+    );
+    assert(
+      liveDrivers.stats.installed >= 2 && liveDrivers.stats.matched === liveDrivers.stats.installed,
+      'the real image installs at least the two ruled drivers and every one of them is published -- '
+        + `got ${JSON.stringify(liveDrivers.stats)}`,
+    );
+
     // ── The green states its own scope ──────────────────────────────────────
-    const line = summarise(clean.stats, expected, proseClean.stats);
+    const line = summarise(clean.stats, expected, proseClean.stats, driverClean.stats);
     assert(
       line.includes('3 concrete pin(s) compared') && line.includes('4 rolling/floating tag(s) skipped'),
       `the summary names every count, so a green can be read for its scope -- got "${line}"`,
@@ -1165,6 +1716,17 @@ async function selfTest() {
     assert(
       line.includes('2 anchored prose claim(s)') && line.includes('2 enumerated claim site(s)'),
       `the summary names the prose counts too -- got "${line}"`,
+    );
+    assert(
+      line.includes('2 driver(s) installed') && line.includes('2 promised') && line.includes('(2 matched by name)'),
+      `the summary names the driver counts too, so this limb's green can be read for its scope -- got "${line}"`,
+    );
+    // A 3-argument call is still legal (the pin+prose scope line), and must not
+    // invent driver counts it was not given.
+    assert(
+      !summarise(clean.stats, expected, proseClean.stats).includes('driver(s) installed'),
+      'summarise() omits the driver clause when it is given no driver stats, rather than printing zeroes '
+        + 'that read as a comparison that happened',
     );
     // The scope line is printed under a FAILING run as well, so it must not word
     // itself as a verdict -- observed contradicting its own findings before this.
@@ -1186,8 +1748,11 @@ async function selfTest() {
     `✓ check-docs-image-tag --self-test: ${checked} assertions over a temp fixture (real checkSurfaces and `
     + "checkProseClaims paths) plus live controls on docker/README.md's tag table and on PROSE_CLAIMS; every "
     + 'limb -- stale pin, rotted enumeration, missing surface, stale PROSE claim, lost prose anchor, unknown '
-    + 'anchor -- observed FAILING, and the X.Y.Z metavariable, the historical "removed in 17.0.0" sentences, '
-    + "the upgrade-checklist rows and the reader's own app version observed EXCLUDED.",
+    + 'anchor, undocumented driver, overpromised driver, driver range mismatch, unranged driver install, '
+    + 'lost driver anchor on either side, empty driver list on either side -- observed FAILING, and the '
+    + 'X.Y.Z metavariable, the historical "removed in 17.0.0" sentences, the upgrade-checklist rows, the '
+    + "reader's own app version, the interpolated CLI pin, the `npm cache clean` tail, the backticked "
+    + 'URL schemes and the "not in the image" prose observed EXCLUDED.',
   );
 
   return SELF_TEST_VERDICT;
@@ -1200,7 +1765,10 @@ function main() {
   const expected = loadExpectedVersion(join(root, VERSION_SOURCE));
   const { findings, stats } = checkSurfaces({ surfaces: SURFACES, expected, root });
   const prose = checkProseClaims({ claims: PROSE_CLAIMS, root });
-  process.exit(report([...findings, ...prose.findings], stats, expected, prose.stats));
+  const drivers = checkDriverPromise({ root });
+  process.exit(
+    report([...findings, ...prose.findings, ...drivers.findings], stats, expected, prose.stats, drivers.stats),
+  );
 }
 
 // Entry-point guard (#9064). Without it, importing this module RUNS the check and

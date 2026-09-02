@@ -507,23 +507,34 @@ describe('defineStack — object-embedded action cross-references: what the walk
     expect(refusals(embeddedStack(action, { flows }))).toEqual([]);
   });
 
-  it('is vacuity-guarded: the ordinary merged shape a shipped stack produces still builds', () => {
+  it('is vacuity-guarded: the ordinary merged shape, authored directly on the object, still builds', () => {
     // `objects[].actions[]` is overwhelmingly WRITTEN by the merge rather than
     // by hand — a top-level action with `objectName` lands there on the way
-    // out of `defineStack`. Feeding that output back in must stay clean, or the
-    // corpus census in PR #7397 has gone stale.
-    const built = build({
+    // out of `defineStack`, carrying its `objectName` with it. This feeds that
+    // exact shape AUTHORED DIRECTLY: embedded actions with valid targets and an
+    // `objectName` naming their owner, and no top-level twin. It must stay
+    // clean, or the corpus census in PR #7397 has gone stale.
+    //
+    // It deliberately no longer re-feeds `defineStack`'s own OUTPUT: the merge
+    // APPENDS, so a built stack carries each bound action in BOTH positions
+    // under one runtime key, and the duplicate-action-key refusal reads that
+    // as two declarations (stack-duplicate-action-key.test.ts pins the
+    // refusal). What #7397 guards is that the embedded walk's target checks
+    // refuse nothing on the merged shape — and that shape is what is fed here.
+    const authored = {
       manifest: baseManifest,
-      objects,
+      objects: [{
+        ...objects[0],
+        actions: [
+          { ...modalAction('probe_home'), objectName: 'probe_task' },
+          { ...flowAction('probe_flow'), objectName: 'probe_task' },
+        ],
+      }],
       pages,
       flows,
-      actions: [
-        { ...modalAction('probe_home'), objectName: 'probe_task' },
-        { ...flowAction('probe_flow'), objectName: 'probe_task' },
-      ],
-    });
+    };
 
-    expect(built.objects?.[0]?.actions?.map((a) => a.name)).toEqual(['probe_new_task', 'probe_run']);
-    expect(refusals(built)).toEqual([]);
+    expect(refusals(authored)).toEqual([]);
+    expect(build(authored).objects?.[0]?.actions?.map((a) => a.name)).toEqual(['probe_new_task', 'probe_run']);
   });
 });
