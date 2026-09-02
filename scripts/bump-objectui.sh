@@ -636,12 +636,21 @@ if [[ "$NO_CHANGESET" -eq 0 ]]; then
   fi
 fi
 
-# FIRST MUTATION OF THE WORKING TREE. Everything read out of the objectui
-# commit — including the changeset derivation above, itself a read of objectui
-# blobs — was read above, and a failure on any of it already refused (#10797).
-# Keep it that way: a new `git -C "$OBJECTUI_ROOT" …` (or a
-# `node .../objectui-changeset-digest.mjs` call) added after this point
-# re-opens exactly the half-applied write this ordering exists to prevent.
+# NOT "the first mutation" any more — on the SUCCESS path the digest above
+# already wrote `CS_FILE` (`--out`), so the changeset file is the first
+# working-tree mutation and this pin write is the second. That is fine: the
+# digest only calls `writeFileSync(out, …)` once the WHOLE digest has built
+# successfully, so a refusal never leaves `CS_FILE` behind for this write to
+# follow — either both land, in this order, or neither does.
+#
+# THE INVARIANT THAT MUST HOLD HERE (#10797): no read of objectui — git or the
+# digest — happens BELOW this point. Everything that can fail on such a read
+# (the commit read above, the range walk, the changeset derivation) already
+# ran and already refused above. Keep it that way: a new `git -C
+# "$OBJECTUI_ROOT" …` or `node .../objectui-changeset-digest.mjs` call added
+# after this point reopens exactly the half-applied write this ordering exists
+# to prevent — a mutation already made (the changeset, or this pin) sitting
+# next to a read that still might fail.
 echo "$NEW_SHA" > "${FRAMEWORK_ROOT}/.objectui-sha"
 echo "→ objectui pin: ${OLD_SHA:0:12} → ${NEW_SHA:0:12}${REACH_TAG}"
 
