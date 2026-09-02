@@ -100,17 +100,38 @@ function getPolicy(schema: any): {
       enabled: false,
       allowedAudiences: [],
       allowedPermissions: [],
-      // [#13856] The declared redaction set is read REGARDLESS of `enabled`.
-      // This branch used to return `redactFields: []`, so a link minted while
-      // the object was opted IN and redeemed after it was opted OUT kept
-      // resolving AND started serving the very fields the object declares
-      // redacted — turning the feature off WIDENED what the anonymous
-      // endpoint serves. Opting out gates MINTING (`createLink`'s 422 reads
-      // `enabled`, not this list) and whatever #14033 rules for standing
-      // links; it must never strip the object's declared redactions from
-      // tokens that still serve. An object with no `publicSharing` block at
-      // all keeps `[]` — nothing declared, nothing redacted — exactly as
-      // before.
+      // [#13856 -> #14033] The declared redaction set is read REGARDLESS of
+      // `enabled`. Kept deliberately, as DEFENCE IN DEPTH — not because any
+      // caller reaches it today.
+      //
+      // Why it exists (#13856): this branch used to return `redactFields: []`,
+      // so a link minted while the object was opted IN and redeemed after it
+      // was opted OUT kept resolving AND started serving the very fields the
+      // object declares redacted — turning the feature OFF WIDENED what the
+      // anonymous endpoint serves. Fail-open, and the reason this read was
+      // added.
+      //
+      // Why nothing reaches it now (#14033): `publicSharing.enabled` is a
+      // standing policy re-read at every redemption, and `resolveToken`'s gate
+      // returns `null` for a switched-off block BEFORE the
+      // `policy.redactFields` union below — so no token on such a block serves
+      // at all, and the sibling keys under it are MOOT. `createLink` never
+      // reads this list on any branch (its 422 reads `enabled`; the row it
+      // writes carries the CALLER's `redactFields`). The ruling is quoted
+      // verbatim in the #14033 reversal register in `share-link-service.test.ts`.
+      //
+      // Why it stays anyway (#14581): "moot" is not "must not be read". The
+      // read is free, it fails CLOSED, and it is the only thing between a
+      // future change to that gate and a silent repeat of #13856 — measured
+      // on that card: collapsing this branch back to `[]` leaves the entire
+      // `plugin-sharing` suite green, so NO pin distinguishes the two shapes
+      // and a regression of the gate would land uncaught. #14637 is the live
+      // reminder that a property this service states can be defeated one
+      // layer up. Do not tidy this into `[]` on the strength of the gate
+      // above it alone.
+      //
+      // An object with no `publicSharing` block at all keeps `[]` — nothing
+      // declared, nothing redacted — exactly as before.
       redactFields: Array.isArray(raw?.redactFields) ? (raw.redactFields as string[]) : [],
     };
   }
