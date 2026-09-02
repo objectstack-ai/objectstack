@@ -187,6 +187,18 @@ jobs:
               # the same suite declares are covered by entries the core filter
               # already carries).
               - 'sdui.manifest.json'
+              # @objectstack/rest's meta-state-route-doc-spelling test discovers
+              # its population instead of listing it (#14561): it asks git for
+              # the authored-prose corpus under content/, docs/ and skills/ and
+              # judges every file that mentions the route. Verbatim per that
+              # declaration. `content/**` and `skills/**` above already cover
+              # two of the three roots; this is the third, and the FIRST entry
+              # to open the `docs/` root that the WIDTH note above records as
+              # declined — declined then because no declaration reached past
+              # `docs/audits/...`, and reached now because one does. The
+              # narrower audits entry is left as the package that declared it
+              # spelled it, exactly as the two narrower `skills/` entries were.
+              - 'docs/**'
 
   test:
     # Sharded 6-way BY PACKAGE: a core-touching PR ran the affected suite

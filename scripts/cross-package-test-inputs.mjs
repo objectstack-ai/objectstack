@@ -758,17 +758,47 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     globs: ['packages/spec/src/security/rls.zod.ts', 'skills/objectstack-formula/**'],
   },
   '@objectstack/rest': {
-    // src/meta-state-route-doc-spelling.test.ts reads the two published prose
-    // sites that teach the `meta.getLegalNextStates` route and asserts each
-    // spells it the way this package's REST_ROUTE_LEDGER row does, so the
-    // ledger row and the prose can no longer drift apart in silence (#10178).
-    // Per-file rather than `content/docs/**` or `skills/**` for the reason the
-    // @objectstack/spec entry gives: those roots are edited far more often than
-    // anything this radius really depends on.
+    // src/meta-state-route-doc-spelling.test.ts asserts the published prose that
+    // teaches the `meta.getLegalNextStates` route spells it the way this
+    // package's REST_ROUTE_LEDGER row does, so the ledger row and the prose can
+    // no longer drift apart in silence (#10178).
+    //
+    // The two per-file globs are the sites it reads BY NAME, and they are the
+    // half this gate's roster can check: each is a `const` bound to one
+    // relative literal, so a rename shows up here as an uncovered path rather
+    // than as a quiet green.
+    //
+    // The three ROOTS are #14561, and they are a deliberate widening rather than
+    // one inherited by accident. A hand-kept two-file list is the same defect
+    // the test exists to catch -- it had already gone stale, with a third site
+    // teaching the wire path outside it -- so the population is now DISCOVERED:
+    // the test asks `git ls-files` for the authored-prose corpus under these
+    // roots and judges every file that mentions the route. The radius is
+    // therefore the roots, not the files that happen to match today, and
+    // anything narrower would be a second hand-kept list standing in for the
+    // same fact. Price, charged to every docs PR: a diff under these roots
+    // schedules and re-runs this package's suite.
+    //
+    // ⛔ Do NOT re-narrow this to the matching files. That is the #7802 shape
+    // ("a list you must remember to update") wearing the radius' clothes: the
+    // next page to teach the route would land outside the declared globs, its
+    // edit would not re-run this suite, and the gate would go on reporting
+    // green over a corpus it no longer hashes.
     globs: [
       'content/docs/protocol/objectql/state-machine.mdx',
       'skills/objectstack-automation/SKILL.md',
+      'content/**',
+      'docs/**',
+      'skills/**',
     ],
+    heldBy: {
+      // The corpus is a `git ls-files` result read through a loop variable, so
+      // the roster gets no name from it -- the trade `pathExpression`
+      // documents. `content/**` and `skills/**` are held mechanically anyway by
+      // the two named sites above; `docs/**` has no such holder and is held by
+      // the scan itself.
+      'docs/**': ['packages/rest/src/meta-state-route-doc-spelling.test.ts'],
+    },
   },
   '@objectstack/metadata-protocol': {
     // src/sys-metadata-repository.draft-drain.test.ts reads the durability
