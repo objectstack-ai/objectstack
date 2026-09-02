@@ -30,9 +30,10 @@ export const entry: SemanticMigration = {
     + 'adapter lowering → filter AST → accepted by `lowerAnalyticsWhere`, which still refuses '
     + 'a RAW rule-object array by design. The ruled migration check ran with the change: the '
     + 'sweep of first-party corpora (examples/, skills/, create-objectstack, content/docs/, '
-    + 'packages/apps/, spec fixtures) found ZERO `element:number` authors writing a '
-    + 'record-form `filter`, so no rewrite ships — this entry carries the prescription for '
-    + 'authors outside the repo.',
+    + 'packages/apps/, spec fixtures) found ONE `element:number` author writing a record-form '
+    + '`filter` — a spec test fixture, rewritten to the array form in the same change — and '
+    + 'zero outside the spec package; this entry carries the prescription for authors outside '
+    + 'the repo.',
   acceptanceCriteria:
     "`ComponentPropsMap['element:number'].safeParse({ object, aggregate, filter: [{ field: "
     + "'status', operator: 'equals', value: 'won' }] })` succeeds and the parsed `filter` is "
@@ -40,6 +41,7 @@ export const entry: SemanticMigration = {
     + '`filter` path (`invalid_type`, expected array). At runtime the element renders its '
     + 'aggregate on an analytics-capable deployment with the array filter applied — the same '
     + 'filter a list view renders. Downstream (objectui, after a released spec version reaches '
-    + 'the pin): the registry declaration for this input and the spec entry agree with no '
-    + 'parity exemption, which is what closes objectui#6206.',
+    + "the pin): the `element:number.filter:array` entry in `OFF_SPEC_ARM_EXEMPTIONS` "
+    + '(`registry-inputs-spec-parity.test.ts`) becomes deletable, which is what closes '
+    + 'objectui#6206.',
 };

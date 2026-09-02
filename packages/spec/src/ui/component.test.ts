@@ -1256,11 +1256,14 @@ describe('ElementNumberPropsSchema', () => {
       object: 'order',
       field: 'amount',
       aggregate: 'sum',
-      filter: { status: 'paid' },
+      // The ViewFilterRule array form (ui#6206-B) — this fixture authored the
+      // record form `{ status: 'paid' }` while the entry alone accepted it.
+      filter: [{ field: 'status', operator: 'equals', value: 'paid' }],
       format: 'currency',
       prefix: '$',
       suffix: ' USD',
     });
+    expect(props.filter).toEqual([{ field: 'status', operator: 'equals', value: 'paid' }]);
     expect(props.format).toBe('currency');
     expect(props.prefix).toBe('$');
     expect(props.suffix).toBe(' USD');

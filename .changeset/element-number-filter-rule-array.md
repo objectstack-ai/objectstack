@@ -39,7 +39,8 @@ filter: [{ field: 'amount', operator: 'greater_than', value: 100 }]
 
 The ruled migration check ran with the change: the sweep of first-party
 corpora (examples/, skills/, create-objectstack, content/docs/, packages/apps/,
-spec fixtures) found zero `element:number` authors writing a record-form
-`filter`, so no rewrite ships. `ElementNumberPropsParsed` is declared
+spec fixtures) found one `element:number` author writing a record-form
+`filter` — a spec test fixture, rewritten to the array form here — and zero
+outside the spec package. `ElementNumberPropsParsed` is declared
 (ADR-0122: the parsed state now differs on `filter`, whose `operator` is
 normalized on parse). `element:record_picker.filter` is not changed here.
