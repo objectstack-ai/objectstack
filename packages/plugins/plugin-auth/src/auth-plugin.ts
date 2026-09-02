@@ -841,11 +841,20 @@ export class AuthPlugin implements Plugin {
           // the localized `sys_email_template` rows become reachable through
           // the platform's own send path instead of sitting dormant.
           //
-          // Maintainer ruling 2026-08-13: the source is
+          // This binds the DEPLOYMENT rung only, from
           // `II18nService.getDefaultLocale()`, resolved here at the plugin
-          // layer. `Accept-Language` is rejected — auth mail is routinely sent
-          // outside the triggering request (invitations, admin-initiated
-          // resets), so a per-device request header is the wrong authority.
+          // layer. Since the 2026-09-02 ruling (#14319) it is the SECOND rung:
+          // a request-triggered send whose recipient is the requester takes the
+          // caller's own `Accept-Language` first, resolved at send time in
+          // `AuthManager` (`authEmailLocaleFromRequest`, which carries the
+          // ruling text). This rung is what answers when the request named no
+          // locale this platform ships a row for, or when there is no request
+          // at all — invitations, scheduled and admin-initiated mail.
+          //
+          // ⚠️ The superseded 2026-08-13 ruling made this rung the WHOLE answer
+          // and rejected `Accept-Language` outright. Do not restore that
+          // reading here; the one place the history is recorded is
+          // `AuthManager.setDefaultEmailLocale`.
           //
           // Both hops are probed rather than assumed: `getService` THROWS for
           // an unregistered service (i18n is not a required dependency of
