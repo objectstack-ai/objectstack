@@ -16,8 +16,8 @@
 // their own `name` and are addressed by it.
 
 import { describe, it, expect } from 'vitest';
-import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-extract';
-import { computeI18nCoverage } from '../src/utils/i18n-coverage';
+import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-extract.js';
+import { computeI18nCoverage } from '../src/utils/i18n-coverage.js';
 import { ObjectTranslationDataSchema } from '@objectstack/spec/system';
 
 /** Every `objects.<o>._validations.*` path the walker emits, as dot-paths. */

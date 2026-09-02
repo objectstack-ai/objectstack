@@ -20,8 +20,8 @@
 // otherwise be unaddressable.
 
 import { describe, it, expect } from 'vitest';
-import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-extract';
-import { computeI18nCoverage } from '../src/utils/i18n-coverage';
+import { collectExpectedEntries, extractTranslations } from '../src/utils/i18n-extract.js';
+import { computeI18nCoverage } from '../src/utils/i18n-coverage.js';
 import { TranslationDataSchema } from '@objectstack/spec/system';
 
 /** Every `datasets.*` path the walker emits, as dot-paths. */
