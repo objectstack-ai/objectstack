@@ -647,9 +647,10 @@ const ROOT_PROGRAM_COUPLED_SCRIPT = 'scripts/check-test-typecheck.mts';
 // repaired to 0, the route #13978 took for `metadata-protocol` and ruled by
 // precedent for this one). It is worth a line because it is the sharpest
 // measurement of the paragraph directly above, and because the composition
-// this entry recorded was wrong in a way no re-measure could show: the recorded
-// split was code-tier 30 / config-tier 25 / noise 34, and repairing the 25
-// TS2835 alone took the pile to 52 -- ALL 33 TS7006 dissolved (they were the
+// this entry recorded was wrong in a way no re-measure could show. Its opening
+// itemisation read, verbatim, 'code-tier 30 (TS2345 x30); config-tier 25
+// (TS2835 x25); noise 34 (TS7006 x33, TS6133)'. Repairing the 25 TS2835 alone
+// took the pile to 52 -- ALL 33 TS7006 dissolved (they were the
 // cascade, not noise the package owed), while 20 TS2322 and 1 TS18048 appeared
 // that the 89 had never contained. So the true code tier was 51, not 30: 30
 // TS2345 (the one shared mock `PluginContext` literal, closed by adding the two

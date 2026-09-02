@@ -52,13 +52,14 @@ import type {
 } from '@objectstack/spec/system';
 import { MetadataManager } from './metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
-// `.js` deliberately, unlike the three extensionless imports above it: under
-// `moduleResolution: nodenext` an extensionless relative import does not
+// `.js` on this relative import, as on every relative import in this file:
+// under `moduleResolution: nodenext` an extensionless relative import does not
 // resolve, and every symbol it names silently becomes `any` (AGENTS.md, the
-// TS7006 cascade). Spelling this one correctly is what makes `implements
+// TS7006 cascade). Spelling it correctly is what makes `implements
 // MetadataLoader` on the fixture below an actual check rather than decoration.
-// The three above are this package's pre-existing type-check debt (#4311) and
-// are left for whoever pays that ledger down.
+// That is no longer a convention this file keeps on its own: the package
+// declares a `typecheck` script, so `turbo run typecheck` compiles this file
+// and an extensionless relative import here is a red gate, not a silent `any`.
 import type { MetadataLoader } from './loaders/loader-interface.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 
