@@ -1026,18 +1026,9 @@ function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_S
  * refused, loudly, at the seam that registers it — not a new unknown-key
  * refusal on a manifest that has never had one.
  */
-export type AssembledPackageBody =
-  Omit<z.input<typeof ManifestSchema>, AssembledPackageBodyKey>
-  & Partial<Record<AssembledPackageBodyKey, unknown>>;
-
-/** Post-parse shape of {@link AssembledPackageBody} — defaults applied, transforms run (ADR-0122). */
-export type AssembledPackageBodyParsed =
-  Omit<z.infer<typeof ManifestSchema>, AssembledPackageBodyKey>
-  & Partial<Record<AssembledPackageBodyKey, unknown>>;
-
 /*
- * ANNOTATED, not inferred, and the annotation is KEY-precise but
- * ELEMENT-loose — both halves measured, neither a preference.
+ * ANNOTATED, not inferred — and annotated with a STRUCTURAL type, not a named
+ * one. Both halves were measured on #14513, neither is a preference.
  *
  * Not inferred: inferring it emits the manifest and all ~35 collection
  * declarations a SECOND time inside `ObjectStackDefinitionSchema`'s own
@@ -1046,32 +1037,50 @@ export type AssembledPackageBodyParsed =
  *   TS7056: The inferred type of this node exceeds the maximum length the
  *           compiler will serialize. An explicit type annotation is needed.
  *
- * Element-loose: the two aliases above name every collection KEY (the set is
- * still derived from `COMPOSE_KEY_DISPOSITIONS`, see `AssembledPackageBodyKey`)
- * but type each collection as `unknown` rather than mapping
- * `z.input<(typeof STACK_DEFINITION_COLLECTIONS_SHAPE)[K]>` per key. The mapped
- * form was tried first and measured on #14513: referencing the shape const from
- * an EXPORTED type makes the declaration emit write `STACK_DEFINITION_COLLECTIONS_SHAPE`
- * into `stack.zod-*.d.ts` a second time (21,443 lines beside the 42,449 the
- * stack schema already occupies), and every consumer program then re-infers all
- * ~35 collection input/output types once more — the `qa/http-conformance`
- * type-check-debt re-measure went from green to out-of-memory at the 4096 MB
- * ceiling `scripts/check-type-check-coverage.mjs` pins as CI's. With the keys
- * held and the elements `unknown`, nothing here references the shape const, the
- * second copy is not emitted, and the per-key inference does not run.
+ * Structural, not named: this schema is the element type of the stack
+ * schema's `packages` key, so whatever is written here is printed INSIDE
+ * `ObjectStackDefinitionSchema`'s declaration — and that declaration is
+ * embedded by every schema that carries a stack (`system/environment-artifact.zod.ts`
+ * among them). The declaration bundler inlines STRUCTURAL types into each chunk
+ * that embeds them, but a NAMED type alias can only be imported from the chunk
+ * that declares it. Two earlier shapes of this annotation named an alias
+ * (`z.ZodType<AssembledPackageBodyParsed, AssembledPackageBody>`), and the
+ * measured consequence was not local: `stack.zod` became a shared chunk that
+ * the `environment-artifact` chunk imports, so every consumer of
+ * `@objectstack/spec/system` started loading the whole stack schema
+ * declaration it never loaded before — `packages/qa/http-conformance`'s
+ * type-check program went from 691,580 to 734,202 lines of definitions
+ * (+42,622, the size of `ObjectStackDefinitionSchema`'s declaration), from
+ * 4.47 GB to 4.88 GB of heap, and past the 4096 MB ceiling
+ * `scripts/check-type-check-coverage.mjs` pins as CI's. A first attempt that
+ * ALSO referenced `typeof STACK_DEFINITION_COLLECTIONS_SHAPE` per key from the
+ * alias emitted the collections shape a second time on top (21,443 lines).
  *
- * What a consumer loses is only the STATIC element type of a collection inside
- * an assembled body (`body.objects` is `unknown`, not `ObjectDefinition[]`); the
- * RUNTIME schema below still carries every collection's full declaration, so a
- * wrong-shaped body is refused exactly as before. Readers of assembled bodies
- * (`compile.ts`, `artifact-packages.ts`) already treat them as records and
- * narrow at the point of use; that is the honest shape for a payload whose
- * collections are attributed per package only at composition time.
+ * `Record<string, unknown>` on both sides is therefore the whole of the static
+ * contract: an assembled body is an object. The two aliases below are derived
+ * FROM this annotation (ADR-0122), never the other way round, so no name can
+ * re-enter the stack schema's printed type. What a consumer loses is the
+ * static field typing inside an assembled body; the RUNTIME schema still
+ * carries the manifest's every field plus every collection's full declaration
+ * (the key set derived from `COMPOSE_KEY_DISPOSITIONS`, see
+ * `assembledPackageBodyShape`), so a wrong-shaped body is refused exactly as
+ * before. Readers of assembled bodies (`compile.ts`, `artifact-packages.ts`)
+ * already treat them as records and narrow at the point of use — the honest
+ * shape for a payload whose collections are attributed per package only at
+ * composition time.
  */
-export const AssembledPackageBodySchema: z.ZodType<AssembledPackageBodyParsed, AssembledPackageBody> =
+export const AssembledPackageBodySchema: z.ZodType<Record<string, unknown>, Record<string, unknown>> =
   lazySchema(() =>
     ManifestSchema.extend(assembledPackageBodyShape())
       .describe('One package as assembled into a release artifact (ADR-0130 D4)'));
+
+/**
+ * The assembled package body as authored — derived from the schema's
+ * annotation above, deliberately structural (see the note there).
+ */
+export type AssembledPackageBody = z.input<typeof AssembledPackageBodySchema>;
+/** Post-parse shape of {@link AssembledPackageBody} — defaults applied, transforms run (ADR-0122). */
+export type AssembledPackageBodyParsed = z.infer<typeof AssembledPackageBodySchema>;
 
 /**
  * One package carried by a release artifact, in its ASSEMBLED form — the

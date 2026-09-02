@@ -240,10 +240,11 @@ describe("ADR-0130 D4 — `manifest: 'preserve'` assembles each input stack", ()
       'com.example.multi.orders',
       'com.example.multi.core',
     ]);
-    // Collections inside an assembled body are `unknown` at the TYPE level (see
-    // the note above `AssembledPackageBodySchema` — the element-precise alias
-    // OOM'd consumer type-checks); narrow at the point of use, as every reader
-    // of an assembled body does.
+    // An assembled body is `Record<string, unknown>` at the TYPE level (see the
+    // note above `AssembledPackageBodySchema` — a named or element-precise
+    // static type there leaked the whole stack declaration into every
+    // consumer of `@objectstack/spec/system` and OOM'd their type-checks);
+    // narrow at the point of use, as every reader of an assembled body does.
     const objectNames = (objects: unknown): string[] | undefined =>
       (objects as Array<{ name: string }> | undefined)?.map((o) => o.name);
     expect(objectNames(parsed[1].manifest.objects)).toEqual(['crm_account']);
