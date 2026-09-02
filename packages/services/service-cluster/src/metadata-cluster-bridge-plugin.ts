@@ -15,8 +15,8 @@ import { isInProcessClusterDriver } from './split-brain-guard.js';
  * state-owner packages only need the `IPubSub` interface, which lives in
  * `@objectstack/spec/contracts`.
  *
- * TWO lanes, late-bound independently at `kernel:ready`, because the state
- * that goes stale lives in two different owners (#13331):
+ * THREE lanes, late-bound independently at `kernel:ready`, because the state
+ * that goes stale lives in three different owners (#13331, #13805):
  *
  *  1. **Metadata service** (`attachClusterPubSub()` — `metadata.changed`):
  *     replays watch events into peer `MetadataManager` caches
@@ -34,6 +34,15 @@ import { isInProcessClusterDriver } from './split-brain-guard.js';
  *     67×201 / 133×404). The lanes are independent on purpose: the boot
  *     shape that lacks lane 1 (host-config, fallback metadata slot) is
  *     exactly the shipped EE shape that needs lane 2.
+ *  3. **Datasource admin service** (`attachDatasourceMutationPubSub()` —
+ *     `datasource.mutated`): fans a datasource create / update / delete out
+ *     to peers, which converge their ObjectQL DRIVER registry from their OWN
+ *     read of the shared datasource record. Lane 2's family, adopted by the
+ *     driver registry (#13805, ruled 2026-09-01 — the same bridge shape, a
+ *     symmetric signal, no second propagation mechanism): without it a
+ *     `DELETE /api/v1/datasources/:name` recovered `/api/v1/ready` on the
+ *     one replica that served it, and every other replica kept the stuck
+ *     driver until restart.
  *
  * Activates each lane only when the cluster service and that lane's state
  * owner are present and expose the seam. Late binding is achieved via the
@@ -42,7 +51,9 @@ import { isInProcessClusterDriver } from './split-brain-guard.js';
  * Channels: `metadata.changed` — payload shape defined by
  * `ClusterMetadataChangedPayload` in `@objectstack/metadata`;
  * `metadata.mutated` — payload shape defined by
- * `ClusterMetadataMutationPayload` in `@objectstack/metadata-protocol`.
+ * `ClusterMetadataMutationPayload` in `@objectstack/metadata-protocol`;
+ * `datasource.mutated` — payload shape defined by
+ * `ClusterDatasourceMutationPayload` in `@objectstack/service-datasource`.
  *
  * See `content/docs/kernel/cluster.mdx` §5.
  */
@@ -53,6 +64,7 @@ export class MetadataClusterBridgePlugin implements Plugin {
 
     private detach?: () => void;
     private detachMutation?: () => void;
+    private detachDatasource?: () => void;
 
     async init(ctx: PluginContext): Promise<void> {
         ctx.hook('kernel:ready', async () => {
@@ -67,6 +79,7 @@ export class MetadataClusterBridgePlugin implements Plugin {
             }
             this.attachMetadataServiceLane(ctx, cluster);
             this.attachProtocolLane(ctx, cluster);
+            this.attachDatasourceLane(ctx, cluster);
         });
 
         ctx.hook('kernel:shutdown', async () => {
@@ -88,6 +101,15 @@ export class MetadataClusterBridgePlugin implements Plugin {
                 );
             }
             this.detachMutation = undefined;
+            try {
+                this.detachDatasource?.();
+            } catch (err) {
+                ctx.logger.error(
+                    'MetadataClusterBridgePlugin: datasource-lane detach error',
+                    err as Error,
+                );
+            }
+            this.detachDatasource = undefined;
         });
     }
 
@@ -214,6 +236,63 @@ export class MetadataClusterBridgePlugin implements Plugin {
         } catch (err) {
             ctx.logger.error(
                 'MetadataClusterBridgePlugin: mutation-lane attach failed',
+                err as Error,
+            );
+        }
+    }
+
+    /**
+     * Lane 3 — the datasource ADMIN SERVICE's `datasource.mutated` fan-out
+     * (#13805): the driver registry adopting the family lane 2 established.
+     *
+     * Duck-typed exactly like lanes 1 and 2 feature-detect their seams: this
+     * package must not depend on `@objectstack/service-datasource`, and
+     * `@objectstack/objectql` — the driver registry's owner — is handed no
+     * bus at all; the admin service publishes on the write doors it already
+     * owns and converges its pools through the seams it already injects.
+     *
+     * Guarded on {@link isInProcessClusterDriver} from birth, like lane 2: the
+     * in-process memory driver fans out to nobody, and on that driver a single
+     * replica's behaviour stays byte-identical to the pre-bridge one.
+     */
+    private attachDatasourceLane(ctx: PluginContext, cluster: IClusterService): void {
+        let admin: unknown;
+        try {
+            admin = ctx.getService<unknown>('datasource-admin');
+        } catch {
+            ctx.logger.debug(
+                'MetadataClusterBridgePlugin: no "datasource-admin" service registered, skipping datasource fan-out',
+            );
+            return;
+        }
+
+        const attach = (admin as { attachDatasourceMutationPubSub?: unknown })
+            .attachDatasourceMutationPubSub;
+        if (typeof attach !== 'function') {
+            ctx.logger.debug(
+                'MetadataClusterBridgePlugin: datasource-admin service does not expose attachDatasourceMutationPubSub(), skipping datasource fan-out',
+            );
+            return;
+        }
+
+        if (isInProcessClusterDriver(cluster.driver)) {
+            ctx.logger.debug(
+                `MetadataClusterBridgePlugin: cluster driver "${cluster.driver}" is in-process; datasource fan-out has no peers to reach, skipping`,
+            );
+            return;
+        }
+
+        try {
+            this.detachDatasource = (attach as (
+                pubsub: IClusterService['pubsub'],
+                nodeId: string,
+            ) => () => void).call(admin, cluster.pubsub, cluster.nodeId);
+            ctx.logger.info(
+                `MetadataClusterBridgePlugin: bridged datasource.mutated → cluster.pubsub (node=${cluster.nodeId})`,
+            );
+        } catch (err) {
+            ctx.logger.error(
+                'MetadataClusterBridgePlugin: datasource-lane attach failed',
                 err as Error,
             );
         }

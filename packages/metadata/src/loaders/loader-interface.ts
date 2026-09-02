@@ -16,6 +16,30 @@ import type {
 } from '@objectstack/spec/system';
 
 /**
+ * [#14205] One loaded item paired with the KEY its store holds it under.
+ *
+ * The pair exists because a metadata body is not required to name itself. Most
+ * do — and for those the key and `data.name` agree, because
+ * `assertMetadataRegisterContract` refuses a `register(type, name, data)` whose
+ * `data.name` disagrees with the `name` argument. But an aggregated `defineView`
+ * container has no own `name` BY DESIGN (its identity is the target object), and
+ * `register()` explicitly allows that: "A document with NO `name` of its own is
+ * fine — the argument is the key".
+ *
+ * So the key is a fact about the STORE, not about the body, and it is the only
+ * identity a nameless item has. Carrying it BESIDE `data` rather than folding it
+ * into `data` is the whole point: the body stays byte-identical to what was
+ * stored, so no consumer sees a synthesised `name` and the register contract's
+ * `data.name` check keeps meaning what it means.
+ */
+export interface MetadataKeyedItem<T = any> {
+  /** The key this item is stored under — `register()`'s `name` argument. */
+  readonly name: string;
+  /** The stored body, exactly as {@link MetadataLoader.loadMany} would return it. */
+  readonly data: T;
+}
+
+/**
  * Abstract interface for metadata loaders
  * Implementations can load from filesystem, HTTP, S3, databases, etc.
  */
@@ -48,6 +72,38 @@ export interface MetadataLoader {
     type: string,
     options?: MetadataLoadOptions
   ): Promise<T[]>;
+
+  /**
+   * Load multiple items of a type, each paired with the KEY this loader holds
+   * it under.
+   *
+   * [#14205] Optional, and the reason it is a second method rather than a
+   * widened `loadMany()`: `MetadataLoader` is exported from this package's
+   * public entry, with implementors outside it (`packages/objectql`'s
+   * conformance fixtures among them). Changing `loadMany()`'s return type would
+   * break every one of them; an optional member breaks none, and a loader that
+   * cannot produce keys — `RemoteLoader`, whose wire format carries bodies only
+   * — simply does not declare it.
+   *
+   * `MetadataManager` prefers this method wherever it merges a loader's answer
+   * into a keyed set (`list()`, and the endpoint index), and falls back to
+   * `loadMany()` keyed by `data.name` when it is absent. That fallback is
+   * exactly the pre-#14205 behaviour, so it drops items whose body has no
+   * top-level `name`: implement this method on any loader that can be asked to
+   * hold one.
+   *
+   * `data` MUST be the same body `loadMany()` would return for the item —
+   * unmodified, in particular with no `name` folded in. `name` is the store's
+   * key, carried beside the body, never written into it.
+   *
+   * @param type The metadata type
+   * @param options Load options with patterns
+   * @returns Array of (key, body) pairs
+   */
+  loadManyKeyed?<T = any>(
+    type: string,
+    options?: MetadataLoadOptions
+  ): Promise<MetadataKeyedItem<T>[]>;
 
   /**
    * Check if item exists

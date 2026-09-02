@@ -31,6 +31,7 @@
  */
 
 import { validateDriverConfig } from '@objectstack/spec/data';
+import type { IPubSub } from '@objectstack/spec/contracts';
 import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
 import { datasourceConnectivityChanged } from './datasource-connectivity-change.js';
 import { redactDatasourceConfig, restoreRedactedConfig } from './datasource-config-redaction.js';
@@ -47,6 +48,47 @@ import type { Logger } from './logger.js';
 
 /** Datasource name rule (mirrors `DatasourceSchema.name`). */
 const NAME_RE = /^[a-z_][a-z0-9_]*$/;
+
+/**
+ * [#13805] Cluster channel for datasource record writes — the DRIVER
+ * registry's adopter of the cluster-invalidation family `metadata.mutated`
+ * (#13331) established (ruled 2026-09-01: the same bridge shape, a symmetric
+ * create + delete signal, convergence by re-reading the shared datasource
+ * records, no second propagation mechanism).
+ *
+ * Published by the {@link DatasourceAdminService} that performed a create,
+ * update or delete (see {@link DatasourceAdminService.attachDatasourceMutationPubSub})
+ * and consumed by every peer replica, which CONVERGES its own live pool for
+ * that name from its OWN read of the shared datasource records — it never
+ * replays the write. Distinct from `metadata.mutated` on purpose: that channel
+ * repairs the ObjectQL OBJECT registry behind `/api/v1/meta/*`, while this one
+ * repairs the ObjectQL DRIVER registry behind `/api/v1/datasources/*` — the
+ * state `registerPool` / `unregisterPool` mutate on the serving replica only,
+ * so that before this channel a `DELETE` recovered `/api/v1/ready` on the one
+ * replica that served it and every other replica kept the stuck driver until
+ * restart.
+ */
+export const DATASOURCE_MUTATION_CLUSTER_CHANNEL = 'datasource.mutated';
+
+/**
+ * [#13805] Payload for {@link DATASOURCE_MUTATION_CLUSTER_CHANNEL}.
+ *
+ * ⭐ A SIGNAL, never trusted content — the contract `ClusterMetadataMutationPayload`
+ * carries, adopted verbatim: only the record's ADDRESS rides the channel. The
+ * receiving replica re-reads the shared record for `name` and converges its
+ * pool from that read — builds what the read says should be live, rebuilds
+ * what changed, evicts what is gone — so the shared store stays the single
+ * source of truth, and a duplicate or re-ordered delivery converges to the
+ * same pool state as a single one. Symmetric by construction: create, update
+ * and delete all publish this one shape, and a receiver cannot tell which it
+ * was without reading, which is the point.
+ */
+export interface ClusterDatasourceMutationPayload {
+  /** Origin nodeId — used for loopback suppression. */
+  originNode?: string;
+  /** The datasource whose shared record was just written. */
+  name: string;
+}
 
 /**
  * A persisted datasource record (subset of `Datasource`). `origin` distinguishes
@@ -152,6 +194,23 @@ export interface DatasourceAdminServiceConfig {
    */
   reregisterPool?: (previous: StoredDatasource, next: StoredDatasource) => Promise<void> | void;
   /**
+   * [#13805] Converge THIS replica's live pool for `name` after a PEER wrote
+   * the shared datasource record — the receive half of
+   * {@link DatasourceAdminService.attachDatasourceMutationPubSub}.
+   *
+   * The host owns it because the read it must perform is the SHARED one: the
+   * durable row every replica writes (`sys_metadata` in the shipped plugin),
+   * not the metadata service's per-replica registry — on the host-config
+   * boot that registry has no cluster seam of its own, and is exactly the
+   * stale read a peer must not converge from. Contract for the host: re-read
+   * that record, then build what is missing, rebuild what changed, evict what
+   * is gone — never replay the mutation, and never touch a pool the host did
+   * not build itself. Optional: a host without it still PUBLISHES (peers that
+   * converge get the signal) and applies nothing it receives, stated once at
+   * `debug` when the transport attaches.
+   */
+  convergePool?: (name: string) => Promise<void> | void;
+  /**
    * Last connect verdict per datasource, from `DatasourceConnectionService`
    * (framework#3827). Absent (a host without the connection service) means the
    * list reports `unvalidated` throughout — the pre-#3827 behavior, and honest:
@@ -228,6 +287,140 @@ export class DatasourceAdminService implements IDatasourceAdminService {
 
   private get logger(): Logger | undefined {
     return this.config.logger;
+  }
+
+  // ── [#13805] the cluster half of every record write ────────────────────────
+  //
+  // Before this seam the driver registry had no cluster propagation in either
+  // direction: each replica filled its registry at boot from the shared
+  // records and mutated it only for the writes IT served. This seam adopts
+  // the family `metadata.mutated` established — the state owner publishes an
+  // address, peers converge from their own read — and adopts it SYMMETRICALLY:
+  // a delete-only broadcast would have made delete more cluster-aware than
+  // create, a new asymmetry in the opposite direction rather than a repair.
+
+  /** The cluster transport, when a bridge attached one. [#13805] */
+  private clusterPubSub?: IPubSub;
+  /** This node's cluster id — stamps `originNode` for loopback suppression. */
+  private clusterNodeId?: string;
+  /** Disposer for the cluster subscription, when attached. */
+  private clusterUnsubscribe?: () => void;
+  /**
+   * One in-flight convergence per datasource name. Two signals for one name
+   * in quick succession (a create chased by an update) must converge in
+   * order: two concurrent builds would both open a pool and the registry
+   * would keep one and discard the other — an open connection nothing closes.
+   * The publisher's `partitionKey` keeps the order per name on the wire; this
+   * keeps it on receipt.
+   */
+  private readonly convergeChains = new Map<string, Promise<void>>();
+
+  /**
+   * [#13805] Attach a cluster pub/sub transport so this replica's datasource
+   * writes fan out on {@link DATASOURCE_MUTATION_CLUSTER_CHANNEL} and peer
+   * writes converge this replica's live pools. Mirrors
+   * `ObjectStackProtocolImplementation.attachMetadataMutationPubSub()` —
+   * including its idempotency on the `(pubsub, nodeId)` pair — and is called
+   * the same way: by `MetadataClusterBridgePlugin` in
+   * `@objectstack/service-cluster`, once per kernel boot at `kernel:ready`,
+   * after both services exist. Only `IPubSub` from `@objectstack/spec/contracts`
+   * crosses this seam: this package takes no dependency on the cluster
+   * service, and `@objectstack/objectql` — the registry's owner — is handed
+   * no bus at all (the layering line the card's triage drew).
+   *
+   * ⭐ Receipt runs CONVERGENCE, not trust: the payload is an address, and the
+   * host's `convergePool` re-reads the shared record before touching any
+   * pool. Duplicates are harmless (same read, same pool state); loss is
+   * bounded the way it always was — by the next boot's full rehydration —
+   * because no shipped driver exceeds at-most-once delivery (`IPubSub`'s own
+   * contract). This channel narrows "until every replica restarts" to "one
+   * network hop"; it does not promise more.
+   *
+   * @returns a disposer that detaches the bridge.
+   */
+  attachDatasourceMutationPubSub(pubsub: IPubSub, nodeId: string): () => void {
+    if (this.clusterPubSub === pubsub && this.clusterNodeId === nodeId) {
+      return () => this.detachDatasourceMutationPubSub();
+    }
+    this.detachDatasourceMutationPubSub();
+    this.clusterPubSub = pubsub;
+    this.clusterNodeId = nodeId;
+    if (!this.config.convergePool) {
+      this.logger?.debug?.(
+        `datasource admin: no convergePool seam wired — peer writes on ${DATASOURCE_MUTATION_CLUSTER_CHANNEL} are published from here but not applied here`,
+      );
+    }
+    this.clusterUnsubscribe = pubsub.subscribe<ClusterDatasourceMutationPayload>(
+      DATASOURCE_MUTATION_CLUSTER_CHANNEL,
+      (msg) => {
+        const p = msg.payload;
+        // Loopback guard — never re-converge what this node just wrote: the
+        // pool seam already ran here, synchronously, at the door that
+        // persisted the record.
+        if (p?.originNode && p.originNode === this.clusterNodeId) return;
+        if (typeof p?.name !== 'string' || p.name.length === 0) return;
+        const converge = this.config.convergePool;
+        if (!converge) return;
+        this.enqueueConvergence(p.name, converge);
+      },
+    );
+    this.logger?.info?.(
+      `datasource admin: attached to the ${DATASOURCE_MUTATION_CLUSTER_CHANNEL} cluster channel (node=${nodeId})`,
+    );
+    return () => this.detachDatasourceMutationPubSub();
+  }
+
+  /** Tear down the cluster wiring. Safe to call multiple times. [#13805] */
+  detachDatasourceMutationPubSub(): void {
+    if (this.clusterUnsubscribe) {
+      try {
+        this.clusterUnsubscribe();
+      } catch {
+        /* idempotent */
+      }
+      this.clusterUnsubscribe = undefined;
+    }
+    this.clusterPubSub = undefined;
+    this.clusterNodeId = undefined;
+  }
+
+  /** Serialise a peer signal's convergence behind any in flight for the same name. */
+  private enqueueConvergence(name: string, converge: NonNullable<DatasourceAdminServiceConfig['convergePool']>): void {
+    const previous = this.convergeChains.get(name) ?? Promise.resolve();
+    const next = previous
+      .then(() => converge(name))
+      .catch((err) => {
+        this.logger?.warn(`datasource admin: converging '${name}' after a peer write failed`, err);
+      });
+    this.convergeChains.set(name, next);
+    void next.then(() => {
+      if (this.convergeChains.get(name) === next) this.convergeChains.delete(name);
+    });
+  }
+
+  /**
+   * [#13805] The cluster half of a record write: publish the datasource's
+   * ADDRESS to peers. Best-effort and fire-and-forget — a publish failure must
+   * never fail the write it announces (the record is already persisted and
+   * this replica's pool already follows it), matching the protocol's
+   * `publishMetadataMutation` verbatim. No-op until a bridge attaches a
+   * transport.
+   *
+   * Called from the three doors that move a record: create, update, remove.
+   * Deliberately NOT from `migrateCredential`: that write leaves the live pool
+   * alone by design (the credential VALUE is unchanged, only where it is read
+   * from moves), so a peer has nothing to converge — and a signal would have
+   * every peer rebuild a working pool over a `credentialsRef` that
+   * dereferences to the same secret.
+   */
+  private publishDatasourceMutation(name: string): void {
+    if (!this.clusterPubSub) return;
+    const payload: ClusterDatasourceMutationPayload = { originNode: this.clusterNodeId, name };
+    void this.clusterPubSub
+      .publish(DATASOURCE_MUTATION_CLUSTER_CHANNEL, payload, { partitionKey: `datasource:${name}` })
+      .catch((err) => {
+        this.logger?.warn(`datasource admin: publishing '${name}' to peer replicas failed`, err);
+      });
   }
 
   async listDatasources(): Promise<DatasourceSummary[]> {
@@ -396,6 +589,9 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // `active ?? true` — so this door was the one place a deliberately
     // disabled datasource still came up serving.
     if (record.active !== false) await this.tryRegisterPool(record);
+    // [#13805] After the pool seam, whatever it decided: peers converge from
+    // the shared record, not from what this replica did with its own pool.
+    this.publishDatasourceMutation(record.name);
     return this.toSummary(record);
   }
 
@@ -516,6 +712,10 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     } else {
       await this.tryRegisterPool(merged);
     }
+    // [#13805] Unconditionally — a label-only edit included. The peer, not the
+    // signal, decides whether anything connectivity-bearing changed, by the
+    // same `datasourceConnectivityChanged` reading this door just applied.
+    this.publishDatasourceMutation(name);
     return this.toSummary(merged);
   }
 
@@ -580,6 +780,10 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     await this.config.deleteDatasourceRecord(name);
     if (existing.external?.credentialsRef) await this.tryRemoveSecret(existing.external.credentialsRef);
     await this.tryUnregisterPool(name);
+    // [#13805] The propagation half #13578 declared out of scope: the eviction
+    // above recovers THIS replica; the signal lets every other replica re-read
+    // the (now absent) shared record and evict its own copy of the driver.
+    this.publishDatasourceMutation(name);
   }
 
   /**

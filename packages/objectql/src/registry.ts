@@ -37,6 +37,11 @@ import { provisionSearchCompanion, SEARCH_COMPANION_FIELD } from './search-compa
 import { ObjectStackManifest, ManifestSchema, InstalledPackage, InstalledPackageSchema, checkFieldCompleteness } from '@objectstack/spec/kernel';
 import { AppSchema } from '@objectstack/spec/ui';
 import { applyProtection } from '@objectstack/spec/shared';
+// [ADR-0130 D1] The ONE derivation of the key a package is installed under
+// (`id || name`). The install gate's co-ownership set must name packages by the
+// same string the artifact loader ordered them by, or a co-owner would be
+// admitted — or refused — under a key nothing else in the path uses.
+import { artifactPackageId } from './artifact-packages.js';
 
 /**
  * Reserved namespaces that do not get FQN prefix applied.
@@ -1148,6 +1153,119 @@ export class NamespaceConflictError extends Error {
     );
     this.name = 'NamespaceConflictError';
     this.namespace = namespace;
+    this.existingPackageId = existingPackageId;
+    this.incomingPackageId = incomingPackageId;
+  }
+}
+
+/**
+ * [ADR-0130 D1] What the install gate is told about the artifact now installing.
+ *
+ * `installPackage` has no notion of which release artifact a manifest arrived
+ * in, and ADR-0130 D8 deliberately adds **no** owner/publisher field to the
+ * manifest to give it one. So the knowledge is threaded as an install-time
+ * SCOPE: the load path that reads an artifact (`manifest.register()` →
+ * `resolveArtifactPackageOrder` → `registerApp`) already holds the artifact's
+ * package list, and passes it down.
+ *
+ * Two consequences worth stating, because both are load-bearing:
+ *
+ *  - **It is per-install, not stored.** Nothing persists a co-ownership claim,
+ *    so nothing can drift from the artifact that is the claim (D8's objection to
+ *    a manifest field, applied to the runtime).
+ *  - **Absent scope means today's behaviour, structurally.** Every caller that
+ *    installs ONE package — `protocol.installPackage`, `POST /packages`, a bare
+ *    `registerApp` — passes no scope, so the co-owner set is empty and both
+ *    halves of the ADR-0130 D1/D3 pair are no-ops. A single-`manifest` artifact
+ *    passes a one-element scope, whose only member is the package itself, which
+ *    the gate excludes anyway (D7).
+ */
+export interface ArtifactInstallScope {
+  /**
+   * The ids of every package delivered by the artifact currently installing —
+   * read through {@link artifactPackageId}, so they are the same strings the
+   * registry keys installed packages by.
+   */
+  readonly packageIds: readonly string[];
+}
+
+/**
+ * The object names one manifest CLAIMS OWNERSHIP of at install time — the names
+ * `registerApp` is about to hand `registerObject` with `ownership: 'own'`.
+ *
+ * Both authored shapes are read, because `registerApp` reads both: an array of
+ * object definitions, or a name-keyed map (whose KEY is the name — `registerApp`
+ * overwrites `objDef.name` with it).
+ *
+ * ⛔ Glob strings are skipped, not treated as names. `ManifestSchema.objects` is
+ * `z.array(z.string())` — file patterns — and an unassembled manifest that still
+ * carries them registers no object here; a pattern is not an object name, and
+ * refusing on one would refuse a package that claims nothing.
+ *
+ * ⛔ `objectExtensions` are not read: an extension contributes fields to an
+ * object it does not own (`ownership: 'extend'`), which is the co-ownership
+ * ADR-0130 exists to permit, not the collision it refuses.
+ */
+function declaredOwnedObjectNames(manifest: ObjectStackManifest): string[] {
+  const objects = (manifest as { objects?: unknown }).objects;
+  if (!objects || typeof objects !== 'object') return [];
+  if (Array.isArray(objects)) {
+    return objects
+      .map((o) => (o && typeof o === 'object' ? (o as { name?: unknown }).name : undefined))
+      .filter((n): n is string => typeof n === 'string' && n !== '');
+  }
+  return Object.keys(objects as Record<string, unknown>).filter((n) => n !== '');
+}
+
+/**
+ * [ADR-0130 D3] Raised when two packages delivered by ONE release artifact both
+ * claim the same object name.
+ *
+ * This refusal is the other half of the D1 gate relaxation, and D3 specifies the
+ * pair as a machine constraint rather than an instruction because this is the
+ * only part of ADR-0130 that can reach customer data. Today's namespace
+ * exclusivity is silently carrying a second guarantee: ADR-0048 §3.2 grounds the
+ * namespace gate on "two packages with namespace `crm` both try to create
+ * `crm_account` and the second fails at the DB", so "no two packages share a
+ * namespace" has been proxying for **"no two packages define the same object
+ * name."** Relax the first without adding the second and two co-owning packages
+ * defining `crm_account` produce either a duplicate `CREATE TABLE` or —
+ * driver-dependent — one package silently overwriting the other's table
+ * definition.
+ *
+ * So the check is install-time and ahead of every mutation `installPackage`
+ * makes, which puts it ahead of all DDL: the refusal lands before the second
+ * package is recorded at all, rather than half-applying an install and blowing
+ * up at table creation.
+ *
+ * Carries the ADR-0112 envelope (`code` + `status`) — the shape this
+ * repository's rejection tests assert against, never a bare throw.
+ */
+export class ArtifactObjectNameConflictError extends Error {
+  readonly code = 'DUPLICATE_ARTIFACT_OBJECT_NAME';
+  readonly status = 422;
+  /** The object name both packages claim. */
+  readonly objectName: string;
+  /** The co-owning package that already owns the name. */
+  readonly existingPackageId: string;
+  /** The package whose install this refusal stopped. */
+  readonly incomingPackageId: string;
+
+  constructor(objectName: string, existingPackageId: string, incomingPackageId: string) {
+    super(
+      `Object name conflict inside one release artifact: object "${objectName}" is ` +
+        `already owned by package "${existingPackageId}", so package ` +
+        `"${incomingPackageId}" — delivered by the same artifact — cannot define it ` +
+        `too. Two packages defining one object name map to one physical table: the ` +
+        `install would either fail at the DB with a duplicate CREATE TABLE or, ` +
+        `driver-dependent, let one definition silently overwrite the other. Rename ` +
+        `the object in "${incomingPackageId}", or have it \`extend\` ` +
+        `"${existingPackageId}"'s object instead of owning a second one. Sharing a ` +
+        `namespace across packages in one artifact is allowed (ADR-0130 D1); ` +
+        `sharing an object NAME is not (ADR-0130 D3).`,
+    );
+    this.name = 'ArtifactObjectNameConflictError';
+    this.objectName = objectName;
     this.existingPackageId = existingPackageId;
     this.incomingPackageId = incomingPackageId;
   }
@@ -3572,16 +3690,45 @@ export class SchemaRegistry {
   // Package Management
   // ==========================================
 
-  installPackage(manifest: ObjectStackManifest, settings?: Record<string, any>): InstalledPackage {
+  installPackage(
+    manifest: ObjectStackManifest,
+    settings?: Record<string, any>,
+    scope?: ArtifactInstallScope,
+  ): InstalledPackage {
+    // [ADR-0130 D1] The co-owners of this package — the OTHER packages the same
+    // release artifact is delivering. Computed once and read by both halves of
+    // the install-time pair below, so the relaxation and the refusal cannot
+    // disagree about who counts as a co-owner.
+    //
+    // Everything inside one artifact is built, versioned, downloaded and
+    // installed as one atomic act by one publisher, and D1 makes that joint
+    // delivery the ownership proof itself — nothing else asserts it, and D8
+    // deliberately adds no manifest field that could drift from it.
+    //
+    // The self-exclusion is by the SAME key the registry installs under
+    // ({@link artifactPackageId}), not by `manifest.id` alone: a manifest
+    // carrying only `name` is installed under that name, and a co-owner set
+    // that still contained it would let the package "co-own" with itself.
+    const selfId = artifactPackageId(manifest);
+    const coOwners = new Set((scope?.packageIds ?? []).filter((id) => id !== selfId));
+
     // ADR-0048 Phase 1 — install-time namespace gate. Refuse a package whose
-    // namespace is already owned by a *different* installed package; this is
-    // the constraint the object/table layer enforces implicitly (a duplicate
-    // `CREATE TABLE <ns>_<obj>` fails at the DB), made explicit and early.
-    // Same-package reinstall/reload is excluded (owner === manifest.id), and
-    // shareable platform namespaces (base/system/sys) are exempt.
+    // namespace is already owned by an installed package that is not a co-owner
+    // of it; this is the constraint the object/table layer enforces implicitly
+    // (a duplicate `CREATE TABLE <ns>_<obj>` fails at the DB), made explicit and
+    // early. Same-package reinstall/reload is excluded (owner === manifest.id),
+    // shareable platform namespaces (base/system/sys) are exempt, and — since
+    // ADR-0130 D1 — so is a co-owner delivered by the same artifact.
+    //
+    // ⛔ This relaxation may not exist without the object-name check below it.
+    // Namespace exclusivity has been silently proxying for "no two packages
+    // define the same object name" (ADR-0048 §3.2's own grounding), so dropping
+    // the proxy alone is the one path in ADR-0130 that can damage customer data.
+    // ADR-0130 D3 states the pair as a machine constraint for that reason, and
+    // `registry-artifact-co-ownership.test.ts` asserts it as ONE proposition.
     if (manifest.namespace && !isShareableNamespace(manifest.namespace)) {
       const conflictOwner = this.getNamespaceOwners(manifest.namespace).find(
-        (owner) => owner !== manifest.id,
+        (owner) => owner !== manifest.id && !coOwners.has(owner),
       );
       if (conflictOwner) {
         if (this.collisionPolicy === 'warn') {
@@ -3596,6 +3743,13 @@ export class SchemaRegistry {
         }
       }
     }
+
+    // [ADR-0130 D3] The other half of the pair: per-object-name uniqueness
+    // across the co-owners of one artifact, install-time and ahead of any DDL.
+    // Placed ahead of EVERY mutation this method makes, so a refused package
+    // leaves no record, no namespace ownership and no half-applied install
+    // behind — the same disposition the namespace gate above has.
+    this.refuseCoOwnedObjectNameCollision(manifest, selfId, coOwners);
 
     const now = new Date().toISOString();
     const disabled = this.initialDisabledPackageIds.has(manifest.id);
@@ -3626,6 +3780,66 @@ export class SchemaRegistry {
     collection.set(manifest.id, pkg);
     this.log(`[Registry] Installed package: ${manifest.id} (${manifest.name})`);
     return pkg;
+  }
+
+  /**
+   * [ADR-0130 D3] Refuse an install in which a CO-OWNER of the incoming package
+   * — a package delivered by the same release artifact — already owns an object
+   * name the incoming package claims.
+   *
+   * ## Why the refusal is scoped to co-owners
+   *
+   * It is exactly the surface D1 opened. Before D1 the namespace gate refused
+   * two packages sharing a namespace outright, and that refusal was doing this
+   * job by proxy; a name claimed by a package from a DIFFERENT artifact is still
+   * that gate's business and still refused there. So this check adds no refusal
+   * the platform did not already make in some form — per #14122 §6.2 it can only
+   * reject a configuration that would have failed at the DB anyway, earlier and
+   * more legibly — while the co-owner case, which D1 has just admitted, is the
+   * one that would otherwise reach the DB unchecked.
+   *
+   * ## One resolution, shared with the read path
+   *
+   * The name is resolved through {@link computeFQN} — the same call
+   * `registerObject` makes on the very definitions this manifest is about to
+   * register — rather than by a private spelling. A gate that resolved names its
+   * own way could refuse an entry `registerObject` would have accepted under a
+   * different key, or wave through the one it would have refused.
+   *
+   * ## The one carve-out
+   *
+   * A tenant-authored sitting owner is skipped, because `registerObject`'s
+   * late-install path (ADR-0029 D9 §6.1) does not refuse that case either: a
+   * code package that ships a name a `sys_metadata` row already holds TAKES
+   * ownership and re-classifies the tenant contribution as its overlay. Refusing
+   * here would break an install the very next call would have completed.
+   *
+   * @throws {ArtifactObjectNameConflictError} ADR-0112 envelope, naming both
+   *   packages and the object.
+   */
+  private refuseCoOwnedObjectNameCollision(
+    manifest: ObjectStackManifest,
+    selfId: string | undefined,
+    coOwners: ReadonlySet<string>,
+  ): void {
+    // No artifact scope, or an artifact carrying one package: nothing this
+    // method can refuse. Stated as an early return rather than left to fall out
+    // of the loop, because "the single-package path is untouched" (D7) is a
+    // property of this code, not a coincidence of its inputs.
+    if (coOwners.size === 0) return;
+
+    for (const shortName of declaredOwnedObjectNames(manifest)) {
+      const fqn = computeFQN(manifest.namespace, shortName);
+      const owner = this.getObjectOwner(fqn);
+      const ownerId = owner?.packageId;
+      if (owner === undefined || ownerId === undefined || ownerId === selfId) continue;
+      // Not a co-owner: a cross-artifact claim, which the namespace gate above
+      // owns and refuses. ⛔ Not widened here — that would be a new refusal for
+      // configurations D1 never admitted, outside this card and outside D3.
+      if (!coOwners.has(ownerId)) continue;
+      if (isTenantAuthored(owner.definition)) continue;
+      throw new ArtifactObjectNameConflictError(fqn, ownerId, selfId ?? manifest.id);
+    }
   }
 
   uninstallPackage(id: string): boolean {

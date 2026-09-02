@@ -189,8 +189,13 @@ export interface IDataDriver {
   /**
    * Update an existing record by ID.
    * MUST return `id` as string. MUST NOT return implementation details like `_id`.
+   * @returns The updated record, or `null` if no record with that id exists —
+   * the same "addressed one row, which may not exist" shape as {@link findOne},
+   * and the not-found vocabulary {@link delete} already carries (`false`). A
+   * driver configured to throw on missing records (`strictMode`) throws
+   * instead of returning `null`.
    */
-  update(object: string, id: string | number, data: Record<string, unknown>, options?: DriverOptions): Promise<Record<string, unknown>>;
+  update(object: string, id: string | number, data: Record<string, unknown>, options?: DriverOptions): Promise<Record<string, unknown> | null>;
 
   /**
    * Upsert (Update or Insert) a record.

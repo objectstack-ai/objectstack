@@ -485,6 +485,23 @@ const TRIAGE = new Map([
     verdict: 'REFUSE-WIDE',
     why: 'non-test sources plus manifests, 1898 of 4903 (39%) — same trade',
   }],
+  ['check:swallow-census-controls SCAN_ROOT packages', {
+    verdict: 'REFUSE-WIDE',
+    why: 'FRESH on 2026-09-02, when #13919 wired the #12981 census own controls into CI for the '
+      + 'first time; the constant is as old as the instrument and only the family is new. The '
+      + 'census walk admits every non-test, non-declaration TypeScript source under the root at '
+      + 'four extensions — 2193 of 5755 (38%), numerator from the instrument own printed scan '
+      + 'count and denominator from git ls-files, both measured on this tree and NOT carried from '
+      + 'the row above. Same class and nearly the same ratio as check:authz-resolver: the '
+      + 'population is not a part of the root, it IS every source file in it, so a bare-root '
+      + 'declaration would be TRUE and is refused for width alone — it would name this gate for '
+      + 'every card in the repo that touches a package, and the coupling it would buy is already '
+      + 'carried by CI, whose lint.yml job has no paths filter. ⚠️ What actually reddens the '
+      + 'gated leg is narrower than the walk and is NOT a subtree either: ten named control files '
+      + 'plus this instrument own source, and — through the zero-member floor alone — the corpus '
+      + 'entire. A declaration naming the ten would be a hint the sweep judges FALSE of the walk, '
+      + 'which is the costlier error this file prices by name',
+  }],
   ['check:engine-double-contract SCAN_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
     why: 'tests AND sources, 4408 of 4903 (90%): the most nearly-true declaration on this list, '

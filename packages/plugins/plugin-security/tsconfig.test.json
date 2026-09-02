@@ -76,8 +76,24 @@
 // costing this package a `tsx` dependency and two more scripts; a bare
 // `tsc --noEmit -p tsconfig.test.json` is the strictly stronger gate at zero
 // residue, because ANY error here is red immediately with no ledger to be added
-// to. If this package ever acquires residue that cannot be fixed in its own PR,
-// that is the moment to wire `scripts/check-test-typecheck.mts` — not before.
+// to.
+//
+// ⚠️ THE LAST SENTENCE OF THAT PARAGRAPH USED TO READ "if this package ever
+// acquires residue that cannot be fixed in its own PR, that is the moment to
+// wire `scripts/check-test-typecheck.mts` — not before". #14062 SUPERSEDED it,
+// and the reason is not this package: the director ruling of 2026-09-01
+// (maintainer verbatim: 「同意」) onboarded all fourteen `packages/plugins/**`
+// packages into the `check:test-typecheck` instrument family AS A FAMILY,
+// because an instrument that is silent over a third of the runtime surface
+// reads as covering it. So `typecheck` now names the SHARED gate rather than
+// invoking tsc directly, and the ledger judgement above is UNCHANGED and still
+// this package's own: there is still no `test-typecheck-debt.json` here, and
+// `check:test-typecheck` reads a missing ledger as `{ entries: {} }` — under
+// which any error in any file here is red immediately, with no entry to be
+// added to. Same strength, one instrument. The `gen:test-typecheck-debt`
+// script is deliberately NOT wired for the same reason it was not before: at
+// zero residue it would only ever write an empty ledger, and adding a real one
+// is maintainer-only (#5286), exactly as the gate says when it refuses.
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {

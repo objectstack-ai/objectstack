@@ -104,7 +104,7 @@ export const FieldZoo = ObjectSchema.create({
     // this is the seedable half of the `multiple: true` reference surface —
     // see `f_users` below for the half that a fresh boot cannot seed.
     f_lookups: Field.lookup('showcase_account', { label: 'Lookup → Accounts (multiple)', multiple: true }),
-    f_master_detail: Field.masterDetail('showcase_project', { label: 'Master-Detail → Project' }),
+    f_master_detail: Field.masterDetail('showcase_project', { label: 'Master-Detail → Project', required: true }),
     f_tree: { type: 'tree', label: 'Tree (self/category)', reference: 'showcase_category' },
 
     // ── User (lookup specialized to sys_user) ────────────────────────────

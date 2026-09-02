@@ -93,6 +93,12 @@
  * twin's contract calls out, kept across the transport boundary.
  */
 
+// [#14287] The unsafe-identifier refusal's ADR-0112 envelope, from the one
+// place that decides it. Imported rather than re-spelled so this module and
+// `RemoteTransport` cannot answer one condition two ways; `turso-driver.ts`
+// already loads both modules together, so the edge costs nothing at runtime.
+import { unsafeIdentifierError } from './remote-transport.js';
+
 /** The `@libsql/client` surface this module uses — nothing more. */
 export interface RemoteBackfillClient {
   execute(stmt: { sql: string; args?: unknown[] } | string): Promise<{
@@ -218,9 +224,34 @@ export const REMOTE_BACKFILL_EPOCH_MS_MAX = 4_102_444_800_000;
  */
 const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
-function assertSafeIdentifier(name: string): void {
+/**
+ * [#14287] The second producer of the transport's unsafe-identifier refusal,
+ * carrying the identical ADR-0112 envelope — `INVALID_REQUEST` / 400 — through
+ * the one constructor that decides it ({@link unsafeIdentifierError}). One
+ * condition, one wire answer, whichever of the two helpers refused it.
+ *
+ * ## Measured: on THIS module's paths the envelope is defence in depth, not a
+ * ## wire answer — and saying so is the point
+ *
+ * Both callers flatten the throw by design: {@link probeRemoteCanonicalColumns}
+ * turns it into `{ error: message }` and {@link backfillRemoteCanonicalColumn}
+ * into `report.error`, because ADR-0053 D-B3 forbids a migration from taking a
+ * boot down. So `code` and `status` reach no response envelope from here today
+ * — only the MESSAGE survives, into the report a caller logs. The envelope is
+ * still worth carrying, for two reasons and no third: the two producers of one
+ * condition must not drift onto two spellings (the card's own "decide the code
+ * once" argument), and a future caller that propagates instead of reporting
+ * inherits the right answer rather than re-deriving one.
+ *
+ * ⛔ It is therefore NOT the wire-reachability evidence for this package's
+ * ledger provenance row — `RemoteTransport`'s DDL and `aggregate` positions
+ * are, and they answer over HTTP. Exported so the envelope has a real pin: no
+ * exported path can observe it, and an unobservable assertion is the phantom
+ * check `AGENTS.md` names rather than a test.
+ */
+export function assertSafeIdentifier(name: string): void {
   if (!SAFE_IDENTIFIER.test(name)) {
-    throw new Error(`remote canonical backfill: unsafe identifier rejected: "${name}"`);
+    throw unsafeIdentifierError(`remote canonical backfill: unsafe identifier rejected: "${name}"`);
   }
 }
 

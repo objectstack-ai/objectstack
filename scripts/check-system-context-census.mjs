@@ -113,6 +113,13 @@
  * change over a population that never moved (#13490). `fixAnchors` carries the two
  * measured occurrences and why the union is the safer shape.
  *
+ * ⇒ So the repair for a line-shift red is `--fix` and never a hand-edited line
+ * number, and the repairing PR should state that `--fix` REFUSED ZERO files. That
+ * sentence is what separates a pure re-anchor from a population change that
+ * happened to be shifted at the same time: the refusal is the gate's only signal
+ * that a site arrived or vanished, and a `--fix` run reporting refusals leaves
+ * rows a human still has to write.
+ *
  * ## Refusals, never quiet passes (#4690)
  *
  * A page that cannot be read, a census with no sites, zero anchors found, a corpus
@@ -157,11 +164,69 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
-import { runCensus, siteKeys } from './isystem-census.mjs';
+import { CORPUS_ROOTS, runCensus, siteKeys } from './isystem-census.mjs';
 import { extractLineAnchors, extractPathCitations, resolveAnchorFile } from './doc-line-anchors.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 export const PAGE = 'content/docs/permissions/system-context.mdx';
+
+/**
+ * ── The population this gate READS, declared where the dispatch tool looks ───
+ *
+ * `extractWatchHints` in `scripts/pm/dispatch-gates.mjs` reads a gate's module
+ * body for path literals and treats them as the population that gate watches.
+ * This gate spelled 29 of them -- the page, the four colliding declarations, the
+ * `NON_READ_ANCHORS` citations -- and every one of them names an ARTIFACT it
+ * maintains. Its real population is the corpus `isystem-census.mjs` walks:
+ * `CORPUS_ROOTS`, today 109 elevation read sites in 20 packages across 45 files
+ * held by 145 anchors.
+ *
+ * ⭐ The failure that produced this declaration is not a missed red. It is a
+ * GREEN that was true and insufficient. A diff that merely SHIFTS a cited line
+ * -- an added import, a widened docblock -- reds this gate in CI while the
+ * derivation places it in the `silent` bucket, which reads as a clearance and is
+ * not: "this gate names paths, none of them yours" is the same sentence for a
+ * gate that cannot see your diff and for one whose whole verdict turns on it.
+ * Measured three times in one night on three unrelated PRs; each cost a CI lap
+ * plus a repair dispatch, and each dev had honestly run its derived families.
+ *
+ * ## Why the subtree and not the 45 cited files
+ *
+ * A roster of the files that carry a read site TODAY can never name the file
+ * that grows one TOMORROW -- and a NEW read site is precisely the finding this
+ * gate exists for (POPULATION, check B above, the mandatory half). A narrow
+ * declaration would derive green for the one case that most needs the lead, so
+ * it re-introduces this defect wearing the shape of a fix.
+ *
+ * ## The cost of the wide form, measured rather than asserted (at a39b02a6b)
+ *
+ * Families derived per probe path, before -> after this declaration:
+ *
+ *   packages/lint/src/authoring-rules.ts                 19 -> 20
+ *   packages/plugins/plugin-auth/src/auth-plugin.ts      22 -> 23
+ *   packages/metadata-protocol/src/protocol.ts           21 -> 22
+ *   packages/spec/src/data/object.zod.ts                 42 -> 42   (already named)
+ *   examples/app-crm/package.json                        17 -> 18
+ *   content/docs/permissions/access-matrix.mdx           30 -> 30   (unchanged)
+ *   scripts/check-nul-bytes.mjs                          14 -> 14   (unchanged)
+ *   .github/workflows/lint.yml                           23 -> 23   (unchanged)
+ *
+ * So the price is ONE family, on cards under the two subtrees only, against a
+ * gate that runs in about 3s and is run by CI on every PR regardless. What the
+ * lead buys is the CI lap it replaces.
+ *
+ * ## Provenance, never a lookup key
+ *
+ * Nothing here reads this array: `collectCorpus` walks `CORPUS_ROOTS`, and the
+ * glob form would name directories that do not exist. The self-test derives both
+ * directions FROM `CORPUS_ROOTS` rather than re-spelling the roots, so a corpus
+ * root added or dropped reddens here instead of silently outrunning the
+ * declaration. It has to be written out as a literal array: assembling it from
+ * `CORPUS_ROOTS` at runtime would put it out of reach of the very text scan it
+ * exists for -- identical runtime value, zero hints extracted, the defect
+ * preserved behind a tidier line (`check-watch-hint-literal` holds this shape).
+ */
+const ROOT_DIR_WATCH_HINTS = ['packages/**', 'examples/**'];
 
 /**
  * ⛔ SHRINK-ONLY. Anchors the page writes that are deliberately NOT elevation read
@@ -1559,6 +1624,64 @@ function selfTest() {
       lintYml.includes(`node ${SELF}\n`)
     );
     t('WIRING: lint.yml runs the --self-test leg too', lintYml.includes(`node ${SELF} --self-test`));
+  }
+
+  // ── POPULATION DECLARATION: what the dispatch derivation is told this gate reads ──
+  //
+  // Nothing in this file can ENFORCE these: `ROOT_DIR_WATCH_HINTS` is read by
+  // another tool entirely (`extractWatchHints` in `scripts/pm/dispatch-gates.mjs`),
+  // so a stale or wrong declaration runs green here forever and pays itself out as
+  // a dev dispatched on a `packages/` card with this gate absent from the brief --
+  // the exact round this declaration was added to end. Both directions are derived
+  // from `CORPUS_ROOTS`, never re-spelled: a corpus root added or dropped there has
+  // to move this declaration or fail here.
+  const declaredRoots = ROOT_DIR_WATCH_HINTS.map((h) => h.replace(/\/\*+$/, ''));
+  t(
+    'POPULATION DECLARATION: every root the census walks is declared',
+    CORPUS_ROOTS.every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)),
+    JSON.stringify({ CORPUS_ROOTS, ROOT_DIR_WATCH_HINTS })
+  );
+  t(
+    'POPULATION DECLARATION: and it declares no root the census does not walk (a declaration that can '
+      + 'drift from the walk is worse than none -- it replaces a silent gate with a lying one)',
+    declaredRoots.every((r) => CORPUS_ROOTS.includes(r)),
+    JSON.stringify(declaredRoots)
+  );
+  t(
+    'POPULATION DECLARATION: each declared literal carries a separator -- a bare root word is refused as '
+      + 'too generic by the consumer and would reach nothing',
+    ROOT_DIR_WATCH_HINTS.every((h) => h.includes('/'))
+  );
+  t(
+    'POPULATION DECLARATION: the repo root is NOT declared -- naming it would put this gate in every '
+      + "card's brief to reach the two subtrees whose edits can turn it red",
+    !declaredRoots.some((r) => r === '' || r === '.')
+  );
+  t(
+    'POPULATION DECLARATION: the declared form is NOT the walk root itself (provenance, never a lookup '
+      + 'key -- the glob form handed to the census would name directories that do not exist)',
+    !CORPUS_ROOTS.some((r) => ROOT_DIR_WATCH_HINTS.includes(r))
+  );
+  // The literal SPELLING is the whole mechanism: the consumer scans source text,
+  // so `CORPUS_ROOTS.map((r) => `${r}/**`)` would keep the runtime value, keep
+  // every assertion above green, and contribute ZERO hints. `check-watch-hint-literal`
+  // owns that rule fleet-wide; this pin is the own-source half, statement-scoped so
+  // a second mention in prose or in a neighbouring assertion cannot satisfy it.
+  let ownSource = null;
+  try {
+    ownSource = readFileSync(join(ROOT, SELF), 'utf8');
+  } catch (err) {
+    t('POPULATION DECLARATION: this gate can read its own source', false, err.code ?? err.message);
+  }
+  if (ownSource !== null) {
+    const declSites = [...ownSource.matchAll(/\bconst\s+ROOT_DIR_WATCH_HINTS\s*=\s*([^;]*);/g)];
+    t(
+      'POPULATION DECLARATION: declared exactly once, as an array of quoted literals the text scan can read',
+      declSites.length === 1 &&
+        ROOT_DIR_WATCH_HINTS.every((h) => declSites[0][1].includes(`'${h}'`)) &&
+        !/[A-Za-z_$][\w$]*\s*\./.test(declSites[0][1]),
+      JSON.stringify(declSites.map((d) => d[1].replace(/\s+/g, ' ')))
+    );
   }
 
   process.stdout.write(

@@ -27,10 +27,12 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import type {
+  DriverOptions,
   EngineAggregateOptions,
   EngineCountOptions,
   EngineQueryOptions,
 } from '@objectstack/spec/data';
+import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { ObjectQL } from './engine.js';
 
 /**
@@ -65,7 +67,49 @@ const deal = {
   },
 };
 
-interface SeenRead { ast: any }
+/**
+ * WITNESS SEAM 1 — what the driver was handed.
+ *
+ * `ast` is the driver contract's own {@link DriverQuery}
+ * (`Omit<QueryAST, 'object'>`, `@objectstack/spec/contracts`), NOT `any`. Every
+ * assertion in this file reads `lastWhere()` off this record, so the record IS
+ * the unreachability evidence — and evidence typed `any` is checked by nothing:
+ * `ast.where` could be renamed, retyped or dropped at the engine→driver
+ * boundary and this file would keep passing while proving less than it says.
+ * Naming the real type is what makes a drift there redden the pin.
+ */
+interface SeenRead { ast: DriverQuery }
+
+/**
+ * WITNESS SEAM 2 — what the double is standing in for.
+ *
+ * The recording double is annotated against the REAL driver contract rather
+ * than left `any`, for the reason `engine-primary-datasource.test.ts` states
+ * for its own fixture: `registerDriver` takes `IDataDriver`, so an un-annotated
+ * double is checked nowhere and drifts silently as the interface grows. With
+ * the annotation THIS declaration is what fails when a member is added or a
+ * signature moves.
+ *
+ * The one extension: `aggregate` is NOT on `IDataDriver`. The engine reaches it
+ * by duck-typing (`typeof drv.aggregate === 'function'`, `engine.ts`), so it is
+ * declared here explicitly — the pin exercises that verb and must keep
+ * witnessing it. ⚠️ Declared here does NOT make it contractual; it records that
+ * this double answers a call the interface does not describe.
+ */
+interface RecordingDriver extends IDataDriver {
+  aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]>;
+}
+
+/**
+ * A verb the pin does not exercise, present only because `IDataDriver` requires
+ * it. Throwing rather than no-op'ing keeps the double a WITNESS: if the engine
+ * ever routes one of these paths, this file says so instead of passing on a
+ * silent stub. Nothing here is reached today — the suite's 52 passing cases are
+ * the reading.
+ */
+const unexercised = (verb: string): never => {
+  throw new Error(`recording driver: ${verb}() is not exercised by this pin (#5158/#13357)`);
+};
 
 /**
  * Minimal driver that records every AST it is handed and executes only the
@@ -104,17 +148,17 @@ function makeRecordingDriver() {
     }
     return true;
   };
-  const run = (ast: any) => {
+  const run = (ast: DriverQuery | undefined) => {
     const out = [...rows.values()].filter((r) => matches(r, ast?.where));
     return typeof ast?.limit === 'number' && ast.limit > 0 ? out.slice(0, ast.limit) : out;
   };
-  const driver: any = {
+  const driver: RecordingDriver = {
     name: 'recording', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-    async find(_o: string, ast: any) { reads.push({ ast }); return run(ast); },
-    async findOne(_o: string, ast: any) { reads.push({ ast }); return run(ast)[0] ?? null; },
-    async count(_o: string, ast: any) { reads.push({ ast }); return run(ast).length; },
-    async aggregate(_o: string, ast: any) { reads.push({ ast }); return run(ast); },
+    async find(_o: string, ast: DriverQuery) { reads.push({ ast }); return run(ast); },
+    async findOne(_o: string, ast: DriverQuery) { reads.push({ ast }); return run(ast)[0] ?? null; },
+    async count(_o: string, ast: DriverQuery) { reads.push({ ast }); return run(ast).length; },
+    async aggregate(_o: string, ast: DriverQuery) { reads.push({ ast }); return run(ast); },
     async create(_o: string, data: Record<string, unknown>) {
       const id = (data.id as string) ?? `r_${rows.size + 1}`;
       const row = { ...data, id }; rows.set(id, row); return row;
@@ -123,14 +167,14 @@ function makeRecordingDriver() {
       const cur = rows.get(id); if (!cur) throw new Error(`nf ${id}`);
       const up = { ...cur, ...data, id }; rows.set(id, up); return up;
     },
-    async updateMany(_o: string, ast: any, data: Record<string, unknown>) {
+    async updateMany(_o: string, ast: DriverQuery, data: Record<string, unknown>) {
       writes.push({ ast });
       const hit = run(ast);
       for (const r of hit) rows.set(r.id as string, { ...r, ...data });
       return hit.length;
     },
     async delete(_o: string, id: string) { return rows.delete(id); },
-    async deleteMany(_o: string, ast: any) {
+    async deleteMany(_o: string, ast: DriverQuery) {
       writes.push({ ast });
       const hit = run(ast);
       for (const r of hit) rows.delete(r.id as string);
@@ -141,6 +185,12 @@ function makeRecordingDriver() {
     },
     async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; },
     async commit() {}, async rollback() {},
+    // ── required by `IDataDriver`, never reached by this pin ──────────────
+    async upsert() { return unexercised('upsert'); },
+    async bulkUpdate() { return unexercised('bulkUpdate'); },
+    async bulkDelete() { return unexercised('bulkDelete'); },
+    async syncSchema() { return unexercised('syncSchema'); },
+    async dropTable() { return unexercised('dropTable'); },
   };
   return { driver, reads, writes };
 }
@@ -543,6 +593,79 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
     expect(err?.code).toBe('INVALID_FILTER');
     expect(err.message).toMatch(/^find\('deal'\): /);
     expect(err.message).toContain('where.$or[0].stage.$nin[0]');
+    expect(reads).toHaveLength(0);
+  });
+
+  // ── [#14080] the ORDERING carve-out, ruled 2026-09-01: a null comparand ──
+  // ── of $gt/$gte/$lt/$lte is refused at this seam, so driver-memory's ─────
+  // ── two-face divergence on it is UNREACHABLE through the engine ─────────
+  //
+  // Ruling point 4's negative pin, engine half, in the exact shape of the
+  // #13357 block above: the witness is the recording driver's call log, not
+  // the thrown envelope alone. The compile-face half (`parseFilterAST`, both
+  // input forms) is pinned in `@objectstack/spec`'s
+  // `filter-comparand-shape.test.ts`; the matcher-side statement lives in
+  // driver-memory's `memory-null-ordering-comparand-unreachable.test.ts`.
+  // ⛔ Nothing here asserts what either face WOULD have answered, and no
+  // ordering-vs-null semantics is defined — the divergence is sealed.
+
+  it.each([
+    ['$gt: null', { amount: { $gt: null } }],
+    ['$gte: null', { amount: { $gte: null } }],
+    ['$lt: null', { amount: { $lt: null } }],
+    ['$lte: null', { amount: { $lte: null } }],
+    ['lowered array form, ">="', [['amount', '>=', null]]],
+  ])('a null ordering comparand is refused on EVERY verb before any driver call — %s', async (_l, where) => {
+    // `asFilterArrayQuery`: the array-form case makes `where` off-contract by
+    // declaration (see the helper's note), and the spelling names that.
+    await expect(engine.find('deal', asFilterArrayQuery(where)))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.findOne('deal', asFilterArrayQuery(where)))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.count('deal', { where } as unknown as EngineCountOptions))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.aggregate('deal', {
+      where: where as unknown as EngineAggregateOptions['where'],
+      groupBy: ['stage'],
+      aggregations: [{ function: 'count', field: 'id', alias: 'n' }],
+    })).rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.update('deal', { amount: 1 }, { where, multi: true } as any))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.delete('deal', { where, multi: true } as any))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    // The negative half: refused BEFORE the store — no read, no write, no row
+    // moved. (The count() control below adds its own read, so it runs after.)
+    expect(reads).toHaveLength(0);
+    expect(writes).toHaveLength(0);
+    expect(await engine.count('deal')).toBe(3);
+  });
+
+  it('the null-ordering refusal is not vacuous — the same operator WITHOUT null reaches the driver', async () => {
+    // Positive control for the zero-call reading above: one comparand
+    // swapped for a value, same operator, same field, and the dispatch happens.
+    const rows = await engine.find('deal', { where: { amount: { $gt: 10 } } });
+    expect(reads).toHaveLength(1);
+    expect(lastWhere()).toEqual({ amount: { $gt: 10 } });
+    expect(rows.map((r: any) => r.id).sort()).toEqual(['d2', 'd3']);
+  });
+
+  it('the null PREDICATE still reaches the driver — the refusal is ordering-shaped, not null-shaped', async () => {
+    // `$eq: null` / `$ne: null` ARE the null predicate (#5332) and are the
+    // spellings the refusal prescribes; the seam must keep passing them.
+    await engine.find('deal', { where: { owner_id: { $ne: null } } });
+    expect(reads).toHaveLength(1);
+    expect(lastWhere()).toEqual({ owner_id: { $ne: null } });
+  });
+
+  it('a nested null ordering comparand is refused at its own path, engine prefix and all', async () => {
+    const err = await engine.find(
+      'deal',
+      { where: { $or: [{ amount: { $lte: null } }] } },
+    ).then(() => null, (e: any) => e);
+    expect(err?.status).toBe(400);
+    expect(err?.code).toBe('INVALID_FILTER');
+    expect(err.message).toMatch(/^find\('deal'\): /);
+    expect(err.message).toContain('where.$or[0].amount.$lte');
     expect(reads).toHaveLength(0);
   });
 

@@ -160,6 +160,69 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
     expect(parseFilterAST({ n: { $between: [0, 0] } })).toEqual({ n: { $between: [0, 0] } });
   });
 
+  // ── the ordering carve-out, ruled 2026-09-01 (#14080) ──────────────────
+
+  it.each([
+    ['$gt, object passthrough', { n: { $gt: null } }],
+    ['$gte, object passthrough', { n: { $gte: null } }],
+    ['$lt, object passthrough', { n: { $lt: null } }],
+    ['$lte, object passthrough', { n: { $lte: null } }],
+    ['$gt, lowered array form (">")', [['n', '>', null]]],
+    ['$gte, lowered array form ("gte")', [['n', 'gte', null]]],
+    ['$lt, lowered array form ("before")', [['n', 'before', null]]],
+    ['$lte, lowered array form ("less_than_or_equal")', [['n', 'less_than_or_equal', null]]],
+    ['$gt with a real neighbour in the same bag', { n: { $gte: 0, $gt: null } }],
+  ])('refuses a null ORDERING comparand — %s', (_label, where) => {
+    const err = refusalOf(() => parseFilterAST(where));
+    expect(err.code).toBe(StandardErrorCode.enum.INVALID_FILTER);
+    expect(err.status).toBe(400);
+  });
+
+  it('the null-ordering refusal prescribes the ruled null predicates', () => {
+    // 2026-09-01: 「拒绝信息点名可用拼法(`$eq: null` / `$ne: null` 是已裁的
+    // null 谓词)」 — the refusal names both halves, and still names operator,
+    // field, position and authoring spellings (the #5346/#5348 contract).
+    const err = refusalOf(() => parseFilterAST({ close_date: { $gte: null } }));
+    expect(err.message)
+      .toMatch(/^Operator "\$gte" on field "close_date" does not accept a null comparand/);
+    expect(err.message).toContain('(at where.close_date.$gte)');
+    expect(err.message).toContain('{"$eq": null} is "has no value"');
+    expect(err.message).toContain('{"$ne": null} is "has a value"');
+    expect(err.message)
+      .toMatch(/Authoring spellings: >=, gte, greater_than_or_equal, greaterthanorequal, greaterorequal\./);
+    expect(err.message).toMatch(/UNFILTERED result set/);
+  });
+
+  it('a null ordering comparand is refused at its own path inside $and / $or / $not too', () => {
+    expect(refusalOf(() => parseFilterAST({ $not: { n: { $lt: null } } })).message)
+      .toContain('where.$not.n.$lt');
+    expect(refusalOf(() => parseFilterAST({ $or: [{ n: { $lte: null } }] })).message)
+      .toContain('where.$or[0].n.$lte');
+    expect(refusalOf(() => parseFilterAST(['and', ['amount', '>', 5], ['n', '<=', null]])).message)
+      .toMatch(/where\.\$and\[1\]\.n\.\$lte/);
+  });
+
+  it('refuses ONLY null in the ordering slots — the null PREDICATES and every value keep passing', () => {
+    // `$eq: null` / `$ne: null` ARE the null predicate (#5332) and are the
+    // spellings the refusal prescribes; they must keep passing this face.
+    expect(parseFilterAST({ n: { $eq: null } })).toEqual({ n: { $eq: null } });
+    expect(parseFilterAST({ n: { $ne: null } })).toEqual({ n: { $ne: null } });
+    expect(parseFilterAST({ n: null })).toEqual({ n: null });
+    // Every non-null comparand type the slots declare, and the { $field }
+    // reference (#5222) — the carve-out is null-shaped and nothing wider.
+    expect(parseFilterAST({ n: { $gt: 0 } })).toEqual({ n: { $gt: 0 } });
+    expect(parseFilterAST({ n: { $gte: '' } })).toEqual({ n: { $gte: '' } });
+    expect(parseFilterAST({ at: { $lt: '2026-07-01' } })).toEqual({ at: { $lt: '2026-07-01' } });
+    expect(parseFilterAST({ a: { $lte: { $field: 'b' } } })).toEqual({ a: { $lte: { $field: 'b' } } });
+    expect(parseFilterAST([['n', '>', 0]])).toEqual({ n: { $gt: 0 } });
+    const day = new Date('2026-07-01T00:00:00.000Z');
+    expect(parseFilterAST({ at: { $gt: day } })).toEqual({ at: { $gt: day } });
+    // `undefined` stays the TYPE door's refusal, with that door's own sentence
+    // — strictly `null` here, so the two messages never compete for one input.
+    expect(refusalOf(() => parseFilterAST({ n: { $gt: undefined } })).message)
+      .toMatch(/^Filter comparand at where\.n\.\$gt is undefined/);
+  });
+
   // ── the wording contract (#5346 / #5348), unchanged by the move ────────
 
   it('names the operator, the field, what arrived, where, and the fix', () => {
@@ -203,6 +266,12 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
       { stage: { $nin: [null] } },
       { close_date: { $between: [null, null] } },
       { close_date: { $between: ['2026-07-01', null] } },
+      // The 2026-09-01 ordering carve-out (#14080): `$gte` / `$lte` carry the
+      // longest spelling lists, so they are the tallest of the four.
+      { close_date: { $gte: null } },
+      { close_date: { $lte: null } },
+      { close_date: { $gt: null } },
+      { close_date: { $lt: null } },
     ]) {
       const err = refusalOf(() => parseFilterAST(where, "find('deal')"));
       expect(err.message.length, JSON.stringify(where)).toBeLessThan(500);
@@ -244,6 +313,31 @@ describe('the list-comparand shape door (#5869) runs inside parseFilterAST (#922
     // with neither branch covering it.
     expect([...VALID_AST_OPERATORS].filter((op) => loweredOperatorOf(op) === '$between'))
       .toEqual(['between']);
+  });
+
+  it('every AST spelling that lowers to an ORDERING operator is refused on null AND named', () => {
+    // The same reconciliation for the 2026-09-01 carve-out (#14080): the
+    // door's `ORDERING_COMPARAND_OPERATORS` spelling lists are hand-written
+    // for the same import-cycle reason, and this is what keeps them honest.
+    const ordering = [...VALID_AST_OPERATORS].filter((op) => {
+      const lowered = loweredOperatorOf(op);
+      return lowered === '$gt' || lowered === '$gte' || lowered === '$lt' || lowered === '$lte';
+    });
+    // Guards the loop from passing vacuously — twenty spellings, four operators.
+    expect(ordering.sort()).toEqual([
+      '<', '<=', '>', '>=', 'after', 'before',
+      'greater_than', 'greater_than_or_equal', 'greaterorequal', 'greaterthan', 'greaterthanorequal',
+      'gt', 'gte',
+      'less_than', 'less_than_or_equal', 'lessorequal', 'lessthan', 'lessthanorequal',
+      'lt', 'lte',
+    ]);
+    for (const op of ordering) {
+      const err = refusalOf(() => parseFilterAST([['n', op, null]]));
+      expect(err.code, op).toBe(StandardErrorCode.enum.INVALID_FILTER);
+      expect(err.status, op).toBe(400);
+      expect(err.message, `"${op}" is refused but the refusal does not name it`)
+        .toContain(`${op}`);
+    }
   });
 
   // ── what must KEEP working — the door is narrow, not merely present ─────

@@ -7,14 +7,38 @@
 //   node scripts/measure-durability-swallow-family.mjs --sites     # every site
 //   node scripts/measure-durability-swallow-family.mjs --json      # machine
 //   node scripts/measure-durability-swallow-family.mjs --file <p>  # one file
-//   node scripts/measure-durability-swallow-family.mjs --self-test # controls
+//   node scripts/measure-durability-swallow-family.mjs --self-test # all 4 control families
+//   node scripts/measure-durability-swallow-family.mjs --self-test=gated
+//                                                      # the 3 families CI runs
 //
-// It is NOT a gate: it is not wired into any workflow, it exits 0 on any
-// membership count, and it is deliberately not named `check:*` or `gen:*` so
-// the #4203 script ledger has nothing to classify (the shape
-// `measure-partial-retirement-annotation.mjs` established). The only non-zero
-// exit is `--self-test` failing its declared controls, and `ts-parse`'s
-// EXIT_UNPARSEABLE.
+// THE CENSUS is NOT a gate: it exits 0 on any membership count, it prints "a
+// MEASUREMENT, not a gate" on every run of it, and the file is deliberately not
+// named `check:*` or `gen:*` so the #4203 script ledger has nothing to classify
+// (the shape `measure-partial-retirement-annotation.mjs` established). The only
+// non-zero exits are a `--self-test` failing its declared controls, an unknown
+// `--self-test=` mode (REFUSED, exit 2), and `ts-parse`'s EXIT_UNPARSEABLE.
+//
+// WHAT CI RUNS, since #13919 (maintainer ruling of 2026-09-01, verbatim 「同意」):
+// the root alias `check:swallow-census-controls` runs `--self-test=gated` from
+// `lint.yml` -- the same shape as the sanctioned precedent
+// `check:stall-guard-headroom` -> `measure-stall-guard-headroom.mjs --self-test`,
+// and the same asymmetry: the SELF-TEST leg only, never a bare invocation. What
+// is gated is THIS INSTRUMENT'S OWN CONTROLS; no membership count can redden it,
+// so the census stays a measurement. That ruling also amends #12981's sanctioned
+// single-entry-point shape to "single entry point + a family flag" -- read
+// SELF_TEST_MODES for the split's whole rationale and for why POSITIVE_CONTROLS
+// is excluded permanently rather than pending.
+//
+// THE PRINTED WORKLIST vs MEMBERSHIP, since #13886: the tier-1 heading says
+// "the repair worklist", and four of its five rows were settled determinations.
+// A determination is a comment, and a comment is trivia to the AST, so it cannot
+// move a site out of the bucket -- measured: writing one left this census
+// byte-identical. `DETERMINED` is the register that lets the HEADING be true
+// without touching the census: a registered site stays a MEMBER and stays in
+// every count, and only the heading it prints under changes. Every row is
+// cross-checked against the determination as it is written in the file, and a
+// row that outlives its determination goes STALE, reddens both self-test modes
+// and excuses nothing. Read `DETERMINED` for the whole rationale.
 //
 // ## Why it exists
 //
@@ -535,6 +559,342 @@ const RESOLUTION_CONTROLS = [
       + 'and this goes red, forcing the census delta to be re-measured instead of narrowed in silence.',
   },
 ];
+
+/**
+ * The DETERMINED register (#13886) — DARK sites whose determination is settled.
+ *
+ * ## The defect it repairs, and the one thing it must NOT do
+ *
+ * The tier-1 bucket prints under "the repair worklist". Membership is decided on
+ * three mechanical conjuncts and a comment is trivia to the AST, so a site the
+ * programme has already RULED ON stays in that bucket forever: measured, writing
+ * the batch-8 determination into `harness.ts` left this census byte-identical.
+ * Four of the five rows in that bucket were settled determinations and one was
+ * an outstanding repair; two rounds were spent re-deriving rows that had already
+ * been read. "5 site(s) — the repair worklist" is a true statement about
+ * membership and a false one about work.
+ *
+ * ⛔ The repair is NOT to move a site out of the bucket. Over-collection is the
+ * census's whole design: a member it cannot see is a member nobody repairs. A
+ * registered site stays a MEMBER, stays counted in every total, and stays at
+ * tier `dark`. This register changes exactly one thing — which HEADING the row
+ * is printed under — so that the heading's claim becomes true. Membership counts
+ * are computed before this register is consulted and cannot be moved by it; that
+ * is asserted rather than asserted-about (`register + positive control coexist`
+ * in `selfTest`).
+ *
+ * ## Keyed `file::function`, never by line
+ *
+ * The same granularity and the same reason as the sibling gate's
+ * `FAILURE_PROPAGATION_SITES` (`check-durability-degradation-log-level.mjs`):
+ * line numbers churn on every unrelated edit, and a whole-FILE key would licence
+ * every future catch that lands anywhere in a nine-thousand-line file. That
+ * script is read here as precedent and never imported — coupling a non-gate
+ * instrument to a merge-blocking one is the same mistake `WRITE_SHAPED_CALLEES`
+ * declines by copying the gate vocabulary by value.
+ *
+ * ## Every row is CROSS-CHECKED, because otherwise this is a new lie carrier
+ *
+ * A row that outlives its determination would print "settled" over a site nobody
+ * has read in a year — the same defect one layer up, and worse, because it would
+ * carry the programme's own authority. So a row is honoured only while all three
+ * hold, and a row that fails any of them goes STALE: it is reported loudly, it
+ * reddens the self-test in BOTH modes, and — the part that matters — it does NOT
+ * excuse its site, which goes back onto the printed worklist.
+ *
+ *   1. the file still exists;
+ *   2. the determination is still WRITTEN DOWN, at the declared `scope` (below);
+ *   3. the `file::function` still resolves to a tier-1 DARK member. A determined
+ *      site that stopped being a member is stale too — the determination was
+ *      about a site that is no longer there, whether it was repaired, renamed or
+ *      re-tiered.
+ *
+ * ## `scope`, and why a file-wide anchor is not the default
+ *
+ *   `site` — the anchor text must appear inside the ENCLOSING FUNCTION's own
+ *            source. The right default: the determination is written where the
+ *            next reader of the catch will find it.
+ *   `file` — anywhere in the file. For the case where the determination is
+ *            genuinely recorded at the CALLER, in the same file. It costs
+ *            something real (a file-wide anchor survives an edit that forgets
+ *            the site) and is why each `file`-scoped row states its reason.
+ *
+ * ⛔ The anchor is a distinctive SENTENCE from the determination itself, not a
+ * bare `[#12981]` marker. A bare marker in a large file is kept alive by every
+ * unrelated repair that mentions the programme, so the cross-check would pass
+ * for a determination that had been deleted entirely — a green that certifies
+ * nothing. Matching is whitespace-normalised and comment-prefix-stripped, so
+ * re-wrapping a comment is safe and REWORDING it is not: a reworded
+ * determination is one a person should re-read.
+ *
+ * ⛔ A DARK site with no determination written down anywhere gets no row. It
+ * stays on the printed worklist, which is the honest answer:
+ * `auth-manager.ts::verifyMcpAccessToken` is one today — the census reaches its
+ * `update` through a same-file helper hop and batch 6 read it as a FALSE MEMBER,
+ * but that reading lives in a report, not in the file, so there is nothing here
+ * to cross-check against.
+ */
+const DETERMINED = new Map([
+  [
+    'packages/plugins/plugin-auth/src/ensure-default-organization.ts::tryInsert',
+    {
+      verdict: 'the fence is lifted — the CALLER reports the refused insert at `error`',
+      ref: 'PR #13685',
+      anchor: '`warn` was wrong here, and #12981 is why.',
+      scope: 'file',
+      why:
+        '`tryInsert` is the shared `catch { return null; }` helper, so the site itself is dark by '
+        + 'construction and stays that way. What was repaired is its caller: `ensureDefaultOrganization` '
+        + 'now answers a null insert with `logDurabilityFailure`, naming the consequence and the remedy. '
+        + 'The determination is therefore recorded AT THE CALLER, in this same file, which is why this '
+        + 'row is `file`-scoped: the anchor sentence is the caller\'s own note, and it is distinctive '
+        + 'enough that deleting the loud report deletes the anchor with it.',
+    },
+  ],
+  [
+    'packages/runtime/src/domains/keys.ts::handleKeysRequest',
+    {
+      verdict: 'silent BY DESIGN — every path out of the catch hands the caller a 500 envelope',
+      ref: '#12981, in-file determination',
+      anchor: '[#12981] This catch is silent BY DESIGN and it is NOT a durability swallow.',
+      scope: 'site',
+      why:
+        'The standing proof this card was filed over: the catch has carried its determination for '
+        + 'several rounds and was listed under "the repair worklist" on every run, so batch 7 had to '
+        + 'open the file to discover it was already settled. Nothing claims to have persisted and the '
+        + 'request does not look normal from the outside — AGENTS.md\'s third legal ending. Its '
+        + 'delivery is pinned in `http-dispatcher.keys.test.ts`. ⛔ The declaration this site is '
+        + 'waiting for belongs to the programme\'s LAST step, the one that widens '
+        + '`DURABILITY_CRITICAL_CALLEES`; this row does not bring that step forward and must not be '
+        + 're-keyed by it.',
+    },
+  ],
+  [
+    'packages/verify/src/harness.ts::inviteForAudienceGate',
+    {
+      verdict: 'NOT a claim-to-persist — the helper answers `void` and the loss is refused one line later',
+      ref: '#12981 batch 8, in-file determination',
+      anchor: '[#12981] This catch is silent BY DESIGN and it is NOT a durability swallow.',
+      scope: 'site',
+      why:
+        'Batch 8 read this site on the merits and wrote the reading into the catch. It is the '
+        + 'measurement that produced this card: writing that annotation left the census byte-identical, '
+        + 'which is the proof that an annotation cannot move a site out of the bucket. ⚠️ This file is '
+        + 'also where the tier-1 DARK positive control is headed; the two do not compete — the control '
+        + 'asserts the file yields a member at tier `dark`, and this row asserts the same site IS still '
+        + 'such a member before it excuses anything.',
+    },
+  ],
+]);
+
+/** `<file>::<enclosing function>` — the register key of a census finding. */
+function determinedKey(finding) {
+  return `${finding.file}::${finding.enclosing}`;
+}
+
+/**
+ * Comment prose with its markers and line breaks removed.
+ *
+ * The anchor is a sentence a human wrote inside a `//` block, so it arrives
+ * wrapped across lines behind comment prefixes. Normalising both sides lets a
+ * re-wrap pass and a rewrite fail, which is the sensitivity this cross-check
+ * wants.
+ */
+function normalizeProse(text) {
+  return text
+    .replace(/^[ \t]*(\/\/+|\/\*+|\*+\/|\*)/gm, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** The name a function-like declaration is known by, as `enclosingFunctionName` reads it. */
+function declaredFunctionName(node) {
+  if (ts.isFunctionDeclaration(node) && node.name) return node.name.text;
+  if (ts.isMethodDeclaration(node) && node.name && ts.isIdentifier(node.name)) return node.name.text;
+  if ((ts.isArrowFunction(node) || ts.isFunctionExpression(node))
+    && ts.isVariableDeclaration(node.parent) && ts.isIdentifier(node.parent.name)) {
+    return node.parent.name.text;
+  }
+  return null;
+}
+
+/** Concatenated source of every function in `sf` declared under `name`; '' when there is none. */
+function functionSourceByName(sf, name) {
+  const parts = [];
+  walkAll(sf, (node) => {
+    if (!ts.isFunctionDeclaration(node) && !ts.isMethodDeclaration(node)
+      && !ts.isArrowFunction(node) && !ts.isFunctionExpression(node)) return;
+    if (declaredFunctionName(node) === name) parts.push(node.getText(sf));
+  });
+  return parts.join('\n');
+}
+
+/**
+ * Judge every register row against the tree and the census.
+ *
+ * Pure in its inputs so the self-test can run it against synthetic registers —
+ * a control that had to mutate the working tree to prove the STALE leg fires
+ * would be a control nobody runs.
+ *
+ * @param register The `DETERMINED` map (or a synthetic one).
+ * @param dark The tier-1 DARK members of a census run.
+ * @returns `{ excused, stale }` — `excused` is the set of keys whose site the
+ *          printed worklist may hand to the register; `stale` the rows that
+ *          failed, each with the `kind` of failure. A stale row excuses NOTHING.
+ */
+function evaluateDetermined(register, dark) {
+  const darkKeys = new Set(dark.map(determinedKey));
+  const excused = new Set();
+  const stale = [];
+  for (const [key, row] of register) {
+    const [file, fn] = [key.slice(0, key.lastIndexOf('::')), key.slice(key.lastIndexOf('::') + 2)];
+    const abs = join(ROOT, file);
+    let source;
+    try {
+      source = readFileSync(abs, 'utf8');
+    } catch {
+      stale.push({ key, row, kind: 'file-gone', detail: `${file} no longer exists.` });
+      continue;
+    }
+    let haystack;
+    if (row.scope === 'site') {
+      const sf = parseSourceFile(abs, source, scriptKindFor(abs));
+      haystack = functionSourceByName(sf, fn);
+      if (haystack === '') {
+        stale.push({
+          key,
+          row,
+          kind: 'function-gone',
+          detail: `${file} declares no function \`${fn}\` — the key names a site this file no longer has.`,
+        });
+        continue;
+      }
+    } else {
+      haystack = source;
+    }
+    if (!normalizeProse(haystack).includes(normalizeProse(row.anchor))) {
+      stale.push({
+        key,
+        row,
+        kind: 'anchor-gone',
+        detail: `the determination is no longer written ${row.scope === 'site' ? `in \`${fn}\`` : `in ${file}`}: `
+          + `the anchor sentence "${row.anchor}" is not there.`,
+      });
+      continue;
+    }
+    if (!darkKeys.has(key)) {
+      stale.push({
+        key,
+        row,
+        kind: 'not-a-member',
+        detail: 'the census no longer reports this site as a tier-1 DARK member, so the determination '
+          + 'is about a site that is not in the bucket any more.',
+      });
+      continue;
+    }
+    excused.add(key);
+  }
+  return { excused, stale };
+}
+
+/** The author-facing block a STALE row prints, shared by the census and the self-test. */
+function staleLines(stale) {
+  const lines = [
+    `  ✗ ${stale.length} STALE row(s) in the DETERMINED register — each one still counts as OUTSTANDING above,`,
+    '    because a determination that is no longer recorded excuses nothing:',
+  ];
+  for (const s of stale) {
+    lines.push(`    ${s.key}  [${s.kind}]`);
+    lines.push(`      ${s.detail}`);
+    lines.push(`      it was registered because: ${s.row.why}`);
+  }
+  lines.push('    If the function was RENAMED, re-key the row. If the determination was reversed or the site');
+  lines.push('    repaired, delete the row — it is a reading of a site, and there is no site to read.');
+  return lines;
+}
+
+/**
+ * Which control families a `--self-test` run asserts (#13919).
+ *
+ * ## Why there is a subset at all
+ *
+ * All four families were green only while somebody remembered to run them by
+ * hand: measured on `origin/main`, nothing in `package.json` or `.github/**`
+ * named this script. The same resolver was then repaired three times (#13459,
+ * #13474, PR #13915) with no gate holding any of the previous repairs, and the
+ * census's numbers feed #12981's repair worklist, so a wrong denominator
+ * propagates into that programme unwatched.
+ *
+ * ## Why the subset is not simply "all of them"
+ *
+ * Wiring `all` into CI would redden the farm WHEN THE REPAIR PROGRAMME
+ * SUCCEEDS. `POSITIVE_CONTROLS` pins members, and its tier-1 DARK entry pins a
+ * member of the #12981 worklist -- precisely what that programme exists to
+ * remove. That is not a forecast: the `dark` control's own `why` above records
+ * it already happening once, when batch 2 repaired the file the control then
+ * named and turned this self-test red for doing exactly what the ruling asked.
+ * Repointing at another dark member only moves the breakage to the batch that
+ * repairs THAT file. ⛔ A gate that reddens on success is not a gate, and worse,
+ * it teaches the fleet to route around gates.
+ *
+ * So `gated` is the families the repair programme CANNOT destroy — three at
+ * #13919, joined by the `DETERMINED` register at #13886 (last section) — and the
+ * exclusion is PERMANENT rather than pending (#13919 ruling of 2026-09-01,
+ * boundary 1): repairs move a member from tier `dark` to tier `channelled` and
+ * it stays a member, so neither the negative controls, the regression controls,
+ * the resolution controls, nor the zero-member floor can be destroyed by a
+ * successful repair.
+ *
+ * ⛔ `gated` is NOT a lighter self-test to reach for by default. Anything that
+ * asserts membership at a declared TIER lives in `all`, and `all` is what a
+ * human or an agent touching this instrument runs.
+ *
+ * ⛔ This subset is also not, and must not be used to bring forward, the
+ * ruling's reserved handover step (`tryInsert`/`tryUpdate` into the real gate's
+ * `DURABILITY_CRITICAL_CALLEES`, still gated on `outstanding == 0`) -- see "The
+ * handover" above.
+ *
+ * ## The FIFTH family (#13886) is in BOTH modes, and that is the point
+ *
+ * The `DETERMINED` register's cross-check is asserted in `gated` as well as
+ * `all`, for the reason #13919 exists at all: a control nobody runs is a control
+ * that is not there. A register whose STALE leg only fired in a mode the farm
+ * never invokes would be exactly the "new lie carrier" the #13886 ruling
+ * forbids -- a row printing "settled" over a determination that had been
+ * deleted, under a green farm.
+ *
+ * It belongs in `gated` on the merits too, and the test is the one this comment
+ * already applies: CAN A SUCCESSFUL REPAIR DESTROY IT? No. A register row names
+ * a site the programme ruled OUT of repair, so the worklist emptying does not
+ * touch one. A row does go STALE if someone repairs its site anyway -- and that
+ * red is the sibling gate's own stale-entry discipline
+ * (`FAILURE_PROPAGATION_SITES`), demanding a one-line deletion that lands with
+ * the repair. That is categorically unlike `POSITIVE_CONTROLS`, where the
+ * cheapest way to green is to WEAKEN the control.
+ */
+const SELF_TEST_MODES = new Set(['all', 'gated']);
+
+/** The banner the instrument prints on every run that is not a bare `--file`/`--json` dump. */
+const MEASUREMENT_BANNER = 'durability swallow-family census (#12981) — a MEASUREMENT, not a gate';
+
+/**
+ * Read the self-test mode out of argv.
+ *
+ * @returns `null` (not a self-test run), a member of `SELF_TEST_MODES`, or
+ *          `{ unknown }` -- REFUSED rather than silently falling through to the
+ *          census, because a typo'd mode reaching `report()` would exit 0 and
+ *          read in a CI log exactly like a self-test that passed.
+ */
+function selfTestMode(argv) {
+  for (const arg of argv) {
+    if (arg === '--self-test') return 'all';
+    if (arg.startsWith('--self-test=')) {
+      const mode = arg.slice('--self-test='.length);
+      return SELF_TEST_MODES.has(mode) ? mode : { unknown: mode };
+    }
+  }
+  return null;
+}
 
 /* ------------------------------------------------------------------------- *
  *  AST helpers
@@ -1186,7 +1546,7 @@ function report({ sites = false } = {}) {
   const carries = members.filter((m) => m.tier === 'carries-error');
   const channelled = members.filter((m) => m.tier === 'channelled');
   const out = [];
-  out.push('durability swallow-family census (#12981) — a MEASUREMENT, not a gate\n');
+  out.push(`${MEASUREMENT_BANNER}\n`);
   out.push(`  scanned                    ${stats.files} non-test source file(s) under packages/`);
   out.push(`  try/catch statements       ${stats.tryStatements}`);
   out.push(`  ...guarding an awaited write ${stats.guardedWrites}`);
@@ -1220,11 +1580,37 @@ function report({ sites = false } = {}) {
     out.push(`    by name: ${shadowed.map(([n, c]) => `${n}×${c}`).join(', ')}`);
   }
   out.push('');
+  // #13886: the bucket above is MEMBERSHIP and does not move; this heading is
+  // about WORK, so the rows it prints are the ones with no settled
+  // determination. A registered site is printed below, still a member, still
+  // counted in [1]. A STALE row excuses nothing and its site prints here.
+  const { excused, stale } = evaluateDetermined(DETERMINED, dark);
+  const outstanding = dark.filter((m) => !excused.has(determinedKey(m)));
+  const determined = dark.filter((m) => excused.has(determinedKey(m)));
   out.push('  [1] DARK members, by file — the repair worklist:');
   const byFile = new Map();
-  for (const m of dark) byFile.set(m.file, (byFile.get(m.file) ?? 0) + 1);
+  for (const m of outstanding) byFile.set(m.file, (byFile.get(m.file) ?? 0) + 1);
   for (const [file, count] of [...byFile.entries()].sort()) out.push(`    ${count}×  ${file}`);
-  if (byFile.size === 0) out.push('    (none — the family is repaired; the gate handover step is unblocked)');
+  if (byFile.size === 0 && determined.length === 0) {
+    out.push('    (none — the family is repaired; the gate handover step is unblocked)');
+  } else if (byFile.size === 0) {
+    out.push('    (none outstanding — every DARK member is DETERMINED below, and every one is still a member)');
+  }
+  if (determined.length > 0) {
+    out.push('');
+    out.push(`  DETERMINED, not outstanding                  ${determined.length} site(s) in ${memberFiles(determined).length} file(s)`);
+    out.push('    read on the merits and recorded in the file; still MEMBERS, still counted in [1] above —');
+    out.push('    a determination is a reading of a site, never a change to it:');
+    for (const m of [...determined].sort((a, b) => determinedKey(a).localeCompare(determinedKey(b)))) {
+      const row = DETERMINED.get(determinedKey(m));
+      out.push(`    ${determinedKey(m)}`);
+      out.push(`      ${row.verdict}  (${row.ref})`);
+    }
+  }
+  if (stale.length > 0) {
+    out.push('');
+    for (const line of staleLines(stale)) out.push(line);
+  }
   out.push('');
   if (sites) {
     for (const [label, rows] of [
@@ -1296,7 +1682,8 @@ function checkResolutionControl(control) {
   return { matched, wrong };
 }
 
-function selfTest() {
+function selfTest(mode = 'all') {
+  const gated = mode === 'gated';
   const problems = [];
   const { members } = census();
   const byFile = new Map();
@@ -1304,7 +1691,7 @@ function selfTest() {
     if (!byFile.has(m.file)) byFile.set(m.file, []);
     byFile.get(m.file).push(m);
   }
-  for (const control of POSITIVE_CONTROLS) {
+  for (const control of gated ? [] : POSITIVE_CONTROLS) {
     const hits = byFile.get(control.file) ?? [];
     if (hits.length === 0) {
       problems.push(`positive control found NO member: ${control.file}\n    ${control.why}`);
@@ -1346,27 +1733,117 @@ function selfTest() {
         + `${wrong.map((w) => `${w.actual ?? 'REFUSAL'}@${w.line}`).join(', ')}\n    ${control.why}`);
     }
   }
+  // ── The DETERMINED register (#13886), asserted in BOTH modes ──────────────
+  //
+  // See SELF_TEST_MODES for why this family is gated. Three legs: the real
+  // register must be clean, both STALE legs must actually fire, and the
+  // register must be unable to move membership.
+  const dark = members.filter((m) => m.tier === 'dark');
+  const live = evaluateDetermined(DETERMINED, dark);
+  for (const s of live.stale) {
+    problems.push(`DETERMINED register row is STALE: ${s.key} [${s.kind}]\n    ${s.detail}\n    `
+      + `it was registered because: ${s.row.why}`);
+  }
+
+  // (i) NEGATIVE leg — a row whose determination is not written where it says.
+  //     Run against a REAL registered file with a sentence nobody wrote, so the
+  //     control proves the anchor is read rather than that a missing file trips.
+  const anchorProbeKey = [...DETERMINED.keys()].find((k) => DETERMINED.get(k).scope === 'site');
+  const anchorProbe = evaluateDetermined(
+    new Map([[anchorProbeKey, { ...DETERMINED.get(anchorProbeKey), anchor: 'this sentence is in no file in this repo' }]]),
+    dark,
+  );
+  if (anchorProbe.stale.length !== 1 || anchorProbe.stale[0].kind !== 'anchor-gone'
+    || anchorProbe.excused.size !== 0) {
+    problems.push('DETERMINED cross-check did not fire: a row whose anchor sentence is absent from its own '
+      + `function was not reported STALE (saw: ${anchorProbe.stale.map((s) => s.kind).join(', ') || 'nothing'}, `
+      + `${anchorProbe.excused.size} excused). Without this leg the register excuses sites on its own `
+      + 'authority, which is the failure it exists to prevent.');
+  }
+
+  // (ii) NEGATIVE leg — a row whose site is not a DARK member. Keyed on a real
+  //      file and a function that exists and carries the anchor, so the ONLY
+  //      thing wrong with it is that the census does not report it in tier 1.
+  const memberProbeKey = 'packages/runtime/src/domains/keys.ts::handleKeysRequest';
+  const memberProbe = evaluateDetermined(
+    new Map([[memberProbeKey, DETERMINED.get(memberProbeKey)]]),
+    dark.filter((m) => determinedKey(m) !== memberProbeKey),
+  );
+  if (memberProbe.stale.length !== 1 || memberProbe.stale[0].kind !== 'not-a-member'
+    || memberProbe.excused.size !== 0) {
+    problems.push('DETERMINED membership check did not fire: a row whose site the census does not report '
+      + `as a tier-1 DARK member was not reported STALE (saw: ${memberProbe.stale.map((s) => s.kind).join(', ') || 'nothing'}, `
+      + `${memberProbe.excused.size} excused). A determination about a site that left the bucket is stale.`);
+  }
+
+  // (iii) COEXISTENCE — the register partitions the printed worklist and moves
+  //       no count. Asserted arithmetically rather than described, because this
+  //       is the property the whole card turns on, and because a positive
+  //       control asserting membership of a registered file must keep passing.
+  const excusedSites = dark.filter((m) => live.excused.has(determinedKey(m)));
+  const outstandingSites = dark.filter((m) => !live.excused.has(determinedKey(m)));
+  if (excusedSites.length + outstandingSites.length !== dark.length) {
+    problems.push('DETERMINED register changed the tier-1 population: '
+      + `${excusedSites.length} + ${outstandingSites.length} != ${dark.length}. The register may only `
+      + 'partition what is printed; membership is decided before it is consulted.');
+  }
+  for (const key of live.excused) {
+    if (!members.some((m) => determinedKey(m) === key)) {
+      problems.push(`DETERMINED row ${key} was excused without being a member — a registered site must `
+        + 'remain in the census, at tier `dark`, or the over-collection this instrument depends on is gone.');
+    }
+  }
+
   // The durability filter must actually filter: the raw shape is ~3.5x this.
   if (members.length === 0) {
     problems.push('census found ZERO members — on this tree that is a broken matcher, not a clean repo.');
   }
   if (problems.length > 0) {
-    process.stderr.write(`x  measure-durability-swallow-family self-test FAILED\n\n${
+    process.stderr.write(`x  measure-durability-swallow-family self-test${gated ? ' (gated families)' : ''} FAILED\n\n${
       problems.map((p) => `  - ${p}`).join('\n\n')}\n\n`);
     return 1;
+  }
+  if (gated) {
+    process.stdout.write(
+      `${MEASUREMENT_BANNER}\n`
+      + '✓ measure-durability-swallow-family self-test, gated families (#13919): '
+      + `${NEGATIVE_CONTROLS.length} negative control(s) yield none, `
+      + `${REGRESSION_CONTROLS.length} regression control(s) stay clear, `
+      + `${RESOLUTION_CONTROLS.length} resolution control(s) resolve as declared, `
+      + `${DETERMINED.size} DETERMINED register row(s) cross-check clean, `
+      + `${members.length} member site(s) total\n`
+      + `   ${POSITIVE_CONTROLS.length} positive control(s) are NOT asserted here, permanently: they pin `
+      + 'members of the #12981 worklist, which\n   that programme exists to remove — a control the repair '
+      + 'is designed to destroy cannot hold a CI gate.\n   Run `--self-test` for every family; see '
+      + '`SELF_TEST_MODES` for the whole rationale.\n',
+    );
+    return 0;
   }
   process.stdout.write(
     `✓ measure-durability-swallow-family self-test: ${POSITIVE_CONTROLS.length} positive control(s) `
     + `yield members at their declared tier, ${NEGATIVE_CONTROLS.length} negative control(s) yield none, `
     + `${REGRESSION_CONTROLS.length} regression control(s) stay clear, `
     + `${RESOLUTION_CONTROLS.length} resolution control(s) resolve as declared, `
+    + `${DETERMINED.size} DETERMINED register row(s) cross-check clean, `
     + `${members.length} member site(s) total\n`,
   );
   return 0;
 }
 
 function main(argv) {
-  if (argv.includes('--self-test')) return selfTest();
+  const mode = selfTestMode(argv);
+  if (mode !== null) {
+    if (typeof mode === 'object') {
+      process.stderr.write(
+        `x  REFUSED: unknown self-test mode \`${mode.unknown}\`. Known modes: `
+        + `${[...SELF_TEST_MODES].map((m) => `--self-test=${m}`).join(', ')} (bare \`--self-test\` means `
+        + '`=all`).\n   Refused rather than run, because falling through to the census would exit 0 and '
+        + 'read in a CI log\n   exactly like a self-test that passed.\n',
+      );
+      return 2;
+    }
+    return selfTest(mode);
+  }
   const fileIdx = argv.indexOf('--file');
   if (fileIdx !== -1) {
     const { members, quiet } = census({ only: argv[fileIdx + 1] });
