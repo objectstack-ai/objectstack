@@ -131,21 +131,45 @@ import { isAppPluginLike } from './graft-runtime-hooks.js';
  *    path any measured instance of this defect took.
  *  - **DDL — and its members split.** `deferSchemaDdl` holds back the
  *    `initObjects`/`syncSchema` path, which `os migrate apply` FLUSHES on
- *    purpose once the operator confirms. `dropTable` (and driver-sql's
- *    `rotateShards`) are NOT held back by that deferral: they run
- *    `assertSchemaMutable` — a schemaMode/dialect gate, not a deferral check —
- *    and then execute immediately, so a hook calling `driver.dropTable(...)`
- *    on a managed datasource during a declaration boot executes, today as
- *    before this guard. A genuinely open boundary, stated.
- *  - **Engine-held drivers for non-default datasources.** The guard's scan
- *    covers the `driver.*` services the kernel publishes, and the only such
- *    registration repo-wide is the DEFAULT datasource's
- *    (`packages/runtime/src/default-datasource-plugin.ts`).
- *    `DatasourceConnectionService.connect()` hands every OTHER datasource's
- *    driver straight to `engine.registerDriver`, never through `driver.*` —
- *    so a host stack that connects a second datasource during a composed boot
- *    holds an engine-side driver this guard cannot see, and objectql-mediated
- *    writes to objects bound to it would land.
+ *    purpose once the operator confirms. `dropTable` (a REQUIRED member of
+ *    `IDataDriver`) and driver-sql's `rotateShards` are NOT held back by that
+ *    deferral: they run `assertSchemaMutable` — a schemaMode/dialect gate,
+ *    not a deferral check — and then execute immediately. They are NOT
+ *    refused here either (#14126): refusing DDL an operator's own hook asked
+ *    for is a behaviour change beyond what this guard exists for. So a
+ *    boot-window call gets exactly the treatment `execute()` gets — FORWARDED
+ *    (it executes, today as before), counted per driver/method/object, warned
+ *    once per driver on stderr, named in the composition notes, and the notes
+ *    withhold "a plan writes nothing" for that run
+ *    ({@link DRIVER_IMMEDIATE_DDL_METHODS}). The execution itself stays an
+ *    open boundary; what closed is its silence.
+ *  - **Engine-held drivers — armed as they are registered (#14126).** The
+ *    guard's scan covers the `driver.*` services the kernel publishes, and
+ *    the only such registration repo-wide is the DEFAULT datasource's
+ *    (`packages/runtime/src/default-datasource-plugin.ts`). Every OTHER
+ *    datasource's driver goes straight to `engine.registerDriver` —
+ *    `DatasourceConnectionService.connect()`, `AppPlugin`'s
+ *    `drivers.register`, `ObjectQL.create` — never through `driver.*`, and
+ *    the engine's driver map is private with no public enumerator. So the
+ *    guard shadows `registerDriver` on the engine INSTANCE the kernel
+ *    publishes (`objectql` / `data`, one object under two names) for the
+ *    length of the boot: each driver instance is armed in place as it is
+ *    registered, and the SAME instance is forwarded to the engine's own
+ *    method — never a wrapper, never a second registration (the engine keeps
+ *    the first instance under a held name and discards the second; identity
+ *    decides). Drivers the engine ALREADY holds when the guard arms are
+ *    reached through its public accessors: the default via
+ *    `getDefaultDriverName()` / `getDriverByName()`, and every driver a
+ *    registered object resolves to via `getDriverForObject()`. Measured on
+ *    this CLI's boot: that set is exactly the default, which the `driver.*`
+ *    scan armed first (`DefaultDatasourcePlugin.init()` registers it through
+ *    the engine and republishes it as `driver.<name>` before this guard's
+ *    `init()` is ordered), so the default keeps its `driver.*` label. What
+ *    remains open, stated: an engine the kernel never publishes as a service,
+ *    and a non-default driver registered BEFORE the guard armed that no
+ *    registered object resolves to at either scan — neither is reachable
+ *    from here without an engine change, and neither occurs in this repo's
+ *    boot.
  *  - writes a plugin makes outside the database entirely (filesystem,
  *    network).
  *  - work a hook defers past the end of the bootstrap; the guard covers the
@@ -245,15 +269,17 @@ export function composeForDeclarations<T extends object>(plugin: T): T {
  * goes stale LOUDLY: adding a write to `IDataDriver` is a spec diff, and
  * every driver in the repo has to implement it.
  *
- * Two contract members that can write are deliberately NOT in this list, and
- * both are stated in the module header's residue census rather than silently
- * excluded: `execute()` — the contract's raw-execution escape hatch, which is
+ * Three groups of members that can write are deliberately NOT in this list,
+ * and each is stated in the module header's residue census rather than
+ * silently excluded: `execute()` — the contract's raw-execution escape hatch,
  * forwarded and REPORTED ({@link DRIVER_RAW_EXECUTION_METHODS}) because a raw
- * command cannot be classified as read-vs-write reliably — and DDL, whose
- * members split: `deferSchemaDdl` holds back the `initObjects`/`syncSchema`
- * path (which `os migrate apply` FLUSHES once the operator confirms — guarding
- * it here would refuse the one write these commands exist to make), while
- * `dropTable`/`rotateShards` are NOT deferred and stay a stated open boundary.
+ * command cannot be classified as read-vs-write reliably; the IMMEDIATE DDL
+ * members `dropTable`/`rotateShards`, forwarded and REPORTED the same way
+ * ({@link DRIVER_IMMEDIATE_DDL_METHODS}) because refusing DDL a hook asked for
+ * is not this guard's call to make; and the DEFERRED DDL path
+ * `initObjects`/`syncSchema`, which `deferSchemaDdl` holds back and
+ * `os migrate apply` FLUSHES once the operator confirms — guarding it here
+ * would refuse the one write these commands exist to make.
  */
 const DRIVER_ROW_WRITE_METHODS = [
   'create',
@@ -287,9 +313,49 @@ const DRIVER_ROW_WRITE_METHODS = [
  */
 const DRIVER_RAW_EXECUTION_METHODS = ['execute'] as const;
 
+/**
+ * The DDL members that execute IMMEDIATELY during a declaration boot —
+ * `IDataDriver.dropTable()` (a REQUIRED contract member: "Drop the underlying
+ * table or collection (destructive)") and driver-sql's `rotateShards()`
+ * (`packages/drivers/driver-sql/src/sql-driver.ts`, the lifecycle rotation
+ * extension `LifecycleService` calls; it DROPs expired shards). Neither is
+ * held back by `deferSchemaDdl`: both run `assertSchemaMutable` — a
+ * schemaMode/dialect gate, not a deferral check — and then issue their DDL.
+ *
+ * FORWARDED and REPORTED, never refused, for a reason weighed on #14126:
+ * refusing DDL an operator's own hook asked for is a behaviour change beyond
+ * what this guard exists for (keeping a dry run from writing rows behind the
+ * operator's back, and saying so), and a served boot of the same stack is
+ * entitled to drop a table it declared. What must never happen is the SILENT
+ * half — a `DROP TABLE` landing while the run prints an unqualified "a plan
+ * writes nothing". So a boot-window call is counted per driver/method/object
+ * (unlike a raw command, a DDL call names its object, and an object name is
+ * already what the refusal notes echo), warned once per driver on stderr,
+ * named in the composition notes, and the notes withhold the claim for that
+ * run — the treatment `execute()` gets, decided ONCE for every path the guard
+ * forwards rather than refuses ({@link DeclarationBootWriteGuard}).
+ */
+const DRIVER_IMMEDIATE_DDL_METHODS = ['dropTable', 'rotateShards'] as const;
+
+/**
+ * The kernel services under which `ObjectQLPlugin.init()` publishes the
+ * engine (`packages/objectql/src/plugin.ts` — `providesServices` names both,
+ * and both point at the same `ObjectQL` instance). The guard shadows
+ * `registerDriver` on whichever of these it finds, keyed by instance so one
+ * engine under two names is shadowed once.
+ */
+const ENGINE_SERVICES = ['objectql', 'data'] as const;
+
 /** One refused write, as the plan reports it. */
 export interface RefusedDeclarationWrite {
-  /** The `driver.*` kernel service the call was made on. */
+  /**
+   * The `driver.*` kernel service the call was made on — or `engine.<name>`
+   * for a driver the guard reached through the engine instead: registered via
+   * `engine.registerDriver` during the boot, or already held by the engine
+   * when the guard armed (#14126). One label per instance, decided by which
+   * path reached it first; the `driver.*` scan runs first, so the default
+   * keeps the label it always had.
+   */
   driver: string;
   /** The contract method the caller reached for. */
   method: string;
@@ -307,20 +373,43 @@ export interface RefusedDeclarationWrite {
  * text into an operator-facing note would leak whatever the caller inlined.
  */
 export interface ForwardedRawExecution {
-  /** The `driver.*` kernel service the call was made on. */
+  /** The driver the call was made on, labelled as {@link RefusedDeclarationWrite.driver} is. */
   driver: string;
   /** How many `execute()` calls this driver saw during the guarded window. */
   count: number;
 }
 
 /**
+ * One immediate-DDL call the boot forwarded, as the plan reports it —
+ * `dropTable()` / `rotateShards()` ({@link DRIVER_IMMEDIATE_DDL_METHODS}).
+ * Unlike a raw command, a DDL call names its object, so it is keyed like a
+ * refusal: per driver/method/object, with a count.
+ */
+export interface ForwardedImmediateDdl {
+  /** The driver the call was made on, labelled as {@link RefusedDeclarationWrite.driver} is. */
+  driver: string;
+  /** `dropTable` or `rotateShards`. */
+  method: string;
+  /** The object (table) named in the call, or `(unknown)` when the call carried none. */
+  object: string;
+  /** How many times this exact driver/method/object triple was forwarded. */
+  count: number;
+}
+
+/**
  * The declaration boot's write guard — the mechanism behind the sentence the
  * plan's notes print when the boot is over and it held, "a plan writes
- * nothing" (#13332). The sentence is an OUTCOME, so {@link disarm} owns it:
- * it is claimed when every write the boot attempted was refused, and dropped
- * when a raw `execute()` was forwarded (#14053 review, R1 — a claim printed
- * over a write the guard let through is the defect this module exists to
- * close).
+ * nothing" (#13332). The sentence is an OUTCOME, so {@link disarm} owns it,
+ * under ONE rule for every path (#14053 review, R1; #14126): it is claimed
+ * only when it held across everything the guard can see — every write it
+ * saw was refused, nothing was forwarded rather than refused (a raw
+ * `execute()`, an immediate `dropTable()`/`rotateShards()`), and nothing it
+ * set out to guard refused the override (a frozen driver, an engine whose
+ * `registerDriver` could not be shadowed). Each of those is NAMED in the
+ * notes and withholds the unqualified line. A claim printed over a write the
+ * guard let through is the defect this module exists to close, and fixing
+ * one such path while leaving another reproduces it at a smaller radius —
+ * which is why the rule is decided once, here, and not per path.
  *
  * ## Why the guard sits at the DRIVER, not at the plugin
  *
@@ -354,6 +443,27 @@ export interface ForwardedRawExecution {
  * it — because there is only ever one object, and the engine's write path is a
  * call-time property lookup on it.
  *
+ * ## Why the ENGINE instance is shadowed too (#14126)
+ *
+ * Only the default datasource is ever published as `driver.*`; every other
+ * driver reaches the engine through `engine.registerDriver` alone
+ * (`DatasourceConnectionService.connect()`, `AppPlugin`'s `drivers.register`,
+ * `ObjectQL.create`), and the engine's driver map is private with no public
+ * enumerator. The same in-place technique answers it: `registerDriver` is a
+ * prototype method on an ordinary, extensible instance that every caller
+ * reaches by a call-time property lookup on the object the kernel publishes
+ * (measured on `ObjectQL`: no `freeze`/`seal`, no bound copy of the method
+ * anywhere in the repo's runtime), so an own property on that instance is
+ * what they all call. The shadow arms the driver instance FIRST and then
+ * forwards the SAME instance to the engine's own method — never a wrapper in
+ * its place, never a second registration under a held name (the engine keeps
+ * the first and discards the second; identity decides) — and `disarm()`
+ * deletes the own property so the instance resolves through its prototype
+ * again. Drivers the engine already held when the guard armed are reached
+ * through its public accessors (the default by name, the rest via the
+ * objects that resolve to them); the module header's census states what that
+ * cannot reach.
+ *
  * ## What a refusal does, and why it does not throw
  *
  * `context.trigger()` dispatches boot hooks PROPAGATING
@@ -371,7 +481,9 @@ export interface DeclarationBootWriteGuard {
    * Compose this into the boot's plugin list. It arms in Phase 1 — ordered
    * after `DefaultDatasourcePlugin`, which is what registers `driver.*` — and
    * re-scans in Phase 2 so a driver registered by a later `init()` is covered
-   * before any hook phase can fire.
+   * before any hook phase can fire. Both scans also shadow `registerDriver`
+   * on the engine the kernel publishes, so a driver registered at ANY later
+   * point of the boot is armed on arrival (#14126).
    */
   readonly plugin: unknown;
   /** Every refusal recorded so far. */
@@ -384,7 +496,24 @@ export interface DeclarationBootWriteGuard {
    */
   readonly rawExecutions: readonly ForwardedRawExecution[];
   /**
-   * Restore every guarded driver to the methods it had, and return the line
+   * Every boot-window `dropTable()` / `rotateShards()` call seen so far —
+   * forwarded and reported rather than refused
+   * ({@link DRIVER_IMMEDIATE_DDL_METHODS}). Non-empty means the run's notes
+   * must not (and do not) claim an unqualified "a plan writes nothing".
+   */
+  readonly immediateDdl: readonly ForwardedImmediateDdl[];
+  /**
+   * The kernel service names under which the guard found — and is currently
+   * shadowing `registerDriver` on — an engine instance, one entry per
+   * distinct instance (`objectql` and `data` are one object, so one entry).
+   * Empty on an embedder with no data plane, and after {@link disarm}.
+   * Exposed so a pin can assert the shadow is a fact of THIS boot rather
+   * than an assumption about it.
+   */
+  readonly shadowedEngines: readonly string[];
+  /**
+   * Restore every guarded driver — and every shadowed engine — to the
+   * methods it had, and return the line
    * for {@link SchemaMigrationComposition.notes} — or `null` when there is
    * nothing to report, so a boot in which nothing tried to write renders
    * byte-identically to before this existed.
@@ -434,16 +563,77 @@ function refusalValue(method: string, args: readonly unknown[]): unknown {
 export function createDeclarationBootWriteGuard(): DeclarationBootWriteGuard {
   const refusals = new Map<string, RefusedDeclarationWrite>();
   const rawExecutions = new Map<string, ForwardedRawExecution>();
-  /** Guarded instance -> method -> the own descriptor it had, `undefined` when it had none. */
+  const immediateDdl = new Map<string, ForwardedImmediateDdl>();
+  /**
+   * Guarded instance -> member -> the own descriptor it had, `undefined` when
+   * it had none. Drivers AND engines: the restore is the same act for both.
+   */
   const armed = new Map<object, Map<string, PropertyDescriptor | undefined>>();
-  /** Instances a runtime refused to let us guard — reported, never swallowed. */
+  /** Driver members a runtime refused to let us guard — reported, never swallowed. */
   const unguardable = new Set<string>();
+  /** Engines whose `registerDriver` refused the shadow — likewise reported. */
+  const unshadowable = new Set<string>();
+  /** Engine instance -> the service name it was reached through. */
+  const shadowedEngines = new Map<object, string>();
   const warned = new Set<string>();
   const warnedExec = new Set<string>();
+  const warnedDdl = new Set<string>();
+
+  /**
+   * The object a call names. Row writes take the object NAME first;
+   * driver-sql's `rotateShards(objectDef, nowMs)` takes the object
+   * DEFINITION, so its name is read off that.
+   */
+  const objectOf = (args: readonly unknown[]): string => {
+    const first = args[0];
+    if (typeof first === 'string') return first;
+    const name = (first as { name?: unknown } | null | undefined)?.name;
+    return typeof name === 'string' ? name : '(unknown)';
+  };
+
+  /**
+   * Install `value` as an own property shadowing `method` on `target`,
+   * remembering what was there so {@link disarm} can put it back. `true`
+   * when the shadow is in place — including when it already was.
+   */
+  const shadow = (
+    label: string,
+    target: Record<string, unknown>,
+    method: string,
+    value: (...args: unknown[]) => unknown,
+    refused: Set<string>,
+  ): boolean => {
+    let saved = armed.get(target);
+    if (!saved) {
+      saved = new Map<string, PropertyDescriptor | undefined>();
+      armed.set(target, saved);
+    }
+    if (saved.has(method)) return true;                     // already guarded
+    if (typeof target[method] !== 'function') return false; // member this instance lacks
+    const original = Object.getOwnPropertyDescriptor(target, method);
+    try {
+      Object.defineProperty(target, method, {
+        value,
+        writable: true,
+        configurable: true,
+        // Prototype methods are non-enumerable; an own property that shadows
+        // one must not start showing up in `for…in` / spread.
+        enumerable: original?.enumerable ?? false,
+      });
+    } catch {
+      // A frozen or non-configurable instance. The guarantee cannot be made
+      // for it, and saying so beats a silent hole — it is named in the notes
+      // and withholds the outcome line.
+      refused.add(`${label}.${method}`);
+      return false;
+    }
+    saved.set(method, original);
+    return true;
+  };
 
   const refuse = (driverName: string, method: string) =>
     async function refusedWrite(...args: unknown[]): Promise<unknown> {
-      const object = typeof args[0] === 'string' ? args[0] : '(unknown)';
+      const object = objectOf(args);
       const key = `${driverName}|${method}|${object}`;
       const seen = refusals.get(key);
       if (seen) seen.count += 1;
@@ -489,51 +679,152 @@ export function createDeclarationBootWriteGuard(): DeclarationBootWriteGuard {
       return Reflect.apply(original, this ?? target, args);
     };
 
-  const armDriver = (serviceName: string, driver: unknown): void => {
+  /**
+   * Immediate DDL is forwarded, never refused — see
+   * {@link DRIVER_IMMEDIATE_DDL_METHODS} for the weighed reason — and, like
+   * `execute()`, it is COUNTED and SAID: the DDL executed, and the run's
+   * notes must not claim otherwise.
+   */
+  const forwardImmediateDdl = (
+    driverName: string,
+    method: string,
+    original: (...args: unknown[]) => unknown,
+    target: object,
+  ) =>
+    function forwardedDdl(this: unknown, ...args: unknown[]): unknown {
+      const object = objectOf(args);
+      const key = `${driverName}|${method}|${object}`;
+      const seen = immediateDdl.get(key);
+      if (seen) seen.count += 1;
+      else immediateDdl.set(key, { driver: driverName, method, object, count: 1 });
+      if (!warnedDdl.has(driverName)) {
+        warnedDdl.add(driverName);
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[migrate] ⚠ ${method}() on ${object} called via ${driverName} during the declaration boot. `
+          + 'Immediate DDL is not held back by the schema deferral, so it was FORWARDED, not '
+          + 'refused — it executed, this boot changed the physical schema, and the plan\'s notes '
+          + 'say so. Move DDL out of the boot path, or behind the served boot it belongs to.',
+        );
+      }
+      return Reflect.apply(original, this ?? target, args);
+    };
+
+  const armDriver = (label: string, driver: unknown): void => {
     if (!driver || typeof driver !== 'object') return;
     const target = driver as Record<string, unknown>;
-    let existing = armed.get(target);
-    if (!existing) {
-      existing = new Map<string, PropertyDescriptor | undefined>();
-      armed.set(target, existing);
-    }
-    const saved = existing;
-    const shadow = (method: string, value: (...args: unknown[]) => unknown): void => {
-      if (saved.has(method)) return;                        // already guarded
-      if (typeof target[method] !== 'function') return;      // member this driver lacks
-      const original = Object.getOwnPropertyDescriptor(target, method);
-      try {
-        Object.defineProperty(target, method, {
-          value,
-          writable: true,
-          configurable: true,
-          // Prototype methods are non-enumerable; an own property that shadows
-          // one must not start showing up in `for…in` / spread.
-          enumerable: original?.enumerable ?? false,
-        });
-      } catch {
-        // A frozen or non-configurable driver. The guarantee cannot be made
-        // for it, and saying so beats a silent hole.
-        unguardable.add(`${serviceName}.${method}`);
-        return;
-      }
-      saved.set(method, original);
-    };
     for (const method of DRIVER_ROW_WRITE_METHODS) {
-      shadow(method, refuse(serviceName, method));
+      shadow(label, target, method, refuse(label, method), unguardable);
     }
     for (const method of DRIVER_RAW_EXECUTION_METHODS) {
       const original = target[method];
       if (typeof original !== 'function') continue;
-      shadow(method, forwardRawExecution(serviceName, original as (...args: unknown[]) => unknown, target));
+      shadow(
+        label, target, method,
+        forwardRawExecution(label, original as (...args: unknown[]) => unknown, target),
+        unguardable,
+      );
     }
+    for (const method of DRIVER_IMMEDIATE_DDL_METHODS) {
+      const original = target[method];
+      if (typeof original !== 'function') continue;
+      shadow(
+        label, target, method,
+        forwardImmediateDdl(label, method, original as (...args: unknown[]) => unknown, target),
+        unguardable,
+      );
+    }
+  };
+
+  /** How a driver reached through the engine is labelled — `engine.<driver.name>`. */
+  const engineLabel = (driver: unknown): string => {
+    const name = (driver as { name?: unknown } | null | undefined)?.name;
+    return `engine.${typeof name === 'string' && name.length > 0 ? name : '(unnamed)'}`;
+  };
+
+  /**
+   * Arm what the engine ALREADY holds, through the accessors it makes
+   * public: the default by name, and every driver a registered object
+   * resolves to. Read-only probes — `getDriverForObject` swallows its own
+   * resolution errors and records nothing. Idempotent, so the Phase 2 re-scan
+   * reaches the objects host `init()`s declared without re-arming anything.
+   */
+  const armHeldDrivers = (engine: Record<string, unknown>): void => {
+    const e = engine as {
+      getDefaultDriverName?: () => unknown;
+      getDriverByName?: (name: string) => unknown;
+      getDriverForObject?: (name: string) => unknown;
+      registry?: { getAllObjects?: () => unknown };
+    };
+    try {
+      const name = e.getDefaultDriverName?.();
+      if (typeof name === 'string') armDriver(`engine.${name}`, e.getDriverByName?.(name));
+    } catch {
+      /* an accessor that throws holds nothing this guard can reach */
+    }
+    if (typeof e.getDriverForObject !== 'function') return;
+    let objects: unknown;
+    try {
+      objects = e.registry?.getAllObjects?.();
+    } catch {
+      return;
+    }
+    if (!Array.isArray(objects)) return;
+    for (const obj of objects) {
+      const objectName = (obj as { name?: unknown } | null | undefined)?.name;
+      if (typeof objectName !== 'string') continue;
+      let driver: unknown;
+      try {
+        driver = e.getDriverForObject(objectName);
+      } catch {
+        continue;
+      }
+      armDriver(engineLabel(driver), driver);
+    }
+  };
+
+  /**
+   * Shadow `registerDriver` on the engine instance the kernel publishes, so a
+   * driver registered by any path — `DatasourceConnectionService.connect()`,
+   * `AppPlugin`'s `drivers.register`, `ObjectQL.create` — is armed on
+   * arrival. The SAME instance is forwarded: the engine discards a second
+   * instance under a held name, so identity is what keeps the engine's
+   * registry and the guard's coverage the same set.
+   */
+  const shadowEngine = (serviceName: string, engine: unknown): void => {
+    if (!engine || typeof engine !== 'object') return;
+    if (shadowedEngines.has(engine)) return; // `objectql` and `data` are one instance
+    const target = engine as Record<string, unknown>;
+    const original = target.registerDriver;
+    if (typeof original !== 'function') return; // not an engine that registers drivers
+    const installed = shadow(
+      serviceName,
+      target,
+      'registerDriver',
+      function guardedRegisterDriver(this: unknown, ...args: unknown[]): unknown {
+        // Arm BEFORE forwarding: the engine's write path is a call-time
+        // lookup on the instance, and a hook may write in the same tick the
+        // registration returns.
+        armDriver(engineLabel(args[0]), args[0]);
+        return Reflect.apply(original as (...a: unknown[]) => unknown, this ?? target, args);
+      },
+      unshadowable,
+    );
+    if (!installed) return; // named in `unshadowable`; the outcome line is withheld
+    shadowedEngines.set(engine, serviceName);
+    armHeldDrivers(target);
   };
 
   const scan = (ctx: any): void => {
     const services: Map<string, unknown> | undefined = ctx?.getServices?.();
     if (!services || typeof services.entries !== 'function') return;
+    // `driver.*` FIRST, so the default keeps the label it always had; the
+    // engine's own view of that instance is then already armed and skipped.
     for (const [name, service] of services.entries()) {
       if (typeof name === 'string' && name.startsWith('driver.')) armDriver(name, service);
+    }
+    for (const [name, service] of services.entries()) {
+      if ((ENGINE_SERVICES as readonly string[]).includes(name)) shadowEngine(name, service);
     }
   };
 
@@ -560,11 +851,15 @@ export function createDeclarationBootWriteGuard(): DeclarationBootWriteGuard {
 
   const describe = (): string | null => {
     const parts: string[] = [];
-    // The flat claim is made only when it is TRUE of this run: with any raw
-    // execute() forwarded, whether the boot wrote is not this guard's to
-    // assert, and the sentence must not print over a write it let through
+    // ONE rule for every path (#14126): the flat claim is printed only when it
+    // held across everything the guard can see — nothing forwarded rather
+    // than refused (raw execute(), immediate DDL) and nothing it set out to
+    // guard refused the override. Each is named below and withholds the
+    // sentence; a claim over a write the guard let through is the defect
     // (#14053 review, R1).
-    const writesNothingHeld = rawExecutions.size === 0;
+    const writesNothingHeld =
+      rawExecutions.size === 0 && immediateDdl.size === 0
+      && unguardable.size === 0 && unshadowable.size === 0;
     if (refusals.size > 0) {
       const total = [...refusals.values()].reduce((n, r) => n + r.count, 0);
       const detail = [...refusals.values()]
@@ -592,10 +887,31 @@ export function createDeclarationBootWriteGuard(): DeclarationBootWriteGuard {
         + 'or move raw commands out of the boot path.',
       );
     }
+    if (immediateDdl.size > 0) {
+      const total = [...immediateDdl.values()].reduce((n, d) => n + d.count, 0);
+      const detail = [...immediateDdl.values()]
+        .map((d) => `${d.method}() on ${d.object} via ${d.driver}${d.count > 1 ? ` x${d.count}` : ''}`)
+        .join(', ');
+      parts.push(
+        `Immediate DDL was called ${total} time(s) during the declaration boot (${detail}) and `
+        + 'FORWARDED, not refused: dropTable()/rotateShards() are not held back by the schema '
+        + 'deferral, so those calls EXECUTED — this boot changed the physical schema, and this run '
+        + 'does NOT claim to have written nothing. A plugin in this stack issues DDL from a hook that '
+        + 'runs on a plan; move it out of the boot path, or behind the served boot it belongs to.',
+      );
+    }
     if (unguardable.size > 0) {
       parts.push(
         `Could NOT guard ${[...unguardable].sort().join(', ')} — the driver refused the override, `
-        + 'so calls through those members were neither refused nor reported on this run.',
+        + 'so calls through those members were neither refused nor reported on this run, and this '
+        + 'run does NOT claim to have written nothing.',
+      );
+    }
+    if (unshadowable.size > 0) {
+      parts.push(
+        `Could NOT shadow ${[...unshadowable].sort().join(', ')} — the engine refused the override, `
+        + 'so drivers registered through it during this boot were neither guarded nor reported, and '
+        + 'this run does NOT claim to have written nothing.',
       );
     }
     return parts.length > 0 ? parts.join(' ') : null;
@@ -605,6 +921,8 @@ export function createDeclarationBootWriteGuard(): DeclarationBootWriteGuard {
     plugin,
     get refusals(): readonly RefusedDeclarationWrite[] { return [...refusals.values()]; },
     get rawExecutions(): readonly ForwardedRawExecution[] { return [...rawExecutions.values()]; },
+    get immediateDdl(): readonly ForwardedImmediateDdl[] { return [...immediateDdl.values()]; },
+    get shadowedEngines(): readonly string[] { return [...shadowedEngines.values()]; },
     disarm(): string | null {
       for (const [target, saved] of armed) {
         for (const [method, original] of saved) {
@@ -613,6 +931,7 @@ export function createDeclarationBootWriteGuard(): DeclarationBootWriteGuard {
         }
       }
       armed.clear();
+      shadowedEngines.clear();
       return describe();
     },
   };

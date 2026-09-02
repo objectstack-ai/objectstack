@@ -18,7 +18,9 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, statSync } f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SqlDriver } from '@objectstack/driver-sql';
+import type { Plugin, PluginContext } from '@objectstack/core';
 import { bootSchemaStack } from './schema-migrate.js';
+import { composeForDeclarations } from './schema-migration-plugins.js';
 
 const ARTIFACT = {
   // #8687: manifest fields under `manifest:` — the flat spelling is refused.
@@ -162,6 +164,64 @@ describe('bootSchemaStack({ deferSchemaDdl }) — the boot writes nothing (#3917
       expect(after.tables).toContain('defer_gadget');
       expect(after.widgetColumns).toContain('colour');
       expect(existsSync(dbFile) && statSync(dbFile).size).toBeGreaterThan(0);
+    } finally {
+      await stack.shutdown();
+    }
+  }, 60_000);
+
+  it('a hook that drops a table during the declaration boot: the DDL EXECUTES (forwarded), and the notes say so instead of claiming the boot wrote nothing (#14126)', async () => {
+    // The guard's census names `dropTable()` as immediate DDL: it runs
+    // `assertSchemaMutable`, not the deferral, and executes. Measured here on
+    // the real driver over the real file — the deferral held back every
+    // CREATE/ALTER of the two cases above, and this DROP goes straight
+    // through. What #14126 changes is not the execution but its silence: the
+    // call is counted and named, and the run does not print "a plan writes
+    // nothing" over a table it dropped.
+    const before = await inspect();
+    expect(before.tables).toEqual(['defer_widget']);
+
+    let via = '';
+    const dropsATable: Plugin = {
+      name: 'com.example.drops-a-table-from-a-hook',
+      version: '1.0.0',
+      init: async (ctx: PluginContext) => {
+        ctx.hook('kernel:ready', async () => {
+          for (const [name, service] of ctx.getServices().entries()) {
+            if (name.startsWith('driver.') && typeof service?.dropTable === 'function') {
+              via = name;
+              await service.dropTable('defer_widget');
+              return;
+            }
+          }
+          throw new Error('no driver.* service with dropTable() to drop through');
+        });
+      },
+    };
+
+    const stack = await bootSchemaStack({
+      jsonOutput: false,
+      databaseUrl: `file:${dbFile}`,
+      deferSchemaDdl: true,
+      projectRoot: dir,
+      // The artifact makes this a COMPOSED boot, which is what arms the guard.
+      composeHostStack: true,
+      extraPlugins: [composeForDeclarations(dropsATable)],
+    });
+    try {
+      const after = await inspect();
+      expect(via).not.toBe('');
+      // FORWARDED: the table is really gone.
+      expect(after.tables).not.toContain('defer_widget');
+      // COUNTED, on the guard's own surface…
+      expect(stack.composition.writeGuard?.immediateDdl).toEqual([
+        { driver: via, method: 'dropTable', object: 'defer_widget', count: 1 },
+      ]);
+      // …and REPORTED in the notes the plan prints, with the claim withheld.
+      const notes = stack.composition.notes.join('\n');
+      expect(notes).toContain(
+        `Immediate DDL was called 1 time(s) during the declaration boot (dropTable() on defer_widget via ${via})`,
+      );
+      expect(notes).not.toContain('a plan writes nothing');
     } finally {
       await stack.shutdown();
     }
