@@ -132,7 +132,7 @@ at runtime from how heavy the record is + the client viewport, because an author
   opens create/edit/detail as a **full page**; a light one as a **drawer**. Mobile
   always pages. Don't set it. To force it for a specific object, set
   `navigation.mode` (`page` | `drawer` | `modal`) on the list view (or object) — or,
-  for bespoke layout, assign a record `Page` (below).
+  for bespoke layout, assign a record `Page`.
 - **Field width.** Use the relative **`span: 'full'`** to make a field take the
   whole row; otherwise **omit it** (`auto` sizes by widget type × current columns —
   textarea / rich-text / file take the row automatically). Do **not** use the

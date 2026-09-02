@@ -19,7 +19,7 @@ renderer are authorizable (ADR-0049 enforce-or-remove):
 | `home`    | App home / landing page |
 | `app`     | App-level page with navigation context |
 | `utility` | Floating utility panel (e.g. notes, phone dialer) |
-| `list`    | Record list/grid interface page — configured via `interfaceConfig` (see the iron rule above) |
+| `list`    | Record list/grid interface page — configured via `interfaceConfig` |
 
 Disambiguation: there is **no** `record_detail`, `app_launcher`, or
 `utility_bar` type — a record layout is `type: 'record'`, an app-level page is

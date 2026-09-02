@@ -190,7 +190,7 @@ structured navigation tree. Build with `App.create({...})` from
 | `joined` | Multi-block analytic surface (combines several sub-reports) |
 
 There is no `chart` report type — a report *visualizes* via its embedded
-`chart:` config (see the example below).
+`chart:` config.
 
 ---
 
