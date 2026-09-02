@@ -69,7 +69,9 @@ import {
   PLATFORM_PROVIDED_OBJECT_NAMES,
 } from '@objectstack/spec/system';
 
-/** Materialized once for the repeated edit-distance scans in `suggest`. */
+import { suggestName } from './object-graph.js';
+
+/** Materialized once for the repeated edit-distance scans in `suggestName`. */
 const PLATFORM_NAMES: readonly string[] = [...PLATFORM_PROVIDED_OBJECT_NAMES];
 
 export const OBJECT_REFERENCE_UNKNOWN = 'object-reference-unknown';
@@ -126,39 +128,6 @@ function isInterpolated(target: string): boolean {
   return open !== -1 && target.indexOf('}', open + 2) !== -1;
 }
 
-/** Levenshtein-bounded "did you mean?" over the known names. */
-function suggest(target: string, known: Iterable<string>): string {
-  let best: string | undefined;
-  let bestScore = Infinity;
-  for (const candidate of known) {
-    const d = distance(target, candidate);
-    if (d < bestScore) {
-      bestScore = d;
-      best = candidate;
-    }
-  }
-  // Only offer a suggestion that is plausibly the same identifier mistyped.
-  const limit = Math.max(2, Math.floor(target.length / 3));
-  return best && bestScore <= limit ? ` Did you mean "${best}"?` : '';
-}
-
-function distance(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  let prev = Array.from({ length: n + 1 }, (_, j) => j);
-  for (let i = 1; i <= m; i++) {
-    const curr = [i, ...new Array<number>(n).fill(0)];
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
-    }
-    prev = curr;
-  }
-  return prev[n];
-}
-
 /**
  * Validate every object-name reference on the surfaces listed in the module
  * header. Returns findings (empty = clean).
@@ -203,7 +172,7 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
           `package, official plugin, or cloud runtime object registers that name — ` +
           `and this stack does not define it either. If nothing provides it at runtime ` +
           `the reference resolves to nothing and fails silently.` +
-          suggest(name, PLATFORM_NAMES),
+          suggestName(name, PLATFORM_NAMES),
         hint:
           `Check the spelling against the object the providing package actually registers ` +
           `(e.g. "sys_approval_request", not "sys_approval_process" — the process object ` +
@@ -223,7 +192,7 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
       message:
         `${subject} "${name}" resolves to no object defined in this stack. ` +
         `The reference is inert at runtime — nothing reports the miss.` +
-        suggest(name, ownObjects),
+        suggestName(name, ownObjects),
       hint:
         `Point it at one of this stack's objects, or at a platform object by its full ` +
         `name (the platform user object is "sys_user", not "user"). ${fix}` +

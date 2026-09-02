@@ -420,10 +420,14 @@ describe('#12125 — the contract is exhaustive over `compile.ts`, not just over
     expect(found[1]).toContain('conversions: conversionNotices');
   });
 
-  it('all 10 `emitJson` exits carry `conversions` — 9 failure exits and the success payload', () => {
+  it('all 11 `emitJson` exits carry `conversions` — 10 failure exits and the success payload', () => {
     const literals = payloadLiterals(SRC);
-    expect(literals, 'the `emitJson` exit count moved — a new exit must carry `conversions` too').toHaveLength(10);
-    expect(literals.filter((p) => p.includes('success: false'))).toHaveLength(9);
+    // The tenth failure exit is ADR-0130 D4's per-package author-time rule leg
+    // (#14439): a multi-package artifact runs the same rule table once per
+    // package, and its refusal is an exit like any other — which is exactly
+    // what this count exists to notice.
+    expect(literals, 'the `emitJson` exit count moved — a new exit must carry `conversions` too').toHaveLength(11);
+    expect(literals.filter((p) => p.includes('success: false'))).toHaveLength(10);
     expect(literals.filter((p) => p.includes('success: true'))).toHaveLength(1);
 
     const bare = literals.filter((p) => !p.includes('conversions:'));

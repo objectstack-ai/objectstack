@@ -16,15 +16,8 @@ Guide for building ObjectStack aggregation queries.
 > ✅ **All six are portable.** `count_distinct` lowers to `COUNT(DISTINCT x)`
 > on `driver-sql` and turso's remote transport, and `driver-mongodb` /
 > `driver-memory` compute it too, so the declared-but-uncompiled set is empty.
-> The per-aggregation `distinct: true` flag went the other way — **removed in
-> 17**, refused at parse. For a deduplicated count, use `count_distinct`.
-
-> **Removed in 17.** `array_agg` and `string_agg` are no longer part of
-> the vocabulary — they were declared and lowered by no SQL backend, so a query
-> using them succeeded or failed depending on which driver happened to be
-> behind the object. A query carrying either is refused at parse. There is no
-> replacement: read the rows with an ordinary `fields` query and shape them in
-> the caller, or materialise the roll-up as a stored field.
+> `distinct: true`, `array_agg` and `string_agg` are removed keys — see the
+> removal table in `SKILL.md`.
 
 ## Basic Aggregation
 
@@ -43,20 +36,19 @@ Guide for building ObjectStack aggregation queries.
 ```typescript
 // SQL: SELECT region, SUM(amount) AS total, AVG(amount) AS average
 //      FROM sale GROUP BY region
-{
-  object: 'sale',
-  fields: ['region'],
+const rows = await engine.aggregate('sale', {
+  groupBy: ['region'],
   aggregations: [
     { function: 'sum', field: 'amount', alias: 'total' },
-    { function: 'avg', field: 'amount', alias: 'average' }
+    { function: 'avg', field: 'amount', alias: 'average' },
   ],
-  groupBy: ['region']
-}
+});
 ```
 
-Note: you do NOT need to repeat `groupBy` fields in `fields` — drivers
-auto-select every grouped field into the result rows. Listing them in
-`fields` (as above) is a readability convention, not a requirement.
+Never list the grouped fields in `fields`: drivers auto-select every grouped
+field into the result rows, and `fields` is not one of the six keys
+`engine.aggregate()` accepts — it is rejected by name (see the calling
+convention in `SKILL.md`).
 
 ## Date-Bucketed Grouping (dateGranularity)
 
@@ -90,10 +82,7 @@ aggregations (never bucket by hand in app code):
 - The engine pushes bucketing down to the driver (`DATE_TRUNC` etc.) when
   the dialect supports that granularity, and transparently falls back to
   in-memory bucketing otherwise — results are correct either way, **including
-  the column keys** (earlier SQL drivers ignored `alias`, so an
-  aliased group came back under the field name when the query was pushed down
-  and under the alias when it fell back — decided by a capability bit and the
-  `timezone`, neither of which the caller can see).
+  the column keys**.
 
 ## HAVING Clause
 
@@ -140,8 +129,7 @@ const [row] = await engine.aggregate('user', {
 > ✅ **`count_distinct` runs everywhere** — `COUNT(DISTINCT field)` on the SQL
 > faces, the same answer in memory. `field` is REQUIRED; there is no
 > `COUNT(DISTINCT *)`. The per-aggregation `distinct: true` flag is NOT its
-> equivalent: **removed in 17**, refused at parse, because exactly one of the
-> six backends that read an aggregation ever honoured it.
+> equivalent — it is a removed key.
 
 ```typescript
 // SQL: SELECT COUNT(DISTINCT department) FROM employee
@@ -155,16 +143,8 @@ const [row] = await engine.aggregate('user', {
 
 ## Window Functions
 
-> ⛔ **REMOVED in `@objectstack/spec` 17 (ADR-0049).** The `QueryAST`
-> schema no longer declares `windowFunctions` — the engine never routed the
-> property to any driver, so it was silently dropped. The key is tombstoned:
-> a query carrying it fails to parse with the upgrade prescription. The one
-> live door is the SQL driver's own `findWithWindowFunctions()` (driver-level,
-> its own flat input shape; even there the builder drops the `field` argument,
-> so `lag(revenue)` renders as `LAG()`). Do not emit `windowFunctions` in
-> queries.
-
-**Working alternatives:**
+`windowFunctions` is a removed key (see the removal table in `SKILL.md`). Two
+working alternatives:
 
 ### Ranking / Top-N per Group
 
@@ -198,13 +178,10 @@ const withTotals = txns.map((t) => ({ ...t, running_total: (runningTotal += t.am
 
 ### Period-over-Period
 
-For dashboard widgets, use the higher-level
-`compareTo: { kind: 'previousPeriod' | 'previousYear', dimension? }` field on
-the widget schema (see *objectstack-ui* → *Period-over-period — `compareTo`*).
-The runtime issues the shifted query for you and aligns the result
-bucket-for-bucket with the dataset dimension's `dateGranularity`. For ad-hoc comparisons,
-run two date-bucketed aggregations (see *Date-Bucketed Grouping* above)
-over the two periods and join the buckets in app code.
+Dashboard widgets declare it: **objectstack-ui → Period-over-period —
+`compareTo`**. For ad-hoc comparisons, run two date-bucketed aggregations (see
+*Date-Bucketed Grouping* above) over the two periods and join the buckets in
+app code.
 
 ## Common Mistakes
 
