@@ -82,13 +82,16 @@ interface WaitTimerLogger {
  * found" and the only remaining path is the next boot's overdue re-arm pass.
  * Both remedies are named in the log line for that reason.
  *
- * Reachability differs by site, and the honest note is that they are not equal.
- * `resumeInternal` reads the durable store only on a hot-cache miss, and a run
- * that paused in *this* process is cached for as long as the suspension lives —
- * so the **re-arm** callback (a fresh process, empty cache) is where
- * `STORE_UNAVAILABLE` is genuinely reachable today, while the arming callback's
- * branch is latent by construction. It is shared anyway rather than special-cased:
- * a second spelling of "settle the one-shot" is exactly the drift #5512 collapsed.
+ * Reachability was once unequal by site, and this note used to say so: while
+ * `resumeInternal` read the durable store only on a miss of the engine's
+ * in-memory map, a run that paused in *this* process was answered from memory
+ * for the life of its suspension, so only the **re-arm** callback (a fresh
+ * process, empty map) could genuinely produce `STORE_UNAVAILABLE`. [#13617]
+ * ended that: the resume path is store-authoritative whenever a
+ * `SuspendedRunStore` is configured, so BOTH callbacks read the store and both
+ * reach this branch — the arming site is no longer latent by construction. The
+ * handler was shared before that was true and stays shared: a second spelling
+ * of "settle the one-shot" is exactly the drift #5512 collapsed.
  */
 function makeWaitTimerJobHandler(
   engine: Pick<AutomationEngine, 'resume'>,

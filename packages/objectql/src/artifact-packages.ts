@@ -20,45 +20,47 @@
  * the caller's ORIGINAL object in that branch rather than a copy or a
  * re-validated clone: the bytes `registerApp` receives must not move.
  *
- * ## The wrapper shape is NOT re-derived here (ADR-0116's lesson)
+ * ## The entry shape is NOT re-derived here (ADR-0116's lesson)
  *
- * `ArtifactPackageEntrySchema` (`@objectstack/spec`, `stack.zod.ts`) is the sole
+ * `ArtifactPackageSchema` (`@objectstack/spec`, `stack.zod.ts`) is the sole
  * declaration of what one entry looks like — a wrapper object carrying the
- * manifest under `manifest:`, the structural position D4 reserves so a future
+ * package under `manifest:`, the structural position D4 reserves so a future
  * `{ ref, integrity }` external segment is an additive key rather than a
- * reshape. This module imports and applies that schema instead of duck-typing
- * the wrapper: a second declaration of one shape is exactly the drift ADR-0116
- * exists about.
+ * reshape, with the body half declared as the ASSEMBLED package body. This
+ * module imports and applies that schema instead of duck-typing either half: a
+ * second declaration of one shape is exactly the drift ADR-0116 exists about.
  *
- * ⛔ The schema is consulted as a **gate on the WRAPPER, and only the wrapper**,
- * and the body handed to `registerApp` is the caller's original
- * `entry.manifest`, never a parsed clone. Two measured reasons, both load-bearing:
+ * ### The gate is a FULL parse now — what changed, and why it could not be
  *
- *  1. **A parsed clone is not the authored body.** `ManifestSchema` carries
- *     defaults (`defaultDatasource: 'default'`, `scope: 'project'`) and Zod
- *     strips undeclared keys, so registering `parsed.data.manifest` would put
- *     different bytes into the registry than the singular-`manifest` branch does
- *     for the same authored package. D7 pins that those two branches do not
- *     disagree.
- *  2. **`ManifestSchema` cannot express an assembled package body.** Its
- *     `objects` key is `z.array(z.string())` — GLOB PATTERNS (`manifest.zod.ts`)
- *     — while what reaches this load path is an assembled payload whose
- *     `objects` are object DEFINITIONS (`AppPlugin` flattens the artifact into
- *     `{ ...bundle.manifest, ...bundle }` before `manifest.register()`, and
- *     `ObjectQL.registerApp` iterates those bodies). Measured against the
- *     landed schema: `ArtifactPackageEntrySchema.safeParse` on such a payload
- *     fails with `manifest.objects.0: expected string, received object`.
- *     Refusing on that would refuse exactly the artifacts this path exists to
- *     register.
+ * This seam used to apply `ArtifactPackageEntrySchema` to the WRAPPER only,
+ * filtering the verdict down to issues at the entry root or on `manifest`
+ * itself. That was a deliberate, narrow accommodation of a real surface defect
+ * rather than a choice: `ArtifactPackageEntrySchema.manifest` is
+ * `ManifestSchema`, whose `objects` key is `z.array(z.string())` — GLOB
+ * PATTERNS (`manifest.zod.ts`) — while what reaches this path is an ASSEMBLED
+ * payload whose `objects` are object DEFINITIONS. Measured against that
+ * schema, `safeParse` of a real entry failed with
+ * `manifest.objects.0: expected string, received object`, so a full parse
+ * would have refused exactly the artifacts this path exists to register.
  *
- * So issues INSIDE the manifest body are not this seam's verdict to give — body
- * validation lives at the authoring/publish doors (`defineStack`, `os validate`,
- * `os compile`'s `ObjectStackDefinitionSchema.safeParse`), which is also where
- * the singular-`manifest` branch has always had it. What this seam does own is
- * the wrapper: an entry must be `{ manifest: … }`. ⚠️ That the entry schema's
- * body half cannot describe the payload the load path registers is a real
- * tension in the landed D4 surface, recorded on the card rather than papered
- * over here — widening it is a spec decision, not a loader's.
+ * The maintainer settled that surface on 2026-09-02 (road **B**): the
+ * assembled/registered form has its own declaration,
+ * `AssembledPackageBodySchema`, and `ArtifactPackageSchema` is the entry that
+ * carries it. Both stages are now describable, so this seam parses the WHOLE
+ * entry — a package body whose collections are the wrong shape (globs where
+ * definitions belong, a permission-capability list where permission sets
+ * belong) is refused HERE, at the seam that would otherwise register it and
+ * silently own nothing. ⛔ Road C — widening `ManifestSchema.objects` to accept
+ * both spellings — was rejected by name: a union that accepts both stages makes
+ * neither stage checkable.
+ *
+ * ⛔ The body handed to `registerApp` is still the caller's original
+ * `entry.manifest`, never `verdict.data.manifest`. The parse is a GATE, and the
+ * reason is unchanged by road B: `ManifestSchema` carries defaults
+ * (`defaultDatasource: 'default'`, `scope: 'project'`) and Zod strips
+ * undeclared keys, so registering a parsed clone would put different bytes into
+ * the registry than the singular-`manifest` branch does for the same authored
+ * package. D7 pins that those two branches do not disagree.
  *
  * ## Ordering reuses the ONE sorter (D5)
  *
@@ -101,7 +103,7 @@
  */
 
 import { resolvePluginOrder, type OrderablePlugin } from '@objectstack/core';
-import { ArtifactPackageEntrySchema } from '@objectstack/spec';
+import { ArtifactPackageSchema } from '@objectstack/spec';
 
 /**
  * Refusals raised by {@link resolveArtifactPackageOrder}, as ADR-0112 envelopes
@@ -110,11 +112,40 @@ import { ArtifactPackageEntrySchema } from '@objectstack/spec';
  */
 export type ArtifactPackageError = Error & { code: string; status: number };
 
+/**
+ * How many Zod issues one refusal quotes before it starts counting instead.
+ *
+ * A single wrong-shaped collection raises one issue per element, so an
+ * uncapped message can run to hundreds of lines for one mistake. The cap is on
+ * the QUOTED issues only — the count that follows names the remainder, so the
+ * message never trails off the way a bare `slice` would.
+ */
+const MAX_REPORTED_ENTRY_ISSUES = 5;
+
 function refuse(code: string, message: string): ArtifactPackageError {
   const err = new Error(message) as ArtifactPackageError;
   err.code = code;
   err.status = 422;
   return err;
+}
+
+/**
+ * The id one artifact package is keyed by.
+ *
+ * `||`, not `??`, on purpose: `ObjectQL.registerApp` keys the installed package
+ * on `manifest.id || manifest.name`, so an empty-string `id` falls back to
+ * `name` there. Every seam that has to name a package — this module's ordering
+ * map, and the install gate's co-ownership set (ADR-0130 D1) — reads the id
+ * through THIS function, so none of them can order or admit a package under a
+ * key the registry never stores it by.
+ *
+ * @returns The package id, or `undefined` when the manifest carries neither a
+ *   usable `id` nor a usable `name`.
+ */
+export function artifactPackageId(manifest: unknown): string | undefined {
+  const id = (manifest as { id?: unknown; name?: unknown } | null | undefined)?.id
+    || (manifest as { name?: unknown } | null | undefined)?.name;
+  return typeof id === 'string' && id !== '' ? id : undefined;
 }
 
 /** The ordering-relevant projection of one artifact package. */
@@ -155,45 +186,44 @@ export function resolveArtifactPackageOrder(artifact: unknown): unknown[] {
   const nodes = new Map<string, ArtifactPackageNode>();
 
   declared.forEach((entry: unknown, index: number) => {
-    // The wrapper contract, read off its ONE declaration rather than
-    // duck-typed. The mistake this catches is the one the schema's own
-    // `history` text exists for: a manifest body inlined straight onto the
-    // array element instead of wrapped as `{ manifest: { … } }`.
-    //
-    // WRAPPER-LEVEL issues only — an issue at the entry root (`strictObject`'s
-    // `unrecognized_keys` for an inlined body, or a non-object entry) or on
-    // `manifest` itself (absent, or not an object). Issues DEEPER than that
-    // describe the manifest body, which this seam deliberately does not judge;
-    // see the module header for the measurement behind that line.
-    const verdict = ArtifactPackageEntrySchema.safeParse(entry);
-    const wrapperIssues = verdict.success
-      ? []
-      : verdict.error.issues.filter(
-          (i) => i.path.length === 0 || (i.path.length === 1 && i.path[0] === 'manifest'),
-        );
-    if (wrapperIssues.length > 0) {
+    // The entry contract, read off its ONE declaration rather than duck-typed,
+    // and parsed WHOLE (#14242 B — see the module header for what this replaced
+    // and why the narrow version was not a choice). Two classes of mistake are
+    // caught by the same call: the WRAPPER one the schema's `history` text
+    // exists for — a body inlined straight onto the array element instead of
+    // wrapped as `{ manifest: { … } }` — and a malformed BODY, most sharply a
+    // manifest still carrying authoring-time glob patterns where the assembled
+    // stage carries definitions.
+    const verdict = ArtifactPackageSchema.safeParse(entry);
+    if (!verdict.success) {
+      // Capped: a body whose whole `objects` array is the wrong shape raises one
+      // issue per element, and a refusal nobody can read is a refusal nobody
+      // acts on. The count says how many were withheld rather than trailing off.
+      const issues = verdict.error.issues;
+      const shown = issues.slice(0, MAX_REPORTED_ENTRY_ISSUES);
       throw refuse(
         'INVALID_ARTIFACT_PACKAGE_ENTRY',
         `Release artifact \`packages[${index}]\` is not a package entry (ADR-0130 D4): `
-        + wrapperIssues.map((i) => `${i.path.join('.') || '<entry>'}: ${i.message}`).join('; ')
+        + shown.map((i) => `${i.path.join('.') || '<entry>'}: ${i.message}`).join('; ')
+        + (issues.length > shown.length ? ` (+${issues.length - shown.length} more)` : '')
         + '. Each entry is a WRAPPER object carrying its package under `manifest:` — '
         + 'wrap an inlined body as `{ manifest: { … } }`. The key position is reserved '
-        + 'so a future external-segment form is an additive key rather than a reshape.',
+        + 'so a future external-segment form is an additive key rather than a reshape. '
+        + 'The body under `manifest:` is the ASSEMBLED package body '
+        + '(`AssembledPackageBodySchema`): its `objects` / `datasources` are '
+        + 'DEFINITIONS, not the authoring manifest\'s glob patterns — a compiled '
+        + 'artifact has no files left to glob.',
       );
     }
 
     // ⛔ The ORIGINAL body, never `verdict.data.manifest` — see the module
-    // header: the schema is a gate here, and a parsed clone carries defaults
-    // and drops undeclared keys the singular-`manifest` branch keeps.
+    // header: the schema is a GATE here even now that it parses the whole
+    // entry, because a parsed clone carries defaults and drops undeclared keys
+    // the singular-`manifest` branch keeps.
     const manifest = (entry as { manifest?: unknown }).manifest;
-    // `||`, not `??`, on purpose: `ObjectQL.registerApp` keys the installed
-    // package on `manifest.id || manifest.name`, so an empty-string `id` falls
-    // back to `name` there — this seam must agree on what the id IS, or the
-    // sorter would order a package under a key the registry never stores it by.
-    const id = (manifest as { id?: unknown; name?: unknown }).id
-      || (manifest as { name?: unknown }).name;
+    const id = artifactPackageId(manifest);
 
-    if (typeof id !== 'string' || id === '') {
+    if (id === undefined) {
       throw refuse(
         'INVALID_ARTIFACT_PACKAGE_ENTRY',
         `Release artifact \`packages[${index}]\` carries a manifest with no usable `

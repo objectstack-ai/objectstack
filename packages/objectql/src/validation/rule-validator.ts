@@ -202,7 +202,7 @@ import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES } from '@objectstack
 // reports it unconditionally, even under `systemFields: false`), and the
 // engine's whole by-id addressing reads that key (`idAddressesThisRow`,
 // `addressKey: 'id'`).
-import { SystemFieldName } from '@objectstack/spec/system';
+import { SystemFieldName, objectValidationMessageKey } from '@objectstack/spec/system';
 import Ajv, { type ValidateFunction } from 'ajv';
 // #5029 — `format` is NOT built into ajv 8; it ships in this separate package.
 // See the `const ajv` note below for why the runtime registers it.
@@ -286,7 +286,8 @@ interface RuleContext {
   logger: EvaluateRulesOptions['logger'];
   /** Declared fields — the source of a violation's display label (#3957). */
   fields: Record<string, ConditionalFieldDef> | undefined;
-  /** Locale + translation hooks for the BUILT-IN messages (#3957). */
+  /** Locale + translation hooks: the BUILT-IN messages (#3957) and the
+   *  authored `rule.message` (#14253) — one hook, two message sources. */
   messages: ValidationMessageContext | undefined;
 }
 
@@ -389,10 +390,13 @@ export interface EvaluateRulesOptions {
    */
   skipStateMachine?: boolean;
   /**
-   * Locale + translation hooks for this evaluator's BUILT-IN messages (#3957) —
-   * the `requiredWhen` required-check, per-option gating, and the state-machine
-   * fallbacks. An author-written `rule.message` is never touched: it is already
-   * in whatever language its author chose.
+   * Locale + translation hooks for this evaluator's messages — the BUILT-IN
+   * ones (#3957: the `requiredWhen` required-check, per-option gating and the
+   * state-machine fallbacks) and, through the SAME hook, an author-written
+   * `rule.message` looked up at `objects.<object>._validations.<rule>.message`
+   * (#14253). Until that key existed the authored half had nowhere to look, so
+   * one rejection envelope could carry platform text in the caller's language
+   * beside authored text in the source language.
    */
   messages?: ValidationMessageContext;
 }
@@ -1296,25 +1300,63 @@ export function stripReadonlyFields(
  * `onFieldsDropped` / `strictReadonlyWrites`. What changed is exclusively the
  * case where the value being deleted was never the caller's.
  *
+ * ### ...and why VALUES were not enough either (#14259)
+ *
+ * #6339's own sentence is the finding, one iteration on: it argued that a key
+ * SET made the contract true "only BY ACCIDENT", and value equality is
+ * accidental in the identical way. `Object.is(row[name], supplied[name])`
+ * cannot separate *the hook re-issued the record number the caller happened to
+ * submit* from *the hook never touched the key*, and those demand opposite
+ * verdicts — so #6339's own measured row (a `beforeInsert` hook that re-issues
+ * or normalises `code`) still loses its write to the one caller who submitted
+ * the same value. `options.hookWrittenKeys` answers by RECORD what the
+ * comparison could only infer; the comparison stays as the fallback for every
+ * key no record covers.
+ *
  * KNOWN LIMIT, identical to the update side's and deliberately not papered over:
- * the snapshot is SHALLOW, so a hook that mutates a caller-supplied object IN
- * PLACE is indistinguishable from a hook that did nothing, and the field is
- * still stripped. That fallback is the pre-#6339 behaviour, i.e. fail-safe; a
- * hook meaning to own a runtime-owned column should ASSIGN to it. (An
- * `autonumber` value is a scalar in every supported shape, so this limit is
- * theoretical here in a way it is not for the update path's `json` columns.)
+ * without a record the snapshot is SHALLOW, so a hook that mutates a
+ * caller-supplied object IN PLACE is indistinguishable from a hook that did
+ * nothing, and the field is still stripped. That fallback is the pre-#6339
+ * behaviour, i.e. fail-safe; a hook meaning to own a runtime-owned column
+ * should ASSIGN to it. (An `autonumber` value is a scalar in every supported
+ * shape, so this limit is theoretical here in a way it is not for the update
+ * path's `json` columns.)
  */
 export function stripRuntimeOwnedFields(
   objectSchema: { name?: string; fields?: Record<string, ConditionalFieldDef> } | undefined | null,
   data: Record<string, unknown> | undefined | null,
   supplied: Readonly<Record<string, unknown>>,
   logger?: EvaluateRulesOptions['logger'],
-  options?: { preserveAudit?: boolean; strictReadonlyWrites?: boolean },
+  options?: {
+    preserveAudit?: boolean;
+    strictReadonlyWrites?: boolean;
+    /**
+     * [#14259] The keys the `beforeInsert` hook chain ACTUALLY ASSIGNED on THIS
+     * ROW, recorded while the writes happened (`recordHookPayloadWrites`, armed
+     * per row at `engine.insert`'s hook-context construction and sealed
+     * immediately after that row's dispatch). The insert-side twin of the
+     * option #14088 gave {@link stripReadonlyFields}, and read by the same
+     * rules: OPTIONAL, and absent means "this call cannot say", never "no hook
+     * wrote anything" — a direct caller, and any row whose hook REPLACED the
+     * payload object, fall back to the `Object.is` test below exactly as before
+     * this option existed.
+     *
+     * ⚠️ Per ROW, never per call: one recording is armed for each row of a
+     * batch, so a hook that stamps row 3 cannot exempt row 4's caller-seeded
+     * record number. And a caller cannot put a key in here — see the
+     * forgery-boundary note on the recorder — so #5503 is untouched: a
+     * caller-seeded record number that no hook assigned is still dropped, still
+     * warns with the same text, and still reports through `onFieldsDropped` /
+     * `strictReadonlyWrites`.
+     */
+    hookWrittenKeys?: ReadonlySet<string>;
+  },
 ): Record<string, unknown> | undefined | null {
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
   const preserveAudit = options?.preserveAudit === true;
   const strict = options?.strictReadonlyWrites === true;
+  const hookWrittenKeys = options?.hookWrittenKeys;
   let result = data;
   for (const [name, def] of Object.entries(fields)) {
     if (!isRuntimeOwnedField(def)) continue;
@@ -1324,12 +1366,24 @@ export function stripRuntimeOwnedFields(
     // any plain snapshot, so `in` would call a hook stamp caller-supplied and
     // strip it.
     if (!Object.prototype.hasOwnProperty.call(supplied, name)) continue; // hook/middleware stamp — keep
+    // [#14259] ...or a hook ASSIGNED it on THIS row. Asked BEFORE the value
+    // comparison because it answers by RECORD the question the comparison is
+    // only a proxy for: `Object.is` reads "the hook re-issued the record number
+    // the caller also submitted" as "the hook never touched the key", and the
+    // two demand opposite verdicts. That is #6339's own argument against the
+    // key SET, applied to the values that replaced it.
+    if (hookWrittenKeys?.has(name)) continue; // the hook wrote this value — keep
     // [#6339] ...and it must still BE the caller's value. A hook that overwrote
     // this key wrote a PLATFORM value, and deleting that is what sent records
     // to the database holding a sequence number the hook had just replaced.
     // `Object.is`, not `===`: `===` reports NaN !== NaN, which would read a
     // caller-forged NaN as "a hook rewrote it" and KEEP the forgery — the one
     // input where the loose operator inverts the verdict.
+    //
+    // [#14259] STAYS as the fallback for every key the record above has nothing
+    // to say about — a call site passing no `hookWrittenKeys`, and a row whose
+    // hook replaced the payload object. ⛔ Not "keep everything": the fallback
+    // over-strips, which is the only safe direction.
     if (!Object.is((result as Record<string, unknown>)[name], supplied[name])) continue;
     if (preserveAudit && isPreservableUnderAudit(name, def)) continue; // historical import reinstates it
     if (result === data) result = { ...data };
@@ -1710,6 +1764,58 @@ function toExpression(cond: string | Expression): Expression {
 }
 
 /**
+ * The CEL scope roots the acting user is mounted under, so a predicate that
+ * NEEDS a user can be told apart from one that does not.
+ *
+ * ADR-0068 D1's canonical root is `current_user`; `@objectstack/formula`'s
+ * `buildScope` mounts the SAME `EvalUser` object under `user`, `ctx.user` and
+ * `os.user` as aliases, and mounts none of them when the evaluation carries no
+ * user. `ctx` and `os` are listed at bare-root granularity because that is what
+ * {@link collectCelRootIdentifiers} reports — and that is exact at THIS call
+ * site rather than merely conservative: {@link evaluateOptionVisibility}
+ * evaluates with `{ record, previous, user }` and nothing else, so `buildScope`
+ * has no `org`/`env` to mount `os` from and no other source for `ctx`. Both
+ * roots are therefore bound here if and only if a user is.
+ */
+const USER_SCOPE_ROOTS: readonly string[] = ['current_user', 'user', 'ctx', 'os'];
+
+/** Parsed-root memo — the twin of {@link parentRootCache}, same fixed sources. */
+const userRootCache = new Map<string, boolean>();
+
+/**
+ * Does this predicate reference the acting user under any root
+ * {@link USER_SCOPE_ROOTS} names?
+ *
+ * Read off the parsed CEL AST ({@link collectCelRootIdentifiers}), the same
+ * reader {@link readsParentRoot} uses — **never** off the evaluation fault's
+ * text, which was measured on this tree to be an unreliable key for the same
+ * question: with no acting user, `'admin' in current_user.positions` reports
+ * `Unknown variable: current_user`, but `'admin' in current_user.positions &&
+ * record.typo == 1` reports `No such key: typo` instead. A message-matching key
+ * would file that second predicate as a live gate failure on every system
+ * write — the exact noise this branch exists to end.
+ *
+ * A non-CEL dialect, an AST-only expression, or source that does not parse
+ * answers `false`, i.e. the loud branch. That is the safe direction and it is
+ * not a lost case: `celEngine.evaluate` itself refuses an expression with no
+ * `source` (`AST-only evaluation not yet supported; persist \`source\``), so
+ * anything this reader cannot see is a predicate the evaluator could not have
+ * run either, on any write, and it should be said loudly.
+ */
+function readsUserRoot(cond: string | Expression): boolean {
+  const expr = toExpression(cond);
+  if (expr.dialect !== 'cel') return false;
+  const source = typeof expr.source === 'string' ? expr.source : '';
+  if (!source) return false;
+  const cached = userRootCache.get(source);
+  if (cached !== undefined) return cached;
+  const roots = collectCelRootIdentifiers(source);
+  const answer = roots.ok && roots.roots.some((r) => USER_SCOPE_ROOTS.includes(r));
+  userRootCache.set(source, answer);
+  return answer;
+}
+
+/**
  * Per-option authorization / cascade enforcement (objectui#2284).
  *
  * A `select` / `multiselect` / `radio` / `checkboxes` option may gate itself with
@@ -1727,6 +1833,20 @@ function toExpression(cond: string | Expression): Expression {
  * every other field rule here: a broken cascade predicate must never brick a
  * write. Authorization gating therefore depends on the engine binding
  * `current_user` on authenticated writes.
+ *
+ * The admission is deliberate and unchanged. What the fail-open branch does NOT
+ * do any more is describe two different facts with one sentence. A system write
+ * — a declarative seed, an in-process job, anything with no acting user — can
+ * never bind `current_user`, so every gated option it carries took that branch
+ * and logged `failed to evaluate — allowed through`: measured at 27 identical
+ * lines on one ordinary boot of a seeded app, one per seeded row, on the
+ * correct path. An authenticated caller whose predicate genuinely faults (a
+ * typo'd field, a missing root) produced the *identical* line, and that one is
+ * a gate that is not being enforced. A signal that fires this often on the
+ * expected path stops being read, and takes the real case with it. The branch
+ * below states which of the two happened, in the message and in structured
+ * `meta.reason`; both stay at `warn` — the authenticated fault must not get
+ * quieter, and the sink offers no other level.
  */
 function evaluateOptionVisibility(
   fields: Record<string, ConditionalFieldDef> | undefined,
@@ -1759,9 +1879,25 @@ function evaluateOptionVisibility(
         user,
       });
       if (!res.ok) {
-        logger?.warn?.(
-          `option visibleWhen for '${name}=${String(value)}' failed to evaluate — allowed through`,
-        );
+        // Which of the two fail-open cases is this? "No acting user to bind"
+        // needs BOTH facts — the write carries no user AND the predicate asks
+        // for one. Either alone misfiles: a system write whose predicate names
+        // no user root and faults on a typo'd field is a real broken gate, and
+        // an authenticated caller's fault is the case this log exists for.
+        const noActingUser = user === undefined;
+        if (noActingUser && readsUserRoot(opt.visibleWhen)) {
+          logger?.warn?.(
+            `option visibleWhen for '${name}=${String(value)}' not evaluated: no acting user to bind current_user (system write) — allowed through`,
+            { field: name, value: String(value), reason: 'no-acting-user', error: res.error },
+          );
+        } else {
+          logger?.warn?.(
+            `option visibleWhen for '${name}=${String(value)}' failed to evaluate `
+              + `(${noActingUser ? 'system write' : 'authenticated caller'}) — allowed through; `
+              + `the option's gate was NOT enforced on this write. Check the predicate.`,
+            { field: name, value: String(value), reason: 'predicate-fault', error: res.error },
+          );
+        }
         continue; // fail-open
       }
       if (res.value === false) {
@@ -1937,6 +2073,52 @@ export function evaluateValidationRules(
 }
 
 /**
+ * The author-written rule message in the caller's locale (#14253).
+ *
+ * `object.validations[].message` is the sentence a rejected write returns, and
+ * it used to be emitted verbatim. A deployment with a full `zh-CN` bundle
+ * therefore read platform-generated refusals in Chinese and author-written ones
+ * in English, side by side in one `400 VALIDATION_FAILED` envelope: the
+ * built-in field catalog has resolved through this same context since #3957,
+ * and only the authored half had nowhere to look.
+ *
+ * ## What this is NOT
+ *
+ * It is not a second i18n path into objectql. The lookup runs on the SAME
+ * `ValidationMessageContext.translate` hook — the engine's `i18nService`,
+ * bridged by `ObjectQLPlugin` — that `resolveFieldLabel` and
+ * `renderValidationMessage` already use. What was missing was a key shape for
+ * an author-written rule, not a channel to resolve one.
+ *
+ * The authored message is handed over verbatim on a miss and the translation is
+ * handed over verbatim on a hit: no `{{…}}` interpolation, because an authored
+ * message has no parameter contract and never had one. Only the language
+ * changes.
+ *
+ * `rule.name` is the address — including a nested `conditional` branch's own
+ * name, since the branch is the rule whose message the caller sees.
+ */
+function authoredRuleMessage(
+  rule: Pick<BaseRule, 'name' | 'message'>,
+  messages: ValidationMessageContext | undefined,
+): string {
+  if (messages?.translate && messages.objectName && messages.locale
+      && typeof rule.name === 'string' && rule.name.length > 0) {
+    const key = objectValidationMessageKey(messages.objectName, rule.name);
+    try {
+      const translated = messages.translate(key, messages.locale);
+      // II18nService echoes the key back on a miss.
+      if (typeof translated === 'string' && translated.length > 0 && translated !== key) {
+        return translated;
+      }
+    } catch {
+      // A misbehaving i18n service must not turn a 400 into a 500.
+    }
+  }
+  return rule.message;
+}
+
+/**
  * Dispatch a single rule to its checker, returning the violation (or null).
  * Shared by the top-level loop and by `checkConditional`, which recurses into
  * its `then` / `otherwise` branch. Unknown types return null — but the schema
@@ -1949,11 +2131,11 @@ function evaluateRule(rule: BaseRule, ctx: RuleContext): FieldValidationError | 
       return checkStateMachine(rule as StateMachineRule, ctx.mode, ctx.data, ctx.previous, ctx);
     case 'script':
     case 'cross_field':
-      return checkPredicate(rule as PredicateRule, ctx.merged, ctx.previous, ctx.logger);
+      return checkPredicate(rule as PredicateRule, ctx.merged, ctx.previous, ctx.logger, ctx.messages);
     case 'format':
-      return checkFormat(rule as FormatRule, ctx.data, ctx.logger);
+      return checkFormat(rule as FormatRule, ctx.data, ctx.logger, ctx.messages);
     case 'json_schema':
-      return checkJsonSchema(rule as JsonSchemaRule, ctx.data, ctx.logger);
+      return checkJsonSchema(rule as JsonSchemaRule, ctx.data, ctx.logger, ctx.messages);
     case 'conditional':
       return checkConditional(rule as ConditionalRule, ctx);
     default:
@@ -1982,8 +2164,10 @@ function checkStateMachine(
   previous: Record<string, unknown> | undefined,
   ctx?: Pick<RuleContext, 'fields' | 'messages'>,
 ): FieldValidationError | null {
-  // An author-written `rule.message` wins untouched — it is already in the
-  // language its author chose. Only the FALLBACK is ours to localize (#3957).
+  // An author-written `rule.message` wins over the built-in fallback, and is
+  // itself resolved against `objects.<o>._validations.<rule>.message` before it
+  // is emitted (#14253) — the authored text is the last resort, not the first.
+  // The FALLBACK is localized through the built-in catalog (#3957).
   const fallback = (
     code: 'invalid_initial_state' | 'invalid_transition',
     constraint: Record<string, unknown>,
@@ -1994,7 +2178,7 @@ function checkStateMachine(
       return {
         field: rule.field,
         code,
-        message: rule.message,
+        message: authoredRuleMessage(rule, ctx?.messages),
         label: resolveFieldLabel(rule.field, def, ctx?.messages),
       };
     }
@@ -2089,6 +2273,7 @@ function checkPredicate(
   record: Record<string, unknown>,
   previous: Record<string, unknown> | undefined,
   logger: EvaluateRulesOptions['logger'],
+  messages?: ValidationMessageContext,
 ): FieldValidationError | null {
   const expr = toExpression(rule.condition);
   const result = ExpressionEngine.evaluate<boolean>(expr, {
@@ -2111,7 +2296,7 @@ function checkPredicate(
     return {
       field,
       code: 'rule_violation',
-      message: rule.message,
+      message: authoredRuleMessage(rule, messages),
     };
   }
   return null;
@@ -2139,6 +2324,7 @@ function checkFormat(
   rule: FormatRule,
   data: Record<string, unknown>,
   logger: EvaluateRulesOptions['logger'],
+  messages?: ValidationMessageContext,
 ): FieldValidationError | null {
   if (!(rule.field in data)) return null;
   const value = data[rule.field];
@@ -2153,11 +2339,11 @@ function checkFormat(
       logger?.warn?.(`Validation rule '${rule.name}' has an invalid regex — skipped`);
       return null;
     }
-    if (!re.test(str)) return formatViolation(rule);
+    if (!re.test(str)) return formatViolation(rule, messages);
   }
 
   if (rule.format && !matchesNamedFormat(rule.format, str)) {
-    return formatViolation(rule);
+    return formatViolation(rule, messages);
   }
   return null;
 }
@@ -2188,8 +2374,11 @@ function matchesNamedFormat(format: FormatRule['format'], str: string): boolean 
   }
 }
 
-function formatViolation(rule: FormatRule): FieldValidationError {
-  return { field: rule.field, code: 'invalid_format', message: rule.message };
+function formatViolation(
+  rule: FormatRule,
+  messages: ValidationMessageContext | undefined,
+): FieldValidationError {
+  return { field: rule.field, code: 'invalid_format', message: authoredRuleMessage(rule, messages) };
 }
 
 /**
@@ -2203,6 +2392,7 @@ function checkJsonSchema(
   rule: JsonSchemaRule,
   data: Record<string, unknown>,
   logger: EvaluateRulesOptions['logger'],
+  messages?: ValidationMessageContext,
 ): FieldValidationError | null {
   if (!(rule.field in data)) return null;
   let value = data[rule.field];
@@ -2212,7 +2402,7 @@ function checkJsonSchema(
     try {
       value = JSON.parse(value);
     } catch {
-      return { field: rule.field, code: 'invalid_json', message: rule.message };
+      return { field: rule.field, code: 'invalid_json', message: authoredRuleMessage(rule, messages) };
     }
   }
 
@@ -2231,7 +2421,7 @@ function checkJsonSchema(
   }
 
   if (!validate(value)) {
-    return { field: rule.field, code: 'json_schema_violation', message: rule.message };
+    return { field: rule.field, code: 'json_schema_violation', message: authoredRuleMessage(rule, messages) };
   }
   return null;
 }

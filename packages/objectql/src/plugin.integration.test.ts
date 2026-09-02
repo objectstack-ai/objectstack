@@ -134,7 +134,7 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
 
       await kernel.use({
         name: 'mock-metadata',
-        type: 'test',
+        type: 'standard',
         version: '1.0.0',
         init: async (ctx) => {
           ctx.registerService('metadata', mockMetadataService);
@@ -320,7 +320,7 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
       // Register mock metadata service BEFORE ObjectQL
       await kernel.use({
         name: 'mock-metadata',
-        type: 'metadata',
+        type: 'standard',
         version: '1.0.0',
         init: async (ctx) => {
           ctx.registerService('metadata', mockMetadataService);
@@ -368,7 +368,7 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
 
       await kernel.use({
         name: 'mock-metadata',
-        type: 'metadata',
+        type: 'standard',
         version: '1.0.0',
         init: async (ctx) => {
           ctx.registerService('metadata', mockMetadataService);

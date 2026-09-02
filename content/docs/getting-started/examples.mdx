@@ -352,6 +352,88 @@ OS_ARTIFACT_PATH=./dist/objectstack.json os start
 
 ---
 
+## A project is a multi-package artifact
+
+`composeStacks` above **flattens**: N stacks go in, one package identity comes
+out, and the other N−1 are discarded. That is right when several stacks are
+assembled into one published package — and wrong when a product wants internal
+module boundaries, because flattening is exactly the boundary being asked for.
+
+The alternative costs no object rename: **compile per package, ship one
+artifact, keep N package manifests inside it.** Pass `manifest: 'preserve'`
+and every input keeps its identity.
+
+```typescript
+// objectstack.config.ts — the PROJECT
+import { composeStacks } from '@objectstack/spec';
+import coreStack from './src/packages/core/index.js';
+import ordersStack from './src/packages/orders/index.js';
+
+export default composeStacks([ordersStack, coreStack], { manifest: 'preserve' });
+```
+
+Each input is an ordinary `defineStack` package, legal on its own:
+
+```typescript
+// src/packages/orders/index.ts — a MODULE of the same artifact
+import { defineStack } from '@objectstack/spec';
+
+export default defineStack({
+  manifest: {
+    id: 'com.example.multi.orders',
+    name: 'Orders',
+    namespace: 'crm',            // the SAME namespace as the app package
+    version: '1.0.0',
+    type: 'module',
+    dependencies: { 'com.example.multi.core': '^1.0.0' },
+  },
+  objects: [
+    {
+      name: 'crm_order',         // no rename: still `crm_*`
+      label: 'Order',
+      sharingModel: 'private',
+      fields: {
+        name: { type: 'text', label: 'Order Number' },
+        account: { type: 'lookup', label: 'Account', reference: 'crm_account' },
+      },
+    },
+  ],
+});
+```
+
+`os build` compiles that project into **one** `dist/objectstack.json` carrying a
+`packages[]` list — one entry per package, each holding that package's own
+manifest fields and the metadata it owns. `os dev` boots the same shape straight
+from source, and `GET /api/v1/packages` on a running instance lists every
+package in the artifact.
+
+The rules worth knowing before you split a product this way:
+
+- **One `type: 'app'` package.** The consumer installs and opens one thing; the
+  rest are `type: 'module'` (or `'plugin'`) shipped inside it. Each package is
+  still held to the single-app rule on its own.
+- **Share the namespace deliberately.** Two packages in one artifact may own the
+  same namespace — that is what buys the split without renaming, since an
+  object's `name` is also its table, REST path, formula token and saved-view
+  key. Two packages defining the same object *name* are refused.
+- **Declare `dependencies` when one package extends another.** Registration
+  order inside the artifact is resolved topologically from those declarations,
+  never from the order of the array — a module that adds fields to another
+  package's object must register after it, and getting that wrong is silent.
+- **Cross-package lookups are fine; cross-package navigation is not.** A field
+  may reference an object another package owns. An app's own `navigation` may
+  not point outside its package — inject into another package's app with
+  `navigationContributions` instead.
+- **One artifact, one version.** Everything inside ships, installs and upgrades
+  together; you cannot hot-fix one module on its own. A module that needs its
+  own release cadence belongs in its own artifact.
+
+A worked example lives in
+[`examples/app-multi-package`](https://github.com/objectstack-ai/objectstack/tree/main/examples/app-multi-package):
+two packages, one namespace, one artifact.
+
+---
+
 ## Project Structure Conventions
 
 All examples follow the same pattern. The recommended project layout — used by

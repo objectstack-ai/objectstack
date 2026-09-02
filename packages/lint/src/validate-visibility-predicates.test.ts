@@ -11,8 +11,10 @@ import {
   VISIBILITY_BARE_IDENTIFIER,
   VISIBILITY_PREDICATE_SYNTAX,
   VISIBILITY_PREDICATE_OVER_BUDGET,
+  VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
 } from './validate-visibility-predicates.js';
 import { AUTHORING_RULES } from './authoring-rules.js';
+import { CEL_STDLIB_FUNCTIONS } from '@objectstack/formula';
 
 describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
   it('is clean for canonical `visibleWhen` with a runtime binding root', () => {
@@ -895,17 +897,31 @@ describe('visibility-predicate-syntax (#6253)', () => {
         .toEqual([VISIBILITY_BARE_IDENTIFIER]);
     });
 
-    it('does NOT widen to type-checking — the CEL-type blind spot stays a blind spot', () => {
+    it('does NOT widen to type-checking — the CEL-type blind spot stays blind, function existence excepted', () => {
       // `type == 'grid'` PARSES; only `celEngine.compile`'s type checker rejects
       // it (`no such overload: type == string`). Routing this rule through
       // `compile` / `validateExpression` would silently overturn the deliberate,
       // separately-pinned decision to stay conservative there — and would widen
       // an error-level gate from "does not parse" to "does not type-check" on a
-      // surface whose predicates are overwhelmingly `dyn`. The ruling said
-      // syntax; the parse verdict is exactly syntax.
+      // surface whose predicates are overwhelmingly `dyn`.
       expect(validateVisibilityPredicates(formStack("type == 'grid'"))).toEqual([]);
       // The legitimate CEL the overload message cannot be told apart from.
       expect(validateVisibilityPredicates(formStack('type(record.x) == string'))).toEqual([]);
+      // A registered function called with arguments no overload accepts is the
+      // same class and stays blind too — cel-js phrases it identically to an
+      // unknown call, and telling this author their function does not exist
+      // would be a fresh false statement.
+      expect(validateVisibilityPredicates(formStack('upper(1, 2)'))).toEqual([]);
+
+      // ── #13594 narrows this pin by exactly one axis ──────────────────
+      //
+      // The maintainer's 2026-08-31 ruling is a SCOPED supersession of the
+      // parse-only decision quoted above: a call to a name the environment does
+      // not register is now an error, and nothing else about the type checker
+      // is read. Updated here as part of the ruling rather than silently, so
+      // the narrowing is visible where the old absolute claim used to be.
+      expect(validateVisibilityPredicates(formStack('totallyBogusFn(1,2)')).map((f) => f.rule))
+        .toEqual([VISIBILITY_PREDICATE_UNKNOWN_FUNCTION]);
     });
 
     it('a `DEFAULT_LIMITS` overrun is NOT this rule any more — it is `over-budget` (#7217)', () => {
@@ -1026,6 +1042,185 @@ const OVER_AST_NODES = Array.from({ length: 80 }, (_, i) => `record.f${i} == ${i
 const OVER_DEPTH = `${'('.repeat(60)}record.a${')'.repeat(60)} == 1`;
 /** 200-element list literal — `maxListElements`. */
 const OVER_LIST = `record.id in [${Array.from({ length: 200 }, (_, i) => `'u${i}'`).join(',')}]`;
+
+/** Only the unknown-function findings (#13594). */
+function unknownFnFindings(stack: Record<string, unknown>, opts?: { layer: 'runtime' | 'metadata' }) {
+  return validateVisibilityPredicates(stack, opts)
+    .filter((f) => f.rule === VISIBILITY_PREDICATE_UNKNOWN_FUNCTION);
+}
+
+/**
+ * `visibility-predicate-unknown-function` (#13594) — the scoped supersession of
+ * this file's parse-only ruling.
+ *
+ * The card's own three probes are the acceptance pair's backbone, because they
+ * are what was MEASURED clean here while `validateExpression` refused all three:
+ *
+ * ```text
+ * source                       this gate (before)   validateExpression
+ * totallyBogusFn(1,2)          CLEAN                ok=false
+ * record.x.nosuchmethod('a')   CLEAN                ok=false
+ * upper('a')                   CLEAN                ok=true   <- must STAY clean
+ * ```
+ *
+ * The third row is not decoration: it is the control that separates "the gate
+ * now refuses unknown calls" from "the gate now refuses calls".
+ */
+describe('visibility-predicate-unknown-function (#13594)', () => {
+  describe('the acceptance pair', () => {
+    it('the GLOBAL-call form is an ERROR that names the function and quotes the engine', () => {
+      const findings = validateVisibilityPredicates(formStack('totallyBogusFn(1,2)'));
+
+      // The WHOLE reported set — so "one rule, not also the bare-ref rule" is
+      // pinned here rather than assumed.
+      expect(findings.map((f) => f.rule)).toEqual([VISIBILITY_PREDICATE_UNKNOWN_FUNCTION]);
+      // `error`, per the ruling: a WARNING would swap a silent failure for a
+      // notice nobody reads.
+      expect(findings[0].severity).toBe('error');
+      expect(findings[0].path).toBe('views[0].sections[0].fields[0]');
+      expect(findings[0].message).toContain('`totallyBogusFn`');
+      // The engine's own vocabulary, verbatim — the same sentence the runtime
+      // fault produces, so publish time and run time read as one system.
+      expect(findings[0].message)
+        .toContain("found no matching overload for 'totallyBogusFn(int, int)'");
+    });
+
+    it('the RECEIVER/member-call form is the same ERROR — half a repair is not a repair', () => {
+      const findings = unknownFnFindings(formStack("record.x.nosuchmethod('a')"));
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe('error');
+      // The METHOD name, not the receiver type cel-js prefixes it with.
+      expect(findings[0].message).toContain('`nosuchmethod`');
+      expect(findings[0].message).not.toContain('`dyn`');
+    });
+
+    it("a registered function stays clean — `upper('a')` is the control that makes the pair a pair", () => {
+      expect(validateVisibilityPredicates(formStack("upper('a')"))).toEqual([]);
+    });
+  });
+
+  it('the objectui#4421 predicate is refused, and the call is what names it', () => {
+    // The authored predicate this ruling came from. `current_user` is a declared
+    // SCOPE_ROOT, so the bare-identifier rule cannot structurally reach `can` —
+    // it reports the rootless ARGUMENTS instead. Both findings are real and have
+    // different fixes, which is why they are not mutually exclusive.
+    const rules = validateVisibilityPredicates(formStack('current_user.can(object, verb)'))
+      .map((f) => f.rule);
+    expect(rules).toContain(VISIBILITY_PREDICATE_UNKNOWN_FUNCTION);
+    expect(rules).toContain(VISIBILITY_BARE_IDENTIFIER);
+    expect(unknownFnFindings(formStack('current_user.can(object, verb)'))[0].message)
+      .toContain('`can`');
+  });
+
+  it('⛔ offers no "did you mean" suggestion, however close the typo (refinement 2)', () => {
+    // `nearestName('can', <the function set>)` answers `min`. The ruling ships
+    // the engine's own wording and nothing on top of it, so a one-edit typo gets
+    // the same treatment as a wholly invented name.
+    const findings = unknownFnFindings(formStack('isBlnk(record.x)'));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).not.toMatch(/did you mean/i);
+    expect(findings[0].hint).not.toMatch(/did you mean/i);
+    // …and the hazard itself, stated as a case: nothing anywhere in the finding
+    // proposes `isBlank` (or, for `can`, `min`).
+    expect(findings[0].message).not.toContain('`isBlank`');
+    expect(findings[0].hint).not.toContain('`isBlank`');
+    expect(JSON.stringify(unknownFnFindings(formStack('can(record.x)')))).not.toContain('`min`');
+  });
+
+  it('the hint says NAME fault, not dialect — the #7073 / #13821 correction, kept', () => {
+    // The source is already bare CEL and parses, so the dialect prescription
+    // ("write `==` not `===`") is advice that cannot succeed. An author who
+    // follows the last sentence they were handed comes back with the same
+    // unresolvable name.
+    const hint = unknownFnFindings(formStack('totallyBogusFn(1,2)'))[0].hint;
+    expect(hint).toContain('NAME fault');
+    expect(hint).not.toContain('`===`');
+    expect(hint).toContain('CEL_STDLIB_FUNCTIONS');
+  });
+
+  it('every carrier the schema declares reaches the rule', () => {
+    const section = { views: [{ name: 'f', sections: [{ visibleWhen: 'bogusFn(1)', fields: [] }] }] };
+    expect(unknownFnFindings(section).map((f) => f.path)).toEqual(['views[0].sections[0]']);
+
+    const page = { pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibleWhen: 'bogusFn(1)' }] }] }] };
+    expect(unknownFnFindings(page).map((f) => f.path)).toEqual(['pages[0].regions[0].components[0]']);
+
+    // The deprecated alias VALUE is still read (#6318 retired the KEY rule only).
+    const alias = { views: [{ name: 'f', sections: [{ visibleOn: 'bogusFn(1)', fields: [] }] }] };
+    expect(unknownFnFindings(alias)).toHaveLength(1);
+  });
+
+  it('the verdict is layer-agnostic — the environment registers the same names on both', () => {
+    // Unlike the bare-identifier and mis-layered rules, nothing here depends on
+    // which root the surface binds, so both layers must answer identically.
+    expect(unknownFnFindings(formStack('bogusFn(1)'), { layer: 'runtime' })).toHaveLength(1);
+    expect(unknownFnFindings(formStack('bogusFn(1)'), { layer: 'metadata' })).toHaveLength(1);
+  });
+
+  describe('the boundaries — what this rule must never widen into', () => {
+    it.each([
+      ["upper('a')", 'a registered function, called correctly'],
+      ['upper(1, 2)', 'a registered function, WRONG arguments — a type fault, not existence'],
+      ["split('a,b')", 'a registered receiver-only name called bare — a call-FORM fault'],
+      ["record.name.split(',')", 'the same name used correctly'],
+      ['record.created.getFullYear() > 2020', 'a registered name absent from CEL_STDLIB_FUNCTIONS'],
+      ['type(record.x) == string', 'the legitimate CEL the blind-spot pin protects'],
+      ["type == 'grid'", 'the CEL-type blind spot itself'],
+      ["1 + 'a'", 'an operator overload fault — no call in it at all'],
+      ["record.tags.all(t, t != '')", 'a comprehension macro'],
+      ['has(record.status)', 'the sparse-binding guard idiom'],
+      ['size(record.tags) > 0', 'a cel-js built-in'],
+      ["record.type in ['lookup', 'master_detail']", 'a membership test'],
+    ])('%s produces no unknown-function finding (%s)', (predicate) => {
+      expect(unknownFnFindings(formStack(predicate))).toEqual([]);
+    });
+
+    it('an unparseable source is the SYNTAX rule, never this one', () => {
+      // No type verdict exists for a source the front end refused, and the two
+      // ids must not both fire on one predicate.
+      expect(validateVisibilityPredicates(formStack('country === "USA"')).map((f) => f.rule))
+        .toEqual([VISIBILITY_PREDICATE_SYNTAX]);
+    });
+
+    it('an over-budget source is the OVER-BUDGET rule, never this one', () => {
+      expect(validateVisibilityPredicates(formStack(OVER_AST_NODES)).map((f) => f.rule))
+        .toEqual([VISIBILITY_PREDICATE_OVER_BUDGET]);
+    });
+
+    it.each([[undefined], ['   '], ['']])('an absent / blank predicate is not a fault: %s', (predicate) => {
+      expect(validateVisibilityPredicates(formStack(predicate))).toEqual([]);
+    });
+  });
+
+  it('two real defects in one predicate produce two findings, not one silence', () => {
+    // The one-finding property this file used to state flatly is restated per
+    // RULE PAIR: syntax/over-budget and bare-identifier are still mutually
+    // exclusive, but an unknown CALL and a rootless VALUE are different tokens
+    // with different fixes, and an author told about only one comes back with
+    // the other.
+    const rules = validateVisibilityPredicates(formStack('bogusFn(status)')).map((f) => f.rule);
+    expect(rules).toEqual([VISIBILITY_PREDICATE_UNKNOWN_FUNCTION, VISIBILITY_BARE_IDENTIFIER]);
+  });
+
+  it('registered names are not refused — the catalog-as-oracle hazard, at the gate (refinement 1)', () => {
+    // `CEL_STDLIB_FUNCTIONS` advertises 35 names; the environment registers 72.
+    // A gate keyed on the catalog would refuse the 37-name gap. The exhaustive
+    // 72-name control lives in `@objectstack/formula`'s `unknown-function.test.ts`,
+    // where the environment is reachable; this is the wiring half — a sample
+    // drawn from the gap, each name measured to resolve today.
+    const registeredButUnadvertised = [
+      'type', 'map', 'filter', 'split', 'getFullYear', 'json', 'substring', 'indexOf',
+      'lowerAscii', 'exists_one', 'hasValue', 'orValue',
+    ];
+    for (const name of registeredButUnadvertised) {
+      expect(CEL_STDLIB_FUNCTIONS, `${name} would make this row vacuous`).not.toContain(name);
+      const findings = unknownFnFindings(formStack(`record.x.${name}(record.y)`));
+      expect(findings.map((f) => f.message), `${name} was refused as unknown`).toEqual([]);
+    }
+    // Non-vacuous: the same probe SHAPE refuses a name that really is absent.
+    expect(unknownFnFindings(formStack('record.x.notARegisteredName(record.y)'))).toHaveLength(1);
+  });
+});
 
 describe('visibility-predicate-over-budget (#7217)', () => {
   describe('the acceptance pair', () => {
@@ -1221,6 +1416,8 @@ describe('emitted prose names the surface, not a source file (#8042)', () => {
       ['syntax · metadata', publishedForm('country === "USA"')],
       ['over-budget · runtime', formStack(OVER_AST_NODES)],
       ['over-budget · metadata', publishedForm(OVER_AST_NODES)],
+      ['unknown-function · runtime', formStack('totallyBogusFn(1,2)')],
+      ['unknown-function · metadata', publishedForm('totallyBogusFn(1,2)')],
     ];
     for (const [name, stack] of cases) {
       const findings = validateVisibilityPredicates(stack);

@@ -171,6 +171,30 @@ describe('/packages read doors — the response always serialises', () => {
         expect(detail.response?.body?.data?.status).toBe('installed');
     });
 
+    it('stamps the #14375 `writable` verdict AFTER the projection, on both doors', async () => {
+        // ORDER PIN. `toPackageResponse` is an allowlist of the declared record
+        // fields and `writable` is not one of them — it is this door's own
+        // computed answer. Stamped BEFORE the projection it would be deleted,
+        // and deleted silently: a 200 with the field simply absent. Asserting
+        // the KEY's presence rather than its value keeps this about the order,
+        // which is the thing a refactor can quietly get wrong; the verdict's
+        // own semantics are pinned in `packages-writable-verdict.test.ts`.
+        const registry = showcaseShapedRegistry();
+
+        const list = await dispatcherOver(registry).handlePackages('/', 'GET', undefined, {}, reader());
+        expect(list.response?.status).toBe(200);
+        for (const row of list.response?.body?.data?.packages) {
+            expect('writable' in row).toBe(true);
+        }
+
+        const detail = await dispatcherOver(registry)
+            .handlePackages('/com.example.showcase', 'GET', undefined, {}, reader());
+        expect(detail.response?.status).toBe(200);
+        expect('writable' in detail.response?.body?.data).toBe(true);
+        // …and the projection still did its job in the same pass.
+        expect(() => JSON.stringify(detail.response?.body)).not.toThrow();
+    });
+
     it('a genuine MISS is still a 404 with the wording this door owns', async () => {
         // Both directions: the projection must not turn "absent" into "present
         // but empty", and the wording is what identifies which door answered.

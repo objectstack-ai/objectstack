@@ -24,7 +24,7 @@ export interface NodeServerPluginOptions {
  */
 export class NodeServerPlugin implements Plugin {
     name = 'com.objectstack.server.node';
-    type = 'server';
+    type = 'server' as const;
     version = '0.1.0';
 
     private server: NodeHttpServer;

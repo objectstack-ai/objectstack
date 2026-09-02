@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Auth, BetterAuthOptions } from 'better-auth';
+import type { SCIMIdentityState, SCIMTransactionContext } from '@better-auth/scim';
 // better-auth value imports (betterAuth + plugins) are deferred via dynamic
 // import() in getOrCreateAuth() / buildPluginList() so that disabled plugins
 // never get loaded into the process. See Stage 2F (RSS investigation).
@@ -18,6 +19,7 @@ import {
   isHumanUserRow,
   resolveAudience,
   AUDIENCE_CONFIG_ERROR,
+  type AudienceCreationClass,
   type ResolvedAudience,
 } from './audience-posture.js';
 import { shouldStampOwnerVerifiedAtCreation } from './walled-owner-operator-stamp.js';
@@ -100,6 +102,11 @@ import {
   LAST_LOCAL_CREDENTIAL_CODE,
   LAST_LOCAL_CREDENTIAL_MESSAGE,
 } from './last-local-credential.js';
+import {
+  applyUserBan,
+  applyUserUnban,
+  SCIM_DEACTIVATION_BAN_REASON,
+} from './user-ban-write.js';
 import {
   PHONE_SMS_TOPICS,
   builtinPhoneSmsBody,
@@ -1055,10 +1062,11 @@ export class AuthManager {
 
   /**
    * Result of the dev-only admin seed (set by `AuthPlugin.maybeSeedDevAdmin`
-   * when it provisions the well-known admin on an empty DB). The `serve`
-   * command reads this after boot to surface the credentials in the startup
-   * banner. Undefined when no seed ran (production, opt-out, or a DB that
-   * already had a user).
+   * when it provisions the well-known admin, or re-armed on a later boot while
+   * that account still carries the default password). The `serve` command
+   * reads this after boot to surface the credentials in the startup banner.
+   * Undefined when no seed ran (production, opt-out, or [#14157] a database
+   * that already carries a login).
    */
   public devSeedResult?: { email: string; password: string };
 
@@ -1951,7 +1959,14 @@ export class AuthManager {
           // `catch` read that refusal as "users exist" and the declared
           // bypass never fired on a real deployment. `isBootstrapCreation`
           // owns the answerable form — see its doc.
-          if (await this.isBootstrapCreation()) {
+          // [#14157] …and the deployment's own boot command provisioning its
+          // admin is the OTHER way through this door. It is not a
+          // self-registration and must not depend on a self-registration
+          // carve-out: an app that seeds people makes the bootstrap probe
+          // answer "populated" before the seed ever runs. Cheap synchronous
+          // check first, so the ticket path costs no I/O.
+          const signUpEmail = typeof ctx?.body?.email === 'string' ? ctx.body.email : undefined;
+          if (this.isOperatorProvisioning(signUpEmail) || (await this.isBootstrapCreation())) {
             ctx.context.__osDisableSignUpOrig = ep.disableSignUp;
             ep.disableSignUp = false;
           }
@@ -3267,6 +3282,16 @@ export class AuthManager {
               return verifyScimBearerToken(engine as never, secret, input.token);
             },
           },
+          // [#14360] The host half of `active`: stable @better-auth/scim
+          // writes no `banned` itself any more (the 1.6.x coupling left the
+          // package in 1.7.0) — it hands the aggregate lifecycle state to
+          // this callback inside the SCIM transaction and only revokes
+          // sessions. Routed to the platform's own ban write; the break-glass
+          // last-administrator guard judges it at the engine. See
+          // `reconcileScimUserLifecycle` for the contract and the measurement.
+          identity: {
+            reconcileUser: (state, context) => this.reconcileScimUserLifecycle(state, context),
+          },
         });
       });
     }
@@ -3662,6 +3687,20 @@ export class AuthManager {
   private static readonly OWNER_STAMP_STAGE_TTL_MS = 10 * 60 * 1000;
 
   /**
+   * [#14157] Addresses the deployment's OWN boot command is provisioning right
+   * now — see {@link stageOperatorProvisioning} for why this exists and why it
+   * is not the bootstrap probe.
+   */
+  private pendingOperatorProvisioning = new Map<string, { stagedAtMs: number }>();
+
+  /**
+   * Deliberately short. The window this covers is a single in-process
+   * `signUpEmail` call that the caller also clears in a `finally`; the TTL is
+   * only the floor under a caller killed between the two.
+   */
+  private static readonly OPERATOR_PROVISIONING_STAGE_TTL_MS = 60 * 1000;
+
+  /**
    * Page size of the bootstrap population probe ({@link isBootstrapCreation}).
    * Matches the bound the dev-admin seed reads with, so the two ask the same
    * question of the same window.
@@ -3747,10 +3786,17 @@ export class AuthManager {
       // EXISTENCE.
       if (data?.source?.action !== 'create-user') return undefined;
       const audience = this.getAudience();
-      const creationClass = classifyCreationMethod(data?.source, {
-        enterpriseOAuthProviderIds: this.enterpriseOAuthProviderIds(),
-      });
       const email = typeof data?.user?.email === 'string' ? (data.user.email as string) : undefined;
+      // [#14157] A creation the deployment's own boot command staged is the
+      // OPERATOR class — the vendor's `source.method` cannot carry that,
+      // because the seed reaches better-auth through the same `signUpEmail`
+      // API a person's sign-up does. See `stageOperatorProvisioning` for why
+      // this is a declared ticket and not a wider bootstrap probe.
+      const creationClass: AudienceCreationClass = this.isOperatorProvisioning(email)
+        ? 'operator'
+        : classifyCreationMethod(data?.source, {
+            enterpriseOAuthProviderIds: this.enterpriseOAuthProviderIds(),
+          });
       let isBootstrap = false;
       let hasPendingInvitation = false;
       if (creationClass === 'self-serve') {
@@ -4028,6 +4074,95 @@ export class AuthManager {
     for (const [key, value] of this.pendingOwnerVerifiedStamps) {
       if (value.stagedAtMs < cutoff) this.pendingOwnerVerifiedStamps.delete(key);
     }
+  }
+
+  /**
+   * [#14157] Declare that the deployment's own boot command is provisioning
+   * this address right now, so its creation is judged as the **operator**
+   * class it actually is rather than as a self-registration.
+   *
+   * ## Why this exists instead of widening the bootstrap probe
+   *
+   * The dev-admin seed provisions through the real `signUpEmail` pipeline (it
+   * must: that is what produces a hashed credential and runs the sign-up
+   * hooks), and until now its admission rode on
+   * {@link isBootstrapCreation} — "zero HUMAN users". That is a **public
+   * self-registration carve-out**: it is what lets an unknown visitor's first
+   * sign-up through under `invite_only`. Its population predicate therefore
+   * has to keep counting humans, because the population it is protecting
+   * against is humans.
+   *
+   * The seed's precondition is a different question — "does a LOGIN exist?"
+   * (`dev-admin-seed-gate.ts`) — and #14157 is what happens when the two are
+   * conflated: an app that seeds people in `defineStack({ data })` makes the
+   * database non-zero-user before the seed runs, and the dev admin is never
+   * minted. Fixing only the seed's own gate does not help, because the
+   * admission still refuses: **measured**, with 13 seeded people and zero
+   * accounts, `api.signUpEmail` comes back `SELF_REGISTRATION_CLOSED` under
+   * the default `invite_only` posture.
+   *
+   * So the seed says what it *is* instead of inferring admission from a
+   * population it does not own. That is the same claim
+   * `walled-owner-operator-stamp.ts` already makes about this account —
+   * "provisioned by the deployment's own boot command with operator-known
+   * credentials" — and it moves no public door: nothing outside this process
+   * can stage a ticket, the only caller is hard-gated to
+   * `NODE_ENV==='development'`, the ticket names ONE address, the caller
+   * clears it in a `finally`, and anything that outlives that is pruned by
+   * {@link OPERATOR_PROVISIONING_STAGE_TTL_MS}.
+   */
+  stageOperatorProvisioning(email: string): void {
+    this.prunePendingOperatorProvisioning();
+    this.pendingOperatorProvisioning.set(email.trim().toLowerCase(), { stagedAtMs: Date.now() });
+  }
+
+  /** [#14157] Drop the ticket staged by {@link stageOperatorProvisioning}. */
+  clearOperatorProvisioning(email: string): void {
+    this.pendingOperatorProvisioning.delete(email.trim().toLowerCase());
+  }
+
+  /**
+   * [#14157] Is this address being provisioned by the deployment's own boot
+   * command? A PEEK, not a consume: both admission seams (the `disableSignUp`
+   * bypass and `validateAudienceAdmission`) ask about the same single
+   * creation, so a one-shot read here would admit at the first seam and refuse
+   * at the second. The ticket's lifetime is bounded by its owner's `finally`
+   * and by the TTL instead.
+   */
+  isOperatorProvisioning(email: unknown): boolean {
+    if (typeof email !== 'string' || email.trim() === '') return false;
+    this.prunePendingOperatorProvisioning();
+    return this.pendingOperatorProvisioning.has(email.trim().toLowerCase());
+  }
+
+  private prunePendingOperatorProvisioning(): void {
+    const cutoff = Date.now() - AuthManager.OPERATOR_PROVISIONING_STAGE_TTL_MS;
+    for (const [key, value] of this.pendingOperatorProvisioning) {
+      if (value.stagedAtMs < cutoff) this.pendingOperatorProvisioning.delete(key);
+    }
+  }
+
+  /**
+   * [#14157] The bootstrap window, as a PUBLIC read — "can a first-run owner
+   * still be created here?".
+   *
+   * `GET /auth/bootstrap-status` answers the console's first-run routing
+   * question, and it used to answer it by counting `sys_user` rows, which
+   * makes it the one call site that disagrees with the three
+   * {@link isHumanUserRow} consumers: on a database still carrying the legacy
+   * `usr_system` service row it reports an owner while the audience gate and
+   * plugin-security's first-user detection both say the first human is still
+   * ahead — i.e. the console withholds the setup flow that the platform is
+   * standing ready to admit and promote. Reading THIS method keeps the console
+   * from ever offering a first-run creation the admission gate would refuse,
+   * and from ever hiding one it would allow.
+   *
+   * Never throws; an unanswerable probe reads as "no window" — the same
+   * fail-closed direction the admission gate takes, and the same answer the
+   * route's own catch produced.
+   */
+  async hasBootstrapWindow(): Promise<boolean> {
+    return this.isBootstrapCreation();
   }
 
   private stageSelfRegistrationGrant(email: string, setName: string): void {
@@ -4417,11 +4552,19 @@ export class AuthManager {
    * localized `sys_email_template` rows can be selected at all.
    *
    * Maintainer ruling 2026-08-13: the recipient locale is the **deployment
-   * default**, read from `II18nService.getDefaultLocale()` and resolved at the
-   * plugin layer; `Accept-Language` is rejected (auth mail is frequently sent
-   * outside the triggering request — invitations, admin-initiated resets — and
-   * a per-device header is the wrong authority for it). AuthPlugin pushes the
-   * value on `kernel:ready`, exactly as it pushes {@link setDefaultSmsLocale}.
+   * default**, resolved at the plugin layer; `Accept-Language` is rejected
+   * (auth mail is frequently sent outside the triggering request —
+   * invitations, admin-initiated resets — and a per-device header is the wrong
+   * authority for it). AuthPlugin pushes the value on `kernel:ready`, exactly
+   * as it pushes {@link setDefaultSmsLocale}.
+   *
+   * #14319 — that "deployment default" is the workspace's declared language,
+   * `localization.locale` (ADR-0053), whenever the operator has explicitly set
+   * one; `II18nService.getDefaultLocale()` (the app artifact's build-time
+   * `i18n.defaultLocale`) stands underneath it. Email read only the build-time
+   * half before, so a workspace that switched to Chinese in Setup received
+   * Chinese auth SMS and English auth mail. The precedence lives in
+   * `AuthPlugin`; this setter stays a plain sink.
    *
    * Unset ⇒ nothing is named and `EmailService`'s ladder resolves its
    * documented `en-US` default, i.e. today's behaviour.
@@ -4719,6 +4862,140 @@ export class AuthManager {
   async getApi(): Promise<Auth<any>['api']> {
     const auth = await this.getOrCreateAuth();
     return auth.api;
+  }
+
+  /**
+   * [#14360] `identity.reconcileUser` — the host half of SCIM `active`.
+   *
+   * `@better-auth/scim` 1.7.0 removed its own `banned` write (1.6.30 mapped
+   * `active` onto the admin plugin's ban and refused a deactivation without
+   * that plugin; on the installed 1.7.2 the substring `ban` occurs zero times
+   * in the package) and replaced it with this optional callback: the vendor
+   * computes the user's AGGREGATE lifecycle state — `active` is true while
+   * any participating SCIM source says so — inside the request's
+   * transaction, calls the host, and then revokes the user's sessions when
+   * the state is inactive (`dist/index.mjs`, the identity facade's
+   * `reconcileUser`). Without a host implementation an IdP's `active: false`
+   * revoked sessions and wrote nothing: `sys_user.banned` stayed false and a
+   * local-password user signed straight back in, while ADR-0071, the
+   * generated docs and the #13816 refusal all asserted the ban.
+   *
+   * This method restores declared = enforced by routing the state to the
+   * platform's OWN ban write (`admin-ban-endpoints.ts`):
+   *
+   *  - `active: false` on a row that is not banned ⇒ `applyUserBan` with
+   *    `SCIM_DEACTIVATION_BAN_REASON` and no expiry. The vendor's
+   *    `session.create` hook (`BANNED_USER`) then refuses sign-in — the same
+   *    enforcement the admin ban has, because it is the same write. On a row
+   *    that is ALREADY banned with an expiry (an administrator's timed ban),
+   *    the deactivation makes that ban permanent — `banExpires` is cleared,
+   *    `banned` and the administrator's reason are left untouched — because
+   *    the vendor's session hook auto-lifts an expired ban and would admit a
+   *    principal the IdP still holds deactivated, and this callback is not
+   *    re-invoked until the IdP mutates that user again.
+   *  - `active: true` on a row banned WITH that reason ⇒ `applyUserUnban`.
+   *    A ban carrying any other reason was placed by an administrator and is
+   *    not the IdP's to lift: an attribute sync (every SCIM PUT carries
+   *    `active: true`) must not silently re-admit a user banned for cause.
+   *    Known collision, documented rather than reserved: an administrator
+   *    who types the reason `Deactivated via SCIM` on the admin mount
+   *    produces a ban this rule reads as the IdP's, so an `active: true`
+   *    lifts it. Reserving the string on the admin mount would change that
+   *    surface, which is not this hook's to do.
+   *  - Anything else is a no-op. The callback is contractually idempotent
+   *    ("Implementations must be idempotent") and the vendor invokes it on
+   *    EVERY user mutation, so a PATCH that changes only `displayName`
+   *    touches no ban column.
+   *
+   * A consequence worth stating: on 1.7.2 a SCIM `DELETE /Users/{id}` no
+   * longer deletes the better-auth user (the vendor tombstones the source);
+   * it leaves the user with no active source, so this callback disables the
+   * account. Re-provisioning through the tombstone re-links the same user,
+   * the state turns active, and the SCIM ban is lifted by the second bullet.
+   *
+   * The break-glass last-administrator guard (ADR-0024 D5.2, #5892) is an
+   * ENGINE `beforeUpdate` hook on `sys_user`, so it judges this write exactly
+   * as it judges the admin mount's: deactivating the last administrator
+   * throws its 403 `PERMISSION_DENIED`, the adapter rethrows it as an
+   * `APIError`, the vendor re-throws `APIError`s unchanged out of this
+   * callback (`runSCIMApplicationCallback`, measured on 1.7.2 — any other
+   * throw becomes a SCIM 500 "SCIM identity reconciliation failed" carrying
+   * the original as `cause`), and the IdP receives a SCIM error with
+   * `status: "403"` and the guard's own explanation. The ban is ONE write,
+   * so it never half-lands: the account stays enabled and nothing is
+   * skipped silently.
+   *
+   * ⚠️ What does NOT roll back today: the vendor runs this callback inside
+   * `runWithTransaction`, which on this adapter is a real engine transaction
+   * only while `scimRequestScope` is set — and that scope, stamped inside
+   * `verifyBearerToken`, is not observed at write time on 1.7.2 (measured:
+   * zero `engine.transaction` calls across a SCIM POST + PATCH; #14522). So
+   * the vendor's own `scimUser.active = false` write, made before this
+   * callback, survives a refusal and the SCIM resource reads inactive while
+   * the account is enabled. #14522 owns that seam; the #14360 suite pins the
+   * residual so its fix flips the pin deliberately.
+   *
+   * Deliberately NOT applied here: the last-LOCAL-credential guard the admin
+   * mount re-runs (`isLastLocalCredentialHolder`). That guard protects the
+   * password escape hatch from an administrator's click; on this path the
+   * identity provider is the authority for the user it deprovisions, and
+   * keeping a departed user's password alive because it happened to be the
+   * last one is the wrong direction for a deprovisioning contract. 1.6.x
+   * never applied it on the SCIM path either — the vendor wrote the column
+   * straight through the adapter.
+   *
+   * Every read and write goes through `context.database` — the adapter the
+   * vendor bound to its transaction — never through an `internalAdapter`
+   * resolved outside it, so the moment #14522 makes that transaction real,
+   * the ban commits or rolls back with the SCIM mutation it belongs to.
+   */
+  private async reconcileScimUserLifecycle(
+    state: SCIMIdentityState,
+    context: SCIMTransactionContext,
+  ): Promise<void> {
+    const db = context.database;
+    const user = await db.findOne<{ banned?: unknown; banReason?: unknown; banExpires?: unknown }>({
+      model: 'user',
+      where: [{ field: 'id', value: state.userId }],
+    });
+    if (!user) {
+      // The vendor holds a `scimSubject` for this user inside the same
+      // transaction, so a missing row is an invariant break, not a state to
+      // reconcile. Thrown, not logged: the vendor turns it into a SCIM 500
+      // and rolls the mutation back — a deactivation that cannot find its
+      // account must not report success.
+      throw new Error(
+        `[auth] SCIM identity reconciliation: better-auth user '${state.userId}' has no sys_user row`,
+      );
+    }
+    const writer = {
+      updateUser: (id: string, data: Record<string, unknown>) =>
+        db.update({ model: 'user', where: [{ field: 'id', value: id }], update: data }),
+    };
+    const banned = user.banned === true;
+    if (!state.active) {
+      if (banned) {
+        // Already disabled — by an earlier SCIM pass or by an administrator.
+        // An administrator's TIMED ban is made permanent: the vendor's session
+        // hook auto-lifts an expired ban, and nothing re-invokes this callback
+        // until the IdP mutates the user again — so left alone, the expiry
+        // would re-admit a principal the IdP still holds deactivated. The
+        // reason stays the administrator's; only the expiry goes.
+        if (user.banExpires !== null && user.banExpires !== undefined) {
+          await writer.updateUser(state.userId, { banExpires: null, updatedAt: new Date() });
+        }
+        return;
+      }
+      await applyUserBan(writer, state.userId, {
+        banReason: SCIM_DEACTIVATION_BAN_REASON,
+        banExpires: null,
+      });
+      return;
+    }
+    if (!banned) return;
+    // An administrator's ban is not the IdP's to lift.
+    if (user.banReason !== SCIM_DEACTIVATION_BAN_REASON) return;
+    await applyUserUnban(writer, state.userId);
   }
 
   /**

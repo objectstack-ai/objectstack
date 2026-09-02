@@ -71,6 +71,21 @@ const CASES: Case[] = [
     field: { type: 'user', multiple: true, defaultValue: 'usr_1' },
     accepted: false,
   },
+  // #13802 — the one AUTHORED door the strictness ledger recorded as a caveat
+  // while these value contracts were `.strip`: an author's undeclared key on a
+  // structured default was admitted silently. Refused by name now.
+  {
+    label: 'address + literal carrying an undeclared key (the #13388 seed spelling)',
+    field: { type: 'address', defaultValue: { street: '1 Main St', postal_code: '98101' } },
+    accepted: false,
+    contains: ['`postal_code`', '`postalCode`'],
+  },
+  {
+    label: 'location + literal carrying a device extra the contract does not declare',
+    field: { type: 'location', defaultValue: { lat: 37.77, lng: -122.42, heading: 90 } },
+    accepted: false,
+    contains: ['`heading`'],
+  },
 
   // ── Literal branch: valid literals stay accepted ──────────────────────────
   { label: 'VALID number', field: { type: 'number', defaultValue: 7 }, accepted: true },
@@ -84,6 +99,16 @@ const CASES: Case[] = [
   {
     label: 'VALID multi-value user array',
     field: { type: 'user', multiple: true, defaultValue: ['usr_1'] },
+    accepted: true,
+  },
+  {
+    label: 'VALID address literal (declared keys only)',
+    field: { type: 'address', defaultValue: { street: '1 Main St', city: 'Seattle', postalCode: '98101', countryCode: 'US' } },
+    accepted: true,
+  },
+  {
+    label: 'VALID location literal (declared keys only)',
+    field: { type: 'location', defaultValue: { lat: 37.77, lng: -122.42, accuracy: 5 } },
     accepted: true,
   },
   {

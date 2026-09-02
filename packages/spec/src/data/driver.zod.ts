@@ -504,12 +504,13 @@ export const DriverInterfaceSchema = lazySchema(() => z.object({
    * @param id - The unique identifier of the record.
    * @param data - The fields to update.
    * @param options - Driver options.
-   * @returns The updated record.
+   * @returns The updated record, or `null` if no record with that id exists
+   *          (a driver configured to throw on missing records throws instead).
    *          MUST return `id` as string. MUST NOT return implementation details like `_id`.
    */
   update: z.function()
     .input(z.tuple([z.string(), z.string().or(z.number()), z.record(z.string(), z.unknown()), DriverOptionsSchema.optional()]))
-    .output(z.promise(z.record(z.string(), z.unknown())))
+    .output(z.promise(z.record(z.string(), z.unknown()).nullable()))
     .describe('Update record'),
 
   /**

@@ -97,6 +97,7 @@
     "FLOW_REGION_SLOTS (const)",
     "FLOW_REGION_SLOTS_BY_TYPE (const)",
     "FLOW_STRUCTURAL_NODE_TYPES (const)",
+    "FLOW_TRIGGER_KINDS (const)",
     "Flow (type)",
     "FlowEdge (type)",
     "FlowEdgeParsed (type)",
@@ -131,6 +132,7 @@
     "FlowRunSummaryParsed (type)",
     "FlowRunSummarySchema (const)",
     "FlowSchema (const)",
+    "FlowTriggerKind (type)",
     "FlowVariableSchema (const)",
     "FlowVersionHistory (type)",
     "FlowVersionHistoryParsed (type)",
@@ -205,6 +207,9 @@
     "TryCatchConfig (type)",
     "TryCatchConfigParsed (type)",
     "TryCatchConfigSchema (const)",
+    "TryCatchErrorValue (type)",
+    "TryCatchErrorValueParsed (type)",
+    "TryCatchErrorValueSchema (const)",
     "UpdateRecordConfig (type)",
     "UpdateRecordConfigParsed (type)",
     "UpdateRecordConfigSchema (const)",
@@ -240,6 +245,7 @@
     "normalizeFlowFunctionEntry (function)",
     "parseFlowNodeRegions (function)",
     "resolveFlowNodeExpressions (function)",
+    "resolveFlowTriggerKind (function)",
     "validateControlFlow (function)"
   ]
 }

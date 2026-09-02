@@ -28,10 +28,15 @@ metadata:
 dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行的 Claude/dogfood 会
 话会抢走浏览器标签页、留下挡住导航的未保存草稿、弄脏工作树。开工前先隔离:
 
+⚠️ 环境事实的锚点是 `docs/qa/platform-checklist/RUNNER.md` —— 本节只写它没有的那
+几条,⛔ 不留第二份拷贝。
+
 - [ ] **自有端口**:挑一个空闲的非默认端口(不要 3000/3001/3210)。先查:
       `lsof -nP -iTCP:<port> -sTCP:LISTEN`。在 `.claude/launch.json` 加一条指向**本**
       工作目录的具名配置,例如
       `pnpm -C <abs>/examples/app-showcase exec objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db`。
+- [ ] **同时导出 `OS_PORT` —— 只给 `-p` 不够。** showcase 的自 ping 连接器读的是*环
+      境*(`SHOWCASE_SELF_URL`→`OS_PORT`→`PORT`→3000),于是 `fetch failed` 冒充出口被封。
 - [ ] **自有数据**:`--seed-admin` 在空 DB 上给出 `admin@objectos.ai / admin123`。持
       久化 `-d file:/tmp/<run>/data.db` 重启后仍在(适合多步配置的运行);`--fresh`
       给全新首跑(退出即清)。
@@ -49,8 +54,9 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
 - [ ] Console UI 在 `/_console/`;应用在 `/_console/apps/<appId>`(如
       `com.objectstack.setup`、`com.objectstack.studio`)。API 根 `/api/v1`,设置
       `/api/settings`,合并后的应用/导航 `/api/v1/meta/app?id=<appName>`。
-- [ ] ⚠️ **`?id=` 键的是应用 `name`,不是包 id。** 真实 name 是 `showcase_app` /
-      `setup` / `studio` / `account` —— 不是上一行那种 `com.objectstack.setup` /
+- [ ] ⚠️ **`?id=` 键的是应用 `name`,不是包 id。** stock boot 的 name 是
+      `showcase_app` / `setup` / `account`(`studio` 不随 stock boot 装载,`?id=studio`
+      理应为空 —— 详见 RUNNER)—— 不是上一行那种 `com.objectstack.setup` /
       `com.example.showcase`(那是包 id,只在 `/_console/apps/` 的路径段上成立)。传
       包 id 得到的是 `{"items":[]}`,读起来和「应用元数据没了」一模一样 —— 最高价值
       的假 P0 形状。**先不带 query 取一次 `/api/v1/meta/app`,读它真正返回的 name,
@@ -63,24 +69,8 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
       watcher 只重编译示例应用自己的 `objectstack.config.ts` / `src`,不管工作区的包。
 - [ ] 所以:先做完**全部**源码编辑 → `pnpm --filter <pkg...> build` →
       `preview_stop` + `preview_start`。不要每修一处就编辑→构建→重启一遍。
-- [ ] ⚠️ **消融验证(predict-then-mutate)以最危险的方式继承这一条,而且它不是 dogfood
-      专属 —— mutate 腿与 restore 腿各自都要重建,并在报告里写明重建过。** 判据是解析
-      路径:任何主体经依赖的 `exports` 解析(→ 该包的 `dist/`,且没有 vitest alias
-      把 specifier 拉回源码)的测试都中招,普通单元套件一样(这批 pair 的台账是
-      `scripts/check-test-source-alias.mjs` 的 `KNOWN_UNALIASED_TEST_IMPORTS`)。忘记重
-      建*修复*是假红:费一圈,但会被发现。忘记重建**消融**跑的是突变前的构建,套件保持
-      **绿**,而这份绿会被记成「测试已被证明有区分度」—— 给一条可能根本红不了的断言
-      发了
-      证书,之后任何 CI 都暴露不了它(CI 构建正确,在那边永远绿);消融本就为证明**新门
-      禁能失败**时更毒 —— 那份绿读作「门禁没触发」,指向门禁坏了而不是夹具坏了,会诱
-      人
-      去弱化一条本来正常的门禁(实测:plugin-auth → core;plugin-email →
-      platform-objects 则是消融后 375 试假绿、重建后 4 红)。每一腿(mutate **与**
-      restore)都是:改动 → `pnpm --filter <pkg> build` → **证明它到达了 `dist/`** → 才
-      读运行结果:`node scripts/ablation-dist-preflight.mjs <pkg> '<marker>'` 只在被消费
-      的 `dist/` 真带着该状态时才退 0(消融删除守卫、以及每个 restore 腿,用
-      `--absent`)。⛔ restore 腿最常被跳过 —— 留在 `dist/` 里的 marker 会让突变代码对该
-      树之后的每次运行保持生效,后面的测量量的是错的树。
+- [ ] ⚠️ **消融的 mutate 腿与 restore 腿都要重建 —— 但那条规则不是 dogfood 专属**:
+      判据、preflight 与两次实测住在 `.claude/agents/os-dev.md`;⛔ 这里不留第二份拷贝。
 - [ ] `dist/` 已 gitignore —— 安全;永不提交构建产物。
 - [ ] **`/_console` UI 是 *vendored objectui 构建*,与框架 `dist` 是两回事。** 它由
       `.objectui-sha` 钉住、按预构建 bundle 提供。已合并的 objectui 修复 —— *甚至

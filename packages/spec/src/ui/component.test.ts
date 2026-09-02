@@ -278,13 +278,15 @@ describe('PageAccordionProps variant (#6776)', () => {
 // same file's `ComponentRegistry.register('accordion', …)` publishes the key to
 // the Studio block designer at `:965` (the `items` input, documented as
 // `[{ label, icon?, collapsed?, children }]`). Measured at the pin this repo
-// builds against — `.objectui-sha` = `d8ec8d6d4`. Re-derived at that pin
-// 2026-09-01: `containers.tsx` DID change across the move off `9602dc820`, so
-// both anchors above were re-derived rather than carried over — the icon block
-// moved `851-857` → `918-924` and the registration input `898` → `965`, both
-// shifted by insertions above them, with the cited text itself unchanged. Every
-// anchor was re-READ at the new pin, never inferred, because identity preserves
-// a wrong anchor as faithfully as a right one (#10274).
+// builds against — `.objectui-sha` = `67dadd602`. Re-derived at that pin
+// 2026-09-02: `containers.tsx` DID change across the move off `d8ec8d6d4`
+// (164 lines), but that change lands from `:995` on, below both anchors (its
+// only edit above them rewrites one import line in place), so neither moved —
+// the icon block is still `918-924` and the registration input still `965`,
+// each re-READ there with the cited text unchanged. The earlier hop off
+// `9602dc820` is the one that moved them, `851-857` → `918-924` and `898` →
+// `965`. Every anchor was re-READ at the new pin, never inferred, because
+// identity preserves a wrong anchor as faithfully as a right one (#10274).
 //
 // #9397 spent a full dispatch cycle re-deriving that read point from scratch
 // after the sweep proposed retiring the key. This block plus the `.describe()`
@@ -367,12 +369,14 @@ describe('PageTabsProps items[].value / items[].count (#5775)', () => {
 // same file's `ComponentRegistry.register('tabs', …)` publishes the key to the
 // Studio block designer at `:788` (the `items` input, documented as
 // `[{ label, value?, icon?, count?, visibleWhen?, children }]`). Measured at
-// the pin this repo builds against — `.objectui-sha` = `d8ec8d6d4`. Re-derived
-// at that pin 2026-09-01: `containers.tsx` DID change across the move off
-// `9602dc820`, so both anchors above were re-derived rather than carried over —
-// the icon block moved `662-668` → `729-735` and the registration input
-// `721` → `788`, both shifted by insertions above them, with the cited text
-// itself unchanged. Both were re-READ at the new pin, never inferred (#10274).
+// the pin this repo builds against — `.objectui-sha` = `67dadd602`. Re-derived
+// at that pin 2026-09-02: `containers.tsx` DID change across the move off
+// `d8ec8d6d4` (164 lines), but that change lands from `:995` on, below both
+// anchors, so neither moved — the icon block is still `729-735` and the
+// registration input still `788`, each re-READ there with the cited text
+// unchanged. The earlier hop off `9602dc820` is the one that moved them,
+// `662-668` → `729-735` and `721` → `788`. Both were re-READ at the new pin,
+// never inferred (#10274).
 //
 // #9397 spent a full dispatch cycle re-deriving the accordion's read point
 // after the sweep proposed retiring it. This block plus the `.describe()` it
@@ -1123,6 +1127,91 @@ describe('Content Elements', () => {
 });
 
 // ---------------------------------------------------------------------------
+// element:number `filter` — the ViewFilterRule ARRAY orthography (ui#6206-B)
+// ---------------------------------------------------------------------------
+describe("element:number `filter` — one filter orthography platform-wide (ui#6206 Option B)", () => {
+  const number = ComponentPropsMap['element:number'];
+  const relatedList = ComponentPropsMap['record:related_list'];
+  const RULES = [{ field: 'status', operator: 'equals', value: 'won' }];
+  const RECORD_FORM = { status: 'won' };
+  /** The issues a parse raised AT `key` (top-level), whatever else it raised. */
+  const issuesAt = (r: { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; code: string }> } }, key: string) =>
+    r.success ? [] : r.error!.issues.filter((i) => i.path[0] === key);
+
+  it('accepts a ViewFilterRule[] filter — the acceptance criterion', () => {
+    // Before the 2026-08-25 ruling this exact value was REFUSED here (the entry
+    // said `FilterConditionSchema`, the MongoDB-style record) while every
+    // sibling `filter` input in the map accepted it.
+    const r = number.safeParse({ object: 'order', aggregate: 'count', filter: RULES });
+    expect(r.success).toBe(true);
+    expect(r.data!.filter).toEqual(RULES);
+  });
+
+  it('the array carries the REAL ViewFilterRuleSchema, not a lookalike: operators normalize, value shapes are checked', () => {
+    // `eq` is a legacy spelling `normalizeFilterOperator` lowers to `equals` — a
+    // plain `z.array(z.object(...))` would have echoed it back unchanged.
+    const legacy = number.safeParse({
+      object: 'order', aggregate: 'count',
+      filter: [{ field: 'status', operator: 'eq', value: 'won' }],
+    });
+    expect(legacy.success).toBe(true);
+    expect(legacy.data!.filter![0].operator).toBe('equals');
+    // `in` takes an array; a scalar is refused at `filter.0.value` by the rule's
+    // own superRefine — the value-shape check rides in with the schema.
+    const scalarIn = number.safeParse({
+      object: 'order', aggregate: 'count',
+      filter: [{ field: 'status', operator: 'in', value: 'won' }],
+    });
+    expect(scalarIn.success).toBe(false);
+    expect(scalarIn.error!.issues.map((i) => i.path.join('.'))).toContain('filter.0.value');
+  });
+
+  it('the MongoDB-style record form — what this entry alone used to accept — is REFUSED at the `filter` path', () => {
+    // Reverse verification of the convergence, asserted on the issue envelope
+    // rather than on a bare `success === false`: the refusal is located at
+    // `filter` and names the expected kind. Migration:
+    // `element-number-filter-rule-array`.
+    const r = number.safeParse({ object: 'order', aggregate: 'count', filter: RECORD_FORM });
+    expect(r.success).toBe(false);
+    const atFilter = issuesAt(r, 'filter');
+    expect(atFilter).toHaveLength(1);
+    expect(atFilter[0].code).toBe('invalid_type');
+    expect(atFilter[0]).toMatchObject({ expected: 'array' });
+    // An operator-object record (`{ amount: { $gt: 100 } }`) is the same form
+    // and gets the same verdict — no arm accepts any spelling of the record.
+    const opRecord = number.safeParse({ object: 'order', aggregate: 'sum', field: 'amount', filter: { amount: { $gt: 100 } } });
+    expect(opRecord.success).toBe(false);
+    expect(issuesAt(opRecord, 'filter').map((i) => i.code)).toEqual(['invalid_type']);
+  });
+
+  it('shares the array orthography with the sibling `filter` inputs — one value, two doors, the same verdicts', () => {
+    // The ruling is "one filter orthography platform-wide", so the pin is
+    // cross-entry: the same rule array raises no issue at `filter` on either
+    // door, and the same record form is refused at `filter` with the same
+    // issue code on both. Each door is asked only about ITS `filter` — the
+    // other keys the related list requires are not this pin's subject.
+    expect(issuesAt(number.safeParse({ object: 'order', aggregate: 'count', filter: RULES }), 'filter')).toEqual([]);
+    expect(issuesAt(relatedList.safeParse({ filter: RULES }), 'filter')).toEqual([]);
+    const numberRefusal = issuesAt(number.safeParse({ object: 'order', aggregate: 'count', filter: RECORD_FORM }), 'filter');
+    const relatedRefusal = issuesAt(relatedList.safeParse({ filter: RECORD_FORM }), 'filter');
+    expect(numberRefusal.map((i) => i.code)).toEqual(['invalid_type']);
+    expect(relatedRefusal.map((i) => i.code)).toEqual(numberRefusal.map((i) => i.code));
+  });
+
+  it('positive control: a well-formed multi-rule array with a real `in` rule parses through the element', () => {
+    const r = number.safeParse({
+      object: 'order', aggregate: 'sum', field: 'amount',
+      filter: [
+        { field: 'status', operator: 'in', value: ['won', 'closed'] },
+        { field: 'amount', operator: 'greater_than', value: 100 },
+      ],
+    });
+    expect(r.success).toBe(true);
+    expect(r.data!.filter).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Element Props Schemas
 // ---------------------------------------------------------------------------
 describe('ElementTextPropsSchema', () => {
@@ -1171,11 +1260,14 @@ describe('ElementNumberPropsSchema', () => {
       object: 'order',
       field: 'amount',
       aggregate: 'sum',
-      filter: { status: 'paid' },
+      // The ViewFilterRule array form (ui#6206-B) — this fixture authored the
+      // record form `{ status: 'paid' }` while the entry alone accepted it.
+      filter: [{ field: 'status', operator: 'equals', value: 'paid' }],
       format: 'currency',
       prefix: '$',
       suffix: ' USD',
     });
+    expect(props.filter).toEqual([{ field: 'status', operator: 'equals', value: 'paid' }]);
     expect(props.format).toBe('currency');
     expect(props.prefix).toBe('$');
     expect(props.suffix).toBe(' USD');
@@ -2441,11 +2533,12 @@ describe('#7751 — object-* block props schemas', () => {
 // #9881 and #9972 recorded the accordion and tab items; these two close the set.
 //
 // The button record re-measured at the pin this repo builds against —
-// `.objectui-sha` = `d8ec8d6d4`, re-derived there 2026-09-01: `button.tsx` and
-// `resolve-icon.ts` are both byte-identical to the ones at `9602dc820`, and
-// every anchor below was still re-READ at the new pin rather than carried on
-// that identity (#10274). The move off `9602dc820` changed neither the read
-// point nor a single line number here.
+// `.objectui-sha` = `67dadd602`, re-derived there 2026-09-02: `button.tsx` and
+// `resolve-icon.ts` are both byte-identical to the ones at `d8ec8d6d4` (and at
+// `9602dc820` before it), and every anchor below was still re-READ at the new
+// pin rather than carried on that identity (#10274). Neither the move off
+// `d8ec8d6d4` nor the one off `9602dc820` changed the read point or a single
+// line number here.
 // The one move that changed the button READ POINT and not merely its line
 // numbers was the one onto `9602dc820`: objectui#5993 deleted `button.tsx`'s
 // file-local `toPascalCase` + `iconNameMap` + `icons` index and routed the

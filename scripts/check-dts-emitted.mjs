@@ -225,6 +225,14 @@ function run(dir) {
 // The two directions this guard can be wrong in are both silent: over-matching
 // makes every build fail, under-matching waves the DTS-less dist through -- the
 // exact artifact #11907 recorded. So both get asserted rather than assumed.
+
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const failures = [];
   const eq = (label, actual, expected) => {
@@ -293,6 +301,7 @@ function selfTest() {
     return 1;
   }
   console.log('check-dts-emitted self-test: all assertions passed.');
+  selfTestReachedVerdict = true;
   return 0;
 }
 
@@ -303,5 +312,17 @@ function selfTest() {
 // failure this guard exists to catch, one level up.
 if (isEntrypoint(import.meta.url)) {
   const isSelfTest = process.argv.includes('--self-test');
-  process.exit(isSelfTest ? selfTest() : run(process.cwd()));
+  if (isSelfTest) {
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-dts-emitted self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    process.exit(selfTestCode);
+  }
+  process.exit(run(process.cwd()));
 }

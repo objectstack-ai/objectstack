@@ -832,6 +832,12 @@ function judgeFixture(src) {
   return { found, results: found.map(judge) };
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-where-matcher-conformance self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   const expect = (label, cond) => { if (!cond) failures.push(label); };
@@ -987,6 +993,8 @@ function selfTest() {
     '    inverted survivor filter are each declined for their own recorded reason; the\n' +
     '    ledger reconciles in both directions.',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 // ---------------------------------------------------------------------------
@@ -1000,7 +1008,14 @@ if (!invokedDirectly) {
   // the corpus scan as an import side effect would make this file impossible to
   // reuse without also failing someone else's process.
 } else if (process.argv.includes('--self-test')) {
-  selfTest();
+  if (selfTest() !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ check-where-matcher-conformance self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
 } else {
   if (!existsSync(resolve(repoRoot, BASELINE_PATH))) {
     console.error(`check-where-matcher-conformance: missing ${BASELINE_PATH}`);

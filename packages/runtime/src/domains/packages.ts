@@ -275,6 +275,36 @@ function requireWritablePackage(
  * 500 and `fields[]` was still dropped. Route new handlers through the shared
  * helper rather than re-deriving the status here.
  */
+/**
+ * [#14375 / ADR-0130 Consequences row 6] Decorate one registry row with the
+ * server's OWN writability verdict.
+ *
+ * Studio's package switcher used to derive "writable" client-side from
+ * `manifest.scope` alone (`scope !== 'project'`). That is not the rule this
+ * server enforces: {@link isWritablePackage} (ADR-0070 D2) reads
+ * `engine.manifests` FIRST — a package booted from an artifact through
+ * `registerApp` is read-only whatever its scope says, and a scope-less module
+ * carried by a multi-package artifact (ADR-0130 D4/D5) lands there too. The
+ * client cannot see `engine.manifests`, so it cannot tell that module
+ * (read-only) from a scope-less Studio-created base (writable); only the
+ * server can, so the server says it — with the SAME predicate the authoring
+ * and lifecycle gates use, which is #8146's ruling ("one answer to 'is this
+ * package writable?'") applied to the read door.
+ *
+ * A spread COPY: the registry's own record is never mutated and the verdict is
+ * never stored — it is a property of the running engine, recomputed per read.
+ * The row is keyed the way the registry keys it (`manifest.id`, falling back
+ * to a bare `id`), so the verdict is asked about the same package the row is.
+ */
+function withWritableVerdict<T extends { manifest?: { id?: unknown }; id?: unknown }>(
+    engine: unknown,
+    row: T,
+): T & { writable: boolean } {
+    const manifestId = row?.manifest?.id;
+    const id = typeof manifestId === 'string' ? manifestId : (typeof row?.id === 'string' ? row.id : undefined);
+    return { ...row, writable: isWritablePackage(engine, id) };
+}
+
 export async function handlePackagesRequest(deps: DomainHandlerDeps, path: string, method: string, body: any, query: any, _context: HttpProtocolContext): Promise<HttpDispatcherResult> {
     const m = method.toUpperCase();
 
@@ -324,13 +354,23 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             if (query?.type) {
                 packages = packages.filter((p: any) => p.manifest?.type === query.type);
             }
-            return {
-                handled: true,
-                response: deps.success({
-                    packages: packages.map(toPackageResponse),
-                    total: packages.length,
-                }),
-            };
+            // [#14375] Every row carries the server's own writability verdict
+            // (see `withWritableVerdict`) — copies, so the registry records the
+            // filters above selected stay untouched.
+            //
+            // [#14309] ORDER IS LOAD-BEARING: project FIRST, stamp the verdict
+            // onto the projection SECOND. `toPackageResponse` is an allowlist of
+            // the DECLARED record fields, and `writable` is not one of them — it
+            // is this door's own computed answer. Stamped first, the projection
+            // would delete it, and the deletion would be silent: a 200 with the
+            // field simply absent. `withWritableVerdict` reads only
+            // `manifest.id`, which the projection keeps, so it is indifferent to
+            // running second. Pinned in `packages-serializable-response.test.ts`
+            // so a future reorder is a red test rather than a missing field.
+            const rows = packages.map(
+                (p: any) => withWritableVerdict(qlService, toPackageResponse(p) as any),
+            );
+            return { handled: true, response: deps.success({ packages: rows, total: rows.length }) };
         }
 
         // POST /packages → install package.
@@ -905,7 +945,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const id = decodeURIComponent(parts[0]);
             const pkg = registry.getPackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
-            return { handled: true, response: deps.success(toPackageResponse(pkg)) };
+            // [#14375] Same verdict, same predicate as the list door — and
+            // [#14309] the same project-then-stamp order, for the same reason.
+            return {
+                handled: true,
+                response: deps.success(withWritableVerdict(qlService, toPackageResponse(pkg) as any)),
+            };
         }
 
         // PATCH /packages/:id → edit the manifest (name / description /

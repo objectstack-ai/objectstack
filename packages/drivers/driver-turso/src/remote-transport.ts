@@ -71,6 +71,73 @@ const BUILTIN_COLUMNS = new Set(['id', 'created_at', 'updated_at']);
 const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
 /**
+ * [#14287] The ADR-0112 envelope every unsafe-identifier refusal carries —
+ * decided ONCE, here, so the `object`, `field`, `outKey`, DDL, index-sync and
+ * backfill positions cannot answer a caller three different ways.
+ *
+ * ## What it replaces
+ *
+ * {@link RemoteTransport.assertSafeIdentifier} threw a bare `Error`: `code`
+ * and `status` were `undefined`, so `mapDataError` fell through to its
+ * terminal branch and served a sanitised **500** — the caller was told the
+ * server had faulted when in fact their own identifier was refused, and an
+ * SDK reading that status retries a request that can never succeed. It is the
+ * same un-enveloped-500 class {@link invalidFilterError} closed for the filter
+ * refusals one door over, at the last positions on this transport still
+ * carrying it.
+ *
+ * ## Why `INVALID_REQUEST` / 400 and not a new code
+ *
+ * Triage ruling, 2026-09-02: `INVALID_REQUEST` is ALREADY a member of the
+ * declared ADR-0112 vocabulary (`error-code-ledger.zod.ts`, registered by
+ * seven packages) for a request that is well-formed but not acceptable, which
+ * is exactly this condition — the identifier arrived intact and is refused on
+ * its SHAPE. An "unsafe identifier" code would be a permanent spelling the
+ * vocabulary does not need, so none is registered; only this package's
+ * provenance row is.
+ *
+ * ⛔ Not `INVALID_QUERY` / `INVALID_FILTER`: those name a query this transport
+ * could not COMPILE, and the DDL and index-sync positions reach this refusal
+ * with no query in sight.
+ *
+ * ## What it deliberately does NOT change
+ *
+ * The accept set — {@link SAFE_IDENTIFIER} is untouched, and so is every
+ * message. Exactly the identifiers refused before this change are refused
+ * after it, with byte-identical prose; `code` and `status` are the whole diff.
+ * The `groupBy` alias GATING question (whether that position should be escaped
+ * rather than refused, as `driver-sql` escapes it) is a separate card and
+ * stays open — this envelopes what is refused today, it does not move which
+ * inputs those are.
+ *
+ * `*_CODE` / `*_STATUS` is the shape `driver-memory`'s `UNIQUE_VIOLATION_CODE`
+ * established for a driver-side wire code, and one of the three the error-code
+ * provenance gate recognises — a registered code stamped through an unnamed
+ * constant is invisible to it.
+ */
+export const UNSAFE_IDENTIFIER_CODE = 'INVALID_REQUEST';
+/** @see {@link UNSAFE_IDENTIFIER_CODE} */
+export const UNSAFE_IDENTIFIER_STATUS = 400;
+
+/**
+ * [#14287] Build the refusal above. The ONE constructor both producers use —
+ * {@link RemoteTransport.assertSafeIdentifier} and the free
+ * `assertSafeIdentifier` in `remote-canonical-backfill.ts` — so the two cannot
+ * drift onto two spellings of one condition, which is the argument the card
+ * made for deciding the code at the helper rather than per position.
+ *
+ * The message stays the producer's own, verbatim: each names itself and quotes
+ * the offending text, and #6144's rule (quote the OFFENDING TEXT, not just the
+ * sentence) is what makes the refusal actionable at all.
+ */
+export function unsafeIdentifierError(message: string): Error {
+  const err = new Error(message) as Error & { code?: string; status?: number };
+  err.code = UNSAFE_IDENTIFIER_CODE;
+  err.status = UNSAFE_IDENTIFIER_STATUS;
+  return err;
+}
+
+/**
  * Every filter operator `buildWhereSQL` compiles — the vocabulary this
  * transport CLAIMS to speak, and (since #1004) the exact set it accepts.
  *
@@ -1302,12 +1369,28 @@ export class RemoteTransport {
     });
 
     for (const { field, outKey } of groupBy) {
+      // The FIELD is a column REFERENCE — grammar — so it keeps the gate.
       this.assertSafeIdentifier(field);
-      // The alias reaches the statement as a quoted identifier, so it is held
-      // to the same gate as every other one — an alias is caller-supplied text
-      // and `assertSafeIdentifier` is what keeps it out of the SQL grammar.
-      this.assertSafeIdentifier(outKey);
-      selectParts.push(outKey === field ? `"${field}"` : `"${field}" AS "${outKey}"`);
+      // [#14235] The output NAME is ESCAPED, not gated — see
+      // {@link RemoteTransport.aliasIdentifierSql}. This is the second of the
+      // two output-name positions in this method; #14113 moved the aggregation
+      // alias one loop down, and this one was filed rather than folded in
+      // because it carried a landed pin asserting the refusal.
+      //
+      // `assertSafeIdentifier(outKey)` used to sit here, with the note "an
+      // alias is caller-supplied text and `assertSafeIdentifier` is what keeps
+      // it out of the SQL grammar". The first half is true and the second is
+      // what moved: quoting-with-escaping is what keeps a NAME out of the
+      // grammar, and it does so without refusing names the contract permits.
+      // `GroupByNodeSchema.alias` is an output-column key — the in-memory face
+      // projects `g.alias ?? g.field` verbatim, `driver-sql` routes the same
+      // position through `SqlDriver.aliasIdentifierSql` post-#13714, and this
+      // face refused anything that was not a bare `[A-Za-z_][A-Za-z0-9_]*`
+      // with an opaque 500 out of `mapDataError`. The reference-versus-name
+      // line #13714 and #14113 drew puts this position on the NAME side.
+      selectParts.push(
+        outKey === field ? `"${field}"` : `"${field}" AS ${this.aliasIdentifierSql(outKey)}`,
+      );
     }
 
     // [#6321] Was `query?.aggregations || query?.aggregate` — see the twin note
@@ -1841,10 +1924,18 @@ export class RemoteTransport {
   /**
    * Validate that a string is a safe SQL identifier.
    * Prevents injection in DDL where parameterized queries are unsupported.
+   *
+   * [#14287] The ONE producer for every position that still gates an
+   * identifier — `object`, `field` and the `groupBy` `outKey` in
+   * {@link RemoteTransport.aggregate}, the table and column names in
+   * `syncSchema` / `syncSchemasBatch` / `buildCreateTableSQL`, and the index
+   * name and columns in `syncUniqueIndexes` — so the envelope is decided once
+   * for all of them. See {@link unsafeIdentifierError} for which envelope and
+   * why. The predicate and the message are unchanged.
    */
   private assertSafeIdentifier(name: string): void {
     if (!SAFE_IDENTIFIER.test(name)) {
-      throw new Error(`RemoteTransport: unsafe identifier rejected: "${name}"`);
+      throw unsafeIdentifierError(`RemoteTransport: unsafe identifier rejected: "${name}"`);
     }
   }
 
@@ -1865,6 +1956,13 @@ export class RemoteTransport {
    * names the contract permits while its own emission could carry them safely.
    * A dot is inert inside `AS "…"`, and `<cube>.<measure>` is the name EVERY
    * analytics measure arrives under.
+   *
+   * [#14235] Both output-name positions of `aggregate` route through here now,
+   * not just the aggregation alias: the groupBy select site emits
+   * `"<field>" AS <this>(<outKey>)`. `GroupByNodeSchema.alias` is the same
+   * class of key as `AggregationNodeSchema.alias`, and `driver-sql` has routed
+   * both through its own `aliasIdentifierSql` since #13714 — so the two faces
+   * agree on the whole method rather than on one loop of it.
    *
    * ## ⛔ Escaping is not "dropping the check"
    *

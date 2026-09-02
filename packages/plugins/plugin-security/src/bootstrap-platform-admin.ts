@@ -15,7 +15,12 @@
  *         `sys_user_permission_set` row pointing at `admin_full_access` with
  *         `organization_id = NULL`. Unchanged — Choice 4A keeps first-user
  *         promotion and its grant row for this posture (4B is the sequenced
- *         follow-up, not dropped).
+ *         follow-up, not dropped). [#14348] "First user" means the oldest
+ *         human that can AUTHENTICATE (holds a `sys_account`), not the oldest
+ *         `sys_user` row: an app declaring people in `defineStack({ data })`
+ *         stores credential-less directory rows that are always older than any
+ *         account, and granting one of them platform admin writes a grant
+ *         nobody can ever exercise. See the selector at the `single` branch.
  *       - walled (`group`/`isolated`): **NO grant row is written, ever.**
  *         Standing is CONFIG-DERIVED at the one derivation site
  *         (`resolve-authz-context.ts` §6b-config): each account whose stored
@@ -159,7 +164,7 @@ function genId(prefix: string): string {
 }
 
 /**
- * Which `sys_user` writes can change the answer of the promotion in
+ * Which writes can change the answer of the promotion in
  * {@link bootstrapPlatformAdmin} — the trigger predicate for the
  * bootstrap-replay middleware in `security-plugin.ts`. Exported so the
  * middleware and its pins consume the SAME predicate instead of re-deriving
@@ -178,10 +183,27 @@ function genId(prefix: string): string {
  *    are `kernel:ready` work; re-running them per sign-up would only re-log
  *    and re-query. (The REQUESTED posture is read, same fail-stricter
  *    direction as the bootstrap itself.)
- *  - `single` + `create`/`insert`: a new account may be the first human user
- *    — the original first-user-promotion trigger, unchanged (Choice 4A).
+ *  - `single` + `sys_user` `create`/`insert`: a new row may be the first human
+ *    user — the original first-user-promotion trigger, unchanged (Choice 4A).
+ *  - `single` + `sys_account` `create`/`insert`: [#14348] a new LOGIN may make
+ *    an already-stored human row promotable. This arm is not optional garnish
+ *    — it is what keeps the trigger set equal to the selection's INPUTS. Since
+ *    #14348 the target is the oldest human that can AUTHENTICATE, so the
+ *    answer reads `sys_account`, and a predicate that watched only `sys_user`
+ *    would miss every write that flips a candidate from "stored" to
+ *    "promotable".
+ *
+ *    That is not a hypothetical ordering: on a real composed boot the sign-up
+ *    pipeline writes `sys_user.insert exit` and only THEN
+ *    `sys_account.insert enter` (measured on the harness stack, #14348). So the
+ *    `sys_user` arm fires while the registrant still has no account — reading
+ *    them non-authenticable, correctly — and without this arm the account that
+ *    arrives one write later would trigger nothing at all. On an app that seeds
+ *    a people directory (where boot finds humans but no logins) that is the
+ *    difference between "the first real sign-up is promoted" and "no platform
+ *    admin is ever promoted".
  *  - `single` + any update: could never change the promotion answer —
- *    `single` promotes the OLDEST human user and never reads
+ *    `single` promotes the oldest authenticable human and never reads
  *    `email`/`email_verified`. The pre-#11974 update arm fired here for the
  *    walled match's sake only; with that gone it would be a pure re-run tax
  *    on every verification write.
@@ -191,7 +213,7 @@ export function shouldReplayBootstrapFor(opCtx: {
   operation?: string;
   data?: unknown;
 }): boolean {
-  if (opCtx?.object !== 'sys_user') return false;
+  if (opCtx?.object !== 'sys_user' && opCtx?.object !== 'sys_account') return false;
   const op = opCtx?.operation;
   if (op !== 'create' && op !== 'insert') return false;
   return !postureEnforcesWall(resolveTenancyPosture());
@@ -349,7 +371,8 @@ export async function bootstrapPlatformAdmin(
   //    verbatim: 「1509 选择 env 指定 owner 邮箱」; re-anchored by #11663 L4):
   //
   //   - `single`: first human user is promoted — ruled reasonable, unchanged
-  //     (Choice 4A keeps first-user promotion and its grant row).
+  //     (Choice 4A keeps first-user promotion and its grant row). [#14348]
+  //     "first human user" = the oldest one that can authenticate.
   //   - walled (`group` / `isolated`): NO grant row is written. Standing is
   //     config-derived at the one derivation site (`resolve-authz-context.ts`
   //     §6b-config): a stored `sys_user` row holding a declared
@@ -492,12 +515,53 @@ export async function bootstrapPlatformAdmin(
   // dev-admin seed, so this guard is the incumbent on this very population.
   const isHumanUser = (u: any) =>
     !!u && typeof u === 'object' && u.id !== SystemUserId.SYSTEM && u.role !== 'system';
-  const oldestOf = (users: any[]) =>
-    [...users].sort((a, b) => {
-      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return ta - tb;
-    })[0];
+  // The age order "first user" has always meant, unchanged by #14348 — only
+  // WHICH rows are candidates changed, never how they are ranked. Kept as a
+  // named comparator (it was inlined in an `oldestOf` helper) so the selector
+  // below states the age rule once instead of carrying a second copy of it.
+  const byCreatedAtAsc = (a: any, b: any) => {
+    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return ta - tb;
+  };
+
+  // [#14348] "First user" has always MEANT the real admin login — the comment
+  // above the `isHumanUser` guard says so, and the guard exists because the
+  // non-loginable `usr_system` row stole the promotion. Being human was only
+  // ever a PROXY for that: on an install where every row came from sign-up,
+  // oldest-human and oldest-login are the same row, so the proxy held.
+  //
+  // It stops holding the moment an app declares people in
+  // `defineStack({ data })`. Those are credential-less directory rows, and the
+  // declarative seed is awaited inside `AppPlugin.start()` — before any
+  // `kernel:ready` hook — so they are ALWAYS older than any account. Measured
+  // on a driven composed boot (#14348): the grant landed on
+  // `person0@demo.example`, a row with no `sys_account`, while a later real
+  // sign-up WITH a credential account was never promoted (the
+  // `already_have_admin` short-circuit had already fired). Same row-versus-
+  // login correction #14157 made in plugin-auth's dev-admin seed, one package
+  // over, on this very population.
+  //
+  // "Can authenticate" is ANY `sys_account` row, not `provider_id ===
+  // 'credential'`: a federated/SSO account is a login too, and narrowing to
+  // passwords would refuse to promote the admin of an SSO-only deployment —
+  // re-creating this defect for a different population.
+  //
+  // Asked per candidate, oldest-first, stopping at the first hit, rather than
+  // bulk-reading accounts and intersecting. A bulk read would need a bound,
+  // and a user holding several accounts (credential + OAuth) can push another
+  // user's only account past it — which reads as "cannot authenticate" and
+  // silently SKIPS a legitimate target. The typical fresh boot answers on the
+  // first query.
+  const oldestAuthenticable = async (ql2: any, users: any[]): Promise<any | undefined> => {
+    const byAge = [...users].sort(byCreatedAtAsc);
+    for (const user of byAge) {
+      if (user?.id === undefined || user?.id === null) continue;
+      const accounts = await tryFind(ql2, 'sys_account', { user_id: user.id }, 1);
+      if (accounts.length > 0) return user;
+    }
+    return undefined;
+  };
 
   // [#11974 / #11663 L4] `single` is the ONLY posture that still selects a
   // target and writes the grant row (Choice 4A). The walled selection — query
@@ -510,7 +574,33 @@ export async function bootstrapPlatformAdmin(
     logger?.info?.('[security] no human users yet — first sign-up will be promoted to platform admin');
     return { seeded: seededCount, adminPromoted: false, reason: 'no_users', ...resyncCounts };
   }
-  const target = oldestOf(humanUsers);
+  const target = await oldestAuthenticable(ql, humanUsers);
+  if (!target) {
+    // [#14348] Humans exist, but not one of them can sign in. Measured on a
+    // real composed boot before this branch existed: an app seeding people
+    // through `defineStack({ data })` had `admin_full_access` granted to
+    // `person0@demo.example` — `has_sys_account: false`, with the whole
+    // `sys_account` table EMPTY — and `claimSeedOwnership` handed it the
+    // seeded business records too. The grant was WRITTEN and unusable.
+    //
+    // The honest answer for that population is to promote NOBODY and wait: the
+    // replay predicate above now fires on the `sys_account` insert, so the
+    // first real login is promoted the moment it exists. `info`, not `error` —
+    // this is a legitimate pre-login state (the app declared a directory and
+    // nobody has signed up yet), the same register the `no_users` line above
+    // uses, and a published sink shape gains nothing from a louder level.
+    logger?.info?.(
+      `[security] ${humanUsers.length} human user row(s) exist but none can authenticate (no sys_account) ` +
+        '— platform admin NOT promoted. The first human that signs in will be promoted instead; a ' +
+        'directory row nobody can sign in as would hold a grant it could never exercise.',
+    );
+    return {
+      seeded: seededCount,
+      adminPromoted: false,
+      reason: 'no_authenticable_user',
+      ...resyncCounts,
+    };
+  }
 
   const inserted = await tryInsert(ql, 'sys_user_permission_set', {
     id: genId('ups'),

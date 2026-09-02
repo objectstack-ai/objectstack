@@ -249,30 +249,52 @@ describe('#5184 — the issue repro: a healed store is not shadowed by the degra
     });
 });
 
+
+/**
+ * [#14205] Counts loader WALKS, not calls to one method name.
+ *
+ * `list()` reads a loader through `loadManyKeyed()` when the loader has one — a
+ * loader-held item's identity is the key its store holds it under, not
+ * `body.name` — and falls back to `loadMany()` when it does not. The invariant
+ * these cases pin is "the manager walked this loader once", which is the SUM of
+ * the two. Spying only `loadMany` counted 0 walks after the read moved, which
+ * reads exactly like a cache hit: green for the wrong reason in one direction,
+ * red for the wrong reason in the other.
+ */
+function loaderWalks(loader: MemoryLoader): { readonly count: number } {
+    const many = vi.spyOn(loader, 'loadMany');
+    const keyed = vi.spyOn(loader, 'loadManyKeyed');
+    return {
+        get count() {
+            return many.mock.calls.length + keyed.mock.calls.length;
+        },
+    };
+}
+
 describe('#5184 — the healthy TTL is untouched', () => {
     it('a complete read is still served from cache for the full 30s', async () => {
         const memory = new MemoryLoader();
         await memory.save('permission', 'stored', { name: 'stored' });
         const manager = new MetadataManager({ formats: ['json'], loaders: [memory] });
-        const loadMany = vi.spyOn(memory, 'loadMany');
+        const walks = loaderWalks(memory);
 
         expect(names(await manager.list('permission'))).toEqual(['stored']);
-        expect(loadMany).toHaveBeenCalledTimes(1);
+        expect(walks.count).toBe(1);
 
         // Past the degraded TTL, nowhere near the healthy one.
         vi.advanceTimersByTime(ttls().degraded * 3);
         await manager.list('permission');
-        expect(loadMany).toHaveBeenCalledTimes(1);
+        expect(walks.count).toBe(1);
 
         // Just short of 30s — still cached.
         vi.advanceTimersByTime(ttls().healthy - ttls().degraded * 3 - 1);
         await manager.list('permission');
-        expect(loadMany).toHaveBeenCalledTimes(1);
+        expect(walks.count).toBe(1);
 
         // Past 30s — re-read, exactly as before.
         vi.advanceTimersByTime(2);
         await manager.list('permission');
-        expect(loadMany).toHaveBeenCalledTimes(2);
+        expect(walks.count).toBe(2);
     });
 });
 
@@ -286,7 +308,7 @@ describe('#5184 — 现象二: the comment now describes the code', () => {
     it('an empty complete read is cached too — there is no non-empty condition', async () => {
         const memory = new MemoryLoader();
         const manager = new MetadataManager({ formats: ['json'], loaders: [memory] });
-        const loadMany = vi.spyOn(memory, 'loadMany');
+        const walks = loaderWalks(memory);
 
         expect(await manager.list('permission')).toEqual([]);
         const entry = peekEntry(manager, 'permission');
@@ -296,6 +318,6 @@ describe('#5184 — 现象二: the comment now describes the code', () => {
 
         // And it is served from cache, not re-read.
         await manager.list('permission');
-        expect(loadMany).toHaveBeenCalledTimes(1);
+        expect(walks.count).toBe(1);
     });
 });

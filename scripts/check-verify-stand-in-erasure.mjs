@@ -388,6 +388,12 @@ function report() {
 
 // ---------------------------------------------------------------------------
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-verify-stand-in-erasure self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   const expect = (label, ok) => {
@@ -554,7 +560,18 @@ function selfTest() {
       'declared in packages/verify and published as a type from its index; and proves discovery, both ' +
       'ledgers and the census reach the real tree — all ten known call sites of it.',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
-if (process.argv.includes('--self-test')) selfTest();
+if (process.argv.includes('--self-test')) {
+  if (selfTest() !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ check-verify-stand-in-erasure self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
+}
 else report();

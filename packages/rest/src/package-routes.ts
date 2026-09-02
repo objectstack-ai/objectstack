@@ -228,6 +228,14 @@ const REGISTRY_PACKAGE_RESPONSE_FIELDS = [
   'upgradeHistory',
   'registeredNamespaces',
   '_diagnostics',
+  // [#14375] The ADR-0070 D2 writability verdict. Like `_diagnostics` this is
+  // NOT a record field: `getMetaItems({ type: 'package' })` stamps it on every
+  // registry item, and this door's contract is to CARRY it (the durable row is
+  // spread over the registry item, so a durable copy without the key must leave
+  // the verdict standing) — pinned in `package-list-writable-carry.test.ts`.
+  // Listed here because an allowlist that omitted it would drop the field
+  // SILENTLY, answering 200 with the verdict simply gone.
+  'writable',
 ] as const;
 
 /**

@@ -341,9 +341,18 @@ export interface ShareLinkServiceOptions {
   /** Companion verifier — must accept hashes produced by `hashPassword`. */
   verifyPassword?: (plain: string, hash: string) => Promise<boolean>;
   /**
-   * Bypass the per-object opt-in check (useful when the schema scan is
-   * happening after `start`). When omitted, calls against an object
-   * without `publicSharing.enabled=true` are rejected with 422.
+   * Bypass the per-object opt-in check at MINT (useful when the schema scan
+   * is happening after `start`). When omitted, `createLink` against an object
+   * without `publicSharing.enabled=true` is rejected with 422.
+   *
+   * [#14033] Mint ONLY. `publicSharing.enabled` is a standing policy held
+   * again at every redemption, and `resolveToken` reads the object's CURRENT
+   * block regardless of how a row was minted: a link minted under this bypass
+   * while the block is off does not resolve until the block is enabled. So
+   * during a late schema scan the option helps MINTING, not serving: an object
+   * the engine cannot return a schema for is `enabled: false` by `getPolicy`'s
+   * definition (the same definition `createLink` uses), and redemption refuses
+   * until the schema resolves and the block is enabled.
    */
   permissive?: boolean;
   /**
@@ -406,6 +415,12 @@ export class ShareLinkService implements IShareLinkService {
     context: ExecutionContext,
   ) => Promise<boolean>;
   private readonly logger?: ShareLinkServiceOptions['logger'];
+  /**
+   * [#12981] Latched by the FIRST refused usage stamp on this instance and
+   * never reset; `reportUsageStampRefusal` reads it so the durability report
+   * is made once, not once per refused write (the rule's own words).
+   */
+  private usageStampRefusalReported = false;
 
   constructor(opts: ShareLinkServiceOptions) {
     this.engine = opts.engine;
@@ -633,7 +648,66 @@ export class ShareLinkService implements IShareLinkService {
     // computed from it below, unchanged.
     const schema = this.engine.getSchema?.(row.object_name);
     const policy = getPolicy(schema);
-    const eligibility = policy.enabled ? policy.eligibility : undefined;
+
+    // [#14033] `publicSharing.enabled` is a STANDING policy — held here, at
+    // every redemption, not only at mint.
+    //
+    // ## Why the parent switch is held at redemption
+    //
+    // `createLink` reads `policy.enabled` (422 `SHARING_NOT_ENABLED`) and
+    // nothing here did. So the predicate INSIDE the block (`eligibility`,
+    // below) was re-evaluated on every redemption while turning the WHOLE
+    // block off stopped no link already handed out: an author who wanted
+    // anonymous serving to stop had to narrow the predicate rather than switch
+    // the feature off — the opposite of what the surface reads like. Measured
+    // before it was changed: a token minted while the block was on kept
+    // serving the record in full after the block was turned off. The
+    // maintainer ruled (2026-09-01, on #14033) that the switch is a standing
+    // policy: re-read on every redemption, a block that is off stops every
+    // existing token on it — retroactively, on deploy, as #13608 was — and
+    // re-enabling the block restores them. Not a revocation: no row moves.
+    //
+    // ## What the gate does NOT ask
+    //
+    // How the link was minted. A token minted under a system context or the
+    // `permissive` bypass (system-context ledger row 37) carries no mark of
+    // it, and the ruling's point 3 says that is right: redemption is an
+    // anonymous act and is not exempted by how the row got there. So this
+    // reads the CURRENT block and nothing else. An absent block is the same
+    // switch at its default (`enabled` defaults to false) and refuses too.
+    //
+    // ## Placement, and what "off" switches off
+    //
+    // AFTER the cheap in-memory gates (a revoked or expired token still pays
+    // no schema read) and BEFORE the record probe and the usage stamp: a
+    // switched-off link reads no record and bumps no counter. Ruling point 4:
+    // with the switch off nothing inside the block is evaluated — the
+    // predicate is not run, the redaction set is never computed — and with it
+    // on, the sibling keys keep exactly the redemption-time behaviour below.
+    //
+    // ## The refusal is the same `null`, and the reason goes to the log
+    //
+    // Same family as `stillEligible`: for a caller who may hold nothing but a
+    // token, a distinguishable "sharing is off for this object" is an
+    // existence oracle, so the answer is the one revoked / expired / unknown /
+    // ineligible already give (over HTTP the generic 404). The readable
+    // reason is written to the server-side log through the GUARANTEED `warn`
+    // member — the caller was answered, so this is not a degradation and not
+    // an `error`; it is the sink shape the eligibility refusal already uses.
+    if (!policy.enabled) {
+      this.logger?.warn?.(
+        '[share-link] redemption refused — publicSharing.enabled is not true on the object '
+          + '(the block is switched off; its links resolve again once it is re-enabled)',
+        {
+          link: row.id,
+          object: row.object_name,
+          record: row.record_id,
+          reason: 'SHARING_NOT_ENABLED',
+        },
+      );
+      return null;
+    }
+    const eligibility = policy.eligibility;
 
     // [#5190] Does the shared RECORD still exist? A share link is an
     // identity-less CAPABILITY token: whoever holds it has the access, no
@@ -698,7 +772,10 @@ export class ShareLinkService implements IShareLinkService {
       new Set<string>([...(policy.redactFields ?? []), ...((row.redact_fields as string[]) ?? [])]),
     );
 
-    // Stamp usage. Errors here MUST NOT block the read — log-and-continue.
+    // Stamp usage. A refusal here MUST NOT block the read — by this line the
+    // token, the record and the policy have all answered and the holder is
+    // owed the record — but it is a DURABILITY degradation, not telemetry to
+    // drop on the floor: see `reportUsageStampRefusal` (#12981).
     try {
       await this.engine.update(
         'sys_share_link',
@@ -709,11 +786,78 @@ export class ShareLinkService implements IShareLinkService {
         },
         { context: SYSTEM_CTX },
       );
-    } catch {
-      // best-effort — usage telemetry is a nice-to-have
+    } catch (err) {
+      this.reportUsageStampRefusal(row, err);
     }
 
     return { link: row, redactFields };
+  }
+
+  /**
+   * [#12981] Storage refused the `use_count` / `last_used_at` stamp that
+   * `resolveToken` issues on a successful resolution. Report it as a
+   * durability degradation — ONCE per service instance.
+   *
+   * ## Why this is a durability site and not "usage telemetry"
+   *
+   * The catch this reporter replaced said "best-effort — usage telemetry is a
+   * nice-to-have". The persistence CLAIM, though, is not made by
+   * `resolveToken`'s response (which carries neither counter; its two public
+   * HTTP callers project a nine-field whitelist that excludes both). It is
+   * made by the declarations: `sys_share_link` declares `use_count` as
+   * "Incremented by resolveToken on every successful resolution" and
+   * `last_used_at` as "Stamped by resolveToken; used by the dashboard to
+   * highlight active links", both `readonly: true` — which is exactly why this
+   * write goes out under `SYSTEM_CTX` (`isSystem` exempts statically readonly
+   * fields). And the shipped `active_links` grid lists both columns. So after
+   * a swallowed refusal: HTTP 200 to the holder, and an admin grid asserting a
+   * count the system's own declaration defines — now wrong, with no signal
+   * anywhere. AGENTS.md → "Degradation log levels", in its own words:
+   * persisted state and runtime state disagree while nothing looks broken.
+   * ⇒ `error`, not `warn`. Neither legal alternative applies: the failure is
+   * handed to no caller, and a write was genuinely issued.
+   *
+   * ## Why ONCE, per instance, never reset
+   *
+   * `resolveToken` runs on EVERY public share-link request. A line per refused
+   * stamp is the mirror-image failure the rule names — "say it once, at the
+   * first degradation, not once per failed write" — a flood nobody reads,
+   * which is what made the founding incident's `warn` unreadable. The latch is
+   * per service instance (the plugin builds one) and deliberately does not
+   * reset on a later successful stamp: a latch that reset would print on every
+   * other request under flapping storage, i.e. the per-request flood again.
+   * Later refusals are silent BY DESIGN, and the one line says so.
+   *
+   * ## The sink, and why `error` is reachable here (#13398 class ruling)
+   *
+   * `ShareLinkServiceOptions['logger']` is the `{ info?, warn, error? }` shape
+   * — `error` optional, `warn` required and guaranteed (#9754 / #10556) — the
+   * ruling's own option-C terminal shape, and already published. What the
+   * ruling forbids is raising a site to `error` when that means GROWING
+   * `error?` onto a published sink that lacks it (its option B); this sink
+   * declares it, so nothing is widened. Spelled the `outbox-sweep.ts` way: a
+   * conditional `error?.(…)` call against a host sink without `error` emits
+   * nothing, so the `warn` fallback is an explicit branch.
+   */
+  private reportUsageStampRefusal(row: ShareLink, err: unknown): void {
+    if (this.usageStampRefusalReported) return;
+    this.usageStampRefusalReported = true;
+    const cause = (err as { message?: unknown } | null | undefined)?.message ?? err;
+    const message =
+      '[share-link] usage stamp REFUSED — `use_count` / `last_used_at` on `sys_share_link` are NOT being '
+      + 'persisted. Links keep resolving normally (the holder is still served the record), so nothing looks '
+      + 'broken, but the `active_links` grid and every "how often was this link used" audit now under-count. '
+      + 'Fix: resolve the storage refusal named as the cause (the `sys_share_link` table, the driver, or the '
+      + 'system-context write path); stamps refused meanwhile are NOT replayed. Reported ONCE per service '
+      + `instance — later refusals are silent. Cause: ${String(cause)}`;
+    const meta = {
+      link: row.id,
+      object: row.object_name,
+      record: row.record_id,
+      reason: (err as { code?: unknown } | null | undefined)?.code ?? 'UNKNOWN',
+    };
+    if (this.logger?.error) this.logger.error(message, meta);
+    else this.logger?.warn?.(message, meta);
   }
 
   /**

@@ -4,7 +4,9 @@
  * #4001 batch D — `data/analytics.zod.ts` strictness (all 8 sites), plus the
  * two re-verdicts the same per-schema read produced (`seed-loader.zod.ts` →
  * wire, `field-value.zod.ts` → open), pinned so a later sweep stops here
- * instead of "finishing" them.
+ * instead of "finishing" them. The `field-value` half of that pin was
+ * OVERRULED at #13802 (maintainer ruling 2026-09-01): section 5 below now pins
+ * the closure, with the reason the batch-D reading did not survive.
  *
  * This file is the third of the three places each verdict is recorded (the
  * others: the JSDoc on each shape, and the `data/` rows in
@@ -254,16 +256,23 @@ describe('#4001 batch D — the strict base does not break the request wrapper',
 // 5. The shapes this batch deliberately did NOT close, with the reason
 // ===========================================================================
 describe('#4001 batch D — deliberate non-closures (re-verdicts, not omissions)', () => {
-  it('`LocationValueSchema` / `AddressSchema` stay tolerant — record-data value contracts (ADR-0104), not authoring surfaces', () => {
-    // A phone's geolocation payload carries `heading`/`speed`; a geocoder's
-    // address carries `district`. These are legitimate stored record data, and
-    // every consumer is validation-only (`record-validator` stores the value
-    // verbatim), so `.strip` never actually strips anything here. Closing them
-    // would reject real data; the enforcement posture belongs to ADR-0104's
-    // evidence-gated warn-first rollout. The day either line goes red, that
-    // rollout — not this ratchet — is the place the decision was made.
-    accept(LocationValueSchema, { lat: 1, lng: 2, heading: 90, speed: 3 });
-    accept(AddressSchema, { street: '1 Main St', district: 'Central' });
+  it('`LocationValueSchema` / `AddressSchema` are CLOSED since #13802 — the batch-D `open` verdict was overruled', () => {
+    // Batch D pinned these two as tolerant ("a phone's geolocation payload
+    // carries `heading`/`speed`; a geocoder's address carries `district`") and
+    // said the day the line went red, the decision would have been made
+    // elsewhere. It was: maintainer ruling 2026-09-01 on #13802, option A —
+    // an all-optional stripping `z.object` accepts a completely wrong key set
+    // and drops it (the showcase seed's `postal_code`, #13388), so a
+    // stored-value scan over the class could only ever report a clean count.
+    // The refusal names the key; where it BITES stays with ADR-0104's
+    // evidence-gated write path (warn-first until the deployment attests
+    // `adr-0104-value-shapes`), which is why closing the schema did not
+    // strand stored data. Full read: the ledger's `data/` rows.
+    expect(reject(LocationValueSchema, { lat: 1, lng: 2, heading: 90, speed: 3 })).toContain('`heading`');
+    expect(reject(AddressSchema, { street: '1 Main St', district: 'Central' })).toContain('`district`');
+    // …and the declared shapes are byte-for-byte still accepted.
+    accept(LocationValueSchema, { lat: 1, lng: 2, altitude: 10, accuracy: 5 });
+    accept(AddressSchema, { street: '1 Main St', city: 'SF', postalCode: '94105', country: 'US' });
   });
 
   it('`seed-loader` shapes stay tolerant — an internal service contract whose every producer is framework code', () => {

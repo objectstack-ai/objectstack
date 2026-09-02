@@ -752,17 +752,25 @@ const PLUGIN_ROUTE_MODULES = {
       'pre-auth bootstrap, ruled outside BaseResponseSchema by design (2026-08-17, #9389 option B): the shell reads /auth/me/permissions, /auth/me/localization and /me/apps to decide what to render, and each answers an unauthenticated caller a bare `{ authenticated: false }` / `{ apps: [] }` instead of refusing — our own shells branch on that top-level field with no unwrap step in between',
   },
 
-  // THREE bodies, all `{ hasOwner: … }` from `/bootstrap-status` (1681/1684/
-  // 1687), whose own comment states the boundary: "Public, unauthenticated; only
-  // returns a boolean so it can be polled before the user has any credentials."
+  // TWO bodies, both `{ hasOwner: … }` from `/bootstrap-status`, whose own
+  // comment states the boundary: "Public, unauthenticated; only returns a
+  // boolean so it can be polled before the user has any credentials."
+  //
+  // [#14157] It was THREE until the handler stopped counting `sys_user` rows.
+  // The third body was its no-engine early return, which existed only because
+  // the handler resolved the data engine itself; asking
+  // `AuthManager.hasBootstrapWindow()` — the same question the admission gate
+  // answers, which reports "no window" without an engine — folds that branch
+  // into the ordinary answer. Shrinking a ruled exemption needs nobody's leave;
+  // it is the widening direction that is MAINTAINER-ONLY.
   //
   // The count is also what keeps this file's OTHER 46 bodies audited — the
-  // conformant `{ success: true, data: config }` of `/auth/public-config` at
-  // 1663 among them — instead of one waiver retiring the lot.
+  // conformant `{ success: true, data: config }` of `/auth/public-config`
+  // among them — instead of one waiver retiring the lot.
   'packages/plugins/plugin-auth/src/auth-plugin.ts': {
-    unenveloped: 3,
+    unenveloped: 2,
     exempt:
-      'pre-auth bootstrap, ruled outside BaseResponseSchema by design (2026-08-17, #9389 option B): /bootstrap-status is polled by the Account SPA to choose between /login and first-run /setup, by a caller that has no credential to authenticate with yet. The rest of this file (~46 bodies) is better-auth\'s own wire format, relayed rather than built, and stays invisible to these counters by design',
+      'pre-auth bootstrap, ruled outside BaseResponseSchema by design (2026-08-17, #9389 option B): /bootstrap-status is polled by the Account SPA to choose between /login and first-run /setup, by a caller that has no credential to authenticate with yet. What is left is the ordinary answer and the catch-all fallback; the third body — a no-engine early return — went away with #14157 when the handler stopped resolving the engine itself. The rest of this file (~46 bodies) is better-auth\'s own wire format, relayed rather than built, and stays invisible to these counters by design',
   },
 
   // ── Ruled vendor wire format (2026-08-21, #10554) ────────────────────
@@ -2085,6 +2093,12 @@ function audit() {
 // ── Self-test ────────────────────────────────────────────────────────────────
 // Both cases below are regressions the regex predecessor actually had.
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-route-envelope self-test reached its verdict';
+
 function selfTest() {
   const assert = (cond, msg) => { if (!cond) { console.error('✗ self-test: ' + msg); process.exit(1); } };
 
@@ -2759,6 +2773,8 @@ function selfTest() {
   );
 
   console.log('✓ check-route-envelope self-test passed');
+
+  return SELF_TEST_VERDICT;
 }
 
 // Exports bindings, so an import for those exports alone must run nothing (#10667).
@@ -2766,5 +2782,14 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 
 if (!invokedDirectly) {
   // imported as a module — expose the exports and do nothing else
-} else if (process.argv.includes('--self-test')) selfTest();
+} else if (process.argv.includes('--self-test')) {
+  if (selfTest() !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ check-route-envelope self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
+}
 else audit();

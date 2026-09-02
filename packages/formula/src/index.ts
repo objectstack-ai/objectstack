@@ -78,6 +78,18 @@ export { __resetPushdownLimitWarnings } from './cel-to-filter';
 // conditions ARE the red/green line.
 export { isSupportedRlsExpression, sqlPredicateToCel } from './rls-predicate';
 export { matchesFilterCondition } from './matches-filter';
+// #13594 — the function-EXISTENCE verdict, isolated from the rest of what
+// cel-js's `check()` has an opinion about. Published for the same reason as
+// `firstUndeclaredReference` above and under the same discipline: the answer to
+// "does the environment register this name?" is the environment's to give, the
+// environment is package-internal (`buildEnv`), and the alternative — a consumer
+// keying a gate on the advertised `CEL_STDLIB_FUNCTIONS` catalog — was measured
+// to refuse 37 names that resolve and evaluate today. `@objectstack/lint`'s
+// view/page visibility gate is the first consumer (maintainer ruling, director
+// batch #21, 2026-08-31). Existence ONLY: a registered name called with the
+// wrong arguments, or in the wrong call position, is not reported here.
+export { firstUnknownFunctionCall } from './unknown-function';
+export type { UnknownFunctionCall } from './unknown-function';
 // ADR-0032 — shared validator + introspection (one validator for build,
 // registration, and the agent-callable validate_expression tool).
 export { validateExpression, introspectScope, expectedDialect, inferExpressionType, nearestName, CEL_STDLIB_FUNCTIONS } from './validate';

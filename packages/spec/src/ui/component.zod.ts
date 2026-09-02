@@ -642,12 +642,13 @@ export const PageTabsProps = strictObject({
      * false candidate a component over).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `d8ec8d6d4`; re-derived at that pin 2026-09-01 —
-     * `containers.tsx` DID change across the move off `9602dc820`, so both
-     * anchors below were re-derived rather than carried over, the icon block
-     * moving `662-668` → `729-735` and the registration input `721` → `788`,
-     * both shifted by insertions above them with the cited text unchanged;
-     * both were re-READ there, never inferred): `containers.tsx:729-735`
+     * (`.objectui-sha` = `67dadd602`; re-derived at that pin 2026-09-02 —
+     * `containers.tsx` DID change across the move off `d8ec8d6d4`, but that
+     * change lands from `:995` on, below both anchors, so neither moved: the
+     * icon block is still `729-735` and the registration input still `788`,
+     * each re-READ there with the cited text unchanged, never inferred; the
+     * earlier hop off `9602dc820` is the one that moved them, `662-668` →
+     * `729-735` and `721` → `788`): `containers.tsx:729-735`
      * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `TabsTrigger`, left of the label span (`mr-1.5 h-3.5 w-3.5 shrink-0
@@ -1701,12 +1702,13 @@ export const PageAccordionProps = strictObject({
      * re-derive the same false candidate).
      *
      * The key is LIVE at the objectui pin this repo builds against
-     * (`.objectui-sha` = `d8ec8d6d4`; re-derived at that pin 2026-09-01 —
-     * `containers.tsx` DID change across the move off `9602dc820`, so both
-     * anchors below were re-derived rather than carried over, the icon block
-     * moving `851-857` → `918-924` and the registration input `898` → `965`,
-     * both shifted by insertions above them with the cited text unchanged;
-     * both were re-READ there, never inferred): `containers.tsx:918-924`
+     * (`.objectui-sha` = `67dadd602`; re-derived at that pin 2026-09-02 —
+     * `containers.tsx` DID change across the move off `d8ec8d6d4`, but that
+     * change lands from `:995` on, below both anchors, so neither moved: the
+     * icon block is still `918-924` and the registration input still `965`,
+     * each re-READ there with the cited text unchanged, never inferred; the
+     * earlier hop off `9602dc820` is the one that moved them, `851-857` →
+     * `918-924` and `898` → `965`): `containers.tsx:918-924`
      * renders
      * `{item.icon && <LazyIcon name={item.icon} …/>}` inside the
      * `AccordionTrigger`, grouped with the label in the trigger's one wrapping
@@ -1799,7 +1801,25 @@ export const ElementNumberPropsSchema = lazySchema(() => strictObject({
   field: z.string().optional().describe('Field to aggregate'),
   aggregate: z.enum(['count', 'sum', 'avg', 'min', 'max'])
     .describe('Aggregation function'),
-  filter: FilterConditionSchema.optional().describe('Filter criteria'),
+  /**
+   * Filter rules narrowing the aggregate — the `ViewFilterRule` ARRAY form,
+   * `[{ field, operator, value }, ...]`, the one filter orthography every
+   * other `filter` input in this map already declares (`record:related_list`
+   * and its Add-affordance picker). Until the ui#6206 ruling (2026-08-25,
+   * Option B, verbatim 「同意」: one filter orthography platform-wide) this
+   * entry alone said `FilterConditionSchema`, the MongoDB-style record form —
+   * so the filter a list view stores and renders was refused by the KPI
+   * element beside it. Sequenced consumer-first (the 2026-08-25 Option-A
+   * ordering ruling): objectui#6828 made `ObjectStackAdapter.aggregate()`
+   * lower a rule array through the same `translateFilterArray` its `find()`
+   * path runs, and the pin carrying it (`d8ec8d6d`) was re-measured before
+   * this declaration moved — authored array → adapter lowering → filter AST →
+   * accepted at the analytics door (which still refuses a RAW rule-object
+   * array, by design). The record form is refused at `filter`; the migration
+   * prescription is the `element-number-filter-rule-array` semantic entry.
+   */
+  filter: z.array(ViewFilterRuleSchema).optional()
+    .describe('Filter rules narrowing the aggregate — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` input in this map shares. The MongoDB-style record form is refused — see migration `element-number-filter-rule-array`'),
   format: z.enum(['number', 'currency', 'percent']).optional().describe('Number display format'),
   prefix: z.string().optional().describe('Prefix text (e.g. "$")'),
   suffix: z.string().optional().describe('Suffix text (e.g. "%")'),
@@ -1807,6 +1827,15 @@ export const ElementNumberPropsSchema = lazySchema(() => strictObject({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
 export type ElementNumberProps = z.input<typeof ElementNumberPropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state on exactly one
+ * key — `filter` carries `ViewFilterRuleSchema` (the ui#6206 convergence),
+ * whose own input ≠ infer (`operator` is normalized on parse, which is why
+ * `ViewFilterRuleParsed` exists). So `element:number` leaves the type-alias
+ * convention pin's isomorphic family (the Iso818 line deleted with this
+ * alias), taking the `ObjectGridPropsParsed` route its comment prescribes.
+ */
+export type ElementNumberPropsParsed = z.infer<typeof ElementNumberPropsSchema>;
 
 export const ElementImagePropsSchema = lazySchema(() => strictObject({
   surface: 'this `element:image`',
@@ -1881,10 +1910,11 @@ export const ElementButtonPropsSchema = lazySchema(() => strictObject({
    * the button.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `d8ec8d6d4`; re-derived at that pin 2026-09-01 —
+   * (`.objectui-sha` = `67dadd602`; re-derived at that pin 2026-09-02 —
    * `button.tsx` and `resolve-icon.ts` are both byte-identical to the ones at
-   * `9602dc820` and every anchor below is unmoved, each one re-READ at the new
-   * pin rather than carried on that identity (#10274). The read point MOVED
+   * `d8ec8d6d4` (and at `9602dc820` before it) and every anchor below is
+   * unmoved, each one re-READ at the new pin rather than carried on that
+   * identity (#10274). The read point MOVED
    * rather than died on the earlier hop onto `9602dc820`, which is why the
    * anchors below span a second file): `components/src/renderers/form/
    * button.tsx:36` resolves `schema.icon` through the shared `resolveIcon`,
@@ -2465,15 +2495,13 @@ export const ObjectMetricPropsSchema = lazySchema(() => strictObject({
    * same record for the metric tile.
    *
    * The key is LIVE at the objectui pin this repo builds against
-   * (`.objectui-sha` = `d8ec8d6d4`; re-derived at that pin 2026-09-01 — of the
-   * files in the chain below, `index.tsx` DID change across the move off
-   * `9602dc820` while `ObjectMetricWidget.tsx`, `MetricWidget.tsx`,
-   * `MetricCard.tsx` and `lazy-icon.tsx` are byte-identical to the ones at
-   * `9602dc820`; this time NO anchor moved, `index.tsx`'s included — its
-   * `object-metric` registration begins at `:194` and the icon input still
-   * lands on `:204`, the change to that file sitting elsewhere in it. Every
-   * anchor below was re-READ at the new pin rather than inferred from either
-   * that identity or that unchanged number), and the chain runs
+   * (`.objectui-sha` = `67dadd602`; re-derived at that pin 2026-09-02 — all
+   * five files in the chain below, `index.tsx`, `ObjectMetricWidget.tsx`,
+   * `MetricWidget.tsx`, `MetricCard.tsx` and `lazy-icon.tsx`, are
+   * byte-identical to the ones at `d8ec8d6d4`, so NO anchor moved — the
+   * `object-metric` registration still begins at `:194` and the icon input
+   * still lands on `:204`. Every anchor below was re-READ at the new pin
+   * rather than inferred from that identity), and the chain runs
    * three files:
    * `plugin-dashboard/src/index.tsx:204` publishes it as a designer input
    * (`Icon (Lucide name)`) on the registered `object-metric` block;

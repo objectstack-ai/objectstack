@@ -103,17 +103,81 @@ export function validateFunctionalCompleteness(stack: unknown): FunctionalComple
   // ── List views: views[] containers → list / listViews.* ────────────────
   // (Form views carry no layout-binding contract; field completeness inside
   // objects is already covered above.)
+  //
+  // The predicate takes the BOUND OBJECT as its optional second argument —
+  // the `tree` parent-pointer rule needs the object's fields to ask whether
+  // the renderer could auto-detect one. This is wiring only: the object is
+  // looked up by name in `stack.objects` (already normalized to an array, so
+  // both authorable spellings arrive with a `name`), resolved in the order
+  // the sibling reference-integrity rules use — a list view's own
+  // `data.object` retarget first (ADR-0047), then the container's binding —
+  // and handed over. Absent from the stack, nothing is handed and the
+  // predicate stays silent on that rule; the dangling `data.object` itself
+  // is `validate-object-references`' finding.
+  const objectsByName = new Map(entriesOf(stack.objects).map((o) => [o.name, o.def]));
+  const strName = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
+  const byName = (name: string | undefined): AnyRec | undefined =>
+    name ? objectsByName.get(name) : undefined;
+  /** A list view's own `data.object` retarget (ADR-0047), when it declares one. */
+  const ownObjectOf = (view: AnyRec): string | undefined =>
+    (isRec(view.data) ? strName(view.data.object) : undefined);
+  const boundObjectOf = (view: AnyRec, container: AnyRec): AnyRec | undefined =>
+    byName(ownObjectOf(view) ?? strName(container.objectName) ?? strName(container.object));
   for (const [vi, container] of entriesOf(stack.views).entries()) {
     const where = container.def.object ? `view container "${container.name}"` : `view container [${vi}]`;
     if (isRec(container.def.list)) {
-      push(out, checkViewCompleteness(container.def.list), `${where} › list`, `views[${vi}].list`);
+      push(
+        out,
+        checkViewCompleteness(container.def.list, boundObjectOf(container.def.list, container.def)),
+        `${where} › list`,
+        `views[${vi}].list`,
+      );
     }
     for (const lv of entriesOf(container.def.listViews)) {
       push(
         out,
-        checkViewCompleteness(lv.def),
+        checkViewCompleteness(lv.def, boundObjectOf(lv.def, container.def)),
         `${where} › listViews.${lv.name}`,
         `views[${vi}].listViews${lv.key}`,
+      );
+    }
+  }
+
+  // ── List views: the OBJECT-NESTED container → objects[].list /
+  //    objects[].listViews.* (ADR-0017 "Object has-many View") ─────────────
+  //
+  // The same two slots, reached through the other authorable door. An object
+  // carries its own view container — `lint-view-refs`'s `containerFromObject`
+  // pulls `list` / `listViews` straight off the object definition, and the
+  // ADR-0017 loader's `isAggregatedViewContainer` / `expandViewContainer`
+  // register the expansion — so a `timeline` / `gantt` / `tree` authored here
+  // reaches exactly the renderer the top-level container's copy reaches. The
+  // walk above stopped at `stack.views`, which made this gate report coverage
+  // it did not have: green, and blind to the other half of the stack.
+  //
+  // Bound object: the object the container belongs to, unless the view's own
+  // `data.object` retargets it (ADR-0047) — the resolution
+  // `validate-list-view-field-refs` uses on this identical rung
+  // (`listViewObject(lv) ?? objName`). Location grammar is this file's own,
+  // shared with the field walk directly above: a positional `objects[<i>]`
+  // (both spellings normalize to one ordered list) and the slot's authored
+  // key.
+  for (const [oi, obj] of entriesOf(stack.objects).entries()) {
+    const where = `object "${obj.name}"`;
+    if (isRec(obj.def.list)) {
+      push(
+        out,
+        checkViewCompleteness(obj.def.list, byName(ownObjectOf(obj.def.list) ?? obj.name)),
+        `${where} › list`,
+        `objects[${oi}].list`,
+      );
+    }
+    for (const lv of entriesOf(obj.def.listViews)) {
+      push(
+        out,
+        checkViewCompleteness(lv.def, byName(ownObjectOf(lv.def) ?? obj.name)),
+        `${where} › listViews.${lv.name}`,
+        `objects[${oi}].listViews${lv.key}`,
       );
     }
   }

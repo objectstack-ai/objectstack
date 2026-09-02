@@ -50,7 +50,7 @@ import { isInProcessClusterDriver } from './split-brain-guard.js';
 export class AuthzClusterBridgePlugin implements Plugin {
     name = 'com.objectstack.service.authz-cluster-bridge';
     version = '1.0.0';
-    type = 'standard';
+    type = 'standard' as const;
 
     private detach?: () => void;
 

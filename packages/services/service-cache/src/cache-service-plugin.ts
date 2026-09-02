@@ -67,7 +67,7 @@ export class CacheServicePlugin implements Plugin {
    */
   providesServices = ['cache'];
   version = '1.0.0';
-  type = 'standard';
+  type = 'standard' as const;
 
   private readonly options: CacheServicePluginOptions;
 

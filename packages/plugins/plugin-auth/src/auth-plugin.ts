@@ -13,9 +13,14 @@ import {
   type SettingsUnsubscribe,
   SystemObjectName,
 } from '@objectstack/spec/system';
-// [#11767] The shared bootstrap population predicate — the dev-admin seed and
-// the audience gate's bootstrap bypass must answer the same question.
+// [#11767] The shared bootstrap population predicate — the audience gate's
+// bootstrap bypass and plugin-security's first-user detection must answer the
+// same question. [#14157] The dev-admin seed no longer GATES on it (a
+// directory row is not a login); it still reads it to find the seed account
+// among existing users when re-arming the credential hint.
 import { isHumanUserRow } from './audience-posture.js';
+// [#14157] The dev-admin seed's own precondition — "does a login exist?".
+import { decideDevAdminSeedGate } from './dev-admin-seed-gate.js';
 import {
   // ADR-0048 — the Setup/Studio/Account apps moved to their own packages
   // (@objectstack/{setup,studio,account}); plugin-auth no longer registers them.
@@ -247,7 +252,7 @@ export class AuthPlugin implements Plugin {
    * kernel name this plugin when a consumer requires one before it inits.
    */
   providesServices = ['auth', 'tenancy'];
-  type = 'standard';
+  type = 'standard' as const;
   version = '1.0.0';
   dependencies: string[] = ['com.objectstack.engine.objectql'];
   /**
@@ -772,6 +777,64 @@ export class AuthPlugin implements Plugin {
             ctx.logger.info('Auth: no sms service registered — phone-number OTP disabled (password sign-in only)');
           }
 
+          // #8195 / #14319 — the locale named on every auth EMAIL, so the
+          // localized `sys_email_template` rows are reachable through the
+          // platform's own send path instead of sitting dormant.
+          //
+          // Maintainer ruling 2026-08-13: the recipient locale is the
+          // **deployment default**, resolved here at the plugin layer.
+          // `Accept-Language` is rejected — auth mail is routinely sent
+          // outside the triggering request (invitations, admin-initiated
+          // resets), so a per-device request header is the wrong authority.
+          //
+          // #14319 measured that "the deployment default" has TWO producers,
+          // and that auth email was reading the weaker one:
+          //
+          //  - `II18nService.getDefaultLocale()` is the app artifact's
+          //    BUILD-TIME `i18n.defaultLocale` (`AppPlugin` pushes it through
+          //    `setDefaultLocale`; the CLI passes `config.i18n.defaultLocale`),
+          //    and is the bare `en` when the app declares nothing.
+          //  - `localization.locale` (ADR-0053) is the workspace's RUNTIME
+          //    language — Setup, Localization, tenant-scoped — whose four
+          //    options are exactly `AUTH_EMAIL_TEMPLATE_LOCALES`. It is
+          //    already the authority for auth SMS (#2815) and for audit
+          //    activity summaries (framework#3039).
+          //
+          // A workspace that declared Chinese therefore received Chinese SMS
+          // and ENGLISH mail. The workspace setting now outranks the
+          // build-time default, and only when it is EXPLICIT
+          // (`source !== 'default'`) — the same precedence the `appName`
+          // binding below uses, because `get` answers the manifest default
+          // (`en-US`) for an untouched workspace and taking it unconditionally
+          // would demote every deployment that declared `i18n.defaultLocale`.
+          //
+          // Both i18n hops are probed rather than assumed: `getService` THROWS
+          // for an unregistered service (i18n is not a required dependency of
+          // auth) and `getDefaultLocale` is OPTIONAL on the contract. Nothing
+          // resolvable ⇒ nothing is named, which is precisely the pre-#8195
+          // behaviour — `EmailService` resolves its documented `en-US` default.
+          let i18nDefaultEmailLocale: string | undefined;
+          try {
+            const i18n = ctx.getService<II18nService>('i18n');
+            const locale =
+              typeof i18n?.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+            i18nDefaultEmailLocale = typeof locale === 'string' ? locale : undefined;
+          } catch {
+            // i18n service is optional — leave the build-time default unset.
+          }
+          const applyEmailLocale = (workspaceLocale: string | undefined): void => {
+            this.authManager?.setDefaultEmailLocale(workspaceLocale ?? i18nDefaultEmailLocale);
+          };
+          // Baseline = the build-time default. Superseded below when a settings
+          // service answers with an explicit workspace language, and left
+          // standing when there is no settings service or its read fails.
+          applyEmailLocale(undefined);
+          if (typeof i18nDefaultEmailLocale === 'string' && i18nDefaultEmailLocale.trim()) {
+            ctx.logger.info(
+              `Auth: bound auth email locale to i18n default=${i18nDefaultEmailLocale}`,
+            );
+          }
+
           // Bind the email brand name (`{{appName}}`) to the live
           // `branding.workspace_name` setting so the admin UI can rename the
           // product without a redeploy. Only an *explicitly set* value
@@ -807,59 +870,45 @@ export class AuthPlugin implements Plugin {
 
               // #2815 — bind the auth SMS locale to the deployment default
               // (`localization.locale`) so OTP/invitation texts render in the
-              // workspace language. Live-rebinds on settings changes.
-              const applySmsLocale = async () => {
+              // workspace language. #14319 binds the auth EMAIL locale from
+              // the very same read, so the two auth channels can no longer
+              // disagree about what language this workspace speaks.
+              // Live-rebinds on settings changes.
+              const applyLocalizationLocale = async () => {
                 try {
                   const resolved = await settings.get('localization', 'locale', {});
                   const value = resolved?.value;
                   this.authManager?.setDefaultSmsLocale(
                     typeof value === 'string' ? value : undefined,
                   );
+                  // Email takes the workspace language only when it was
+                  // EXPLICITLY set; a manifest default leaves the app's
+                  // build-time `i18n.defaultLocale` standing (block above).
+                  const explicit =
+                    resolved && resolved.source !== 'default' && typeof value === 'string'
+                      ? value
+                      : undefined;
+                  applyEmailLocale(explicit);
+                  if (explicit) {
+                    ctx.logger.info(
+                      `Auth: bound auth email locale to localization.locale=${explicit}`,
+                    );
+                  }
                 } catch (err: any) {
                   ctx.logger.warn(
                     'Auth: failed to apply localization.locale: ' + (err?.message ?? err),
                   );
                 }
               };
-              await applySmsLocale();
+              await applyLocalizationLocale();
               if (typeof settings.subscribe === 'function') {
                 settings.subscribe('localization', () => {
-                  void applySmsLocale();
+                  void applyLocalizationLocale();
                 });
               }
             }
           } catch {
             // settings service is optional — keep the configured appName.
-          }
-
-          // #8195 — name the deployment-default locale on every auth EMAIL, so
-          // the localized `sys_email_template` rows become reachable through
-          // the platform's own send path instead of sitting dormant.
-          //
-          // Maintainer ruling 2026-08-13: the source is
-          // `II18nService.getDefaultLocale()`, resolved here at the plugin
-          // layer. `Accept-Language` is rejected — auth mail is routinely sent
-          // outside the triggering request (invitations, admin-initiated
-          // resets), so a per-device request header is the wrong authority.
-          //
-          // Both hops are probed rather than assumed: `getService` THROWS for
-          // an unregistered service (i18n is not a required dependency of
-          // auth), and `getDefaultLocale` is OPTIONAL on the contract. Either
-          // one missing must leave the locale unset, which is precisely the
-          // pre-#8195 behaviour — `EmailService` resolves its documented
-          // `en-US` default.
-          try {
-            const i18n = ctx.getService<II18nService>('i18n');
-            const locale =
-              typeof i18n?.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
-            this.authManager?.setDefaultEmailLocale(
-              typeof locale === 'string' ? locale : undefined,
-            );
-            if (typeof locale === 'string' && locale.trim()) {
-              ctx.logger.info(`Auth: bound auth email locale to i18n default=${locale}`);
-            }
-          } catch {
-            // i18n service is optional — leave the email locale unset.
           }
 
           // #2815 — seed the built-in bilingual auth SMS templates into
@@ -1725,9 +1774,15 @@ export class AuthPlugin implements Plugin {
    *     un-loginable row.
    * Running it in-process needs no port and no readiness polling.
    *
-   * Idempotent and non-destructive: it only ever acts on a zero-user DB and
-   * never touches an existing account, so a custom password is never
-   * overwritten.
+   * Idempotent and non-destructive: [#14157] it only ever acts on a database
+   * with NO LOGIN — no account on the configured address, and no local
+   * password login anywhere — and never touches an existing account, so a
+   * custom password is never overwritten. The predicate used to be "no human
+   * `sys_user` row", which is the same question only while every user row
+   * carries a credential: an app declaring people in `defineStack({ data })`
+   * made the database non-zero-user before this hook ran, and the admin was
+   * never minted — on that boot or any later one. `dev-admin-seed-gate.ts`
+   * owns the predicate and the argument.
    *
    * HARD-GATED to development (NODE_ENV==='development'): a known-credential
    * admin can never be provisioned in production. Opt out within dev via
@@ -1751,25 +1806,33 @@ export class AuthPlugin implements Plugin {
     if (!ql || typeof ql.find !== 'function') return;
 
     try {
-      // Only seed when no HUMAN user exists yet. A DB created by an older
-      // runtime may still contain the system service account
-      // (SystemUserId.SYSTEM, role='system'), which must NOT count — mirror
-      // plugin-security's first-user detection so the seed fires on a
-      // genuinely empty DB. Any real human user (or a prior sign-up) disables
-      // the seed for good; we never touch or overwrite an existing account.
-      //
-      // [#11767] The predicate itself is `isHumanUserRow`, shared with the
-      // audience gate's bootstrap bypass (`AuthManager.isBootstrapCreation`)
-      // — this seed's `signUpEmail` call passes through that gate, so the two
-      // MUST answer the same question. Two hand-spelled copies is how they
-      // drift, and a drift there means a seed that decides to run and a gate
-      // that then refuses it.
+      // The human page is read for the REPORT path below, which looks the
+      // seed account up among the existing users. [#11767] `isHumanUserRow`
+      // is the shared population predicate; it is no longer the seed's GATE.
       const rows = await ql
         .find(SystemObjectName.USER, { where: {}, limit: 50 }, { context: { isSystem: true } })
         .catch(() => []);
       const humans = (Array.isArray(rows) ? rows : []).filter(isHumanUserRow);
-      if (humans.length > 0) {
-        ctx.logger.debug('[auth] dev admin seed skipped — a user already exists');
+
+      // [#14157] THE GATE: a LOGIN, not a directory row. See
+      // `dev-admin-seed-gate.ts` for why the predicate moved off the user
+      // table and why an unanswerable probe is its own verdict.
+      const verdict = await decideDevAdminSeedGate(ql, email);
+      if (!verdict.act) {
+        if (verdict.reason === 'unanswerable') {
+          // Functional degradation, and the operator has to be told: the DB
+          // could not be read, so the seed declined rather than minting a
+          // known-credential admin into an environment it cannot see. Nothing
+          // claims to have been persisted, so `warn` is the level (AGENTS.md
+          // → Degradation log levels).
+          ctx.logger.warn(
+            '[auth] dev admin seed skipped — the credential store could not be read, so whether a ' +
+              'login already exists is unknown. No admin was provisioned; re-run once the data engine ' +
+              `is reachable, or provision ${email} yourself.`,
+          );
+          return;
+        }
+        ctx.logger.debug(`[auth] dev admin seed skipped — ${verdict.reason}`);
         // `os dev` defaults to a persistent DB, so the seed fires exactly
         // once — but the startup banner and the Console login hint read
         // `devSeedResult`, which used to be set only on the seeding boot.
@@ -1788,10 +1851,24 @@ export class AuthPlugin implements Plugin {
       }
 
       // Real auth pipeline: creates sys_user + a hashed `credential` account
-      // and runs the sign-up hooks. The dev-mode OS_DISABLE_SIGNUP bypass
-      // (auth-manager.ts) lets this through on an empty DB even when sign-up
-      // is otherwise disabled.
-      await api.signUpEmail({ body: { email, password, name } });
+      // and runs the sign-up hooks.
+      //
+      // [#14157] Admission for THIS call is declared, not inferred. Both
+      // gates on the way in — the audience posture and the `disableSignUp`
+      // bypass — used to let the seed through only via the zero-human
+      // bootstrap probe, which an app's own `defineStack({ data })` people
+      // seed answers "populated" long before this hook runs: measured, the
+      // seed's `signUpEmail` comes back `SELF_REGISTRATION_CLOSED` under the
+      // default `invite_only` posture with 13 seeded people and zero
+      // accounts. The ticket says what this creation IS (the deployment's own
+      // boot command provisioning its admin — the operator class) for exactly
+      // this address, and is cleared whatever happens.
+      this.authManager.stageOperatorProvisioning(email);
+      try {
+        await api.signUpEmail({ body: { email, password, name } });
+      } finally {
+        this.authManager.clearOperatorProvisioning(email);
+      }
       // [#11343] Stamp the seeded admin's address VERIFIED. This account is
       // provisioned by the deployment's own boot command with operator-known
       // credentials — it is not an unknown self-registrant, which is the class
@@ -1975,16 +2052,21 @@ export class AuthPlugin implements Plugin {
     // /setup (first-run owner creation). Public, unauthenticated; only
     // returns a boolean so it can be polled before the user has any
     // credentials.
+    //
+    // [#14157] It asks `AuthManager.hasBootstrapWindow()` — the SAME question
+    // the audience gate's bootstrap bypass answers, so the console can never
+    // offer a first-run creation the platform would refuse, nor withhold one
+    // it would admit and promote. It used to count `sys_user` rows with no
+    // filter at all, which made it the one call site disagreeing with the
+    // three `isHumanUserRow` consumers: on a database still carrying the
+    // legacy `usr_system` service row it answered `hasOwner: true` while the
+    // admission gate and plugin-security's first-user detection both said the
+    // first human was still ahead. A no-engine composition (MSW/mock mode)
+    // still reads as bootstrapped — the probe answers "no window" without an
+    // engine — so the SPA falls through to its normal login flow as before.
     rawApp.get(`${basePath}/bootstrap-status`, async (c: any) => {
       try {
-        const dataEngine = this.authManager!.getDataEngine();
-        if (!dataEngine) {
-          // No data engine wired (e.g. MSW/mock mode) — assume bootstrapped
-          // so the SPA falls through to its normal login flow.
-          return c.json({ hasOwner: true });
-        }
-        const count = await dataEngine.count('sys_user', {});
-        return c.json({ hasOwner: (count ?? 0) > 0 });
+        return c.json({ hasOwner: !(await this.authManager!.hasBootstrapWindow()) });
       } catch (error) {
         ctx.logger.warn('[AuthPlugin] bootstrap-status check failed; assuming bootstrapped', error as Error);
         return c.json({ hasOwner: true });

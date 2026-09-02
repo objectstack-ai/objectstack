@@ -39,7 +39,7 @@
         {
           "clause": "--seed-admin provisions the FIXED well-known dev admin (admin@objectos.ai / admin123) loginable via the real auth endpoint, and the seed is idempotent — a later boot with a different --admin-password does NOT overwrite the existing account",
           "oracle": "api",
-          "verify": "login succeeds with the original credentials after the changed-password restart (flag contract: 'only acts on a zero-user DB, never overwrites an existing account')",
+          "verify": "login succeeds with the original credentials after the changed-password restart (flag contract: 'it acts only while no account holds the seed address and no local password login exists anywhere, never overwrites an existing account')",
           "evidence": "the two auth responses"
         },
         {
@@ -794,7 +794,7 @@
         ],
         "knownGaps": [
           "This item deliberately does NOT re-prove what two existing items already cover. The scaffold→install→validate→build→artifact-boot chain belongs to cli.scaffold-first-run (automated by .github/workflows/scaffold-e2e.yml); the console-on-a-populated-app half belongs to cli.dev-boot-contract, which drives examples/app-showcase. What is untested is the SEAM: the Console rendering against a freshly scaffolded BLANK project — one object and no seed data. Score only the seam; cite the two siblings for the halves.",
-          "A blank scaffold DOES have a loginable identity out of the box: `seed-admin` is default-ON in dev (commands/dev.ts: flags['seed-admin'] ?? true, 'Default: on (idempotent — only acts on a zero-user DB, never overwrites an existing account)'), so bare `objectstack dev` seeds admin@objectos.ai / admin123 on an empty DB and the banner prints the credentials. Clause 4 therefore scores whether the newcomer can COMPLETE the documented visual check with that identity, not whether one exists. Still do not import showcase credentials."
+          "A blank scaffold DOES have a loginable identity out of the box: `seed-admin` is default-ON in dev (commands/dev.ts: flags['seed-admin'] ?? true, 'Default: on (idempotent — it acts only while no account holds the seed address and no local password login exists anywhere, never overwrites an existing account)'), so bare `objectstack dev` seeds admin@objectos.ai / admin123 on an empty DB and the banner prints the credentials. Clause 4 therefore scores whether the newcomer can COMPLETE the documented visual check with that identity, not whether one exists. Still do not import showcase credentials."
         ]
       },
       "steps": [

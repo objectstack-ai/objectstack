@@ -2181,9 +2181,10 @@ describe('conditional enforcement', () => {
 
 /**
  * #3957 — this evaluator's BUILT-IN messages had the same defect as the field
- * validator's: hardcoded English with the API field name. An author-written
- * `rule.message` is untouched (it is already in the author's language); only
- * the platform's own sentences are localized.
+ * validator's: hardcoded English with the API field name. Only the platform's
+ * own sentences are localized here; an author-written `rule.message` is
+ * untouched unless the bundle explicitly addresses it — see the `_validations`
+ * describe below (#14253), which is the ONLY thing that can override it.
  */
 describe('evaluateValidationRules — built-in messages are localized (#3957)', () => {
   const zh = { locale: 'zh-CN', objectName: 'mes_invoice' };
@@ -2253,10 +2254,13 @@ describe('evaluateValidationRules — built-in messages are localized (#3957)', 
   });
 
   /**
-   * An author who wrote their own message owns the wording — localizing over it
-   * would silently replace their (often already-translated) text.
+   * An author who wrote their own message owns the wording, and the BUILT-IN
+   * catalog never speaks over it: a `zh-CN` context with no i18n service (and
+   * so no `_validations` entry to find) leaves the authored sentence exactly as
+   * written. The one thing that CAN replace it is an explicit bundle entry at
+   * `objects.<o>._validations.<rule>.message` — see the #14253 describe below.
    */
-  it('never overrides an author-written rule message', () => {
+  it('never overrides an author-written rule message from the built-in catalog', () => {
     const schema = {
       fields: { status: { type: 'select', label: '状态' } },
       validations: [{
@@ -2284,5 +2288,196 @@ describe('evaluateValidationRules — built-in messages are localized (#3957)', 
       },
     };
     expect(failing(schema, { status: 'sent' }, 'insert')[0].message).toBe('Amount is required');
+  });
+});
+
+/**
+ * #14253 — an author-written `validations[].message` in the caller's language.
+ *
+ * The evaluator emitted the authored sentence verbatim, so a deployment with a
+ * complete `zh-CN` bundle read platform-generated refusals in Chinese and
+ * author-written refusals in English **inside one error envelope**. The
+ * built-in field catalog has resolved through `messages.translate` since #3957;
+ * what was missing was a key shape for an author's own rule, not a channel.
+ *
+ * These tests drive the SAME `ValidationMessageContext.translate` hook the
+ * built-in catalog uses (the engine's `i18nService`, `II18nService.t`
+ * semantics: the key is echoed back on a miss). If a second i18n path were ever
+ * added to objectql, this fixture would keep passing through the old one — so
+ * the address is asserted explicitly, not just the output.
+ */
+describe('evaluateValidationRules — authored rule messages resolve from the bundle (#14253)', () => {
+  /** An `II18nService.t`-shaped lookup over a flat key→string map. */
+  const service = (entries: Record<string, string>) => {
+    const seen: string[] = [];
+    return {
+      seen,
+      t: (key: string, locale: string) => {
+        seen.push(`${locale}|${key}`);
+        return entries[`${locale}|${key}`] ?? key;
+      },
+    };
+  };
+
+  const failing = (
+    schema: any,
+    data: Record<string, unknown>,
+    mode: 'insert' | 'update',
+    opts: Record<string, unknown> = {},
+  ) => {
+    try {
+      evaluateValidationRules(schema, data, mode, opts);
+    } catch (e) {
+      return (e as ValidationError).fields;
+    }
+    throw new Error('expected a ValidationError');
+  };
+
+  const scriptSchema = (message: string) => ({
+    fields: { frequency: { type: 'select', label: '频率' } },
+    validations: [{
+      type: 'script',
+      name: 'standing_no_frequency',
+      message,
+      condition: "record.frequency == null || record.frequency == ''",
+      fields: ['frequency'],
+    }],
+  });
+
+  it('asks for objects.<object>._validations.<rule>.message, and returns what it gets', () => {
+    const i18n = service({
+      'zh-CN|objects.duly_duty._validations.standing_no_frequency.message':
+        '常规任务必须设置频率。',
+    });
+    const [err] = failing(scriptSchema('A standing duty must declare a frequency.'), {}, 'insert', {
+      messages: { locale: 'zh-CN', objectName: 'duly_duty', translate: i18n.t },
+    });
+    expect(err.message).toBe('常规任务必须设置频率。');
+    expect(i18n.seen).toContain('zh-CN|objects.duly_duty._validations.standing_no_frequency.message');
+    // The wire vocabulary is unchanged — ADR-0114's `code` does not split
+    // because a sentence is now translatable.
+    expect(err.code).toBe('rule_violation');
+    expect(err.field).toBe('frequency');
+  });
+
+  it('keeps the authored sentence when the bundle has no entry (the key echoes back)', () => {
+    const i18n = service({});
+    const [err] = failing(scriptSchema('A standing duty must declare a frequency.'), {}, 'insert', {
+      messages: { locale: 'zh-CN', objectName: 'duly_duty', translate: i18n.t },
+    });
+    expect(err.message).toBe('A standing duty must declare a frequency.');
+  });
+
+  it('does not consult the bundle without an object name or a locale', () => {
+    const i18n = service({
+      'zh-CN|objects.duly_duty._validations.standing_no_frequency.message': '常规任务必须设置频率。',
+    });
+    expect(failing(scriptSchema('authored'), {}, 'insert', {
+      messages: { locale: 'zh-CN', translate: i18n.t },
+    })[0].message).toBe('authored');
+    expect(failing(scriptSchema('authored'), {}, 'insert', {
+      messages: { objectName: 'duly_duty', translate: i18n.t },
+    })[0].message).toBe('authored');
+    expect(i18n.seen).toEqual([]);
+  });
+
+  it('survives a throwing i18n service — a 400 must not become a 500', () => {
+    const [err] = failing(scriptSchema('authored'), {}, 'insert', {
+      messages: {
+        locale: 'zh-CN',
+        objectName: 'duly_duty',
+        translate: () => { throw new Error('i18n exploded'); },
+      },
+    });
+    expect(err.message).toBe('authored');
+  });
+
+  it('reaches the state-machine, format and json_schema emitters too', () => {
+    const i18n = service({
+      'zh-CN|objects.duly_duty._validations.lifecycle.message': '已完成的任务不能退回。',
+      'zh-CN|objects.duly_duty._validations.contact_email.message': '联系邮箱格式不正确。',
+      'zh-CN|objects.duly_duty._validations.payload_shape.message': '负载结构不符合约定。',
+    });
+    const messages = { locale: 'zh-CN', objectName: 'duly_duty', translate: i18n.t };
+
+    const fsm = {
+      fields: { status: { type: 'select', label: '状态' } },
+      validations: [{
+        type: 'state_machine', name: 'lifecycle', message: 'A done duty cannot be reopened.',
+        field: 'status', transitions: { done: [] },
+      }],
+    };
+    expect(failing(fsm, { status: 'open' }, 'update', { messages, previous: { status: 'done' } })[0].message)
+      .toBe('已完成的任务不能退回。');
+
+    const format = {
+      fields: { contact: { type: 'text', label: '联系邮箱' } },
+      validations: [{
+        type: 'format', name: 'contact_email', message: 'Contact email is malformed.',
+        field: 'contact', format: 'email',
+      }],
+    };
+    expect(failing(format, { contact: 'not-an-email' }, 'insert', { messages })[0].message)
+      .toBe('联系邮箱格式不正确。');
+
+    const json = {
+      fields: { payload: { type: 'json', label: '负载' } },
+      validations: [{
+        type: 'json_schema', name: 'payload_shape', message: 'Payload does not match the contract.',
+        field: 'payload', schema: { type: 'object', required: ['kind'] },
+      }],
+    };
+    expect(failing(json, { payload: { other: 1 } }, 'insert', { messages })[0].message)
+      .toBe('负载结构不符合约定。');
+  });
+
+  it('addresses a nested conditional branch by the BRANCH\'s own name', () => {
+    const i18n = service({
+      'zh-CN|objects.duly_duty._validations.approver_required.message': '企业客户需要审批人。',
+      // The wrapping conditional's own message never reaches a caller; an entry
+      // for it must not be what the branch renders.
+      'zh-CN|objects.duly_duty._validations.enterprise_gate.message': 'WRONG — the wrapper',
+    });
+    const schema = {
+      fields: { account_type: { type: 'select' }, approver: { type: 'text' } },
+      validations: [{
+        type: 'conditional',
+        name: 'enterprise_gate',
+        message: 'Enterprise validation',
+        when: "record.account_type == 'enterprise'",
+        then: {
+          type: 'script',
+          name: 'approver_required',
+          message: 'Enterprise accounts require an approver.',
+          condition: 'record.approver == null',
+          fields: ['approver'],
+        },
+      }],
+    };
+    const [err] = failing(schema, { account_type: 'enterprise', approver: null }, 'insert', {
+      messages: { locale: 'zh-CN', objectName: 'duly_duty', translate: i18n.t },
+    });
+    expect(err.message).toBe('企业客户需要审批人。');
+  });
+
+  it('leaves a PLATFORM-generated rejection alone — only the authored sentence is addressed', () => {
+    // An unevaluable predicate produces the platform's own sentence, not the
+    // author's, so `_validations.<rule>.message` must not overwrite it: the
+    // caller needs to be told the rule is broken, not told the rule's verdict.
+    const i18n = service({
+      'zh-CN|objects.duly_duty._validations.broken.message': '这条不该出现。',
+    });
+    const schema = {
+      fields: { frequency: { type: 'select' } },
+      validations: [{
+        type: 'script', name: 'broken', message: 'authored',
+        condition: { dialect: 'cel', source: 'this is (( not valid' }, fields: ['frequency'],
+      }],
+    };
+    const [err] = failing(schema, {}, 'insert', {
+      messages: { locale: 'zh-CN', objectName: 'duly_duty', translate: i18n.t },
+    });
+    expect(err.message).toMatch(/could not be evaluated/);
+    expect(err.message).not.toBe('这条不该出现。');
   });
 });

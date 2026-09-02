@@ -136,6 +136,7 @@
     "ElementImagePropsSchema": "src/ui/component.zod.ts#ElementImagePropsSchema (const)",
     "ElementMetadataViewerPropsSchema": "src/ui/component.zod.ts#ElementMetadataViewerPropsSchema (const)",
     "ElementNumberProps": "src/ui/component.zod.ts#ElementNumberProps (type)",
+    "ElementNumberPropsParsed": "src/ui/component.zod.ts#ElementNumberPropsParsed (type)",
     "ElementNumberPropsSchema": "src/ui/component.zod.ts#ElementNumberPropsSchema (const)",
     "ElementRecordPickerProps": "src/ui/component.zod.ts#ElementRecordPickerProps (type)",
     "ElementRecordPickerPropsSchema": "src/ui/component.zod.ts#ElementRecordPickerPropsSchema (const)",

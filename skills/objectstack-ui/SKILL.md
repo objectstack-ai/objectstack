@@ -5,14 +5,13 @@ description: >
   Apps (navigation), Pages (structured plus the HTML and React source-authoring
   tiers, ADR-0080/0081), Dashboards, Reports, Charts, Actions, and
   package Docs (`src/docs/*.md`). Use when
-  the user is adding `*.view.ts` / `*.app.ts` / `*.dashboard.ts` /
-  `*.action.ts` / `src/docs/*.md` files or designing a Studio-rendered UI
-  surface, including
-  dataset-bound dashboard/report widgets. Do not use for: data schema (see
-  objectstack-data), interactive screen flows /
-  wizards (those are `*.flow.ts` with `type: 'screen'` — see
-  objectstack-automation), the React renderer implementation (lives in
-  `packages/client-react`, not metadata), or Studio's own admin UI (that
+  the user is adding `*.view.ts` / `*.page.ts` / `*.app.ts` /
+  `*.dashboard.ts` / `*.report.ts` / `*.dataset.ts` / `*.action.ts` /
+  `src/docs/*.md` files or designing a Studio-rendered UI surface.
+  Do not use for: data schema (see objectstack-data), multi-step flows that
+  BRANCH on logic between steps (those are `*.flow.ts` with `type: 'screen'` —
+  see objectstack-automation; a stepped form over ONE object is this skill's
+  `formViews` `type: 'wizard'`), or Studio's own admin UI (that
   ships with the platform). CEL expressions in
   visibility/conditional rules: load objectstack-formula alongside.
 license: Apache-2.0
@@ -29,19 +28,6 @@ metadata:
 Expert instructions for designing user interfaces using the ObjectStack
 specification. This skill covers Views (list, form, kanban, calendar, …),
 App navigation, Dashboards, Reports, and Actions.
-
----
-
-## When to Use This Skill
-
-- You are creating a **list view** (grid, kanban, calendar, gantt, map, …).
-- You are designing a **form layout** (simple, tabbed, wizard).
-- You are building an **app** with structured navigation menus.
-- You need a **dashboard** with widget grids.
-- You are adding **reports** (tabular, summary, matrix, joined).
-- You are configuring **actions** (buttons, URL jumps, screen flows).
-- You are writing **package documentation** (`src/docs/*.md`) that ships
-  with the package and renders at `/docs/<name>`.
 
 ---
 
@@ -77,15 +63,12 @@ lines, project + tasks) and save them **atomically**, you almost never need a
 custom page or form config. Prefer, in order:
 
 1. **Relationship `inlineEdit` (default, zero UI config).** Declare it in the
-   DATA MODEL — set `inlineEdit: true` on the child's `master_detail` field that
-   references the parent (see the objectstack-data skill → Relationships →
-   Inline Editing). Every standard New/Edit form for the parent (modal, drawer,
-   full-page) then auto-renders the children and saves parent + children in one
-   atomic `/api/v1/batch`. **No view metadata needed.** The value picks the
-   form factor: `'grid'` (editable line-item grid — thin children), `'form'`
-   (read-only list whose Add / per-row edit opens the child's FULL form — fat
-   children with rich types), or `true` (smart default: `form` when the child
-   has rich/form-only fields or >~8 fields, else `grid`).
+   DATA MODEL — set `inlineEdit` on the child's `master_detail` field that
+   references the parent. Every standard New/Edit form for the parent (modal,
+   drawer, full-page) then auto-renders the children and saves parent + children
+   in one atomic `/api/v1/batch`. **No view metadata needed.** The
+   `true` / `'grid'` / `'form'` ladder and what each value picks:
+   **objectstack-data → Relationships → Inline Editing**.
 
 2. **Form view `subforms` (override / tuning).** Add to a form view only when you
    need to override the derived columns/order, or expose a child the
@@ -113,37 +96,14 @@ metadata in every case; select options and lookups carry through. A parent
 `summary` field rolls child values up server-side (see objectstack-data).
 
 **Line-item grid behaviors (`grid` mode).** The editable grid is a real
-spreadsheet-style line editor (the QuickBooks / Stripe / NetSuite pattern). All
-of the following come from the DATA MODEL — no UI config — so they apply to any
-inline grid, not just invoices:
-
-- **Computed columns.** A child field with an arithmetic `expression`
-  (e.g. `amount: Field.currency({ expression: 'record.quantity * record.unit_price' })`)
-  renders **read-only** and is recomputed **live** client-side as its inputs
-  change, then persisted. Keep it a *stored* field (`currency`/`number`), NOT a
-  `formula` field, so a parent `summary` can still roll it up — the server only
-  treats `type: 'formula'` as computed, so a stored field's `expression` is a
-  client-side display/compute hint and the sent value is stored as-is. The
-  evaluator supports `+ - * / %`, parens and `record.<field>` refs only.
-- **Trailing "ghost" row.** The grid always shows one empty line at the bottom;
-  typing in it materialises a real row and a fresh ghost appears — users never
-  click "Add line", and an untouched ghost is never persisted.
-- **Item typeahead auto-fill.** When a `lookup` cell's record is picked, the grid
-  copies the chosen record's fields into any **same-named** sibling columns
-  (e.g. a product's `unit_price` / `description` drop into the line). Model it by
-  giving the line a `lookup` to the catalog plus columns whose names match the
-  catalog fields. Opt out per column with `autofill: false`.
-- **Persisted drag-reorder.** Add a numeric sort field to the child named
-  `position` (or `sort_order` / `sequence` / `line_no`). The grid auto-detects
-  it, hides it from the editable columns, and stamps `row[position] = index` on
-  reorder so line order survives a reload.
-- **Totals stack.** Give the PARENT a tax-rate field named `tax_rate` (percent
-  number). The master-detail form then renders a live **Subtotal → Tax → Total**
-  block under the lines (override the field name with the form's `taxRateField`).
-  The parent `summary` persists the line subtotal; the tax-inclusive grand total
-  is a live entry-time aid.
-- Per-cell **inline validation** (required-empty cells flag red in place) and a
-  hover **duplicate** action come for free.
+spreadsheet-style line editor (the QuickBooks / Stripe / NetSuite pattern), and
+every behaviour is derived from the DATA MODEL — computed columns, catalog
+typeahead auto-fill, persisted drag-reorder, and the live Subtotal → Tax → Total
+stack: **objectstack-data → Relationships → Inline Editing**. Three things are
+authored on this side: a trailing **ghost** row always exists, so never add an
+"Add line" button (typing in the ghost materialises a row; an untouched one is
+never persisted); `autofill: false` opts one column out of the typeahead copy;
+and the form's `taxRateField` overrides which parent field drives the totals.
 
 **Read side — detail-page related lists.** The mirror of `inlineEdit` is the
 related list on the parent's record DETAIL page. You don't author it: every
@@ -172,18 +132,15 @@ Page** and lay it out explicitly with `record:related_list` (or inline-editable
 
 ### Field Conditional Rules in Forms
 
-For conditions that belong to a field's lifecycle, declare the rule on the
-DATA MODEL field, not in the form view. ObjectUI forms consume:
+Conditions that belong to a field's lifecycle — `visibleWhen`, `readonlyWhen`,
+`requiredWhen` — are declared on the **DATA MODEL field**, not in the form view;
+ObjectUI forms consume them. Their semantics and server behaviour:
+**objectstack-data → Conditional Field Rules**.
 
-| Field property | UI behavior | Server behavior |
-|:--|:--|:--|
-| `visibleWhen` | Hide the field when the CEL predicate is false | UX-only visibility hint |
-| `readonlyWhen` | Render read-only when true | ObjectQL ignores incoming writes when true |
-| `requiredWhen` | Mark required when true | ObjectQL validates requiredness on submit |
-
-Inline master-detail grids evaluate these rules row-by-row against the child
-row. Use `requiredWhen` — the `conditionalRequired` alias was REMOVED in
-protocol 17 and is now a parse error. Load **objectstack-formula** when authoring non-trivial CEL.
+UI-side: inline master-detail grids evaluate these rules **row-by-row** against
+each child row. Use `requiredWhen` — the `conditionalRequired` alias was REMOVED
+in protocol 17 and is now a parse error. Load **objectstack-formula** when
+authoring non-trivial CEL.
 
 ---
 
@@ -377,16 +334,11 @@ export const CaseViews = defineView({
 | declares `searchableFields` | **that list, verbatim** — whatever the field types are |
 | declares nothing | the auto-default: the name field + the text-like columns (`text` / `email` / `phone` / `url` / `autonumber` / `textarea` / `markdown` / `select` / `status`) |
 
-So field **type** decides only in the second row. On an object that declares
-`searchableFields: ['subject', 'account_id']`, a view narrowing to
-`['account_id']` — a lookup — is **accepted** and scanned; on the same object,
-narrowing to a `text` column the object left out is **refused**. Judge every
-entry against the object's allowed set, never against the type list.
-
-Modelling side — the object's own set, and the stored-mirror prescription for
-searching by a related record's title: **objectstack-data → Search Fields
-(`searchableFields`)**. Query side (`search.fields` over the API):
-**objectstack-query → Full-Text Search**.
+Field **type** therefore decides only in the second row: where the object
+declares the set, a lookup in it is scanned and a `text` column outside it is
+refused. Judge every entry against the object's allowed set, never the type
+list. Modelling side: **objectstack-data → Search Fields**. Query side
+(`search.fields` over the API): **objectstack-query → Full-Text Search**.
 
 #### ⛔ One bad entry 400s EVERY search on that list
 
@@ -400,39 +352,15 @@ result, no result at all.
 |:---------------------------|:--------------|:--------------------------|
 | a subset of the allowed set | clean | scans exactly those columns |
 | key omitted | clean | scans the object's full allowed set |
-| `searchableFields: []` | clean | **identical to omitting it** — see below |
+| `searchableFields: []` | clean | **identical to omitting it** — empty is *absent* at all three layers, so it scans MORE than `["subject"]` would |
 | a renamed / mistyped column | `searchable-field-unknown` | `400 INVALID_FIELD` |
 | a dotted path (`account_id.name`) | `searchable-field-unknown` | `400 INVALID_FIELD` |
 | a real column outside the allowed set | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
 | a virtual `formula` column — nothing stored to scan | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
 
 Both diagnostics are **errors**, not warnings — `os validate` fails the build.
-The two you will actually hit, verbatim:
 
-```text
-list-view searchableFields entry "account_id.name" is not a field on object
-"support_case". The declaration is stale: searching it can never match, and the
-engine silently drops it — leaving a narrower search than declared, or the
-auto-default set once every entry is dropped.
-
-list-view searchableFields entry "status" is outside object "support_case"'s
-declared searchableFields (subject, case_number, description) — the set 'search'
-scans. Clients echo this declaration verbatim as the '$searchFields' override,
-and the runtime refuses an entry outside the allowed set: every toolbar search
-on this list returns 400 INVALID_FIELD.
-```
-
-#### `searchableFields: []` does NOT turn search off
-
-An empty array is **absent**, at all three layers: the client omits the
-`$searchFields` key entirely, the ingress gate treats a zero-length override as
-no override, and the engine falls through to the object's allowed set. A view
-written `searchableFields: []` searches **more** columns than one written
-`searchableFields: ['subject']`, which is the opposite of what the spelling
-suggests.
-
-To actually remove the search box from the toolbar, toggle the affordance —
-a different key, on the same view:
+To remove the search box, toggle the affordance — a different key, same view:
 
 <!-- os:check -->
 ```typescript
@@ -449,15 +377,11 @@ export const AuditViews = defineView({
 });
 ```
 
-#### Searching by a related record's title
-
-Never reach for a dotted path. `search` scans the queried object's **own**
-columns — unlike `columns` / `sort` / `filter`, the search axis resolves no
-traversal, so `account_id.name` is refused rather than silently dropped. Copy
-the parent's title into a **stored** field on this object and put that field in
-the object's `searchableFields`; the view then narrows to it like any other
-column. The full prescription — the mirror field, the two hooks that maintain
-it, and why a `formula` field cannot be the mirror — lives in
+**Searching by a related record's title:** never reach for a dotted path. The
+search axis resolves no traversal, so `account_id.name` is refused rather than
+silently dropped. Mirror the parent's title into a **stored** field on this
+object and narrow to that. The prescription — the mirror field, the two hooks
+that maintain it, and why a `formula` field cannot be the mirror — lives in
 **objectstack-data → Search Fields (`searchableFields`)**.
 
 ### Sorting
@@ -524,54 +448,6 @@ Timeline settings nest under `gantt:` (`GanttConfigSchema`);
 Rows with children (or `type: 'summary'`) render as **summary bars** — they
 move the whole group on drag and have **no resize handles**. Leaf tasks resize
 freely unless `locked: true`.
-
-### Shift segmentation — `timeSegments` (排班分段, ObjectUI extension)
-
-`timeSegments` splits each day column into ordered **bands** (e.g. 白班 / 夜班)
-for shift-based scheduling. It is an **ObjectUI display extension**, *not* part
-of the upstream `GanttConfigSchema` in `@objectstack/spec` — it lives inside
-the nested `gantt: {}` view config and is read by the ObjectUI gantt runtime.
-
-```typescript
-{
-  type: 'gantt',
-  data: { provider: 'object', object: 'work_order' },
-  columns: ['name', 'assignee'],
-  gantt: {
-    startDateField: 'start', endDateField: 'end', titleField: 'name',
-    timeSegments: {
-      dayStart: '08:00',               // clock time the 排班日 begins (default '00:00')
-      bands: [
-        { key: 'day',   label: '白班', start: '08:00', end: '20:00' },
-        { key: 'night', label: '夜班', start: '20:00', end: '08:00', color: '#6366f1' },
-      ],
-    },
-  },
-}
-```
-
-Field shapes:
-
-| Field | Required | Notes |
-| --- | --- | --- |
-| `dayStart` | no | `'HH:mm'` (24h). The "day" column starts here and runs a full 24h, so a cross-midnight band sits wholly inside one column. Default `'00:00'`. |
-| `bands[].key` | no | Stable id (`'day'`/`'night'`); defaults to `band{index}`. |
-| `bands[].label` | yes | Header text for the band (白班 / 夜班). |
-| `bands[].start` / `bands[].end` | yes | `'HH:mm'`. When `end <= start` the band crosses midnight. Bands must tile the 24h day from `dayStart`. |
-| `bands[].color` | no | Any CSS color. Tints that band's column; **omit for no tint**. |
-| `showMidnight` | no | Draw the dashed local-0:00 cue inside cross-midnight bands (the 排班日 cell itself stays unbroken). Default `true`; set `false` to hide it. |
-
-Behavior:
-
-- **Day scale only.** `timeSegments` applies when the gantt is in `day` mode; in
-  week/month/quarter scales it is ignored (no-op).
-- **Two-tier header.** Top tier = the 排班日 date (starting at `dayStart`),
-  bottom tier = one cell per band (each half-width for two equal bands).
-- **Attribution by `start`.** A task is placed in the 排班日 its `start` falls
-  in, so a 夜班 spanning 20:00→次日08:00 stays in a single column.
-- **Drag-snaps to band boundaries** (the band duration, e.g. 12h) instead of
-  whole days.
-- **Default off.** Omit `timeSegments` and the gantt renders unsegmented.
 
 ---
 
@@ -686,11 +562,10 @@ modifier; date bucketing comes from the bound dataset dimension's
 Every persisted chart is **dataset-backed** (ADR-0021 single-form cutover): a
 dashboard widget, a report, and a list `type:'chart'` view all **bind a `dataset`
 and select named `dimensions` + `values`**; the dataset owns the base object,
-allowed joins, intrinsic filter, dimensions, and certified measures. The legacy
-per-widget inline query (`object` + `categoryField` + `valueField` + `aggregate`)
-**was removed** — a widget now requires `dataset` + `values`; the closed schema
-REJECTS the inline keys by name, and one lacking `dataset` fails `os validate`.
-The dataset shape is
+allowed joins, intrinsic filter, dimensions, and certified measures. A widget
+**requires `dataset` + `values`**; the closed schema rejects `object` /
+`categoryField` / `valueField` / `aggregate` by name, and one lacking `dataset`
+fails `os validate`. The dataset shape is
 `DatasetSchema` — see `node_modules/@objectstack/spec/src/ui/dataset.zod.ts`.
 
 A widget's presentation-scope `filter` flows into the query as the runtime
@@ -1020,9 +895,15 @@ which contain components.
 
 ### Example — Record Detail Page
 
+<!-- os:check -->
 ```typescript
-import { definePage } from '@objectstack/spec/ui';
-import { ConvertLeadAction } from '../actions/lead.actions';
+import { defineAction, definePage } from '@objectstack/spec/ui';
+
+// Normally lives in its own `*.action.ts`; inlined so this block stands alone.
+const ConvertLeadAction = defineAction({
+  name: 'convert_lead', label: 'Convert Lead', objectName: 'lead',
+  type: 'flow', target: 'lead_conversion', locations: ['record_header'],
+});
 
 export const LeadDetailPage = definePage({
   name: 'lead_detail_page',
@@ -1143,9 +1024,9 @@ The source is real React executed at render by the runtime. The injected scope a
   `type:'record'`, where the context exists
 - `data` / `variables` / `page`
 
-Compose **layout with inline `style={{…}}`** (real CSS — see *Styling*, below); use the
-injected blocks for data. **Do NOT use Tailwind `className`** — page source is runtime
-metadata the build never scans, so utility classes silently do nothing. Real component
+Compose **layout with inline `style={{…}}`** (real CSS); use the injected blocks
+for data. **Do NOT use Tailwind `className`** — see *Styling a page* below for
+why it silently does nothing. Real component
 props/callbacks flow through — e.g. `<ObjectForm>` honors `objectName` / `mode` / `recordId` /
 `formType` / `onSuccess` / `onCancel`; `<ListView>` honors `objectName` / `fields` /
 `onRowClick` / `navigation`.
@@ -1165,7 +1046,10 @@ props/callbacks flow through — e.g. `<ObjectForm>` honors `objectName` / `mode
 
 Master/detail (click a row → edit it → save refreshes the list):
 
+<!-- os:check -->
 ```tsx
+import { definePage } from '@objectstack/spec/ui';
+
 export const CrmWorkbenchPage = definePage({
   name: 'crm_workbench', label: 'CRM Workbench', type: 'home', kind: 'react',
   source: `
@@ -1247,10 +1131,7 @@ Rules:
 }
 ```
 
-Why this model: it's **build-independent** (no Tailwind compile dependency),
-**collision-free** (per-node scoped, beats base utilities without `@layer`
-games), and **responsive-correct** (breakpoint maps → generated `@media`). The
-spec field is `PageComponentSchema.responsiveStyles` (`ResponsiveStylesSchema` —
+The spec field is `PageComponentSchema.responsiveStyles` (`ResponsiveStylesSchema` —
 see `node_modules/@objectstack/spec/src/ui/responsive.zod.ts`). See ADR-0065
 (SDUI styling model).
 
@@ -1351,14 +1232,10 @@ package) is a later, additive concern — author-side, nothing to model now.
 
 ### Inline metadata views — the `metadata` fence (ADR-0051)
 
-A reader who can't open Studio (a business user, a PM, an auditor) can't
-see the *whole shape* of a process or the *full* set of legal state
-transitions from a running screen. A `metadata` fenced block embeds a
-**live, read-only** view of one metadata item, resolved from the *current*
-metadata at render time — change the rule and the diagram follows, it is
-never a screenshot. The body is flat `key: value` **data, not code**, so it
-stays inside the §3.4 trust boundary (it compiles to the read-only
-`element:metadata_viewer` component — the same one a page can render).
+A `metadata` fenced block embeds a **live, read-only** view of one metadata
+item, resolved from the *current* metadata at render time — change the rule and
+the diagram follows; it is never a screenshot. The body is flat `key: value`
+**data, not code**, so it stays inside the §3.4 trust boundary.
 
 Three view kinds:
 
@@ -1439,6 +1316,7 @@ This blueprint is the default for “build a complete metadata app UI” tasks.
 Dashboards (`Dashboard`) are first-class metadata. Beyond the basic widget
 layout shown above, the production-grade pattern uses:
 
+<!-- os:check -->
 ```typescript
 import type { Dashboard } from '@objectstack/spec/ui';
 
@@ -1482,7 +1360,6 @@ export const SalesDashboard: Dashboard = {
       // Period-over-period: renderer fetches the prior quarter and
       // surfaces a secondary value + delta arrow automatically.
       compareTo: { kind: 'previousPeriod' },
-      actionType: 'url', actionUrl: '/objects/opportunity?filter=open',
     },
 
     // Chart widget with comparison overlay (M2). The renderer issues a
@@ -1501,10 +1378,34 @@ export const SalesDashboard: Dashboard = {
 };
 ```
 
-> **Tokens in filters:** `{current_quarter_start}`, `{current_user.id}` are
+> **Tokens in filters:** `{current_quarter_start}`, `{current_user_id}` are
 > resolved at request time. Avoid baking absolute dates into definitions.
 > The full list of supported date placeholders is documented in
 > [Date Macros](#date-macros--filter-placeholders) below.
+
+### Dashboard filters — `globalFilters` + per-widget `filterBindings`
+
+A dashboard filter is **broadcast into every widget's query**. A widget with no
+`filterBindings` inherits it on its own object's like-named field — which is how
+a filter bar looks alive while the tiles read `0`: the inherited binding is
+field-valid and value-empty when two objects share a column name under different
+vocabularies.
+
+| Declare | On | Meaning |
+|:--|:--|:--|
+| `name` | a `globalFilters` entry | The stable key `filterBindings` references. Defaults to `field`; name it for the **vocabulary it carries**, not the column it sits on. |
+| `scope: 'widget'` + `targetWidgets` | a `globalFilters` entry | Apply to those widget ids only. `scope` defaults to `'dashboard'`. |
+| `filterBindings: { filterName: 'field' }` | a widget | Re-target onto THIS widget's field. |
+| `filterBindings: { filterName: false }` | a widget | Opt out — the honest binding when the vocabularies are disjoint and no field can be re-targeted. |
+| absent | a widget | Default binding: the filter's own `field`; for the reserved `dateRange`, `dateRange.field ?? 'created_at'`. |
+
+```typescript
+// One control, two objects: re-target on one widget, opt the other out.
+{ id: 'revenue_by_region', dataset: 'order_metrics', values: ['total_sum'],
+  filterBindings: { region: 'sales_region' } },
+{ id: 'projects_at_risk', dataset: 'project_metrics', values: ['project_count'],
+  filterBindings: { task_status: false } },
+```
 
 ### Period-over-period — `compareTo`
 
@@ -1526,13 +1427,6 @@ runs. There is no second widget-side vocabulary.
 compareTo: { kind: 'previousPeriod' }                            // one dated dimension
 compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — say which
 ```
-
-> **Removed in v17:** the bare strings `compareTo: 'previousPeriod'` /
-> `'previousYear'` and the `{ offset: '7d' | '1M' | '1y' }` arm. The strings and
-> `{ offset: '1y' }` are rewritten for you by `os migrate meta --from 16`; any
-> other `offset` duration has no faithful target — state the window on the
-> widget's `filter` and compare it with `{ kind: 'previousPeriod' }`, which
-> shifts by that window's own length.
 
 * **Metric widgets** — the prior-period value renders as a small caption
   beneath the headline number, alongside a green/red delta arrow and an
@@ -1569,13 +1463,17 @@ compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — 
 
 ### Server-side date bucketing — `dateGranularity` (ADR-0021)
 
-Date bucketing lives on the **dataset dimension**, not the widget. Give a date
+The **dataset dimension carries the default; a widget's
+`options.dateGranularity` overrides it for that widget only.** Give a date
 dimension a `dateGranularity` and any presentation that selects it groups by that
 bucket server-side — without it every distinct timestamp becomes its own
 category, collapsing a 12-row seed into a 12-point flat line. (The old widget-level
 `categoryGranularity` was removed in the single-form cutover.)
 
+<!-- os:check -->
 ```typescript
+import { defineDataset, type DashboardWidget } from '@objectstack/spec/ui';
+
 // In the dataset (Guides → Analytics Datasets):
 defineDataset({
   name: 'contract_metrics', label: 'Contract Metrics', object: 'contract',
@@ -1589,10 +1487,51 @@ defineDataset({
 // (ADR-0053). Omit it for non-money measures (count, avg-of-hours).
 
 // The widget just selects the dimension by name:
-{ id: 'signed_by_month', type: 'line',
+const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',
   dataset: 'contract_metrics', dimensions: ['signed_date'], values: ['signed_count'],
   filter: { signed_date: { $gte: '{12_months_ago}' } },
-  compareTo: { kind: 'previousYear' } }
+  compareTo: { kind: 'previousYear' } };
+```
+
+| `dateGranularity` | Rendered bucket label |
+|:--|:--|
+| `'day'` | `YYYY-MM-DD` |
+| `'week'` | ISO date of the bucket (`YYYY-MM-DD`) |
+| `'month'` | `YYYY-MM` |
+| `'quarter'` | `YYYY-Qn` |
+| `'year'` | `YYYY` |
+
+* **Engine support** — Postgres `date_trunc`, MySQL `date_format`, SQLite
+  `strftime`, MongoDB `$dateTrunc`, in-memory fallback. All emitted by the
+  analytics service, not the client.
+* **Human labels are automatic** — the analytics layer formats the bucket value
+  to the label above, and resolves `select`/`lookup` dimension values to their
+  option label / related-record name. Measures carry their `label` + `format`
+  (e.g. `$0,0`) so KPIs and legends read "Total Spent / $616,000", not
+  "spent_sum / 616000". Authors do not format dimension/measure values by hand.
+* **Combines with `compareTo`** — the comparison query is issued with the same
+  granularity, so the muted overlay aligns bucket-for-bucket.
+* **Rule of thumb** — `day` for ≤30d windows, `week` for ~90d, `month` for
+  6–12 months, `quarter` for multi-year, `year` for retention / compliance.
+
+### Widget `options` — the five declared keys
+
+`options` is an open bag — presentation extras (`icon`, `trend`, `density`, …)
+pass through untouched. These five are **declared** because they change the SQL
+the dataset query compiles to, so a typo (`sortDirection`, `granularity`) is an
+author-time type error rather than an option that silently does nothing.
+
+| Key | Value | Effect |
+|:--|:--|:--|
+| `dateGranularity` | `day` / `week` / `month` / `quarter` / `year` | Buckets this widget's selected DATE dimensions. **Overrides** the dataset dimension's own default, for this widget only. |
+| `sortBy` | a name this widget selects | Order by that dimension or measure. It must be one of this widget's own `dimensions` / `values` entries. |
+| `sortOrder` | `'asc'` \| `'desc'` | Direction for `sortBy` (default ascending). |
+| `limit` | positive integer | Max rows, applied **after** ordering — so "top 10 accounts" is `limit` **plus** `sortBy`. Without `sortBy` the runtime orders by the selected dimensions: deterministic, but not the top of anything. |
+| `stageOrder` | array of **stored** values | Explicit category order for `funnel` / `pyramid`. Stored values, not display labels; omit it to inherit the field's own picklist order. |
+
+```typescript
+// Top 10 accounts by revenue, bucketed monthly for this widget only
+options: { sortBy: 'revenue_sum', sortOrder: 'desc', limit: 10, dateGranularity: 'month' }
 ```
 
 ### Drilldown
@@ -1620,149 +1559,28 @@ defaults `true`) opens the identical in-place drawer on row/cell click — peek 
 records, click a row to open one, or "Open in list →" for the full list page.
 Dashboard and report drill are unified.
 
-> **Renderer note (object/record-backed surfaces).** The ObjectUI renderer
-> exposes a richer `options.drillDown` block for non-dataset list/table widgets
-> and the drill drawers — `enabled`, `mode` (`'filter'` = aggregate → filtered
-> list; `'record'` = row → that record), `target` (`'drawer'` | `'dialog'` |
-> `'navigate'`, where `'navigate'` skips the drawer and opens the list page
-> directly), `columns` (whitelist), and `title` (`${event.*}` interpolation). At
-> the renderer level drill-through covers the `bar` / `line` / `area` / `pie` /
-> `donut` / `funnel` / `scatter` / `treemap` / `sankey` families and pivot
-> cell/row/column/total clicks (`radar` is excluded — no single clickable
-> category point). The "Open in list →" escape hatch appears whenever the host
-> app wired drill navigation (the console does). **Dataset-bound dashboards use
-> the semantic-layer drill above and ignore the rest of this block.**
-
-| `dateGranularity` | Rendered bucket label |
-|:--|:--|
-| `'day'` | `YYYY-MM-DD` |
-| `'week'` | ISO date of the bucket (`YYYY-MM-DD`) |
-| `'month'` | `YYYY-MM` |
-| `'quarter'` | `YYYY-Qn` |
-| `'year'` | `YYYY` |
-
-* **Engine support** — Postgres `date_trunc`, MySQL `date_format`, SQLite
-  `strftime`, MongoDB `$dateTrunc`, in-memory fallback. All emitted by the
-  analytics service, not the client.
-* **Human labels are automatic** — the analytics layer formats the bucket value
-  to the label above, and resolves `select`/`lookup` dimension values to their
-  option label / related-record name. Measures carry their `label` + `format`
-  (e.g. `$0,0`) so KPIs and legends read "Total Spent / $616,000", not
-  "spent_sum / 616000". Authors do not format dimension/measure values by hand.
-* **Combines with `compareTo`** — the comparison query is issued with the same
-  granularity, so the muted overlay aligns bucket-for-bucket.
-* **Rule of thumb** — `day` for ≤30d windows, `week` for ~90d, `month` for
-  6–12 months, `quarter` for multi-year, `year` for retention / compliance.
-
 ---
 
 ## Date Macros — Filter Placeholders
 
-Dashboards, reports, list-view filters, and other UI metadata can embed
-relative-date placeholders. The canonical contract is published as
-`DATE_MACRO_TOKENS` in `@objectstack/spec/data` (source:
-`node_modules/@objectstack/spec/src/data/date-macros.zod.ts`); two resolvers
-consume it and must stay in lockstep with it — `resolveDateMacros` in
-`@object-ui/core` (before the request leaves the browser) and
-`resolveFilterTokens` in `@objectstack/core` (the ObjectQL
-read path and the analytics dataset executor, which is what a dashboard
-widget's `filter` actually travels through — it never passes a renderer).
+Filter values in list views, dashboards, reports and pages accept relative-date
+tokens (`{today}`, `{current_month_start}`, `{30_days_ago}`) and the two session
+tokens `{current_user_id}` / `{current_org_id}`. **The vocabulary, both accepted
+spellings, the two resolvers and the near-miss list are owned by
+objectstack-query → `rules/filters.md` — load it before writing a filter token.**
+An unrecognised token is a build error and a runtime throw, never a silent
+literal.
 
-An unrecognised placeholder is a build error (`validate-filter-tokens`) and a
-runtime throw, never a silent literal. Note `*_end` is the period's last
-calendar DAY, so a `datetime` column wants `< {next_*_start}` rather than
-`<= {current_*_end}`.
+Two rules this package owns, because they are about UI surfaces rather than the
+token vocabulary:
 
-Both `{token}` and `${token}` forms are accepted.
-
-### Fixed tokens (36)
-
-| Category | Tokens |
-|:--|:--|
-| Instants | `today`, `yesterday`, `tomorrow`, `now` |
-| Current period | `current_week_start` / `_end`, `current_month_start` / `_end`, `current_quarter_start` / `_end`, `current_year_start` / `_end` |
-| Last period | `last_week_start` / `_end`, `last_month_start` / `_end`, `last_quarter_start` / `_end`, `last_year_start` / `_end` |
-| Next period | `next_week_start` / `_end`, `next_month_start` / `_end`, `next_quarter_start` / `_end`, `next_year_start` / `_end` |
-| Bare aliases | `week_start`, `week_end`, `month_start`, `month_end`, `quarter_start`, `quarter_end`, `year_start`, `year_end` (same as `current_*`) |
-
-### Parameterised tokens — `{N_<unit>_(ago|from_now)}`
-
-`N` is any non-negative integer; `<unit>` is one of
-`minute(s) | hour(s) | day(s) | week(s) | month(s) | year(s)`.
-`minute`/`hour` resolve to a full ISO timestamp; coarser units resolve to
-`YYYY-MM-DD`.
-
-```
-{30_days_ago}       {7_days_from_now}     {1_day_ago}
-{2_weeks_ago}       {6_months_from_now}   {1_year_ago}
-{15_minutes_ago}    {2_hours_from_now}
-```
-
-### DO / DON'T
-
-* **DO** type-check tokens against the spec — `isDateMacroToken(tok)` from
-  `@objectstack/spec/data` returns `false` for anything unsupported.
-* **DO** prefer `Field.datetime()` for "near-now" filters (minute/hour
-  precision); driver-sql automatically coerces ISO macros to the stored
-  ms-epoch representation.
-* **DON'T** invent tokens. Unknown placeholders silently pass through as
-  literal strings — the resulting SQL compares text against
-  `'{my_made_up_token}'` and matches zero rows.
-* **DON'T** combine multiple tokens inside one value without resolution
-  semantics (`'{today}-{tomorrow}'` is fine; `{today_or_tomorrow}` is
-  not — there is no such token).
-
-## Context Tokens — `{current_user_id}` / `{current_org_id}`
-
-The session-scoped sibling of date macros, resolved by the same client pass
-(`resolveFilterPlaceholders` in `@object-ui/core`). Contract: `CONTEXT_TOKENS`
-in `@objectstack/spec/data`. These are the **only two** tokens that resolve
-inside a filter value:
-
-| Token | Resolves to |
-|:--|:--|
-| `{current_user_id}` | the signed-in user's id (`sys_user.id`) |
-| `{current_org_id}` | the active organization id |
-
-They work in **every** filter value — list-view filters, dashboard widget
-filters, report `runtimeFilter`, dataset filters, SDUI component filters, and
-nav-item `filters` — in both authoring shapes:
-
-```typescript
-// Widget filter (object shape)
-filter: { owner_id: '{current_user_id}', created_at: { $gte: '{week_start}' } }
-
-// List view (array shape)
-filter: [{ field: 'owner', operator: 'equals', value: '{current_user_id}' }]
-```
-
-### DO / DON'T
-
-* **DO** use exactly these spellings. Three near-misses are common because
-  each is a correct spelling *somewhere else* in the platform — all three
-  resolve to nothing in a filter:
-
-  | You might write | Because | Correct token |
-  |:--|:--|:--|
-  | `{current_user}` | `current_user.id` is the RLS expression root | `{current_user_id}` |
-  | `{user_id}` | `{user_id}` is valid `titleFormat` field interpolation | `{current_user_id}` |
-  | `{organization_id}` | that is the real column name | `{current_org_id}` |
-
-* **DO** remember these are **presentation scope, not security**. They decide
-  what a surface *shows*; RLS decides what a caller may *read*. Removing a
-  `{current_user_id}` filter widens a view — it must never be the thing
-  standing between a user and someone else's data.
-* **DON'T** embed a token in a larger string (`'user-{current_user_id}'`).
-  Ids are opaque; only whole-value placeholders are substituted.
-* **DON'T** use `AppContextSelector` ids (e.g. `{active_package}`) in a
-  filter. Those resolve in navigation `recordId` / `params` only — filters are
-  not evaluated with the sidebar's selector state.
-
-`os validate` fails the build on an unresolvable placeholder in any filter
-(rule `filter-token-unknown`) and names the token it thinks you meant. That
-gate exists because the runtime failure is silent: an unresolved token reaches
-SQL as a literal, matches nothing, and the widget renders `0` —
-indistinguishable from a genuine zero.
+* A filter token is **presentation scope, not security**. It decides what a
+  surface *shows*; RLS decides what a caller may *read*. Removing a
+  `{current_user_id}` filter widens a view — it must never be the thing standing
+  between a user and someone else's data.
+* `AppContextSelector` ids (e.g. `{active_package}`) resolve in navigation
+  `recordId` / `params` only. Filters are not evaluated with the sidebar's
+  selector state.
 
 ---
 
@@ -1796,17 +1614,12 @@ export const opportunityCube = defineCube({
 });
 ```
 
-### Cube Best Practices
+### Cube Rules
 
 1. **`sql` = object name** (e.g. `'opportunity'`). The ObjectQL strategy
    reads it via `cube.sql.trim()` — do **not** put raw SQL there.
-2. **Use dotted lookups** in `dimensions[*].sql` (`'account.industry'`) to
-   reach across relations — the engine auto-joins.
-3. **Always declare `granularities`** on `time` dimensions so dashboards can
+2. **Always declare `granularities`** on `time` dimensions so dashboards can
    bucket by day / month / quarter without ad-hoc queries.
-4. **Keep `public: true`** for any cube referenced by a dashboard widget; an
-   internal-only cube should be `public: false`.
-5. One cube per object usually beats omnibus cubes — composability stays high.
 
 ---
 
@@ -1950,34 +1763,16 @@ zero relearning:
 const org = ctx.user?.organizationId ?? ctx.session?.organizationId;
 ```
 
-> The former `ctx.session.tenantId` alias was removed in v16; read the
-> caller's active org under `organizationId`.
-
 Action bodies execute **trusted** (the `ctx.engine` / `ctx.api` facade bypasses
 RLS/FLS), so a body that must scope by org reads it from `ctx` explicitly.
-`ctx.user` is `undefined` for a context-less / self-invoked call; read
-`ctx.session?.organizationId` when the action must work regardless. (Same two
-isolation axes as hooks — `organization_id` row-scoping vs environment /
-database-per-tenant; see the objectstack-data hooks reference.)
+`ctx.user` is `undefined` for a context-less / self-invoked call. Same two
+isolation axes, same blessed name, same `undefined` cases as hooks — see the
+objectstack-data hooks reference.
 
-The caller's position names are on `ctx.session.positions` — the ADR-0090 D3
-spelling, the same one the hook `ctx.session`, `ctx.user.positions` and the
-sharing service use:
-
-```typescript
-// ✅ Canonical
-const positions = ctx.session?.positions ?? [];
-```
-
-> The key is **absent** (not empty) when the caller holds no positions, and the
-> whole `ctx.session` is `undefined` for a call with no identity envelope. The
-> pre-ADR-0090 alias of this same array is still emitted for one migration
-> window and then removed — see `action-session-*-to-positions` in the protocol
-> upgrade guide for the prescription. Migrate the READ to `positions`; do not
-> migrate an access check by renaming it. **This array is not an authorization
-> input**: `positions.includes('admin')` is the same defect under a blessed
-> name. Ask the security service for privilege (capability grants, placements,
-> derived posture — ADR-0095).
+The caller's position names are on `ctx.session.positions` (absent, not empty,
+when the caller holds none). **This array is not an authorization input**:
+`positions.includes('admin')` is a defect under a blessed name — ask the
+security service for privilege (ADR-0095).
 
 ### Opening in a New Tab (`openIn` / `opensInNewTab` / `newTabUrl`)
 
@@ -1998,7 +1793,7 @@ import { defineAction } from '@objectstack/spec/ui';
 
 export const PrintA3Action = defineAction({
   name: 'print_a3',
-  label: '打印总表(A3)',
+  label: 'Print Summary Sheet (A3)',
   type: 'url',
   target: '/print/a3?id=${record.id}',   // static template; interpolated at click
   openIn: 'new-tab',

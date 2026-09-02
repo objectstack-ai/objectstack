@@ -1,0 +1,75 @@
+// The TEST-layer type-check program (#14062 — the `packages/plugins/**` family
+// adopting the mechanism #5286 set for `packages/spec`, #5449 generalised,
+// #12542 carried to `packages/rest` and #13176 to `packages/plugins/
+// plugin-security`). `tsconfig.json` beside this one stays exactly as it is: it
+// is the BUILD config. This sibling puts the test layer in front of tsc under
+// the module semantics vitest really executes it with, and `package.json`'s
+// `typecheck` script NAMES it (via `check:test-typecheck --project`), because a
+// config no script invokes is exactly the phantom this whole change is about.
+//
+// The family was onboarded as a family by the director ruling of 2026-09-01 on
+// #14062 (maintainer verbatim: 「同意」), which also carries the #5286
+// maintainer authority for the starting ledgers. The reason it is a family and
+// not one package: the ledger's shrink-only guarantee said NOTHING about a
+// third of the repo's runtime surface, and a guarantee with a silent hole is
+// worse than a narrower one honestly drawn, because readers generalise it.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - MODULE SEMANTICS ONLY, plus `lib`. The tests are written and executed as
+//     ESM by vitest (esbuild/vite). Matching that is FIDELITY, not laxity: it is the
+//     same subtraction `packages/spec`, `packages/rest` and `plugin-security`
+//     each made, and it removes a config-tier error pile that says nothing
+//     about the tests.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`,
+//     `rootDir`, `paths` and `types` are all INHERITED from `tsconfig.json`
+//     (and through it the root config), and none of them is re-declared here.
+//     ⚠️ A child that declared its own `paths` would REPLACE the parent map
+//     rather than merge into it, silently sending a source-resolved specifier
+//     back to `dist/` — a BUILD ARTIFACT — so this file declares none.
+//     Nothing here may loosen a type rule; if a test does not compile, that is
+//     the finding.
+//
+//   - `lib: ["ES2022"]`, for the same reason `packages/rest` states: the root
+//     config's `lib` is ES2020 and vitest runs on a Node that has es2022
+//     builtins, so the gap is reported as TS2550 about the CHECK. No `DOM`:
+//     nothing in this layer touches a browser global.
+//
+// MEASURED at e80889095, workspace closure built first (`tsc --noEmit --pretty false
+// --listFiles -p tsconfig.test.json`, and the same command without `--listFiles`):
+//
+//   files in this program        388
+//   own `src/**/*.test.ts` in it 1
+//   errors under BUILD semantics 4
+//   errors under THIS config     3
+//
+// The difference is exactly the config tier — 1 x TS2550
+// (`Array.prototype.at` against the root config's `lib: ES2020`) — and not
+// one line of test code. Fixing the CHECK first and reading the residue
+// afterwards is the #4311 discipline this repo already writes down.
+//
+// BEFORE THIS FILE: the build config does not exclude tests EITHER, but
+// this package declared NO `typecheck` script at all — so no tsc program
+// was ever RUN over them. Same silence, reached the other way, and the 3
+// residual errors below are what it was hiding.
+//
+// The 3 residual error(s) are PRE-EXISTING — this change edits no test file, and
+// every one of them would have been reported on `origin/main` had this program always
+// existed. They are ledgered per file in `test-typecheck-debt.json` beside this config,
+// EXACT and shrink-only: a file that gains an error is red, one that loses an error is
+// red until re-recorded, one that reaches zero is red until its entry is deleted, a
+// signature that ARRIVES or VANISHES is red even at an unchanged file total, and a file
+// NOT listed there may have no errors at all. ⛔ The ruling is explicit that this PR
+// does not REPAIR them — it makes the ratchet able to see them; paydown follows the
+// ratchet's own shrink-only discipline, on its own cards.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

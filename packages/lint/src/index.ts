@@ -24,6 +24,10 @@ export {
   WIDGET_LEGACY_ANALYTICS_UNRENDERABLE,
   DASHBOARD_FILTER_FIELD_UNKNOWN,
   DASHBOARD_FILTER_FIELD_UNPROVISIONED,
+  // [#14275] The `include` clause on a DASHBOARD-level filter's effective
+  // field, now that it is resolved on the object graph rather than skipped
+  // whenever it was dotted.
+  DASHBOARD_FILTER_FIELD_NOT_INCLUDED,
   // [#14148] The widget's OWN two references, at the same site: the keys of its
   // presentation-scope `filter` (resolved on the #14105 object-graph seam, with
   // the ADR-0021 `include` clause its `runtimeFilter` really is subject to) and
@@ -223,6 +227,7 @@ export {
   VISIBILITY_BARE_IDENTIFIER,
   VISIBILITY_PREDICATE_SYNTAX,
   VISIBILITY_PREDICATE_OVER_BUDGET,
+  VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
 } from './validate-visibility-predicates.js';
 export type {
   VisibilityFinding,
@@ -434,9 +439,14 @@ export type {
 // timeline / gallery / map / tree blocks). Resolution goes through the shared
 // `object-graph.ts` seam (#14105/#14148), on the HEAD segment — see that
 // module's dotted-path note.
+// [#14282] The same rule's SECOND finding class: a dotted reference at a
+// position whose name reaches a query door (the `$select` projection, or the
+// compiled filter), where that door refuses it by name — the loud-failing half
+// #14107 recorded and left open.
 export {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
+  LIST_VIEW_FIELD_DOTTED,
 } from './validate-list-view-field-refs.js';
 export type {
   ListViewFieldRefFinding,

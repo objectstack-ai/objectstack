@@ -658,10 +658,6 @@ const DEBT = {
     errors: 3,
     note: 'all code-tier (TS2769/TS18046).',
   },
-  '@objectstack/knowledge-ragflow': {
-    errors: 4,
-    note: 'code-tier 3 (TS2353) + 1 config-tier (TS2550 lib).',
-  },
   '@objectstack/metadata': {
     errors: 89,
     note: 'code-tier 30 (TS2345 x30); config-tier 25 (TS2835 x25); noise 34 (TS7006 x33, TS6133). '
@@ -911,33 +907,40 @@ const EXEMPT = {
 // the graduation message no longer offers the exclusion route without its
 // precondition. Re-measure before relying on the split: it moves with every
 // import a test file gains.
+//
+// ── #14062: three plugin entries GRADUATED, and what replaced them ───────────
+//
+// `plugin-approvals` (345), `plugin-auth` (94) and `plugin-sharing` (3) left
+// this ledger on 2026-09-02, and `knowledge-ragflow` (4) left DEBT above in the
+// same change. ⛔ None of them was PAID DOWN — read that first, because a
+// deleted debt entry normally means the errors are gone and here it does not.
+//
+// The director ruling of 2026-09-01 on #14062 (maintainer verbatim: 「同意」)
+// onboarded all fourteen `packages/plugins/**` packages into the
+// `check:test-typecheck` instrument: each has a `tsconfig.test.json` its
+// `typecheck` script NAMES, so `hidesTests` is false for all of them and this
+// gate's per-PACKAGE approximation of the debt has nothing left to approximate.
+// The same errors are now held one level finer, per FILE and per SIGNATURE, in
+// each package's own `test-typecheck-debt.json` — 324 / 94 / 3 / 3 respectively
+// (approvals reads 324 rather than 345 because the test program uses vitest's
+// module semantics, which subtracts 21 config-tier diagnostics that were never
+// about the tests). That is the graduation this ledger's own message asks for:
+// "the repair is the same one spec took -- put the file in a tsc program", and
+// the entry goes when the program exists, not when the number reaches zero.
+//
+// `@objectstack/lint` (16) left this ledger under the same shape on 2026-09-02
+// (#14173, wired to this instrument per the triage ruling on that card): the
+// recorded 16 (TS7006 x11, TS2835 x5) was entirely a config-tier pile -- it
+// dissolves under `tsconfig.test.json`'s `bundler` resolution, the same effect
+// measured above -- and the 6 residual TS6059 that replace it in
+// `test-typecheck-debt.json` were never part of the 16 at all; this entry's own
+// prior note already excluded them ("never this package's debt ... reporting on
+// its own inherited rootDir").
+//
+// So the shrink-only guarantee did not loosen here; it moved to a strictly
+// sharper instrument, one that also reddens on a wholesale substitution of
+// error IDENTITY at a constant total, which a per-package integer cannot see.
 const TEST_DEBT = {
-  '@objectstack/plugin-approvals': {
-    errors: 345,
-    note: 'TS2339 x296, TS2550 x20, TS2345 x16, TS18048 x10, plus 5 singletons (TS2554 x2, TS1470, '
-      + 'TS2352, TS6133). LOWERED 347 -> 345 at ead731756 (#12723), in a sweep that re-measured all 31 '
-      + 'ledger entries at once and found 4 of them carrying slack. The tally above was taken at 347 and '
-      + 'is NOT re-tallied here: that sweep measured per-entry TOTALS only, so the -2 is unattributed, '
-      + 'and an admitted gap beats an invented composition. '
-      + 'Lowered 348 -> 347 at 0e0bf8049 (#11497): tsc against that tree reports the '
-      + 'same seven codes at the same counts as the prior 348 composition, TO THE UNIT, minus the sole '
-      + 'TS2353 -- a fully attributable single-error retirement, not a rescale. '
-      + 'Was 547 (re-measured at 5ab08428, up from 467; TS2345 x213 then). '
-      + 'Lowered 547 -> 348 at b5e09b21 (#7888), and the -199 is ONE CLASS COLLAPSING rather than a '
-      + 'measured surface shrinking -- the distinction the surplus finding asked to be settled before a '
-      + 'gap this size was written in as a floor. Three readings say collapse: (a) TS2339 x296, TS2550 '
-      + 'x20 and TS18048 x10 are unchanged TO THE UNIT against the 547 composition and only TS2345 moved, '
-      + '213 -> 16 -- a program that had DEGRADED instead (an unresolved import turning a type into any) '
-      + 'would have wiped the 296 property errors first, since property access on any is legal; (b) all '
-      + '21 test files are on disk and all 21 are in the program (tsc --listFiles), none deleted, and the '
-      + 'package\'s other test files gained 406 lines and lost 204 over the window -- the set grew; (c) '
-      + 'src/approval-service.test.ts, which holds 273 of the 348 as it held 443 of the 547, is '
-      + 'BYTE-IDENTICAL between 5ab08428 and b5e09b21 (blob 3fc272f, 3335 lines both ends). Same bytes, '
-      + '170 fewer errors, so the repair landed in a producer\'s types and no assertion was deleted to '
-      + 'get it. The 16 TS2345 that survive are still reported against a fully-resolved approver-config '
-      + 'union, so that parameter type is still strict -- the 197 that went were repaired, not loosened '
-      + 'away. Still entirely test-only (src is clean), so nothing but this ledger has ever seen it.',
-  },
   '@objectstack/runtime': {
     errors: 206,
     note: 'TS18048 x91 (possibly-undefined), TS18046 x27, TS2339 x17, TS2493 x15, TS2835 x13, TS2345 x10, '
@@ -997,67 +1000,6 @@ const TEST_DEBT = {
       + 'RECORDED EXACTLY, no bootstrap margin: this layer has never been gated, so the first new error in '
       + 'it should go red rather than be absorbed.',
   },
-  '@objectstack/plugin-auth': {
-    errors: 94,
-    note: 'LOWERED 97 -> 94 at ead731756 (#12723), in a sweep that re-measured all 31 ledger entries at '
-      + 'once. Everything below -- the tally, the per-file split, the 97 they sum to -- was taken at 97 '
-      + 'and is NOT re-tallied here: that sweep measured per-entry TOTALS only, so the -3 is unattributed. '
-      + 'RE-TALLIED from tsc at the 97 below (#10615), measured at cea8c7d867 with the workspace closure '
-      + 'built by the same command lint.yml runs before this gate, so the composition, the per-file split '
-      + 'and the total are ONE measurement rather than a rescale: TS2493 x36 (tuple index out of range), '
-      + 'TS18048 x24, TS2322 x11, TS2532 x9, TS2345 x4, TS2339 x3, TS2554 x3, TS2741 x3, TS7006 x2, '
-      + 'TS2769 x1, TS6133 x1 = 97, the number recorded at THAT time EXACTLY. The per-file split is '
-      + 'COMPLETE at this measurement rather than a top-four: '
-      + '43 in src/auth-manager.test.ts, 18 in src/admin-user-endpoints.test.ts, 12 in '
-      + 'src/auth-plugin.test.ts, 11 in src/admin-import-users.test.ts, 3 each in '
-      + 'src/objectql-adapter.test.ts and src/sso-client-secret-at-rest.test.ts, 2 each in '
-      + 'src/auth-manager.jwt-eddsa-fallback.test.ts and src/reconcile-membership.test.ts, 1 each in '
-      + 'src/better-auth-schema-parity.test.ts, src/last-admin-guard.test.ts and '
-      + 'src/oauth-provider-schema-parity.test.ts -- 11 files, summing to 97. '
-      + 'LOWERED 109 -> 97 here, and the -12 was MEASURED rather than subtracted, which is the whole point '
-      + 'of the card: it was filed naming a surplus of 11 (a 98) off PR #10614\'s head, a later sweep at '
-      + '3c6028f1b2 reported the surplus as 12, and 109 - 11 = 98 was the cheap wrong answer that looks '
-      + 'right. Cross-tabbing the recorded measurement against this one by file AND code attributes all 12: '
-      + '11 sit in ONE file, src/admin-import-users.test.ts (TS2339 5 -> 0, TS2493 13 -> 7), which is '
-      + '#10614 giving two engine doubles real typed parameters -- a zero-parameter mock has a zero-length '
-      + 'parameter tuple, so every call site reading `.mock.calls[0][1]` was a TS2493 and every '
-      + '`options?.where` off it a TS2339. The 12th is one TS2345 that left '
-      + 'src/auth-manager.test.ts(4086,46) after that PR (a vi.fn callback whose parameter tuple did not '
-      + 'match its consumer), over three commits that rewrote 204 lines of that file, and it is NOT '
-      + 'attributed further rather than guessed. '
-      + 'CORRECTION, recorded because re-deriving the whole split is what caught it: the card predicted '
-      + 'src/admin-import-users.test.ts AND src/admin-user-endpoints.test.ts as "exactly the two files '
-      + 'that moved". admin-user-endpoints holds 18 at BOTH ends and did not move at all. Patching the two '
-      + 'numbers a reader believes changed would have written a plausible and wrong split over a correct '
-      + 'total -- the one failure this ledger cannot see, since nothing but prose records a split. '
-      + 'ANCHOR, re-established BEFORE re-tallying rather than assumed: d5e7b9f5a1, the ref the 109 was '
-      + 'measured on, still measures 109 today -- and not only in total, which is what makes it an anchor '
-      + 'rather than a coincidence: the composition reproduces class for class (TS2493 x42, TS18048 x24, '
-      + 'TS2322 x11, TS2532 x9, TS2339 x8, TS2345 x5, TS2554 x3, TS2741 x3, TS7006 x2, TS2769 x1, '
-      + 'TS6133 x1) and the per-file split reproduces the 44/22/18/12 this note used to record. So the '
-      + 'measuring stick did not drift under the entry and 97 is comparable to 109. Worth the check: this '
-      + 'gate grew +1752/-81 over the same window and the re-measure path itself DID move -- '
-      + '`measureTestDebt` now asks `tscErrorCount` to drop TS6059 (#10779) and the `include` roots moved '
-      + 'into `includeRoot` (#10876) -- but neither reaches this package, whose output carries no TS6059 '
-      + 'and whose `include` root reads the same under an expression that is the old inline one verbatim. '
-      + 'NOT a graduation: 97 is not 0, so this entry stays and the package typecheck script is unchanged. '
-      + 'History, still true: measured 124 -> 129 (5ab08428, composition unchanged in shape) -> 131 '
-      + '(e8db1a230). Lowered 131 -> 111 at b16dcb45 (#7888); the intermediate 108 in that PR\'s first '
-      + 'commit was measured at b5e09b21 and was already stale when the merge queue built it -- the '
-      + 'package took +3 inside the hour, the same "a ledger number is a number about a moment" race that '
-      + 'kicked #5278 three times, so 111 was the merge-queue run\'s own re-measure on the ref that PR '
-      + 'actually landed on. Of the +2 that had made 131, half is a TS2554 in src/last-admin-guard.test.ts, '
-      + 'a file added by #5941 / PR #5993 (the break-glass delete guard); the other 1 landed in a file that '
-      + 'already existed and is not attributed further. Then 111 -> 110 in PR #10013 -- the number moved '
-      + 'and the note did not, which is how a composition written at 131 was still sitting over an entry '
-      + 'reading 110 -- and 110 -> 109 (#9694), where src/managed-extension-fields.test.ts stopped seeding '
-      + 'from `import.meta.url` (a meta-property module: NodeNext forbids in this CJS-typed package) and '
-      + 'now seeds from `__dirname`, which type-checks here AND is a spelling '
-      + 'check:cross-package-test-inputs resolves -- that gate publishes the current set verbatim in its '
-      + 'failure text, deliberately not restated as a count here because a count drifts silently (widened '
-      + 'twice, #8995 and #9763) -- so that file\'s repo-wide *.object.ts walk stays visible to the gate '
-      + 'holding plugin-auth\'s declared input radius. It contributes nothing to this pile any more.',
-  },
   '@objectstack/mcp': {
     errors: 53,
     note: 'TS18046 x51 -- `json` is of type unknown, one `await res.json()` idiom repeated across four '
@@ -1103,33 +1045,6 @@ const TEST_DEBT = {
       + 'ratchet. Re-measured 10 at 2bc187641, and the pristine tree at that commit reports the same 10, '
       + "so none of the -33 is this PR's doing.",
   },
-  '@objectstack/lint': {
-    errors: 16,
-    note: 'TS7006 x11, TS2835 x5, re-tallied from tsc at the 16 below -- not the older '
-      + 'composition rescaled. Per file: src/validate-semantic-roles.test.ts x5, '
-      + 'src/validate-dashboard-action-refs.test.ts x4, '
-      + 'src/validate-filter-tokens.test.ts x3, src/validate-capability-references.test.ts x3, '
-      + 'src/validate-managed-api-methods.test.ts x1. The 5 TS2835 are one per file and all the same '
-      + "shape -- the test's own relative import of the module under test, missing its `.js`. "
-      + 'LOWERED 19 -> 16 in #10779, re-tallied rather than declared stale because the delta is exactly '
-      + 'attributable: the 3 that left are the TS6059 this itemisation used to list, all of them in '
-      + 'validate-translatable-sections.test.ts, which imports contact.object.ts, contact.view.ts and '
-      + 'system/translations/index.ts from examples/app-showcase -- outside this package entirely. They '
-      + 'were never this package\'s debt; they were the generated re-measure project reporting on its '
-      + 'own inherited `rootDir`, and no author here could have retired them by fixing lint. That file '
-      + 'held exactly those 3 and so leaves the per-file list altogether. '
-      + 'Measured 26 -> 30 (5ab08428, the +4 being TS6059, a file outside rootDir, a class the pre-#5278 '
-      + 'note did not list) -> 32 (e8db1a230), and RECORDED 42 was a bootstrap margin (+10 over that 32). '
-      + 'THE MARGIN IS GONE, and has been since #7888 / PR #8225 lowered 42 -> 20 against a measured 20 at '
-      + 'b5e09b21 -- that PR deliberately left this note describing the larger pile, because inventing a '
-      + 'composition for errors that are gone is the one thing this ledger forbids, so the tally above is '
-      + 'the first one taken at the size the entry actually is. Lowered 20 -> 19 at 585edf738 (#8728). '
-      + 'The -1 is attributed: #8515 / PR #8610 moved the translation-section-name-missing pins onto the '
-      + 'frozen src/showcase-shape.fixtures.ts snapshot and dropped the live `TaskViews` import, which is '
-      + 'the TS6059 that left -- the surviving three name exactly the three example files those tests '
-      + 'still import. One older claim is now false and is corrected rather than carried: '
-      + 'src/validate-visibility-predicates.test.ts held 10 of the 32 and reports none today.',
-  },
   '@objectstack/formula': {
     errors: 17,
     note: 'TS2591 x6 (`process`), TS2345 x3, TS2352 x3, TS1470 x2, TS2339 x2, TS2739 x1. Re-measured 17 '
@@ -1174,7 +1089,6 @@ const TEST_DEBT = {
       + 'not because anything was suppressed.',
   },
   '@objectstack/platform-objects': { errors: 3, note: 'TS2339 x2, TS7006 x1. Re-measured 3 at 5ab08428, exact.' },
-  '@objectstack/plugin-sharing': { errors: 3, note: 'TS6133 x2, TS18048 x1. Re-measured 3 at 5ab08428, exact.' },
   '@objectstack/service-sms': { errors: 1, note: 'TS2493 x1, in transports.test.ts. Re-measured 1 at 5ab08428 and still 1 at e8db1a230, after two more hidden test files: #5773 added sms-manifest-providers.contract.test.ts and #2814 / PR #6042 added sms-daily-quota.test.ts. The file count moved twice while the error count did not -- both new files are type-clean with the exclusion lifted.' },
   '@objectstack/connector-rest': { errors: 1, note: 'TS6133 x1. Re-measured 1 at 5ab08428, exact.' },
 };
@@ -1233,8 +1147,19 @@ const PHANTOM_PIN_DEBT = {};
 //       `packages/cli/test/helpers/serve-process.ts`
 //
 // This invariant governs the SECOND group only, which is why the observation
-// half takes files at `depth > 0`. The line is drawn there on evidence rather
-// than convenience, and the evidence cuts both ways, so both halves are here:
+// half takes files at `depth > 0` -- EXCEPT for `ROOT_SOURCE_FILES`, the
+// declared allowlist #14386 carved out of the first group for the 5
+// `objectstack.config.ts` instances above: those are manifest AUTHORING sites
+// (of the same class #13284 put inside a tsc program), not build/test
+// tooling, and #14386 found three of the five (`plugin-auth`,
+// `plugin-security`, `service-i18n`) still outside every program with no
+// ledger entry -- a green gate over unread source. The FOR/AGAINST split
+// below is about the other 49 (`vitest.config.ts`, `tsup.config.ts`, ...),
+// which #14386 explicitly declined to re-decide (comment 5504408509: "queue
+// now" vs "not this card") -- see `ROOT_SOURCE_FILES`'s own docblock for why
+// a declared name, not a wider predicate, is the line drawn there. The line
+// is drawn there on evidence rather than convenience, and the evidence cuts
+// both ways, so both halves are here:
 //
 //   FOR -- the 54 are one repo-wide convention, not 42 independent decisions.
 //   Every package's `include` is `src/**/*`; a tool config sits at the package
@@ -1633,17 +1558,49 @@ function unreadFiles(rels, programs) {
 }
 
 /**
+ * Root-level (`depth === 0`) filenames admitted into SOURCES_COVERED despite
+ * the package-root line below (#14386).
+ *
+ * The census behind that line found 54 root configs against 11 files in a
+ * source directory, and most of the 54 are build/test tooling
+ * (`vitest.config.ts`, `tsup.config.ts`) rather than authored source --
+ * deciding whether THAT population owes a program or a ledger entry is a
+ * scope decision about build tooling, not about authored source, and #14386
+ * (comment 5504408509) is explicit that a dev repair must not settle it: "if
+ * whoever implements this believes the allowlist is the wrong shape, they
+ * stop and file a needs-user-decision card -- they do not widen the predicate
+ * to all of depth 0".
+ *
+ * `objectstack.config.ts` is admitted because it is not tooling -- it is a
+ * plugin manifest authoring site of exactly the class #13284 put inside a tsc
+ * program (`packages/drivers/driver-memory`, `packages/plugins/
+ * plugin-hono-server`), and #14386 found three more package-root instances of
+ * it sitting outside every program with no ledger entry: a green gate over
+ * unread source. Declared as an exact filename set rather than matched by a
+ * pattern (e.g. any `*.config.ts`) so that growing it to cover a new filename
+ * stays a decision made here, on its own card, instead of happening as a side
+ * effect of some unrelated file landing at a package root.
+ */
+const ROOT_SOURCE_FILES = new Set(['objectstack.config.ts']);
+
+/**
  * Is this file one SOURCES_COVERED asks about (#10756)?
  *
  * Three exclusions, each load-bearing:
  *
- *   `depth > 0`   the package-root line. A `vitest.config.ts` beside the
- *                 manifest is a tool's entry point, not a directory of source,
- *                 and the census kept the two apart -- 54 root configs against
- *                 11 files in a source directory. Argued both ways on
- *                 UNCHECKED_SOURCE_DEBT.
+ *   `depth > 0`   the package-root line, EXCEPT for `ROOT_SOURCE_FILES`
+ *                 above. A `vitest.config.ts` beside the manifest is a
+ *                 tool's entry point, not a directory of source, and the
+ *                 census kept the two apart -- 54 root configs against 11
+ *                 files in a source directory. Argued both ways on
+ *                 UNCHECKED_SOURCE_DEBT for everything else at the root; a
+ *                 declared manifest authoring site is not "everything else"
+ *                 (#14386).
  *   `.d.ts`       a declaration file STATES types rather than being checked for
- *                 them, so "no program reads it" is not the same finding.
+ *                 them, so "no program reads it" is not the same finding --
+ *                 still enforced even for a `ROOT_SOURCE_FILES` name, so a
+ *                 hypothetical declaration-file entry there could never
+ *                 bypass this exclusion.
  *   test files    TESTS_COVERED's subject, decided per file over there. Counting
  *                 them here too would bill one hidden file to two ledgers.
  *
@@ -1651,7 +1608,7 @@ function unreadFiles(rels, programs) {
  * @param {number} depth 0 at the package root
  */
 function isUncheckedSourceCandidate(name, depth) {
-  if (depth === 0) return false;
+  if (depth === 0 && !ROOT_SOURCE_FILES.has(name)) return false;
   if (!SOURCE_FILE.test(name) || TEST_FILE.test(name)) return false;
   return !name.endsWith('.d.ts');
 }
@@ -1731,7 +1688,15 @@ function testCoverage(dir, scripts) {
   const uncheckedByDir = new Map();
   if (scripts.typecheck !== undefined) {
     for (const rel of unreadFiles(sourceRels, accountedPrograms(configs, invoked))) {
-      const top = rel.slice(0, rel.indexOf('/'));
+      // `rel.indexOf('/')` is -1 for a package-ROOT file (#14386's
+      // `ROOT_SOURCE_FILES` admits those past `isUncheckedSourceCandidate`
+      // now) -- `.slice(0, -1)` on that would produce a garbage key (the
+      // basename minus its last character), not a missing one. `'.'` is the
+      // sensible root key: fed through `posix.join(dir, top)` below it
+      // collapses to the package's own directory, which is exactly what an
+      // unread root-level file is "inside" -- there is no narrower directory
+      // to name.
+      const top = rel.includes('/') ? rel.slice(0, rel.indexOf('/')) : '.';
       uncheckedByDir.set(top, (uncheckedByDir.get(top) ?? 0) + 1);
     }
   }
@@ -3802,6 +3767,28 @@ function selfTest() {
       expect: [/packages\/a\/scripts: 2 non-test source file\(s\) here sit outside every tsc program/],
     },
     {
+      // #14386: every source-layer case above is a SUBDIRECTORY case
+      // (`packages/a/scripts`) -- that is exactly why the hole this card
+      // fixes survived. `testCoverage()`'s aggregation keys a root-level
+      // file (no `/` in its package-relative path) at `'.'`, which
+      // `posix.join(dir, '.')` collapses to the package's own directory --
+      // so the dir this fixture feeds in (`'packages/a'`, with no
+      // subdirectory suffix) is what the real walk now actually produces
+      // for an unread `objectstack.config.ts`, and this pins that it
+      // renders sensibly rather than as the `rel.slice(0, -1)` garbage key
+      // the old `indexOf('/') === -1` arithmetic would have produced.
+      label: 'an unread ROOT-level source file in a COVERED package fails SOURCES_COVERED too, keyed at the package directory itself (#14386)',
+      packages: [
+        pkg('a', {
+          scripts: { typecheck: 'tsc --noEmit' },
+          uncheckedSources: [{ dir: 'packages/a', files: 1 }],
+        }),
+      ],
+      root: okRoot,
+      state: okState,
+      expect: [/packages\/a: 1 non-test source file\(s\) here sit outside every tsc program/],
+    },
+    {
       label: 'an UNCHECKED_SOURCE_DEBT entry covers it, but only with a reason',
       packages: [
         pkg('a', {
@@ -4317,14 +4304,24 @@ function selfTest() {
   }
 
   // SOURCES_COVERED's file-level predicate (#10756). Each exclusion is a way
-  // this invariant can be silently wrong: lose `depth > 0` and 42 packages'
-  // tool configs flood the ledger, lose the test check and one hidden file is
-  // billed to two ledgers, lose `.d.ts` and the gate reports a finding about a
-  // file that states types rather than being checked for them.
+  // this invariant can be silently wrong: lose `depth > 0` (unqualified) and
+  // 42 packages' tool configs flood the ledger, lose the test check and one
+  // hidden file is billed to two ledgers, lose `.d.ts` and the gate reports a
+  // finding about a file that states types rather than being checked for
+  // them.
   const sourceCandidateCases = [
     { label: 'a module in a subdirectory is the subject', name: 'dry-run-hash-compat.ts', depth: 1, expect: true },
     { label: 'the same module at the package root is not', name: 'dry-run-hash-compat.ts', depth: 0, expect: false },
     { label: 'a package-root tool config is out of scope by the depth rule', name: 'vitest.config.ts', depth: 0, expect: false },
+    // #14386: `ROOT_SOURCE_FILES` is the depth-0 exception, and it is an
+    // EXACT-name allowlist, not "anything that looks like config at the
+    // root" -- the next two rows pin both sides of that line.
+    { label: 'a declared root source file IS in scope despite depth 0 (#14386)', name: 'objectstack.config.ts', depth: 0, expect: true },
+    { label: 'a root-level BUILD tool config stays out of scope -- the 104-file question is not this predicate\'s to answer', name: 'tsup.config.ts', depth: 0, expect: false },
+    // Defense in depth: even a name that WERE declared in `ROOT_SOURCE_FILES`
+    // must still lose to the `.d.ts` exclusion below -- a states-types file
+    // is never "unread source" regardless of depth.
+    { label: 'a declaration file at the root is still excluded, even hypothetically declared', name: 'globals.d.ts', depth: 0, expect: false },
     { label: 'the SAME tool config inside a directory IS in scope', name: 'i18n-extract.config.ts', depth: 1, expect: true },
     { label: 'a test file belongs to TESTS_COVERED, not here', name: 'engine.test.ts', depth: 1, expect: false },
     { label: 'a spec file likewise', name: 'engine.spec.tsx', depth: 2, expect: false },

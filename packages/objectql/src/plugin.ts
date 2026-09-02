@@ -4,7 +4,7 @@ import { ObjectQL } from './engine.js';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
-import { resolveArtifactPackageOrder } from './artifact-packages.js';
+import { resolveArtifactPackageOrder, artifactPackageId } from './artifact-packages.js';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
@@ -203,7 +203,7 @@ export interface ObjectQLPluginOptions {
 
 export class ObjectQLPlugin implements Plugin {
   name = 'com.objectstack.engine.objectql';
-  type = 'objectql';
+  type = 'objectql' as const;
   version = '1.0.0';
   /**
    * Services init() UNCONDITIONALLY registers (ADR-0116, #4131) — lets the
@@ -433,8 +433,24 @@ export class ObjectQLPlugin implements Plugin {
           return Promise.resolve();
         }
 
+        // [ADR-0130 D1] The artifact's own package list, handed to every
+        // install in it. This is the whole of how the install gate learns
+        // "same artifact": co-ownership is proven by joint delivery, and this
+        // load path is the only place that holds the delivery. ⛔ No owner field
+        // on the manifest (D8) and nothing persisted — the claim cannot outlive,
+        // or drift from, the artifact that IS the claim.
+        //
+        // A single-`manifest` artifact yields a one-element list whose only
+        // member is the installing package itself, which the gate excludes
+        // anyway: that path stays bit-identical (D7).
+        const scope = {
+          packageIds: ordered
+            .map((m) => artifactPackageId(m))
+            .filter((id): id is string => id !== undefined),
+        };
+
         for (const manifest of ordered) {
-          ql.registerApp(manifest);
+          ql.registerApp(manifest, scope);
           ctx.logger.debug('Manifest registered via manifest service', {
             id: manifest.id || manifest.name
           });
@@ -2460,10 +2476,13 @@ export class ObjectQLPlugin implements Plugin {
    * the registry is final for the boot) and again on `metadata:reloaded`.
    *
    * This is the checklist that makes D3's hard refusal a migration step
-   * instead of a mystery: every handler listed here answers 404 at dispatch,
-   * and the message says which `defineAction` fixes it. It lives on the
-   * ENGINE plugin deliberately — AppPlugin hosted it first and is registered
-   * conditionally, so the platform's own `os dev` path never printed it.
+   * instead of a mystery — but only while it reads what the router reads, so
+   * every source `resolveRouteActionDeclaration` resolves through is wired in
+   * below, the registry rung included. A handler listed here is one no source
+   * declares; the message says so in those terms and stops short of claiming
+   * a dispatch this audit never performed. It lives on the ENGINE plugin
+   * deliberately — AppPlugin hosted it first and is registered conditionally,
+   * so the platform's own `os dev` path never printed it.
    *
    * Warn-only, exception-proof (the runner swallows its own failures): a
    * diagnostic must never be the reason a kernel fails to boot.
@@ -2513,6 +2532,18 @@ export class ObjectQLPlugin implements Plugin {
       registered: ql.listRegisteredActions(),
       objects,
       loadStandaloneActions,
+      // The router's SECOND rung, handed over from here because objectql
+      // cannot import the router (runtime -> objectql, never the reverse).
+      // `resolveRouteActionDeclaration` resolves a declaration through
+      // object-embedded `actions[]` -> THIS lookup -> the metadata plane, and
+      // the inventory had the first and the last: every object-less
+      // `defineAction` that lives in the registry alone (the in-process boot,
+      // where the plane holds no `action` rows) was reported as a handler
+      // with no declaration while the router was dispatching it. This call
+      // site is the only place with `ql` in hand, so it is where the rung
+      // joins the audit; the ownership test that judges the answer lives with
+      // the rest of the addressing vocabulary in `action-governance.ts`.
+      lookupRegistryAction: (actionName: string) => ql.registry?.getItem?.('action', actionName),
       logger: ctx.logger,
       lastFingerprint: this.lastGovernanceFingerprint,
     });

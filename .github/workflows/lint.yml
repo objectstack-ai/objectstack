@@ -1343,9 +1343,12 @@ jobs:
       # own git repo and linked worktree under $TMPDIR, and both were re-run
       # from a primary checkout, a detached HEAD and a non-repo cwd with
       # identical results, so neither this checkout's depth nor its branch is an
-      # input. Needs `jq` and `git` and nothing else — no pnpm, no node, no
-      # build, no network (`jq` is in the runner image and is already relied on
-      # bare by cut-rc.yml and release.yml). ~2 s measured.
+      # input. This step itself needs only `jq` and `git` (both in the runner
+      # image; `jq` is already relied on bare by cut-rc.yml and release.yml),
+      # plus whatever each discovered matrix declares in its own header —
+      # discovery above is by glob, so a matrix needing more (node, pnpm, a
+      # built tree, a generator) must say so there; this comment is not the
+      # place to enumerate it.
       - name: Claude hook guard self-tests (worktree-first · stash ban)
         run: |
           # Tolerate-and-collect (#10814) — see the note above this step. Each
@@ -2867,24 +2870,28 @@ jobs:
       # line, driven against REAL captured vitest logs of the incident's own
       # test file — one timeout, one assertion, byte-identical FAIL lines and
       # opposite diagnoses, which is the confusion that produced a confidently
-      # wrong card (#10112) and cost a whole dispatch; and (2) the cross-PR
+      # wrong card (#10112) and cost a whole dispatch; (2) the cross-PR
       # aggregation files exactly ONE anchor issue at >= 2 DISTINCT PRs,
       # REFRESHES it on the next ejection instead of filing a second, and files
       # none for two different keys or for one PR ejecting twice. The refresh
       # leg is driven as a PAIR — run 2's world is built from run 1's output —
       # because idempotency is a property of the pair and a hand-written marker
-      # would prove each half while leaving the two runs free to disagree.
+      # would prove each half while leaving the two runs free to disagree; and
+      # (3) the operative guidance prose (the timeout-vs-assertion rule, its
+      # named exception, and the boundary sentence that the re-queue allowance
+      # is governed elsewhere) is present in the posted body, one assertion per
+      # claim over the WHOLE body, not the excerpt.
       #
       # Its --self-test runs first and is the half that stops the battery
-      # rotting into decoration: it mutates the shipped script fourteen ways —
+      # rotting into decoration: it mutates the shipped script twenty ways —
       # drop the reason lookahead, test the FAIL pattern before the reason
       # pattern (which silently loses every assertion), count runs instead of
       # distinct PRs, always create instead of refreshing, drop the sighting
-      # markers, downgrade each anti-no-op announcement to an info line, and
-      # more — and requires the battery to go RED for each, naming the scenario
-      # that catches it. A mutation whose anchor no longer exists is a failure
-      # too, so a rewrite of the workflow cannot leave the mutations silently
-      # matching nothing.
+      # markers, downgrade each anti-no-op announcement to an info line, drop
+      # each half of the guidance prose, and more — and requires the battery to
+      # go RED for each, naming the scenario that catches it. A mutation whose
+      # anchor no longer exists is a failure too, so a rewrite of the workflow
+      # cannot leave the mutations silently matching nothing.
       #
       # Invoked as `node` rather than through a `pnpm check:*` alias, same
       # reason as the step above: see the GATE INVOCATION IDIOM note at the top
@@ -3628,6 +3635,39 @@ jobs:
       - name: turbo.json package tasks name real packages and real scripts
         run: pnpm check:turbo-task-graph
 
+      # The workspace manifest graph, over every `workspace:` edge in
+      # `dependencies`, `devDependencies`, `peerDependencies` and
+      # `optionalDependencies` across all workspace packages, has NO cycle
+      # (#13513, filed as #14195).
+      #
+      # #13513 cost seven independent dev seats a wasted build cycle each, on
+      # trees they did not touch, because one `devDependencies` edge made the
+      # graph cyclic. A cyclic edge does not fail where it is added -- the
+      # author's own package builds fine -- it fails later, in SOMEONE ELSE's
+      # closure build, in a package they did not touch, non-deterministically
+      # (which member loses the DTS race is a scheduling outcome). Before this
+      # gate the only signal was `pnpm install` printing `WARN There are
+      # cyclic workspace dependencies: …` on stderr with EXIT 0, and it had
+      # been printing that warning for the entire life of the #13513 defect
+      # before anyone read it.
+      #
+      # All FOUR declaration classes are walked, `peerDependencies` included:
+      # a scan over the other three alone reports 0 cycles on the pre-fix
+      # #13513 tree, honestly and wrongly -- the loop's first edge was a
+      # `peerDependencies` edge (#13513 comment `5473800149`, resolved in
+      # `5479206575`). Every cycle is named with the declaration class of each
+      # edge that closes it (`A --devDependencies--> B`), because "there is a
+      # cycle" does not tell an author which edge to cut.
+      #
+      # Reads the workspace manifests only (via the shared enumerator). No
+      # build, no pnpm invocation, no network, sub-second. The `check:` key
+      # runs `--self-test` first: this gate's defect class is its matching
+      # rule, which a clean tree cannot distinguish from a rule that stopped
+      # matching, and the peer-only / optional-only cases are the #13513
+      # false-zero control -- a walker that drops either class fails them.
+      - name: workspace manifest dependency graph has no cycle
+        run: pnpm check:workspace-manifest-cycles
+
       # A relationship carrier is spelled as the target object's NAME (#13103).
       # `FieldSchema.reference` is `z.string()`, and #13053 measured what a
       # non-string one costs: a fixture spelling `reference: { object: '...' }`
@@ -3886,6 +3926,39 @@ jobs:
       # fixtures; no network, no token, no build.
       - name: Stall-guard headroom self-test (self-test half only, never the measurement)
         run: pnpm check:stall-guard-headroom
+
+      # The #12981 swallow census's own controls (#13919, maintainer ruling of
+      # 2026-09-01). Same shape as the step above and for the same reason: a
+      # `measure-*` instrument whose SELF-TEST is the only thing CI runs, never a
+      # bare invocation. `measure-durability-swallow-family.mjs` declares four
+      # control families and, measured on `origin/main` when #13919 was filed,
+      # NOTHING ran any of them -- zero references to the script anywhere in
+      # `package.json` or `.github/**`, against a control that must return
+      # non-zero (`measure-stall-guard-headroom`, 2 hits) so the zero was a
+      # reading and not a broken query. Meanwhile the resolver those controls pin
+      # was repaired three times (#13459, #13474, PR #13915), each time with no
+      # gate holding the previous repair, and the census's numbers feed #12981's
+      # repair worklist -- so a wrong denominator propagates into that programme
+      # with nobody watching.
+      #
+      # ONLY THE `gated` FAMILIES, and that asymmetry is the ruling's boundary 1
+      # rather than a convenience. `--self-test=gated` runs RESOLUTION + NEGATIVE
+      # + REGRESSION; it omits POSITIVE_CONTROLS, which pin members of the
+      # #12981 worklist that the repair programme exists to REMOVE. That is
+      # recorded, not forecast: batch 2 repaired the file the dark control then
+      # named and turned the self-test red for doing exactly what the ruling
+      # asked. ⛔ A gate that reddens when the programme succeeds is not a gate,
+      # and it trains the fleet to route around gates -- so ⛔ never "tidy" this
+      # step into a bare `--self-test`. The three wired families cannot be
+      # destroyed by a successful repair: a repair moves a member from tier
+      # `dark` to tier `channelled` and it stays a member.
+      #
+      # The census itself stays a MEASUREMENT: no membership count can redden
+      # this step, and the gated run prints the instrument's own "a MEASUREMENT,
+      # not a gate" banner. It reads `packages/**` source text through ts-parse;
+      # no network, no token, no build.
+      - name: Swallow-census control families (gated families only, never POSITIVE)
+        run: pnpm check:swallow-census-controls
 
       # The dev-preflight gate's self-test — and deliberately only HALF of that
       # gate (#8170, the second and only other member of #8110's split-gate
