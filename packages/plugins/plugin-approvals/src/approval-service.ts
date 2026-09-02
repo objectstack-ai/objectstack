@@ -2928,7 +2928,7 @@ export class ApprovalService implements IApprovalService {
       const developerMessage =
         `[approvals] recall refused: actor '${actorId}' is not the submitter of request `
         + `'${requestId}' (submitter '${String(raw.submitter_id)}') and holds no #3424 override `
-        + `for a '${raw.status}' request (the override reaches pending requests only, #12775)`;
+        + `for a '${raw.status}' request (the override reaches pending requests only)`;
       this.logger?.warn?.(developerMessage, {
         request: requestId,
         actor: actorId,
