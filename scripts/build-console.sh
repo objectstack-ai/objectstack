@@ -86,6 +86,16 @@ if [[ -n "$SOURCE_ROOT" ]]; then
     fi
   fi
   if [[ ! -d "$BUILD_ROOT" ]]; then
+    # Prune stale worktree registrations before adding. Registrations live in
+    # the SHARED objectui/.git — nothing on the framework side touches them,
+    # so if a previous run's directory was removed without going through
+    # `worktree remove` (the force-remove fallback above hitting `rm -rf`, or
+    # an external `rm -rf .cache/objectui-*` cleanup), the registration
+    # survives as `prunable` and the next `worktree add` at this same path
+    # dies with exit 128 "already registered worktree". `prune` only drops
+    # registrations whose directory is already gone, so it's safe here
+    # unconditionally.
+    git -C "$SOURCE_ROOT" worktree prune
     git -C "$SOURCE_ROOT" worktree add --detach "$BUILD_ROOT" "$PINNED_SHA"
   fi
 else
