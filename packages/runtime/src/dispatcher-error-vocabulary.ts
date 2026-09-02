@@ -681,7 +681,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // registered code, so they are not demoted at a door, they never reach one.
     {
         code: 'INVALID_ARTIFACT_PACKAGES',
-        file: 'packages/objectql/src/artifact-packages.ts',
+        file: 'packages/core/src/artifact-packages.ts',
         shape: 'codehelper',
         door: 'none',
         verdict: 'boot-refusal',
@@ -701,7 +701,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     {
         code: 'INVALID_ARTIFACT_PACKAGE_ENTRY',
-        file: 'packages/objectql/src/artifact-packages.ts',
+        file: 'packages/core/src/artifact-packages.ts',
         shape: 'codehelper',
         door: 'none',
         verdict: 'boot-refusal',
@@ -722,7 +722,7 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     },
     {
         code: 'DUPLICATE_ARTIFACT_PACKAGE',
-        file: 'packages/objectql/src/artifact-packages.ts',
+        file: 'packages/core/src/artifact-packages.ts',
         shape: 'codehelper',
         door: 'none',
         verdict: 'boot-refusal',
