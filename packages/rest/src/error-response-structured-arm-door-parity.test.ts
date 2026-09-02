@@ -41,14 +41,26 @@
  *     again is a red test rather than a re-measurement;
  *  §3 `handleRouteError` and `sendThrownError` agree with each other (they
  *     share `resolveErrorResponse`; the pin keeps that true);
- *  §4 the three guards the fix is fenced by — a declared 5xx keeps the
+ *  §4 the guards the fix is fenced by, EVERY case asserting BOTH doors and
+ *     labelled CONVERGED or ACCEPTED DIVERGENCE — a declared 5xx keeps the
  *     passthrough's prose-withholding arm (#5437 / #5582 / #5907), a 5xx ARM
- *     never displaces a declared 4xx, and a sandboxed producer keeps the
- *     unwrap door's sentence (#11588 / #7543);
- *  §5 the drift guard: every `code` literal inside `structuredCodeAnswer` is
- *     covered by a §1 case. Adding an arm without a parity case fails here,
- *     which is the whole point — an exclusion list is what this card is the
- *     bill for, and a coverage list nobody checks is the same defect.
+ *     never displaces a declared 4xx, a sandboxed producer keeps the unwrap
+ *     door's sentence on the bulk door (#11588 / #7543; the mirror on the
+ *     single door is filed as #14704), and the one status this card DOES move
+ *     — a sandboxed 5xx carrying `OBJECT_NOT_FOUND` / `INVALID_FIELD` — is
+ *     pinned rather than described;
+ *  §5 the drift guard, over BOTH halves of `classifyDataError`: every
+ *     declared-code arm — inside the shared classification AND below the
+ *     consult, the position that produced this card — is either a §1 parity
+ *     case or a NAMED single-door arm carrying its reason;
+ *  §6 the two families that reach this door through `classifiedRefusalAnswer`
+ *     rather than a route catch: the analytics dataset face, whose body
+ *     genuinely gains `field` and `object`, pinned at KEY level because its
+ *     own envelope tests assert only `code` and a message shape; and the
+ *     record-share family, whose key set does not move.
+ *
+ * §4, §5 and §6 in these shapes are the contract review's conditions 3, 4, 5
+ * and 6 on this card (verdict `PASS WITH CONDITIONS`, 2026-09-02).
  *
  * Refusal assertions state `code` AND `status` (ADR-0112) — never
  * `toThrow()` alone, which is green for a curated envelope and for a raw
@@ -61,7 +73,12 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DuplicateRecordError } from '@objectstack/objectql';
 import { ConcurrentUpdateError } from '@objectstack/metadata-protocol';
-import { mapDataError, sendThrownError, handleRouteError } from './error-response.js';
+import {
+    mapDataError,
+    sendThrownError,
+    handleRouteError,
+    classifiedRefusalAnswer,
+} from './error-response.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -405,33 +422,59 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
         }
     });
 
-    describe('§4 the guards this fix is fenced by', () => {
-        it('a producer-declared 5xx still takes the passthrough, prose withheld (#5437/#5582)', () => {
-            const err: any = new Error('Cannot delete: dependent records exist');
-            err.code = 'DELETE_RESTRICTED';
-            err.status = 503;
-            err.object = 'account';
-            err.dependentObject = 'contact';
-            const bulk = bulkDoor(err, 'account');
-            expect(bulk.status).toBe(503);
-            expect(bulk.body.code).toBe('DELETE_RESTRICTED');
-            // The 5xx arm's whole point: the producer's own sentence never
-            // reaches the client, and nothing about that is narrowed here.
-            expect(bulk.body.error).not.toBe('Cannot delete: dependent records exist');
-            expect(bulk.body).not.toHaveProperty('dependentObject');
-        });
-
-        it('a 5xx ARM never displaces a status the producer declared', () => {
+    /**
+     * [contract-review condition 4 / 5] Every guard case asserts BOTH doors.
+     *
+     * The review measured §4 pinning the bulk door alone in two shapes where
+     * the doors are known to diverge, which pins the divergence silently — the
+     * opposite of what triage guard 3 asks for. So each case below states its
+     * verdict as one of two things and never as a single door's answer:
+     *
+     *   CONVERGED           — both doors answer the same status AND body;
+     *   ACCEPTED DIVERGENCE — they differ, on purpose, with the reason and the
+     *                         card that owns it named in the case itself.
+     */
+    describe('§4 the guards this fix is fenced by — both doors, every case', () => {
+        it('CONVERGED: a 5xx ARM never displaces a status the producer declared in the 4xx band', () => {
+            // Reviewer probe (A). Before the patch round the doors answered
+            // 503 (single) and 400 (bulk) for this one error, because the
+            // `structured.status < 500` guard existed only in
+            // `resolveErrorResponse`. `fiveXxArmDisplacesDeclared4xx` is now
+            // asked at both. No producer declares a status on this code, so
+            // nothing moves on the wire.
             const err: any = new Error("Datasource 'warehouse' is declared but not connected");
             err.code = 'ERR_DATASOURCE_UNAVAILABLE';
             err.status = 400;
             err.datasource = 'warehouse';
             const bulk = bulkDoor(err, 'account');
+            const single = singleDoor(err, 'account');
             expect(bulk.status).toBe(400);
+            expect(single.status).toBe(400);
+            expect(single.body.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
             expect(bulk.body.code).toBe('ERR_DATASOURCE_UNAVAILABLE');
+            // ⚠️ The bodies still differ by ONE key, and it is not this card's
+            // defect: `classifyDataError`'s GENERIC declared-status passthrough
+            // appends `object` from the door's argument and
+            // `resolveErrorResponse`'s does not. Same door-disagreement class,
+            // one arm over, untouched here and filed as #14725 — pinned so the
+            // residue is visible rather than implied.
+            expect(single.body).toHaveProperty('object', 'account');
+            expect(bulk.body).not.toHaveProperty('object');
         });
 
-        it('a sandboxed producer keeps the unwrap door’s sentence (#11588/#7543)', () => {
+        it('CONVERGED: the arm still answers 503 when the producer declared NO status', () => {
+            const err: any = new Error("Datasource 'warehouse' is declared but not connected");
+            err.code = 'ERR_DATASOURCE_UNAVAILABLE';
+            err.datasource = 'warehouse';
+            err.kind = 'blocked';
+            const bulk = bulkDoor(err, 'account');
+            const single = singleDoor(err, 'account');
+            expect(bulk.status).toBe(503);
+            expect(bulk.body).toEqual(single.body);
+            expect(bulk.body).toHaveProperty('datasource', 'warehouse');
+        });
+
+        it('ACCEPTED DIVERGENCE (#14704): a sandboxed producer — bulk door unwraps, single door does not', () => {
             const err: any = new Error("hook 'guard' threw: Error: Opportunity is closed.");
             err.innerMessage = 'Opportunity is closed.';
             err.code = 'DELETE_RESTRICTED';
@@ -439,25 +482,103 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
             err.object = 'account';
             err.dependentObject = 'contact';
             const bulk = bulkDoor(err, 'account');
+            const single = singleDoor(err, 'account');
             expect(bulk.status).toBe(409);
+            expect(single.status).toBe(409);
+            // The bulk door reads `sandboxBusinessMessage` (#11588) and ships
+            // the business sentence; ⛔ never the QuickJS debug wrapper.
             expect(bulk.body.error).toBe('Opportunity is closed.');
-            // ⛔ never the QuickJS debug wrapper.
             expect(String(bulk.body.error)).not.toContain('threw:');
+            // The single door reaches the arm, which ships `error.message` —
+            // the wrapper. That is the mirror defect, filed as #14704 and
+            // deliberately NOT closed here: closing it means deciding what an
+            // arm answers for a sandboxed CRASH. Pinned so it cannot drift
+            // unnoticed in either direction.
+            expect(single.body.error).toBe("hook 'guard' threw: Error: Opportunity is closed.");
         });
 
-        it('a sandboxed OBJECT_NOT_FOUND keeps its `object` (the surviving #3770 clause)', () => {
+        it('ACCEPTED DIVERGENCE (guard 1): a producer-declared 5xx keeps the passthrough on the bulk door', () => {
+            const err: any = new Error('Cannot delete: dependent records exist');
+            err.code = 'DELETE_RESTRICTED';
+            err.status = 503;
+            err.object = 'account';
+            err.dependentObject = 'contact';
+            const bulk = bulkDoor(err, 'account');
+            const single = singleDoor(err, 'account');
+            // Guard 1: the 5xx half is NOT narrowed — status kept, prose
+            // dropped unconditionally (#5437 / #5582 / #5907).
+            expect(bulk.status).toBe(503);
+            expect(bulk.body.code).toBe('DELETE_RESTRICTED');
+            expect(bulk.body.error).not.toBe('Cannot delete: dependent records exist');
+            expect(bulk.body).not.toHaveProperty('dependentObject');
+            // The single door keeps reaching the arm for this shape, exactly
+            // as it did before this card. Converging it would MOVE a status on
+            // a published door, which is outside this card's fence — so it is
+            // named here rather than silently pinned on one side.
+            expect(single.status).toBe(409);
+            expect(single.body).toHaveProperty('dependentObject', 'contact');
+        });
+
+        it('CONVERGED: a sandboxed OBJECT_NOT_FOUND keeps its `object` (the surviving #3770 clause)', () => {
             const err: any = new Error("hook 'guard' threw: Error: Object 'nope' not found");
             err.innerMessage = "Object 'nope' not found";
             err.code = 'OBJECT_NOT_FOUND';
             err.status = 404;
             err.object = 'nope';
             const bulk = bulkDoor(err, 'nope');
+            const single = singleDoor(err, 'nope');
             expect(bulk.status).toBe(404);
+            expect(bulk.body).toEqual(single.body);
             expect(bulk.body.code).toBe('OBJECT_NOT_FOUND');
             expect(bulk.body).toHaveProperty('object', 'nope');
         });
 
-        it('a producer-marked `userMessage` rides the restored body (#9934)', () => {
+        /**
+         * [contract-review condition 5] The one status this change DOES move,
+         * pinned rather than left as a sentence.
+         *
+         * On `origin/main` a sandboxed producer declaring a 5xx with code
+         * `OBJECT_NOT_FOUND` / `INVALID_FIELD` fell PAST the unwrap door
+         * (declared >= 500) into the arm below it and answered 404 / 400. The
+         * arms now carry `!isSandboxOrigin`, so the same shape keeps the
+         * declared 5xx with the prose withheld — #5582's rule, on both doors.
+         * Better, but a status move on the single-record door, and the
+         * changeset says so.
+         */
+        it('MOVED (stated): a sandboxed 5xx + OBJECT_NOT_FOUND keeps the declared 5xx on both doors', () => {
+            const err: any = new Error("hook 'guard' threw: Error: Object 'nope' not found");
+            err.innerMessage = "Object 'nope' not found";
+            err.code = 'OBJECT_NOT_FOUND';
+            err.status = 503;
+            err.object = 'nope';
+            const bulk = bulkDoor(err, 'nope');
+            const single = singleDoor(err, 'nope');
+            expect(bulk.status).toBe(503);
+            expect(single.status).toBe(503);
+            expect(bulk.body).toEqual(single.body);
+            expect(bulk.body.code).toBe('OBJECT_NOT_FOUND');
+            // #5437/#5582: the 5xx band never ships the producer's prose.
+            expect(bulk.body.error).not.toContain('nope');
+            expect(bulk.body).not.toHaveProperty('object');
+        });
+
+        it('MOVED (stated): a sandboxed 5xx + INVALID_FIELD keeps the declared 5xx on both doors', () => {
+            const err: any = new Error("hook 'guard' threw: Error: Unknown field 'emial'");
+            err.innerMessage = "Unknown field 'emial'";
+            err.code = 'INVALID_FIELD';
+            err.status = 502;
+            err.field = 'emial';
+            err.object = 'account';
+            const bulk = bulkDoor(err, 'account');
+            const single = singleDoor(err, 'account');
+            expect(bulk.status).toBe(502);
+            expect(single.status).toBe(502);
+            expect(bulk.body).toEqual(single.body);
+            expect(bulk.body.code).toBe('INVALID_FIELD');
+            expect(bulk.body).not.toHaveProperty('field');
+        });
+
+        it('CONVERGED: a producer-marked `userMessage` rides the restored body (#9934)', () => {
             const err: any = new Error('Cannot delete: dependent records exist');
             err.code = 'DELETE_RESTRICTED';
             err.status = 409;
@@ -470,19 +591,169 @@ describe('#14541 · structured arms are consulted by BOTH doors', () => {
         });
     });
 
-    describe('§5 drift guard — every arm in the shared classification is covered', () => {
-        it('no `code` literal in structuredCodeAnswer is missing a §1 case', () => {
-            const source = readFileSync(resolve(HERE, 'error-response.ts'), 'utf8');
-            const start = source.indexOf('function structuredCodeAnswer(');
-            const end = source.indexOf('function classifyDataError(', start);
-            expect(start).toBeGreaterThan(-1);
-            expect(end).toBeGreaterThan(start);
-            const slice = source.slice(start, end);
-            const declared = new Set<string>();
-            for (const m of slice.matchAll(/error\?\.code === '([A-Z_]+)'/g)) declared.add(m[1]);
+    /**
+     * [contract-review condition 3] The drift guard has to cover BOTH halves
+     * of `classifyDataError`, not just the lifted one.
+     *
+     * The first version scanned only the `structuredCodeAnswer` slice. A new
+     * bespoke arm added to `classifyDataError` BELOW the consult — exactly
+     * where `OBJECT_NOT_FOUND` and `INVALID_FIELD` sat before this card —
+     * reproduces the card's defect (reachable from one door only) and nothing
+     * would have fired. Triage guard 3 asks that "the next code with a
+     * structured arm cannot diverge silently again", so the scan now collects
+     * every declared-code literal in the whole function and requires each to
+     * be either a §1 parity case or a NAMED single-door arm with its reason.
+     */
+    describe('§5 drift guard — every declared-code arm is covered or explained', () => {
+        /**
+         * Arms reachable from `mapDataError` only. Two KINDS, deliberately kept
+         * apart — an allowlist that cannot tell "by design" from "not fixed
+         * yet" is the same defect as no allowlist:
+         *
+         *   `by-design`  the arm answers one door on purpose, and the entry
+         *                says why the shared classification does not want it;
+         *   `known-gap`  the arm IS an instance of this card's defect, left
+         *                open on purpose, and the entry MUST cite the card
+         *                that carries it. Green by disclosure, never by
+         *                omission.
+         *
+         * ⛔ Adding an entry is a decision, not a way to quiet the test.
+         */
+        const SINGLE_DOOR_ONLY: ReadonlyArray<{
+            code: string;
+            kind: 'by-design' | 'known-gap';
+            card?: number;
+            why: string;
+        }> = [
+            {
+                code: 'PERMISSION_DENIED',
+                kind: 'by-design',
+                why: 'its third limb is gated on message TEXT (`[Security] Access denied`), '
+                    + 'and the shared classification is declared-code only — lifting a text '
+                    + 'sniff above the passthrough is what `resolveErrorResponse` argues against. '
+                    + 'Measured: its producer declares `statusCode`, not `status`, so the '
+                    + 'passthrough never fires for it and both doors already agree.',
+            },
+            {
+                code: 'RECORD_NOT_FOUND',
+                kind: 'known-gap',
+                card: 14725,
+                why: 'a REAL instance of this card\'s defect, found by this very guard: '
+                    + '`recordNotFoundError` (@objectstack/core) declares code, `status = 404` '
+                    + 'and `object`, so the bulk doors take the passthrough and drop `object` '
+                    + 'while the single door reaches the arm. Not lifted here because (a) its '
+                    + 'second limb is a message-TEXT gate, outside the declared-code boundary, '
+                    + 'and (b) this PR\'s wire delta was measured and contract-reviewed over a '
+                    + 'fixed set of codes — an eleventh body change after that verdict would be '
+                    + 'an unreviewed delta. #14725 carries it.',
+            },
+        ];
+
+        function sliceOf(source: string, from: string, to: string): string {
+            const a = source.indexOf(from);
+            const b = source.indexOf(to, a + 1);
+            expect(a).toBeGreaterThan(-1);
+            expect(b).toBeGreaterThan(a);
+            return source.slice(a, b);
+        }
+
+        function codeLiterals(slice: string): Set<string> {
+            const out = new Set<string>();
+            for (const m of slice.matchAll(/error\?\.code === '([A-Z_]+)'/g)) out.add(m[1]);
+            return out;
+        }
+
+        const SOURCE = readFileSync(resolve(HERE, 'error-response.ts'), 'utf8');
+
+        it('every arm in the SHARED classification has a §1 parity case', () => {
+            const declared = codeLiterals(
+                sliceOf(SOURCE, 'function structuredCodeAnswer(', 'function classifyDataError('),
+            );
             const covered = new Set(CASES.flatMap((c) => c.covers));
             expect(declared.size).toBeGreaterThan(0);
             expect([...declared].filter((code) => !covered.has(code))).toEqual([]);
+        });
+
+        it('every arm BELOW the consult is a §1 case or a named single-door arm', () => {
+            // The whole function, so an arm added below the consult — the
+            // position that reproduced this card's defect — is seen too.
+            const declared = codeLiterals(
+                sliceOf(SOURCE, 'function classifyDataError(', '\nexport function sendThrownError('),
+            );
+            const covered = new Set(CASES.flatMap((c) => c.covers));
+            const excused = new Set(SINGLE_DOOR_ONLY.map((e) => e.code));
+            expect(declared.size).toBeGreaterThan(0);
+            expect([...declared].filter((code) => !covered.has(code) && !excused.has(code))).toEqual([]);
+        });
+
+        it('the allowlist is not a dumping ground: every entry is a live arm, reasoned, and a gap cites its card', () => {
+            const whole = sliceOf(SOURCE, 'function classifyDataError(', '\nexport function sendThrownError(');
+            for (const entry of SINGLE_DOOR_ONLY) {
+                // An entry for an arm that no longer exists is stale cover.
+                expect(whole).toContain(`error?.code === '${entry.code}'`);
+                expect(entry.why.length).toBeGreaterThan(60);
+                // A known gap without a card is exactly the silence this
+                // guard exists to break.
+                if (entry.kind === 'known-gap') expect(typeof entry.card).toBe('number');
+            }
+        });
+    });
+
+    /**
+     * [contract-review condition 6] The two families that reach
+     * `resolveErrorResponse` through {@link classifiedRefusalAnswer} rather
+     * than through a route's `handleRouteError` catch.
+     *
+     * `POST /api/v1/analytics/dataset/query` spreads every classified key onto
+     * its own envelope (`const { error: refusalText, ...refusalFields } =
+     * refusal.body`), so a widened classification widens that body too — and
+     * its existing envelope tests assert `code` and a message regex only, so
+     * nothing held the KEYS. `service-analytics` throws `INVALID_FIELD` with
+     * `status`, `field` and `object` at three sites, which is exactly the arm
+     * this card lifted.
+     *
+     * Pinned against `classifiedRefusalAnswer` itself rather than by booting
+     * the route: that function IS what the route spreads, and `rest-server.ts`
+     * is held by another branch.
+     */
+    describe('§6 the classifiedRefusalAnswer families', () => {
+        it('the analytics refusal body gains `field` and `object` for an INVALID_FIELD producer', () => {
+            const err: any = new Error("Unknown measure 'amout_sum' on object 'invoice'");
+            err.code = 'INVALID_FIELD';
+            err.status = 400;
+            err.field = 'amout_sum';
+            err.object = 'invoice';
+            err.param = 'measures';
+            const refusal = classifiedRefusalAnswer(err);
+            expect(refusal).toBeDefined();
+            expect(refusal!.status).toBe(400);
+            // The KEY SET is the contract here — the existing analytics
+            // envelope tests assert only `code` and a message shape.
+            expect(Object.keys(refusal!.body).sort()).toEqual(['code', 'error', 'field', 'object']);
+            expect(refusal!.body.code).toBe('INVALID_FIELD');
+            expect(refusal!.body.field).toBe('amout_sum');
+            expect(refusal!.body.object).toBe('invoice');
+            // ⛔ `param` is NOT relayed: the arm ships what it declares, and a
+            // producer key nobody classified does not reach the wire.
+            expect(refusal!.body).not.toHaveProperty('param');
+        });
+
+        it('the record-share family keeps its own key set; only the SENTENCE moves', () => {
+            // That family re-dresses `code` / `declaredCode` / `userMessage` /
+            // `error` into the nested ADR-0112 D5 envelope, so the widened
+            // classification cannot add keys there. What it does change is the
+            // sentence a DuplicateRecordError produces.
+            const err: any = new Error("Duplicate record refused on 'sys_record_share'");
+            err.name = 'DuplicateRecordError';
+            err.code = 'DUPLICATE_RECORD';
+            err.status = 409;
+            err.object = 'sys_record_share';
+            err.field = 'token';
+            const refusal = classifiedRefusalAnswer(err);
+            expect(refusal).toBeDefined();
+            expect(refusal!.status).toBe(409);
+            expect(refusal!.body.code).toBe('UNIQUE_VIOLATION');
+            expect(refusal!.body.error).toBe('A record with this token already exists');
         });
     });
 });
