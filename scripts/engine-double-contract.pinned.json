@@ -3002,6 +3002,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/action-governance-scope-divergence.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/domains/meta-published-runtime-publish.test.ts",
       "verb": "delete",
       "pinned": 1

@@ -49,6 +49,7 @@ import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { ObjectKernel, ServiceLifecycle } from '@objectstack/core';
 import { MetadataManager, DatabaseLoader } from '@objectstack/metadata';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { NodeMetadataManager } from '@objectstack/metadata/node';
 import type { MetadataLoader } from '@objectstack/metadata';
 import { runActionGovernanceInventory, collectEngineActionDeclarations } from '@objectstack/objectql';
@@ -70,7 +71,7 @@ const OBJECT_KEY = 'global'; // object-less action — `GLOBAL_ACTION_OBJECT_KEY
  * combinator as a field name — the conforming shape `check:where-matcher`
  * exists to keep: `{ $or: [...] }` must not silently match nothing.
  */
-function readEngine(rows: Array<Record<string, unknown>>, opts: { failFind?: () => Error } = {}) {
+function readEngine(rows: Array<Record<string, unknown>>) {
     const matches = (r: Record<string, unknown>, w: Record<string, unknown>) =>
         Object.entries(w).every(([k, v]) => {
             if (k.startsWith('$')) throw new Error(`readEngine: unsupported WHERE combinator '${k}'`);
@@ -78,15 +79,43 @@ function readEngine(rows: Array<Record<string, unknown>>, opts: { failFind?: () 
             return r[k] === v;
         });
     return {
-        async find(_table: string, q: any) {
-            if (opts.failFind) throw opts.failFind();
-            return rows.filter((r) => matches(r, q?.where ?? {}));
+        async find(table: string, q: any) {
+            const hits = rows.filter((r) => matches(r, q?.where ?? {}));
+            // The caller's bound, applied AFTER the filter and by PRESENCE —
+            // `check:objectql-double-limit`'s conforming shape. A double that
+            // ignores `limit` answers more rows than the real engine would,
+            // which is how a paging defect stays green in a suite.
+            void table;
+            return typeof q?.limit === 'number' ? hits.slice(0, q.limit) : hits;
         },
-        async findOne(_table: string, q: any) {
+        async findOne(table: string, q: any) {
+            // `check:engine-double-contract`: a fake whose findOne is looser
+            // than `ObjectQL.findOne` is how a dead route ships with a green
+            // suite. Route the predicate through the shared assertion.
+            assertEngineFindOnePredicate(table, q);
             return rows.find((r) => matches(r, q?.where ?? {})) ?? null;
         },
         async count(_table: string, q: any) {
             return rows.filter((r) => matches(r, q?.where ?? {})).length;
+        },
+    };
+}
+
+/**
+ * The same engine with its LIST read down — a separate double rather than a
+ * flag on {@link readEngine}, deliberately. An injected `failFind` hook makes
+ * the base double undrivable by `check:objectql-double-limit`'s control probe
+ * (the probe substitutes a stub for the hook, the double calls it, and the
+ * candidate files as UNJUDGED debt instead of being graded). Overriding `find`
+ * on the base leaves `findOne` — the verb `check:engine-double-contract` pins
+ * — reading the base's implementation, which is what that gate's third-spelling
+ * note requires of an override.
+ */
+function listDownEngine(rows: Array<Record<string, unknown>>) {
+    return {
+        ...readEngine(rows),
+        async find() {
+            throw Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432'), { code: 'ECONNREFUSED' });
         },
     };
 }
@@ -106,10 +135,10 @@ function row(name: string, body: Record<string, unknown>) {
 }
 
 /** A real `MetadataManager` over a real `DatabaseLoader` over `rows`. */
-function planeOver(rows: Array<Record<string, unknown>>, opts: { failFind?: () => Error } = {}) {
+function planeOver(rows: Array<Record<string, unknown>>, engine: unknown = readEngine(rows)) {
     const mgr = new MetadataManager({});
     mgr.registerLoader(new DatabaseLoader({
-        engine: readEngine(rows, opts) as any,
+        engine: engine as any,
         trackHistory: false,
         cache: { enabled: false },
     } as any) as unknown as MetadataLoader);
@@ -238,9 +267,7 @@ describe('#14423 (a) — can `loadMany` omit a name `load` serves?', () => {
      */
     it('C3 — plural read throws, by-name read answers: `loadMany` omits the name `load` serves', async () => {
         const rows = [row(ACTION, { name: ACTION, type: 'script', target: ACTION })];
-        const meta = planeOver(rows, {
-            failFind: () => Object.assign(new Error('connect ECONNREFUSED 10.0.0.5:5432'), { code: 'ECONNREFUSED' }),
-        });
+        const meta = planeOver(rows, listDownEngine(rows));
 
         const enumerated = await meta.loadMany<any>('action');
         const byName = await meta.loadDiagnosed<any>('action', ACTION);
