@@ -16,13 +16,24 @@
  * fall back to BUNDLING it (esbuild bundles the real closure, so `slugify` comes
  * along) — no ReferenceError, no build break.
  *
- * Safety bias: this analysis is deliberately **conservative**. `bindings`
+ * Safety bias, and the one direction it does NOT hold. `bindings`
  * over-approximates (every name declared ANYWHERE in the function counts as
- * bound), and `GLOBALS` is generous. Both bias toward NOT flagging — a missed
- * case merely preserves today's behavior, whereas a false positive would only
- * ever cause a self-contained handler to be bundled instead of inlined (a
- * size/over-caution cost, never a correctness or build failure). We never
- * trade that bias for completeness.
+ * bound), which biases toward NOT flagging — safe, because a false positive
+ * only ever costs a self-contained handler a bundle instead of an inline
+ * (size/over-caution), never correctness.
+ *
+ * The AMBIENT-NAME allowlist used to be described the same way, and that was
+ * the defect: "assume the runtime has it" is only conservative for names the
+ * runtime being assumed about actually has. The lowered body's runtime is the
+ * QuickJS sandbox, not the Node process that runs `objectstack build` — and the
+ * allowlist named globals (`Intl` the reported one) that Node has and the
+ * sandbox does not. Not flagging those did not preserve behaviour: it lowered a
+ * body that throws `ReferenceError` in production while `validate`, `typecheck`,
+ * `test` and `build` all stay green, because the in-process test runs the RAW
+ * function in Node, where the global exists. So the allowlist is now two sets —
+ * {@link SANDBOX_GLOBALS}, whose membership is MEASURED inside the sandbox, and
+ * {@link NODE_ONLY_GLOBALS}, the host-only remainder, which is REPORTED as free
+ * so the handler falls back to the bundle (where it runs in Node and works).
  */
 
 // `ts-morph` is already a CLI runtime dependency and re-exports the full
@@ -31,16 +42,25 @@
 import { ts } from 'ts-morph';
 
 /**
- * Identifiers the JS runtime provides ambiently. Generous on purpose — listing
- * a name here means "assume the runtime has it" → don't flag → don't over-bundle
- * the rare false positive. A genuinely-missing global is a different problem
- * (sandbox capability), not a module-scope-helper leak.
+ * Identifiers the HOOK SANDBOX provides ambiently — the allowlist proper.
+ *
+ * ⛔ MEMBERSHIP IS MEASURED, NEVER RECALLED. Every name here was read out of the
+ * shipped QuickJS build by `sandbox-globals-probe.test.ts`, which evaluates a
+ * `typeof`/`in globalThis` probe for each member INSIDE the same
+ * `QuickJSScriptRunner` the runtime evaluates a lowered body in, and fails if
+ * this set is not exactly the probe's present-set. That pin is what keeps the
+ * split honest: a name added here from memory reddens it.
+ *
+ * `undefined` is in this set on the `in globalThis` limb, not the `typeof` one —
+ * `typeof undefined` is the string `'undefined'` for a global that genuinely
+ * exists, so a typeof-only probe would have called the one global whose VALUE is
+ * undefined absent. The probe asks both questions for that reason.
  */
-const GLOBALS: ReadonlySet<string> = new Set([
+export const SANDBOX_GLOBALS: ReadonlySet<string> = new Set([
   // Value/namespace globals
   'Math', 'JSON', 'Date', 'Object', 'Array', 'String', 'Number', 'Boolean',
   'RegExp', 'Map', 'Set', 'WeakMap', 'WeakSet', 'Promise', 'Symbol', 'BigInt',
-  'Function', 'Reflect', 'Proxy', 'Intl',
+  'Function', 'Reflect', 'Proxy',
   'ArrayBuffer', 'SharedArrayBuffer', 'DataView',
   'Int8Array', 'Uint8Array', 'Uint8ClampedArray', 'Int16Array', 'Uint16Array',
   'Int32Array', 'Uint32Array', 'Float32Array', 'Float64Array', 'BigInt64Array', 'BigUint64Array',
@@ -50,17 +70,66 @@ const GLOBALS: ReadonlySet<string> = new Set([
   // Global functions
   'parseInt', 'parseFloat', 'isNaN', 'isFinite',
   'encodeURIComponent', 'decodeURIComponent', 'encodeURI', 'decodeURI',
+  // Literal-ish globals
+  'undefined', 'NaN', 'Infinity', 'globalThis',
+]);
+
+/**
+ * Identifiers the NODE HOST provides that the sandbox does NOT — measured
+ * absent by the same probe, from the same allowlist this file used to hold as
+ * one generous list.
+ *
+ * A free reference to one of these is REPORTED (`FreeIdentifierResult.nodeOnly`)
+ * rather than waved through, and {@link detectFreeIdentifiers}'s caller turns it
+ * into a lowering refusal that names the identifier and the remedy. The refusal
+ * is the SAFE direction and costs nothing an author can lose: `lowerCallables`
+ * catches it and ships the handler through the `.mjs` bundle, which runs
+ * in-process in Node, where these names are real. What changes is that the
+ * platform stops emitting a `body.source` it knows cannot run.
+ *
+ * ⛔ This set is NOT a wish-list for sandbox capabilities. Moving a name out of
+ * it means the shipped QuickJS build gained the global — a runtime change,
+ * measured by the probe, never an edit here.
+ */
+export const NODE_ONLY_GLOBALS: ReadonlySet<string> = new Set([
+  // ECMA-402. Standard in every browser and in Node; absent from this QuickJS
+  // build. The name the defect was reported under.
+  'Intl',
+  // Host/Web platform additions, not ECMAScript. QuickJS is the language, not
+  // the platform — nothing installs these into the VM.
   'structuredClone', 'queueMicrotask', 'atob', 'btoa',
   'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
-  // Web-ish that the sandbox / Node commonly provide
-  'URL', 'URLSearchParams', 'TextEncoder', 'TextDecoder', 'console',
-  // Literal-ish globals & implicit bindings
-  'undefined', 'NaN', 'Infinity', 'globalThis', 'arguments',
+  'URL', 'URLSearchParams', 'TextEncoder', 'TextDecoder',
+  // `console` is a HOST object, and the sandbox deliberately routes logging
+  // through the capability-gated `ctx.log` instead — see `buildBodyLogSurface`
+  // in the runtime's body runner. A lowered body calling `console.log` throws.
+  'console',
+  // The one member that is not a global at all: `arguments` is an implicit
+  // binding of ordinary function scope, and the runner wraps a lowered body in
+  // an ARROW (`(async (ctx) => { … })(ctx)`), which provides none. It measures
+  // absent for a different reason than the rest and is refused for the same
+  // one — a body naming it throws where the raw `function (ctx) {…}` handler,
+  // run in-process, does not.
+  'arguments',
 ]);
 
 export interface FreeIdentifierResult {
-  /** Sorted, de-duplicated free identifier names (empty when self-contained). */
+  /**
+   * Sorted, de-duplicated names the handler references and NOTHING in the
+   * lowered body's world binds — module-scope helpers/imports/consts AND the
+   * {@link NODE_ONLY_GLOBALS} the sandbox does not provide. Empty when the
+   * handler really is self-contained inside the sandbox.
+   */
   free: string[];
+  /**
+   * The subset of {@link free} that the Node HOST provides but the sandbox does
+   * not. Carried separately because the two halves have opposite remedies: a
+   * module-scope name can be inlined into the handler, a host-only global
+   * cannot be inlined at all and needs a string handler ref or a validation
+   * rule. Callers that flatten this back into one list re-create the paragraph
+   * of English this field exists to replace.
+   */
+  nodeOnly: string[];
   /** True when the source could not be parsed into a single function node. */
   unparsed: boolean;
 }
@@ -220,22 +289,29 @@ function collectReferences(fn: ts.FunctionLikeDeclarationBase): Set<string> {
 
 /**
  * Compute the free identifiers of a handler function source.
- * Returns `{ free: [], unparsed: true }` when the source can't be parsed — the
- * caller treats "unparsed" as "don't block extraction" (conservative).
+ * Returns `{ free: [], nodeOnly: [], unparsed: true }` when the source can't be
+ * parsed — the caller treats "unparsed" as "don't block extraction"
+ * (conservative).
  */
 export function detectFreeIdentifiers(rawFunctionSource: string): FreeIdentifierResult {
   const fn = parseFunction(rawFunctionSource);
-  if (!fn) return { free: [], unparsed: true };
+  if (!fn) return { free: [], nodeOnly: [], unparsed: true };
 
   const bound = collectBindings(fn);
   const refs = collectReferences(fn);
 
   const free: string[] = [];
+  const nodeOnly: string[] = [];
   for (const name of refs) {
     if (bound.has(name)) continue;
-    if (GLOBALS.has(name)) continue;
+    // Only the SANDBOX set waives a name. A `NODE_ONLY_GLOBALS` member falls
+    // through to `free` on purpose — that is the whole fix — and is ALSO
+    // recorded in `nodeOnly` so the refusal can name the right remedy.
+    if (SANDBOX_GLOBALS.has(name)) continue;
     free.push(name);
+    if (NODE_ONLY_GLOBALS.has(name)) nodeOnly.push(name);
   }
   free.sort();
-  return { free, unparsed: false };
+  nodeOnly.sort();
+  return { free, nodeOnly, unparsed: false };
 }

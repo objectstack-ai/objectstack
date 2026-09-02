@@ -71,6 +71,16 @@
  * (helper, import, top-level const) cannot be shipped body-only — the reference
  * would `ReferenceError` at runtime. {@link detectFreeIdentifiers} finds those;
  * extraction throws so the caller falls back to bundling the real closure.
+ *
+ * Sandbox-missing HOST globals (#14301) arrive through that same gate and for
+ * the same reason, once the ambient allowlist stopped conflating "Node has it"
+ * with "the sandbox has it". `Intl` was allowlisted next to `JSON`, so a handler
+ * calling `Intl.DateTimeFormat` had no free identifier at all: it lowered, every
+ * local gate stayed green, and the body threw `ReferenceError` in production —
+ * under a hook's default `onError: 'abort'`, refusing every write to the object.
+ * Those names are now REPORTED (`FreeIdentifierResult.nodeOnly`) and refused
+ * with prose that names the identifier and the remedy, which is NOT the
+ * module-scope one: a host global cannot be inlined.
  */
 
 import { detectFreeIdentifiers } from './detect-free-identifiers.js';
@@ -85,11 +95,16 @@ import { detectFreeIdentifiers } from './detect-free-identifiers.js';
  * paragraph of English where it needed a category. So the two refusals that
  * mean OPPOSITE things to an author shared one undifferentiated fate:
  *
- *   `free-identifiers`   the handler IS expressible as a metadata-only body.
- *                        It references a module-scope helper/import/const, so
- *                        the deployment shape silently changed from metadata to
- *                        bundled closure — against what the author wrote. The
- *                        remedy is local and mechanical (inline the value).
+ *   `free-identifiers`   the handler names something the lowered body's world
+ *                        does not bind, so the deployment shape silently
+ *                        changed from metadata to bundled closure — against
+ *                        what the author wrote. Two sub-cases, told apart by
+ *                        `nodeOnlyIdentifiers`: a module-scope helper/import/
+ *                        const, whose remedy is local and mechanical (inline
+ *                        the value), and a global the NODE HOST has that the
+ *                        sandbox does not (#14301), which cannot be inlined at
+ *                        all — that one keeps the check in a string handler ref
+ *                        or moves it to a validation rule.
  *   `forbidden-token`    the handler is NOT expressible as a metadata-only body
  *                        at ALL. `fetch`/`require`/`process`/… are capabilities
  *                        the QuickJS sandbox does not have, so writing one IS
@@ -123,18 +138,32 @@ export class HookBodyExtractionError extends Error {
   readonly originLabel: string;
   /** Names the handler referenced but does not bind — `free-identifiers` only. */
   readonly freeIdentifiers: readonly string[];
+  /**
+   * The subset of {@link freeIdentifiers} the NODE HOST provides and the QuickJS
+   * sandbox does not (#14301) — `Intl` the reported one.
+   *
+   * Same discipline as `kind` above, one level finer: the refusing rule already
+   * knows which half of the free list it is looking at, and a consumer that has
+   * to re-derive it from the message prose is back where #13651 started. The
+   * two halves have OPPOSITE remedies — a module-scope name is inlined into the
+   * handler, a host-only global cannot be inlined at all — so a consumer that
+   * prints one remedy for both prints a wrong one half the time.
+   */
+  readonly nodeOnlyIdentifiers: readonly string[];
 
   constructor(
     kind: HookBodyRefusalKind,
     originLabel: string,
     message: string,
     freeIdentifiers: readonly string[] = [],
+    nodeOnlyIdentifiers: readonly string[] = [],
   ) {
     super(message);
     this.name = 'HookBodyExtractionError';
     this.kind = kind;
     this.originLabel = originLabel;
     this.freeIdentifiers = freeIdentifiers;
+    this.nodeOnlyIdentifiers = nodeOnlyIdentifiers;
   }
 }
 
@@ -268,16 +297,14 @@ export function extractHookBody(fn: (...a: unknown[]) => unknown, originLabel: s
   // throw — the caller catches this and keeps the handler in the BUNDLED form,
   // where esbuild carries the real closure along. The whole `fn` source (params
   // included) is analyzed so parameters are correctly in scope.
-  const { free, unparsed } = detectFreeIdentifiers(raw);
+  const { free, nodeOnly, unparsed } = detectFreeIdentifiers(raw);
   if (!unparsed && free.length > 0) {
     throw new HookBodyExtractionError(
       'free-identifiers',
       originLabel,
-      `[hook-body-extract] ${originLabel}: handler references identifier(s) not in scope at runtime: ` +
-        `${free.join(', ')}. Module-scope helpers/imports aren't shipped with a metadata-only body, so ` +
-        `this handler will be BUNDLED instead (no behavior change). To make it body-only, inline the ` +
-        `helper(s) into the handler or move the logic behind \`ctx\` (e.g. \`ctx.api\`).`,
+      freeIdentifierRefusal(originLabel, free, nodeOnly),
       free,
+      nodeOnly,
     );
   }
 
@@ -292,6 +319,79 @@ export function extractHookBody(fn: (...a: unknown[]) => unknown, originLabel: s
     capabilities: [...inferred].sort(),
     isExpression: block.isExpression,
   };
+}
+
+/**
+ * The closed set of host names the sandbox answers with a FIRST-CLASS
+ * replacement, so the refusal can name it.
+ *
+ * Deliberately one entry, not a mechanism. `console` is the host-only name an
+ * ordinary handler is most likely to reach for, and "keep it in a string
+ * handler ref" is poor advice for a log line when the platform's own answer is
+ * one capability away. Every other member of `NODE_ONLY_GLOBALS` has no
+ * in-sandbox equivalent to point at, and inventing one per name would be a
+ * second, unmeasured contract growing beside the measured set.
+ */
+const SANDBOX_REPLACEMENTS: Readonly<Record<string, string>> = {
+  console: 'For logging specifically the sandbox has `ctx.log` — declare the `log` capability and '
+    + 'call `ctx.log.info(...)`.',
+};
+
+/**
+ * The prose for a `free-identifiers` refusal.
+ *
+ * ⛔ The module-scope-only sentence is BYTE-IDENTICAL to what this function
+ * threw before #14301 — `os build`'s warn-and-bundle line, `--strict-body`'s
+ * per-callable diagnostic and `content/docs/automation/hook-bodies.mdx` all
+ * quote it, and a refusal that reads differently would be a documentation break
+ * wearing a refactor's clothes. The host-only branch is ADDITIONAL prose for a
+ * case that could not previously arrive here at all (the names were allowlisted
+ * away), so it breaks no quotation.
+ *
+ * The two branches exist because the remedies are opposite and a wrong remedy
+ * is worse than none: "inline the helper" is impossible for `Intl`, and an
+ * author (or a code-writing model) who tries it lands on a second broken shape.
+ */
+function freeIdentifierRefusal(
+  originLabel: string,
+  free: readonly string[],
+  nodeOnly: readonly string[],
+): string {
+  const head =
+    `[hook-body-extract] ${originLabel}: handler references identifier(s) not in scope at runtime: ` +
+    `${free.join(', ')}. `;
+
+  if (nodeOnly.length === 0) {
+    return (
+      head +
+      `Module-scope helpers/imports aren't shipped with a metadata-only body, so ` +
+      `this handler will be BUNDLED instead (no behavior change). To make it body-only, inline the ` +
+      `helper(s) into the handler or move the logic behind \`ctx\` (e.g. \`ctx.api\`).`
+    );
+  }
+
+  const names = nodeOnly.join(', ');
+  const isAre = nodeOnly.length === 1 ? 'is' : 'are';
+  const itThem = nodeOnly.length === 1 ? 'it' : 'them';
+  const moduleScope = free.filter((n) => !nodeOnly.includes(n));
+  const tail =
+    moduleScope.length > 0
+      ? ` The remaining name(s) — ${moduleScope.join(', ')} — are module-scope helpers/imports: ` +
+        `inline them into the handler or move the logic behind \`ctx\` (e.g. \`ctx.api\`).`
+      : '';
+  const hint = nodeOnly.map((n) => SANDBOX_REPLACEMENTS[n]).filter(Boolean).join(' ');
+
+  return (
+    head +
+    `${names} ${isAre} not available in the hook sandbox — the QuickJS build the runtime evaluates a ` +
+    `lowered body in does not provide ${itThem}, so the body would throw ReferenceError in production ` +
+    `while validate, typecheck, test and build all stay green (they run the raw function in Node, ` +
+    `where ${itThem} exist${nodeOnly.length === 1 ? 's' : ''}). This handler will be BUNDLED instead ` +
+    `(no behavior change). To keep it as metadata, keep the check in a string handler ref — put the ` +
+    `function in the top-level \`functions:\` map and write \`handler: 'fn_name'\` — or move it to a ` +
+    `validation rule.${hint ? ' ' + hint : ''}` +
+    tail
+  );
 }
 
 interface PeeledBody {
