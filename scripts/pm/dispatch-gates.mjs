@@ -2664,6 +2664,194 @@ export function moduleRelativeDirectoryHint(literal, scriptPath, tree, { root = 
   return resolved;
 }
 
+/** A binding worth resolving is seeded from the running module's own location. */
+const MODULE_ANCHOR_SEED = /import\.meta\.(?:url|dirname|filename)/;
+
+/**
+ * ── The THIRD anchor: the PACKAGE ROOT a gate binds from its own module URL
+ *    (#14208) ──────────────────────────────────────────────────────────────────
+ *
+ * The repo root is one anchor and the writer's own directory
+ * (`resolveModuleRelativeHint`) is the second. A gate that lives INSIDE a
+ * package writes against a third, bound once at module top and used everywhere
+ * after:
+ *
+ *   const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+ *   const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
+ *
+ * This function answers WHERE that binding points, and answers nothing else.
+ * Whether any literal should be read against it is the caller's question
+ * (`packageRootAnchoredHint`), which is what keeps this one a fact of the tree
+ * rather than a reading of intent.
+ *
+ * ## Why it routes through `resolvePathExpression` and builds no walker
+ *
+ * `anchoredReadTargets` already resolves exactly these expressions, from the
+ * same three-part context, for the read follow. A second regex over
+ * `fileURLToPath` spellings would be a copy of that resolver, and a copy that
+ * drifts is the defect this file exists to refuse — so the ctx is built the
+ * way that scan builds it and the resolution is the resolver's.
+ *
+ * ## Narrowings, and why each one is structural
+ *
+ * SEEDED FROM `import.meta` ONLY. A binding computed from the repo root
+ * (`join(ROOT, 'packages/spec')`) is already spelled from the root and needs no
+ * anchor; admitting it would make every join base in the file a candidate
+ * anchor, which is a widening nothing here measured.
+ *
+ * A TRACKED DIRECTORY, read off `tree.prefixes`/`tree.files` — the same two
+ * sets `moduleRelativeDirectoryHint` reads, so this cannot disagree with what
+ * the reachability half of the tool believes the tree holds.
+ *
+ * THAT CARRIES A TRACKED `package.json`. This is the narrowing that makes the
+ * anchor a PACKAGE root rather than "any directory above the writer": the
+ * manifest is the tree's own declaration that this directory is a root things
+ * are addressed from, and it is the same declaration the manifest follow
+ * (`packageManifestTargets`) reads one edge over. Without it the rule would
+ * re-anchor at every intermediate directory a script happens to climb to.
+ *
+ * NEVER THE REPO ROOT: a binding that resolves to zero segments is the anchor
+ * the extractor already applies, so admitting it would be a no-op wearing a
+ * rule's clothes. `dispatch-gates.mjs`' own `ROOT` is that shape.
+ *
+ * The FIRST such binding in source order wins. Measured on this tree the
+ * question does not arise — every script in the population binds exactly one —
+ * and a file that bound two package roots would be describing two packages,
+ * which is a card to file rather than a guess to make here.
+ */
+export function packageRootBinding(scriptPath, moduleBody, tree) {
+  if (!scriptPath || !tree) return null;
+  const ctx = {
+    fileSegs: scriptPath.split('/'),
+    names: nameInitialisers(moduleBody),
+    returns: singleReturnExpressions(moduleBody),
+    params: singleCallSiteParameters(moduleBody),
+    seen: new Set(),
+  };
+  for (const inits of ctx.names.values()) {
+    for (const init of inits) {
+      if (!MODULE_ANCHOR_SEED.test(init)) continue;
+      ctx.seen.clear();
+      const at = resolvePathExpression(init, ctx);
+      if (at.kind !== 'in-tree' || at.segs.length === 0) continue;
+      const dir = at.segs.join('/');
+      if (!tree.prefixes.has(dir) || tree.files.has(dir)) continue;
+      if (!tree.files.has(`${dir}/package.json`)) continue;
+      return dir;
+    }
+  }
+  return null;
+}
+
+/**
+ * One hint, re-read against the package root its writer binds — or `null` when
+ * that reading is not available or does not reach the tree (#14208).
+ *
+ * ## The defect, and the one class it is allowed to touch
+ *
+ * `extractWatchHints` takes a literal with no `./` prefix as spelled FROM THE
+ * REPO ROOT. For a gate inside a package that is the wrong base and the tree
+ * says so out loud: `check:generated` declares `api-surface/`,
+ * `export-origins/`, `declaration-map/`, `liveness/state-counts.md` and
+ * `src/meta-spelling/meta-url-data.generated.ts`, all five alive under
+ * `packages/spec/` and all five printed by the residue as dead leads.
+ *
+ * The admitted class is exactly the one whose residue sentence was FALSE, and
+ * that coupling is deliberate rather than convenient: a hint is re-anchored
+ * only when `deepestTrackedPrefix` is empty — no tracked path begins with even
+ * its first segment — which is the branch `unreachableReason` renders as "never
+ * was a repo path". A hint that stops at a SHORTER prefix is the "layout moved"
+ * class and is left alone: its first segment is a real repo directory, so the
+ * root is the base the author most plausibly meant and re-anchoring it would
+ * replace a triage lead with a fabricated one.
+ *
+ * ## Why this is not the widening the two priced refusals refuse
+ *
+ * `moduleRelativeDirectoryHint`'s docblock prices a naive widening of the
+ * RESOLVED form at +53 hints of which 1 was a true lead, and `hintCovers`'
+ * bare-top-level-word admission at +139084 pairs. Neither is relaxed here, and
+ * neither can be reached from here:
+ *
+ *   - ADMISSION is untouched. A literal that is not already a hint — a bare
+ *     single-segment word, a sibling specifier, a package name — never arrives
+ *     at this function. What is re-anchored is a literal the scan already
+ *     admitted and the tree already refused;
+ *   - the candidate must REACH THE TREE, through `hintReachesTree`, which is
+ *     `hintCovers` applied to the corpus. A re-anchoring that names nothing is
+ *     dropped and the hint keeps the spelling it had, so the rule cannot invent
+ *     a path — measured live on `check:browser-reachable-entries`' `'zod'`,
+ *     which stays dead because `packages/spec/zod` is not there;
+ *   - it REPLACES rather than adds. The re-anchored form is the same claim
+ *     about the same literal under the base its writer actually bound, so the
+ *     family's declared-literal count does not move and no second hint is
+ *     manufactured beside a dead one.
+ *
+ * ## The POPULATION, swept before the rule was written (ad54eb342)
+ *
+ * The card that filed this asked for the sweep first and the repair only if it
+ * survived. Over the 201 discovered families' 195 scannable gate scripts:
+ *
+ *   scripts binding a package root this way              8   (all `packages/spec`)
+ *   ...of which carry a hint dead at the repo root       2
+ *   dead-at-root hints in that population                6
+ *   ...that re-anchor onto something the tree HAS        5
+ *   ...refused because the re-anchoring reaches nothing  1   (`'zod'`, a package
+ *                                                            specifier, in
+ *                                                            check:browser-reachable-entries)
+ *
+ * ⚠️ The card described the class as literals passed to `resolve(PKG_DIR, …)`.
+ * That shape is real — 6 such literals across 6 of the 8 scripts — but it is
+ * NOT where the confirmed instance comes from, and a rule restricted to it
+ * would have repaired none of the three dead leads the card names: all five of
+ * check:generated's are `artifact:` values in its GATED ledger, describing what
+ * each gate verifies, resolved by nothing. The syntactic restriction was
+ * measured and dropped for that reason; the reachability test above is what
+ * keeps the wider reading honest.
+ *
+ * ## Blast radius, measured before the change and after it (ad54eb342)
+ *
+ * A rule that moves rows moves them for EVERY family, so the price is the
+ * deliverable and not a footnote. Over 201 discovered families and 7900 tracked
+ * files:
+ *
+ *   watch-hint (gate, file) pairs   142089 -> 142139   (+50, and ZERO lost)
+ *   families whose hint set moves        1  — check:generated, and no other
+ *   pairs RE-ATTRIBUTED (same pair, new via)            0 — every replaced
+ *                                   spelling was DEAD, so it covered nothing
+ *                                   that could be re-attributed
+ *   (check, hint) live / inert      1108/152 -> 1113/147
+ *   distinct hints in the fleet          725 -> 722, because three of the five
+ *                                   re-anchored forms are already spelled from
+ *                                   the root by other gates
+ *   families carrying dead literals       46 -> 45
+ *   dead literals                        152 -> 147
+ *   ...of them in the "never was a repo path" class   128 -> 123
+ *
+ * PROVENANCE, which is the criterion this file prices and never volume: 5 of 5
+ * admitted hints are TRUE leads and 50 of 50 pairs with them, each verified at
+ * its declaration site — they are `check:generated`'s own artifact ledger, and
+ * the gate's whole job is to verify those artifacts against their sources:
+ *
+ *   packages/spec/api-surface        17 files    packages/spec/export-origins  17
+ *   packages/spec/declaration-map    14          .../meta-url-data.generated.ts  1
+ *   packages/spec/liveness/state-counts.md        1
+ *
+ * 0 fabricated. For scale, `hintCovers`' docblock prices the bare-top-level-word
+ * admission it refuses at +139084 pairs on this corpus; this is 0.04% of it.
+ *
+ * @param {string} hint  a hint `extractWatchHints` has already admitted
+ * @param {string} base  the package root, from `packageRootBinding`
+ * @param {{files: Set<string>, prefixes: Set<string>}} tree
+ * @param {string[]} files  the same corpus, as the array `hintReachesTree` walks
+ * @returns {string|null} the re-anchored hint, or null
+ */
+export function packageRootAnchoredHint(hint, base, tree, files) {
+  if (!base || !tree || !files) return null;
+  if (deepestTrackedPrefix(hint, tree.prefixes) !== '') return null;
+  const candidate = `${base}/${hint}`;
+  return hintReachesTree(candidate, files) ? candidate : null;
+}
+
 /**
  * Scan a check script's MODULE BODY for the path-ish string literals it
  * operates on. A hint is a quoted string that contains a `/` (or names a
@@ -2817,7 +3005,52 @@ export function extractWatchHints(scriptSource, scriptPath = null, { tree = null
     }
     hints.add(trimmed);
   }
-  return [...hints];
+  return anchorAtPackageRoot(hints, scriptPath, moduleBody, tree);
+}
+
+/**
+ * The THIRD anchor, applied to a finished hint set (#14208).
+ *
+ * It runs LAST and over the assembled set rather than inside the admission
+ * loop, because it is a re-reading of hints and not a second admission rule:
+ * everything it can touch is already a hint, so the loop above keeps being the
+ * one place that decides what a hint IS.
+ *
+ * The order of the returned list is preserved to the byte for every hint it
+ * does not touch, and a re-anchored hint keeps its ORIGINAL POSITION rather
+ * than moving to the end. `discoverFamilies` puts a gate's own hints at the
+ * front so an already-matched path keeps the exact key and via label it had,
+ * and `residueNames` prints the first three — a rule that reshuffled the list
+ * would move rows in output that nothing in this change is entitled to move.
+ *
+ * The two cheap refusals come first, so the corpus is materialised and the
+ * source is parsed for bindings ONLY for a script that has both a dead-at-root
+ * hint and something to re-anchor it to. Over the live fleet that is 2 scripts
+ * of 201 families' worth of files.
+ */
+function anchorAtPackageRoot(hints, scriptPath, moduleBody, tree) {
+  const spelled = [...hints];
+  if (!scriptPath || !tree) return spelled;
+  const orphans = spelled.filter((h) => deepestTrackedPrefix(h, tree.prefixes) === '');
+  if (orphans.length === 0) return spelled;
+  const base = packageRootBinding(scriptPath, moduleBody, tree);
+  if (!base) return spelled;
+  const files = [...tree.files];
+  const anchored = new Map();
+  for (const h of orphans) {
+    const at = packageRootAnchoredHint(h, base, tree, files);
+    if (at) anchored.set(h, at);
+  }
+  if (anchored.size === 0) return spelled;
+  const out = [];
+  const seen = new Set();
+  for (const h of spelled) {
+    const v = anchored.get(h) ?? h;
+    if (seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
 }
 
 /**
@@ -10752,15 +10985,112 @@ function selfTest() {
     for (const h of entry.hints ?? []) if (!before.has(h)) dirGained.push(`${check} +${h}`);
     for (const h of before) if (!(entry.hints ?? []).includes(h)) dirLost.push(`${check} -${h}`);
   }
+  // ⚠️ WITH-tree against WITHOUT-tree measures every TREE-COUPLED rule at once,
+  // and there are TWO of them now: this one, and the package-root anchor
+  // (#14208), which refuses without a tree for the same reason. The rows are
+  // PARTITIONED rather than filtered — a filter would let a third rule's rows
+  // disappear from the one pin whose job is to notice them.
+  const dirRuleGained = dirGained.filter((r) => r.endsWith('+packages/spec/src'));
+  const parseRow = (row, sign) => {
+    const at = row.indexOf(` ${sign}`);
+    return { check: row.slice(0, at), hint: row.slice(at + 2) };
+  };
+  const anchorGained = dirGained.filter((r) => !dirRuleGained.includes(r)).map((r) => parseRow(r, '+'));
+  const anchorLost = dirLost.map((r) => parseRow(r, '-'));
   t(
     'the rule changes exactly the two gates that walk packages/spec/src, and adds exactly the directory they walk',
-    dirGained.join(' · ') === 'check:docs +packages/spec/src · check:skill-refs +packages/spec/src',
+    dirRuleGained.join(' · ') === 'check:docs +packages/spec/src · check:skill-refs +packages/spec/src',
     dirGained.join(' · '),
   );
+  // It takes nothing away, and every remaining tree-coupled row belongs to the
+  // anchor — asserted as a PAIRING rather than as a list of names, so the pin
+  // survives packages/spec's artifact ledger moving and still reds the day the
+  // anchor starts ADDING a hint beside a dead one instead of replacing it.
   t(
     'and it takes NOTHING away — a widening that also subtracted would read exactly like this one',
-    dirLost.length === 0,
-    dirLost.join(' · '),
+    anchorLost.length === anchorGained.length &&
+      anchorGained.every((g) =>
+        anchorLost.some(
+          (l) =>
+            l.check === g.check &&
+            g.hint.endsWith(`/${l.hint}`) &&
+            hintTree.files.has(`${g.hint.slice(0, g.hint.length - l.hint.length - 1)}/package.json`),
+        ),
+      ),
+    `${anchorGained.map((g) => `${g.check} +${g.hint}`).join(' · ')} || ${dirLost.join(' · ')}`,
+  );
+
+  // ── The THIRD anchor: a literal bound to the writer's PACKAGE ROOT (#14208)
+  //
+  // `packageRootAnchoredHint` carries the population sweep, the pricing against
+  // the two refusals it must not become, and the provenance split. Pinned here
+  // as the four things a reader has to be able to break: that it FIRES, that it
+  // is REFUSED without a tree, that it cannot invent a path, and that it leaves
+  // the layout-moved class alone.
+  const pkgAnchorSrc =
+    "const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');\n" +
+    "const GATED = [{ check: 'check:api-surface', artifact: 'api-surface/' }];\n";
+  t(
+    'a literal dead at the repo root is re-read against the package root its writer binds',
+    extractWatchHints(pkgAnchorSrc, 'packages/spec/scripts/check-x.ts', { tree: hintTree }).join() ===
+      'packages/spec/api-surface',
+    extractWatchHints(pkgAnchorSrc, 'packages/spec/scripts/check-x.ts', { tree: hintTree }).join(),
+  );
+  t(
+    '…and without a tree the same call keeps the root spelling — a missing lead, never a fabricated one',
+    extractWatchHints(pkgAnchorSrc, 'packages/spec/scripts/check-x.ts').join() === 'api-surface',
+  );
+  t(
+    'a re-anchoring that reaches nothing is REFUSED, so the rule cannot invent a path',
+    extractWatchHints(
+      `${pkgAnchorSrc}const P = 'no-such-dir/no-such-file.ts';`,
+      'packages/spec/scripts/check-x.ts',
+      { tree: hintTree },
+    ).includes('no-such-dir/no-such-file.ts'),
+  );
+  // The layout-moved class is NOT this rule's: its first segment is a real repo
+  // directory, so the root is the base its author most plausibly meant, and
+  // re-anchoring it would replace a triage lead with a fabricated one.
+  t(
+    'a hint the tree stops short of keeps the ROOT spelling — the layout-moved class is left to triage',
+    extractWatchHints(
+      `${pkgAnchorSrc}const P = 'scripts/gone-from-here.mjs';`,
+      'packages/spec/scripts/check-x.ts',
+      { tree: hintTree },
+    ).includes('scripts/gone-from-here.mjs'),
+  );
+  t(
+    'a module-anchored binding that carries no package.json is no anchor',
+    packageRootBinding(
+      'scripts/pm/x.mjs',
+      "const D = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');",
+      hintTree,
+    ) === null,
+  );
+  t(
+    '…and the repo root is never the anchor — that base is the one already applied',
+    packageRootBinding('scripts/pm/x.mjs', "const R = new URL('../..', import.meta.url).pathname;", hintTree) === null,
+  );
+  // LIVE, on this tree: the specimen the card was filed for. ARRIVAL, not
+  // departure — the family is named, and the re-anchored hint is shown to reach
+  // a real file that NO other hint of that family reaches, so the pair is this
+  // rule's rather than a coincidence of some other hint already covering it.
+  t(
+    'the live spec gate binds the package root the card names',
+    packageRootBinding(
+      'packages/spec/scripts/check-generated.ts',
+      readFileSync(join(ROOT, 'packages/spec/scripts/check-generated.ts'), 'utf8'),
+      hintTree,
+    ) === 'packages/spec',
+  );
+  const generatedEntry = dirLanding.get('check:generated');
+  const apiSurfaceFile = trackedFiles().find((f) => f.startsWith('packages/spec/api-surface/'));
+  t(
+    'check:generated carries its artifact ledger re-anchored, and that hint is what reaches it',
+    Boolean(apiSurfaceFile) &&
+      (generatedEntry?.hints ?? []).filter((h) => hintCovers(h, apiSurfaceFile)).join() ===
+        'packages/spec/api-surface',
+    (generatedEntry?.hints ?? []).filter((h) => hintCovers(h, apiSurfaceFile)).join(),
   );
 
   // REFUSAL 1 — module-relative ONLY. `resolve` treats a bare word exactly like
