@@ -55,7 +55,7 @@
  *   |-------------|----------------------------------------------------------|
  *   | `statistic` | `schema.label`, `schema.value`, `schema.description` (`data-display/statistic.tsx`) |
  *   | `card`      | `schema.title`, `schema.description` (`layout/card.tsx`) |
- *   | `button`    | `schema.label` (`form/button.tsx`, `action/action-button.tsx`) |
+ *   | `button`    | `schema.label` (`form/button.tsx`) |
  *
  * These are the measured motivating cases from objectui#4795 (dashboard
  * workhorses). Other registered renderers also read keys from this closed set
@@ -73,6 +73,32 @@
  * channel as `content` alone and declared `text.value` OUT on those grounds —
  * this omission is deliberate, not pending measurement. Adding a row is
  * additive and spec-first; do it here, never as a renderer-side inference.
+ *
+ * ## Rows are keyed on the AUTHORED type string, prefix and all
+ *
+ * {@link expressionBindableTextKeysFor} does an own-property lookup on the
+ * type string exactly as authored, so a namespace-prefixed spelling —
+ * `action:button`, `ui:button`, the `mcp:` family — is a DIFFERENT key from
+ * the bare name and answers the empty set BY CONSTRUCTION, not by oversight.
+ * Nothing strips a prefix between the two, and nothing should: a stripping
+ * rule would in the same motion grant rows to `element:button` and
+ * `page:card`, whose renderers take their config from the evaluated
+ * `properties` bag and never read these keys at the node's top level.
+ *
+ * `action:button` is therefore deliberately OUT, and `ui:button` with it
+ * (objectstack#13672); the `button` row above covers the bare `button`
+ * spelling alone, which is why its citation names `form/button.tsx` only. Two
+ * measured grounds, the same two kinds every other row runs on — zero pull
+ * (the objectui corpus census of 736 JSON documents / 2747 typed nodes finds 5
+ * `action:button` nodes, 0 of them carrying an expression in `label`, and 0
+ * `ui:`-prefixed spellings of any kind), and this module's own admission rule
+ * that a row arrives with its own measurement while a type string with no row
+ * IS the empty set. Not a judgement that the key is inert:
+ * `action/action-button.tsx` renders the author-written `schema.label`
+ * directly (measured 2026-08-31), so the read-back half is real and only the
+ * pull is missing. The reopen path is the ordinary one: a named requirement
+ * for an expression-bound `action:button` label adds a row here, carrying that
+ * row's own measurement.
  */
 
 import { z } from 'zod';
