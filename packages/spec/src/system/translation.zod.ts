@@ -172,7 +172,8 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
   aliases: {
     // The group prefixes are the whole point of the `_`-prefixed convention,
     // and the un-prefixed spelling is the one an author reaches for first.
-    views: '_views', actions: '_actions', sections: '_sections',
+    views: '_views', actions: '_actions', sections: '_sections', validations: '_validations',
+    validationRules: '_validations', rules: '_validations',
     plural: 'pluralLabel', labelPlural: 'pluralLabel', name: 'label', title: 'label',
     columns: 'fields', properties: 'fields', attributes: 'fields',
   },
@@ -383,6 +384,73 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
   }, {
     label: z.string().optional().describe('Translated tab label'),
   })).optional().describe('Filter-preset tab translations keyed by tab name'),
+
+  /**
+   * Custom validation-rule messages keyed by rule name
+   * (`ValidationRuleSchema.name`, snake_case).
+   *
+   * Convention (resolved on the WRITE path by the ObjectQL rule evaluator):
+   *   objects.<object>._validations.<rule_name>.message
+   *
+   * **The hole this closes (#14253).** `object.validations[].message` is the
+   * sentence a rejected write returns, and the evaluator emitted it verbatim.
+   * A deployment therefore got platform-generated refusals in the caller's
+   * language — the built-in field catalog has shipped `zh-CN` since #3957 — and
+   * author-written refusals in the source language, side by side in one error
+   * envelope.
+   *
+   * **This is not `validationMessages` coming back.** That group (retired in
+   * 17.0.0, #4667) was keyed by rule name at the TOP level, so it could not
+   * tell two objects' rules apart, and — the reason it was retired — nothing
+   * read it. This one is object-scoped, sits beside `_views` / `_actions` /
+   * `_tabs`, and has a reader in the same change: `objectValidationMessageKey`
+   * (`system/i18n-resolver.ts`) spells the address, and the rule evaluator asks
+   * the **existing** `i18nService` channel (`engine.ts`'s `setI18nService`,
+   * #3957 — the one that already localizes built-in messages and field labels).
+   * No second i18n path into objectql.
+   *
+   * **`messages['validation.field.*']` is a different thing** and stays as it
+   * is: it overrides the platform's BUILT-IN field catalog
+   * (`BUILTIN_VALIDATION_MESSAGES`), which is keyed by constraint, not by rule.
+   * It cannot address an author's own rule.
+   *
+   * **The key face is one key, measured.** A rule declares `label` (its entry
+   * in the admin rule listing) and `description` (administrative notes) as well
+   * as `message` — neither reaches a rejected caller, and declaring them here
+   * would parse clean and translate nothing, the ADR-0078 shape this file keeps
+   * paying to remove. Both carry `guidance` instead.
+   *
+   * A nested `conditional` branch rule carries its own `name` and is addressed
+   * by it; the wrapping `conditional`'s own `message` never reaches a user (the
+   * branch supplies the violation), so it has nothing to translate.
+   */
+  _validations: z.record(z.string(), strictObject({
+    surface: 'this validation rule translation',
+    history: TRANSLATION_HISTORY,
+    aliases: {
+      text: 'message', error: 'message', errorMessage: 'message', errorText: 'message',
+      violation: 'message', violationMessage: 'message', msg: 'message',
+    },
+    guidance: {
+      label:
+        "`label` is the rule's entry in the admin rule listing, not the text a rejected write returns "
+        + '— nothing resolves it through the bundle, so a key here would parse clean and translate '
+        + 'nothing. Only `message` is addressed on this surface.',
+      description:
+        "`description` is the rule's administrative note (the business reason, for whoever maintains "
+        + 'the rule) and never reaches a user. Translate `message`, the sentence a rejected write '
+        + 'returns.',
+      condition:
+        '`condition` / `when` is a CEL predicate, not display copy — it is the same expression in '
+        + 'every locale. Only `message` is translatable on a validation rule.',
+      when:
+        '`when` / `condition` is a CEL predicate, not display copy — it is the same expression in '
+        + 'every locale. Only `message` is translatable on a validation rule.',
+    },
+  }, {
+    message: z.string().optional()
+      .describe("Translated rejection message — overlays the rule's authored `message` on every rejected write"),
+  })).optional().describe('Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`)'),
 }).describe('Translation data for a single object'));
 
 export type ObjectTranslationData = z.input<typeof ObjectTranslationDataSchema>;
@@ -463,10 +531,12 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
   // through to the client tree and nothing downstream consumed it.
   validationMessages:
     '`validationMessages` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no '
-    + 'resolver ever read it, so a translated rule message was stored and never shown. '
-    + 'Validation messages are not translated through a translation group: author the '
+    + 'resolver ever read it, so a translated rule message was stored and never shown, and its '
+    + 'rule-name-only keying could not tell two objects\' rules apart. Author the '
     + 'message on the rule itself (`object.validations[].message`), which the engine '
-    + 'evaluates and returns on every rejected write. Delete the key. Run '
+    + 'evaluates and returns on every rejected write, and translate it under the object-scoped '
+    + "group 'objects.<object_name>._validations.<rule_name>.message' (#14253), which the write "
+    + 'path resolves. Delete this key. Run '
     + '`os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   o: "`o` is the retired object-first dialect, which no resolver reads — use 'objects.<object_name>'",
   app: "`app` is the retired object-first dialect, which no resolver reads — use 'apps.<app_name>'",
@@ -479,9 +549,9 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
   // `validationMessages`, which was itself dead, so taking the advice moved the
   // content from one unread group to another. Both are gone now (#4667).
   errors:
-    '`errors` is the retired object-first dialect and has no replacement — rule messages are '
-    + 'not translated through a translation group at all. Author the message on the rule '
-    + "itself (`object.validations[].message`); omit `errors`.",
+    '`errors` is the retired object-first dialect and has no replacement under that name. Author '
+    + 'the message on the rule itself (`object.validations[].message`) and translate it under '
+    + "'objects.<object_name>._validations.<rule_name>.message' (#14253); omit `errors`.",
   _globalOptions: "`_globalOptions` is the retired object-first dialect — use 'objects.<object_name>.fields.<field_name>.options'",
   _meta: "`_meta` is the retired object-first dialect — use the top-level 'locale' field (on a bundle, the locale is the map key)",
   namespace: '`namespace` is not part of the translation contract — omit it (ADR-0129 D3 retired the separate namespace declaration platform-wide)',

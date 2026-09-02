@@ -1704,6 +1704,29 @@ export function objectLabelKey(objectName: string): string {
   return `objects.${objectName}.label`;
 }
 
+/**
+ * Dot-notation i18n key for a custom validation rule's rejection message —
+ * `objects.<object>._validations.<rule>.message` (#14253).
+ *
+ * The third member of the {@link objectFieldLabelKey} / {@link objectLabelKey}
+ * family, and spelled here for the same reason: the consumer holds an
+ * `II18nService` (which takes a key), not a `TranslationBundle`. Used by the
+ * ObjectQL rule evaluator so an author-written `validations[].message` reaches
+ * a rejected caller in that caller's language, the way the built-in field
+ * catalog already does (#3957).
+ *
+ * `ruleName` is `ValidationRuleSchema.name` — including a nested `conditional`
+ * branch's own name, which is what the branch's violation is emitted under.
+ *
+ * ⚠️ This is deliberately NOT the retired `validationMessages` group (#4667,
+ * ADR-0049). That one was keyed by rule name at the bundle's top level, so it
+ * could not distinguish two objects' rules, and — the reason it was retired —
+ * nothing read it. This address is object-scoped and has a reader.
+ */
+export function objectValidationMessageKey(objectName: string, ruleName: string): string {
+  return `objects.${objectName}._validations.${ruleName}.message`;
+}
+
 export function resolveObjectFieldLabels(
   data: TranslationData | undefined,
   objectName: string,

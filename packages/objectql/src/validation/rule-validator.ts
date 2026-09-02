@@ -202,7 +202,7 @@ import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES } from '@objectstack
 // reports it unconditionally, even under `systemFields: false`), and the
 // engine's whole by-id addressing reads that key (`idAddressesThisRow`,
 // `addressKey: 'id'`).
-import { SystemFieldName } from '@objectstack/spec/system';
+import { SystemFieldName, objectValidationMessageKey } from '@objectstack/spec/system';
 import Ajv, { type ValidateFunction } from 'ajv';
 // #5029 — `format` is NOT built into ajv 8; it ships in this separate package.
 // See the `const ajv` note below for why the runtime registers it.
@@ -286,7 +286,8 @@ interface RuleContext {
   logger: EvaluateRulesOptions['logger'];
   /** Declared fields — the source of a violation's display label (#3957). */
   fields: Record<string, ConditionalFieldDef> | undefined;
-  /** Locale + translation hooks for the BUILT-IN messages (#3957). */
+  /** Locale + translation hooks: the BUILT-IN messages (#3957) and the
+   *  authored `rule.message` (#14253) — one hook, two message sources. */
   messages: ValidationMessageContext | undefined;
 }
 
@@ -389,10 +390,13 @@ export interface EvaluateRulesOptions {
    */
   skipStateMachine?: boolean;
   /**
-   * Locale + translation hooks for this evaluator's BUILT-IN messages (#3957) —
-   * the `requiredWhen` required-check, per-option gating, and the state-machine
-   * fallbacks. An author-written `rule.message` is never touched: it is already
-   * in whatever language its author chose.
+   * Locale + translation hooks for this evaluator's messages — the BUILT-IN
+   * ones (#3957: the `requiredWhen` required-check, per-option gating and the
+   * state-machine fallbacks) and, through the SAME hook, an author-written
+   * `rule.message` looked up at `objects.<object>._validations.<rule>.message`
+   * (#14253). Until that key existed the authored half had nowhere to look, so
+   * one rejection envelope could carry platform text in the caller's language
+   * beside authored text in the source language.
    */
   messages?: ValidationMessageContext;
 }
@@ -1872,6 +1876,52 @@ export function evaluateValidationRules(
 }
 
 /**
+ * The author-written rule message in the caller's locale (#14253).
+ *
+ * `object.validations[].message` is the sentence a rejected write returns, and
+ * it used to be emitted verbatim. A deployment with a full `zh-CN` bundle
+ * therefore read platform-generated refusals in Chinese and author-written ones
+ * in English, side by side in one `400 VALIDATION_FAILED` envelope: the
+ * built-in field catalog has resolved through this same context since #3957,
+ * and only the authored half had nowhere to look.
+ *
+ * ## What this is NOT
+ *
+ * It is not a second i18n path into objectql. The lookup runs on the SAME
+ * `ValidationMessageContext.translate` hook — the engine's `i18nService`,
+ * bridged by `ObjectQLPlugin` — that `resolveFieldLabel` and
+ * `renderValidationMessage` already use. What was missing was a key shape for
+ * an author-written rule, not a channel to resolve one.
+ *
+ * The authored message is handed over verbatim on a miss and the translation is
+ * handed over verbatim on a hit: no `{{…}}` interpolation, because an authored
+ * message has no parameter contract and never had one. Only the language
+ * changes.
+ *
+ * `rule.name` is the address — including a nested `conditional` branch's own
+ * name, since the branch is the rule whose message the caller sees.
+ */
+function authoredRuleMessage(
+  rule: Pick<BaseRule, 'name' | 'message'>,
+  messages: ValidationMessageContext | undefined,
+): string {
+  if (messages?.translate && messages.objectName && messages.locale
+      && typeof rule.name === 'string' && rule.name.length > 0) {
+    const key = objectValidationMessageKey(messages.objectName, rule.name);
+    try {
+      const translated = messages.translate(key, messages.locale);
+      // II18nService echoes the key back on a miss.
+      if (typeof translated === 'string' && translated.length > 0 && translated !== key) {
+        return translated;
+      }
+    } catch {
+      // A misbehaving i18n service must not turn a 400 into a 500.
+    }
+  }
+  return rule.message;
+}
+
+/**
  * Dispatch a single rule to its checker, returning the violation (or null).
  * Shared by the top-level loop and by `checkConditional`, which recurses into
  * its `then` / `otherwise` branch. Unknown types return null — but the schema
@@ -1884,11 +1934,11 @@ function evaluateRule(rule: BaseRule, ctx: RuleContext): FieldValidationError | 
       return checkStateMachine(rule as StateMachineRule, ctx.mode, ctx.data, ctx.previous, ctx);
     case 'script':
     case 'cross_field':
-      return checkPredicate(rule as PredicateRule, ctx.merged, ctx.previous, ctx.logger);
+      return checkPredicate(rule as PredicateRule, ctx.merged, ctx.previous, ctx.logger, ctx.messages);
     case 'format':
-      return checkFormat(rule as FormatRule, ctx.data, ctx.logger);
+      return checkFormat(rule as FormatRule, ctx.data, ctx.logger, ctx.messages);
     case 'json_schema':
-      return checkJsonSchema(rule as JsonSchemaRule, ctx.data, ctx.logger);
+      return checkJsonSchema(rule as JsonSchemaRule, ctx.data, ctx.logger, ctx.messages);
     case 'conditional':
       return checkConditional(rule as ConditionalRule, ctx);
     default:
@@ -1917,8 +1967,10 @@ function checkStateMachine(
   previous: Record<string, unknown> | undefined,
   ctx?: Pick<RuleContext, 'fields' | 'messages'>,
 ): FieldValidationError | null {
-  // An author-written `rule.message` wins untouched — it is already in the
-  // language its author chose. Only the FALLBACK is ours to localize (#3957).
+  // An author-written `rule.message` wins over the built-in fallback, and is
+  // itself resolved against `objects.<o>._validations.<rule>.message` before it
+  // is emitted (#14253) — the authored text is the last resort, not the first.
+  // The FALLBACK is localized through the built-in catalog (#3957).
   const fallback = (
     code: 'invalid_initial_state' | 'invalid_transition',
     constraint: Record<string, unknown>,
@@ -1929,7 +1981,7 @@ function checkStateMachine(
       return {
         field: rule.field,
         code,
-        message: rule.message,
+        message: authoredRuleMessage(rule, ctx?.messages),
         label: resolveFieldLabel(rule.field, def, ctx?.messages),
       };
     }
@@ -2024,6 +2076,7 @@ function checkPredicate(
   record: Record<string, unknown>,
   previous: Record<string, unknown> | undefined,
   logger: EvaluateRulesOptions['logger'],
+  messages?: ValidationMessageContext,
 ): FieldValidationError | null {
   const expr = toExpression(rule.condition);
   const result = ExpressionEngine.evaluate<boolean>(expr, {
@@ -2046,7 +2099,7 @@ function checkPredicate(
     return {
       field,
       code: 'rule_violation',
-      message: rule.message,
+      message: authoredRuleMessage(rule, messages),
     };
   }
   return null;
@@ -2074,6 +2127,7 @@ function checkFormat(
   rule: FormatRule,
   data: Record<string, unknown>,
   logger: EvaluateRulesOptions['logger'],
+  messages?: ValidationMessageContext,
 ): FieldValidationError | null {
   if (!(rule.field in data)) return null;
   const value = data[rule.field];
@@ -2088,11 +2142,11 @@ function checkFormat(
       logger?.warn?.(`Validation rule '${rule.name}' has an invalid regex — skipped`);
       return null;
     }
-    if (!re.test(str)) return formatViolation(rule);
+    if (!re.test(str)) return formatViolation(rule, messages);
   }
 
   if (rule.format && !matchesNamedFormat(rule.format, str)) {
-    return formatViolation(rule);
+    return formatViolation(rule, messages);
   }
   return null;
 }
@@ -2123,8 +2177,11 @@ function matchesNamedFormat(format: FormatRule['format'], str: string): boolean 
   }
 }
 
-function formatViolation(rule: FormatRule): FieldValidationError {
-  return { field: rule.field, code: 'invalid_format', message: rule.message };
+function formatViolation(
+  rule: FormatRule,
+  messages: ValidationMessageContext | undefined,
+): FieldValidationError {
+  return { field: rule.field, code: 'invalid_format', message: authoredRuleMessage(rule, messages) };
 }
 
 /**
@@ -2138,6 +2195,7 @@ function checkJsonSchema(
   rule: JsonSchemaRule,
   data: Record<string, unknown>,
   logger: EvaluateRulesOptions['logger'],
+  messages?: ValidationMessageContext,
 ): FieldValidationError | null {
   if (!(rule.field in data)) return null;
   let value = data[rule.field];
@@ -2147,7 +2205,7 @@ function checkJsonSchema(
     try {
       value = JSON.parse(value);
     } catch {
-      return { field: rule.field, code: 'invalid_json', message: rule.message };
+      return { field: rule.field, code: 'invalid_json', message: authoredRuleMessage(rule, messages) };
     }
   }
 
@@ -2166,7 +2224,7 @@ function checkJsonSchema(
   }
 
   if (!validate(value)) {
-    return { field: rule.field, code: 'json_schema_violation', message: rule.message };
+    return { field: rule.field, code: 'json_schema_violation', message: authoredRuleMessage(rule, messages) };
   }
   return null;
 }
