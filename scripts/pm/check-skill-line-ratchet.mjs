@@ -311,7 +311,29 @@ export const CEILINGS = new Map([
   // file is the lookup table it points at, so the policy flip did not have to
   // grow the hot file. Set at landed line count (headroom 0, same convention
   // as the entries above).
-  ['.claude/skills/pm-dispatch/references/rest-channel.md', 87],
+  // Raised 87 → 93 by a maintainer ruling (2026-09-01, 总监批 #22) that names
+  // this ceiling and orders its own encoding — the ratchet's own legitimate
+  // exit, and the raising PR quotes the ruling comment. Verbatim and
+  // untranslated (one quotation, wrapped only to fit this comment):
+  //   「**B 获授权**:`rest-channel.md` 天花板 87 → **≤93 行**,提额 PR 引用本裁决
+  //   评论(棘轮自己的合法出口);两条处方按 dev 已测的忠实版落(两个拒绝 +
+  //   `&page=N` 短页终止条件 + `open_issues_count` 减开放 PR 交叉核对 + 成因未知
+  //   边界 + 关键词对照结构性盲区注记)」
+  // and, same batch, the content-ownership call that says what is paid in place:
+  //   「**C 同批**:退役 L58 对红窗常设规则的复述 —— 内容归属裁定:**红窗规则由
+  //   `platform-readings.md` 配额段独家持有**,`rest-channel.md` 只留指路」
+  // Paid in place: that restatement and its adjacent blank are retired (−2), and
+  // the pointer the ruling permits is folded into the 不可迁移 heading at zero
+  // line cost — so the red-window rule now has exactly one home. Spent: +8, the
+  // two enumeration-completeness prescriptions (both refusals, the `&page=N`
+  // short-page termination, the `open_issues_count`-minus-open-PRs cross-check,
+  // the cause-unknown boundary, and the note that a keyword positive control is
+  // structurally blind to this class) plus the closed-inclusive dedup obligation
+  // the same batch ruled onto this file (「提额预算一次用足」). Could not be paid
+  // by re-wrap: the file measures zero reclaimable lines under this gate's own
+  // wrapLine, and re-wrap funding is refused per the 2026-08-17 rule in any
+  // case. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/rest-channel.md', 93],
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 84],
   ['.claude/skills/pm-dispatch/references/landing-operations.md', 80],
   // Release-aftercare duties — what a lane PM still owes AFTER a tagged release
