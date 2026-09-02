@@ -75,6 +75,22 @@ const fieldNames = (r: SchemaRegistry, name: string) =>
 const kinds = (r: SchemaRegistry, name: string) =>
   r.getObjectContributors(name).map((c) => c.ownership);
 
+/**
+ * What a synchronous registration REFUSED with, or `undefined` when it did not
+ * refuse. The refusal assertions below read the ADR-0112 envelope off it
+ * (`code` + `status`), never a bare `toThrow()`: a throw-shaped assertion is
+ * satisfied by any `Error` from anywhere on the path, which is exactly how an
+ * ablated sibling check stayed green (#14367).
+ */
+const refusalOf = (run: () => unknown): (Error & { code?: unknown; status?: unknown }) | undefined => {
+  try {
+    run();
+    return undefined;
+  } catch (e) {
+    return e as Error & { code?: unknown; status?: unknown };
+  }
+};
+
 /** The registry as a package boot leaves it, plus the tenant's layer. */
 function overlaidRegistry(name = 'myapp_invoice', binding: string = APP_PKG) {
   const r = silent();
@@ -290,8 +306,10 @@ describe('ADR-0029 D9.5 — the single-owner assertion, unchanged, plus one clas
 
   it('a second cross-package OWNER is still refused at registration', () => {
     const r = overlaidRegistry();
-    expect(() => r.registerObject(packagedBody('myapp_invoice') as any, OTHER_PKG))
-      .toThrow(/already owned by package "app\.myapp"/);
+    const refused = refusalOf(() => r.registerObject(packagedBody('myapp_invoice') as any, OTHER_PKG));
+    // ADR-0112 envelope — `code` + `status`, never a bare `toThrow()` (#14367).
+    expect(refused).toMatchObject({ code: 'OBJECT_OWNERSHIP_CONFLICT', status: 422 });
+    expect(refused?.message).toMatch(/already owned by package "app\.myapp"/);
   });
 
   /**
@@ -450,8 +468,10 @@ describe('ADR-0029 D9 §6.1 — LATE INSTALL: the code layer takes ownership', (
   it('does NOT re-classify a packaged owner — a second code package is still refused', () => {
     const r = silent();
     r.registerObject(packagedBody('myapp_invoice') as any, APP_PKG);
-    expect(() => r.registerObject(packagedBody('myapp_invoice') as any, OTHER_PKG))
-      .toThrow(/already owned by package "app\.myapp"/);
+    const refused = refusalOf(() => r.registerObject(packagedBody('myapp_invoice') as any, OTHER_PKG));
+    // ADR-0112 envelope — `code` + `status`, never a bare `toThrow()` (#14367).
+    expect(refused).toMatchObject({ code: 'OBJECT_OWNERSHIP_CONFLICT', status: 422 });
+    expect(refused?.message).toMatch(/already owned by package "app\.myapp"/);
     expect(kinds(r, 'myapp_invoice')).toEqual(['own']);
   });
 
