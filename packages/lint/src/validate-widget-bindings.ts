@@ -657,9 +657,11 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
                 push({
                   severity: 'error',
                   rule: DASHBOARD_FILTER_FIELD_UNKNOWN,
+                  // #2501 is the fan-out this sentence describes; the id stays
+                  // in the comment, never in the string an author reads.
                   message:
                     `${provenance}${account.message} The filter is ANDed into EVERY bound ` +
-                    `widget's analytics query (#2501), so the query addresses a column that ` +
+                    `widget's analytics query, so the query addresses a column that ` +
                     `does not exist.`,
                   hint:
                     `Point filterBindings: { ${def.name}: '<field>' } at a field that resolves on ` +
@@ -700,11 +702,13 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
                 push({
                   severity: 'error',
                   rule: DASHBOARD_FILTER_FIELD_NOT_INCLUDED,
+                  // Same #2501 fan-out as above — id in the comment, not the
+                  // message: `#NNNN` resolves for nobody downstream of here.
                   message:
                     `${provenance}its relationship prefix "${prefix}" is not declared in dataset ` +
                     `"${dsName}"'s \`include\` — and ADR-0021 joins ONLY declared paths, so no join ` +
                     `is compiled and the column is out of this query's reach. The filter is ANDed ` +
-                    `into EVERY bound widget's analytics query (#2501), so the whole board renders ` +
+                    `into EVERY bound widget's analytics query, so the whole board renders ` +
                     `empty, not one tile.`,
                   hint:
                     `Add "${prefix}" to dataset "${dsName}"'s include (declaring "a.b" implicitly ` +
