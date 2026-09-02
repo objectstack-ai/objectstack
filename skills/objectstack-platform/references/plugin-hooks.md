@@ -73,9 +73,8 @@ event names (`beforeFind`, `afterFind`, `beforeInsert`, `afterInsert`,
 
 Because `ctx.hook()` accepts any string, a handler registered for
 `'data:beforeInsert'` on the kernel bus registers "successfully" and then
-**silently never fires**. If you need per-record validation, defaults, or
-audit trails, go to the **objectstack-data** skill (`rules/hooks.md`,
-`references/data-hooks.md`).
+**silently never fires**. For per-record validation, defaults or audit
+trails see [objectstack-data](../../objectstack-data/references/data-hooks.md).
 
 ## Custom Hooks
 
