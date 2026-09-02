@@ -4614,22 +4614,25 @@ export class RestServer {
                         // same result 40+ handlers here already share. It is
                         // resolved only on the typed arm so the untyped sweep
                         // keeps its exact behaviour today, authz-store failure
-                        // modes included.
-                        const diagnosticsCtx = diagnosticsType
-                            ? await this.resolveExecCtx(environmentId, req)
-                                .catch(rethrowAuthzStoreUnavailable)
-                            : undefined;
-                        const diagnosticsOrganizationId = diagnosticsType
-                            // [#10340] FOLDED, not raw — see the PUT door's
-                            // org-scope comment for the measurement. The
-                            // protocol keeps receiving the caller's own
-                            // spelling (it normalises, and refuses an
-                            // unrecognised one with its own 400); only the
-                            // scope decision reads the canonical singular.
-                            ? organizationIdForMetaRead(
+                        // modes included — which is why this reads as a
+                        // statement rather than a ternary: the LOCALLY CAUGHT
+                        // continuation-line spelling is the one the sibling
+                        // doors use and the one `execctx-consumer-census`
+                        // reads, and a third layout would be invisible to it.
+                        let diagnosticsOrganizationId: string | undefined;
+                        if (diagnosticsType) {
+                            const diagnosticsCtx = await this.resolveExecCtx(environmentId, req)
+                                .catch(rethrowAuthzStoreUnavailable);
+                            diagnosticsOrganizationId = organizationIdForMetaRead(
+                                // [#10340] FOLDED, not raw — see the PUT door's
+                                // org-scope comment for the measurement. The
+                                // protocol keeps receiving the caller's own
+                                // spelling (it normalises, and refuses an
+                                // unrecognised one with its own 400); only the
+                                // scope decision reads the canonical singular.
                                 canonicalMetaUrlType(diagnosticsType), diagnosticsCtx?.tenantId,
-                            )
-                            : undefined;
+                            );
+                        }
                         const result = await (p as any).getMetaDiagnostics({
                             type: diagnosticsType,
                             severity,
