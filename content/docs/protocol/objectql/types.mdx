@@ -1048,6 +1048,13 @@ billing_address:
 }
 ```
 
+Only these seven keys are accepted — the value contract (`AddressSchema`,
+`field-value.zod.ts`) refuses an undeclared key and names it, so `postal_code`
+or `zipCode` fails with a rename to `postalCode` instead of being silently
+dropped (ADR-0104 D1; strict since #13802). A record write carrying one stays
+warn-first until the deployment has attested `os migrate value-shapes`, which
+now counts such keys as violations.
+
 **Database mapping:**
 - SQL driver: a `JSON` column (not a composite type)
 - MongoDB: Embedded document
@@ -1073,7 +1080,10 @@ office_location:
 
 `altitude` and `accuracy` (both in metres) are optional additional members. Note
 the keys are `lat`/`lng` — the `{ latitude, longitude }` spelling was never
-consumed by the runtime and has been retired from the value contract.
+consumed by the runtime and has been retired from the value contract. Those
+four keys are the whole accept set: an undeclared key (`heading`, `latitude`)
+is refused by name rather than dropped (`LocationValueSchema`, strict since
+#13802), under the same ADR-0104 warn-first write posture as `address`.
 
 <Callout type="warn">
 Proximity / radius ("near") search is **not** a built-in filter operator.

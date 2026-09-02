@@ -15,7 +15,7 @@ import type {
   MetadataSaveOptions,
   MetadataSaveResult,
 } from '@objectstack/spec/system';
-import type { MetadataLoader } from './loader-interface.js';
+import type { MetadataLoader, MetadataKeyedItem } from './loader-interface.js';
 
 export class MemoryLoader implements MetadataLoader {
   readonly contract: MetadataLoaderContract = {
@@ -59,6 +59,24 @@ export class MemoryLoader implements MetadataLoader {
     const typeStore = this.storage.get(type);
     if (!typeStore) return [];
     return Array.from(typeStore.values()) as T[];
+  }
+
+  /**
+   * [#14205] The keyed half of {@link loadMany}. The storage map is already
+   * `Type -> Name -> Data`, so the key this loader holds an item under is the
+   * map key — `loadMany()` was simply discarding it, which dropped every
+   * nameless body out of `MetadataManager.list()` and out of the endpoint index.
+   *
+   * The body is handed back by reference, unchanged: the key travels beside it,
+   * never folded into it.
+   */
+  async loadManyKeyed<T = any>(
+    type: string,
+    _options?: MetadataLoadOptions
+  ): Promise<MetadataKeyedItem<T>[]> {
+    const typeStore = this.storage.get(type);
+    if (!typeStore) return [];
+    return Array.from(typeStore, ([name, data]) => ({ name, data: data as T }));
   }
 
   async exists(type: string, name: string): Promise<boolean> {

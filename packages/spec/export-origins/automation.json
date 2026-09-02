@@ -97,6 +97,7 @@
     "FLOW_REGION_SLOTS": "src/automation/region-slots.ts#FLOW_REGION_SLOTS (const)",
     "FLOW_REGION_SLOTS_BY_TYPE": "src/automation/region-slots.ts#FLOW_REGION_SLOTS_BY_TYPE (const)",
     "FLOW_STRUCTURAL_NODE_TYPES": "src/automation/flow.zod.ts#FLOW_STRUCTURAL_NODE_TYPES (const)",
+    "FLOW_TRIGGER_KINDS": "src/automation/flow-trigger-kind.ts#FLOW_TRIGGER_KINDS (const)",
     "Flow": "src/automation/flow.zod.ts#Flow (type)",
     "FlowEdge": "src/automation/flow.zod.ts#FlowEdge (type)",
     "FlowEdgeParsed": "src/automation/flow.zod.ts#FlowEdgeParsed (type)",
@@ -131,6 +132,7 @@
     "FlowRunSummaryParsed": "src/automation/execution.zod.ts#FlowRunSummaryParsed (type)",
     "FlowRunSummarySchema": "src/automation/execution.zod.ts#FlowRunSummarySchema (const)",
     "FlowSchema": "src/automation/flow.zod.ts#FlowSchema (const)",
+    "FlowTriggerKind": "src/automation/flow-trigger-kind.ts#FlowTriggerKind (type)",
     "FlowVariableSchema": "src/automation/flow.zod.ts#FlowVariableSchema (const)",
     "FlowVersionHistory": "src/automation/flow.zod.ts#FlowVersionHistory (type)",
     "FlowVersionHistoryParsed": "src/automation/flow.zod.ts#FlowVersionHistoryParsed (type)",
@@ -240,6 +242,7 @@
     "normalizeFlowFunctionEntry": "src/automation/flow-function.zod.ts#normalizeFlowFunctionEntry (function)",
     "parseFlowNodeRegions": "src/automation/control-flow.zod.ts#parseFlowNodeRegions (function)",
     "resolveFlowNodeExpressions": "src/automation/flow-node-expression-paths.ts#resolveFlowNodeExpressions (function)",
+    "resolveFlowTriggerKind": "src/automation/flow-trigger-kind.ts#resolveFlowTriggerKind (function)",
     "validateControlFlow": "src/automation/control-flow.zod.ts#validateControlFlow (function)"
   }
 }
