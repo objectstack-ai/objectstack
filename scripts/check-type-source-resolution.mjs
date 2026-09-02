@@ -498,6 +498,32 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/service-cluster', '@objectstack/service-datasource', '@objectstack/spec',
     '@objectstack/types',
   ],
+  // #14386 re-baseline (the onboarding limb above): a NEW entry, reached ONLY
+  // through `tsconfig.typecheck.json` -- a program that card ADDED (this
+  // package's `typecheck` was a bare `tsc --noEmit` before it, with no sibling
+  // to move the set through). The bare `@objectstack/spec` specifier
+  // `objectstack.config.ts`'s `import { defineStack } from '@objectstack/spec'`
+  // resolves is not one `src/**/*` reached before: `src/` imports only
+  // SUBPATHS (`@objectstack/spec/contracts`, `@objectstack/spec/system`),
+  // never the bare package, so this program is genuinely the first to reach
+  // it. `paths` is deliberately NOT the tool, on the onboarding limb's own
+  // measured grounds (PR #12570): this program checks exactly one file whose
+  // manifest is inline literals, and pulling `@objectstack/spec/src` into it
+  // via `paths` would put that package's own source (and everything IT
+  // imports) inside a program whose `rootDir` is `.` (= this package's own
+  // directory) -- the same TS6059 storm `driver-memory/tsconfig.typecheck.json`
+  // (#13284) neutralises `rootDir` to avoid for its OWN single file, not for a
+  // transitively-pulled dependency tree.
+  //
+  // Numbers, `--list` before/after on the same checkout (measured at
+  // `bd8795ea1`, this entry excluded from the "after" run to isolate exactly
+  // what onboarding the program added):
+  //
+  //   before   55 of 77 packages, 111 programs, 269 pairs, 22 clean
+  //   after    56 of 77 packages, 112 programs, 270 pairs, 21 clean
+  //
+  // so +1 program, +1 pair, +1 package -- this entry and nothing else.
+  '@objectstack/service-i18n': ['@objectstack/spec'],
   // #11490 re-baseline: NEW entries — reached only through `tsconfig.scripts.json`.
   '@objectstack/service-messaging': ['@objectstack/spec'],
   '@objectstack/service-realtime': ['@objectstack/spec'],
