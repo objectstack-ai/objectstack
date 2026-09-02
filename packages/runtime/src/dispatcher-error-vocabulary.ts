@@ -134,7 +134,32 @@ export type CodeStampShape =
      * because a filter drawn around the inconvenient cases is an exemption
      * wearing a predicate's clothes.
      */
-    | 'objlithelper';
+    | 'objlithelper'
+    /**
+     * [#13790] An INLINE literal EXPRESSION at an object-literal `code:` — a
+     * ternary, or a `||`/`??` chain, written at the stamp itself with every
+     * branch already a literal:
+     *
+     * ```ts
+     * code: isProvisioning ? 'PROJECT_PROVISIONING' : 'PROJECT_NOT_FOUND'
+     * ```
+     *
+     * The fifth object-literal position and, until #13790, the third one no
+     * shape reached at all: `objlit` needs the quote immediately after the
+     * colon and here the condition comes first, `objlitconst` needs a
+     * SCREAMING_SNAKE identifier there, `objlittemplate` needs backticks, and
+     * `objlithelper`'s candidate captures the CONDITION's identifier, which is
+     * not a parameter, so it declines. No site AND no unresolved, again.
+     *
+     * ⭐ Unlike every other indirect shape it needs NO resolver: the gate
+     * reduces the value text with `literalCodeValues` directly, and the
+     * ALL-OR-NOTHING rule that drops an expression with one runtime limb is
+     * also what keeps its precision high — 214 of the 216 candidate positions
+     * on the tree it landed against are type annotations or runtime
+     * expressions, and every one of them reduces to nothing without a single
+     * position-specific test.
+     */
+    | 'objlitexpr';
 
 /**
  * Where the stamped code can end up. `dispatcher` is the door this card is
@@ -1179,6 +1204,62 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'value is a member of the closed ADR-0114 D2 catalog by construction; \'min_value\' is one of them. ' +
             'It reaches `ApiError.details.fields[].code`, never `error.code`, so no ledger row can be owed ' +
             'for it (ADR-0112 D6).',
+    },
+
+    // ── [#13790] the SAME D6 genre, arriving through the inline-expression ──
+    // ── shape rather than through a helper parameter ────────────────────────
+    //
+    // These two rows are the whole verdict cost of the `objlitexpr` widening on
+    // this tree, and they are owed for the reason the block above is owed:
+    // reconciliation runs in BOTH directions, so a newly derived site with no
+    // row is a red. What is NOT here is the point of the card — no
+    // `pending-registration` row, because the widening surfaced no unregistered
+    // WIRE code at all. The other live inline-expression position,
+    // `packages/rest/src/error-response.ts`, stamps `PROJECT_PROVISIONING` /
+    // `PROJECT_PROVISIONING_FAILED` / `PROJECT_NOT_FOUND` — all three already in
+    // `ERROR_CODE_LEDGER`, so the scan derives no site for them, and the value
+    // of the shape there is that it will derive one the day a fourth branch is
+    // added to that ternary. That file is the REST door itself.
+    //
+    // ⚠️ Reported HERE rather than delegated to `check:error-code-casing`, and
+    // that was measured rather than assumed. Every pattern that gate has needs
+    // a QUOTED literal beside the token `code`; at an inline ternary there is
+    // none — `findViolations()` returns ZERO findings for this file, while the
+    // literally-spelled `code: 'invalid_type'` a few lines up it DOES see and
+    // correctly skips as D6. A `casing-gate` delegation here would therefore be
+    // the seam this file's header describes, not a hand-off.
+    // flow definition + clone doors — domains/automation.ts
+    {
+        code: 'required',
+        file: 'packages/runtime/src/domains/automation.ts',
+        shape: 'objlitexpr',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The automation door builds `validationFailure(message, [{ field, code, message }])` and stamps ' +
+            'the field code as an INLINE ternary at the property itself — `code: body.name === undefined ? ' +
+            '\'required\' : \'invalid_type\'`. Both branches are ADR-0114 D2 `FieldErrorCode` members, and ' +
+            '`validationFailure` puts the record in `ApiError.details.fields[]` while `error.code` carries ' +
+            'the envelope\'s own VALIDATION_ERROR. The same D6 field-addressed catalog the record-validator ' +
+            'and query-param rows above carry, one stamp shape over (ADR-0112 D6).',
+    },
+    {
+        code: 'invalid_type',
+        file: 'packages/runtime/src/domains/automation.ts',
+        shape: 'objlitexpr',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'The automation door builds `validationFailure(message, [{ field, code, message }])` and stamps ' +
+            'the field code as an INLINE ternary at the property itself — `code: body.name === undefined ? ' +
+            '\'required\' : \'invalid_type\'`. Both branches are ADR-0114 D2 `FieldErrorCode` members, and ' +
+            '`validationFailure` puts the record in `ApiError.details.fields[]` while `error.code` carries ' +
+            'the envelope\'s own VALIDATION_ERROR. The same D6 field-addressed catalog the record-validator ' +
+            'and query-param rows above carry, one stamp shape over (ADR-0112 D6). ⚠️ The gate derives this ' +
+            'row from the `name` ternary alone: two more instances of the identical stamp (the clone door\'s ' +
+            '`name` and `label` checks) sit behind a nested-template desync in the shared textual scanners ' +
+            'and are invisible to `enclosingOpeners`. Same values, same verdict; recorded so the count is ' +
+            'read as a lower bound.',
     },
 ];
 
