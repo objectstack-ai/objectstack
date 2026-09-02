@@ -101,6 +101,14 @@ export type { SummaryRecomputeFailure } from './summary-errors.js';
 // caller (a cron / server-side plugin) can narrow on the class; the `code` is
 // the boundary-crossing identity.
 export { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
+// [#14095] Thrown by `engine.insert` when a driver refuses a row as a unique
+// violation. Exported so an application implementing the platform's own
+// "declare a unique index, attempt the insert, swallow the violation" idiom can
+// name the condition WITHOUT reaching for a dialect's code or
+// `@objectstack/types` (which an app cannot resolve); `code ===
+// 'DUPLICATE_RECORD'` is the boundary-crossing identity, the class is the
+// in-process convenience.
+export { DuplicateRecordError, DUPLICATE_RECORD_CODE } from './duplicate-record-error.js';
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Hosts that boot the engine themselves can catch it to
 // render their own "database unreachable" message.

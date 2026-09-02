@@ -119,6 +119,7 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 // engine is the consumer-side tolerant parsing PD #12 forbids and precedent
 // #5841 retired.
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
+import { envelopeUniqueViolation } from './duplicate-record-error.js';
 // [#8682] The write-path loggers' redaction — bound values never reach the log.
 import { redactBoundStatement } from './driver-fault-redaction.js';
 // [#8844] The runtime half of #8686's ruling: a system-context write on a
@@ -4472,8 +4473,12 @@ export class ObjectQL implements IObjectQLEngine {
    *     (#6250) — never a word-list of this method's own.
    *   - When the dialect names the conflicting COLUMN (`uniqueViolationColumn`,
    *     #6544), it must be one of the fields the engine issued. A conflict on
-   *     some other unique field is the caller's business error and is rethrown
-   *     untouched, exactly as #5495's disposition ruled («非本字段的冲突原样上抛»).
+   *     some other unique field is the caller's business error and is NOT
+   *     re-issued, exactly as #5495's disposition ruled («非本字段的冲突原样上抛»);
+   *     since #14095 it leaves the door as the `DUPLICATE_RECORD` envelope
+   *     (`DuplicateRecordError`) carrying that same driver error as `cause` —
+   *     the disposition is about not RE-ISSUING, and the envelope changes
+   *     nothing about which failures qualify.
    *     When the dialect names no determinable column the attribution falls back
    *     to "the engine issued a number on this row, and the row was refused as a
    *     duplicate" — deliberately, because `uniqueViolationColumn` answers
@@ -4565,7 +4570,14 @@ export class ObjectQL implements IObjectQLEngine {
       try {
         return await driver.create(object, row, driverOptions);
       } catch (error) {
-        if (!this.isIssuedAutonumberCollision(error, issued)) throw error;
+        // [#14095] Not OUR collision to re-issue — so this is where a driver's
+        // refusal leaves the single-row door, and where it stops being the
+        // driver's error. `envelopeUniqueViolation` returns everything that is
+        // not a unique violation untouched (a deadlock, a NOT NULL, an
+        // unreachable store), so only the recognised conflict changes shape.
+        if (!this.isIssuedAutonumberCollision(error, issued)) {
+          throw envelopeUniqueViolation(error, object);
+        }
         // Whatever happens next, the stale counter must not survive this call:
         // leaving it in place is what turned one collision into a storm.
         for (const one of issued) this.autonumberCounters.delete(one.counterKey);
@@ -4590,8 +4602,17 @@ export class ObjectQL implements IObjectQLEngine {
         for (const one of issued) delete row[one.field];
         issued = await this.applyAutonumbers(object, row, execCtx, driverOwnsAutonumber);
         // Nothing left to re-issue (the field vanished from the schema
-        // mid-flight) — the next failure is the caller's to see.
-        if (issued.length === 0) return await driver.create(object, row, driverOptions);
+        // mid-flight) — the next failure is the caller's to see, enveloped on
+        // the same terms as the exit above (#14095): this call is OUTSIDE the
+        // loop's own `try`, so its rejection is a second driver-error exit and
+        // not a path the branch above covers.
+        if (issued.length === 0) {
+          try {
+            return await driver.create(object, row, driverOptions);
+          } catch (retryError) {
+            throw envelopeUniqueViolation(retryError, object);
+          }
+        }
       }
     }
   }
@@ -9459,6 +9480,30 @@ export class ObjectQL implements IObjectQLEngine {
     };
   }
 
+  /**
+   * Create one record, or a batch of them.
+   *
+   * # The error contract on a unique violation (#14095)
+   *
+   * A driver's unique-constraint refusal leaves this door as the ADR-0112
+   * envelope `DuplicateRecordError` — `code: 'DUPLICATE_RECORD'`, `status: 409`,
+   * the driver's own error whole on `cause`, and `field` when the dialect
+   * determinably named the conflicting COLUMN. Identically on every driver, in
+   * the single-row and batch paths alike, so the platform's own recommended
+   * idiom ("declare a unique index, attempt the insert, swallow the violation")
+   * is expressible by an application that knows nothing about SQLite's
+   * `SQLITE_CONSTRAINT_UNIQUE`, Postgres' `23505` or MySQL's `ER_DUP_ENTRY`.
+   *
+   * ⛔ Every other driver failure is rethrown UNCHANGED — a NOT NULL violation,
+   * a deadlock, a missing table, an unreachable store. The verdict is
+   * `isUniqueViolationError` (`@objectstack/types`), the one predicate the repo
+   * has for the question; this door adds no dialect knowledge of its own.
+   *
+   * One conflict keeps a narrower identity: an autonumber the engine ITSELF
+   * issued and re-issued to exhaustion is `ERR_AUTONUMBER_COLLISION`, which
+   * says something `DUPLICATE_RECORD` cannot ("re-seeded, re-issued, still
+   * refused"). It carries the driver error as `cause` exactly as before.
+   */
   async insert(object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
     object = this.resolveObjectName(object);
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
@@ -9891,20 +9936,28 @@ export class ObjectQL implements IObjectQLEngine {
             // strictly worse than the collision. What must not survive is the
             // stale counter: leaving it is what makes the very next insert
             // collide too, one number at a time, which is the storm. So the
-            // counters this batch drew on are dropped and the driver's error is
-            // rethrown UNCHANGED (a batch caller — bulkWrite's per-row
-            // degradation — reads these errors, and this is not the place to
-            // change what it reads).
+            // counters this batch drew on are dropped and the batch is NOT
+            // re-issued.
+            //
+            // [#14095] What is rethrown is no longer the driver's raw error.
+            // The batch door answers the same contract as the single-row one:
+            // a recognised unique violation leaves as the `DUPLICATE_RECORD`
+            // envelope carrying the driver's error as `cause`, and everything
+            // else leaves untouched. A batch caller reading these errors —
+            // bulkWrite's per-row degradation, the import runner — reads a
+            // BETTER answer than before, because the row report's `code` was
+            // previously whatever dialect token the driver happened to use
+            // (`SQLITE_CONSTRAINT_UNIQUE`, `11000`), which is precisely the
+            // coupling this card exists to remove.
             //
             // What an author gets, stated plainly: `insert(object, rows[])` and
-            // `insertMany` both REJECT with the driver's own duplicate-key
-            // error — never `ERR_AUTONUMBER_COLLISION`, which is the
-            // single-row path's identity for "re-issued and still refused".
-            // Whether any row was written is the driver's answer, not this
-            // method's. The one thing the engine guarantees is that the NEXT
-            // write re-seeds instead of walking into the same collision, so a
-            // retry by the caller converges. Pinned in
-            // engine-autonumber-resync.test.ts.
+            // `insertMany` both REJECT with `DUPLICATE_RECORD` — never
+            // `ERR_AUTONUMBER_COLLISION`, which remains the single-row path's
+            // identity for "re-issued and still refused". Whether any row was
+            // written is the driver's answer, not this method's. The one thing
+            // the engine guarantees is that the NEXT write re-seeds instead of
+            // walking into the same collision, so a retry by the caller
+            // converges. Pinned in engine-autonumber-resync.test.ts.
             try {
               if (driver.bulkCreate) {
                 result = await driver.bulkCreate(object, liveRows, driverOptions);
@@ -9920,7 +9973,7 @@ export class ObjectQL implements IObjectQLEngine {
                   object, fields: [...new Set(batchIssued.map((one) => one.field))],
                 });
               }
-              throw error;
+              throw envelopeUniqueViolation(error, object);
             }
           }
         } else {
