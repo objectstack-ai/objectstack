@@ -159,12 +159,30 @@ function applyApiEndpointGates(
 }
 
 /**
- * One package carried by a release artifact (ADR-0130 D4).
+ * One package entry as an AUTHOR writes it — manifest only (ADR-0130 D4).
  *
  * A release artifact MAY carry N package manifests: everything inside one
  * artifact is delivered atomically by one publisher, and that joint delivery IS
- * the co-ownership declaration (ADR-0130 D1). This schema is the ELEMENT of the
- * artifact's `packages` list.
+ * the co-ownership declaration (ADR-0130 D1).
+ *
+ * ## This is the AUTHORING stage, not the artifact's element type
+ *
+ * The element type of `packages` on {@link ObjectStackDefinitionSchema} is
+ * {@link ArtifactPackageSchema}, whose body half is the ASSEMBLED package body
+ * — manifest fields plus the metadata collections that package owns, which is
+ * what `ObjectQL.registerApp` iterates. This schema stays at the stage its body
+ * half can actually describe: `ManifestSchema`, whose `objects` are glob
+ * PATTERNS. #14242 measured that a full parse of a real artifact entry against
+ * it is refused (`manifest.objects.0: expected string, received object`), and
+ * the maintainer's decision (2026-09-02, road B) was to declare the assembled
+ * stage beside this one rather than widen either into a union that could check
+ * neither.
+ *
+ * So: this schema for what an author hands `composeStacks`,
+ * {@link ArtifactPackageSchema} for what the artifact carries and the load path
+ * registers. An authoring entry is a valid instance of the assembled one
+ * whenever its manifest declares no globs — a package identity with no
+ * collections.
  *
  * ## ⛔ The entry is a WRAPPER object, and that is the whole point of its shape
  *
@@ -213,125 +231,37 @@ export const ArtifactPackageEntrySchema = lazySchema(() => strictObject({
     + 'wrap it as `{ manifest: { … } }`.',
 }, {
   manifest: ManifestSchema.describe('The package manifest this artifact entry carries'),
-}).describe('One package carried by a release artifact (ADR-0130 D4)'));
+}).describe('One package entry as authored — manifest only (ADR-0130 D4)'));
 
 export type ArtifactPackageEntry = z.input<typeof ArtifactPackageEntrySchema>;
 /** Post-parse shape of {@link ArtifactPackageEntry} — defaults applied, transforms run (ADR-0122). */
 export type ArtifactPackageEntryParsed = z.infer<typeof ArtifactPackageEntrySchema>;
 
 /**
- * ObjectStack Ecosystem Definition
+ * Every metadata COLLECTION `ObjectStackDefinitionSchema` declares, as one
+ * named shape.
  *
- * This schema represents the "Full Stack" definition of a project or environment.
- * It is used for:
- * 1. Project Export/Import (YAML/JSON dumps)
- * 2. IDE Validation (IntelliSense)
- * 3. Runtime Bootstrapping (In-memory loading)
- * 4. Platform Reflection (API & Capabilities Discovery)
+ * ## Why the collections are a const rather than written inline
+ *
+ * Two surfaces need this exact key set and must not be able to disagree about
+ * it: the stack definition (spread in below) and {@link
+ * AssembledPackageBodySchema}, the assembled form of ONE package inside a
+ * release artifact (ADR-0130 D4). Declaring the collections twice is the drift
+ * ADR-0116 exists about, and here it would be silent in the worst direction —
+ * a metadata family added to the stack and forgotten on the package body would
+ * make the load gate refuse every multi-package artifact that uses it, naming a
+ * key its author correctly wrote.
+ *
+ * ⛔ The artifact ENVELOPE keys stay on the schema below and are deliberately
+ * NOT in here: `manifest`, `packages`, `api`, `server`, `i18n`, `runtimeModule`
+ * and `onEnable` describe the artifact or the deployment, not one package
+ * inside it. `packages` additionally CANNOT live here — its element schema is
+ * built from this shape, so putting it in the shape would make the declaration
+ * circular.
+ *
+ * @internal
  */
-/**
- * 1. DEFINITION PROTOCOL (Static)
- * ----------------------------------------------------------------------
- * Describes the "Blueprint" or "Source Code" of an ObjectStack Plugin/Project.
- * This represents the complete declarative state of the application.
- *
- * Usage:
- * - Developers write this in files locally.
- * - AI Agents generate this to create apps.
- * - CI Tools deploy this to the server.
- */
-/*
- * #8687 — the TOP-LEVEL door is `strictObject` like every inner authorable
- * surface the #4001 campaign closed. Before this, an unknown top-level key
- * parsed green and was silently dropped: a `flow`-for-`flows` typo (or the
- * stale `approvalProcesses`) shipped an artifact missing that whole metadata
- * family, with `os validate` — even `--strict` — exiting 0, because the
- * `defineStack:` diagnostic was printed at load, outside the warning tally.
- *
- * The near-miss guidance that used to arrive through `lintUnknownStackKeys`
- * (`objectz` → "did you mean `objects`?") now arrives through the refusal
- * itself: `strictObject`'s error map suggests the closest declared key, and
- * the lint deliberately goes quiet on a strict schema (its own posture rule —
- * see `kernel/metadata-authoring-lint.ts`), so there is one voice, not two.
- *
- * The `guidance` entries are the curated half: retired/never-keys where a
- * rename suggestion would be wrong. `storage` mirrors `STACK_KEY_GUIDANCE`
- * (`data/authoring-key-lint.ts`), which stays exported for the generic lint
- * API but no longer fires for this surface.
- */
-export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
-  surface: 'this stack definition',
-  history:
-    'Until this surface was closed (the outermost door), an unknown top-level stack '
-    + 'key parsed green and its value was silently dropped — a one-character typo could ship '
-    + 'an artifact missing a whole metadata family while `os validate` exited 0. The declared '
-    + 'keys are enumerated by `ObjectStackDefinitionSchema` (@objectstack/spec, stack.zod.ts) '
-    + 'and in the stack-definition reference docs.',
-  guidance: {
-    storage:
-      'the file-storage backend is a deployment concern, not an application declaration. '
-      + 'Configure it with the OS_STORAGE_* environment variables, or per-deployment in Setup → '
-      + 'Settings → Storage (which also holds credentials — a stack definition would commit them '
-      + 'to git and to any published artifact).',
-    approvals:
-      'approvals are not a top-level collection (ADR-0019): author an approval as a flow with '
-      + 'one or more Approval nodes, in `flows`.',
-    approvalProcesses:
-      'approvals are not a top-level collection (ADR-0019, standalone `approvals` removed in '
-      + '7.4): author an approval as a flow with one or more Approval nodes, in `flows`.',
-    workflows:
-      'there is no top-level `workflows` collection (ADR-0020): a record state machine is a '
-      + '`state_machine` validation rule on the object it governs.',
-    portals:
-      'the top-level `portals` collection was removed — nothing ever consumed it. '
-      + 'Author external-user UI with `apps`/`views` plus positions and permission sets.',
-    themes:
-      '`themes` was removed in @objectstack/spec 17.1 (ADR-0049) — authored themes '
-      + 'were parsed and stored, but no framework package ever read them back, no first-party '
-      + 'app mounted the spec-aware theme provider, and nothing selected an active theme, so '
-      + 'a declared theme changed nothing on screen. Delete the key. To colour the shipped '
-      + 'console, set `app.branding.primaryColor` / `accentColor` — the one live colour '
-      + 'surface (it drives `--primary`, `--accent` and their derived variables).',
-    onDisable:
-      'no kernel, runtime or service ever called `onDisable` (the uninvoked lifecycle '
-      + 'family is retired), so a value written here goes nowhere. Do teardown inside the '
-      + 'resources `onEnable` acquires.',
-  },
-}, {
-  /** System Configuration */
-  manifest: ManifestSchema.optional().describe('Project Package Configuration'),
-
-  /**
-   * The artifact's package list (ADR-0130 D4) — **optional, and additive**.
-   *
-   * A release artifact MAY carry N package manifests so a product can be split
-   * into modules **without renaming a single object** (which is what separate
-   * namespaces would cost: the object `name` IS the table name, the REST path,
-   * the formula token and the saved-view key — ADR-0129 D1–D2 — and
-   * rename-on-install is ADR-0048's standing non-goal).
-   *
-   * ## Read BOTH shapes — the schema shape IS the compatibility mechanism
-   *
-   * - `packages` present → iterate it.
-   * - `packages` absent → treat `manifest` (singular) as a **single-element
-   *   list**.
-   *
-   * `manifest` is therefore RETAINED, not replaced. A replacement would break
-   * every artifact already built and on disk at every customer; the read-both
-   * rule is the term ADR-0130's whole compatibility claim rests on, which is
-   * why D4 states it as the schema decision rather than an implementation note.
-   * An existing single-`manifest` artifact takes the second branch and its
-   * behaviour is unchanged.
-   *
-   * ⚠️ This declares the SHAPE. The load path that iterates it — topologically
-   * ordered through the one sorter, `resolvePluginOrder` (ADR-0130 D5,
-   * ADR-0116) — and the `installPackage` co-ownership gate (ADR-0130 D1/D3) are
-   * separate, dependent changes. Until they land, a multi-package artifact
-   * parses and carries its list; nothing downstream iterates it yet.
-   */
-  packages: z.array(ArtifactPackageEntrySchema).optional()
-    .describe('Package manifests carried by this release artifact (ADR-0130 D4)'),
-
+const STACK_DEFINITION_COLLECTIONS_SHAPE = {
   datasources: z.array(DatasourceSchema).optional().describe('External Data Connections'),
 
   /**
@@ -841,6 +771,445 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
    * @example "./objectstack-runtime.7a70cd6576d17ff6.mjs"
    */
   runtimeModule: z.string().optional().describe('Path (relative to the artifact JSON) of the compiled runtime ESM bundle. Set by `objectstack build`; do not author by hand.'),
+};
+
+
+/**
+ * How {@link composeStacks} treats one top-level key (#5005).
+ *
+ * - `'concat'`    — array collection; concatenated in stack order.
+ * - `'single'`    — one scalar/object value; identical declarations pass
+ *                   through, differing ones are a composition ERROR.
+ * - `'manifest'`  — chosen by the `manifest` option.
+ * - `'objects'`   — merged by the `objectConflict` strategy.
+ * - `'functions'` — named-handler collection; merged by name.
+ * @internal
+ */
+type ComposeDisposition = 'concat' | 'single' | 'manifest' | 'objects' | 'functions';
+
+/**
+ * The composition rule for EVERY top-level key of `ObjectStackDefinition`
+ * (#5005).
+ *
+ * ## Why a total table and not a list
+ *
+ * `composeStacks` used to build its result from an empty object by filling in
+ * `manifest`, `i18n`, `objects` and a hand-maintained array whitelist. Anything
+ * absent from that whitelist was not "left alone" — it was **deleted**, with no
+ * error, no warning, and no way for a consumer to tell "the composer dropped it"
+ * apart from "the author never wrote it". Composition is the platform's
+ * app-packaging / install story, so that silence reached real security config:
+ * `api.enforceProjectMembership` (the per-environment 403 gate) and, as of
+ * #4910, `server.security.rateLimit` both vanished the moment a stack was
+ * composed with any other one. Seven declared array collections
+ * (`datasourceMapping`, `datasets`, `jobs`, `emailTemplates`, `docs`, `books`,
+ * `tiers`) and the whole `functions` handler map went the same way; `tools`
+ * escaped the same fate only because ADR-0109 noticed and patched the list.
+ *
+ * A whitelist makes forgetting the default. This table makes it a **type
+ * error**: it `satisfies Record<StackDefinitionKey, …>` — the stack schema's
+ * own declared key set, read off `STACK_DEFINITION_COLLECTIONS_SHAPE` plus the
+ * two envelope keys — so a new top-level key does not compile until someone
+ * states what composing it means. It is additionally `as const`, because
+ * {@link AssembledPackageBodyKey} derives the assembled package body's key set
+ * from these literal dispositions rather than transcribing them. That is
+ * the structural half of the fix; {@link composeStacks} carries the runtime
+ * half (an undeclared key warns rather than disappearing), so a key that
+ * reaches composition without a rule — via `strict: false`, or a raw object —
+ * still reports itself.
+ *
+ * ## Note on `i18n` (#5051)
+ *
+ * `i18n` carried a last-wins of its own through #5005 — the one key here that
+ * already had a deliberate, working strategy, and #5005's subject was keys that
+ * got *dropped*. That left it as the only top-level key still resolving a
+ * disagreement by silent override: the very shape the maintainer rejected for
+ * `api`/`server` — an earlier stack's declaration overwritten without a word by
+ * whoever composes after it. #5051 closed the inconsistency — `i18n` is
+ * `'single'` like every other non-array configuration key. Which locales an
+ * application supports is not a detail a composer may pick for the author: the
+ * `translations` bundles each stack ships are written against its own
+ * `supportedLocales`, so overriding one stack's declaration leaves the other
+ * stack's bundles addressing locales the composed app no longer admits.
+ *
+ * @internal
+ */
+type StackDefinitionKey = 'manifest' | 'packages' | keyof typeof STACK_DEFINITION_COLLECTIONS_SHAPE;
+
+const COMPOSE_KEY_DISPOSITIONS = {
+  // ── Bespoke strategies (unchanged by #5005) ──
+  manifest: 'manifest',
+  objects: 'objects',
+  functions: 'functions',
+
+  // ── Array collections — concatenated in stack order ──
+  // ADR-0130 D4's artifact package list. Not a metadata collection like the
+  // rest of this block — it carries package MANIFESTS, not authored metadata —
+  // but its composition rule is the same one for the same reason: composing two
+  // stacks that each carry package entries must yield BOTH publishers' entries,
+  // since dropping one would lose a package the composed artifact still
+  // delivers. Declared here in the change that declares the key, as the table's
+  // docblock requires.
+  //
+  // ⚠️ This disposition governs stacks that already CARRY a `packages` list.
+  // It does not, on its own, repair `manifest:`'s deliberate pick-one semantics
+  // above (`selectManifest`, first/last): two stacks that each declare only the
+  // SINGULAR `manifest` would still lose N−1 of them. Folding those in is the
+  // `manifest: 'preserve'` option (ADR-0130 follow-up row 3), which is opt-in
+  // and composes `packages` itself — see `preservePackageEntries`. Concat stays
+  // the rule for every other strategy, and preserve's own output concatenates
+  // in stack order too, so the two agree rather than compete.
+  packages: 'concat',
+  datasources: 'concat',
+  datasourceMapping: 'concat',
+  translations: 'concat',
+  objectExtensions: 'concat',
+  apps: 'concat',
+  views: 'concat',
+  // [#5320] Machine-assembled channel (never authorable — the schema types it
+  // `never`, so no authored stack reaches composition carrying it). Assembled
+  // manifests are not `composeStacks` inputs today; if two ever were, their
+  // non-container view artifacts would concatenate like every other collection.
+  viewItems: 'concat',
+  pages: 'concat',
+  dashboards: 'concat',
+  reports: 'concat',
+  datasets: 'concat',
+  actions: 'concat',
+  // `themes` left this table with the key (#10485) — the total-record type is
+  // what forces this comment to move in lockstep with the schema.
+  flows: 'concat',
+  jobs: 'concat',
+  emailTemplates: 'concat',
+  docs: 'concat',
+  books: 'concat',
+  positions: 'concat',
+  permissions: 'concat',
+  capabilities: 'concat',
+  sharingRules: 'concat',
+  apis: 'concat',
+  webhooks: 'concat',
+  agents: 'concat',
+  tools: 'concat',
+  skills: 'concat',
+  hooks: 'concat',
+  mappings: 'concat',
+  analyticsCubes: 'concat',
+  connectors: 'concat',
+  data: 'concat',
+  plugins: 'concat',
+  requires: 'concat',
+  tiers: 'concat',
+  devPlugins: 'concat',
+
+  // ── Single-valued configuration — same value passes, difference throws ──
+  api: 'single',
+  server: 'single',
+  runtimeModule: 'single',
+  // #8687: declared alongside the strict close (it was undeclared-but-honoured
+  // before, so composition never saw it through a parsed stack). One bundle
+  // gets one `onEnable` (`AppPlugin` invokes a single hook at start()); two
+  // stacks shipping DIFFERENT hooks cannot be merged without inventing an
+  // execution order neither author wrote — refuse and name them, like
+  // `api`/`server`. Multi-app hosts keep per-app hooks by composing PLUGINS
+  // (each AppPlugin carries its own bundle), not by folding stacks into one.
+  onEnable: 'single',
+  // #5051: the last key still on last-wins; aligned here, see the note above.
+  i18n: 'single',
+} as const satisfies Record<StackDefinitionKey, ComposeDisposition>;
+
+/**
+ * All array fields on `ObjectStackDefinition` that are simply concatenated.
+ * Derived from {@link COMPOSE_KEY_DISPOSITIONS} so the two cannot drift.
+ * @internal
+ */
+const CONCAT_ARRAY_FIELDS = (Object.keys(COMPOSE_KEY_DISPOSITIONS) as (keyof ObjectStackDefinition)[])
+  .filter((key) => COMPOSE_KEY_DISPOSITIONS[key] === 'concat');
+
+
+/**
+ * The keys an ASSEMBLED package body carries beyond its manifest fields.
+ *
+ * DERIVED from {@link COMPOSE_KEY_DISPOSITIONS}, never transcribed: that table
+ * is total over the stack schema's declared keys, so a metadata family added to
+ * the stack arrives here without anyone remembering to add it. Transcribing the
+ * list instead would fail SILENTLY and in the worst direction — the load gate
+ * would refuse a multi-package artifact naming a key its author correctly
+ * wrote, and the refusal would look like a defect in the author's metadata.
+ *
+ * `packages` is the one collection excluded: an artifact carries packages, a
+ * package inside it does not carry packages of its own (ADR-0130 D1 — the
+ * artifact is the co-ownership boundary, and nesting would put a second
+ * boundary inside the first).
+ *
+ * @internal
+ */
+type AssembledPackageBodyKey = Exclude<{
+  [K in keyof typeof COMPOSE_KEY_DISPOSITIONS]:
+    (typeof COMPOSE_KEY_DISPOSITIONS)[K] extends 'concat' | 'objects' | 'functions' ? K : never;
+}[keyof typeof COMPOSE_KEY_DISPOSITIONS], 'packages'>;
+
+/** The dispositions that mark a stack key as a metadata COLLECTION. @internal */
+const ASSEMBLED_PACKAGE_BODY_DISPOSITIONS: readonly string[] = ['concat', 'objects', 'functions'];
+
+/**
+ * Runtime half of {@link AssembledPackageBodyKey}: the collection members of
+ * {@link STACK_DEFINITION_COLLECTIONS_SHAPE}, read off the same disposition
+ * table the type is derived from.
+ *
+ * The return type is `Pick<typeof STACK_DEFINITION_COLLECTIONS_SHAPE,
+ * AssembledPackageBodyKey>`, which is what makes the derivation mechanical
+ * rather than a promise: `Pick` requires every derived key to exist on that
+ * shape, so a collection declared in the disposition table but living outside
+ * the collections shape is a COMPILE error here, not a key that quietly goes
+ * missing from every assembled package body.
+ *
+ * @internal
+ */
+function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_SHAPE, AssembledPackageBodyKey> {
+  const shape: Record<string, unknown> = {};
+  for (const [key, disposition] of Object.entries(COMPOSE_KEY_DISPOSITIONS)) {
+    if (key === 'packages') continue;
+    if (!ASSEMBLED_PACKAGE_BODY_DISPOSITIONS.includes(disposition)) continue;
+    shape[key] = (STACK_DEFINITION_COLLECTIONS_SHAPE as Record<string, unknown>)[key];
+  }
+  return shape as Pick<typeof STACK_DEFINITION_COLLECTIONS_SHAPE, AssembledPackageBodyKey>;
+}
+
+/**
+ * One package as it is ASSEMBLED into a release artifact, and as the load path
+ * registers it (ADR-0130 D4; #14242 decision B, maintainer 2026-09-02).
+ *
+ * ## The two stages this schema exists to separate
+ *
+ * `ManifestSchema` describes a package at AUTHORING time: its `objects` key is
+ * `z.array(z.string())` — GLOB PATTERNS naming the files a file-based loader
+ * should read. What reaches the ADR-0130 load path is an ASSEMBLED payload
+ * whose `objects` are object DEFINITIONS: `composeStacks(…, { manifest:
+ * 'preserve' })` folds each input stack's own metadata onto its manifest,
+ * `AppPlugin` flattens an artifact into `{ ...bundle.manifest, ...bundle }`
+ * before calling `manifest.register()`, and `ObjectQL.registerApp` iterates
+ * those bodies as definitions.
+ *
+ * One schema was being asked to describe both stages, so a full parse of a real
+ * artifact entry REFUSED it (`manifest.objects.0: expected string, received
+ * object`) and the load path could only gate the wrapper. #14242 recorded three
+ * roads and the maintainer took **B**: give the assembled form its own
+ * declaration, so both stages are describable and a load-time consumer has
+ * something correct to parse against. ⛔ Widening `ManifestSchema.objects` to a
+ * union of both spellings (road C) was REJECTED by name: a union that accepts
+ * both stages makes neither stage checkable, which is the tolerance-at-the-
+ * consumer shape this repository refuses (Prime Directive #12).
+ *
+ * ## What it is, mechanically
+ *
+ * The manifest's own fields, plus every metadata COLLECTION the stack schema
+ * declares — the key set derived from one table rather than transcribed (see
+ * {@link AssembledPackageBodyKey}). Where the two halves declare the SAME key,
+ * the collection wins, because that is what the assembled payload actually
+ * carries and what `registerApp` reads:
+ *
+ * | key | manifest (authoring) | assembled body |
+ * | --- | --- | --- |
+ * | `objects` | glob patterns | object definitions |
+ * | `datasources` | glob patterns | datasource definitions |
+ * | `permissions` | required-capability list (ADR-0025) | permission sets |
+ *
+ * That precedence is not chosen here: it is `AppPlugin`'s flatten order
+ * (`{ ...manifest, ...bundle }`) stated as a declaration. A manifest key the
+ * assembled stage overrides therefore has no expression in an assembled body —
+ * write it in the package's own stack, where the collection form is read.
+ *
+ * NOT `strictObject`: `ManifestSchema` is an open object, and this schema is
+ * that surface plus collections rather than a new door. The gate it enables is
+ * the one #14242 asked for — a body whose collections are the wrong SHAPE is
+ * refused, loudly, at the seam that registers it — not a new unknown-key
+ * refusal on a manifest that has never had one.
+ */
+export type AssembledPackageBody =
+  Omit<z.input<typeof ManifestSchema>, AssembledPackageBodyKey>
+  & Partial<{ [K in AssembledPackageBodyKey]: z.input<(typeof STACK_DEFINITION_COLLECTIONS_SHAPE)[K]> }>;
+
+/** Post-parse shape of {@link AssembledPackageBody} — defaults applied, transforms run (ADR-0122). */
+export type AssembledPackageBodyParsed =
+  Omit<z.infer<typeof ManifestSchema>, AssembledPackageBodyKey>
+  & Partial<{ [K in AssembledPackageBodyKey]: z.infer<(typeof STACK_DEFINITION_COLLECTIONS_SHAPE)[K]> }>;
+
+/*
+ * ANNOTATED, not inferred, and the annotation is derived rather than
+ * transcribed (the two aliases above are mapped over the same key set the value
+ * is built from). Inferring it emits the manifest and all ~35 collection
+ * declarations a SECOND time inside `ObjectStackDefinitionSchema`'s own
+ * inferred type, which `tsc` refuses to serialize at all:
+ *
+ *   TS7056: The inferred type of this node exceeds the maximum length the
+ *           compiler will serialize. An explicit type annotation is needed.
+ *
+ * Measured on this change: the stack schema's `.d.ts` node was already near
+ * that ceiling, and adding `packages`' expanded element type pushed it over.
+ * The annotation keeps the declaration one named reference wide.
+ */
+export const AssembledPackageBodySchema: z.ZodType<AssembledPackageBodyParsed, AssembledPackageBody> =
+  lazySchema(() =>
+    ManifestSchema.extend(assembledPackageBodyShape())
+      .describe('One package as assembled into a release artifact (ADR-0130 D4)'));
+
+/**
+ * One package carried by a release artifact, in its ASSEMBLED form — the
+ * element type of `packages` on {@link ObjectStackDefinitionSchema}.
+ *
+ * Same WRAPPER as {@link ArtifactPackageEntrySchema} — the body sits under
+ * `manifest:`, the structural position ADR-0130 D4 reserves so a future
+ * `{ ref, integrity }` external segment is an ADDITIVE key rather than a
+ * reshape — with the body half declared at the stage the artifact is actually
+ * in: {@link AssembledPackageBodySchema}.
+ *
+ * The authoring entry is a valid instance of this one: a body carrying manifest
+ * fields and no collections parses green, which is exactly what a hand-written
+ * `{ manifest: { id, name, version, type } }` entry is. What it does NOT admit
+ * is an authoring manifest whose `objects` are globs — refused here, on
+ * purpose, because a glob in a compiled artifact names files nobody will read.
+ */
+export const ArtifactPackageSchema = lazySchema(() => strictObject({
+  surface: 'an assembled artifact package entry',
+  history:
+    'The entry is a wrapper object whose package body lives under `manifest:` — the '
+    + 'structural position ADR-0130 D4 reserves so a future `{ ref, integrity }` external '
+    + 'segment is an additive key rather than a reshape. An inlined body (`id`, `name`, '
+    + '`version`, `objects`, … written directly on the array element) is therefore refused: '
+    + 'wrap it as `{ manifest: { … } }`.',
+}, {
+  manifest: AssembledPackageBodySchema.describe('The assembled package body this artifact entry carries'),
+}).describe('One package carried by a release artifact, assembled (ADR-0130 D4)'));
+
+export type ArtifactPackage = z.input<typeof ArtifactPackageSchema>;
+/** Post-parse shape of {@link ArtifactPackage} — defaults applied, transforms run (ADR-0122). */
+export type ArtifactPackageParsed = z.infer<typeof ArtifactPackageSchema>;
+
+/**
+ * ObjectStack Ecosystem Definition
+ *
+ * This schema represents the "Full Stack" definition of a project or environment.
+ * It is used for:
+ * 1. Project Export/Import (YAML/JSON dumps)
+ * 2. IDE Validation (IntelliSense)
+ * 3. Runtime Bootstrapping (In-memory loading)
+ * 4. Platform Reflection (API & Capabilities Discovery)
+ */
+/**
+ * 1. DEFINITION PROTOCOL (Static)
+ * ----------------------------------------------------------------------
+ * Describes the "Blueprint" or "Source Code" of an ObjectStack Plugin/Project.
+ * This represents the complete declarative state of the application.
+ *
+ * Usage:
+ * - Developers write this in files locally.
+ * - AI Agents generate this to create apps.
+ * - CI Tools deploy this to the server.
+ */
+/*
+ * #8687 — the TOP-LEVEL door is `strictObject` like every inner authorable
+ * surface the #4001 campaign closed. Before this, an unknown top-level key
+ * parsed green and was silently dropped: a `flow`-for-`flows` typo (or the
+ * stale `approvalProcesses`) shipped an artifact missing that whole metadata
+ * family, with `os validate` — even `--strict` — exiting 0, because the
+ * `defineStack:` diagnostic was printed at load, outside the warning tally.
+ *
+ * The near-miss guidance that used to arrive through `lintUnknownStackKeys`
+ * (`objectz` → "did you mean `objects`?") now arrives through the refusal
+ * itself: `strictObject`'s error map suggests the closest declared key, and
+ * the lint deliberately goes quiet on a strict schema (its own posture rule —
+ * see `kernel/metadata-authoring-lint.ts`), so there is one voice, not two.
+ *
+ * The `guidance` entries are the curated half: retired/never-keys where a
+ * rename suggestion would be wrong. `storage` mirrors `STACK_KEY_GUIDANCE`
+ * (`data/authoring-key-lint.ts`), which stays exported for the generic lint
+ * API but no longer fires for this surface.
+ */
+export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
+  surface: 'this stack definition',
+  history:
+    'Until this surface was closed (the outermost door), an unknown top-level stack '
+    + 'key parsed green and its value was silently dropped — a one-character typo could ship '
+    + 'an artifact missing a whole metadata family while `os validate` exited 0. The declared '
+    + 'keys are enumerated by `ObjectStackDefinitionSchema` (@objectstack/spec, stack.zod.ts) '
+    + 'and in the stack-definition reference docs.',
+  guidance: {
+    storage:
+      'the file-storage backend is a deployment concern, not an application declaration. '
+      + 'Configure it with the OS_STORAGE_* environment variables, or per-deployment in Setup → '
+      + 'Settings → Storage (which also holds credentials — a stack definition would commit them '
+      + 'to git and to any published artifact).',
+    approvals:
+      'approvals are not a top-level collection (ADR-0019): author an approval as a flow with '
+      + 'one or more Approval nodes, in `flows`.',
+    approvalProcesses:
+      'approvals are not a top-level collection (ADR-0019, standalone `approvals` removed in '
+      + '7.4): author an approval as a flow with one or more Approval nodes, in `flows`.',
+    workflows:
+      'there is no top-level `workflows` collection (ADR-0020): a record state machine is a '
+      + '`state_machine` validation rule on the object it governs.',
+    portals:
+      'the top-level `portals` collection was removed — nothing ever consumed it. '
+      + 'Author external-user UI with `apps`/`views` plus positions and permission sets.',
+    themes:
+      '`themes` was removed in @objectstack/spec 17.1 (ADR-0049) — authored themes '
+      + 'were parsed and stored, but no framework package ever read them back, no first-party '
+      + 'app mounted the spec-aware theme provider, and nothing selected an active theme, so '
+      + 'a declared theme changed nothing on screen. Delete the key. To colour the shipped '
+      + 'console, set `app.branding.primaryColor` / `accentColor` — the one live colour '
+      + 'surface (it drives `--primary`, `--accent` and their derived variables).',
+    onDisable:
+      'no kernel, runtime or service ever called `onDisable` (the uninvoked lifecycle '
+      + 'family is retired), so a value written here goes nowhere. Do teardown inside the '
+      + 'resources `onEnable` acquires.',
+  },
+}, {
+  /** System Configuration */
+  manifest: ManifestSchema.optional().describe('Project Package Configuration'),
+
+  /**
+   * The artifact's package list (ADR-0130 D4) — **optional, and additive**.
+   *
+   * A release artifact MAY carry N package manifests so a product can be split
+   * into modules **without renaming a single object** (which is what separate
+   * namespaces would cost: the object `name` IS the table name, the REST path,
+   * the formula token and the saved-view key — ADR-0129 D1–D2 — and
+   * rename-on-install is ADR-0048's standing non-goal).
+   *
+   * ## Read BOTH shapes — the schema shape IS the compatibility mechanism
+   *
+   * - `packages` present → iterate it.
+   * - `packages` absent → treat `manifest` (singular) as a **single-element
+   *   list**.
+   *
+   * `manifest` is therefore RETAINED, not replaced. A replacement would break
+   * every artifact already built and on disk at every customer; the read-both
+   * rule is the term ADR-0130's whole compatibility claim rests on, which is
+   * why D4 states it as the schema decision rather than an implementation note.
+   * An existing single-`manifest` artifact takes the second branch and its
+   * behaviour is unchanged.
+   *
+   * ## The element is the ASSEMBLED entry (#14242 B)
+   *
+   * Each entry is `{ manifest: <assembled package body> }` — manifest fields
+   * plus the metadata collections that package owns, which is the payload
+   * `ObjectQL.registerApp` iterates. This key is read at LOAD time, so the
+   * authoring-time {@link ArtifactPackageEntrySchema} (whose `manifest.objects`
+   * are glob patterns) cannot describe it: that mismatch was #14242, and the
+   * maintainer's decision (2026-09-02) was to declare the assembled stage
+   * rather than widen the authoring one. A hand-written manifest-only entry
+   * still parses — it is an assembled body carrying no collections.
+   *
+   * `composeStacks([...], { manifest: 'preserve' })` is what produces this list
+   * from N authored stacks; `os build` / `os compile` writes it into the
+   * artifact, and the load path registers each entry in dependency-topological
+   * order (ADR-0130 D5, ADR-0116's one sorter).
+   */
+  packages: z.array(ArtifactPackageSchema).optional()
+    .describe('Assembled package bodies carried by this release artifact (ADR-0130 D4)'),
+
+  ...STACK_DEFINITION_COLLECTIONS_SHAPE,
 }).superRefine(applyApiEndpointGates));
 
 export type ObjectStackDefinition = z.input<typeof ObjectStackDefinitionSchema>;
@@ -1919,7 +2288,12 @@ export const ComposeStacksOptionsSchema = lazySchema(() => z.object({
    * `'preserve'` composes the artifact's package list instead of discarding it:
    * every input stack contributes its packages to `packages` (ADR-0130 D4), in
    * stack order, each element the `{ manifest: … }` wrapper object
-   * {@link ArtifactPackageEntrySchema} declares.
+   * {@link ArtifactPackageSchema} declares — its body half being that stack
+   * ASSEMBLED (manifest fields plus the collections that package owns), which
+   * is the payload `ObjectQL.registerApp` iterates. Assembling here is not an
+   * implementation detail of preserve: composition is the last moment at which
+   * per-package attribution exists at all, since the composed stack flattens
+   * every collection to the top level.
    *
    * Which entries a stack contributes is **D4's read-both rule applied to the
    * inputs**, not a second rule invented here:
@@ -1956,151 +2330,6 @@ export type ComposeStacksOptions = z.input<typeof ComposeStacksOptionsSchema>;
 /** Post-parse shape of {@link ComposeStacksOptions} — defaults applied, transforms run (ADR-0122). */
 export type ComposeStacksOptionsParsed = z.infer<typeof ComposeStacksOptionsSchema>;
 
-/**
- * How {@link composeStacks} treats one top-level key (#5005).
- *
- * - `'concat'`    — array collection; concatenated in stack order.
- * - `'single'`    — one scalar/object value; identical declarations pass
- *                   through, differing ones are a composition ERROR.
- * - `'manifest'`  — chosen by the `manifest` option.
- * - `'objects'`   — merged by the `objectConflict` strategy.
- * - `'functions'` — named-handler collection; merged by name.
- * @internal
- */
-type ComposeDisposition = 'concat' | 'single' | 'manifest' | 'objects' | 'functions';
-
-/**
- * The composition rule for EVERY top-level key of `ObjectStackDefinition`
- * (#5005).
- *
- * ## Why a total table and not a list
- *
- * `composeStacks` used to build its result from an empty object by filling in
- * `manifest`, `i18n`, `objects` and a hand-maintained array whitelist. Anything
- * absent from that whitelist was not "left alone" — it was **deleted**, with no
- * error, no warning, and no way for a consumer to tell "the composer dropped it"
- * apart from "the author never wrote it". Composition is the platform's
- * app-packaging / install story, so that silence reached real security config:
- * `api.enforceProjectMembership` (the per-environment 403 gate) and, as of
- * #4910, `server.security.rateLimit` both vanished the moment a stack was
- * composed with any other one. Seven declared array collections
- * (`datasourceMapping`, `datasets`, `jobs`, `emailTemplates`, `docs`, `books`,
- * `tiers`) and the whole `functions` handler map went the same way; `tools`
- * escaped the same fate only because ADR-0109 noticed and patched the list.
- *
- * A whitelist makes forgetting the default. This table makes it a **type
- * error**: it is `Record< keyof ObjectStackDefinition, … >`, so a new top-level
- * key does not compile until someone states what composing it means. That is
- * the structural half of the fix; {@link composeStacks} carries the runtime
- * half (an undeclared key warns rather than disappearing), so a key that
- * reaches composition without a rule — via `strict: false`, or a raw object —
- * still reports itself.
- *
- * ## Note on `i18n` (#5051)
- *
- * `i18n` carried a last-wins of its own through #5005 — the one key here that
- * already had a deliberate, working strategy, and #5005's subject was keys that
- * got *dropped*. That left it as the only top-level key still resolving a
- * disagreement by silent override: the very shape the maintainer rejected for
- * `api`/`server` — an earlier stack's declaration overwritten without a word by
- * whoever composes after it. #5051 closed the inconsistency — `i18n` is
- * `'single'` like every other non-array configuration key. Which locales an
- * application supports is not a detail a composer may pick for the author: the
- * `translations` bundles each stack ships are written against its own
- * `supportedLocales`, so overriding one stack's declaration leaves the other
- * stack's bundles addressing locales the composed app no longer admits.
- *
- * @internal
- */
-const COMPOSE_KEY_DISPOSITIONS: Record<keyof ObjectStackDefinition, ComposeDisposition> = {
-  // ── Bespoke strategies (unchanged by #5005) ──
-  manifest: 'manifest',
-  objects: 'objects',
-  functions: 'functions',
-
-  // ── Array collections — concatenated in stack order ──
-  // ADR-0130 D4's artifact package list. Not a metadata collection like the
-  // rest of this block — it carries package MANIFESTS, not authored metadata —
-  // but its composition rule is the same one for the same reason: composing two
-  // stacks that each carry package entries must yield BOTH publishers' entries,
-  // since dropping one would lose a package the composed artifact still
-  // delivers. Declared here in the change that declares the key, as the table's
-  // docblock requires.
-  //
-  // ⚠️ This disposition governs stacks that already CARRY a `packages` list.
-  // It does not, on its own, repair `manifest:`'s deliberate pick-one semantics
-  // above (`selectManifest`, first/last): two stacks that each declare only the
-  // SINGULAR `manifest` would still lose N−1 of them. Folding those in is the
-  // `manifest: 'preserve'` option (ADR-0130 follow-up row 3), which is opt-in
-  // and composes `packages` itself — see `preservePackageEntries`. Concat stays
-  // the rule for every other strategy, and preserve's own output concatenates
-  // in stack order too, so the two agree rather than compete.
-  packages: 'concat',
-  datasources: 'concat',
-  datasourceMapping: 'concat',
-  translations: 'concat',
-  objectExtensions: 'concat',
-  apps: 'concat',
-  views: 'concat',
-  // [#5320] Machine-assembled channel (never authorable — the schema types it
-  // `never`, so no authored stack reaches composition carrying it). Assembled
-  // manifests are not `composeStacks` inputs today; if two ever were, their
-  // non-container view artifacts would concatenate like every other collection.
-  viewItems: 'concat',
-  pages: 'concat',
-  dashboards: 'concat',
-  reports: 'concat',
-  datasets: 'concat',
-  actions: 'concat',
-  // `themes` left this table with the key (#10485) — the total-record type is
-  // what forces this comment to move in lockstep with the schema.
-  flows: 'concat',
-  jobs: 'concat',
-  emailTemplates: 'concat',
-  docs: 'concat',
-  books: 'concat',
-  positions: 'concat',
-  permissions: 'concat',
-  capabilities: 'concat',
-  sharingRules: 'concat',
-  apis: 'concat',
-  webhooks: 'concat',
-  agents: 'concat',
-  tools: 'concat',
-  skills: 'concat',
-  hooks: 'concat',
-  mappings: 'concat',
-  analyticsCubes: 'concat',
-  connectors: 'concat',
-  data: 'concat',
-  plugins: 'concat',
-  requires: 'concat',
-  tiers: 'concat',
-  devPlugins: 'concat',
-
-  // ── Single-valued configuration — same value passes, difference throws ──
-  api: 'single',
-  server: 'single',
-  runtimeModule: 'single',
-  // #8687: declared alongside the strict close (it was undeclared-but-honoured
-  // before, so composition never saw it through a parsed stack). One bundle
-  // gets one `onEnable` (`AppPlugin` invokes a single hook at start()); two
-  // stacks shipping DIFFERENT hooks cannot be merged without inventing an
-  // execution order neither author wrote — refuse and name them, like
-  // `api`/`server`. Multi-app hosts keep per-app hooks by composing PLUGINS
-  // (each AppPlugin carries its own bundle), not by folding stacks into one.
-  onEnable: 'single',
-  // #5051: the last key still on last-wins; aligned here, see the note above.
-  i18n: 'single',
-};
-
-/**
- * All array fields on `ObjectStackDefinition` that are simply concatenated.
- * Derived from {@link COMPOSE_KEY_DISPOSITIONS} so the two cannot drift.
- * @internal
- */
-const CONCAT_ARRAY_FIELDS = (Object.keys(COMPOSE_KEY_DISPOSITIONS) as (keyof ObjectStackDefinition)[])
-  .filter((key) => COMPOSE_KEY_DISPOSITIONS[key] === 'concat');
 
 /**
  * Name a stack the way its author would recognise it (#5005).
@@ -2380,11 +2609,14 @@ function selectManifest(
  * twice in the first place.
  *
  * Entries are emitted as the `{ manifest: … }` wrapper object
- * {@link ArtifactPackageEntrySchema} declares, never a flat inlined manifest
- * body: that wrapper is the structural position ADR-0130 D4 reserves so a
- * future `{ ref, integrity }` external segment stays an ADDITIVE key. ⛔ The
- * shape is not re-derived here — a second declaration of one shape is the drift
- * ADR-0116 exists about.
+ * {@link ArtifactPackageSchema} declares, never a flat inlined body: that
+ * wrapper is the structural position ADR-0130 D4 reserves so a future
+ * `{ ref, integrity }` external segment stays an ADDITIVE key. ⛔ The shape is
+ * not re-derived here — a second declaration of one shape is the drift ADR-0116
+ * exists about. A stack that ALREADY carries `packages` contributes those
+ * entries untouched: they are assembled bodies already, and re-assembling one
+ * would fold the composed stack's flattened collections onto a package that
+ * does not own them.
  *
  * A `packages` value that is not an array cannot be iterated; `defineStack`
  * rejects that shape, so it is reachable only via `strict: false` or a
@@ -2394,17 +2626,59 @@ function selectManifest(
  *
  * @internal
  */
-function preservePackageEntries(stacks: ObjectStackDefinition[]): ArtifactPackageEntry[] {
-  const entries: ArtifactPackageEntry[] = [];
+function preservePackageEntries(stacks: ObjectStackDefinition[]): ArtifactPackage[] {
+  const entries: ArtifactPackage[] = [];
   for (const stack of stacks) {
     const declared = (stack as Record<string, unknown>).packages;
     if (Array.isArray(declared)) {
-      entries.push(...(declared as ArtifactPackageEntry[]));
+      entries.push(...(declared as ArtifactPackage[]));
       continue;
     }
-    if (stack.manifest) entries.push({ manifest: stack.manifest });
+    if (stack.manifest) entries.push({ manifest: assemblePackageBody(stack) });
   }
   return entries;
+}
+
+/**
+ * Fold ONE input stack into the assembled package body the artifact carries
+ * (ADR-0130 D4; #14242 B).
+ *
+ * ## Why this is composition's job and nowhere else's
+ *
+ * Composition is the last moment at which per-package attribution EXISTS. The
+ * composed stack flattens every collection to the top level — that is what
+ * makes it one loadable stack — and a flattened `objects` array says nothing
+ * about which package each object came from. Reconstructing the split
+ * downstream (in `os build`, or at load) is not a harder version of this
+ * function; it is impossible, because the information is gone. So the assembly
+ * happens here, while both halves are still in hand.
+ *
+ * ## The shape, and why it is this one
+ *
+ * `{ ...manifest, ...collections }` — manifest fields flattened, then the
+ * stack's own collections written over them. That is not a choice made here: it
+ * is `AppPlugin`'s flatten (`{ ...bundle.manifest, ...bundle }`) and what
+ * `ObjectQL.registerApp` reads, stated as data instead of re-derived at three
+ * seams. {@link AssembledPackageBodySchema} is its declaration and
+ * {@link ObjectStackDefinitionSchema}'s `packages` key parses against it, so a
+ * body this function builds and a body the load path accepts cannot drift.
+ *
+ * ⚠️ ADDITIVE, like `'preserve'` itself: the composed stack keeps its flattened
+ * collections, so every consumer that reads the artifact's top level — the
+ * metadata service's artifact door among them — sees exactly what it saw
+ * before. What `packages` adds is per-package OWNERSHIP at registration, which
+ * is the whole of ADR-0130 D1: without it, a composed multi-package artifact
+ * registers N package records owning nothing at all.
+ *
+ * @internal
+ */
+function assemblePackageBody(stack: ObjectStackDefinition): AssembledPackageBody {
+  const source = stack as Record<string, unknown>;
+  const body: Record<string, unknown> = { ...(stack.manifest as Record<string, unknown> | undefined) };
+  for (const key of Object.keys(assembledPackageBodyShape())) {
+    if (source[key] !== undefined) body[key] = source[key];
+  }
+  return body as AssembledPackageBody;
 }
 
 /**
@@ -2443,9 +2717,9 @@ function preservePackageEntries(stacks: ObjectStackDefinition[]): ArtifactPackag
  * // Merge strategy — fields from later stacks are shallow-merged
  * const combined = composeStacks([crm, todo], { objectConflict: 'merge' });
  *
- * // Preserve — one artifact carrying BOTH package identities (ADR-0130 D4)
+ * // Preserve — one artifact carrying BOTH packages, each assembled (ADR-0130 D4)
  * const artifact = composeStacks([crm, cpq], { manifest: 'preserve' });
- * artifact.packages; // [{ manifest: crmManifest }, { manifest: cpqManifest }]
+ * artifact.packages; // [{ manifest: { ...crmManifest, objects: [...] } }, …]
  * ```
  */
 export function composeStacks(
