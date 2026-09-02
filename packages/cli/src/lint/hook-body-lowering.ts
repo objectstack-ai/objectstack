@@ -38,13 +38,22 @@
  * Today both arrive through one catch, so they share one fate. They are not
  * the same event, and the refusal kind already tells them apart:
  *
- *   `free-identifiers`  ACCIDENTAL. The handler IS expressible as a metadata
- *                       body; it merely names a module-scope const/helper/
- *                       import. The author wrote something that reads
+ *   `free-identifiers`  ACCIDENTAL. The author wrote something that reads
  *                       self-contained, and the platform quietly re-shaped the
  *                       deployment behind them — its own message even says "no
  *                       behavior change", which is true of behaviour and false
- *                       of shape. Remedy is local: inline the value. => `error`.
+ *                       of shape. => `error`, for both sub-cases:
+ *                         · a module-scope const/helper/import — remedy is
+ *                           local: inline the value.
+ *                         · a global the NODE HOST has and the sandbox does not
+ *                           (#14301, `Intl`) — NOT inlinable, and still
+ *                           accidental rather than a chosen bundle: `Intl` is a
+ *                           standard global in every browser and in Node, so
+ *                           writing it is not the recognisable "I am reaching
+ *                           for the host" act that `fetch(`/`process.` are.
+ *                           That is why it is an `error` here and not the
+ *                           `warning` its structural cousin gets — and why the
+ *                           remedy sentence below is CHOSEN per sub-case.
  *   `forbidden-token`   STRUCTURAL. `fetch`/`require`/`process`/`eval`/… are
  *                       capabilities the sandbox does not have, so the handler
  *                       can NEVER be a metadata body. Writing one IS choosing a
@@ -129,12 +138,37 @@ function judge(fn: AnyFn, originLabel: string, path: string): HookBodyLintIssue 
   } catch (err: unknown) {
     const kind = err instanceof HookBodyExtractionError ? err.kind : 'unknown';
     const free = err instanceof HookBodyExtractionError ? err.freeIdentifiers : [];
+    // [#14301] The half of `free` the Node HOST provides and the sandbox does
+    // not. Read off the refusal rather than re-derived here: this rule's whole
+    // parity claim is that it cannot disagree with what `os build` did to the
+    // same handler, and a second membership table in this file would be exactly
+    // such a disagreement waiting to happen.
+    const nodeOnly = err instanceof HookBodyExtractionError ? err.nodeOnlyIdentifiers : [];
     // Only the first line: the refusal text carries a multi-line offending-source
     // dump for `--strict-body`'s per-callable diagnostic, which would swamp a
     // lint report. `os build --strict-body` remains the place to read it whole.
     const firstLine = String((err as Error)?.message ?? err).split('\n')[0];
 
     if (kind === 'free-identifiers') {
+      // The remedy sentence is chosen, not fixed. "Inline the value(s)" is
+      // right for a module-scope helper and IMPOSSIBLE for a host global —
+      // there is nothing to inline `Intl` from — so printing it for both would
+      // send an author (or a code-writing model) after a second broken shape.
+      const moduleScope = free.filter((n) => !nodeOnly.includes(n));
+      const hostRemedy =
+        `${nodeOnly.join(', ')} ${nodeOnly.length === 1 ? 'is' : 'are'} provided by the Node host ` +
+        `and NOT by the sandbox, so ${nodeOnly.length === 1 ? 'it' : 'they'} cannot be inlined: ` +
+        `keep the check in a string handler ref, or move it to a validation rule.`;
+      const inlineRemedy =
+        `Inline the value(s) into the handler, or reach them through \`ctx\`.`;
+      const remedy =
+        nodeOnly.length === 0
+          ? inlineRemedy
+          : moduleScope.length === 0
+            ? hostRemedy
+            : `${hostRemedy} ${moduleScope.join(', ')} ${moduleScope.length === 1 ? 'is' : 'are'} ` +
+              `module-scope: inline ${moduleScope.length === 1 ? 'it' : 'them'} into the handler, ` +
+              `or reach ${moduleScope.length === 1 ? 'it' : 'them'} through \`ctx\`.`;
       return {
         severity: 'error',
         rule: NOT_LOWERABLE_RULE,
@@ -143,8 +177,7 @@ function judge(fn: AnyFn, originLabel: string, path: string): HookBodyLintIssue 
           `${free.length === 1 ? 'the identifier' : 'identifiers'} ${free.join(', ')}, which ` +
           `${free.length === 1 ? 'is' : 'are'} not in scope inside the sandbox. The handler is ` +
           `BUNDLED instead, so this app is no longer shippable as pure metadata — a change of ` +
-          `deployment shape, not of behaviour. Inline the value(s) into the handler, or reach ` +
-          `them through \`ctx\`. ${DELIBERATE_BUNDLE_REMEDY}`,
+          `deployment shape, not of behaviour. ${remedy} ${DELIBERATE_BUNDLE_REMEDY}`,
         path,
       };
     }

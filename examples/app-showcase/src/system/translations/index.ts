@@ -94,6 +94,17 @@ export const ShowcaseTranslationBundle = {
           },
           sync_error: { label: 'Sync Error' },
         },
+        // The object's ONE authored rule message, on the #14253 channel for the
+        // same reason `showcase_project`'s four are (see the note there). The
+        // `en` entry is the authored sentence VERBATIM: the bundle WINS over
+        // `rule.message` in every locale, so a bundle entry that has drifted
+        // from the object turns the object's own sentence into dead text no
+        // reader ever sees. The pin asserts that equality rather than trusting it.
+        _validations: {
+          task_status_flow: {
+            message: 'Invalid task status transition.',
+          },
+        },
         // The FIRST `_views` block on the `en` side of this bundle, and
         // deliberately not a mirror of the zh-CN one below: view LABELS are
         // already English in `ui/views/task.view.ts`, so restating all fifteen
@@ -128,6 +139,40 @@ export const ShowcaseTranslationBundle = {
           billing_email: { label: 'Billing Email' },
           support_config: { label: 'Support Config' },
           churn_reason: { label: 'Churn Reason' },
+        },
+        // An author-written `validations[].message` is emitted VERBATIM unless
+        // the bundle carries it here (#14253) — see the note on
+        // `showcase_project` above. All SEVEN names this object declares, and
+        // the two NESTED ones are the point: `checkConditional` dispatches to
+        // the matching branch and renders that BRANCH's message, addressed by
+        // the branch's own `name`, so `churn_reason_consistency`'s own sentence
+        // is structurally unreachable and translating only it would leave both
+        // refusals a caller can actually see in English. Its entry is here
+        // anyway so the bundle mirrors the DECLARED rule set 1:1 — the pin in
+        // `test/new-project-wizard-initial-status.test.ts` asks for every
+        // declared name rather than re-deriving objectql's dispatch.
+        _validations: {
+          account_lifecycle: {
+            message: 'Invalid account lifecycle transition.',
+          },
+          tax_id_format: {
+            message: 'Tax ID must look like 12-3456789.',
+          },
+          billing_email_format: {
+            message: 'Billing Email must be a valid email address.',
+          },
+          support_config_shape: {
+            message: 'Support Config must be { tier: standard|premium|enterprise, seats?: >=1 }.',
+          },
+          churn_reason_consistency: {
+            message: 'Churn reason consistency.',
+          },
+          churn_reason_present: {
+            message: 'A churn reason is required when an account is marked churned.',
+          },
+          churn_reason_absent: {
+            message: 'A churn reason should only be set when the account is churned.',
+          },
         },
       },
       showcase_contact: {
@@ -368,6 +413,11 @@ export const ShowcaseTranslationBundle = {
           },
           sync_error: { label: '同步错误' },
         },
+        // 状态 is the field label above and 状态流转 the same idea
+        // `showcase_project`'s entry uses — one word per idea across the bundle.
+        _validations: {
+          task_status_flow: { message: '任务状态流转无效。' },
+        },
         _views: {
           // The default list — keyed `default`, see showcase_project above.
           default: { label: '全部任务' },
@@ -465,6 +515,21 @@ export const ShowcaseTranslationBundle = {
           billing_email: { label: '账单邮箱' },
           support_config: { label: '支持配置' },
           churn_reason: { label: '流失原因' },
+        },
+        // The zh-CN mirror of the `en` `_validations` block — see the note
+        // there. Vocabulary is the one this bundle already established:
+        // 生命周期 / 税号 / 账单邮箱 / 支持配置 / 流失原因 are the field labels
+        // right above, so a refusal names the field with the same word the form
+        // does. The `support_config_shape` shape stays in its source spelling —
+        // it is a machine contract the author must type back, not prose.
+        _validations: {
+          account_lifecycle: { message: '客户生命周期的状态流转无效。' },
+          tax_id_format: { message: '税号格式应为 12-3456789。' },
+          billing_email_format: { message: '账单邮箱必须是有效的邮箱地址。' },
+          support_config_shape: { message: '支持配置必须为 { tier: standard|premium|enterprise, seats?: >=1 }。' },
+          churn_reason_consistency: { message: '流失原因一致性。' },
+          churn_reason_present: { message: '客户标记为流失时必须填写流失原因。' },
+          churn_reason_absent: { message: '只有客户已流失时才能填写流失原因。' },
         },
       },
       showcase_contact: {

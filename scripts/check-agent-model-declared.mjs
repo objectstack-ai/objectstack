@@ -11,8 +11,10 @@
 // model does this role run on" a property of whoever happened to dispatch it, at
 // whatever moment their own session was on, rather than a property of the role —
 // and it changes with no signal, mid-term, invisibly. (`CLAUDE_CODE_SUBAGENT_MODEL`
-// outranks every other step, including this gate's own pin — see
-// `.claude/agents/os-dev.md` for the full order and both adjacent traps.)
+// outranks every other step, including this gate's own pin — the first of the two
+// adjacent traps; the allowlist fallback below is the second. This header is the
+// home of that full order and of both traps, and `.claude/agents/os-dev.md` carries
+// only the `model: opus` pin plus a pointer back here.)
 //
 // A second, smaller nuance in that same order: a value blocked by the
 // organization's `availableModels` allowlist does NOT fall back to the frontmatter

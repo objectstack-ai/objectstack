@@ -185,6 +185,11 @@ import {
   AssembledViewArtifactSchema,
   isViewContainerShaped,
 } from '@objectstack/spec';
+// [#14399] The ONE spelling of "which object does an aggregated `defineView`
+// container bind to", imported rather than re-spelled. See
+// `resolveMetadataItemName` below for why this registrar had a fourth copy and
+// why it lost it.
+import { deriveViewContainerObject } from '@objectstack/metadata';
 import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
@@ -2014,28 +2019,67 @@ const METADATA_ARRAY_KEYS = [
  *
  * Most metadata items expose a top-level `name` (or `id`). The `View`
  * container defined by `@objectstack/spec/ui` is special: it aggregates
- * `list / form / listViews / formViews` for a single object and is
- * keyed implicitly by its target object name (see `data.object`).
+ * `list / form / listViews / formViews` for a single object and is keyed by
+ * the OBJECT it binds to, not by its own row identity — which is what
+ * `/api/v1/meta/views/:object`, `getViewsByObject()` and
+ * `GET /meta/view?object=` all address it by.
  *
- * Per spec, `ViewSchema` does NOT have a top-level `name` field
- * (view.zod.ts), so we resolve it from the inner data source. This
- * matches the server-side metadata API contract (`/api/v1/meta/views/:object`).
+ * ⚠️ [#14399] The sentence that used to stand here — "per spec, `ViewSchema`
+ * does NOT have a top-level `name` field" — is measurably false and was the
+ * premise for consulting `item.name` first. `ViewSchema` declares an optional
+ * `name` (`view.zod.ts`), described there as "supplied by the metadata door;
+ * for an object-scoped container it is the object name". "Is the object name"
+ * is a CONVENTION the door does not enforce, so the two never actually had to
+ * agree — and where they disagreed, this registrar and the other two picked
+ * different keys for the same document.
  */
 function resolveMetadataItemName(key: string, item: any): string | undefined {
   if (!item) return undefined;
+  // [#14399] The aggregated `views` CONTAINER branch, taken FIRST and answered
+  // by the shared derivation. Everything below is unchanged.
+  //
+  // This registrar used to consult `item.name` before anything else, for every
+  // key including this one — so a container written as
+  // `{ name: 'lead_views', object: 'crm_lead', list: {…} }` registered under
+  // `lead_views` here while the artifact/HMR SOURCE registrar
+  // (`MetadataPlugin._parseAndRegisterArtifact`) and the runtime door
+  // (`expandRuntimeViewContainer`) both registered it under `crm_lead`. Same
+  // document, two source registrars, two registry keys and two sets of expanded
+  // item names, with `getViewsByObject()` / `GET /meta/view?object=` answering
+  // for the object only when the right registrar happened to load it.
+  //
+  // The 2026-08-07 meta-rule settles the direction rather than taste: one
+  // operation with two inconsistent implementations, the side bound by a
+  // DECLARATION wins. `ViewSchema.object`'s own `.describe()` names its readers
+  // (`getViewsByObject()` / `GET /meta/view?object=`); this loop's old order
+  // argued from item identity, which declares nothing about the binding. So the
+  // container branch adopts `deriveViewContainerObject` — by import, because a
+  // fourth hand-copy of a chain that already exists three times is the defect
+  // this repair exists to close, not the repair.
+  //
+  // The gate is `isAggregatedViewContainer`, which is what makes this the
+  // CONTAINER branch and nothing wider: it is false for every artifact carrying
+  // a `viewKind`, so the assembled `viewItems:` channel below (standalone
+  // ViewItems and flattened list/form overlays — every member of
+  // `AssembledViewArtifactSchema` requires `viewKind`) still resolves by its own
+  // `name` first, which is its identity and not a binding.
+  //
+  // `item.id` is untouched and stays reachable for every other key. It cannot
+  // fire for a spec-valid container: `ViewSchema` is a `strictObject` that
+  // declares `name` and `object` and no `id`, so an `id` on a container is
+  // refused at the authoring and metadata doors before this seam sees it.
+  if (key === 'views' && isAggregatedViewContainer(item)) {
+    return deriveViewContainerObject(item);
+  }
   if (item.name) return item.name;
   if (item.id) return item.id;
   if (key === 'views') {
-    // Independent ViewItems ("Object has-many View") carry a top-level `name`
-    // (handled above) and bind to their object via `object`. The aggregated
-    // container has no top-level name/object, so fall back to its inner data
-    // source — matching the loader's expansion key.
-    return (
-      item?.object ||
-      item?.list?.data?.object ||
-      item?.form?.data?.object ||
-      undefined
-    );
+    // A `views` entry that is NOT an aggregated container and carries neither
+    // `name` nor `id` — e.g. a flattened overlay whose optional `name` was
+    // omitted. Same derivation, and identical to the chain that used to be
+    // written out here: with `item.name` already known falsy, the helper's
+    // trailing `name` term contributes nothing.
+    return deriveViewContainerObject(item);
   }
   return undefined;
 }
