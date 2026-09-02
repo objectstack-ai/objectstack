@@ -48,10 +48,22 @@ interface HarnessOptions {
      * `'real'` (exposes attachMetadataMutationPubSub).
      */
     protocol?: 'none' | 'bare' | 'real';
+    /**
+     * [#13805] The `datasource-admin` slot: `'none'` (getService throws — the
+     * default, so the #13331 cases above read exactly as they did), `'bare'`
+     * (present, no attachDatasourceMutationPubSub — an older implementation),
+     * or `'real'` (exposes attachDatasourceMutationPubSub).
+     */
+    datasourceAdmin?: 'none' | 'bare' | 'real';
+    /** When true, the datasource-admin seam throws on attach. */
+    datasourceAttachThrows?: boolean;
 }
 
 function makeHarness(opts: HarnessOptions = {}) {
-    const { driver = 'redis', metadata = 'fallback', protocol = 'real' } = opts;
+    const {
+        driver = 'redis', metadata = 'fallback', protocol = 'real',
+        datasourceAdmin = 'none', datasourceAttachThrows = false,
+    } = opts;
 
     const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
@@ -59,6 +71,11 @@ function makeHarness(opts: HarnessOptions = {}) {
     const attachMetadata = vi.fn((_pubsub: unknown, _nodeId: string) => detachMetadata);
     const detachMutation = vi.fn();
     const attachMutation = vi.fn((_pubsub: unknown, _nodeId: string) => detachMutation);
+    const detachDatasource = vi.fn();
+    const attachDatasource = vi.fn((_pubsub: unknown, _nodeId: string) => {
+        if (datasourceAttachThrows) throw new Error('datasource attach exploded');
+        return detachDatasource;
+    });
 
     const pubsub = { publish: vi.fn(), subscribe: vi.fn(), close: vi.fn() };
     const cluster =
@@ -74,6 +91,10 @@ function makeHarness(opts: HarnessOptions = {}) {
         protocol === 'none' ? undefined
         : protocol === 'bare' ? { saveMetaItem: vi.fn() }
         : { attachMetadataMutationPubSub: attachMutation };
+    const datasourceAdminService =
+        datasourceAdmin === 'none' ? undefined
+        : datasourceAdmin === 'bare' ? { listDatasources: vi.fn() }
+        : { attachDatasourceMutationPubSub: attachDatasource };
 
     const hooks = new Map<string, Array<() => Promise<void> | void>>();
     const ctx = {
@@ -96,6 +117,10 @@ function makeHarness(opts: HarnessOptions = {}) {
                 if (!protocolService) throw new Error('service not found: protocol');
                 return protocolService;
             }
+            if (name === 'datasource-admin') {
+                if (!datasourceAdminService) throw new Error('service not found: datasource-admin');
+                return datasourceAdminService;
+            }
             throw new Error(`service not found: ${name}`);
         },
     } as unknown as PluginContext;
@@ -107,6 +132,7 @@ function makeHarness(opts: HarnessOptions = {}) {
     return {
         ctx, logger, fire, pubsub,
         attachMetadata, detachMetadata, attachMutation, detachMutation,
+        attachDatasource, detachDatasource,
     };
 }
 
@@ -278,5 +304,111 @@ describe('[#14021] lane 1 — an in-process bus must not be reported as “bridg
 
         expect(h.detachMetadata).not.toHaveBeenCalled();
         expect(h.logger.error).not.toHaveBeenCalled();
+    });
+});
+
+describe('[#13805] lane 3 — the datasource admin service’s datasource.mutated fan-out', () => {
+    it('⭐ attaches on a cross-process driver and reports it — independently of lanes 1 and 2', async () => {
+        // The shipped EE shape again, one owner over: no manager-backed
+        // metadata slot, no protocol seam, and a real datasource-admin service.
+        // Lane 3 must attach exactly there, with nothing from the other two
+        // lanes taking it down.
+        const h = makeHarness({ driver: 'redis', metadata: 'none', protocol: 'none', datasourceAdmin: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+
+        expect(h.attachDatasource).toHaveBeenCalledTimes(1);
+        expect(h.attachDatasource).toHaveBeenCalledWith(h.pubsub, 'node-a');
+        // Asserted VERBATIM, like lane 1's and lane 2's lines: the wording is
+        // what an operator reads as "datasource fan-out is on".
+        expect(infoLines(h)).toContain(
+            'MetadataClusterBridgePlugin: bridged datasource.mutated → cluster.pubsub (node=node-a)',
+        );
+        expect(h.logger.error).not.toHaveBeenCalled();
+    });
+
+    it('all three lanes attach together when every owner exposes its seam', async () => {
+        const h = makeHarness({ driver: 'redis', metadata: 'manager', protocol: 'real', datasourceAdmin: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+
+        expect(h.attachMetadata).toHaveBeenCalledWith(h.pubsub, 'node-a');
+        expect(h.attachMutation).toHaveBeenCalledWith(h.pubsub, 'node-a');
+        expect(h.attachDatasource).toHaveBeenCalledWith(h.pubsub, 'node-a');
+        expect(warnLines(h)).toEqual([]);
+    });
+
+    it('skips attach on the in-process memory driver — no peers to reach, nothing said above debug', async () => {
+        const h = makeHarness({ driver: 'memory', datasourceAdmin: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+
+        // The guard lanes 1 and 2 carry, from birth: on the memory driver a
+        // single replica's behaviour stays byte-identical to the pre-bridge
+        // one — no subscription, no publisher, no "bridged" claim.
+        expect(h.attachDatasource).not.toHaveBeenCalled();
+        expect(infoLines(h).some((l) => l.includes('datasource.mutated'))).toBe(false);
+        expect(
+            debugLines(h).some((l) => l.includes('is in-process') && l.includes('datasource fan-out')),
+        ).toBe(true);
+    });
+
+    it('skips quietly when no datasource-admin service is registered', async () => {
+        const h = makeHarness({ driver: 'redis', datasourceAdmin: 'none' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+
+        expect(h.attachDatasource).not.toHaveBeenCalled();
+        expect(h.logger.error).not.toHaveBeenCalled();
+        expect(warnLines(h).some((l) => l.includes('datasource'))).toBe(false);
+    });
+
+    it('skips quietly when the service does not expose the seam', async () => {
+        const h = makeHarness({ driver: 'redis', datasourceAdmin: 'bare' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+
+        expect(h.attachDatasource).not.toHaveBeenCalled();
+        expect(h.logger.error).not.toHaveBeenCalled();
+    });
+
+    it('no cluster service at all skips lane 3 too', async () => {
+        const h = makeHarness({ driver: null, datasourceAdmin: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+
+        expect(h.attachDatasource).not.toHaveBeenCalled();
+    });
+
+    it('a throwing attach is reported and does not take the other lanes down', async () => {
+        const h = makeHarness({
+            driver: 'redis', metadata: 'manager', protocol: 'real',
+            datasourceAdmin: 'real', datasourceAttachThrows: true,
+        });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+
+        expect(h.attachMetadata).toHaveBeenCalledTimes(1);
+        expect(h.attachMutation).toHaveBeenCalledTimes(1);
+        expect(h.logger.error).toHaveBeenCalledWith(
+            'MetadataClusterBridgePlugin: datasource-lane attach failed',
+            expect.any(Error),
+        );
+        expect(infoLines(h).some((l) => l.includes('datasource.mutated'))).toBe(false);
+    });
+
+    it('kernel:shutdown detaches lane 3, and a throwing lane-2 detach does not strand it', async () => {
+        const h = makeHarness({ driver: 'redis', metadata: 'manager', protocol: 'real', datasourceAdmin: 'real' });
+        h.detachMutation.mockImplementation(() => { throw new Error('detach exploded'); });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        await h.fire('kernel:shutdown');
+
+        expect(h.detachDatasource).toHaveBeenCalledTimes(1);
+        expect(h.logger.error).toHaveBeenCalled();
+
+        // Idempotent: a second shutdown does not detach twice.
+        await h.fire('kernel:shutdown');
+        expect(h.detachDatasource).toHaveBeenCalledTimes(1);
     });
 });

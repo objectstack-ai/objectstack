@@ -75,6 +75,14 @@ export type {
   ProbeInput,
 } from './datasource-admin-service.js';
 
+// [#13805] The driver registry's cluster channel — the address-only signal a
+// datasource write publishes so peer replicas converge their live pools from
+// their own read of the shared record. Exported beside `metadata.mutated`'s
+// constant for the same reason: a host wiring its own transport or subscriber
+// names the channel it is on, rather than re-spelling it.
+export { DATASOURCE_MUTATION_CLUSTER_CHANNEL } from './datasource-admin-service.js';
+export type { ClusterDatasourceMutationPayload } from './datasource-admin-service.js';
+
 // Which update actually changes what the live pool was built from (#13804) —
 // exported so a host wiring its own `reregisterPool` seam asks the same
 // question the shipped update path asks, rather than re-deriving the set.
