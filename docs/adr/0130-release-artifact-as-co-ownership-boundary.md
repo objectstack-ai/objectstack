@@ -3,6 +3,10 @@
 **Status**: Proposed (2026-09-01) — awaiting the maintainer's hand-merge, which is itself the
 acceptance act for a governed surface (Prime Directive #14). ⛔ Nothing below is settled until
 this record merges; the implementation cards are cut **from** the merged ADR, never ahead of it.
+**Scope bounded by the 2026-09-02 addendum**
+([#14487](https://github.com/objectstack-ai/objectstack/issues/14487)): the permission matrix
+§1.3(a) measures is **not** part of this boundary's payoff — permission sets stay whole in the
+`type: app` package.
 **Deciders**: ObjectStack maintainer, 2026-09-01, live PM chat, verbatim and untranslated:
 「立 ADR 起草卡派发」and 「14122 作为epic 任务集中跟踪」— approving the proposal in
 [#14122](https://github.com/objectstack-ai/objectstack/issues/14122) into the ADR-drafting lane
@@ -507,3 +511,92 @@ a reader deserves to know which of its anchors were re-measured:
   `packages/objectql/src/plugin.ts`, `packages/core/src/plugin-order.ts`,
   `packages/spec/src/stack.zod.ts`, `packages/spec/src/kernel/manifest.zod.ts`,
   `packages/cli/src/commands/compile.ts`
+
+---
+
+## Addendum (2026-09-02, #14487) — the permission matrix is outside this boundary's payoff; permission sets stay whole in the app package
+
+**Provenance.** Maintainer ruling, 2026-09-02, live PM chat, recorded the same day on
+[#14454](https://github.com/objectstack-ai/objectstack/issues/14454#issuecomment-5507189677)
+and quoted here in the words that record carries — the PM seat's, not a transcript of the
+maintainer's:「第 3 项（权限集）维护者 2026-09-02 拍板：取 B。」The same comment names what this
+section must say:「权限集整体留在 app 包，权限矩阵不在包边界收益范围内」. The question ruled
+on is item 3 of [#14454](https://github.com/objectstack-ai/objectstack/issues/14454) (carried
+verbatim onto
+[#14457](https://github.com/objectstack-ai/objectstack/issues/14457) as its decision card),
+raised by the HotCRM split plan
+[objectstack-ai/hotcrm#1449](https://github.com/objectstack-ai/hotcrm/pull/1449),
+§上游缺口 / Upstream gaps item 3, which asked the maintainer to *"decide whether permission sets
+can be composed per package (a module contributing its own object grants into a role the app
+owns), or record that the permission matrix is explicitly out of scope for the boundary ADR-0130
+creates."* **B is the second half of that sentence, and this section is that record.**
+
+This section lands while the record is still **Proposed**: it bounds what the record claims and
+settles nothing else — the maintainer's hand-merge remains the acceptance act, exactly as the
+Status line says.
+
+### What §1.3(a) measured, and what this boundary does not fix
+
+§1.3(a) counts, among the three measurable consequences of having no boundary, *"a permission
+matrix of 30 rows × 9 CRUD columns × 6 permission sets that interleaves `客户/联系人/商机` with
+`运费标准/等级政策/工厂成本`"*, and §4 draws the payoff from that section: *"Studio's scope is the
+package, so package boundaries **are** the grouping Studio has never had (§1.3a)"*. **The payoff
+does not extend to the permission matrix.** Splitting a product into co-owning packages leaves
+that matrix exactly as flat as §1.3(a) found it. This is said here, in the record, because
+§1.3(a) lists the matrix as a pain and §4 answers §1.3(a) as a whole — a reader is otherwise
+entitled to read a promise this record cannot keep.
+
+**Why — measured, not reasoned.** A permission set grants across domains *by nature*: it is
+authored per **role**, not per module, so no module owns it. hotcrm#1449 measured the standard
+HotCRM product against its six planned modules — `core`, `sales`, `cpq`, `service`, `marketing`,
+`activity`, all inside the one `crm` namespace D1 makes co-ownable, with the `type: app` package
+declaring no objects at all. Of its **six** permission sets, **four span five or six of the six
+modules** (`sales_rep`, `sales_manager` and `system_admin` at six; `service_agent` at five); the
+remaining two span four (`marketing_user`) and two (`guest_portal`). **Not one is confined to a
+single module.** The split therefore has nothing to distribute — whatever the module boundaries
+are, every set still names objects on both sides of them. This is a second instance, independent
+of the 黑猫 fork §1.3(a) measured: two products, the same shape.
+
+**Where the sets live, and what Studio shows.** The six sets stay **whole in the `type: app`
+package**. That is not a new rule but the standing one:
+[ADR-0086](./0086-authz-metadata-config-boundary-and-cross-package-composition.md) D3 gives a
+permission set exactly one owning `packageId` (implemented — `spec/security/permission.zod.ts`,
+tagged `[ADR-0086 D3]`), so a set is in one package or in another and cannot be in several. In
+Studio's **Access** pillar — the matrix of
+[ADR-0084](./0084-application-builder-information-architecture.md), reached per package through
+ADR-0086 D7's package door — the sets therefore appear **under the app package only**, and their
+matrix stays as wide as the product. Modules group Data, Automation and Interface; they do not
+group Access.
+
+⛔ This section changes no decision: D1–D8, §1 and §3's non-goal on grouping keys stand exactly
+as written. In particular **no `module` or grouping key is added to a permission set** — §1.4
+rejected that key on measured cost, and nothing here reopens it.
+
+### What was NOT decided
+
+Per-package composition of grants — a module contributing **its own** objects' grants into a role
+the app package owns, by analogy with `navigationContributions` — is the other half of
+hotcrm#1449's question. It is **filed, not decided**:
+[#14488](https://github.com/objectstack-ai/objectstack/issues/14488), for the phase in which a
+module ships on its own (the §1.3(c) CPQ case, where a module's objects would otherwise arrive
+with no grants at all). It is out of this release and carries **no commitment** — neither that it
+will be built, nor that the contribution shape is the one it will take.
+
+Three inputs it inherits, recorded here because they are this record's own and would otherwise be
+rediscovered:
+
+- **ADR-0086 D4 stands until amended.** D4 chose Shape B — a package ships its own sets — and
+  states flatly: *"A package never writes into a shared/foreign record."* A contribution
+  mechanism is exactly such a write, so #14488 is an **amendment to that decision**, not an
+  addition beside it.
+- **D4's conflict-freedom argument does not survive co-ownership unexamined.** It is
+  conflict-free *"because each set only grants `objects.<own-namespace>_*` keys"* — one namespace
+  per package. D1 lets N packages co-own one namespace, so inside one artifact that
+  discriminator is gone and #14488 must supply its own. (Both hotcrm#1449 and #14488 propose
+  **refusing** a doubly-contributed `(set, object)` rather than unioning it — a shape to measure,
+  not a decision this section makes.)
+- **Which door edits a split product's app-owned sets is unmeasured.** ADR-0086 D7 scopes the
+  package Access door to *"this package's own object slice"* and keeps the cross-package
+  all-objects matrix at the environment-admin door. After a split the app package owns the sets
+  but no objects, so where a *packaged* cross-module set's grants are authored is a UI question
+  this record does not answer and #14488 inherits.
