@@ -2802,9 +2802,15 @@ export default class Serve extends Command {
       // (`dist/objectstack.json`) the `os dev` supervisor produced from that
       // same module. Measured on a real `os dev` boot of a host config: the
       // door loads the artifact first and the wrap's ADR-0057 block registers
-      // last, so the wrap's UNPARSED copy wins the cold boot — and the door's
-      // copy replaces it on the first artifact reload, so the winner CHANGES
-      // mid-run without a restart. Maintainer ruling (2026-08-29, #12892): the
+      // last, so the WRAP's copy wins the cold boot — and the door's copy
+      // replaces it on the first artifact reload, so the winner CHANGES
+      // mid-run without a restart. ⚠️ The two copies differ by PROVENANCE and
+      // by FRESHNESS, not by parsing: on a config boot `defineStack()` is
+      // strict by default and runs the same `ObjectStackDefinitionSchema`
+      // parse the door runs, so the wrap's copy already carries the schema
+      // defaults and input transforms. What it lacks is the ADR-0010 stamp,
+      // and it never refreshes while the door's copy reloads on every
+      // recompile. Maintainer ruling (2026-08-29, #12892): the
       // door owns the registration route; two permanent writers with matched
       // shapes was refused as an end state. So the composition that runs the
       // door declares it, here, exactly as `createStandaloneStack` does for
@@ -2832,19 +2838,45 @@ export default class Serve extends Command {
           // polls would silently drift to `<cwd>/dist/objectstack.json`
           // whenever `os dev --artifact <elsewhere>` was used.
           const hmrArtifactPath = resolveDefaultArtifactPath(readInternalArtifactPath());
+          // ⛔ RESOLVING IS NOT EXISTING, and the difference decides who
+          // registers the four security collections. Under `os dev` the
+          // supervisor writes its channel unconditionally, so
+          // `readInternalArtifactPath()` always answers and
+          // `resolveDefaultArtifactPath` hands an explicitly named path back
+          // VERBATIM, with no existence check (packages/runtime/src/
+          // default-host.ts — only the conventional `<cwd>/dist/…` fallback is
+          // stat'ed). Compose a door over a path that is not there and it
+          // starts EMPTY and SILENT by design: `MetadataPlugin`'s local-file
+          // load is `{ optional: true }` and answers ENOENT with an `info`
+          // line, registering nothing (packages/metadata/src/plugin.ts). The
+          // wrap below would then have deferred to a door that never writes,
+          // and `positions` / `permissions` / `capabilities` / `sharingRules`
+          // would end the boot with ZERO registrars — green, quiet, and worse
+          // than the divergence this whole block exists to remove. So the
+          // door is composed only when its bytes are on disk NOW; a named but
+          // missing artifact leaves the wrap as the single registrar, exactly
+          // as before this decision existed.
           if (hmrArtifactPath && !/^https?:\/\//i.test(hmrArtifactPath)) {
-            const { MetadataPlugin } = await import('@objectstack/metadata');
-            // Mirror the standalone stack's dev config exactly
-            // (packages/runtime/src/standalone-stack.ts): declarative
-            // metadata is loaded from the compiled artifact — no source-file
-            // scanner (redundant + EMFILE-prone) — and `artifactWatch` polls
-            // the single artifact file so an `os dev` recompile broadcasts a
-            // reload over the SSE stream.
-            devArtifactDoor = new MetadataPlugin({
-              watch: false,
-              artifactWatch: true,
-              artifactSource: { mode: 'local-file', path: hmrArtifactPath },
-            });
+            if (!fs.existsSync(hmrArtifactPath)) {
+              console.warn(chalk.yellow(
+                `  ⚠ Dev metadata-HMR endpoint not enabled: no compiled artifact at ${hmrArtifactPath}`
+                + '\n    Stack-declared security metadata stays with the app wrap, its registrar on every'
+                + '\n    boot without a door.',
+              ));
+            } else {
+              const { MetadataPlugin } = await import('@objectstack/metadata');
+              // Mirror the standalone stack's dev config exactly
+              // (packages/runtime/src/standalone-stack.ts): declarative
+              // metadata is loaded from the compiled artifact — no source-file
+              // scanner (redundant + EMFILE-prone) — and `artifactWatch` polls
+              // the single artifact file so an `os dev` recompile broadcasts a
+              // reload over the SSE stream.
+              devArtifactDoor = new MetadataPlugin({
+                watch: false,
+                artifactWatch: true,
+                artifactSource: { mode: 'local-file', path: hmrArtifactPath },
+              });
+            }
           }
         } catch (e: any) {
           console.warn(chalk.yellow(`  ⚠ Dev metadata-HMR endpoint not enabled: ${e?.message}`));
@@ -3080,16 +3112,22 @@ export default class Serve extends Command {
       // (search `devArtifactDoor`) because the wrap's
       // `securityMetadataRegistrar` has to be decided from the SAME value;
       // only the `kernel.use` stays here, where the ordering requirement is.
+      // The catch is the pre-existing one and keeps its pre-existing message.
+      // ⛔ It is deliberately NOT the place to warn that the four security
+      // collections went unregistered: `Kernel.use` only validates the plugin
+      // and registers it by name (packages/core/src/kernel.ts) — `init` and
+      // `start` run later, in `bootstrap` — so for a MetadataPlugin that was
+      // constructed successfully a few hundred lines above, on a kernel still
+      // `idle`, this path does not fire. The registrar hand-off is decided by
+      // whether `devArtifactDoor` exists at all, and the case that genuinely
+      // loses a door — a named artifact that is not on disk — warns at the
+      // construction site, where the missing path can be named.
       if (devArtifactDoor) {
         try {
           await kernel.use(devArtifactDoor);
           trackPlugin('Metadata');
         } catch (e: any) {
-          console.warn(chalk.yellow(
-            `  ⚠ Dev metadata-HMR endpoint not enabled: ${e?.message}`
-            + '\n    The app wrap deferred positions/permissions/capabilities/sharingRules to this'
-            + '\n    door, so they are NOT registered on this boot.',
-          ));
+          console.warn(chalk.yellow(`  ⚠ Dev metadata-HMR endpoint not enabled: ${e?.message}`));
         }
       }
 

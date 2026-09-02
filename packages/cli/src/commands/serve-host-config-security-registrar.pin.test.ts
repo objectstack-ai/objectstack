@@ -41,11 +41,17 @@
  * artifact reload, no restart — the same four items held the artifact's labels
  * and `_packageVersion: '1.0.0'`.
  *
- * ⛔ **A consumer that reads the losing copy is not reading a stale value, it
- * is reading an UNPARSED one** — a sharing rule's `condition` reaches it as
- * whatever the module held, with no schema defaults and no ADR-0010
- * provenance. That is why this is `security`-labelled and why the fix is the
- * ownership one rather than "make the two shapes match".
+ * ⚠️ **The two copies differ by PROVENANCE and FRESHNESS, not by parsing.** On
+ * a config boot `defineStack()` is strict by default and runs the same
+ * `ObjectStackDefinitionSchema` parse the door runs (`packages/spec/src/
+ * stack.zod.ts`), so the wrap's copy already carries the schema defaults and
+ * the ADR-0122 input transforms. What it lacks is the ADR-0010 stamp
+ * (`_packageVersion` on all four kinds, `_packageId` / `_provenance` on
+ * `position`), and — the half that bites — it never refreshes, while the
+ * door's copy reloads on every recompile. A consumer therefore reads one of
+ * two copies of an authorization input depending on when it asked. That is
+ * why this is `security`-labelled, and why the fix is the ownership one
+ * rather than "make the two shapes match".
  *
  * ## What is pinned, and why the guard is on SOURCE
  *
@@ -64,6 +70,19 @@
  *   • it declares NOTHING (so `AppPlugin` defaults to `'app-plugin'`) when the
  *     door does not — because a host config with no compiled artifact, and
  *     every non-dev host boot, would otherwise lose its ONLY registrar.
+ *
+ * ⛔ The second direction has a trap that RESOLVING hides: under `os dev` the
+ * supervisor always writes its channel, and `resolveDefaultArtifactPath`
+ * returns an explicitly named path VERBATIM with no existence check
+ * (`packages/runtime/src/default-host.ts`) — only the conventional
+ * `<cwd>/dist/objectstack.json` fallback is stat'ed. Compose the door over a
+ * path that is not on disk (`os dev --artifact ./typo.json`, a stale
+ * `OS_ARTIFACT_PATH`) and it starts EMPTY and SILENT: its local-file load is
+ * `{ optional: true }` and answers ENOENT with an `info` line, registering
+ * nothing (`packages/metadata/src/plugin.ts`). The wrap would have deferred to
+ * a writer that never writes, and all four collections would end the boot with
+ * ZERO registrars — green and quiet, and strictly worse than the divergence
+ * this composition removes. So the gate is EXISTENCE, not resolution.
  *     Measured: `os serve` over the same host config has a metadata service
  *     and the wrap is its only writer (`Registered stack-declared security
  *     metadata {"appId":"com.probe.hostcfg","count":4}`, no door in the boot).
@@ -109,6 +128,30 @@ describe('#14397 — `os dev` over a HOST config composes ONE registrar for stac
         );
     });
 
+    it('the door is composed only when its artifact EXISTS, not merely resolves', () => {
+        // The regression this closes: `resolveDefaultArtifactPath` returns a
+        // NAMED path verbatim without stat'ing it, and the door tolerates
+        // ENOENT by starting empty — so gating on resolution alone hands the
+        // four collections to a writer that never writes.
+        expect(source, 'the door must be gated on the artifact being on disk').toContain(
+            'if (!fs.existsSync(hmrArtifactPath)) {',
+        );
+        // The gate must sit BEFORE the construction, not after it: a door
+        // constructed and then discarded would still have set the wrap's
+        // option under any future refactor that reads "was one built?".
+        const gateAt = source.indexOf('if (!fs.existsSync(hmrArtifactPath)) {');
+        const buildAt = source.indexOf('devArtifactDoor = new MetadataPlugin({');
+        expect(gateAt).toBeGreaterThan(-1);
+        expect(buildAt).toBeGreaterThan(-1);
+        expect(gateAt).toBeLessThan(buildAt);
+        // A missing artifact is not a silent downgrade: the warning names the
+        // path, and says the wrap keeps the collections.
+        expect(source).toContain(
+            '`  ⚠ Dev metadata-HMR endpoint not enabled: no compiled artifact at ${hmrArtifactPath}`',
+        );
+        expect(source).toContain('Stack-declared security metadata stays with the app wrap');
+    });
+
     it('the host-config wrap declares `artifact-door` exactly when that door exists', () => {
         expect(source).toContain(
             "devArtifactDoor ? { securityMetadataRegistrar: 'artifact-door' } : {},",
@@ -135,13 +178,19 @@ describe('#14397 — `os dev` over a HOST config composes ONE registrar for stac
             .toBeLessThan(source.indexOf('await kernel.use(devArtifactDoor);'));
     });
 
-    it('a failure to compose the door SAYS the four collections went unregistered', () => {
-        // The wrap has already deferred them by then; a bare "endpoint not
-        // enabled" line would read as a lost dev convenience rather than as
-        // missing security metadata.
-        expect(source).toContain(
-            'The app wrap deferred positions/permissions/capabilities/sharingRules to this',
-        );
+    it('the `kernel.use` catch does not claim a consequence it cannot have', () => {
+        // An earlier draft warned there that the four collections had gone
+        // unregistered. `Kernel.use` only validates the plugin and registers
+        // it by NAME (packages/core/src/kernel.ts) — `init`/`start` run later,
+        // in `bootstrap` — so for a MetadataPlugin already constructed above,
+        // on a still-`idle` kernel, that catch does not fire. The real
+        // lost-door case is the missing artifact, and it warns where the path
+        // can be named; see the existence test above.
+        const useAt = source.indexOf('await kernel.use(devArtifactDoor);');
+        expect(useAt).toBeGreaterThan(-1);
+        const catchWindow = source.slice(useAt, useAt + 600);
+        expect(catchWindow).not.toContain('The app wrap deferred');
+        expect(catchWindow).not.toContain('NOT registered on this boot');
     });
 
     it('behavioural: the option the source passes is the one AppPlugin reads', () => {
