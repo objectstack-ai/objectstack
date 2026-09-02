@@ -252,7 +252,7 @@ export class AuthPlugin implements Plugin {
    * kernel name this plugin when a consumer requires one before it inits.
    */
   providesServices = ['auth', 'tenancy'];
-  type = 'standard';
+  type = 'standard' as const;
   version = '1.0.0';
   dependencies: string[] = ['com.objectstack.engine.objectql'];
   /**

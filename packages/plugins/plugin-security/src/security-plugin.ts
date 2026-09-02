@@ -753,7 +753,7 @@ export class SecurityPlugin implements Plugin {
    * kernel name this plugin when a consumer requires one before it inits.
    */
   providesServices = ['security.permissions', 'security.rls', 'security.fieldMasker', 'security.bootstrapPermissionSets', 'security.fallbackPermissionSet', 'security.baselinePermissionSets'];
-  type = 'standard';
+  type = 'standard' as const;
   version = '1.0.0';
   dependencies = ['com.objectstack.engine.objectql'];
 

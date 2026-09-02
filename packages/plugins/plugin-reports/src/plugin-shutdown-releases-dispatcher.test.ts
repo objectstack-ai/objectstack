@@ -98,7 +98,7 @@ interface JobLog {
 class FakeJobServicePlugin implements Plugin {
   name = 'test.fake.job';
   version = '1.0.0';
-  type = 'standard';
+  type = 'standard' as const;
 
   constructor(private readonly log: JobLog) {}
 
