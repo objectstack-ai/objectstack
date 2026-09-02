@@ -601,10 +601,24 @@ export async function checkScopeInjection(source) {
 // --- main --------------------------------------------------------------------
 
 // Exports bindings, so an import for those exports alone must run nothing (#10667).
+
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-audit-scope self-test reached its verdict';
+
 if (isEntrypoint(import.meta.url)) {
   try {
     if (args.includes('--self-test')) {
-      await selfTest();
+      if ((await selfTest()) !== SELF_TEST_VERDICT) {
+        console.error(
+          '\n✗ check-audit-scope self-test: selfTest() returned without reaching its verdict,\n'
+            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+            + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+      }
       process.exit(0);
     }
     await main();
@@ -1015,4 +1029,6 @@ async function selfTest() {
     process.exit(1);
   }
   console.log(`✓ check-audit-scope self-test: ${total} cases pass.`);
+
+  return SELF_TEST_VERDICT;
 }

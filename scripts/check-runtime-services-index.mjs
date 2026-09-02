@@ -697,6 +697,12 @@ function main() {
 // ---------------------------------------------------------------------------
 // Self-test: every limb observed FAILING on a synthetic tree, and observed silent.
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-runtime-services-index self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   let checked = 0;
@@ -1063,6 +1069,8 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`✓ check-runtime-services-index --self-test: ${checked} assertions over a temp fixture (real run() path); every limb -- chapter list, kernel table, meta.json, order, href, title premise, registry slot (incl. the split-line registration), stability matrix (missing row, stale row, order) and stability LABEL on both tables, canonical-source rows (page-less row, page with no row, prose label, duplicate, missing path, and never read as a stability claim), label VOCABULARY (undefined label named with its allowed set and reported only against the page, every defined label accepted, the two legends drifting apart from EACH OTHER while every label they name is still in the enum, a legend widening it alone, legend order, section scoping past a decoy in each file, and a missing legend refused), empty tree, missing versioning.mdx, empty Source-of-Truth list -- observed FAILING and observed silent.`);
+
+  return SELF_TEST_VERDICT;
 }
 
 // Exports bindings, so an import for those exports alone must run nothing (#10667).
@@ -1070,5 +1078,14 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 
 if (!invokedDirectly) {
   // imported as a module — expose the exports and do nothing else
-} else if (process.argv.includes('--self-test')) selfTest();
+} else if (process.argv.includes('--self-test')) {
+    if (selfTest() !== SELF_TEST_VERDICT) {
+        console.error(
+            '\n✗ check-runtime-services-index self-test: selfTest() returned without reaching its verdict,\n'
+                + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+    }
+}
 else main();

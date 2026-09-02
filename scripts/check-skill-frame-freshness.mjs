@@ -791,6 +791,13 @@ function setOriginMain(dir, sha) {
   git(['update-ref', 'refs/remotes/origin/main', sha], { cwd: dir });
 }
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const real = realFrameFiles();
   const twoAxis = twoAxisFrameFiles();
@@ -1019,13 +1026,25 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`✓ check-skill-frame-freshness self-test: ${cases.length} cases pass.`);
+  selfTestReachedVerdict = true;
 }
 
 // ---------------------------------------------------------------------------
 
 function main() {
   const argv = process.argv.slice(2);
-  if (argv.includes('--self-test')) return selfTest();
+  if (argv.includes('--self-test')) {
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-skill-frame-freshness self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    return selfTestCode;
+  }
 
   const refAt = argv.indexOf('--ref');
   const verdict = evaluate({

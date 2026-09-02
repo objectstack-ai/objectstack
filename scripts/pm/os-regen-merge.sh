@@ -107,12 +107,20 @@
 # They used to contradict each other: this script deliberately produces the
 # commit the `os-regen` pre-commit hook refused, so following the procedure
 # meant skipping the hook — and `--no-verify` skips EVERY pre-commit check, not
-# just this one. Ruled 2026-08-12: the hook moved. It now recognises a merge
-# commit whose artifacts are stale and records a DEFERRAL rather than refusing,
-# then holds you to it — every commit after the merge is refused until the
-# regeneration lands, a second merge cannot defer on top of an outstanding one,
-# and `.githooks/pre-push` refuses a push that still owes one. So step 3 needs
-# no bypass, and step 4 is what clears the marker.
+# just this one. Ruled 2026-08-12 (#8047): the hook gained a DEFERRAL mode —
+# but it applies only to a merge commit finished BY HAND, `MERGE_HEAD` present
+# at commit time. Step 1 here is `git merge --no-edit`, which auto-commits with
+# NO hook run at all (git skips pre-commit for a merge it completes itself), so
+# the marker is untouched going into step 3. Step 3's commit is therefore an
+# ORDINARY commit — the hook's `refuse-stale` path, not its deferral path, and
+# it DOES refuse. Measured (2026-09-01):
+#   content/docs/permissions/system-context.mdx - stale
+#   Regenerate the 1 stale artifact(s) above
+# That is the DESIGNED outcome, not a dropped side — step 1's merge already
+# landed. The fallback above clears it; the repair commit then prints
+#   content/docs/permissions/system-context.mdx - current
+#   os-regen: all deferred artifacts are current - marker cleared
+# So step 3 needs no bypass, and step 4 is what clears the marker.
 #
 # The os-regen path list is read from .gitattributes AT RUN TIME — the one copy
 # that cannot rot is the one that does not exist.

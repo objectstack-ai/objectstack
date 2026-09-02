@@ -55,7 +55,7 @@ import { isInProcessClusterDriver } from './split-brain-guard.js';
  * `datasource.mutated` — payload shape defined by
  * `ClusterDatasourceMutationPayload` in `@objectstack/service-datasource`.
  *
- * See `content/docs/kernel/cluster.mdx` §5.
+ * See `content/docs/kernel/cluster.mdx` §6.2.
  */
 export class MetadataClusterBridgePlugin implements Plugin {
     name = 'com.objectstack.service.metadata-cluster-bridge';

@@ -1369,12 +1369,28 @@ export class RemoteTransport {
     });
 
     for (const { field, outKey } of groupBy) {
+      // The FIELD is a column REFERENCE — grammar — so it keeps the gate.
       this.assertSafeIdentifier(field);
-      // The alias reaches the statement as a quoted identifier, so it is held
-      // to the same gate as every other one — an alias is caller-supplied text
-      // and `assertSafeIdentifier` is what keeps it out of the SQL grammar.
-      this.assertSafeIdentifier(outKey);
-      selectParts.push(outKey === field ? `"${field}"` : `"${field}" AS "${outKey}"`);
+      // [#14235] The output NAME is ESCAPED, not gated — see
+      // {@link RemoteTransport.aliasIdentifierSql}. This is the second of the
+      // two output-name positions in this method; #14113 moved the aggregation
+      // alias one loop down, and this one was filed rather than folded in
+      // because it carried a landed pin asserting the refusal.
+      //
+      // `assertSafeIdentifier(outKey)` used to sit here, with the note "an
+      // alias is caller-supplied text and `assertSafeIdentifier` is what keeps
+      // it out of the SQL grammar". The first half is true and the second is
+      // what moved: quoting-with-escaping is what keeps a NAME out of the
+      // grammar, and it does so without refusing names the contract permits.
+      // `GroupByNodeSchema.alias` is an output-column key — the in-memory face
+      // projects `g.alias ?? g.field` verbatim, `driver-sql` routes the same
+      // position through `SqlDriver.aliasIdentifierSql` post-#13714, and this
+      // face refused anything that was not a bare `[A-Za-z_][A-Za-z0-9_]*`
+      // with an opaque 500 out of `mapDataError`. The reference-versus-name
+      // line #13714 and #14113 drew puts this position on the NAME side.
+      selectParts.push(
+        outKey === field ? `"${field}"` : `"${field}" AS ${this.aliasIdentifierSql(outKey)}`,
+      );
     }
 
     // [#6321] Was `query?.aggregations || query?.aggregate` — see the twin note
@@ -1940,6 +1956,13 @@ export class RemoteTransport {
    * names the contract permits while its own emission could carry them safely.
    * A dot is inert inside `AS "…"`, and `<cube>.<measure>` is the name EVERY
    * analytics measure arrives under.
+   *
+   * [#14235] Both output-name positions of `aggregate` route through here now,
+   * not just the aggregation alias: the groupBy select site emits
+   * `"<field>" AS <this>(<outKey>)`. `GroupByNodeSchema.alias` is the same
+   * class of key as `AggregationNodeSchema.alias`, and `driver-sql` has routed
+   * both through its own `aliasIdentifierSql` since #13714 — so the two faces
+   * agree on the whole method rather than on one loop of it.
    *
    * ## ⛔ Escaping is not "dropping the check"
    *

@@ -423,6 +423,13 @@ function exportsVerdict(manifest) {
  * into noise, and one that under-matches makes SUFFICIENT wave a broken package
  * through. Both failures are silent, so they get asserted rather than assumed.
  */
+
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-published-files self-test reached its verdict';
+
 function selfTest() {
   const cases = [
     ['dist', 'dist/index.js', true],
@@ -609,10 +616,19 @@ function selfTest() {
       `${liveDeclaring} of ${livePublishable} live) and the shared workspace enumerator's own ` +
       `assertions, over ${liveGlobs.length} live workspace glob(s).`,
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 if (process.argv.includes('--self-test')) {
-  selfTest();
+  if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+          '\n✗ check-published-files self-test: selfTest() returned without reaching its verdict,\n'
+              + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+              + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+  }
   process.exit(0);
 }
 

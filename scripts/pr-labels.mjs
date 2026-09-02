@@ -517,6 +517,12 @@ async function runPaths(dryRun) {
 // Self-test.
 // ---------------------------------------------------------------------------
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'pr-labels self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   const check = (name, actual, expected) => {
@@ -741,6 +747,8 @@ function selfTest() {
     process.exit(1);
   }
   console.log('VERDICT: pr-labels self-test PASSED');
+
+  return SELF_TEST_VERDICT;
 }
 
 // ---------------------------------------------------------------------------
@@ -750,7 +758,14 @@ async function main() {
   const dryRun = args.has('--dry-run');
 
   if (args.has('--self-test')) {
-    selfTest();
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ pr-labels self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
     return;
   }
   if (args.has('--size')) {
