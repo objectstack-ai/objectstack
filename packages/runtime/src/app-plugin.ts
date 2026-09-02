@@ -50,6 +50,73 @@ export interface AppPluginProjectContext {
 }
 
 /**
+ * Is this `plugins[]` entry an instantiated kernel Plugin rather than
+ * declarative metadata?
+ *
+ * `plugins:` is a deliberately mixed collection — its own schema documents it
+ * as "a Manifest object, a package name string, or a Runtime Plugin instance"
+ * (`ObjectStackDefinitionSchema.plugins`, `z.array(z.unknown())`). The two
+ * kinds are consumed by different halves of the platform: the CLI hands the
+ * INSTANCES to `kernel.use()` as runtime wiring, while the engine walks the
+ * manifest-shaped entries as nested metadata (`ObjectQL.registerApp` step 7 →
+ * `registerPlugin`).
+ *
+ * The discriminator is the kernel's own: `Plugin.init` is a REQUIRED member of
+ * the `Plugin` interface (`@objectstack/core`), so every instantiated plugin
+ * has it and no declarative manifest does. It is also the exact predicate the
+ * CLI already uses to answer this same question about the same array
+ * (`isHostConfig`, `@objectstack/cli`) — one spelling, so the two cannot come
+ * to different conclusions about one entry.
+ */
+function isRuntimePluginInstance(entry: unknown): boolean {
+    return typeof (entry as { init?: unknown } | null | undefined)?.init === 'function';
+}
+
+/**
+ * Drop the instantiated kernel plugins from a registration payload's
+ * `plugins[]`, leaving every declarative member untouched.
+ *
+ * ## The failure this closes (#14442)
+ *
+ * The payload handed to `manifest.register()` is stored RAW as the package
+ * record's `manifest` (`SchemaRegistry.installPackage`), and every door that
+ * serves a package row runs it through `JSON.stringify`: the two
+ * `GET /api/v1/packages` doors (list and detail), `getMetaItems({type:
+ * 'package'})`, and `service-package`'s `sys_packages` persist. A booted
+ * runtime plugin holds the engine (`ctx.getService('objectql')`), the engine
+ * refers back to itself, and the record therefore contained a CYCLE — so all
+ * four doors answered HTTP 500 "Converting circular structure to JSON" for any
+ * stack that declares plugin instances (`examples/app-showcase`), while a
+ * purely declarative stack (`examples/app-todo`) was unaffected. Studio's
+ * package picker reads the list door, so its package list was wholly
+ * unavailable on those apps.
+ *
+ * ## Why filtering rather than dropping the key
+ *
+ * A runtime instance contributes NOTHING to the record: it is not metadata, it
+ * is the wiring the kernel already holds. A manifest-shaped entry does — the
+ * engine registers its objects, views and the rest under the parent package's
+ * ownership — so dropping `plugins` wholesale would silently retire that
+ * registration for every package that ships metadata through a nested plugin.
+ * Only the members the record cannot carry are removed.
+ *
+ * ## Identity when there is nothing to strip
+ *
+ * A payload with no `plugins[]`, or one whose entries are all declarative, is
+ * returned BY REFERENCE — not a copy. Every stack without plugin instances
+ * (`app-todo`, `hotcrm`, every JSON artifact) therefore reaches the registry as
+ * the exact same object it reached it as before, which is what keeps the
+ * ADR-0130 D7 single-manifest bit-identity contract untouched by this change.
+ */
+export function withoutRuntimePluginInstances<T>(payload: T): T {
+    const plugins = (payload as { plugins?: unknown } | null | undefined)?.plugins;
+    if (!Array.isArray(plugins)) return payload;
+    const declarative = plugins.filter((entry) => !isRuntimePluginInstance(entry));
+    if (declarative.length === plugins.length) return payload;
+    return { ...(payload as object), plugins: declarative } as T;
+}
+
+/**
  * AppPlugin
  * 
  * Adapts a generic App Bundle (Manifest + Runtime Code) into a Kernel Plugin.
@@ -245,9 +312,17 @@ export class AppPlugin implements Plugin {
         
         // Register the app manifest directly via the manifest service.
         // This immediately decomposes the manifest into SchemaRegistry entries.
-        const servicePayload = this.bundle.manifest
-            ? { ...this.bundle.manifest, ...this.bundle }
-            : this.bundle;
+        //
+        // `withoutRuntimePluginInstances` is what keeps the resulting package
+        // record SERIALIZABLE — see its own doc comment for the failure it
+        // closes. It is applied to the flattened payload rather than to the
+        // bundle so both envelope shapes (nested `manifest`, bare manifest)
+        // go through it.
+        const servicePayload = withoutRuntimePluginInstances(
+            this.bundle.manifest
+                ? { ...this.bundle.manifest, ...this.bundle }
+                : this.bundle,
+        );
 
         ctx.getService<{ register(m: any): void }>('manifest').register(servicePayload);
     }
