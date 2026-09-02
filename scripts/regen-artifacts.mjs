@@ -40,6 +40,31 @@ export const ROOT_OWNER = '@objectstack/spec-monorepo';
  * `DEFAULT_OWNER`. `--self-test` verifies each name against THAT manifest, so a
  * renamed script fails loudly here instead of silently disarming a path.
  *
+ * ## `mixed` — the row is NOT generated whole, and here is when deferring is safe (#14064)
+ *
+ * Every other row is generated WHOLE: its generator renders the file's entire
+ * content in memory and writes it, so nothing on disk survives into the output and
+ * a merge that keeps one side whole loses nothing a regeneration cannot restore.
+ * That property is what makes "defer and regenerate" a merge SEMANTICS rather than
+ * a coin flip, and it is why `NOT_DRIVER_MANAGED` turns MIXED files away
+ * (`skills/README.md`, `content/docs/ai/skills-reference.mdx`,
+ * `src/migrations/registry.ts` — each in its own words: "a deferral would launder
+ * the prose").
+ *
+ * `mixed` is the third answer those two lists could not express. A file can be
+ * mixed AND still belong here, when the generated half is unreachable by any text
+ * merge (`content/docs/permissions/system-context.mdx` is the measured case) — but
+ * then "defer" is only correct for the merges where the discarded side changed
+ * nothing but the generated half. The value NAMES that equivalence, and
+ * `git-merge-regen.mjs` holds the mapping from the name to the comparator; an
+ * unrecognised name makes the driver CONFLICT and the self-test RED, so this fails
+ * closed in both directions.
+ *
+ * ⛔ It is not a licence to route mixed files in general. Reach for
+ * `NOT_DRIVER_MANAGED` first; `mixed` is for the case where a hand merge provably
+ * cannot produce the right answer, and it buys back exactly the deferrals that are
+ * lossless — never the rest.
+ *
  * ## Why the owner is declared and not searched for (#13585)
  *
  * Until #13585 the verification read `packages/spec/package.json` alone, so an
@@ -215,14 +240,46 @@ export const REGEN_ARTIFACTS = Object.freeze([
   // against branch `4407/5770/…` and main `4284/5647/…`. A text merge cannot reach
   // that answer from either input, so this is a deferral-and-regenerate shape.
   //
-  // ⭐ And the deferral is safe in the direction that matters, which is the
-  // question `os-regen-merge.sh` raises about every path here — a driver that
-  // exits 0 trades a loud failure for a silent one unless something else still
-  // reddens. Here something does, on every PR: `check-system-context-census.mjs`
-  // runs in the required `Lint & Repo Gates` job with no `paths:` filter and on
-  // `merge_group`, it re-derives the census from the tree rather than reading the
-  // page back, and its scheduling is pinned by its own `--self-test` (#13646). The
-  // driver is therefore the cheap half here and never the only signal.
+  // ⚠️ #14064 CORRECTED the safety argument this row used to carry, and the
+  // correction is why it is the one row with a `mixed` field. The old text said the
+  // deferral is safe *because* `check-system-context-census.mjs` re-derives the
+  // census from the tree on every PR. That argument is TRUE and it covers HALF of
+  // what the driver discards. The gate re-derives the census and the anchors; it
+  // re-derives no prose, because the prose is derived from nothing. So the argument's
+  // domain and the risk surface do not coincide, and the gap is not theoretical:
+  //
+  //   - The driver never writes `%A`, so the side left behind is OURS and the side
+  //     dropped is always THEIRS — i.e. always main's already-landed work, never the
+  //     branch's (measured on #14036: `git merge` exit 0, zero markers, output blob
+  //     byte-identical to the branch head, all 16 of main's re-anchorings gone).
+  //   - A PROSE-ONLY drop passes every check. Measured by deleting a 3-line
+  //     anchor-free paragraph from the merged tree and running ten doc-family gates
+  //     (`check-system-context-census`, `check:doc-anchors`, `check:doc-authoring`,
+  //     `check:docs-single-h1`, `check:corpus-claim-drift`, `check:docs-audit-scope`,
+  //     `check:role-word`, `check-doc-frontmatter`, `check-docs-section-name`,
+  //     `check-doc-route-spelling`): ten exit 0 over silently deleted documentation.
+  //   - It is not a rare path. main rewrites this page about every 75 minutes, so any
+  //     PR touching it and older than an hour meets the driver by construction.
+  //
+  // ⭐ The routing itself is still RIGHT and #14064 does not undo it: the merged
+  // tree's correct anchors are on NEITHER side (measured on #13625 — five conflicted
+  // anchors resolve to 4408/5771/6019/6382/6575 against branch 4407/5770/… and main
+  // 4284/5647/…), so no text merge and no hand merge can reach them. Moving this row
+  // to NOT_DRIVER_MANAGED would buy the prose back by handing a page that conflicts
+  // hourly to a human who cannot resolve it correctly. The census over every routed
+  // path says that trade is worse than it looks: of the last 25 main commits to this
+  // page, 24 changed nothing but anchor line numbers — the case the driver handles
+  // correctly and cheaply — and exactly 1 touched prose.
+  //
+  // ⇒ So the row keeps its routing and declares WHEN the deferral is lossless.
+  // `mixed` names the equivalence: two revisions equal after
+  // `blankAnchorLineNumbers` differ only in the half `--fix` re-derives, and
+  // dropping either loses nothing. `git-merge-regen.mjs` refuses to defer silently
+  // when they are not equal, so the 1-in-25 prose case becomes a text merge or a
+  // loud conflict instead of a silent deletion, and the 24-in-25 anchor case keeps
+  // #13646's win untouched. This is the field to reach for when the NEXT mixed
+  // artifact arrives — a whole-file generator needs no `mixed`, because there is
+  // nothing on its page a regeneration cannot restore.
   //
   // No `readsDist`/`readsSchemaTree`: the census is an AST walk over `src/`, so a
   // merged tree is the whole prerequisite. `gen` cannot launder a POPULATION change
@@ -234,6 +291,7 @@ export const REGEN_ARTIFACTS = Object.freeze([
     gen: 'gen:system-context-census',
     check: 'check:system-context-census',
     owner: ROOT_OWNER,
+    mixed: 'line-anchors',
   },
   // #13335 / #13731. The per-skill reference index — one row per `packages/spec`
   // source module, rendered whole by `gen:skill-refs`. Nine tracked files today,

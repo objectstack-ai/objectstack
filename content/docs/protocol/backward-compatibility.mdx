@@ -55,7 +55,7 @@ When a feature, schema property, or API is deprecated, ObjectStack follows a str
 - Runtime warning is emitted on first use (once per session)
 - Migration path is documented in the CHANGELOG
 
-### Phase 2: Migration Period (minimum 2 MINOR releases)
+### Phase 2: Migration Period
 
 - Deprecated feature continues to function without behavior changes
 - Documentation is updated with migration guides
@@ -75,13 +75,12 @@ Shipped examples: `17.2.0` retired `http_request_errors_total` and `sys_position
 
 ```mermaid
 flowchart TD
-    A["v3.2.0 — feature deprecated (warning emitted)"] --> B["v3.3.0 — migration period continues"]
-    B --> C["v3.4.0 — migration continues (minimum 2 minor releases)"]
-    C --> D["v3.5.0 — feature removed (earliest possible removal, MINOR)"]
+    A["Deprecation notice — feature marked deprecated (warning emitted)"] --> B["Migration period — deprecated feature keeps working, no behavior change"]
+    B --> C["Removal — retired at the boundary the ADR-0087 registry records (MINOR release, during the launch window)"]
 ```
 
 <Callout type="warn">
-**Minimum guarantee:** Deprecated features survive for at least **2 MINOR releases** before they can be removed. During the launch window the removal itself lands in a MINOR release, so a MINOR bump is where you should expect a removal to arrive.
+**No minimum survival window.** ObjectStack does not guarantee a deprecated feature survives for a fixed number of releases — [ADR-0049](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0049-no-unenforced-security-properties.md)'s dispositions for a flagged property are enforce, `experimental`, or remove, and none of them carries a dwell time. A deprecated feature is retired at the boundary the ADR-0087 registry records for it; during the launch window that removal itself lands in a MINOR release, so a MINOR bump is where you should expect a removal to arrive.
 </Callout>
 
 ---
@@ -109,7 +108,7 @@ Read the **Breaking?** column, not the version number: during the launch window 
 
 ### Breaking Change Process
 
-1. **RFC (Request for Comments)** — Breaking changes are proposed as GitHub issues with the `breaking-change` label.
+1. **RFC (Request for Comments)** — Breaking changes are proposed as GitHub issues with the `protocol:breaking` label.
 2. **Deprecation** — The old behavior is deprecated in a MINOR release (see timeline above).
 3. **Migration Guide** — A detailed migration guide is published before the removal lands, in the release notes for the version that carries it.
 4. **Release** — During the launch window the breaking change ships in the next **MINOR** version, carrying a changeset entry marked `**BREAKING**`. `scripts/check-changeset-no-major.mjs` fails any pull request that declares a `major` bump, because under lockstep one `major` would promote all 69 published packages.
@@ -204,7 +203,7 @@ MAJOR releases do still happen — 17.0.0 was cut precisely because its breaking
 
 ### When it stops applying
 
-The tables and deprecation timeline above now state this rule directly, so the page no longer contradicts itself. Classic SemVer — where a breaking change once again requires a MAJOR — is the settled form the project returns to once the launch window closes; the condition that closes the window is tracked separately and is deliberately not stated here. Until it closes, **this section is the operative rule wherever any part of this page disagrees.**
+The tables and deprecation timeline above now state this rule directly, so the page no longer contradicts itself. Classic SemVer — where a breaking change once again requires a MAJOR — is the settled form the project returns to once the launch window closes: the window closes at GA, and strict SemVer resumes from that point. Until it closes, **this section is the operative rule wherever any part of this page disagrees.**
 
 ---
 
@@ -213,6 +212,6 @@ The tables and deprecation timeline above now state this rule directly, so the p
 If you encounter an unintended breaking change:
 
 1. **Check the CHANGELOG** — Verify the change was not documented as intentional.
-2. **Open an issue** — File a GitHub issue with the `compatibility` label.
+2. **Open an issue** — File a GitHub issue describing the unintended change.
 3. **Include a reproduction** — Provide a minimal code sample showing the breakage.
 4. **Reference the version** — Specify the exact versions where behavior changed.
