@@ -115,6 +115,8 @@
     "TransitionSchema": "automation/Transition",
     "TryCatchConfig": "automation/TryCatchConfig",
     "TryCatchConfigSchema": "automation/TryCatchConfig",
+    "TryCatchErrorValue": "automation/TryCatchErrorValue",
+    "TryCatchErrorValueSchema": "automation/TryCatchErrorValue",
     "UpdateRecordConfig": "automation/UpdateRecordConfig",
     "UpdateRecordConfigSchema": "automation/UpdateRecordConfig",
     "WaitEventType": "automation/WaitEventType",

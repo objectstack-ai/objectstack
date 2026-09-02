@@ -21,9 +21,9 @@ regenerate.
 | Measure | Value |
 |---|---|
 | Triaged directories | 5 |
-| Object sites in them | 437 |
-| Still-open (strip) sites | 122 |
-| Files carrying at least one | 21 |
+| Object sites in them | 438 |
+| Still-open (strip) sites | 123 |
+| Files carrying at least one | 22 |
 
 Remaining strip sites by class:
 
@@ -31,7 +31,7 @@ Remaining strip sites by class:
 |---|---|
 | authorable — the ruling's forced scope | 1 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 117 |
+| wire / open — out of forced scope | 118 |
 | no door — no carrier, ADR-0049 territory | 3 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 1 |
@@ -46,10 +46,10 @@ The `strict` column is the one the campaign schedules against; it counts both th
 |---|---|---|---|---|---|
 | `ui/` | 169 | 157 | 5 | 0 | 7 |
 | `data/` | 156 | 76 | 1 | 0 | 79 |
-| `automation/` | 65 | 42 | 0 | 0 | 23 |
+| `automation/` | 66 | 42 | 0 | 0 | 24 |
 | `security/` | 20 | 7 | 0 | 0 | 13 |
 | `studio/` | 27 | 27 | 0 | 0 | 0 |
-| **total** | **437** | **309** | **6** | **0** | **122** |
+| **total** | **438** | **309** | **6** | **0** | **123** |
 
 ## File-level triage — site counts
 
@@ -116,7 +116,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `approval.zod.ts` | 4 |
 | `bpmn-interop.zod.ts` | 5 |
 | `builtin-node-config.zod.ts` | 8 |
-| `control-flow.zod.ts` | 5 |
+| `control-flow.zod.ts` | 6 |
 | `execution.zod.ts` | 13 |
 | `flow-function.zod.ts` | 1 |
 | `flow.zod.ts` | 11 |
@@ -126,7 +126,7 @@ classify and is not listed (it becomes reportable the day it grows its first sit
 | `state-machine.zod.ts` | 6 |
 | `time-relative-trigger.zod.ts` | 1 |
 | `webhook.zod.ts` | 1 |
-| **total** | **65** |
+| **total** | **66** |
 
 ### `security/` — sites
 
@@ -204,21 +204,22 @@ over it is here.
 
 ### `automation/` — open
 
-**23 strip of 65**, in 4 file(s).
+**24 strip of 66**, in 5 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
 | `bpmn-interop.zod.ts` | 5 | 5 |
+| `control-flow.zod.ts` | 1 | 6 |
 | `execution.zod.ts` | 13 | 13 |
 | `flow.zod.ts` | 1 | 11 |
 | `node-executor.zod.ts` | 4 | 4 |
-| **total** | **23** | **65** |
+| **total** | **24** | **66** |
 
 | Bucket | Sites |
 |---|---|
 | authorable — the ruling's forced scope | 0 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 23 |
+| wire / open — out of forced scope | 24 |
 | no door — no carrier, ADR-0049 territory | 0 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 0 |

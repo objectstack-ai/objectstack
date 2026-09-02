@@ -63,6 +63,7 @@
     "automation/TimeRelativeTrigger",
     "automation/Transition",
     "automation/TryCatchConfig",
+    "automation/TryCatchErrorValue",
     "automation/UpdateRecordConfig",
     "automation/WaitEventType",
     "automation/WaitExecutorConfig",

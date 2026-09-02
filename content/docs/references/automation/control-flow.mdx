@@ -78,8 +78,8 @@ for is untouched, and it simply stopped silently repairing its own input.
 ## TypeScript Usage
 
 ```typescript
-import { FlowRegionSchema, LoopConfigSchema, ParallelBranchSchema, ParallelConfigSchema, RetryPolicySchema, TryCatchConfigSchema } from '@objectstack/spec/automation';
-import type { FlowRegion, LoopConfig, ParallelBranch, ParallelConfig, RetryPolicy, TryCatchConfig } from '@objectstack/spec/automation';
+import { FlowRegionSchema, LoopConfigSchema, ParallelBranchSchema, ParallelConfigSchema, RetryPolicySchema, TryCatchConfigSchema, TryCatchErrorValueSchema } from '@objectstack/spec/automation';
+import type { FlowRegion, LoopConfig, ParallelBranch, ParallelConfig, RetryPolicy, TryCatchConfig, TryCatchErrorValue } from '@objectstack/spec/automation';
 
 // Validate data
 const result = FlowRegionSchema.parse(data);
@@ -233,7 +233,7 @@ const result = FlowRegionSchema.parse(data);
 | :--- | :--- | :--- | :--- |
 | **try** | `{ nodes: object[]; edges?: object[] }` | ✅ | Protected region |
 | **catch** | `{ nodes: object[]; edges?: object[] }` | optional | Handler region run when the try region fails |
-| **errorVariable** | `string` | optional (default: `"$error"`) | Variable holding the caught error in the catch region |
+| **errorVariable** | `string` | optional (default: `"$error"`) | Variable holding the caught error in the catch region — a `TryCatchErrorValue`: `nodeId`, `message`, and `iteration` / `item` when the failure happened inside a loop body |
 | **retry** | `{ maxRetries?: integer; backoffMs?: integer; backoffMultiplier?: number; maxRetryDelayMs?: integer; … }` | optional | Optional retry policy for the try region |
 
 ### Nested Shape: `TryCatchConfig.try`
@@ -260,6 +260,20 @@ const result = FlowRegionSchema.parse(data);
 | **maxRetryDelayMs** | `integer` | optional (default: `30000`) | Ceiling for a single backoff delay (ms) |
 | **jitter** | `boolean` | optional (default: `false`) | Randomize each delay within [50%, 100%] of its computed value — spreads a thundering herd of simultaneous retries |
 | **retryDelayMs** | `never` | optional | [REMOVED] `retryDelayMs` was removed in @objectstack/spec 17.0.0 — the retry policy now has ONE spelling for its base delay across every surface that carries it: `job.retryPolicy`, a `try_catch` node's `retry` and `flow.errorHandling`. Rename the key to `backoffMs`; the value (milliseconds before the first retry) is unchanged. Run `os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand. |
+
+
+---
+
+## TryCatchErrorValue
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **nodeId** | `string` | ✅ | Node the failure is attributed to |
+| **message** | `string` | ✅ | Message of the error that ended the try region, after any retries |
+| **iteration** | `integer` | optional | Zero-based iteration of the enclosing loop when the failure happened inside a loop body; absent outside a loop |
+| **item** | `any` | optional | The loop item being processed (the enclosing loop's `iteratorVariable` value) when the failure happened inside a loop body; absent outside a loop |
 
 
 ---
