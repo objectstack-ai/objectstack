@@ -50,6 +50,7 @@ import { describe, it, expect } from 'vitest';
 import { ObjectKernel, ServiceLifecycle } from '@objectstack/core';
 import { MetadataManager, DatabaseLoader } from '@objectstack/metadata';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import type { IMetadataService } from '@objectstack/spec/contracts';
 import { NodeMetadataManager } from '@objectstack/metadata/node';
 import type { MetadataLoader } from '@objectstack/metadata';
 import { runActionGovernanceInventory, collectEngineActionDeclarations } from '@objectstack/objectql';
@@ -314,11 +315,14 @@ describe('#14423 (a) — can `loadMany` omit a name `load` serves?', () => {
             ServiceLifecycle.SCOPED,
         );
 
-        // The audit's lookup — `ctx.getService('metadata')` in plugin.ts, inside its try/catch.
-        let auditMeta: any;
+        // The audit's lookup — `ctx.getService('metadata')` in plugin.ts, inside its
+        // try/catch. Typed with the slot's CONTRACT, not `any`: the audit reads
+        // `meta.loadMany` off whatever this returns, and erasing the result is
+        // exactly the shape `check:slot-lookup` refuses (#4251).
+        let auditMeta: IMetadataService | undefined;
         let auditLookupError: string | undefined;
-        try { auditMeta = kernel.getService('metadata'); }
-        catch (e: any) { auditLookupError = e?.message ?? String(e); }
+        try { auditMeta = kernel.getService<IMetadataService>('metadata'); }
+        catch (e: unknown) { auditLookupError = e instanceof Error ? e.message : String(e); }
 
         // The router's lookup — the dispatcher's scoped branch, with the request's envId.
         const routerMeta = await kernel.getServiceAsync<MetadataManager>('metadata', 'env_a');
