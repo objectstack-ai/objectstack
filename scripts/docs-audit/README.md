@@ -48,7 +48,7 @@ Three anchor kinds, each exact:
 
 | anchor | what it is | how it is derived |
 |:--|:--|:--|
-| `symbol` | a documentable declaration the diff touched | the top-level declaration, or a member of a top-level **container** (class / interface / type / enum / schema object), enclosing each changed line — on **both** sides of the diff, so a removed export still anchors the pages naming it |
+| `symbol` | a documentable declaration the diff touched | the top-level declaration, or a member of a top-level **container** (class / interface / type / enum / schema object), enclosing each changed line — on **both** sides of the diff, so a removed export still anchors the pages naming it. A member that is a **data property** is additionally qualified by its declaring container against the authorable surface (see below) |
 | `route` | a wire path the change touched | a path literal on a changed line, plus every route whose **registrar handler** references a changed symbol |
 | `sdk` | the client method bound to an anchor route | the declared `route` ⟷ `client` rows in the repo's route ledgers |
 
@@ -104,11 +104,68 @@ maintainer's decision of 2026-08-31 took this (option C) and ruled OUT filtering
 rows. A false positive costs a reader a minute; a false negative ships a falsified page.
 So no guard, no threshold and no bridge hop reads `from` — `--self-test` pins that the
 provenance key set is exactly the anchor set, in both directions, so a future change
-cannot start deciding with it without going red. Container-qualified *discrimination*
-lives on #13712 (the spec half) and #13713 (the docs-audit half), and needs a TS-name →
-spec-name mapping this does not have.
+cannot start deciding with it without going red. Container-qualified *discrimination* is
+the separate, later step below (option D), and it decides from the declarations directly,
+never by parsing this clause back out.
+
+### A data property is qualified by its declaring container (#13713)
+
+Option D of the same ruling, and the half that *does* move rows. It landed once the spec
+side (#13712) published the mapping it needs: `packages/spec/declaration-map/*.json` maps a
+**TS declaration name** to a **spec type name** (`ObjectSchemaBase` → `data/Object`), and
+`packages/spec/authorable-surface.base.json` keys the authorable surface as
+`container:property` (`data/Object:userActions`). Both are generated and covered by
+`check:generated`; this script only ever reads them, and ⛔ never carries a local mapping
+table of its own — a container the map lacks is a spec-lane card, not a local fix.
+
+For a data property `prop` (`name:` / `name?:` / `name =`) whose most specific enclosing
+declaration is the container `C`:
+
+| | `C` resolves to | `C:prop` authorable | verdict |
+|:--|:--|:--|:--|
+| (a) | `cat/T` | yes | **mint** — today's behaviour, now justified. The row also says so: `a field of const object ObjectSchemaBase, an authorable key of data/Object` |
+| (b) | `cat/T` | no | **drop** the property anchor and fall through to the container branch that already existed — no new fallback |
+| (c) | nothing, or two different types | — | **mint, unchanged** |
+
+⛔ **(c) must never become "drop".** That is option **B** (blanket prefer-container) by
+another name, and it is vetoed on two rounds of measurement: its "zero recall loss" was
+measured against a ground truth of 10 of 46 pages, most of which were never in this tool's
+corpus at all (the real recall is 48.8%, re-derived), and the rows it drops are the most
+valuable ones the tool mints. **Fail toward noise, never toward silence.** A method, a
+nested interface, a namespaced type — anything whose winning declaration is not a data
+property — is outside the rule entirely.
+
+Two consequences worth stating plainly, because both are easy to mistake for bugs:
+
+- **Both ruled true positives survive, and they survive by different routes.**
+  `userActions` is a key of `ObjectSchemaBase`, which the map carries, so it is kept by
+  (a) — `data-modeling/objects.mdx` is still listed and the row now names the spec key.
+  `schemaMode` is declared on `DatasourceDef`, an **objectql-local** interface the
+  generated map does **not** carry, so it is kept by (c) — the unmapped keep, not the
+  authorable lookup. `--self-test` pins that absence as a fact rather than papering over
+  it; the day the map carries `DatasourceDef`, `data/Datasource:schemaMode` is already an
+  authorable key and the row survives via (a) instead.
+- **The realised reduction is far smaller than the −17.4% the projection quoted**, and for
+  the same reason: the projection hand-classified the 20 dropping containers, and 18 of
+  them are internal implementation types (`MetaOverlayCacheKey`, `LocalizationCacheEntry`,
+  `AUTH_MODEL_TO_PROTOCOL`, …) that the generated map does not carry either. Under the
+  ruled rule those are case (c) and they **keep**. Only containers the map resolves can
+  drop. Widening the drop set to reach the projected number would be option B; the number
+  moves when the *map's coverage* grows, which is spec-lane work.
+
+Every drop is published in `containerQualifiedDrops`, naming the property, its container
+and the spec key that failed to be authorable — the same discipline as the two guards
+below. A deliberate false negative that no field names is one no reviewer can audit.
+
+If either artifact is unreadable (this script runs in contexts where `packages/spec` may be
+absent) every container reads as unmapped, the run behaves exactly as it did before this
+existed, and one note goes to stderr. `--self-test` pins that degradation too.
 
 ### Two guards, and both publish what they removed
+
+(Three narrowings publish now — the container qualification above reports
+`containerQualifiedDrops` on the same terms. These two are the ones that run over the
+whole anchor set, in every kind, after it is derived.)
 
 The first build of this derivation was, on some PRs, *noisier* than the proxy it replaced
 (134 rows where the old tool gave 26). Two guards fixed that, and both run **before** the
