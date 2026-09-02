@@ -12,24 +12,34 @@
  * dead `department:<id>` approver slot; here it would produce a sharing rule
  * that silently grants nobody.
  *
- * It is NOT reachable today: every materialized `sys_sharing_rule` row carries
- * `organization_id = null` (verified on a live showcase stack), so
- * `expandRecipient` passes `null` and `orgScope` is skipped entirely. The
- * moment rules start carrying an org — a multi-tenant deployment — a BU
- * subtree rule against a seeded unit stops granting, and the symptom is
- * "the right people cannot see the record", which is far quieter than a stuck
- * approval.
+ * [#14547] IT BECAME REACHABLE, and the divergence is now closed. A rule
+ * created through the REST data API by an organization admin IS org-stamped
+ * (the engine stamps it, and an explicit `organization_id: null` in the payload
+ * is overridden), so `expandRecipient` passes a real organization and the
+ * strict screen fired on exactly the seeded units the reproduction used. The
+ * predicate this file's earlier note nominated is the one that landed:
+ * `orgScope` now composes `$or: [{ organization_id }, { organization_id: null }]`
+ * — the platform's own null-inclusive tenant screen, the same one
+ * `SqlDriver.applyTenantScope` emits and the same reading `plugin-approvals`
+ * already had.
  *
- * So this file locks BOTH sides down:
- *   - the reachable paths (null-org rule) keep working, and
- *   - the divergence from approvals is written down as an executable fact
- *     rather than a comment, so flipping it is a deliberate edit to a named
- *     test and never a silent behaviour change.
+ * ⚠️ Widening that screen alone would have been a LEAK, which is why this file
+ * now pins a PAIR of asymmetric screens rather than one:
  *
- * If the platform decides null-org means "env-wide, visible to every org" for
- * sharing too — the way `plugin-approvals` and `sys_metadata` already read it —
- * the test named `[divergence]` below is the one to flip, and `orgScope` grows
- * the same `$or: [{ organization_id }, { organization_id: null }]` predicate.
+ *   - the UNIT screen is null-inclusive (a seeded unit is usable), while
+ *   - the MEMBER screen is STRICT (`memberScope`) — the member reads used to
+ *     carry no organization predicate at all, and the old strict unit screen
+ *     was the only thing keeping an org-stamped rule away from that unscoped
+ *     query. A seeded unit id exists identically in every tenant, so widening
+ *     the unit screen without screening the members turns a silent under-grant
+ *     into a silent CROSS-TENANT over-grant.
+ *
+ * A NULL organization means different things on the two rows, which is what
+ * makes the asymmetry principled rather than convenient: on the unit it is the
+ * documented platform/seeded class, and on a member row it is UNKNOWN TENANCY
+ * (measured: seed replay and elevated system writes both leave
+ * `sys_business_unit_member.organization_id` NULL). A grant fails closed on
+ * unknown tenancy.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -41,7 +51,12 @@ interface UnitRow {
   organization_id?: string | null;
   active?: boolean;
 }
-interface MemberRow { business_unit_id: string; user_id: string }
+interface MemberRow {
+  business_unit_id: string;
+  user_id: string;
+  /** [#14547] Absent = the org-less row seed replay and system writes produce. */
+  organization_id?: string | null;
+}
 
 /**
  * Minimal engine over `sys_business_unit` + `sys_business_unit_member`.
@@ -167,13 +182,15 @@ describe('BusinessUnitGraphService — the two widths are actually two widths (#
     expect(await graph().expandUnitMembers('')).toEqual([]);
   });
 
-  it('the narrow width is org-predicated exactly like the wide one', async () => {
+  it('[#14547] the narrow width is org-predicated exactly like the wide one', async () => {
     const g = new BusinessUnitGraphService({
       engine: makeEngine(DIV_UNITS, DIV_MEMBERS),
       organizationId: 'org_a',
     });
-    // Seeded (null-org) units are not visible to an org-scoped rule — the
-    // same `[divergence]` posture the wide width holds below.
+    // The seeded (null-org) UNIT is now usable — but these members carry no
+    // organization either, and an org-stamped rule does not grant to rows of
+    // unknown tenancy. Empty, for the member reason rather than the unit one;
+    // the org-stamped-member control is in the `#14547` block below.
     expect(await g.expandUnitMembers('bu_div')).toEqual([]);
   });
 
@@ -224,17 +241,125 @@ describe('BusinessUnitGraphService — org scoping (#3807)', () => {
     expect(await g.expandUsers('bu_root')).toEqual([]);
   });
 
-  it('[divergence] an org-scoped rule does NOT see an env-wide (null-org) unit — approvals does (#3807)', async () => {
-    // Same inputs that #3807 fixed on the approvals side. Sharing still reads
-    // a null-org unit as "belongs to no org, therefore not mine" and grants
-    // nobody. Unreachable today (rules are null-org), deliberate until the
-    // platform rules on null-org semantics for AUTHORIZATION paths — widening
-    // who can SEE a record is not a change to make on a defect that cannot
-    // currently fire.
+  it('[#14547, was divergence] an org-scoped rule DOES see an env-wide (null-org) unit — as approvals does (#3807)', async () => {
+    // The former `[divergence]` pin, flipped. Same inputs #3807 fixed on the
+    // approvals side; sharing now reads a null-org unit the same way, so the
+    // unit resolves and its ORG-STAMPED members are granted. The unit rows
+    // stay seeded (null-org) — that is the whole point — and only the
+    // membership rows carry the rule's organization, which is exactly what the
+    // reported reproduction had (units from app seed data, memberships POSTed
+    // through the REST data API).
+    const members: MemberRow[] = SEEDED_MEMBERS.map((m) => ({ ...m, organization_id: 'org_a' }));
     const g = new BusinessUnitGraphService({
-      engine: makeEngine(SEEDED_UNITS, SEEDED_MEMBERS),
+      engine: makeEngine(SEEDED_UNITS, members),
+      organizationId: 'org_a',
+    });
+    expect((await g.expandUsers('bu_root')).sort()).toEqual(['u_child', 'u_root']);
+  });
+});
+
+/**
+ * [#14547] The pair of screens, asserted as a pair.
+ *
+ * Every case below runs the SAME seeded (null-org) unit tree, because that is
+ * the tree the reproduction had and the one the unit screen was widened for.
+ * What varies is the MEMBER rows' organization, which is the only tenancy fact
+ * a membership carries — so each assertion isolates the member screen from the
+ * unit screen instead of moving both at once.
+ */
+describe('BusinessUnitGraphService — the unit screen widened, the member screen did not (#14547)', () => {
+  /** Two tenants' members inside ONE seeded, org-less unit tree. */
+  const MIXED_MEMBERS: MemberRow[] = [
+    { business_unit_id: 'bu_root', user_id: 'u_a_root', organization_id: 'org_a' },
+    { business_unit_id: 'bu_child', user_id: 'u_a_child', organization_id: 'org_a' },
+    { business_unit_id: 'bu_root', user_id: 'u_b_root', organization_id: 'org_b' },
+    { business_unit_id: 'bu_child', user_id: 'u_b_child', organization_id: 'org_b' },
+    { business_unit_id: 'bu_root', user_id: 'u_unstamped' },
+  ];
+
+  const graph = (organizationId: string | null, members: MemberRow[] = MIXED_MEMBERS) =>
+    new BusinessUnitGraphService({ engine: makeEngine(SEEDED_UNITS, members), organizationId });
+
+  it('(a) an org-NULL unit is USABLE for an org-stamped rule — both widths', async () => {
+    // The defect verbatim: `seedIsUsable` read the seeded unit as "does not
+    // exist", so both widths returned zero users and the rule granted nobody.
+    expect((await graph('org_a').expandUsers('bu_root')).sort()).toEqual(['u_a_child', 'u_a_root']);
+    expect(await graph('org_a').expandUnitMembers('bu_root')).toEqual(['u_a_root']);
+  });
+
+  it('(b) members of ANOTHER organization are never expanded — both widths', async () => {
+    // The leak that widening the unit screen alone would have opened: one
+    // seeded unit id, reachable from every tenant, over an unscoped member
+    // query. Asserted on the WIDE width too — it is the recipient kind the
+    // reported reproduction used.
+    const wide = await graph('org_a').expandUsers('bu_root');
+    expect(wide).not.toContain('u_b_root');
+    expect(wide).not.toContain('u_b_child');
+    const narrow = await graph('org_a').expandUnitMembers('bu_root');
+    expect(narrow).not.toContain('u_b_root');
+    // …and the mirror image, so neither answer is right by accident.
+    expect((await graph('org_b').expandUsers('bu_root')).sort()).toEqual(['u_b_child', 'u_b_root']);
+  });
+
+  it('(c) a NULL-org member row is NOT a member of an org-stamped rule', async () => {
+    // Measured on this tree: seed replay (`seed-loader.ts` withholds its
+    // single-org fallback from every `sys_` object) and elevated system writes
+    // (`sys_business_unit_member` is `unclassified` in
+    // `PLATFORM_OBJECT_TENANCY`) both leave the column NULL. So NULL here is
+    // UNKNOWN TENANCY, not "platform-global", and a grant fails closed on it.
+    expect(await graph('org_a').expandUsers('bu_root')).not.toContain('u_unstamped');
+    expect(await graph('org_b').expandUsers('bu_root')).not.toContain('u_unstamped');
+  });
+
+  it('(c control) an org-LESS rule still expands every member, stamped or not', async () => {
+    // The dominant path in practice, and the one that must not move: with no
+    // organization on the rule there is nothing to screen against, so the
+    // member read stays exactly as unscoped as it was before #14547.
+    expect((await graph(null).expandUsers('bu_root')).sort()).toEqual(
+      ['u_a_child', 'u_a_root', 'u_b_child', 'u_b_root', 'u_unstamped'],
+    );
+  });
+
+  it('an org-stamped rule still never reaches ANOTHER org’s unit', async () => {
+    // The widening admits NULL, and only NULL. A unit belonging to org_b is
+    // still invisible to an org_a rule — the null-inclusive screen must not be
+    // read as "no screen".
+    const units: UnitRow[] = [{ id: 'bu_root', organization_id: 'org_b', active: true }];
+    const g = new BusinessUnitGraphService({
+      engine: makeEngine(units, [{ business_unit_id: 'bu_root', user_id: 'u_b', organization_id: 'org_b' }]),
       organizationId: 'org_a',
     });
     expect(await g.expandUsers('bu_root')).toEqual([]);
+    expect(await g.expandUnitMembers('bu_root')).toEqual([]);
+  });
+
+  it('the descent into a seeded subtree is null-inclusive too, not just the seed', async () => {
+    // `descendants()` runs `orgScope` on the CHILD query as well. A screen
+    // applied to the seed alone would find the root and then walk into an
+    // empty child set — the same zero-grant, one query later.
+    const units: UnitRow[] = [
+      { id: 'bu_root', organization_id: 'org_a', active: true },
+      { id: 'bu_child', parent_business_unit_id: 'bu_root', organization_id: null, active: true },
+    ];
+    const members: MemberRow[] = [
+      { business_unit_id: 'bu_child', user_id: 'u_child', organization_id: 'org_a' },
+    ];
+    const g = new BusinessUnitGraphService({ engine: makeEngine(units, members), organizationId: 'org_a' });
+    expect(await g.expandUsers('bu_root')).toEqual(['u_child']);
+  });
+
+  it('an inactive seeded unit still contributes nobody', async () => {
+    // The widening is about TENANCY only. `active: false` remains a hard stop,
+    // on the seed and on the descent.
+    const units: UnitRow[] = [
+      { id: 'bu_root', organization_id: null, active: false },
+      { id: 'bu_child', parent_business_unit_id: 'bu_root', organization_id: null, active: true },
+    ];
+    const g = new BusinessUnitGraphService({
+      engine: makeEngine(units, MIXED_MEMBERS),
+      organizationId: 'org_a',
+    });
+    expect(await g.expandUsers('bu_root')).toEqual([]);
+    expect(await g.expandUnitMembers('bu_root')).toEqual([]);
   });
 });

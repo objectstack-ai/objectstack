@@ -170,7 +170,8 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
     let rows: any[] = [];
     try {
       rows = await this.engine.find('sys_business_unit_member', {
-        where: { business_unit_id: businessUnitId },
+        // [#14547] Screened — see {@link memberScope}.
+        where: this.memberScope({ business_unit_id: businessUnitId }),
         fields: ['user_id'],
         limit: 10000,
         context: SYSTEM_CTX,
@@ -196,7 +197,10 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
     let rows: any[] = [];
     try {
       rows = await this.engine.find('sys_business_unit_member', {
-        where: { business_unit_id: { $in: units } },
+        // [#14547] Screened — see {@link memberScope}. The WIDE width needs it
+        // exactly as much as the narrow one: `unit_and_subordinates` is the
+        // recipient kind the reported repro used.
+        where: this.memberScope({ business_unit_id: { $in: units } }),
         fields: ['user_id'],
         limit: 10000,
         context: SYSTEM_CTX,
@@ -266,8 +270,102 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
     }
   }
 
+  /**
+   * [#14547] The UNIT screen — the platform's own NULL-INCLUSIVE tenant
+   * predicate, not a strict equality.
+   *
+   * `SqlDriver.applyTenantScope` — the platform's one chokepoint for tenant
+   * scoping on a read — emits `(organization_id = ? OR organization_id IS
+   * NULL)`, because a NULL organization marks a PLATFORM/seeded row that every
+   * tenant may see (#2734). This method used to AND a bare
+   * `organization_id = <rule org>` instead, dropping that NULL arm. A
+   * `sys_business_unit` row written by seed data carries no organization — a
+   * seed cannot know the id the runtime mints at boot — so an org-stamped rule
+   * naming a seeded unit matched nothing: {@link seedIsUsable} read the unit as
+   * "does not exist", both widths returned zero users, and the rule stayed
+   * `active: true` having materialised no `sys_record_share` row and logged
+   * nothing. Silent under-grant, and the symptom operators see is "the right
+   * people cannot see the record".
+   *
+   * The spelling is `$or` rather than `context.tenantId` on purpose. Threading
+   * a tenant would hand the driver the same predicate, but the graph's reads
+   * are elevated ({@link SYSTEM_CTX}) precisely so they can see rows no
+   * recipient could, and the two axes are resolved separately
+   * (`ObjectQLEngine.buildDriverOptions`); more decisively, `driver-memory` and
+   * `driver-mongodb` implement NO tenant scoping at all, so a screen that
+   * existed only inside the SQL family would be no screen. The predicate is
+   * written where the decision is, and it is the same one the driver writes.
+   *
+   * ⛔ This is NOT the screen the MEMBER rows get — see {@link memberScope},
+   * which is strict on purpose. The asymmetry is the point of #14547 and both
+   * halves are pinned in `business-unit-graph.test.ts`.
+   */
   private orgScope(filter: Record<string, unknown>): Record<string, unknown> {
-    if (this.organizationId) return { ...filter, organization_id: this.organizationId };
-    return filter;
+    if (!this.organizationId) return filter;
+    return {
+      ...filter,
+      $or: [{ organization_id: this.organizationId }, { organization_id: null }],
+    };
+  }
+
+  /**
+   * [#14547] The MEMBER screen — STRICT equality, deliberately not
+   * {@link orgScope}.
+   *
+   * ## Why the member rows are screened at all
+   *
+   * Both member reads used to carry no organization predicate whatever, under
+   * a {@link SYSTEM_CTX} that carries no tenant either — so the query was
+   * unscoped by organization. That was invisible only because the strict
+   * equality {@link orgScope} used to apply kept an org-stamped rule from ever
+   * reaching a seeded unit. Widening the unit screen without this one would
+   * have turned a silent UNDER-grant into a silent CROSS-TENANT OVER-grant: a
+   * seeded unit id exists identically in every tenant, so tenant A's rule would
+   * expand to tenant B's members. A screen removed from the only place it was
+   * being enforced is not a fix.
+   *
+   * ## Why STRICT, when the unit screen is null-inclusive
+   *
+   * The two rows answer different questions. The unit is the ANCHOR the rule's
+   * author named by id, and a NULL organization on it is the documented
+   * platform/seeded class. A member row is part of the SET BEING GRANTED,
+   * enumerated by the platform rather than named by anyone, and its
+   * organization is the only tenancy fact it carries.
+   *
+   * `sys_business_unit_member` rows are NOT organization-stamped on every write
+   * path (measured on this tree for #14547):
+   *
+   *   - REST / session writes ARE stamped — the engine threads the caller's
+   *     `tenantId` into `DriverOptions` and the SQL driver's
+   *     `injectTenantOnInsert` fills the injected `organization_id` column;
+   *   - SEED replay is NOT — `seed-loader.ts` withholds its single-org
+   *     `fallbackOrgId` from every `sys_` / `cloud_` / `ai_` object, so a
+   *     seeded membership lands org-less unless the replay pinned an
+   *     organization or the record spelled the column itself;
+   *   - ELEVATED (system-context) writes are NOT — `sys_business_unit_member`
+   *     is `unclassified` in `PLATFORM_OBJECT_TENANCY`
+   *     (`packages/objectql/src/tenancy/platform-object-tenancy.ts`), so
+   *     `Engine.resolveSystemInsertOrganization` returns early and stamps
+   *     nothing;
+   *   - `driver-memory` / `driver-mongodb` never stamp a tenant column at all
+   *     (both refuse to boot multi-tenant, which is what makes that safe).
+   *
+   * So a NULL organization on a member row does not mean "platform-global", it
+   * means UNKNOWN TENANCY — and admitting an identity of unknown tenancy into
+   * an org-stamped grant is the cross-tenant over-grant above, arriving by the
+   * other door. A grant fails CLOSED: unknown tenancy is not a member here.
+   *
+   * ⚠️ The cost is declared, not hidden: a rule stamped with an organization
+   * whose unit AND memberships were both seeded still expands to nobody. That
+   * outcome is now LOUD — `SharingRuleService.expandRecipient` warns once per
+   * rule naming the rule and the unit — where before it was silent, and the
+   * repair is to stamp the membership rows rather than to widen this screen.
+   *
+   * ⛔ Do not "unify" this with {@link orgScope}. One method for both screens
+   * re-opens whichever half it does not implement.
+   */
+  private memberScope(filter: Record<string, unknown>): Record<string, unknown> {
+    if (!this.organizationId) return filter;
+    return { ...filter, organization_id: this.organizationId };
   }
 }
