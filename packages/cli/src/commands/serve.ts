@@ -2856,6 +2856,18 @@ export default class Serve extends Command {
           // door is composed only when its bytes are on disk NOW; a named but
           // missing artifact leaves the wrap as the single registrar, exactly
           // as before this decision existed.
+          //
+          // The trade this makes, stated rather than discovered later: on that
+          // boot the dev HMR SSE endpoint is not mounted either, because the
+          // plugin that mounts it is the one not composed. That is the right
+          // way round. The alternative — compose the door anyway and only
+          // withhold the registrar — keeps a dev convenience by re-creating the
+          // TWO-WRITER divergence this block exists to remove: the watcher
+          // picks the artifact up if it later appears, and then registers a
+          // second copy behind a wrap that already registered its own. The
+          // endpoint is missing only where `os dev` was pointed at an artifact
+          // that is not there (`--artifact` skips auto-compile), and the
+          // warning above says so by name.
           if (hmrArtifactPath && !/^https?:\/\//i.test(hmrArtifactPath)) {
             if (!fs.existsSync(hmrArtifactPath)) {
               console.warn(chalk.yellow(
