@@ -19,8 +19,19 @@ Comprehensive guide for building ObjectStack query filters.
 | String | `$notContains` | `NOT LIKE %?%` | `{ email: { $notContains: 'spam' } }` |
 | String | `$startsWith` | `LIKE ?%` | `{ code: { $startsWith: 'PRJ-' } }` |
 | String | `$endsWith` | `LIKE %?` | `{ file: { $endsWith: '.pdf' } }` |
+| String | `$icontains` | `LIKE %?%`, case-blind | `{ name: { $icontains: 'john' } }` |
+| String | `$like` | `LIKE ?` — caller binds `%` / `_` | `{ code: { $like: 'PRJ-%-26' } }` |
+| String | `$ilike` | `$like`, case-blind | `{ code: { $ilike: 'prj-%' } }` |
 | Null | `$null` | `IS NULL` / `IS NOT NULL` | `{ deleted_at: { $null: true } }` |
 | Null | `$exists` | `IS NOT NULL` / `IS NULL` | `{ metadata: { $exists: true } }` |
+
+**Case sensitivity is part of the contract** (`filter.zod.ts`): "`$contains` /
+`$notContains` / `$startsWith` / `$endsWith` compare CASE-SENSITIVELY.
+`$icontains` is the case-INSENSITIVE twin" — ASCII folding only, so `café` does
+not match `CAFÉ`. Use `$icontains` for anything a human typed. `$like`/`$ilike`
+match the WHOLE value, so a pattern with no wildcard is an exact comparison, not
+a substring search; `driver-mongodb`, objectql `having` and service-analytics
+refuse them (`INVALID_FILTER`) rather than approximating.
 
 ## Implicit Equality (Shorthand)
 
@@ -159,31 +170,8 @@ where: {
 
 ### ❌ Wrong: Using string operators on non-string fields
 
-```typescript
-// ❌ $contains only works on string fields
-where: {
-  age: { $contains: '25' }  // age is a number
-}
-
-// ✅ Use comparison operators for numbers
-where: {
-  age: { $eq: 25 }
-}
-```
-
-### ❌ Wrong: Using $between with wrong tuple length
-
-```typescript
-// ❌ $between requires exactly [min, max]
-where: {
-  price: { $between: [10, 50, 100] }
-}
-
-// ✅ Correct: exactly two elements
-where: {
-  price: { $between: [10, 50] }
-}
-```
+`{ age: { $contains: '25' } }` — the string operators are declared on strings
+only; use the comparison operators for numbers and dates.
 
 ### ⚠️ Prefer `$null` to a bare `null` comparand
 
@@ -238,6 +226,9 @@ where: {
 - **Parameterised tokens:** `{N_<unit>_ago}` / `{N_<unit>_from_now}` with
   units `minute|hour|day|week|month|year` — e.g. `{30_days_ago}`,
   `{2_weeks_from_now}`.
+- **Both spellings parse:** `{today}` and `${today}` are the same token
+  (`DATE_MACRO_WRAPPED_RE` is `/^\$?\{([a-zA-Z0-9_]+)\}$/`, and the context
+  tokens share it).
 
 **Session tokens:** the same value positions accept `{current_user_id}` and
 `{current_org_id}` (defined in `data/context-tokens.zod.ts`) — the signed-in
@@ -247,43 +238,31 @@ user's id and the active organization id.
 where: { owner: '{current_user_id}', close_date: { $gte: '{current_year_start}' } }
 ```
 
-**Scope:** tokens are expanded on **both** sides of the wire, so the same
-filter behaves the same wherever it runs — client-side by `resolveDateMacros()`
-/ `resolveContextTokens()` in `@object-ui/core`, and server-side by
-`resolveFilterTokens()` in `@objectstack/core` (wired into the ObjectQL read
-AND write paths — `find`/`findOne`/`count`/`aggregate`/`update`/`delete` — plus
-the analytics dataset executor). The driver only ever sees ISO date/timestamp
-strings and concrete ids, never `{tokens}`. You may therefore use tokens in a
-query issued directly against the engine — and you should: computing "today" at
-module load freezes the date into the built artifact.
+**Scope:** tokens expand on **both** sides of the wire — client-side by
+`resolveDateMacros()` / `resolveContextTokens()` in `@object-ui/core`,
+server-side by `resolveFilterTokens()` in `@objectstack/core`, wired into the
+ObjectQL read AND write paths (`find`/`findOne`/`count`/`aggregate`/`update`/
+`delete`) plus the analytics dataset executor. The driver only ever sees ISO
+strings and concrete ids. So use tokens in a hand-issued engine query too:
+computing "today" at module load freezes the date into the built artifact.
 
-This includes a **flow node's** `config.filter`. The flow template engine runs
-first there, but it hands a recognised filter placeholder through untouched for
-the engine to expand. Flow variables still win — `{record.owner}` resolves as
-always, and a flow variable named after a placeholder shadows it.
+A **flow node's** `config.filter` takes these tokens too. What happens when one
+of them drops a condition is a flow rule, not a query rule:
+**objectstack-automation** — a dropped condition *widens* the query, so
+`get_record` / `update_record` / `delete_record` fail the step instead of
+running it.
 
-**A flow filter that loses a condition refuses to run.** In a filter, a token
-that resolves to nothing does not narrow the query — it removes the condition,
-which matches *more* rows, and a `delete_record` with every condition gone
-means the whole object. So `get_record` / `update_record` / `delete_record`
-fail the step, naming the offending template, rather than executing a widened
-query. That covers a mistyped field (`{record.ownr}`), an input the run never
-received, and a lookup hop (`{record.account.name}` — the trigger record
-carries a scalar id; add the relation to the start node's `config.expand`).
-
-Two of those three are caught earlier: `objectstack validate` **fails** on a
-`{record.<path>}` filter token naming an unknown field, or hopping through a
-relation the start node does not `expand`, because the runtime has already
-committed to refusing that node. The same reference outside a filter — in a
-message body, an `http` url, a write payload — stays a warning, since there it
-renders a blank rather than widening a query. An unresolved *flow variable*
-(`{someInput}`) is not statically checkable and still surfaces at run time.
-
-**Unknown tokens are rejected, not ignored.** `{current_user}` (the RLS
-expression root) and `{this_quarter_start}` are near-misses, not tokens:
-`objectstack build` fails on them and the runtime resolver throws. A filter
-value that is entirely `{...}` is always read as a placeholder, so a literal
-value of that shape is not expressible.
+**Unknown tokens are rejected, not ignored.** A value that is entirely `{...}`
+is a placeholder by construction: `objectstack build` fails it (rule
+`filter-token-unknown`) and the resolver throws — because an unresolved token
+reaches SQL as a **literal**, matches nothing, and renders a widget showing 0,
+indistinguishable from "there is no data". Near-misses, not tokens:
+`{current_user}` (the RLS expression root), `{this_quarter_start}`, `{user_id}`
+(a real `titleFormat` interpolation) and `{organization_id}` (the column name);
+the error names the correction. A value that merely *contains* braces is left
+untouched — `'user-{current_user_id}'` is a literal. Check a spelling while
+authoring with `isDateMacroToken(tok)` / `isContextToken(tok)` from
+`@objectstack/spec/data`, passing the token WITHOUT braces.
 
 **`*_end` is a calendar DAY.** `{current_year_end}` is `2026-12-31`, so on a
 `datetime` column `<= {current_year_end}` stops at midnight on the 31st. Use
