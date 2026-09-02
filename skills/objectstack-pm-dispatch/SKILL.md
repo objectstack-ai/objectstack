@@ -7,11 +7,9 @@ description: >
   drive accepted pull requests to landing — escalating to the maintainer only
   what genuinely needs a human decision. Ships the developer-agent operating
   template the loop injects into every dispatch (no custom agent types
-  required) and the upstream-reporting procedure for platform defects an app
-  project finds. Use when asked to "work through the backlog",
-  "batch-dispatch issues", "派发 issue 给开发 agent", to stand up a
-  multi-agent delivery loop in an ObjectStack app project, or to report a
-  platform bug found while building an app. Do not use for authoring
+  required). Use when asked to "work through the backlog",
+  "batch-dispatch issues", "派发 issue 给开发 agent", or to stand up a
+  multi-agent delivery loop in an ObjectStack app project. Do not use for authoring
   ObjectStack metadata (the domain skills cover that), for a single
   already-scoped change you can just make, or as a replacement for the
   project's own conventions file — that file always wins.
@@ -178,7 +176,7 @@ classify each:
 
 1. **No `pm:*` / `needs-user-decision` label, and no classification label**
    either — none of the labels your project reads as "already routed" (area,
-   component, owning team, lane). The plain rule.
+   component, owning team). The plain rule.
 2. **`pm:queue` present, classification label absent** — scoped to the
    repositories that actually use classification labels (see the caution).
 3. **A classification label present, but no queue state** (`pm:queue`,
@@ -188,41 +186,20 @@ classify each:
 Disjuncts 2 and 3 take only cards whose `updated_at` is more than a minute or
 two old; disjunct 1 needs no such floor.
 
-**Why the sweep is a disjunction and not one "unlabeled" filter.** Routing and
-queue state are two independent axes, and a card carrying exactly one of them
-is invisible on **both** views at once: the queue lists by queue state, while
-claimants filter by classification — and a predicate that skips anything
-already carrying a `pm:*` label shuts the last door. Neither half is one
-filer's bad habit; both have standing producers:
+**Why a disjunction and not one "unlabeled" filter.** Routing and queue state
+are independent axes, and a card carrying exactly one of them is invisible on
+**both** views at once — whoever produced it, the predicate itself has to
+absorb that shape.
 
-- A card can arrive **pre-queued by the protocol itself**. Cross-seat transfer
-  tickets (the handing-off side applies the queue label as part of the
-  transfer) and tickets filed mechanically by a steward automation both carry
-  `pm:queue` on arrival, while a single-producer discipline for classification
-  labels forbids those same producers from applying one. The card then reads as
-  dispatchable on the board and is claimable by nobody.
-- The mirror shape — classified but stateless — comes from anyone who files
-  with an area label out of habit. Writing the discipline down elsewhere does
-  not fix it: a project that had published exactly that rule hours earlier
-  still produced such a card the same day. **The predicate itself has to
-  absorb it.**
+⚠️ **Scope any disjunct keyed on a label's absence to the repositories where
+that label exists** — elsewhere its absence is universal and the sweep becomes
+its own noise source. Whatever your project already excludes from the sweep
+(parked work, tracking issues) stays excluded; a parked card's normal shape is
+precisely "classified, no queue state".
 
-⚠️ **Any disjunct keyed on a label's absence must be scoped to the
-repositories where that label exists.** Where it does not exist, its absence is
-universal, so the disjunct matches every open queue card in that repository and
-the sweep becomes its own noise source — the check is whether the label exists
-there at all, not whether some card happens to carry it. Whatever your project
-already excludes from the sweep (parked work, tracking issues, protocol posts)
-stays excluded, and disjunct 3 makes that exclusion list load-bearing: a parked
-card's normal shape is precisely "classified, no queue state".
-
-⏳ **Give the partial-labeling disjuncts an age floor keyed on `updated_at`,
-not `created_at`.** A half-labeled card has two sources: one just filed, and an
-older one that a **label write** has just put into that state — and since
-labels are applied one write at a time, the sweep's own labeling passes through
-the half-labeled shape for a few seconds. `created_at` misses the second
-source; `updated_at` covers both, at the cost of a freshly commented card
-waiting one more round.
+⏳ Key the age floor on `updated_at`, not `created_at`: the sweep's own
+one-label-at-a-time writes pass through the half-labeled shape for a few
+seconds, and only `updated_at` covers that source.
 
 - **Auto-queue (`pm:queue`)** — a concrete defect with a named location or
   repro; a scoped tooling or gate fix; a restore-invariant finding; a test-only
@@ -331,30 +308,27 @@ each selected issue, before dispatching, execute in order:
 
 1. **Assign** the issue to yourself and add `pm:dispatched`. Skip — and drop
    from the batch — any issue that acquired an assignee since step 1.
-2. **Claim comment**, fixed shape. The branch name is the key: every later
-   artifact (worktree, push, PR) hangs off it.
+2. **Claim comment**, fixed shape. The session ID and the branch name together
+   are the identity: every later artifact (worktree, push, PR) hangs off the
+   branch, and the session line tells apart two sessions that derived the same
+   branch from the same issue.
 
    > Claim: PM loop round N
+   > Session: `session_<id>`
    > Branch: `claude/issue-<n>-<slug>`
    > Worktree: `<repo>-issue-<n>`
 
 3. **Race check.** Assignment is idempotent, so two agents can both "succeed".
-   Re-read the comments; if an earlier claim comment with a *different* branch
-   name exists, you lost — touch nothing of theirs, reply that you are yielding,
-   and pick another issue. **First comment wins.**
+   Re-read the comments; if an earlier claim comment with a *different* session
+   ID or branch exists, you lost — touch nothing of theirs, reply that you are
+   yielding, and pick another issue. **First comment wins.**
 
 **Read the claim comment back — GitHub's body sanitizer deletes short `<…>`
-spans in place, and backticks do not protect them.** The shape above is built
-out of placeholders, and the branch name inside it is the key that both the race
-check and the stale-claim reclaim below read. Measured on this loop, writing
-then reading the stored body back: `<!-- dev-report -->` came back as *nothing at
-all*, `expected <n> to be 19` came back as `expected  to be 19`, `git log --
-<path>` came back as `git log -- `. All three were inside code spans. This is
-**not** the truncation shape that step 0's *Repair first* handles: the rest of
-the body survives intact, so there is no truncation point to find, the rendered
-page looks correct, and the API returned success. The first of those spans cost
-the most — it was a report-collection marker, so the instruction to sweep for it
-had been deleted from the very text that carried it.
+spans in place, and backticks do not protect them** (measured: a code-spanned
+HTML comment came back as nothing at all, the rest of the body intact and the
+API reporting success). The shape above is built out of placeholders, and the
+identity lines inside it are what the race check and the stale-claim reclaim
+below read.
 
 - Write literal angle brackets as HTML entities (`&lt;` / `&gt;`), or put a
   space after the `<`. A code span is not protection.
@@ -413,48 +387,17 @@ Non-negotiables for this dispatch:
 Return ONLY the JSON report defined in the operating procedure.
 ```
 
-#### One semantics, N independent implementations — enumerate them in the prompt
-
-**Applicability:** the issue changes a *semantic rule* — how an operator, a
-predicate, a comparison, or an absent/empty value is interpreted — and that rule
-is implemented **more than once**, by compilers or evaluators that share no code.
-Query filters, expression languages, permission predicates and serialization
-formats all tend to grow this shape as a project adds backends.
-
-When it applies, the dispatch prompt carries an **explicit inventory of every
-implementing surface**, and requires the agent to give a verdict **for each one**
-in its PR body: **changed** / **already conformant** (with evidence) /
-**explicitly out of scope** (with a reason). A surface the PR never mentions is
-reviewed as one that was *missed*, not as one that needed no change.
-
-Why this is worth a standing clause instead of case-by-case judgment: the failure
-it prevents is not "implemented it wrong", it is **"implemented part of it and
-believed the work was finished"**. That failure is invisible at review time — the
-diff is correct and the tests are green, while the untouched surfaces keep
-answering the old way until a user hits the divergence. The cost scales with the
-count: a semantics carried by N implementations makes every ruling an N-part
-task, and the parts that get skipped are exactly the ones nobody wrote down.
-
-Two disciplines keep the inventory trustworthy:
-
-- **The inventory is maintained by PR.** Whichever change adds, retires or merges
-  an implementing surface updates the list in that same PR. An inventory going
-  stale is inevitable; an inventory with **no owner** is the defect.
-- **Re-verify before pasting.** Paths move and surfaces get added between
-  rulings, so re-derive the list from the code at dispatch time rather than
-  copying the previous prompt. An inventory that was right last month and is
-  pasted unchecked reintroduces the very miss it exists to prevent.
-
-Surfaces that are **deliberately frozen** (deprecated backends, formats kept only
-for compatibility) stay in the inventory. Their verdict is "out of scope —
-frozen", recorded rather than silently absent: a reader cannot otherwise tell a
-frozen surface from a forgotten one.
-
 #### Dispatch backends
 
-**`mode:subagent` (default).** Sub-agents inside the PM's own session. Reports
-come back directly as each agent's final message — a lossless channel. Prefer
-this mode; it is simpler and nothing can be lost between agent and reviewer.
+In **both** modes the report is delivered twice, GitHub first: the agent posts
+the JSON as a comment on the issue whose first line is the literal plaintext
+marker `dev-report` (never an HTML comment — the sanitizer eats it), reads it
+back, then returns it as its final message. The comment is the record; the
+final message is the accelerator. An agent killed mid-message loses nothing.
+
+**`mode:subagent` (default).** Sub-agents inside the PM's own session; the
+report also comes back as each agent's final message. Prefer this mode; it is
+simpler.
 
 **`mode:cloud`.** Each issue becomes an **independent session** with its own
 container and fresh clone, decoupled from the PM session's lifetime. Use it
@@ -463,16 +406,15 @@ maintainer asks for it. Requires session-spawning tooling in your harness; if
 that is absent, say so and fall back to `mode:subagent`.
 
 An independent session cannot return a message to the PM, so the dispatch
-prompt must be **fully standalone** (it starts with zero conversation context)
-and must instruct the agent to **post the JSON report as a comment on the
-issue**, prefixed with a machine-findable PLAIN-TEXT marker such as
-`dev-report`, in addition to opening the draft PR.
+prompt must be **fully standalone** (it starts with zero conversation context);
+the report comment on the issue is its only channel.
 
 ### 6. Collect
 
 **Subagent mode:** wait for the agents to return. Do not poll, and never
 fabricate a pending agent's result. An agent that dies or returns malformed
-output counts as `status: "blocked"` with its raw output attached.
+output is read from its `dev-report` comment on the issue; with no comment
+either, it counts as `status: "blocked"` with its raw output attached.
 
 **Cloud mode:** there is no direct return channel — collect through GitHub. Arm
 a check-in (~15 min); on each wake, sweep the dispatched issues for report
@@ -484,15 +426,8 @@ has reported, or a dispatch has been silent for over ~2 h (count it as
 
 **Write every check-in as criteria, never as a conclusion — scheduled text
 arrives in a future you cannot see.** A check-in armed now is read by a session
-that has lost your context, against a world that has moved on. Measured three
-times in one day on this loop: a scheduled message **still delivered after its
-timer had been cancelled**, carrying text two rounds out of date. One of them
-read "no branch and no report ⇒ judge the agent unreliable and dispatch a fresh
-one"; by delivery time that agent had opened a PR which was already reviewed and
-accepted, so executing the text verbatim would have pushed a duplicate agent
-into a live, finished worktree — the exact collision the claim protocol exists to
-prevent, arriving through the automation instead of through a racing PM. Two
-rules make stale text harmless:
+that has lost your context, against a world that has moved on — and a
+cancelled timer can still deliver. Two rules make stale text harmless:
 
 - **Open every check-in with "idempotent — re-read the state before acting"**,
   and include no imperative that can be executed without that re-read. Once a
@@ -507,24 +442,13 @@ rules make stale text harmless:
   of non-delivery.
 
 **A silence threshold is a collection boundary, not a verdict of death.** The
-~2 h above means "stop waiting this round"; it does not mean the agent is gone,
-and the two must not be swapped, because their costs differ by an order of
-magnitude — waiting one more round costs a round, while concluding death costs a
-**duplicate dispatch into a worktree that may still be live**. Before concluding
-that a dispatched agent is dead, require one of: a direct status query answered
-in a way that shows it is dead, the host reporting the session stopped, or
-**silence past a completion-time baseline you have actually measured**.
-
-Measure that baseline for your own project — dispatch to first pushed branch or
-PR, over a handful of comparable cards — and treat it as local. Two same-day
-samples from this repo's loop show why no single number can be inherited: four
-text-only documentation cards landed at 93 / 96 / ~95 / ~110 min, while four
-mixed cards from the same day spanned ~64 min to ~2 h 50 min (the two long ones
-waiting on CI). Eight cards, one day, one toolchain, a spread from about an hour
-to nearly three. **Silence inside the baseline is not evidence**, and a check-in
-threshold having passed twice is evidence only that time passed. This is the
-same failure as inferring an abort from symptoms: until you know the baseline,
-"working normally, slowly" and "dead" produce identical readings.
+~2 h above means "stop waiting this round", not "the agent is gone": waiting one
+more round costs a round, while concluding death costs a **duplicate dispatch
+into a worktree that may still be live**. Before concluding that a dispatched
+agent is dead, require one of: a direct status query showing it dead, the host
+reporting the session stopped, or **silence past a completion-time baseline you
+measured in your own project** (dispatch to first pushed branch or PR, over a
+handful of comparable cards). Silence inside the baseline is not evidence.
 
 ### 7. Review each report
 
@@ -555,8 +479,6 @@ Verdict per issue:
   check is green (the queue rebuilds against the current default branch, which
   is the sanctioned path); where none exists, merge serially only after remote
   CI is fully green, and only if the project allows the PM to merge at all.
-  This applies to **developer-agent PRs dispatched by this loop only** — the
-  PM's own tooling PRs stay with the maintainer.
 - **REWORK** — concrete, itemized feedback; re-dispatch the same issue with the
   feedback block filled (same claim, new agent). **Maximum 2 rework rounds**
   per issue; a third failure escalates instead.
@@ -588,31 +510,6 @@ Named non-escalation classes — act immediately:
 - **Sequencing and dependency ordering** between technical tasks.
 - **Verification strategy** — what regression pass a risky-but-decided change
   needs. That is scoping the work, not deciding it.
-- **A declaration silently dropped on a new arm, when a sibling arm already has
-  a ruling.** When a declared key is silently ignored on one arm of a component
-  and an earlier ruling already made that same key a **loud authoring error** on
-  a sibling arm, the new arm **joins the existing rejection set by default** —
-  reuse that ruling, queue it, dispatch it; do not spend a fresh decision on a
-  one-word extension of an answer you already have. Only a genuine **semantic
-  difference between the arms** reopens the question. **State the boundary in the
-  same breath as the default, or the shortcut gets over-applied:** what carries
-  over is the ruling **together with its rationale**, never the verdict alone.
-  When the original rationale was measured to be arm-specific — it held on the
-  face it was ruled on and is disproved on the new one, as a "refusing this would
-  reject usage that already works" argument does the moment the new arm has no
-  such working usage — the default does not apply and the new arm earns its own
-  decision. The test is mechanical: re-check the original rationale against the
-  new arm *before* reusing the verdict. Sharing a key name is not sharing a
-  reason.
-- **Two implementations of one operation.** When one operation has two
-  implementations and they disagree, the side that already carries the
-  **governance** — authorization gates, user consent, de-duplication, audit
-  trail — is the **default survivor**; the other is rebound onto it and deleted.
-  Not reconciled, not kept as a second writer. The ungoverned side wins only
-  when **product semantics explicitly demand** it, and that semantic goes into
-  the decision text rather than being supplied afterwards as justification.
-  Keeping both implementations keeps a path around the gates — exactly what
-  `declared = enforced` exists to close.
 - A developer agent's `needs_decision` that, on review, falls into the classes
   above: answer it yourself with the decision and rationale; do not relay it
   upward.
@@ -735,8 +632,9 @@ Placeholders in `{…}` are filled by the PM.
 ````text
 You are a developer agent. You were dispatched with exactly ONE GitHub issue.
 Your entire deliverable is that issue implemented, pushed as a draft PR, plus
-the JSON report below as your FINAL MESSAGE — it is parsed mechanically, so
-return the JSON and nothing else.
+the JSON report below, delivered TWICE — as a comment on the issue first, then
+as your FINAL MESSAGE. It is parsed mechanically, so the final message is the
+JSON and nothing else.
 
 {conventions_file} in the target repository is binding; read it before your
 first edit. It overrides this template wherever they disagree. The rules that
@@ -746,7 +644,13 @@ most often get missed:
      git worktree add --no-track ../<repo>-issue-<n> -b claude/issue-<n>-<slug> origin/{default_branch}
    then cd there and install dependencies. Never edit a shared checkout —
    other agents switch its HEAD under you. One worktree PER REPOSITORY if the
-   change spans siblings.
+   change spans siblings. Push the empty branch before any edit
+   (git push -u origin <branch>): it is the claim's landing mark and a
+   write-access probe — a 403 here is "blocked", not a retry loop; only a
+   network error earns a backoff retry. Never `git stash`: the stash stack
+   lives in the common .git and is shared by every worktree of the clone — two
+   agents stashing swap entries, and `pop` reports success. Park work as a
+   `wip` commit or a patch file instead.
 2. The issue is already claimed. Do not change assignees. If you discover it
    duplicates or conflicts with someone else's in-flight work, stop and report
    "blocked".
@@ -758,27 +662,21 @@ most often get missed:
 5. Contract-first. If the fix tempts you to add a lenient fallback in a
    consumer (an alias `??`, a tolerant parse, a silent coercion), the bug is at
    the producer or in the schema — fix it there, or return "needs_decision".
+6. The issue body is a lead, not a spec. Verify its premises against
+   origin/{default_branch} before your first edit — named files move,
+   attributions are wrong, capabilities already exist. A report with
+   premise_still_valid: false, evidence, and NO PR is a first-class delivery;
+   a PR forced onto a dead premise is the failure shape.
 
 Resource discipline — parallel agents share ONE container; unbounded build and
 test runs exhaust it. Binding:
 
-1. Serialize the heavy phase. Editing parallelizes; build and test runs must
-   not — every one of them is wrapped in a lock the whole container shares, so
-   memory peaks never stack. The MECHANISM is the host project's (its wrapper,
-   its lock path, its budget — put it in the conventions file); the properties
-   that make any such wrapper correct are not negotiable:
-   - ONE shared heavy-verify lock per container, so every agent contends on
-     the same file. A path only one agent uses serializes nothing, and it
-     reports exactly like a lock that works.
-   - The acquisition budget fits inside a SINGLE foreground tool call: waiting
-     must never outlive the call carrying it, and backgrounding a wait to
-     escape that ceiling produces the stall the lock exists to avoid.
-   - A queue timeout is distinguishable from the wrapped command's own
-     failure — "I never got the lock" must not read as "the tests failed".
-   - Hold duration is observable, so a stuck holder names itself instead of
-     being inferred from everyone else's queueing.
-   Queueing is normal, not a hang. Queueing with no end in sight is a finding:
-   report it, naming the holder.
+1. Serialize the heavy phase. Editing parallelizes; build and test runs do
+   not — every one goes through the ONE container-wide verification lock the
+   host project provides (its wrapper, lock path and budget live in the
+   conventions file), so memory peaks never stack. Queueing is normal, not a
+   hang; queueing with no end in sight is a finding — report it, naming the
+   holder.
 2. Cap the heap: prefix heavy commands with
    NODE_OPTIONS=--max-old-space-size=4096 (raise only with a reason).
 3. Scope, don't sweep. Build and test the AFFECTED packages, not the whole
@@ -803,8 +701,7 @@ Definition of done, in order:
   test and typecheck commands and capture REAL output for the report.
 - Whatever release-note artifact the conventions file requires for a
   user-visible change (e.g. a changeset entry).
-- Pushed: git push -u origin claude/issue-<n>-<slug> (retry on network failure
-  with backoff).
+- Pushed: every commit is on the branch you pushed at the start.
 - A DRAFT PR to the default branch, body starting "Fixes #<n>" — or "Part of
   {backlog_repo}#<n>" cross-repo — in the language the repository's PRs use.
 - Tear down anything you started (dev servers, temporary processes) by PID.
@@ -864,13 +761,17 @@ Return "blocked" (with evidence) when the default branch is broken under you, a
 dependency issue is unmerged, or CI infrastructure fails — after retrying
 enough to be sure it is not your change.
 
-Final message — exactly this JSON, no prose around it:
+Report — post exactly this JSON as a comment on the issue, its first line the
+literal plaintext dev-report (never an HTML comment: the sanitizer deletes it),
+read the comment back to its end, then return the same JSON as your final
+message with no prose around it:
 
 {
   "issue": <n>,
   "status": "done | rework | blocked | needs_decision",
   "branch": "claude/issue-<n>-<slug>",
   "pr": "<url or null>",
+  "premise_still_valid": true,
   "summary": "what was implemented, 2-4 sentences",
   "tests": "commands run + pass/fail evidence (real output excerpts)",
   "open_questions": [
@@ -887,147 +788,33 @@ TypeScript generics) and HTML comments alike. Write a space after each "<"
 and read the stored body back when a snippet is load-bearing.
 ````
 
----
-
-## Report contract (what a developer agent returns)
-
-```json
-{
-  "issue": 123,
-  "status": "done | rework | blocked | needs_decision",
-  "branch": "claude/issue-123-short-slug",
-  "pr": "https://github.com/acme/hotcrm/pull/456 | null",
-  "summary": "what was implemented, 2-4 sentences",
-  "tests": "commands run + pass/fail evidence",
-  "open_questions": [
-    { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
-  ],
-  "out_of_scope_findings": ["filed as #<n>: …"]
-}
-```
-
-`open_questions` must be non-empty when `status` is `needs_decision`, and each
-entry becomes input to the escalation analysis. `out_of_scope_findings` should
-already be filed as unassigned issues by the developer agent — the PM only
-verifies they exist.
+**Report contract.** The JSON in the template's final-message block is the
+whole contract. `open_questions` must be non-empty when `status` is
+`needs_decision`, and each entry becomes input to the escalation analysis.
+`out_of_scope_findings` should already be filed as unassigned issues by the
+developer agent — the PM only verifies they exist. `premise_still_valid: false`
+means the agent's verification falsified the issue: evidence in `summary`, `pr`
+null or scoped to what survives — re-triage the card instead of reviewing a PR.
 
 ---
 
 ## Upstream reporting — platform defects found while building an app
 
-An app project (built on ObjectStack, or on any platform it does not own)
-regularly trips over defects that are **not the app's to fix**. The temptation
-is to make the app tolerate it and move on. Do not. A workaround in the app
-hides the defect from the people who can fix it, ships a second source of truth
-to every future author, and outlives the upstream fix by years — and when the
-app's metadata is AI-authored, the tolerant path is copied into everything
-generated next.
+The doctrine lives in `objectstack-platform` under **"The App / Platform
+Boundary"** — the fix is upstream, never a workaround in the app. This loop
+adds:
 
-**The upstream repository is derived, not configured.** Read it from the
-failing dependency itself (its `package.json` `repository` field, or the
-registry page). For `@objectstack/*` packages that is
-`objectstack-ai/objectstack`.
-
-### 1. Stale-premise check first
-
-Before writing anything, establish that the defect still exists upstream:
-
-- reproduce against the **current** upstream default branch or the newest
-  published version, not the version the app happens to pin;
-- search the upstream repository's open **and closed** issues and merged PRs
-  for the symptom, the error string, and the module name;
-- read the upstream changelog between your pinned version and the latest.
-
-If it is already fixed, the app-side task is an **upgrade**, not a report. Say
-so and stop.
-
-### 2. Write a report that can be acted on without your app
-
-- **Minimal repro** — the smallest metadata or code that shows the defect,
-  standalone, with no dependency on the app's own packages. If it cannot be
-  reduced, say exactly what part of the app is load-bearing and why.
-- **Pinned versions** — the exact versions of every upstream package involved
-  (`pnpm list @objectstack/…`), plus runtime and OS if relevant. "Latest" is
-  not a version.
-- **Expected vs actual**, and the **contract you are citing**: the schema line,
-  documented behaviour, or ADR the upstream is violating. A report that names
-  the contract gets triaged as a defect; one that does not gets triaged as a
-  question.
-- **What you did NOT do**: state that the app has no workaround, so the
-  upstream can see the real blast radius.
-
-### 3. File it as a guest, not as a scheduler
-
-- Open the issue **in the upstream repository**, with a backlink line
-  `Part of <app-owner>/<app-repo>#<n>` so both sides can navigate.
-- **Never apply the upstream's queue labels** (`pm:queue`, `pm:dispatched`, …),
-  never assign it, never add it to their board. Their PM triages their backlog;
-  labeling it yourself injects work into a queue whose in-flight batch you
-  cannot see — the same collision the single-scheduling-authority ban exists
-  for.
-- Do not open a fix PR upstream unless your project has the appetite and the
-  upstream's conventions invite it. If it does, that is an ordinary dispatch
-  against the upstream repository, governed by **their** conventions file.
-
-### 4. Park the app-side task honestly
-
-The app-side issue does not silently continue. Pick one and record it:
-
-- **`Blocked-by: <upstream-owner>/<upstream-repo>#<n>`** in the body — the PM's
-  batch selection skips it until that issue closes; or
-- **pin the current upstream version** with the unblock condition written down:
-  "pinned at 17.2.0; unpin when `<upstream>#<n>` ships in >= 17.3". A pin with
-  no recorded unblock condition is a workaround with better manners.
-
-Either way the app-side issue stays open and visible. **"We worked around it"
-is never a resolution** — closing it is what makes the defect permanent.
-
----
-
-## Multiple PMs — shard by repository, never share a queue
-
-The claim protocol makes concurrent PMs *safe*, not *useful*: batch
-independence is only checked within one PM's view, so two PMs on the same queue
-can claim different issues that collide on shared files. Scale in this order:
-
-1. **One PM, bigger batch** (`batch:5`), heavy tasks via `mode:cloud` — adds
-   compute without adding schedulers.
-2. **When one PM genuinely cannot keep up**, a second session takes a **whole
-   repository** as its shard (`/pm-dispatch repo:<owner>/<other-repo>`) — file
-   universes are disjoint by construction. A sharded PM states its shard in
-   every claim comment and **never claims outside it**.
-3. **Multiple PMs on the same queue: prohibited.** All cost, no throughput.
-
-**Shard ownership is registered, never assumed.** A registry issue in the
-backlog repository records which session owns which shard. A PM taking over a
-shard comments there as its FIRST action, and again when handing off. An
-unowned shard may be **caretaken** by the backlog PM, but the moment a shard is
-registered to another session the caretaker stops dispatching into it —
-in-flight claimed tasks finish under whoever claimed them, and everything else
-belongs to the new owner. State the mode in claim comments so the registry and
-the claims never disagree silently.
-
-**Work crosses shard lines; PMs never do.**
-
-- **Transfer via the target queue**: file the piece as an issue in the target
-  repository with the queue label and a source line
-  `Part of <owner/repo>#<n>`. The target shard's PM picks it up through its own
-  sweep — the queue label IS the inter-PM channel.
-- **Dependencies via `Blocked-by:`** on the waiting side.
-- **Follow-up chores belong to the consuming shard** — when an upstream change
-  lands, the dependent repository's adaptation issue is filed by the PM that
-  owns that repository; it knows its own surfaces.
-- **Shared contract surfaces have one owner.** Anything touching the shared
-  schema or contract package transfers to the backlog PM regardless of who
-  needs it — only that PM sees that repository's in-flight batch and its
-  generated-artifact collisions.
-- Cross-repository parent/sub-issue chains stay coordinated by the backlog PM;
-  sharded PMs coordinate only chains fully inside their shard.
-
-**Linkage chores are issues, not memory.** When an accepted PR's artifacts must
-flow into another repository (a regenerated client, a version bump, a refreshed
-build), file that follow-up in the consuming repository's backlog immediately,
-blocked by the PR until it merges. Nobody remembers.
+- **Derive the upstream repository** from the failing dependency's
+  `package.json` `repository` field, and confirm the defect still exists on its
+  current default branch — already fixed means the app-side task is an upgrade.
+- **Report so it can be acted on without your app**: standalone minimal repro,
+  exact pinned versions, expected vs actual, the contract you cite.
+- **File as a guest, not as a scheduler**: backlink `Part of
+  <app-owner>/<app-repo>#<n>`; never apply the upstream's queue labels, never
+  assign, never add it to their board.
+- **Park the app-side issue honestly**: `Blocked-by: <upstream>#<n>`, or a
+  version pin with its unblock condition written down. It stays open — "we
+  worked around it" is never a resolution.
 
 ---
 
@@ -1035,7 +822,7 @@ blocked by the PR until it merges. Nobody remembers.
 
 Memory peaks come from **build and test**, not editing, so the fix is not less
 parallelism but serialized heavy phases — which the developer-agent template
-enforces with a container-wide verification lock, a heap cap, scoped builds and
+requires: a container-wide verification lock, a heap cap, scoped builds and
 worktree cleanup.
 
 PM side: treat the configured `batch` as assuming normal-sized tasks. For
@@ -1058,6 +845,12 @@ alone rather than into a full batch.
   file-disjoint by construction.
 - The backlog repository is the **single scheduling authority**. Never dispatch
   into a repository whose in-flight batch you cannot see.
+- **One PM per queue.** Scale with `batch` and `mode:cloud`, never a second
+  scheduler on one queue; a second PM takes a whole other repository as its
+  shard, states it in every claim comment and never claims outside it. Work
+  crosses shards as issues: a queue-labeled card in the target repository with
+  a `Part of <owner/repo>#<n>` line, `Blocked-by:` on the waiting side, and
+  follow-up chores filed in the consuming repository — never remembered.
 - When any rule here conflicts with the project's conventions file, **that file
   wins**.
 
