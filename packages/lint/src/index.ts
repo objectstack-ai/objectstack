@@ -223,6 +223,7 @@ export {
   VISIBILITY_BARE_IDENTIFIER,
   VISIBILITY_PREDICATE_SYNTAX,
   VISIBILITY_PREDICATE_OVER_BUDGET,
+  VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
 } from './validate-visibility-predicates.js';
 export type {
   VisibilityFinding,
