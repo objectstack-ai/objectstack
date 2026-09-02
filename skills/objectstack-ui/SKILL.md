@@ -1482,7 +1482,6 @@ export const SalesDashboard: Dashboard = {
       // Period-over-period: renderer fetches the prior quarter and
       // surfaces a secondary value + delta arrow automatically.
       compareTo: { kind: 'previousPeriod' },
-      actionType: 'url', actionUrl: '/objects/opportunity?filter=open',
     },
 
     // Chart widget with comparison overlay (M2). The renderer issues a
@@ -1501,10 +1500,34 @@ export const SalesDashboard: Dashboard = {
 };
 ```
 
-> **Tokens in filters:** `{current_quarter_start}`, `{current_user.id}` are
+> **Tokens in filters:** `{current_quarter_start}`, `{current_user_id}` are
 > resolved at request time. Avoid baking absolute dates into definitions.
 > The full list of supported date placeholders is documented in
 > [Date Macros](#date-macros--filter-placeholders) below.
+
+### Dashboard filters — `globalFilters` + per-widget `filterBindings`
+
+A dashboard filter is **broadcast into every widget's query**. A widget with no
+`filterBindings` inherits it on its own object's like-named field — which is how
+a filter bar looks alive while the tiles read `0`: the inherited binding is
+field-valid and value-empty when two objects share a column name under different
+vocabularies.
+
+| Declare | On | Meaning |
+|:--|:--|:--|
+| `name` | a `globalFilters` entry | The stable key `filterBindings` references. Defaults to `field`; name it for the **vocabulary it carries**, not the column it sits on. |
+| `scope: 'widget'` + `targetWidgets` | a `globalFilters` entry | Apply to those widget ids only. `scope` defaults to `'dashboard'`. |
+| `filterBindings: { filterName: 'field' }` | a widget | Re-target onto THIS widget's field. |
+| `filterBindings: { filterName: false }` | a widget | Opt out — the honest binding when the vocabularies are disjoint and no field can be re-targeted. |
+| absent | a widget | Default binding: the filter's own `field`; for the reserved `dateRange`, `dateRange.field ?? 'created_at'`. |
+
+```typescript
+// One control, two objects: re-target on one widget, opt the other out.
+{ id: 'revenue_by_region', dataset: 'order_metrics', values: ['total_sum'],
+  filterBindings: { region: 'sales_region' } },
+{ id: 'projects_at_risk', dataset: 'project_metrics', values: ['project_count'],
+  filterBindings: { task_status: false } },
+```
 
 ### Period-over-period — `compareTo`
 
@@ -1526,13 +1549,6 @@ runs. There is no second widget-side vocabulary.
 compareTo: { kind: 'previousPeriod' }                            // one dated dimension
 compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — say which
 ```
-
-> **Removed in v17:** the bare strings `compareTo: 'previousPeriod'` /
-> `'previousYear'` and the `{ offset: '7d' | '1M' | '1y' }` arm. The strings and
-> `{ offset: '1y' }` are rewritten for you by `os migrate meta --from 16`; any
-> other `offset` duration has no faithful target — state the window on the
-> widget's `filter` and compare it with `{ kind: 'previousPeriod' }`, which
-> shifts by that window's own length.
 
 * **Metric widgets** — the prior-period value renders as a small caption
   beneath the headline number, alongside a green/red delta arrow and an
@@ -1569,7 +1585,8 @@ compareTo: { kind: 'previousYear', dimension: 'close_date' }     // several — 
 
 ### Server-side date bucketing — `dateGranularity` (ADR-0021)
 
-Date bucketing lives on the **dataset dimension**, not the widget. Give a date
+The **dataset dimension carries the default; a widget's
+`options.dateGranularity` overrides it for that widget only.** Give a date
 dimension a `dateGranularity` and any presentation that selects it groups by that
 bucket server-side — without it every distinct timestamp becomes its own
 category, collapsing a 12-row seed into a 12-point flat line. (The old widget-level
@@ -1593,6 +1610,47 @@ defineDataset({
   dataset: 'contract_metrics', dimensions: ['signed_date'], values: ['signed_count'],
   filter: { signed_date: { $gte: '{12_months_ago}' } },
   compareTo: { kind: 'previousYear' } }
+```
+
+| `dateGranularity` | Rendered bucket label |
+|:--|:--|
+| `'day'` | `YYYY-MM-DD` |
+| `'week'` | ISO date of the bucket (`YYYY-MM-DD`) |
+| `'month'` | `YYYY-MM` |
+| `'quarter'` | `YYYY-Qn` |
+| `'year'` | `YYYY` |
+
+* **Engine support** — Postgres `date_trunc`, MySQL `date_format`, SQLite
+  `strftime`, MongoDB `$dateTrunc`, in-memory fallback. All emitted by the
+  analytics service, not the client.
+* **Human labels are automatic** — the analytics layer formats the bucket value
+  to the label above, and resolves `select`/`lookup` dimension values to their
+  option label / related-record name. Measures carry their `label` + `format`
+  (e.g. `$0,0`) so KPIs and legends read "Total Spent / $616,000", not
+  "spent_sum / 616000". Authors do not format dimension/measure values by hand.
+* **Combines with `compareTo`** — the comparison query is issued with the same
+  granularity, so the muted overlay aligns bucket-for-bucket.
+* **Rule of thumb** — `day` for ≤30d windows, `week` for ~90d, `month` for
+  6–12 months, `quarter` for multi-year, `year` for retention / compliance.
+
+### Widget `options` — the five declared keys
+
+`options` is an open bag — presentation extras (`icon`, `trend`, `density`, …)
+pass through untouched. These five are **declared** because they change the SQL
+the dataset query compiles to, so a typo (`sortDirection`, `granularity`) is an
+author-time type error rather than an option that silently does nothing.
+
+| Key | Value | Effect |
+|:--|:--|:--|
+| `dateGranularity` | `day` / `week` / `month` / `quarter` / `year` | Buckets this widget's selected DATE dimensions. **Overrides** the dataset dimension's own default, for this widget only. |
+| `sortBy` | a name this widget selects | Order by that dimension or measure. It must be one of this widget's own `dimensions` / `values` entries. |
+| `sortOrder` | `'asc'` \| `'desc'` | Direction for `sortBy` (default ascending). |
+| `limit` | positive integer | Max rows, applied **after** ordering — so "top 10 accounts" is `limit` **plus** `sortBy`. Without `sortBy` the runtime orders by the selected dimensions: deterministic, but not the top of anything. |
+| `stageOrder` | array of **stored** values | Explicit category order for `funnel` / `pyramid`. Stored values, not display labels; omit it to inherit the field's own picklist order. |
+
+```typescript
+// Top 10 accounts by revenue, bucketed monthly for this widget only
+options: { sortBy: 'revenue_sum', sortOrder: 'desc', limit: 10, dateGranularity: 'month' }
 ```
 
 ### Drilldown
@@ -1620,149 +1678,28 @@ defaults `true`) opens the identical in-place drawer on row/cell click — peek 
 records, click a row to open one, or "Open in list →" for the full list page.
 Dashboard and report drill are unified.
 
-> **Renderer note (object/record-backed surfaces).** The ObjectUI renderer
-> exposes a richer `options.drillDown` block for non-dataset list/table widgets
-> and the drill drawers — `enabled`, `mode` (`'filter'` = aggregate → filtered
-> list; `'record'` = row → that record), `target` (`'drawer'` | `'dialog'` |
-> `'navigate'`, where `'navigate'` skips the drawer and opens the list page
-> directly), `columns` (whitelist), and `title` (`${event.*}` interpolation). At
-> the renderer level drill-through covers the `bar` / `line` / `area` / `pie` /
-> `donut` / `funnel` / `scatter` / `treemap` / `sankey` families and pivot
-> cell/row/column/total clicks (`radar` is excluded — no single clickable
-> category point). The "Open in list →" escape hatch appears whenever the host
-> app wired drill navigation (the console does). **Dataset-bound dashboards use
-> the semantic-layer drill above and ignore the rest of this block.**
-
-| `dateGranularity` | Rendered bucket label |
-|:--|:--|
-| `'day'` | `YYYY-MM-DD` |
-| `'week'` | ISO date of the bucket (`YYYY-MM-DD`) |
-| `'month'` | `YYYY-MM` |
-| `'quarter'` | `YYYY-Qn` |
-| `'year'` | `YYYY` |
-
-* **Engine support** — Postgres `date_trunc`, MySQL `date_format`, SQLite
-  `strftime`, MongoDB `$dateTrunc`, in-memory fallback. All emitted by the
-  analytics service, not the client.
-* **Human labels are automatic** — the analytics layer formats the bucket value
-  to the label above, and resolves `select`/`lookup` dimension values to their
-  option label / related-record name. Measures carry their `label` + `format`
-  (e.g. `$0,0`) so KPIs and legends read "Total Spent / $616,000", not
-  "spent_sum / 616000". Authors do not format dimension/measure values by hand.
-* **Combines with `compareTo`** — the comparison query is issued with the same
-  granularity, so the muted overlay aligns bucket-for-bucket.
-* **Rule of thumb** — `day` for ≤30d windows, `week` for ~90d, `month` for
-  6–12 months, `quarter` for multi-year, `year` for retention / compliance.
-
 ---
 
 ## Date Macros — Filter Placeholders
 
-Dashboards, reports, list-view filters, and other UI metadata can embed
-relative-date placeholders. The canonical contract is published as
-`DATE_MACRO_TOKENS` in `@objectstack/spec/data` (source:
-`node_modules/@objectstack/spec/src/data/date-macros.zod.ts`); two resolvers
-consume it and must stay in lockstep with it — `resolveDateMacros` in
-`@object-ui/core` (before the request leaves the browser) and
-`resolveFilterTokens` in `@objectstack/core` (the ObjectQL
-read path and the analytics dataset executor, which is what a dashboard
-widget's `filter` actually travels through — it never passes a renderer).
+Filter values in list views, dashboards, reports and pages accept relative-date
+tokens (`{today}`, `{current_month_start}`, `{30_days_ago}`) and the two session
+tokens `{current_user_id}` / `{current_org_id}`. **The vocabulary, both accepted
+spellings, the two resolvers and the near-miss list are owned by
+objectstack-query → `rules/filters.md` — load it before writing a filter token.**
+An unrecognised token is a build error and a runtime throw, never a silent
+literal.
 
-An unrecognised placeholder is a build error (`validate-filter-tokens`) and a
-runtime throw, never a silent literal. Note `*_end` is the period's last
-calendar DAY, so a `datetime` column wants `< {next_*_start}` rather than
-`<= {current_*_end}`.
+Two rules this package owns, because they are about UI surfaces rather than the
+token vocabulary:
 
-Both `{token}` and `${token}` forms are accepted.
-
-### Fixed tokens (36)
-
-| Category | Tokens |
-|:--|:--|
-| Instants | `today`, `yesterday`, `tomorrow`, `now` |
-| Current period | `current_week_start` / `_end`, `current_month_start` / `_end`, `current_quarter_start` / `_end`, `current_year_start` / `_end` |
-| Last period | `last_week_start` / `_end`, `last_month_start` / `_end`, `last_quarter_start` / `_end`, `last_year_start` / `_end` |
-| Next period | `next_week_start` / `_end`, `next_month_start` / `_end`, `next_quarter_start` / `_end`, `next_year_start` / `_end` |
-| Bare aliases | `week_start`, `week_end`, `month_start`, `month_end`, `quarter_start`, `quarter_end`, `year_start`, `year_end` (same as `current_*`) |
-
-### Parameterised tokens — `{N_<unit>_(ago|from_now)}`
-
-`N` is any non-negative integer; `<unit>` is one of
-`minute(s) | hour(s) | day(s) | week(s) | month(s) | year(s)`.
-`minute`/`hour` resolve to a full ISO timestamp; coarser units resolve to
-`YYYY-MM-DD`.
-
-```
-{30_days_ago}       {7_days_from_now}     {1_day_ago}
-{2_weeks_ago}       {6_months_from_now}   {1_year_ago}
-{15_minutes_ago}    {2_hours_from_now}
-```
-
-### DO / DON'T
-
-* **DO** type-check tokens against the spec — `isDateMacroToken(tok)` from
-  `@objectstack/spec/data` returns `false` for anything unsupported.
-* **DO** prefer `Field.datetime()` for "near-now" filters (minute/hour
-  precision); driver-sql automatically coerces ISO macros to the stored
-  ms-epoch representation.
-* **DON'T** invent tokens. Unknown placeholders silently pass through as
-  literal strings — the resulting SQL compares text against
-  `'{my_made_up_token}'` and matches zero rows.
-* **DON'T** combine multiple tokens inside one value without resolution
-  semantics (`'{today}-{tomorrow}'` is fine; `{today_or_tomorrow}` is
-  not — there is no such token).
-
-## Context Tokens — `{current_user_id}` / `{current_org_id}`
-
-The session-scoped sibling of date macros, resolved by the same client pass
-(`resolveFilterPlaceholders` in `@object-ui/core`). Contract: `CONTEXT_TOKENS`
-in `@objectstack/spec/data`. These are the **only two** tokens that resolve
-inside a filter value:
-
-| Token | Resolves to |
-|:--|:--|
-| `{current_user_id}` | the signed-in user's id (`sys_user.id`) |
-| `{current_org_id}` | the active organization id |
-
-They work in **every** filter value — list-view filters, dashboard widget
-filters, report `runtimeFilter`, dataset filters, SDUI component filters, and
-nav-item `filters` — in both authoring shapes:
-
-```typescript
-// Widget filter (object shape)
-filter: { owner_id: '{current_user_id}', created_at: { $gte: '{week_start}' } }
-
-// List view (array shape)
-filter: [{ field: 'owner', operator: 'equals', value: '{current_user_id}' }]
-```
-
-### DO / DON'T
-
-* **DO** use exactly these spellings. Three near-misses are common because
-  each is a correct spelling *somewhere else* in the platform — all three
-  resolve to nothing in a filter:
-
-  | You might write | Because | Correct token |
-  |:--|:--|:--|
-  | `{current_user}` | `current_user.id` is the RLS expression root | `{current_user_id}` |
-  | `{user_id}` | `{user_id}` is valid `titleFormat` field interpolation | `{current_user_id}` |
-  | `{organization_id}` | that is the real column name | `{current_org_id}` |
-
-* **DO** remember these are **presentation scope, not security**. They decide
-  what a surface *shows*; RLS decides what a caller may *read*. Removing a
-  `{current_user_id}` filter widens a view — it must never be the thing
-  standing between a user and someone else's data.
-* **DON'T** embed a token in a larger string (`'user-{current_user_id}'`).
-  Ids are opaque; only whole-value placeholders are substituted.
-* **DON'T** use `AppContextSelector` ids (e.g. `{active_package}`) in a
-  filter. Those resolve in navigation `recordId` / `params` only — filters are
-  not evaluated with the sidebar's selector state.
-
-`os validate` fails the build on an unresolvable placeholder in any filter
-(rule `filter-token-unknown`) and names the token it thinks you meant. That
-gate exists because the runtime failure is silent: an unresolved token reaches
-SQL as a literal, matches nothing, and the widget renders `0` —
-indistinguishable from a genuine zero.
+* A filter token is **presentation scope, not security**. It decides what a
+  surface *shows*; RLS decides what a caller may *read*. Removing a
+  `{current_user_id}` filter widens a view — it must never be the thing standing
+  between a user and someone else's data.
+* `AppContextSelector` ids (e.g. `{active_package}`) resolve in navigation
+  `recordId` / `params` only. Filters are not evaluated with the sidebar's
+  selector state.
 
 ---
 
@@ -1796,17 +1733,12 @@ export const opportunityCube = defineCube({
 });
 ```
 
-### Cube Best Practices
+### Cube Rules (enforced)
 
 1. **`sql` = object name** (e.g. `'opportunity'`). The ObjectQL strategy
    reads it via `cube.sql.trim()` — do **not** put raw SQL there.
-2. **Use dotted lookups** in `dimensions[*].sql` (`'account.industry'`) to
-   reach across relations — the engine auto-joins.
-3. **Always declare `granularities`** on `time` dimensions so dashboards can
+2. **Always declare `granularities`** on `time` dimensions so dashboards can
    bucket by day / month / quarter without ad-hoc queries.
-4. **Keep `public: true`** for any cube referenced by a dashboard widget; an
-   internal-only cube should be `public: false`.
-5. One cube per object usually beats omnibus cubes — composability stays high.
 
 ---
 
@@ -1950,34 +1882,16 @@ zero relearning:
 const org = ctx.user?.organizationId ?? ctx.session?.organizationId;
 ```
 
-> The former `ctx.session.tenantId` alias was removed in v16; read the
-> caller's active org under `organizationId`.
-
 Action bodies execute **trusted** (the `ctx.engine` / `ctx.api` facade bypasses
 RLS/FLS), so a body that must scope by org reads it from `ctx` explicitly.
-`ctx.user` is `undefined` for a context-less / self-invoked call; read
-`ctx.session?.organizationId` when the action must work regardless. (Same two
-isolation axes as hooks — `organization_id` row-scoping vs environment /
-database-per-tenant; see the objectstack-data hooks reference.)
+`ctx.user` is `undefined` for a context-less / self-invoked call. Same two
+isolation axes, same blessed name, same `undefined` cases as hooks — see the
+objectstack-data hooks reference.
 
-The caller's position names are on `ctx.session.positions` — the ADR-0090 D3
-spelling, the same one the hook `ctx.session`, `ctx.user.positions` and the
-sharing service use:
-
-```typescript
-// ✅ Canonical
-const positions = ctx.session?.positions ?? [];
-```
-
-> The key is **absent** (not empty) when the caller holds no positions, and the
-> whole `ctx.session` is `undefined` for a call with no identity envelope. The
-> pre-ADR-0090 alias of this same array is still emitted for one migration
-> window and then removed — see `action-session-*-to-positions` in the protocol
-> upgrade guide for the prescription. Migrate the READ to `positions`; do not
-> migrate an access check by renaming it. **This array is not an authorization
-> input**: `positions.includes('admin')` is the same defect under a blessed
-> name. Ask the security service for privilege (capability grants, placements,
-> derived posture — ADR-0095).
+The caller's position names are on `ctx.session.positions` (absent, not empty,
+when the caller holds none). **This array is not an authorization input**:
+`positions.includes('admin')` is a defect under a blessed name — ask the
+security service for privilege (ADR-0095).
 
 ### Opening in a New Tab (`openIn` / `opensInNewTab` / `newTabUrl`)
 
