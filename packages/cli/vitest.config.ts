@@ -492,8 +492,155 @@
 //
 // Before adding a `test` block for speed, re-measure: if `tests` is still the
 // dominant term, the block is not the lever.
-import { defineConfig } from 'vitest/config';
+//
+// ## THE TWO TIERS (#13504) — `unit` and `integration`, measured on 00ff228fe0
+//
+// Maintainer ruling (2026-09-01): split this suite into two NAMED tiers — a
+// unit-fast tier that is the local default and does not monopolise the shared
+// verify lock, and a real-kernel integration tier that is CI-mandatory and run
+// locally on demand. Nothing is skipped, weakened, deleted or doubled: every
+// file below still runs under `pnpm test`, because `vitest run` with no
+// `--project` runs every project. The tiers only change what a NARROWED local
+// run selects.
+//
+//   pnpm --filter @objectstack/cli exec vitest run --project unit          # fast, local default
+//   pnpm --filter @objectstack/cli exec vitest run --project integration   # the real thing, on demand
+//   pnpm --filter @objectstack/cli test                                    # both — what CI runs
+//
+// ⛔ THE PREDICATE IS WHAT A FILE DOES, NOT WHAT IT IS CALLED. The ACCEPT on
+// #13504 fixed that the `*.e2e.test.ts` name disagrees with behaviour, so a
+// tier keyed on the name routes coverage to the wrong place. `INTEGRATION_FILES`
+// below is an explicit list, and `test/vitest-tiers-partition.test.ts` (unit
+// tier) re-derives it from the comment-masked SOURCE of every test file and
+// fails when the two disagree — so a new file that spawns the CLI or boots a
+// driver cannot land in the fast tier silently, and a stale entry cannot
+// linger. A file is `integration` when, in code position, it either
+//
+//   SPAWNS the real CLI (or this package's TypeScript source in a cold tsx
+//   child): it calls `runServe(` from `test/helpers/serve-process.ts`, or it
+//   value-imports `node:child_process` AND names an entry basename
+//   (`run-dev.js` / `run.js`), or imports `CLI` / `TSX` from that helper, or
+//   names the `.bin/tsx` binary;
+//
+//   or BOOTS a real kernel or driver in-process: a value import of
+//   `bootSchemaStack` from `schema-migrate`, of `better-sqlite3`, or of any
+//   `@objectstack/driver-*` package, or a `new ObjectQL(` construction.
+//
+// Type-only imports, spelling lists, fixture config objects that merely SAY
+// `client: 'better-sqlite3'`, and prose do not count — the pin's own header
+// carries the regexes and the false positives they were tuned against.
+//
+// Population on this commit: 228 files = 158 unit + 70 integration (48 spawn
+// the CLI, 23 boot a kernel/driver, 1 both). Reconciled against the #13872
+// census (f532630d02, 220 files, 35 spawners / 29 kernel-booters / 1 both):
+// on that same tree this predicate finds 46 spawners and 22 kernel-booters.
+// The spawner side GROWS by 11 files the basename census could not see — six
+// that spawn only through `runServe()` and five through the helper's exported
+// `CLI` path constant — and SHRINKS by three that name an entry basename in an
+// assertion without importing `child_process` at all. The kernel side shrinks
+// because the census counted text matches: two `CONTRACT_ONLY_SPELLINGS`
+// lists, a banner fixture, a connection-display formatter, a scaffold
+// dependency assertion and two `import type { … } from '@objectstack/driver-*'`
+// are not boots. With the behavioural predicate the name-vs-behaviour
+// disagreement is 5 files (4 spawn without the `.e2e` name, 1 carries the name
+// and spawns plain node), down from the census's 18.
+//
+// WHAT THE SPLIT COSTS AND BUYS, priced from the #13872 attribution above: the
+// 70 integration files hold the 73.4% of test-body time that belongs to the
+// spawners plus the 3.4% of the kernel-booters; the unit tier is the remaining
+// ~23% of test-body time plus the per-file import floor, which is the part the
+// split cannot move. The unit tier's measured wall on this box is recorded in
+// the PR that landed this section; re-measure it when the population moves,
+// and print the commit here.
+//
+// ⚠️ INLINE PROJECTS INHERIT NOTHING BY DEFAULT — `extends: true` is what
+// carries this file's `resolve.alias` table and `test.server.deps.external`
+// into each project (vitest 4.1.10: an inline project without it gets a fresh
+// Vite config, so the source aliases the gate above guards would be declared
+// here and enforced nowhere). `disableConsoleIntercept: true` is repeated
+// inside every project because `check:console-intercept-disarm` measured the
+// root-level setting inert under projects. `exclude` for the unit tier spreads
+// `configDefaults.exclude` first: an `exclude` that names only the integration
+// files would drop the `node_modules` exclusion and start collecting
+// dependencies' own test files.
+import { configDefaults, defineConfig } from 'vitest/config';
 import path from 'path';
+
+// The integration tier, by MEASURED behaviour (see the section above; the pin
+// test `test/vitest-tiers-partition.test.ts` keeps this list equal to what the
+// files do). Relative to this package root; each entry is an exact path.
+export const INTEGRATION_FILES = [
+  'src/adr-0048-app-split.test.ts',
+  'src/commands/meta/delete-reset-carriers.test.ts',
+  'src/commands/migrate/duplicates.contract.test.ts',
+  'src/commands/migrate/duplicates.created-at-canonical.test.ts',
+  'src/commands/migrate/duplicates.integration.test.ts',
+  'src/commands/migrate/duplicates.null-seam.test.ts',
+  'src/commands/migrate/duplicates.pre-repair.test.ts',
+  'src/commands/migrate/meta.stored-flow-resolution.integration.test.ts',
+  'src/commands/migrate/multi-value-columns.dialect-probe.test.ts',
+  'src/commands/migrate/multi-value-columns.dry-run.test.ts',
+  'src/commands/secret/orphans.guards.test.ts',
+  'src/commands/validate-json-strict-exit.e2e.test.ts',
+  'src/utils/artifact-boot-migration.report-only-drift.test.ts',
+  'src/utils/platform-migrations-arming.integration.test.ts',
+  'src/utils/schema-migrate.deferred-ddl.integration.test.ts',
+  'src/utils/schema-migrate.host-composition.integration.test.ts',
+  'src/utils/schema-migrate.integration.test.ts',
+  'src/utils/schema-migrate.readonly-probe.integration.test.ts',
+  'src/utils/schema-migrate.teardown.integration.test.ts',
+  'src/utils/secret-reference-union.test.ts',
+  'src/utils/sqlite-occupancy.test.ts',
+  'src/utils/sys-secret-orphan-sweep.test.ts',
+  'src/utils/unmanaged-tables.integration.test.ts',
+  'test/artifact-pinned-boot.e2e.test.ts',
+  'test/authoring-rule-command-parity.test.ts',
+  'test/build-json-advisory-parity.e2e.test.ts',
+  'test/build-json-failure-conversions.e2e.test.ts',
+  'test/build-json-failure-warnings.e2e.test.ts',
+  'test/build-json-undeclared-key-parity.e2e.test.ts',
+  'test/cloud-login-json-ndjson.e2e.test.ts',
+  'test/compile-artifact-packages.e2e.test.ts',
+  'test/emit-json-pipe.test.ts',
+  'test/format-zod-union.test.ts',
+  'test/generate-agent-retired.e2e.test.ts',
+  'test/generate-skill.e2e.test.ts',
+  'test/hook-body-build-reach.e2e.test.ts',
+  'test/init-created-files-summary.e2e.test.ts',
+  'test/invocation-loudness.e2e.test.ts',
+  'test/json-stdout-purity.e2e.test.ts',
+  'test/lint-conversion-notices.e2e.test.ts',
+  'test/login-json-ndjson.e2e.test.ts',
+  'test/login-json-noninteractive.e2e.test.ts',
+  'test/metadata-type-schema-gate.test.ts',
+  'test/migrate-apply-refuses-before-ddl.e2e.test.ts',
+  'test/migrate-exit-code.e2e.test.ts',
+  'test/migrate-meta.e2e.test.ts',
+  'test/migrate-plan-exits.e2e.test.ts',
+  'test/migrate-unloadable-host-config-exit.e2e.test.ts',
+  'test/qa-empty-glob-exit-code.e2e.test.ts',
+  'test/run-dev-unbuilt-workspace.e2e.test.ts',
+  'test/serve-app-anchored-optional-import.e2e.test.ts',
+  'test/serve-app-runtime-hooks.e2e.test.ts',
+  'test/serve-boot-diagnostics.e2e.test.ts',
+  'test/serve-host-fallback-base.e2e.test.ts',
+  'test/serve-mcp-capability-collision.e2e.test.ts',
+  'test/serve-mcp-stdio-answers.e2e.test.ts',
+  'test/serve-no-artifact.e2e.test.ts',
+  'test/serve-node-env-production-default.e2e.test.ts',
+  'test/serve-organizations-host-resolution.e2e.test.ts',
+  'test/serve-organizations-mount-failure.e2e.test.ts',
+  'test/serve-port-drift-notice.e2e.test.ts',
+  'test/serve-port-readback.e2e.test.ts',
+  'test/serve-process-child-env.e2e.test.ts',
+  'test/serve-publishes-bound-port.e2e.test.ts',
+  'test/serve-stdio-stdout-purity.e2e.test.ts',
+  'test/start-port-banner-agreement.e2e.test.ts',
+  'test/validate-json-failure-conversions.e2e.test.ts',
+  'test/validate-json-failure-warnings.e2e.test.ts',
+  'test/validate-json-warning-parity.e2e.test.ts',
+  'test/validate-top-level-strict.e2e.test.ts',
+];
 
 export default defineConfig({
   resolve: {
@@ -555,5 +702,27 @@ export default defineConfig({
         external: [/packages[\/]types[\/]dist/],
       },
     },
+    // The two tiers (#13504) — see the header section of the same name. Both
+    // `extends: true` so each project inherits the `resolve.alias` table and
+    // the `server.deps.external` entry above; each repeats the console-intercept
+    // disarm because the root-level one is inert under projects.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'unit',
+          disableConsoleIntercept: true,
+          exclude: [...configDefaults.exclude, ...INTEGRATION_FILES],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'integration',
+          disableConsoleIntercept: true,
+          include: INTEGRATION_FILES,
+        },
+      },
+    ],
   },
 });
