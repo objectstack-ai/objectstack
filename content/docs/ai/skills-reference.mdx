@@ -47,7 +47,7 @@ ObjectStack ships **11 skills** — one per authoring domain, plus process skill
 | 2 | [Data](#data) | `data` | `skills/objectstack-data/` | Design ObjectStack data schemas — objects, fields, field conditional rules, relationships, validations, indexes, lifecycle hooks, permissions, row-level security, data `lifecycle` retention/TTL/rotation, metadata `protection` locks, and external / federated datasources (`defineDatasource`) — and the seeds (`defineSeed()`) that load fixtures and reference data alongside them. |
 | 3 | [Query](#query) | `query` | `skills/objectstack-query/` | Construct ObjectQL queries — filters, sorting, pagination, aggregation, relation expansion, and full-text search. |
 | 4 | [UI](#ui) | `ui` | `skills/objectstack-ui/` | Author ObjectStack UI metadata — Views (list/form/kanban/calendar/gantt), Apps (navigation), Pages (structured plus the HTML and React source-authoring tiers, ADR-0080/0081), Dashboards, Reports, Charts, Actions, and package Docs (`src/docs/*.md`). |
-| 5 | [Automation](#automation) | `automation` | `skills/objectstack-automation/` | Design ObjectStack automation — Flows (visual logic), Triggers, Approvals, state machines, scheduled jobs, and webhooks. |
+| 5 | [Automation](#automation) | `automation` | `skills/objectstack-automation/` | Design ObjectStack automation — Flows (visual logic), Triggers, Approvals, state machines, and the `jobs` (`defineJob`) / `webhooks` (`defineWebhook`) stack collections. |
 | 6 | [AI](#ai) | `ai` | `skills/objectstack-ai/` | Design ObjectStack AI skills, tools, knowledge sources, conversations, model registry entries, and MCP integrations. |
 | 7 | [API](#api) | `api` | `skills/objectstack-api/` | Design the server-side API surface that an ObjectStack runtime exposes — REST endpoints, auth providers, realtime channels, error envelopes, batch/versioning contracts. |
 | 8 | [i18n](#i18n) | `i18n` | `skills/objectstack-i18n/` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the per-locale source layout. |
@@ -117,9 +117,9 @@ Do not use for: data schema (see objectstack-data), multi-step flows that BRANCH
 
 **Domain** `automation` · **Path** `skills/objectstack-automation/`
 
-Design ObjectStack automation — Flows (visual logic), Triggers, Approvals, state machines, scheduled jobs, and webhooks.
+Design ObjectStack automation — Flows (visual logic), Triggers, Approvals, state machines, and the `jobs` (`defineJob`) / `webhooks` (`defineWebhook`) stack collections.
 
-Use when the user is adding `*.flow.ts`, wiring an event-driven rule, or modelling an approval chain.
+Use when the user is adding `*.flow.ts`, wiring an event-driven rule, modelling an approval chain, or building an interactive screen flow / wizard (objectstack-ui routes those here).
 
 Do not use for data lifecycle hooks at the object layer (see objectstack-data) or for kernel / plugin events (see objectstack-platform). CEL expressions in flow conditions / edge guards: load objectstack-formula alongside.
 
