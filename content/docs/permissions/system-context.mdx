@@ -193,7 +193,7 @@ assuming `isSystem` covers it is a documented source of bugs.
 
 | Assumption | Reality | Anchor |
 |:---|:---|:---|
-| "It suppresses triggers / record-change automation" | **No.** Only `skipTriggers` does. A bare `{ isSystem: true }` on a seed write re-fired automation on freshly seeded rows and wedged first boot | `metadata-protocol/src/seed-loader.ts:1909` (rationale at `:1819`–`1821`, #3760), `flow.zod.ts:685` |
+| "It suppresses triggers / record-change automation" | **No.** Only `skipTriggers` does. A bare `{ isSystem: true }` on a seed write re-fired automation on freshly seeded rows and wedged first boot | `metadata-protocol/src/seed-loader.ts:1971` (rationale at `:1881`–`1883`, #3760), `flow.zod.ts:685` |
 | "It skips the state machine" | **No.** That is `skipStateMachine`, carried by seed replay and by `treatAsHistorical` imports | `objectql/src/engine.ts` FSM gate; see [State Machine](/docs/protocol/objectql/state-machine) |
 | "It skips validation rules" | **No.** Field shape, `format`, `script` and the rest still run. The `readonly` strip runs *before* validation precisely so a discarded value is not judged | `objectql/src/engine.ts:9810`–`9827` |
 | "It preserves a supplied `updated_at` / `updated_by`" | **No.** That is `preserveAudit`, a separate opt-in — and an UPDATE-path exemption only | `field.zod.ts:1516` (#3493 / #6640) |
