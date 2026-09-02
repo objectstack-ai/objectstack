@@ -24,7 +24,9 @@
  * already hold one: better-auth's `internalAdapter` satisfies it directly; the
  * SCIM hook adapts the `DBTransactionAdapter` the vendor bound to its
  * transaction, so the write commits — or rolls back — with the SCIM mutation
- * it belongs to once that transaction is real on this adapter (#14522).
+ * it belongs to (a real engine transaction on this adapter: the SCIM request
+ * scope is opened at `AuthManager.handleRequest`, pinned by
+ * `scim-transaction-scope.test.ts`).
  *
  * Session revocation is deliberately NOT part of the write: the admin mount
  * revokes explicitly, and the SCIM vendor revokes after its callback returns
