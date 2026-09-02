@@ -771,6 +771,14 @@ function buildActionSandboxContext(
     // downstream writes it back. `warnDiscardedRecordWrites` reports the writes
     // a body makes to it rather than letting them vanish.
     record: unwrapProxyToPlain(actionCtx?.record),
+    // [#14143] The caller-scope load's verdict, marshalled EXPLICITLY for the
+    // same reason `dispatch` / `referentialFieldClear` are on the hook face: a
+    // body cannot reach the dispatcher's locals, and `ctx.record.id` is stamped
+    // even when the caller cannot read the row, so without this key an action
+    // body has no way at all to tell the two apart. Both assembly sites
+    // (`../action-execution.ts`, `../domains/actions.ts`) write it, and only
+    // in its declared shape — absent, never `false`, when nothing was refused.
+    ...(actionCtx?.recordLoadDenied === true ? { recordLoadDenied: true } : {}),
     api: buildSandboxApi(actionCtx, ql, 'action body'),
     // [#7448] Same removal as the hook face: neither action-context assembly
     // site (`../domains/actions.ts`, `../action-execution.ts`) writes `logger`.

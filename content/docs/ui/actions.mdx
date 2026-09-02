@@ -161,7 +161,10 @@ rejected at authoring time.) Also note that both data surfaces a body reaches
 — `ctx.api.object(name)` and the handler's `ctx.engine` facade — are
 **trusted**: they run under the caller's identity elevated to system, so they
 bypass row- and field-level security (writes stay attributed to the caller and
-scoped to their organization). Enforce any caller-specific rules yourself.
+scoped to their organization). Enforce any caller-specific rules yourself — and
+read [Authorization inside an action](#authorization-inside-an-action) before
+you write that guard, because `ctx.record.id` is present even when the caller
+cannot read the row.
 </Callout>
 
 <Callout type="warn">
@@ -300,6 +303,61 @@ is a spec proposal for a properly named key, not a values map under this one.
   [formulas guide](/docs/data-modeling/formulas) for CEL syntax.
 - **`requiresFeature`** ties visibility to a feature flag (compiled into a
   `visible` predicate).
+
+### Authorization inside an action
+
+An action body and a registered handler both run **elevated**: `ctx.api` and
+`ctx.engine` carry `isSystem`, so they bypass row- and field-level security by
+design (that is what lets an action do work the caller cannot do directly). The
+consequence is that any caller-specific rule has to be re-established **inside**
+your handler — and the predicate most people reach for first does not work:
+
+```js
+if (!ctx.record?.id) return refuse();   // ❌ always false — never refuses anything
+```
+
+Before dispatch, the platform loads the subject row in **your caller's own
+scope**. If that read comes back empty — the row is invisible to them under
+row-level security, or the id names nothing — the dispatcher still puts the
+`recordId` from the request onto `ctx.record.id`, because a **new-record /
+record-less** action legitimately needs it there. So `ctx.record.id` is present
+either way, and the guard above passes for a caller who cannot see the row.
+
+The signal that *does* distinguish them is `ctx.recordLoadDenied`:
+
+```js
+// ✅ the caller-scope load did not deliver the row — do not act on it
+if (ctx.recordLoadDenied) {
+  throw Object.assign(new Error('Record not available'), { code: 'RECORD_NOT_FOUND' });
+}
+```
+
+| | `ctx.record.id` | `ctx.recordLoadDenied` |
+|:---|:---|:---|
+| Caller **can** read the row | the id | absent |
+| Caller **cannot** read the row | the id (stamped) | `true` |
+| New-record / record-less action | the id, if one was passed | absent |
+
+<Callout type="info">
+Read it as `ctx.recordLoadDenied === true`. The key is **absent**, never
+`false`, when nothing was refused — so an action that never loads a row (no
+`recordId`, or an object-less action) never trips the guard.
+
+It reports **"the row did not resolve for this caller"**, not "the platform saw
+an authorization error". A row hidden by row-level security and an id that names
+nothing both arrive as `RECORD_NOT_FOUND`, deliberately — the platform does not
+disclose whether a record you cannot see exists — and the flag does not pretend
+to separate what that read fuses. For an authorization decision they are the
+same answer: this caller has not demonstrated read access to that row.
+
+Both invocation doors set it — `POST /api/v1/actions/...` and the MCP
+`run_action` tool — and it reaches inline `body` sandboxes and registered
+handlers alike.
+</Callout>
+
+Set `ctx.recordLoadDenied` aside only when your action is *meant* to run without
+a readable subject row (an "import this id from elsewhere" action, say). The
+default for a row-scoped action on a `private` object is to refuse.
 
 ## Call it over REST
 

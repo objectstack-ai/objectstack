@@ -528,6 +528,14 @@ export class QuickJSScriptRunner implements ScriptRunner {
     if (ctx.referentialFieldClear === true) {
       vm.setProp(ctxObj, 'referentialFieldClear', vm.true);
     }
+    // [#14143] The action face's caller-scope load verdict — same true-only
+    // installation, same reason: a body reads `ctx.recordLoadDenied === true`
+    // and an absent key means "nothing was refused". A plain boolean, so no
+    // freeze/graft ceremony is needed (the write-back channel reads only
+    // `ctx.input`, so a VM-side reassignment travels nowhere).
+    if (ctx.recordLoadDenied === true) {
+      vm.setProp(ctxObj, 'recordLoadDenied', vm.true);
+    }
 
     const apiObj = vm.newObject();
     const objectFn = vm.newFunction('object', (nameH) => {

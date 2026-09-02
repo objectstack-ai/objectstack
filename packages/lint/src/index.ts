@@ -755,6 +755,7 @@ export {
   VIEW_KEY_COLLISION,
   VIEW_REF_FORM_TARGET_MISSING,
   VIEW_REF_FORM_TARGET_KIND,
+  VIEW_REF_NAV_VIEW_MISSING,
 } from './lint-view-refs.js';
 
 export {

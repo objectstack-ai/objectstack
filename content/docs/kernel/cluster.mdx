@@ -342,7 +342,9 @@ The transport is handed to the manager by `MetadataClusterBridgePlugin`
 (`@objectstack/service-cluster`), which calls
 `metadata.attachClusterPubSub(cluster.pubsub, cluster.nodeId)` on
 `kernel:ready`. `Runtime` registers that bridge automatically alongside the
-cluster service.
+cluster service. It skips that call when the resolved driver is in-process
+(`memory`) — such a bus fans out to no peer, so the bridge states that at
+`debug` rather than reporting itself as "bridged" (#14021).
 
 On receipt a peer suppresses its own messages by `originNode`, then — **first,
 synchronously** — invalidates its local caches for that type: it drops the

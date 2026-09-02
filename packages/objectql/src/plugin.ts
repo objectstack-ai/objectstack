@@ -4,6 +4,7 @@ import { ObjectQL } from './engine.js';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
+import { resolveArtifactPackageOrder } from './artifact-packages.js';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
@@ -401,20 +402,52 @@ export class ObjectQLPlugin implements Plugin {
     // instead of the legacy ctx.registerService('app.<id>', manifestData) convention.
     const ql = this.ql;
     ctx.registerService('manifest', {
-      register: (manifest: any) => {
-        ql.registerApp(manifest);
-        ctx.logger.debug('Manifest registered via manifest service', {
-          id: manifest.id || manifest.name
-        });
+      // [ADR-0130 D4/D5] The load path reads BOTH artifact shapes and registers
+      // the packages inside one artifact in dependency-TOPOLOGICAL order.
+      //
+      // `resolveArtifactPackageOrder` is the whole of that decision: it reads
+      // `packages` when present and falls back to the caller's own object as a
+      // single-element list when absent (D4), and it orders through
+      // `resolvePluginOrder` — the platform's ONE topological sorter (ADR-0116).
+      // ⛔ Nothing here may re-derive either the entry shape or the ordering; a
+      // second copy of either is the drift both records exist about.
+      //
+      // Registration of ALL packages completes before ANY bridging begins. The
+      // bridge resolves objects out of the registry, and an artifact's later
+      // packages contribute extensions onto the earlier ones' objects — so a
+      // register/bridge interleave would bridge a body that the very next
+      // package is about to change. For the single-package artifact this is the
+      // same one register followed by the same one bridge as before (D7).
+      register: (artifact: any) => {
+        const ordered = resolveArtifactPackageOrder(artifact) as any[];
+
+        if (ordered.length === 0) {
+          // An artifact that declared `packages: []` registers nothing. Said out
+          // loud rather than returning quietly: "the install did nothing" is not
+          // a state anyone should have to infer from an absence.
+          ctx.logger.warn(
+            'Artifact declared an empty `packages: []` — nothing was registered. A '
+            + 'single-package artifact omits the key entirely and carries `manifest` '
+            + '(ADR-0130 D4).',
+          );
+          return Promise.resolve();
+        }
+
+        for (const manifest of ordered) {
+          ql.registerApp(manifest);
+          ctx.logger.debug('Manifest registered via manifest service', {
+            id: manifest.id || manifest.name
+          });
+        }
         // Manifests registered AFTER start() (marketplace install / ledger
         // rehydrate arrive on `kernel:ready` or an HTTP request) land in the
         // SchemaRegistry only — the one-shot startup bridge already ran — so
-        // bridge this manifest's objects into the metadata service now.
+        // bridge every registered package's objects into the metadata service now.
         // No-op until start() arms it, so boot-time registrations keep the
         // single startup bridge. The promise never rejects; async callers
         // (marketplace install) await it so metadata reads right after
         // install are deterministic, sync callers may ignore it.
-        return this.bridgeManifestObjectsToMetadataService(ctx, manifest);
+        return this.bridgeArtifactObjectsToMetadataService(ctx, ordered);
       }
     });
 
@@ -1870,6 +1903,26 @@ export class ObjectQLPlugin implements Plugin {
       ctx.logger.debug('Failed to bridge objects to metadata service', {
         error: e instanceof Error ? e.message : String(e),
       });
+    }
+  }
+
+  /**
+   * [ADR-0130 D5] Bridge each package of one artifact, in the SAME
+   * dependency-topological order they registered in.
+   *
+   * Sequential, not `Promise.all`: {@link bridgeManifestObjectsToMetadataService}
+   * reads an object out of the metadata service and decides whether the copy
+   * sitting there is its own before overwriting it, so two packages
+   * contributing to one object must not interleave that read-then-write. For an
+   * artifact carrying one package this awaits exactly the one bridge the
+   * pre-ADR-0130 path returned (D7).
+   */
+  private async bridgeArtifactObjectsToMetadataService(
+    ctx: PluginContext,
+    manifests: any[],
+  ): Promise<void> {
+    for (const manifest of manifests) {
+      await this.bridgeManifestObjectsToMetadataService(ctx, manifest);
     }
   }
 

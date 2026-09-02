@@ -82,6 +82,7 @@ import { validateExpression, collectCelRootIdentifiers, parseCelToAst, SCOPE_ROO
 import { collectFlowGraphs, resolveFlowNodeExpressions } from '@objectstack/spec/automation';
 import type { FlowNodeParsed } from '@objectstack/spec/automation';
 
+import { collectFlowVariableNames, shadowedFieldReads, shadowedFieldMessage } from './flow-variable-scope.js';
 import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { findUnguardedNullableOperands, nullGuardMessage } from './validate-null-guards.js';
 import type { NullGuardOutcome } from './validate-null-guards.js';
@@ -1080,11 +1081,46 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
     // `objectstack validate` and shipped. This is the author-time half of the
     // same traversal the engine's registration pass now does; `scope` names the
     // region so the located message still points at one edge.
-    for (const graph of collectFlowGraphs(flow as { nodes?: FlowNodeParsed[] })) {
+    const graphs = collectFlowGraphs(flow as { nodes?: FlowNodeParsed[] });
+
+    // [#14089] The flattened-scope shadowing pass needs the flow's COMPLETE
+    // variable set before any condition is judged, so it is a separate walk over
+    // the (already materialized) graph list rather than an interleaved one.
+    // That is forced, not stylistic: `seedRunVariables` builds ONE variable map
+    // per run, so a name declared by the LAST node is in scope for a condition
+    // on the first — collecting as the checking walk goes would make the verdict
+    // depend on traversal order. `collectFlowGraphs` is still called once.
+    const declaredVariables = collectFlowVariableNames(flow, graphs);
+
+    /**
+     * [#14089] The one bare-identifier case a flattened flow scope may not stay
+     * silent about: a name bound as BOTH a declared flow variable and a field on
+     * the bound object. The variable wins at runtime and nothing says so, which
+     * is why the diagnostic exists; every other bare identifier here is the form
+     * the platform's own contract and canon teach, and is deliberately NOT
+     * judged. Severity `warning` — see `flow-variable-scope.ts` for the ruling,
+     * the measured mechanism, and the oracle's known blind spot.
+     */
+    const warnShadowedFieldReads = (where: string, raw: unknown): void => {
+      if (!objectName) return;
+      const celSource = celSourceOf(raw);
+      if (!celSource) return;
+      for (const shadowed of shadowedFieldReads(celSource, declaredVariables, fieldIndex.get(objectName) ?? [])) {
+        issues.push({
+          where,
+          message: shadowedFieldMessage(shadowed, objectName),
+          source: celSource,
+          severity: 'warning',
+        });
+      }
+    };
+
+    for (const graph of graphs) {
       const at = graph.scope ? `flow '${flowName}' · ${graph.scope}` : `flow '${flowName}'`;
       for (const node of graph.nodes as unknown as AnyRec[]) {
         const cfg = (node.config ?? {}) as AnyRec;
         check(`${at} · node '${node.id}' (${node.type}) condition`, cfg.condition, objectName);
+        warnShadowedFieldReads(`${at} · node '${node.id}' (${node.type}) condition`, cfg.condition);
 
         // Descriptor-declared expression slots (#4027). Before this, the traversal
         // hardcoded `condition` and assumed every other node string was a `{var}`
@@ -1162,6 +1198,7 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
       }
       for (const edge of graph.edges as unknown as AnyRec[]) {
         check(`${at} · edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition, objectName);
+        warnShadowedFieldReads(`${at} · edge '${edge.id}' (${edge.source}→${edge.target}) condition`, edge.condition);
       }
       // No `checkNullGuards` on node/edge conditions — and NOT for the reason
       // #4811 first recorded (#4811 re-measured it). The stated blocker was the

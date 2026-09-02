@@ -238,6 +238,8 @@ await ctx.api.object('crm_deal').updateById(ctx.recordId, { stage: 'won' });
 
 Mutating the snapshot *as a payload* and then handing it to such a call is fine — that write is live, and the lint leaves it alone.
 
+`ctx.record` is also **not** an authorization input. An action body runs elevated, so any caller-specific rule has to be re-established inside it — and `ctx.record.id` carries the requested `recordId` even when the caller-scope load did **not** deliver the row, so `if (!ctx.record?.id) …` never refuses. The key that distinguishes the two is `ctx.recordLoadDenied` (`=== true` exactly when a load was attempted and returned nothing; absent otherwise). See [Authorization inside an action](/docs/ui/actions#authorization-inside-an-action).
+
 ### Engine
 
 The sandbox engine is **`quickjs-emscripten`** — pure-WASM, runs on every JS host. We considered `isolated-vm` but its native dependency disqualifies edge targets. The choice is hidden behind the `ScriptRunner` interface in `packages/runtime/src/sandbox/`, so a node-only deployment can swap in a faster engine later without touching call sites.

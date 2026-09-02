@@ -302,6 +302,29 @@ export interface ScriptContext {
    * prejudges neither answer.
    */
   record?: unknown;
+  /**
+   * Action only: `true` exactly when the dispatcher ATTEMPTED to load the
+   * subject row in the CALLER's own scope and that load did not deliver it
+   * (#14143). Absent otherwise — including on every record-less / new-record
+   * action, which never attempts a load — so read it as
+   * `ctx.recordLoadDenied === true`, the same absence semantics as
+   * {@link referentialFieldClear}.
+   *
+   * This is the authorization predicate {@link record} cannot be. An action
+   * body runs ELEVATED (`isSystem`, #3914) and therefore has to re-establish
+   * authorization itself, but `ctx.record.id` is present whether or not the
+   * caller can read the row: a refused load leaves `record.id == null`, which
+   * is the exact condition on which the dispatcher stamps `recordId` back on
+   * (a stamp record-less actions depend on). So `if (!ctx.record?.id) …` was
+   * always false and never refused anything.
+   *
+   * ⚠️ It says "the row did not resolve for this caller", NOT "the platform
+   * saw an authorization error": an RLS-invisible row and a nonexistent id both
+   * surface as `RECORD_NOT_FOUND`, deliberately (existence non-disclosure), and
+   * the flag does not pretend to separate what the read path fused. For an
+   * authorization decision they are one answer.
+   */
+  recordLoadDenied?: boolean;
   /** Engine-side `result` (only set for after* hooks). */
   result?: unknown;
   api?: unknown;

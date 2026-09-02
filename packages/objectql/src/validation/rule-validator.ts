@@ -1027,6 +1027,34 @@ export function isRuntimeOwnedField(def: { type?: string } | undefined | null): 
  * verdict as before. What changed is exclusively the case where a hook already
  * overwrote the key — where the value being deleted was never the caller's.
  *
+ * ### ...and why VALUES are not enough either (#14088)
+ *
+ * #5591's own argument applied one turn further, and it is the argument rather
+ * than a new one: it retired the key SET because that made the contract
+ * ("hook-written keys are NOT caller-supplied") true only BY ACCIDENT. Value
+ * equality is true by accident in exactly the same way. `Object.is` cannot
+ * separate *the hook deliberately wrote the value the caller also sent* from
+ * *the hook never touched the key*, and those two demand opposite verdicts.
+ *
+ * Measured downstream (objectstack#14088, from a `duly_task` on published
+ * 17.2.0): a `readonly` `completed_at` stamped by a `beforeUpdate` hook on the
+ * transition INTO `done` and CLEARED on the transition out. Reopening works —
+ * until the caller also sends `completed_at: null`, which is exactly what a
+ * form round-trip of the whole record does. `Object.is(null, null)` is `true`,
+ * the hook's clear is deleted along with the caller's null, and the row commits
+ * `status = in_progress` still carrying its OLD completion timestamp, with no
+ * error. The corrupted row is the one a validation rule cannot catch — "a
+ * completed task must carry a completion timestamp" has no purchase on its
+ * inverse — and nothing downstream can tell it from a genuinely completed one.
+ *
+ * ⛔ Not a `null` bug, and `null` must not be special-cased: `0`, `''`, `false`
+ * and a shared object reference collide identically, and every one of them is
+ * echoed back by the same whole-record write-back idiom. The distinction is
+ * PROVENANCE, it cannot be recovered from the values after the fact, and so it
+ * is RECORDED while the hook writes happen — `options.hookWrittenKeys`, fed by
+ * `recordHookPayloadWrites` at the engine's before-phase seam. The value test
+ * above stays as the fallback for every key the record cannot speak to.
+ *
  * KNOWN LIMIT, deliberately not papered over: the snapshot is SHALLOW, so a hook
  * that mutates a caller-supplied object or array IN PLACE
  * (`data.some_json.x = 1`) is indistinguishable from a hook that did nothing —
@@ -1126,13 +1154,33 @@ export function stripReadonlyFields(
   data: Record<string, unknown> | undefined | null,
   supplied: Readonly<Record<string, unknown>>,
   logger?: EvaluateRulesOptions['logger'],
-  options?: { preserveAudit?: boolean; addressKey?: string; strictReadonlyWrites?: boolean },
+  options?: {
+    preserveAudit?: boolean;
+    addressKey?: string;
+    strictReadonlyWrites?: boolean;
+    /**
+     * [#14088] The keys the before-phase hook chain ACTUALLY ASSIGNED on this
+     * payload, recorded while the writes happened — see
+     * `recordHookPayloadWrites`. OPTIONAL, and absent means "this call cannot
+     * say", never "no hook wrote anything": a call site with no recording
+     * (every direct caller of this function, and any write whose hook replaced
+     * the payload object) falls back to the two-part test below, exactly as
+     * before this option existed.
+     *
+     * ⚠️ It may only ever turn a STRIP into a KEEP, and only for a key a hook
+     * assigned. A caller cannot put a key in here — see the forgery-boundary
+     * note on the recorder — and any future producer of this set owes the same
+     * proof, because a key in this set is a key this strip stops defending.
+     */
+    hookWrittenKeys?: ReadonlySet<string>;
+  },
 ): Record<string, unknown> | undefined | null {
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
   const preserveAudit = options?.preserveAudit === true;
   const addressKey = options?.addressKey;
   const strict = options?.strictReadonlyWrites === true;
+  const hookWrittenKeys = options?.hookWrittenKeys;
   let result = data;
   for (const [name, def] of Object.entries(fields)) {
     // [#5503] `readonly: true` is the AUTHOR-declared lock; a runtime-owned
@@ -1146,12 +1194,29 @@ export function stripReadonlyFields(
     // any plain snapshot, so `in` would call a hook stamp caller-supplied and
     // strip it.
     if (!Object.prototype.hasOwnProperty.call(supplied, name)) continue; // server-stamped, not caller-supplied — keep
+    // [#14088] ...or a hook ASSIGNED it. Asked BEFORE the value comparison
+    // because it answers the question the comparison is only a proxy for, and
+    // answers it by RECORD rather than by inference: `Object.is` collapses "the
+    // hook deliberately wrote the value the caller also sent" into "the hook
+    // never touched it", and the two demand opposite verdicts. `null` is where
+    // that collision was measured (a hook CLEARING a readonly column against a
+    // caller that round-tripped the whole record, committing `status =
+    // in_progress` beside a stale `completed_at`, with no error), but it is not
+    // a `null` bug — `0`, `''`, `false` and a shared object reference collide
+    // identically, which is why the fix is provenance and not a sentinel.
+    if (hookWrittenKeys?.has(name)) continue; // the hook wrote this value — keep
     // [#5591] ...and it must still BE the caller's value. A hook that
     // overwrote this key wrote a PLATFORM value; deleting that is what put
     // `status = published` rows in the database with `published_at = null`.
     // `Object.is`, not `===`, on purpose: `===` reports NaN !== NaN, which
     // would read a caller-forged NaN as "a hook rewrote it" and KEEP the
     // forgery — the one input where the loose operator inverts the verdict.
+    //
+    // [#14088] STAYS, and stays as the fallback for every key the record above
+    // has nothing to say about: a call site that passes no `hookWrittenKeys`
+    // gets byte-identical behaviour, and a hook that REPLACED the payload
+    // object leaves no record, so this test is what still separates its
+    // overwrite from a forgery.
     if (!Object.is((result as Record<string, unknown>)[name], supplied[name])) continue;
     if (preserveAudit && isPreservableUnderAudit(name, def)) continue; // historical import reinstates it
     if (result === data) result = { ...data };
