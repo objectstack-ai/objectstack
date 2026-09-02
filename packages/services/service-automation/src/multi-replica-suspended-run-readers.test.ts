@@ -62,9 +62,10 @@
 import { describe, it, expect } from 'vitest';
 import { defineActionDescriptor } from '@objectstack/spec/automation';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
+import type { AutomationContext } from '@objectstack/spec/contracts';
 import { AutomationEngine } from './engine.js';
 import { InMemorySuspendedRunStore } from './suspended-run-store.js';
-import type { AutomationContext, SuspendedRun, SuspendedRunStore } from './engine.js';
+import type { SuspendedRun, SuspendedRunStore } from './engine.js';
 
 function silentLogger(): any {
   return { info() {}, warn() {}, error() {}, debug() {}, child() { return silentLogger(); } };
