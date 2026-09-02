@@ -420,7 +420,6 @@ export const CEILINGS = new Map([
   // objectstack-platform
   ['skills/objectstack-platform/evals/README.md', 514],
   ['skills/objectstack-platform/references/plugin-hooks.md', 2628],
-  ['skills/objectstack-platform/rules/bootstrap-patterns.md', 1093],
   ['skills/objectstack-platform/rules/plugin-hooks-events.md', 985],
   ['skills/objectstack-platform/rules/plugin-lifecycle.md', 2408],
   ['skills/objectstack-platform/rules/service-registry.md', 2331],
