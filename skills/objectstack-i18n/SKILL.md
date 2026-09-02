@@ -167,11 +167,9 @@ Top-level groups alongside `objects`: `apps` (label, description, navigation),
 `messages`, `globalActions` (object-less actions), `dashboards`, `pages`, `flows`,
 `settings`, `metadataForms`, `settingsCommon`.
 
-> **Validation messages are not a translation group.** `validationMessages` was
-> removed in spec 17.0.0 — nothing ever read it, so a translated rule
-> message was stored and never shown. Author the message on the rule itself
-> (`object.validations[].message`), which the engine returns on every rejected
-> write.
+> `validationMessages` is not a translation group — it was removed in spec 17.0.0.
+> Author the message on the rule itself (`object.validations[].message`), which the
+> engine returns on every rejected write.
 
 For the exact Zod shape (and any field that may have been added since), read
 `node_modules/@objectstack/spec/src/system/translation.zod.ts` —
@@ -198,10 +196,10 @@ parse, ship, and resolve to nothing.
 
 `os validate` / `os lint` / `os compile` check this direction and report it as
 warnings (`translation-target-unknown`, `translation-option-key-unknown`): a key
-naming an object, field, view, action, param, section, app, nav item, dashboard,
-widget or flow screen that does not exist is listed alongside the names that do.
-A bundle keyed to something since renamed still parses — the label just renders
-silently in its source locale while every neighbouring one resolves.
+naming an object, field, view, tab, action, param, section, app, nav item,
+dashboard, widget or flow screen that does not exist is listed alongside the names
+that do. A bundle keyed to something since renamed still parses — the label just
+renders silently in its source locale while every neighbouring one resolves.
 
 ---
 
@@ -436,65 +434,15 @@ Run `os i18n check` before releases; `extract --check` is what sees staleness.
 
 ---
 
-## Quick-Start Template
-
-One compact per-locale file — assemble locales with `defineTranslationBundle` and
-register via `defineStack({ translations: [...] })` as shown in
-"Authoring Translation Bundles" above:
-
-<!-- os:check -->
-```typescript
-// src/translations/zh-CN.ts
-import type { TranslationData } from '@objectstack/spec/system';
-
-export const zhCN: TranslationData = {
-  objects: {
-    account: {
-      label: '客户',
-      pluralLabel: '客户',
-      fields: {
-        name: { label: '客户名称' },
-        email: { label: '邮箱', placeholder: '输入邮箱地址' },
-        status: {
-          label: '状态',
-          options: {
-            active: '活跃',
-            inactive: '停用',
-          },
-        },
-      },
-      _views: {
-        all_accounts: { label: '全部客户' },
-      },
-    },
-  },
-
-  apps: {
-    crm: { label: '客户关系管理' },
-  },
-
-  messages: {
-    'common.save': '保存',
-    'common.cancel': '取消',
-  },
-};
-```
-
----
-
 ## Verify your work
 
-After editing a `*.translation.ts` bundle:
-
 ```bash
-os i18n check   # translation coverage vs the default locale (missing-key report)
-os validate     # the bundle conforms to the protocol schema (no artifact)
-# or: os build  # the same schema gate, plus emits dist/
+os i18n check   # coverage: which keys are missing, per locale
+os validate     # the bundle conforms to the protocol schema
 ```
 
-`os i18n check` lists keys missing per locale; `os lint --i18n-strict` turns
-coverage gaps into hard errors. In a scaffolded project the schema gate is
-`npm run validate`. See objectstack-platform → **Verify your work**.
+`os lint --i18n-strict` turns coverage gaps into hard errors. For the build and scaffold
+gates see objectstack-platform → **Verify your work**.
 
 ---
 
