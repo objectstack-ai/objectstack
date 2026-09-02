@@ -8,7 +8,15 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "outDir": "./dist",
-    "rootDir": "."
+    "rootDir": ".",
+    // `check:type-source-resolution` — without these, this package's type
+    // verdicts would be a function of `packages/spec/dist` rather than of the
+    // source in this checkout, and the dangerous direction is SILENT: a `dist`
+    // merely BEHIND the source type-checks GREEN against old declarations.
+    "paths": {
+      "@objectstack/spec": ["../../packages/spec/src/index.ts"],
+      "@objectstack/spec/*": ["../../packages/spec/src/*/index.ts"]
+    }
   },
   "include": ["src/**/*", "objectstack.config.ts"]
 }

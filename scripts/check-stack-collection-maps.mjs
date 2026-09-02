@@ -356,10 +356,49 @@ export function stackCollections(stackSource) {
   if (!options) return null;
   const shape = sliceBody(stackSource, '{', options.end + 1);
   if (!shape) return null;
-  return objectEntries(shape.body)
+
+  // [#14439] The shape may SPREAD a named const rather than writing every key
+  // inline: ADR-0130 D4's assembled package body is built from the same
+  // collections the stack declares, so those collections were lifted into
+  // `STACK_DEFINITION_COLLECTIONS_SHAPE` and both surfaces read that one const
+  // (a second transcription is the drift ADR-0116 exists about).
+  //
+  // Resolved by NAME, in the same source, and an unresolvable spread returns
+  // `null` rather than "no collections". That direction matters: this gate's
+  // caller treats an empty set as a hard failure precisely because an empty set
+  // reconciles perfectly against every site, so a spread this function could not
+  // follow must reach that refusal instead of silently shrinking the set.
+  const bodies = [shape.body];
+  for (const ident of spreadIdentifiers(shape.body)) {
+    const spread = sliceBody(stackSource, `const ${ident} = {`);
+    if (!spread) return null;
+    bodies.push(spread.body);
+  }
+
+  return bodies
+    .flatMap((body) => objectEntries(body))
     .filter(({ value }) => /^z\.array\(\s*[A-Za-z_$][\w$]*Schema\s*\)/.test(value))
     .map(({ key }) => key)
     .filter((key) => !NON_COLLECTION_ARRAY_KEYS.has(key));
+}
+
+/**
+ * The identifiers an object literal body spreads (`...IDENT,`).
+ *
+ * Line-anchored on purpose: a `...` inside a nested value (a default object, a
+ * template) is not a shape spread, and matching one would send this gate
+ * looking for a const that does not exist and refusing a healthy tree.
+ *
+ * @param body - an object-literal body, as `sliceBody` returns it
+ * @returns the spread identifiers, in source order, without duplicates
+ */
+export function spreadIdentifiers(body) {
+  const found = [];
+  for (const line of body.split('\n')) {
+    const m = /^\s*\.\.\.([A-Za-z_$][\w$]*)\s*,?\s*$/.exec(line);
+    if (m && !found.includes(m[1])) found.push(m[1]);
+  }
+  return found;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -873,7 +912,14 @@ function run({ list = false } = {}) {
 
 function selfTest() {
   const failures = [];
+  // COUNTED, not transcribed. The pass line used to carry a hand-written
+  // number, and it had already drifted one below the real count by the time
+  // #14439 added three assertions to this block — a self-test that misreports
+  // how much it asserted is the same class of defect as the sites this gate
+  // reconciles.
+  let asserted = 0;
   const eq = (label, actual, expected) => {
+    asserted += 1;
     const a = JSON.stringify(actual);
     const e = JSON.stringify(expected);
     if (a !== e) failures.push(`${label}\n      expected ${e}\n      actual   ${a}`);
@@ -906,6 +952,37 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
     stackCollections(stack).includes('packages'),
     false,
   );
+  // [#14439] The spread form: the collections live in a named const the shape
+  // spreads in. Both directions are driven — resolved, and unresolvable.
+  const spreadStack = `
+const STACK_DEFINITION_COLLECTIONS_SHAPE = {
+  objects: z.array(ObjectSchema).optional().describe('Business Objects'),
+  // a commented-out collection must NOT count:
+  // ghosts: z.array(GhostSchema).optional(),
+  plugins: z.array(z.unknown()).optional(),
+  data: z.array(SeedSchema).optional(),
+};
+
+export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
+  surface: 'this stack definition',
+}, {
+  manifest: ManifestSchema.optional(),
+  packages: z.array(ArtifactPackageSchema).optional(),
+  ...STACK_DEFINITION_COLLECTIONS_SHAPE,
+}).superRefine(gates));
+`;
+  eq('stackCollections() follows a spread into a named shape const', stackCollections(spreadStack), ['objects', 'data']);
+  eq(
+    'stackCollections() REFUSES (null) when a spread names a const it cannot find',
+    stackCollections(spreadStack.replace('const STACK_DEFINITION_COLLECTIONS_SHAPE = {', 'const SOMETHING_ELSE = {')),
+    null,
+  );
+  eq(
+    'spreadIdentifiers() takes only line-anchored spreads',
+    spreadIdentifiers('  a: 1,\n  ...SHAPE,\n  b: { ...inner },\n  ...OTHER\n'),
+    ['SHAPE', 'OTHER'],
+  );
+
   eq('stackCollections() returns null when the anchor is gone', stackCollections('export const Other = 1;'), null);
   eq(
     'stackCollections() returns null when the shape argument is missing',
@@ -990,7 +1067,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
     for (const f of failures) console.error(`  • ${f}\n`);
     return 1;
   }
-  console.log('✓ check-stack-collection-maps --self-test: 16 assertions over synthetic sources');
+  console.log(`✓ check-stack-collection-maps --self-test: ${asserted} assertions over synthetic sources`);
   return 0;
 }
 
