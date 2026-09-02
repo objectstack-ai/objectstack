@@ -161,6 +161,18 @@ const ARTIFACT_FIELD_TO_TYPE: Record<string, string> = {
 // callers below and for `view-expand.test.ts`.
 export { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
 import { isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec';
+// [#13912] WHICH object a container binds to is a separate question from HOW it
+// expands, and it is the one that had drifted here: this file walked two levels
+// (`list.data.object` then `form.data.object`) and never read the container's
+// own top-level `object` — the field `ViewSchema.object` documents as the
+// authorial signal "read by getViewsByObject() / GET /meta/view?object=". The
+// one spelling of that derivation for this package already exists:
+// `view-container-expansion.ts`'s `deriveViewContainerObject`, whose header
+// declares it to be the single place the drift is repaired rather than a third
+// private copy to fall behind. Both sites below call it instead of restating a
+// chain of their own; it carries the same order #13407 settled at the runtime
+// door (`expandRuntimeViewContainer` in `packages/metadata-protocol`).
+import { deriveViewContainerObject } from './view-container-expansion.js';
 import type { IHttpServer } from '@objectstack/spec/contracts';
 
 
@@ -930,9 +942,13 @@ export class MetadataPlugin implements Plugin {
                 // reads. Already-independent ViewItems carry a top-level `name`
                 // and fall through to the normal path below.
                 if (metaType === 'view' && isAggregatedViewContainer(item)) {
-                    const viewObject =
-                        (item as any)?.list?.data?.object
-                        ?? (item as any)?.form?.data?.object;
+                    // [#13912] `object` FIRST — a package-shipped
+                    // `defineView({ object: 'crm_lead', list: { columns } })`
+                    // sets the binding here and nowhere else, and the old
+                    // two-deep chain skipped that container entirely (`continue`
+                    // below), so it never reached the registry at all and
+                    // `getViewsByObject()` had nothing to expand.
+                    const viewObject = deriveViewContainerObject(item);
                     if (!viewObject) continue;
                     applyProtection(item as any, {
                         packageId: manifestPackageId,
@@ -957,7 +973,9 @@ export class MetadataPlugin implements Plugin {
                 }
                 // Most metadata items carry a top-level `name`. The `View`
                 // container (UI namespace) is an exception: it has no own
-                // `name` — its identity is the target object, encoded under
+                // `name` — its identity is the target object, declared in the
+                // container's own top-level `object` field and, for containers
+                // written before that field was read here, under
                 // `list.data.object` (or `form.data.object`). Mirror the
                 // resolution used by `ObjectQL.SchemaRegistry` so that
                 // artifact-loaded views land in `MetadataManager` under the
@@ -967,12 +985,16 @@ export class MetadataPlugin implements Plugin {
                 // boot-only SchemaRegistry cache and is never refreshed on
                 // file edits — leaving MetadataService empty for view/* and
                 // forcing all reads to return the stale boot copy.
+                //
+                // [#13912] `deriveViewContainerObject` is that resolution, in
+                // the package's one spelling. Its last fallback — the row's own
+                // `name` — cannot fire on this branch (we are here only because
+                // `item.name` is falsy), so what it adds here is exactly the
+                // leading `object` term this path was missing.
                 let name = (item as any)?.name;
                 if (!name) {
                     if (metaType === 'view') {
-                        name =
-                            (item as any)?.list?.data?.object
-                            ?? (item as any)?.form?.data?.object;
+                        name = deriveViewContainerObject(item);
                     }
                 }
                 if (!name) continue;
