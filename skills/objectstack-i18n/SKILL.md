@@ -221,58 +221,14 @@ directory tree for you.
 
 ## Authoring at Runtime: the `translation` Item
 
-Translations do not have to ship as files. A **`translation` metadata item** —
-created in the Studio, through the metadata API, or by an agent — is one
-locale's worth of the **same** `objects.*` groups documented above, plus the
-`locale` it translates. There is exactly one shape; nothing converts between
-formats.
-
-<!-- os:check -->
-```typescript
-import { defineTranslation } from '@objectstack/spec/system';
-
-export default defineTranslation({
-  locale: 'zh-CN',
-  objects: {
-    account: {
-      label: '客户',
-      pluralLabel: '客户',
-      fields: {
-        name: { label: '客户名称', help: '公司或组织的法定名称' },
-        industry: { label: '行业', options: { tech: '科技', finance: '金融' } },
-        status: { options: { active: '活跃', inactive: '停用' } },
-      },
-      _views: { all_accounts: { label: '全部客户' } },
-      _sections: { basic_info: { label: '基本信息' } },
-      _actions: {
-        merge: { label: '合并客户', confirmText: '此操作无法撤销，确认合并？' },
-      },
-    },
-  },
-  apps: { crm: { label: '客户关系管理', navigation: { home: { label: '首页' } } } },
-  messages: { 'common.save': '保存' },
-});
-```
-
-Rules that differ from a file bundle:
-
-- **`locale` is required.** A file bundle names its locales as map keys; an item
-  carries its own. The sync falls back to a BCP-47-looking item *name*, then skips
-  the item with an `[i18n] … — skipped` warning nobody watches.
-- **One locale per item.** Author `zh-CN` and `ja-JP` as two items.
-- Published items are loaded at boot and on every publish (no restart), and
-  layer **over** the file bundles — an authored value wins over a shipped one
-  for the same key; deleting the item restores the shipped value.
-
-Exact Zod shape: `node_modules/@objectstack/spec/src/system/translation.zod.ts` —
-`TranslationItemSchema`.
-
-### Retired: the `o.*` dialect
-
-A second object-first shape keyed on `o.{object_name}` (with `app`, `nav`,
-`dashboard`, `reports`, `notifications`, `errors`, `_globalOptions`, `_meta`,
-`namespace`, `_actions.confirmMessage`) was once documented for Studio authoring.
-**No resolver ever read it**, and both doors now reject it — files included.
+Translations do not have to ship as files. A **`translation` metadata item** — created in
+the Studio, through the metadata API, or by an agent — carries one locale's worth of the
+**same** `objects.*` groups documented above plus the `locale` it translates. `locale` is
+required, one locale per item, and published items load at boot and on every publish,
+layering **over** the file bundles (delete the item and the shipped value returns). There
+is exactly one shape; nothing converts between formats. Author with `defineTranslation`;
+exact Zod shape is `TranslationItemSchema` in
+`node_modules/@objectstack/spec/src/system/translation.zod.ts`.
 
 ---
 
