@@ -1,7 +1,8 @@
 # ObjectStack official runtime image — ghcr.io/objectstack-ai/objectstack
 #
-# A generic, app-agnostic production runtime: Node + @objectstack/cli +
-# `os start`. It contains NO app — bring your compiled artifact
+# A generic, app-agnostic production runtime: Node + @objectstack/cli + the
+# `pg` / `mysql2` SQL drivers + `os start`. It contains NO app — bring your
+# compiled artifact
 # (dist/objectstack.json, built by `os build` in CI):
 #
 #   FROM ghcr.io/objectstack-ai/objectstack:<version>

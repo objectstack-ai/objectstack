@@ -1,9 +1,9 @@
 # ObjectStack Official Runtime Image
 
 `ghcr.io/objectstack-ai/objectstack` — the official production runtime for
-standalone ObjectStack apps. It packages Node 22 and `@objectstack/cli`
-(`os start`) and nothing else: **your compiled artifact is the app**, the
-image is the runtime.
+standalone ObjectStack apps. It packages Node 22, `@objectstack/cli`
+(`os start`) and the SQL drivers listed below — and no application code:
+**your compiled artifact is the app**, the image is the runtime.
 
 ```
 objectstack.config.ts ──(os build, CI)──▶ dist/objectstack.json ──(this image)──▶ running app
