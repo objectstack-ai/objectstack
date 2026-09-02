@@ -5,14 +5,13 @@ description: >
   Apps (navigation), Pages (structured plus the HTML and React source-authoring
   tiers, ADR-0080/0081), Dashboards, Reports, Charts, Actions, and
   package Docs (`src/docs/*.md`). Use when
-  the user is adding `*.view.ts` / `*.app.ts` / `*.dashboard.ts` /
-  `*.action.ts` / `src/docs/*.md` files or designing a Studio-rendered UI
-  surface, including
-  dataset-bound dashboard/report widgets. Do not use for: data schema (see
-  objectstack-data), interactive screen flows /
-  wizards (those are `*.flow.ts` with `type: 'screen'` — see
-  objectstack-automation), the React renderer implementation (lives in
-  `packages/client-react`, not metadata), or Studio's own admin UI (that
+  the user is adding `*.view.ts` / `*.page.ts` / `*.app.ts` /
+  `*.dashboard.ts` / `*.report.ts` / `*.dataset.ts` / `*.action.ts` /
+  `src/docs/*.md` files or designing a Studio-rendered UI surface.
+  Do not use for: data schema (see objectstack-data), multi-step flows that
+  BRANCH on logic between steps (those are `*.flow.ts` with `type: 'screen'` —
+  see objectstack-automation; a stepped form over ONE object is this skill's
+  `formViews` `type: 'wizard'`), or Studio's own admin UI (that
   ships with the platform). CEL expressions in
   visibility/conditional rules: load objectstack-formula alongside.
 license: Apache-2.0
@@ -29,19 +28,6 @@ metadata:
 Expert instructions for designing user interfaces using the ObjectStack
 specification. This skill covers Views (list, form, kanban, calendar, …),
 App navigation, Dashboards, Reports, and Actions.
-
----
-
-## When to Use This Skill
-
-- You are creating a **list view** (grid, kanban, calendar, gantt, map, …).
-- You are designing a **form layout** (simple, tabbed, wizard).
-- You are building an **app** with structured navigation menus.
-- You need a **dashboard** with widget grids.
-- You are adding **reports** (tabular, summary, matrix, joined).
-- You are configuring **actions** (buttons, URL jumps, screen flows).
-- You are writing **package documentation** (`src/docs/*.md`) that ships
-  with the package and renders at `/docs/<name>`.
 
 ---
 
@@ -576,11 +562,10 @@ modifier; date bucketing comes from the bound dataset dimension's
 Every persisted chart is **dataset-backed** (ADR-0021 single-form cutover): a
 dashboard widget, a report, and a list `type:'chart'` view all **bind a `dataset`
 and select named `dimensions` + `values`**; the dataset owns the base object,
-allowed joins, intrinsic filter, dimensions, and certified measures. The legacy
-per-widget inline query (`object` + `categoryField` + `valueField` + `aggregate`)
-**was removed** — a widget now requires `dataset` + `values`; the closed schema
-REJECTS the inline keys by name, and one lacking `dataset` fails `os validate`.
-The dataset shape is
+allowed joins, intrinsic filter, dimensions, and certified measures. A widget
+**requires `dataset` + `values`**; the closed schema rejects `object` /
+`categoryField` / `valueField` / `aggregate` by name, and one lacking `dataset`
+fails `os validate`. The dataset shape is
 `DatasetSchema` — see `node_modules/@objectstack/spec/src/ui/dataset.zod.ts`.
 
 A widget's presentation-scope `filter` flows into the query as the runtime
@@ -910,9 +895,15 @@ which contain components.
 
 ### Example — Record Detail Page
 
+<!-- os:check -->
 ```typescript
-import { definePage } from '@objectstack/spec/ui';
-import { ConvertLeadAction } from '../actions/lead.actions';
+import { defineAction, definePage } from '@objectstack/spec/ui';
+
+// Normally lives in its own `*.action.ts`; inlined so this block stands alone.
+const ConvertLeadAction = defineAction({
+  name: 'convert_lead', label: 'Convert Lead', objectName: 'lead',
+  type: 'flow', target: 'lead_conversion', locations: ['record_header'],
+});
 
 export const LeadDetailPage = definePage({
   name: 'lead_detail_page',
@@ -1033,9 +1024,9 @@ The source is real React executed at render by the runtime. The injected scope a
   `type:'record'`, where the context exists
 - `data` / `variables` / `page`
 
-Compose **layout with inline `style={{…}}`** (real CSS — see *Styling*, below); use the
-injected blocks for data. **Do NOT use Tailwind `className`** — page source is runtime
-metadata the build never scans, so utility classes silently do nothing. Real component
+Compose **layout with inline `style={{…}}`** (real CSS); use the injected blocks
+for data. **Do NOT use Tailwind `className`** — see *Styling a page* below for
+why it silently does nothing. Real component
 props/callbacks flow through — e.g. `<ObjectForm>` honors `objectName` / `mode` / `recordId` /
 `formType` / `onSuccess` / `onCancel`; `<ListView>` honors `objectName` / `fields` /
 `onRowClick` / `navigation`.
@@ -1055,7 +1046,10 @@ props/callbacks flow through — e.g. `<ObjectForm>` honors `objectName` / `mode
 
 Master/detail (click a row → edit it → save refreshes the list):
 
+<!-- os:check -->
 ```tsx
+import { definePage } from '@objectstack/spec/ui';
+
 export const CrmWorkbenchPage = definePage({
   name: 'crm_workbench', label: 'CRM Workbench', type: 'home', kind: 'react',
   source: `
@@ -1137,10 +1131,7 @@ Rules:
 }
 ```
 
-Why this model: it's **build-independent** (no Tailwind compile dependency),
-**collision-free** (per-node scoped, beats base utilities without `@layer`
-games), and **responsive-correct** (breakpoint maps → generated `@media`). The
-spec field is `PageComponentSchema.responsiveStyles` (`ResponsiveStylesSchema` —
+The spec field is `PageComponentSchema.responsiveStyles` (`ResponsiveStylesSchema` —
 see `node_modules/@objectstack/spec/src/ui/responsive.zod.ts`). See ADR-0065
 (SDUI styling model).
 
@@ -1241,14 +1232,10 @@ package) is a later, additive concern — author-side, nothing to model now.
 
 ### Inline metadata views — the `metadata` fence (ADR-0051)
 
-A reader who can't open Studio (a business user, a PM, an auditor) can't
-see the *whole shape* of a process or the *full* set of legal state
-transitions from a running screen. A `metadata` fenced block embeds a
-**live, read-only** view of one metadata item, resolved from the *current*
-metadata at render time — change the rule and the diagram follows, it is
-never a screenshot. The body is flat `key: value` **data, not code**, so it
-stays inside the §3.4 trust boundary (it compiles to the read-only
-`element:metadata_viewer` component — the same one a page can render).
+A `metadata` fenced block embeds a **live, read-only** view of one metadata
+item, resolved from the *current* metadata at render time — change the rule and
+the diagram follows; it is never a screenshot. The body is flat `key: value`
+**data, not code**, so it stays inside the §3.4 trust boundary.
 
 Three view kinds:
 
@@ -1329,6 +1316,7 @@ This blueprint is the default for “build a complete metadata app UI” tasks.
 Dashboards (`Dashboard`) are first-class metadata. Beyond the basic widget
 layout shown above, the production-grade pattern uses:
 
+<!-- os:check -->
 ```typescript
 import type { Dashboard } from '@objectstack/spec/ui';
 
@@ -1482,7 +1470,10 @@ bucket server-side — without it every distinct timestamp becomes its own
 category, collapsing a 12-row seed into a 12-point flat line. (The old widget-level
 `categoryGranularity` was removed in the single-form cutover.)
 
+<!-- os:check -->
 ```typescript
+import { defineDataset, type DashboardWidget } from '@objectstack/spec/ui';
+
 // In the dataset (Guides → Analytics Datasets):
 defineDataset({
   name: 'contract_metrics', label: 'Contract Metrics', object: 'contract',
@@ -1496,10 +1487,10 @@ defineDataset({
 // (ADR-0053). Omit it for non-money measures (count, avg-of-hours).
 
 // The widget just selects the dimension by name:
-{ id: 'signed_by_month', type: 'line',
+const signedByMonth: DashboardWidget = { id: 'signed_by_month', type: 'line',
   dataset: 'contract_metrics', dimensions: ['signed_date'], values: ['signed_count'],
   filter: { signed_date: { $gte: '{12_months_ago}' } },
-  compareTo: { kind: 'previousYear' } }
+  compareTo: { kind: 'previousYear' } };
 ```
 
 | `dateGranularity` | Rendered bucket label |
@@ -1802,7 +1793,7 @@ import { defineAction } from '@objectstack/spec/ui';
 
 export const PrintA3Action = defineAction({
   name: 'print_a3',
-  label: '打印总表(A3)',
+  label: 'Print Summary Sheet (A3)',
   type: 'url',
   target: '/print/a3?id=${record.id}',   // static template; interpolated at click
   openIn: 'new-tab',
