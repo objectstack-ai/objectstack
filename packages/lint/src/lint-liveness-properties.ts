@@ -4,15 +4,17 @@
  * Build-time lint that closes the spec-liveness loop on the AUTHOR side.
  *
  * The liveness ledgers (`@objectstack/spec/liveness/<type>.json`) classify every
- * authorable metadata property as live / experimental / planned / dead with
- * evidence. The CI gate enforces that classification is *complete*, but the
- * ledger's knowledge never reached the person (very often an AI) writing the
- * metadata. This lint surfaces it: when an authored object/field sets a property
- * the ledger marks `dead`-and-misleading, `experimental`, or `planned`, it emits
- * an advisory WARNING with a verdict-specific message and hint — `dead` says
- * remove it, `experimental`/`planned` say keep it (declared, just not enforced /
- * not read yet) — under a verdict-specific rule id (`describe()` below is the one
- * place that mapping lives; #11384). It NEVER fails the build.
+ * authorable metadata property as live / experimental / planned / dead /
+ * live-elsewhere with evidence. The CI gate enforces that classification is
+ * *complete*, but the ledger's knowledge never reached the person (very often an
+ * AI) writing the metadata. This lint surfaces it: when an authored object/field
+ * sets a property the ledger marks `dead`-and-misleading, `experimental`,
+ * `planned`, or `live-elsewhere`, it emits an advisory WARNING with a
+ * verdict-specific message and hint — `dead` says remove it,
+ * `experimental`/`planned` say keep it (declared, just not enforced / not read
+ * yet), `live-elsewhere` says keep it because a SIBLING REPO's gate enforces it
+ * — under a verdict-specific rule id (`describe()` below is the one place that
+ * mapping lives; #11384). It NEVER fails the build.
  *
  * Signal over noise is the whole point, so the ledger opts in per entry via
  * `"authorWarn": true` (+ an optional `"authorHint"`). A property being merely
@@ -24,7 +26,7 @@
 
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 
 export interface LivenessLintFinding {
   where: string;
@@ -36,6 +38,7 @@ export interface LivenessLintFinding {
 export const LIVENESS_DEAD_PROPERTY = 'liveness-dead-property';
 export const LIVENESS_EXPERIMENTAL_PROPERTY = 'liveness-experimental-property';
 export const LIVENESS_PLANNED_PROPERTY = 'liveness-planned-property';
+export const LIVENESS_LIVE_ELSEWHERE_PROPERTY = 'liveness-live-elsewhere-property';
 
 type AnyRec = Record<string, unknown>;
 
@@ -109,28 +112,46 @@ function isAuthored(value: unknown): boolean {
 }
 
 /**
- * `#11384`. The ledger ships (at least) three verdicts an author-facing finding
- * can carry, and they imply OPPOSITE actions: `dead` means remove the property
- * (nothing will ever read it), `planned` means keep it (a consumer is being
- * built against it, contract-first — it just does not have runtime effect
- * YET), `experimental` means keep it too but with the guarantee's status
- * flagged. Collapsing `planned` into the `dead` branch — the bug this function
- * fixes — told an author to delete metadata the platform had asked them to
- * write, while the row's own `authorHint`/`note` (when present) said the
- * opposite one sentence later on the SAME finding.
+ * `#11384`. The ledger ships four verdicts an author-facing finding can carry,
+ * and they imply OPPOSITE actions: `dead` means remove the property (nothing
+ * will ever read it), `planned` means keep it (a consumer is being built
+ * against it, contract-first — it just does not have runtime effect YET),
+ * `experimental` means keep it too but with the guarantee's status flagged,
+ * and `live-elsewhere` (#13483) means keep it because it is genuinely
+ * ENFORCED — just not here. Collapsing `planned` into the `dead` branch — the
+ * bug this function fixes — told an author to delete metadata the platform had
+ * asked them to write, while the row's own `authorHint`/`note` (when present)
+ * said the opposite one sentence later on the SAME finding.
+ *
+ * `#14057` is the same defect class arriving through a different door, and the
+ * reason the boundary below is a THROW rather than a fallthrough. #13483 added
+ * the fifth status to the ledger vocabulary — `live-elsewhere`: dead HERE by
+ * measurement, genuinely enforced in a sibling repo (first row:
+ * `manifest.runtime`, whose enforcer is the cloud marketplace publish gate) —
+ * without teaching this function about it. Falling into `dead` would have said
+ * "Remove it" about a key whose enforcement is real and remote, i.e. exactly
+ * the most wrong sentence available: deleting it tears out a live gate's
+ * input. That row is not deletable, so `live-elsewhere` gets its own branch and
+ * its own rule id, and its default hint points the author at the ledger row's
+ * `evidence` — the enforcer's address — rather than at a delete key.
  *
  * Each verdict below also carries its own DEFAULT hint (used only when the
  * ledger entry has neither `authorHint` nor `note`): the `dead` default says
- * "Remove it"; `planned`'s must not, because removing a planned property is
- * exactly the wrong author action.
+ * "Remove it"; `planned`'s and `live-elsewhere`'s must not, because removing a
+ * planned or elsewhere-enforced property is exactly the wrong author action.
  *
  * Unknown status: `LedgerEntry.status` is a plain `string` (see the interface
  * above) because the ledger's status vocabulary is DOCUMENTED, not
  * schema-enforced — `packages/spec/scripts/liveness/check-liveness.mts`'s own
- * header states "Statuses: live | experimental | planned | dead" in a comment,
- * and nothing in that gate (or anywhere else) rejects a ledger JSON file that
- * spells one wrong or ships a status this function has never heard of; the
- * gate only requires that a status be PRESENT, not that it be one of the four.
+ * header states "Statuses: live | experimental | planned | dead |
+ * live-elsewhere" in a comment, and nothing in that gate (or anywhere else)
+ * rejects a ledger JSON file that spells one wrong or ships a status this
+ * function has never heard of; the gate only requires that a status be
+ * PRESENT, not that it be one of the five. A comment is also all it is: there
+ * is no importable enum to switch on, which is why the coverage pin in this
+ * module's test derives the vocabulary from the SHIPPED LEDGER ROWS
+ * ({@link shippedLedgerStatuses}) instead of from that prose.
+ *
  * An entry only reaches `describe()` once `shouldWarn()` has already said yes
  * (`authorWarn: true`, or `status === 'experimental'`), so `live` can in
  * principle arrive here too (an entry marked `authorWarn: true` on a `live`
@@ -167,12 +188,89 @@ function describe(entry: LedgerEntry): { kind: string; rule: string; defaultHint
       defaultHint: 'Remove it — it is declared in the spec but not consumed at runtime.',
     };
   }
+  // Deliberately adjacent to `dead`, because the two are one measurement apart
+  // and opposite in what they ask of the author: both are inert HERE, but a
+  // `live-elsewhere` key is load-bearing for a gate in another repo, so the
+  // `dead` branch's "Remove it" is the single most damaging sentence this
+  // function could emit about it (#14057 / #13483).
+  if (entry.status === 'live-elsewhere') {
+    return {
+      kind: 'is enforced in a sibling repo, not here (liveness: live-elsewhere)',
+      rule: LIVENESS_LIVE_ELSEWHERE_PROPERTY,
+      defaultHint:
+        'Keep it — nothing reads it when the stack loads here, but a sibling repo enforces it ' +
+        "(for `manifest.runtime`, the cloud marketplace publish gate); see the ledger row's " +
+        'evidence for the enforcer.',
+    };
+  }
   throw new Error(
     `lintLivenessProperties: ledger entry has unrecognised status ${JSON.stringify(entry.status)} — ` +
-    "describe() only knows 'experimental' | 'planned' | 'dead'. This is a shipped-ledger integrity " +
-    'bug, not an authoring error: either the ledger JSON has a typo, or a new status was added to ' +
-    'the vocabulary without teaching describe() in lint-liveness-properties.ts about it (#11384).',
+    "describe() only knows 'experimental' | 'planned' | 'dead' | 'live-elsewhere'. This is a " +
+    'shipped-ledger integrity bug, not an authoring error: either the ledger JSON has a typo, or a ' +
+    'new status was added to the vocabulary without teaching describe() in ' +
+    'lint-liveness-properties.ts about it (#11384, and again #14057).',
   );
+}
+
+/**
+ * ── Coverage seam (#14057). Package-internal: NOT part of the published surface,
+ *    same posture as the #10262 seam below `getNested` (exported from the MODULE
+ *    only; `src/index.ts` re-exports neither, and this package's `exports` map
+ *    publishes just `.` and `./runtime`). ────────────────────────────────────
+ *
+ * Every distinct `status` string the SHIPPED ledgers actually carry, walked the
+ * way `loadWarnMap` walks them (top-level props plus one level of `children` —
+ * measured as the ledgers' full depth: 423 top-level and 285 child rows carry a
+ * status, zero grandchildren do).
+ *
+ * WHY THIS EXISTS AND WHY IT DERIVES FROM ROWS. #14057 is #11384 repeating
+ * itself through a different door: `describe()` fell behind the vocabulary when
+ * #13483 shipped `live-elsewhere`, and nothing failed, because the gap is
+ * invisible until some row with the new status also opts into `authorWarn` —
+ * an event that had not happened yet and may not for months. A hand-written
+ * list of statuses in the test would have gone stale in exactly the same way
+ * and for exactly the same reason (nobody edits the list they did not know
+ * existed), so the test walks the ledgers instead: the day a sixth status
+ * appears in a shipped row, the coverage pin goes red naming it, rather than
+ * waiting for an author to trip the sentinel throw.
+ *
+ * The vocabulary is prose, not an enum — `check-liveness.mts`'s header comment
+ * — so the rows are the only machine-readable statement of it in this
+ * package's reach. That makes this a slightly NARROWER population than the
+ * documented vocabulary (a status documented with zero rows is not seen), and
+ * deliberately so: a status no row carries cannot reach `describe()`, and the
+ * moment one does, this returns it.
+ *
+ * Unreadable or absent ledger ⇒ the empty set — the same silent state
+ * `authorWarnedProperties` returns, and the reason its caller in the test
+ * carries an anti-vacuity guard.
+ */
+export function shippedLedgerStatuses(): ReadonlySet<string> {
+  const statuses = new Set<string>();
+  const dir = resolveLivenessDir();
+  if (!dir) return statuses;
+  let files: string[];
+  try {
+    files = readdirSync(dir);
+  } catch {
+    return statuses;
+  }
+  for (const file of files) {
+    if (!file.endsWith('.json')) continue;
+    let ledger: { props?: Record<string, LedgerEntry> };
+    try {
+      ledger = JSON.parse(readFileSync(join(dir, file), 'utf8'));
+    } catch {
+      continue;
+    }
+    for (const entry of Object.values(ledger?.props ?? {})) {
+      if (typeof entry?.status === 'string') statuses.add(entry.status);
+      for (const child of Object.values(entry?.children ?? {})) {
+        if (typeof child?.status === 'string') statuses.add(child.status);
+      }
+    }
+  }
+  return statuses;
 }
 
 /**
