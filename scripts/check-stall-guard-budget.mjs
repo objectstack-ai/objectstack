@@ -647,6 +647,14 @@ export function run(root, parseYaml, io = {}) {
  * the selector can only shrink the finding set, and the empty set is the fixed
  * point of shrinking. So these fixtures are the only instrument watching it.
  */
+
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 export async function selfTest() {
   const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
   const failures = [];
@@ -1001,13 +1009,23 @@ export async function selfTest() {
       'REFUSE, and the sibling note proven to follow JOB membership -- absent for a lone guarded step, and absent for two ' +
       'jobs sharing only a --stall-minutes value or only a job id.',
   );
+  selfTestReachedVerdict = true;
   return 0;
 }
 
 // Exports bindings, so an import for those exports alone must run nothing (#10667).
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    process.exit(await selfTest());
+    const selfTestCode = await selfTest();
+    if (!selfTestReachedVerdict) {
+        console.error(
+            '\n✗ check-stall-guard-budget self-test: selfTest() returned without reaching its verdict,\n'
+                + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+    }
+    process.exit(selfTestCode);
   } else {
     const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
     if (process.argv.includes('--list')) {
