@@ -125,7 +125,6 @@ export {
   MULTI_UPDATE_HOOK_KEY_DIVERGENCE_STATUS,
   divergingHookPayloadKeys,
 } from './multi-update-hook-key-divergence.js';
-export type { PerRowHookWrittenKeys } from './multi-update-hook-key-divergence.js';
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Hosts that boot the engine themselves can catch it to
 // render their own "database unreachable" message.

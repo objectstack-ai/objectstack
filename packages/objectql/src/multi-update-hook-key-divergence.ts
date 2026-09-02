@@ -66,45 +66,45 @@
  * module does not widen to cover it, and a future author reaching for a value
  * comparison to close it must re-read the two measurements above first.
  *
- * ## Divergence is `union \ intersection`, and rows that cannot speak abstain
+ * ## Divergence is `union` minus `intersection`
  *
- * The diverging keys are every key some row's recording holds and some other
+ * The diverging keys are every key some row's window holds and some other
  * row's does not — order-independent by construction, so the envelope names
- * the same keys whatever order the driver returned the matched rows in.
+ * the same keys whatever order the driver returned the matched rows in, and it
+ * names ALL of them rather than the first pair to disagree.
  *
- * A row whose recording is `undefined` — a hook REPLACED `ctx.input.data`
- * rather than mutating it, the KNOWN LIMIT `hook-write-provenance.ts`
- * documents — is EXCLUDED from the comparison rather than treated as an empty
- * set. `undefined` means "this call cannot say", and refusing a batch on a
- * measurement that was never taken would be a fabricated verdict. That keeps
- * the pre-#14099 behaviour for payload-replacing hooks, which is the same
- * fail-safe direction #14088 chose for the same limit: keep the old bug rather
- * than act on evidence that does not exist.
+ * ## When the recording cannot speak, the batch is not judged at all
+ *
+ * That decision does not live here, deliberately: it is the ENGINE that knows
+ * whether its recording survived the batch. A hook may REPLACE
+ * `ctx.input.data` rather than mutate it, and the replacement's keys are
+ * indistinguishable from the caller's (`hook-write-provenance.ts`'s KNOWN
+ * LIMIT) — so `seal` returns no record, and the engine skips this comparison
+ * entirely instead of feeding it windows that describe a payload the batch no
+ * longer writes. Refusing on a measurement that no longer applies would be a
+ * fabricated verdict; abstaining keeps the pre-#14099 behaviour for that
+ * shape, which is the same fail-safe direction #14088 chose for the same
+ * limit. This function therefore takes real key sets only, and reading a
+ * missing row as an empty set is not a case it can be handed.
  */
-
-/**
- * One row's recorded key set, as {@link SealedHookWrites.hookWrittenKeys}
- * hands it back: the keys that row's hook chain assigned, or `undefined` when
- * the call has no attributable record.
- */
-export type PerRowHookWrittenKeys = ReadonlySet<string> | undefined;
 
 /**
  * The keys whose presence in the hook chain's writes DIFFERS across the rows
- * of one predicate update, sorted; `[]` when every row that could be recorded
- * agreed (which includes the cases of one row, and of no row able to speak).
+ * of one predicate update, sorted; `[]` when every row agreed (which includes
+ * a batch of one row, and a batch where no hook wrote anything).
  *
- * Pure and total — it never throws and never reads the engine. The engine
- * raises; the contract decides.
+ * Each entry is one row's OBSERVATION WINDOW —
+ * {@link HookWriteRecording.closeWindow}'s return, the keys that row's chain
+ * assigned. Pure and total: it never throws and never reads the engine. The
+ * engine raises; the contract decides.
  */
-export function divergingHookPayloadKeys(perRow: readonly PerRowHookWrittenKeys[]): string[] {
-  const recorded = perRow.filter((s): s is ReadonlySet<string> => s !== undefined);
-  if (recorded.length < 2) return [];
+export function divergingHookPayloadKeys(perRow: readonly ReadonlySet<string>[]): string[] {
+  if (perRow.length < 2) return [];
   const union = new Set<string>();
-  for (const set of recorded) for (const key of set) union.add(key);
+  for (const set of perRow) for (const key of set) union.add(key);
   const diverging: string[] = [];
   for (const key of union) {
-    if (!recorded.every((set) => set.has(key))) diverging.push(key);
+    if (!perRow.every((set) => set.has(key))) diverging.push(key);
   }
   return diverging.sort();
 }

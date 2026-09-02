@@ -445,13 +445,13 @@ describe('[#14099] divergingHookPayloadKeys', () => {
     expect(divergingHookPayloadKeys([S('a')])).toEqual([]);
   });
 
-  it('`undefined` ABSTAINS — it is "cannot say", never an empty set', () => {
-    // Reading `undefined` as `{}` would refuse this batch on evidence that does
-    // not exist. Both recorded rows agree, so nothing diverges.
-    expect(divergingHookPayloadKeys([S('a'), undefined, S('a')])).toEqual([]);
-    expect(divergingHookPayloadKeys([undefined, undefined])).toEqual([]);
-    // …and rows that CAN speak are still compared with each other.
-    expect(divergingHookPayloadKeys([S('a'), undefined, S('b')])).toEqual(['a', 'b']);
+  it('rows with no writes at all agree with each other', () => {
+    // The abstention case — a hook REPLACED the payload, so the recording can
+    // say nothing — never reaches this function: the engine skips the
+    // comparison outright when its seal returns no record (pinned end-to-end in
+    // §5). ⛔ So an absent row must never be modelled here as an empty set;
+    // these are real windows that happen to be empty.
+    expect(divergingHookPayloadKeys([S(), S(), S()])).toEqual([]);
   });
 
   it('a key DELETED on one row and assigned on another diverges', () => {
