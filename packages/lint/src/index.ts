@@ -734,6 +734,8 @@ export {
   FLOW_MULTIPLE_DEFAULT_EDGES,
   FLOW_INERT_NODE_CONDITION,
   FLOW_MULTI_WRITE_UNFILTERED,
+  FLOW_LOOP_BODY_UNCONTAINED,
+  FLOW_TRY_CATCH_WITHOUT_CATCH,
 } from './lint-flow-patterns.js';
 
 export { lintLivenessProperties } from './lint-liveness-properties.js';
