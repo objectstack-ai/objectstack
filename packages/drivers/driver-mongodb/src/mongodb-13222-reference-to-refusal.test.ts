@@ -228,10 +228,13 @@ describe('#13222 part (1) — driver-mongodb refuses `reference_to` at the schem
 
   it('does not index a `lookup` that declares no target — `reference` is read for truth, not presence', async () => {
     // Measured on `FieldSchema` built from this tree: `{ type: 'lookup' }` with
-    // no `reference`, and `{ type: 'lookup', reference: '' }`, BOTH parse
-    // successfully — the spec's prose calls `reference` required for these
-    // types, but the schema does not enforce it. So this is a shape an author
-    // can really publish, not a hypothetical, and the arm has to answer for it.
+    // no `reference`, and `{ type: 'lookup', reference: '' }`, are BOTH REFUSED
+    // (`custom` on the `reference` path) — #13927 made the "required for these
+    // types" in the spec's own prose enforced; both parsed successfully until
+    // then. The shape is still not hypothetical, because it does not arrive
+    // through Zod: `syncSchema(object, schema: unknown)` casts and forwards
+    // verbatim, which is the seam this test calls directly, so the arm still
+    // has to answer for it.
     //
     // It answers by declining: `idx_FIELD_lookup` exists to serve a join, and a
     // lookup with no declared target has no join to serve — the index would

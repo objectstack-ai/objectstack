@@ -1,0 +1,48 @@
+// The MANIFEST-layer type-check program for @objectstack/service-i18n (#14386).
+//
+// `objectstack.config.ts` sits at the PACKAGE ROOT and declares this service's
+// plugin manifest inline (a `defineStack({ manifest: { ... } })` call with no
+// import from `src/`, unlike `plugin-auth` / `plugin-security`, so the manifest
+// body itself is unread by any program too, not merely the composing site).
+// Until this file existed no tsc program read a line of it: `tsconfig.json`
+// selects `src`, and that entry cannot match a root-level file. The annotation
+// was therefore decorative -- `pnpm --filter @objectstack/service-i18n
+// typecheck` (a bare `tsc --noEmit`, this package's only program before this
+// change) still exited 0 regardless of what the manifest object contained.
+// `check:type-check-coverage`'s `isUncheckedSourceCandidate` skips
+// `depth === 0` by construction (the package-root line), so the gate reported
+// this package COVERED at the same time -- the same green-over-unread-source
+// shape #13284 found and fixed in `packages/drivers/driver-memory` and
+// `packages/plugins/plugin-hono-server`, and #14386 found two more instances
+// of (`plugin-auth`, `plugin-security`) beside this one. See
+// `scripts/check-type-check-coverage.mjs`'s `ROOT_SOURCE_FILES` for the
+// declared allowlist this repairs against.
+//
+// A SIBLING rather than a wider `include` on `tsconfig.json`, the distinction
+// #5475 drew for `packages/spec` and #10756 for `packages/objectql/scripts`,
+// and the shape `packages/drivers/driver-memory/tsconfig.typecheck.json`
+// (#13284) used for the identical case: that config EMITS (`rootDir: "src"`,
+// `outDir: "dist"`), so widening it to reach the package root would put the
+// manifest in front of the emit -- the measured failure mode there is TS6059
+// ("File ... is not under 'rootDir' ... 'rootDir' is expected to contain all
+// source files"), and it fires under `--noEmit` too. This program emits
+// nothing, so it can neutralise `rootDir` without touching what ships. `tsup`
+// builds `src/index.ts` (via the root `tsup.config.ts`) and `files` publishes
+// `dist` only, so nothing about the published package moves.
+//
+// STRICTNESS IS INHERITED and deliberately not relaxed: `strict`,
+// `esModuleInterop`, `forceConsistentCasingInFileNames` and the rest come from
+// the root config through `tsconfig.json`. The manifest type-checks clean
+// under them -- it enters with ZERO recorded debt, and there is no ledger here
+// to record any in.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // `.` rather than the inherited `src`, because the file this program
+    // checks is the one outside `src`. Safe precisely because nothing is
+    // emitted from here -- see the header.
+    "rootDir": "."
+  },
+  "include": ["objectstack.config.ts"]
+}

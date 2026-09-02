@@ -1271,6 +1271,61 @@ export class ArtifactObjectNameConflictError extends Error {
   }
 }
 
+/**
+ * [ADR-0029 D3] The cross-package ownership refusal: a package claims `own`
+ * on an object name that a DIFFERENT package already owns. Raised by
+ * {@link SchemaRegistry.registerObject} — the single-owner-per-object-name
+ * invariant, enforced at the one choke point every registration path goes
+ * through (the manifest load path via `ObjectQL.registerApp`, the metadata
+ * bridge, the `sys_metadata` hydration seams). The remedy the message names is
+ * the supported one: `extend` merges fields into the owner's definition instead
+ * of claiming a second owner.
+ *
+ * Carries the ADR-0112 envelope (`code` + `status`) — the shape this
+ * repository's rejection tests assert against, never a bare throw. Before it
+ * carried one, this refusal was a bare `Error`, and a throw-shaped assertion
+ * on the install-time `DUPLICATE_ARTIFACT_OBJECT_NAME` check one layer up
+ * stayed green with that check ablated: this refusal fired one step later and
+ * was indistinguishable to `toThrow()` (#14367). Only an envelope assertion
+ * can tell the two refusals apart, and only if both carry one.
+ *
+ * The message text is byte-for-byte what the bare `Error` carried, so every
+ * message-substring assertion and every forwarder that interpolates it into a
+ * `console.warn` or a per-record `errors` count reads exactly what it read
+ * before. The two package ids are typed as the contributor stores them
+ * (`ObjectContributor.packageId` is `string | undefined`, #12623) rather than
+ * narrowed, so the message stays identical on a package-less call too.
+ *
+ * ⛔ Not the ADR-0029 D9 §6.1 late-install branch beside it: a TENANT-authored
+ * sitting owner is re-classified as the code package's overlay layer, and
+ * nothing is refused there.
+ */
+export class ObjectOwnershipConflictError extends Error {
+  readonly code = 'OBJECT_OWNERSHIP_CONFLICT';
+  readonly status = 422;
+  /** The fully-qualified object name both packages claim. */
+  readonly objectName: string;
+  /** The package that already owns the name. */
+  readonly existingPackageId: string | undefined;
+  /** The package whose `own` claim this refusal stopped. */
+  readonly incomingPackageId: string | undefined;
+
+  constructor(
+    objectName: string,
+    existingPackageId: string | undefined,
+    incomingPackageId: string | undefined,
+  ) {
+    super(
+      `Object "${objectName}" is already owned by package "${existingPackageId}". ` +
+      `Package "${incomingPackageId}" cannot claim ownership. Use 'extend' to add fields.`
+    );
+    this.name = 'ObjectOwnershipConflictError';
+    this.objectName = objectName;
+    this.existingPackageId = existingPackageId;
+    this.incomingPackageId = incomingPackageId;
+  }
+}
+
 // [#10062] `isTenantAuthored` and `isCodeArtifactBody` used to be defined here.
 // They now live in `@objectstack/metadata-core`
 // (`code-artifact-provenance.ts`), imported at the top of this file and
@@ -1681,7 +1736,9 @@ export class SchemaRegistry {
    *   REPLACES the base at resolution; ADR-0029 D9) | 'extend' (additive merge)
    * @param priority - Merge priority (lower applied first, higher wins on conflict)
    * 
-   * @throws Error if trying to 'own' an object that already has a PACKAGED owner
+   * @throws {ObjectOwnershipConflictError} ADR-0112 envelope (`code` +
+   *   `status: 422`) if trying to 'own' an object that already has a PACKAGED
+   *   owner from another package
    */
   registerObject(
     schema: ServiceObject,
@@ -1797,10 +1854,10 @@ export class SchemaRegistry {
           `the tenant contribution (${existingOwner.packageId}) becomes its overlay layer.`
         );
       } else if (existingOwner && existingOwner.packageId !== packageId) {
-        throw new Error(
-          `Object "${fqn}" is already owned by package "${existingOwner.packageId}". ` +
-          `Package "${packageId}" cannot claim ownership. Use 'extend' to add fields.`
-        );
+        // [ADR-0029 D3] Two packages claiming one name — the cross-package
+        // refusal, carried as an ADR-0112 envelope (`code` + `status: 422`)
+        // with the message text unchanged. See {@link ObjectOwnershipConflictError}.
+        throw new ObjectOwnershipConflictError(fqn, existingOwner.packageId, packageId);
       } else if (existingOwner) {
         // Remove existing owner contribution from same package (re-registration).
         // Normal path (metadata rebuild / HMR / multi-project seed replays the
