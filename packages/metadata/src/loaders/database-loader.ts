@@ -23,7 +23,7 @@ import { SysMetadataObject, SysMetadataHistoryObject } from '@objectstack/metada
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import type { IDataDriver, IDataEngine, DriverQuery } from '@objectstack/spec/contracts';
-import type { MetadataLoader } from './loader-interface.js';
+import type { MetadataLoader, MetadataKeyedItem } from './loader-interface.js';
 import { calculateChecksum } from '../utils/metadata-history-utils.js';
 import { LRUCache } from '../utils/lru-cache.js';
 // [#13279] Both predicates moved to `@objectstack/types` — see its
@@ -870,15 +870,29 @@ export class DatabaseLoader implements MetadataLoader {
     }
   }
 
-  async loadMany<T = any>(
-    type: string,
-    _options?: MetadataLoadOptions
-  ): Promise<T[]> {
+  /**
+   * The one type-wide read both plural readers share: every row of `type`, each
+   * body paired with the `name` COLUMN it was stored under.
+   *
+   * [#14205] `name` is `null` only for a row whose key column does not hold a
+   * string. Such a row is still a body {@link loadMany} must return — dropping
+   * it would change what consumers see today — but it has no usable identity,
+   * so {@link loadManyKeyed} filters it out rather than invent one.
+   *
+   * One query and one cache entry serve both methods: `loadMany()` used to own
+   * them, and splitting them would have made every keyed `list()` read miss the
+   * cache and re-hit the database.
+   */
+  private async readTypeRows(
+    type: string
+  ): Promise<Array<{ name: string | null; data: Record<string, unknown> }>> {
     await this.ensureSchema();
 
     if (this.loadManyCache) {
       const cached = this.loadManyCache.get(type);
-      if (cached !== undefined) return cached as T[];
+      if (cached !== undefined) {
+        return cached as Array<{ name: string | null; data: Record<string, unknown> }>;
+      }
     }
 
     try {
@@ -886,9 +900,13 @@ export class DatabaseLoader implements MetadataLoader {
         where: this.baseFilter(type),
       });
 
-      const result = rows
-        .map(row => this.rowToData(row))
-        .filter((data): data is Record<string, unknown> => data !== null) as T[];
+      const result: Array<{ name: string | null; data: Record<string, unknown> }> = [];
+      for (const row of rows) {
+        const data = this.rowToData(row);
+        if (data === null) continue;
+        const name = row.name;
+        result.push({ name: typeof name === 'string' && name !== '' ? name : null, data });
+      }
 
       this.loadManyCache?.set(type, result);
       return result;
@@ -897,6 +915,37 @@ export class DatabaseLoader implements MetadataLoader {
       // Benign only: no table, therefore no items of this type. Not cached.
       return [];
     }
+  }
+
+  async loadMany<T = any>(
+    type: string,
+    _options?: MetadataLoadOptions
+  ): Promise<T[]> {
+    return (await this.readTypeRows(type)).map(entry => entry.data) as T[];
+  }
+
+  /**
+   * [#14205] The keyed half of {@link loadMany} — see
+   * {@link MetadataKeyedItem} for why the row key travels beside the body
+   * instead of inside it.
+   *
+   * `DatabaseLoader` is where the defect was measured: an aggregated view
+   * container is written by `register('view', OBJECT, container)` and stored
+   * verbatim, so its `sys_metadata` row carries the identity in the `name`
+   * COLUMN and the body has none. {@link rowToData} returns that body without
+   * folding the column in — deliberately, and unchanged here.
+   */
+  async loadManyKeyed<T = any>(
+    type: string,
+    _options?: MetadataLoadOptions
+  ): Promise<MetadataKeyedItem<T>[]> {
+    const entries = await this.readTypeRows(type);
+    const keyed: MetadataKeyedItem<T>[] = [];
+    for (const entry of entries) {
+      if (entry.name === null) continue;
+      keyed.push({ name: entry.name, data: entry.data as T });
+    }
+    return keyed;
   }
 
   async exists(type: string, name: string): Promise<boolean> {
