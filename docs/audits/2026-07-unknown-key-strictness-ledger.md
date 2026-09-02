@@ -580,6 +580,27 @@ dropped at parse, and nothing failed.
       `chart.test.ts` is part of #5056 — the campaign's own recurring lesson
       about a second copy of the truth, arriving this time in its instruments.
 
+21. **An all-optional stripping shape is a value that cannot fail — and an
+    instrument over it cannot count.** `LocationValueSchema` and `AddressSchema`
+    had every member optional, so under `.strip` a value with a completely
+    wrong key set parsed GREEN and the wrong keys vanished from the output. The
+    showcase's own seed wrote `postal_code` (#13388): accepted, dropped,
+    rendered as an empty ZIP box — and any stored-value scan over the class
+    reported a clean count it had no way to earn (#13802). Batch D had
+    re-verdicted the file `open` on a real door census and a hypothetical cost
+    (a phone's `heading`/`speed`, a geocoder's `district`); the corpus census the
+    ruling ordered first found **zero** such producers in-repo, and the
+    maintainer overruled the verdict (2026-09-01, option A). Closed with
+    `strictObject`; the refusal names the key and the rename
+    (`postal_code` → `postalCode`, `latitude` → `lat`). What did NOT move is the
+    write path's posture: ADR-0104's evidence gate decides where a refusal bites
+    (attested deployments reject, everyone else stays warn-first), and
+    `os migrate value-shapes` — which now counts the key — is the instrument that
+    earns the number. Two method notes: a `Class` verdict can be right about
+    WHO writes the input and still wrong about what the openness COSTS, and the
+    honest instrument reading for a shape that cannot fail is "unmeasurable",
+    never zero.
+
 ## Where this ended up
 
 **24 of 25 registered types closed** (from 9 when the line started), and the
@@ -705,7 +726,7 @@ column does not move and the `strip` column falls by the count of what left.
 | `mapping.zod.ts` | authorable (p) | |
 | `external-catalog.zod.ts` | wire (p) | |
 | `validation.zod.ts` | authorable | **strict as of #4001 batch 3b** — a `z.lazy()` discriminated union, so the one-call conversion does not apply: each of the six variants builds its own `strictObject` from a shared `BASE_VALIDATION_SHAPE`. Closing the base alone would have rejected correctly but suggested from the SHARED keys only, so a typo of a variant's own key (`transtions` → `transitions`) would get no rename. Site count 1 → 6 because the six variants are now object sites in their own right. The ADR-0010 envelope lives in the shared shape, so all six inherit it |
-| `field-value.zod.ts` / `seed.zod.ts` | open | `seed` is strict (registered-types batch). **`field-value` re-verdicted `open` 2026-08-14 (#4001 batch D)** — the row's own "record data, very likely open" prediction, now measured: `LocationValueSchema` and `AddressSchema` are ADR-0104 VALUE contracts whose input is record data (end users, importers, device geolocation APIs, geocoders), consumed validation-only (`record-validator`'s `shapeSchemaFor(def).safeParse(value)` — the value is stored verbatim, so `.strip` never actually strips anything), with enforcement posture owned by ADR-0104's own evidence-gated warn-first rollout, not this ratchet. Closing them would reject legitimate stored data — a phone's geolocation payload carries `heading`/`speed`, a geocoder's address carries `district` — exactly the openness their sibling `FileValueSchema` declares with `z.looseObject` ("renderers add their own"). One caveat recorded rather than glossed: a `location`/`address` field's authored `defaultValue` literal validates through the same contract (#7127), so an author's extra key there is admitted silently — that is the value contract serving two doors with one posture, and splitting it strict-for-defaults/open-for-records would fork the ADR-0104 contract |
+| `field-value.zod.ts` / `seed.zod.ts` | authorable | `seed` is strict (registered-types batch). **`field-value` strict as of #13802 (2026-09-02) — re-verdicted `open` → `authorable` by maintainer ruling 2026-09-01 (option A, director batch #26, verbatim 「同意」), overruling this row's #4001 batch D reading.** Both value contracts (`LocationValueSchema`, `AddressSchema` = `AddressValueSchema`) are `strictObject` now; `FileValueSchema` stays `z.looseObject` on purpose — the one deliberate loose site, ⛔ untouched. What batch D got wrong was not the door census but the cost model: every member of both shapes is OPTIONAL, so under `.strip` a value with a completely wrong key set still parsed green and the wrong keys vanished — the showcase seed wrote `postal_code`, the platform accepted it, dropped it, and rendered an empty ZIP box (#13388; found by objectui#6812's survey; #5143 had named the same stripping on the widget round-trip) — while any stored-value scan over the class could only ever report zero (#13802's finding: an instrument reporting a number it has no way to earn). The "legitimate extras" (`heading`/`speed`, `district`) were a hypothesis with no in-repo producer. **Corpus census at `a39b02a6`, ordered first by the ruling**: every in-repo corpus that writes address/location VALUES — `examples/**`, `packages/apps/**`, `packages/qa/**`, `packages/**/src` fixtures and tests, `content/docs/**`, `skills/**`, `.changeset/**`, `docs/**` (`.ts/.tsx/.js/.mjs/.cjs/.json/.yaml/.yml/.md/.mdx`; generated `references/`, `releases/`, CHANGELOGs excluded) — a brace-matched scan of 8459 files / 196,098 leaf object literals found 57 address- or location-shaped literals and **0 carrying a key outside the declared sets** other than batch D's own tolerance pin in `analytics-strictness-batchd.test.ts` (repinned to the closure in the same stroke; the SCIM hits are `SCIMAddressSchema`, a different contract). The spelling grep `git grep -n -E "postal_code|zip_code|zipCode|postcode|latitude|longitude|heading *:|speed *:|district *:" -- 'examples/**' 'packages/apps/**' 'packages/qa/**' 'packages/spec/**' 'content/docs/**' 'skills/**'` hits only the retired-form docs, `ListMapConfig`'s field-name keys and pins. So the repair commit the ruling ordered first was EMPTY by measurement — #13388's seed fix had already landed at #14090. **Migration note — where the refusal bites, by call site** (`git grep -n "valueSchemaFor(" -- packages`, non-test): ① **authoring, hard reject, unconditional** — a `location`/`address` field's literal `defaultValue` (`default-value-shape.ts` `checkLiteralDefaultValue` → `FieldSchema`, #7127) and an action-param value of those types (`ui/action-params.zod.ts` `validateActionParams`, D2 strict by default since 17.0); ② **record writes, per deployment** — objectql `record-validator` `validateOne` (`shapeSchemaFor(def).safeParse(value)`, insert and update) rejects with `invalid_type` / `invalid_value_shape` ONLY when `valueShapeStrictEffective` holds (the deployment attested `adr-0104-value-shapes`, or `OS_DATA_VALUE_SHAPE_STRICT_ENABLED=1`; `OS_ALLOW_LAX_VALUE_SHAPES=1` re-opens), otherwise **warn-first** — logged once per field and reported to the admitted-violation sink (#4769), unchanged; ③ **the scan** — `os migrate value-shapes` (`valueShapeViolation`, the same predicate) now COUNTS an undeclared key, so a deployment holding such values cannot attest until they are cleaned at the producer — the mechanism that keeps ② from stranding stored data; ④ **read paths: none** — no consumer calls `valueSchemaFor(def, 'expanded')` for these types outside `packages/spec` (`git grep "'expanded')" -- 'packages/**/src/**' ':!packages/spec/**'` → 0 hits), drivers return the stored JSON verbatim and renderers read it, so a stored `{ …, postal_code }` still reads back as written. ⛔ Per the ruling no read path was narrowed; the customer-database inventory is the one thing this repo cannot see — a confidence gap recorded here, not glossed: the scan is the instrument that closes it per deployment. ⛔ No consumer-side alias (AGENTS.md #0.1): the `aliases` on both shapes are did-you-mean RENAMES in the refusal message (`zipCode`/`zip`/`postcode` → `postalCode`, `latitude`/`longitude` → `lat`/`lng`), not tolerance — `postal_code` is refused, never read. objectui at the pin (`LocationField.tsx`) `safeParse`s only a widget-built `{ lat, lng, altitude?, accuracy? }` candidate, so its verdicts do not move; its `LocationField.optionalKeys.test.tsx` pins the OLD strip behaviour and flips the day objectui takes a spec carrying this — filed there, not here. D3 semantic entry `address-location-value-unknown-keys-refused` (protocol 18). Re-check: `git grep -n "strictObject(\|looseObject(\|z.object(" -- packages/spec/src/data/field-value.zod.ts` → two `strictObject(`, one `z.looseObject(`, zero `z.object(` |
 
 ### `automation/` — file-level triage
 
@@ -1212,7 +1233,6 @@ triage row record which one was taken.
 | `hook.zod.ts` | wire | **out of scope** — `HookContextSchema` + `.session`/`.provenance`/`.user` are the runtime shape handed to a handler; verified in the data step |
 | `field.zod.ts` | no door | ⛔ **not strictness work — re-verdicted 2026-08-13 (#4001 data batch).** This row's own instruction was "check whether they are record data (→ open) before closing", and the measured answer is the THIRD one: neither authorable nor open. Both remaining strip sites (`LocationCoordinatesSchema`, `CurrencyValueSchema`) are `@deprecated` DEAD EXPORTS that contradict the enforced value contract — `currency` stores a BARE NUMBER everywhere (validator, SQL driver `float` column, import coercion, field-zoo oracle), `location` stores `{lat, lng}` not `{latitude, longitude}`. Carrier: absent — no schema in the tree references either, so unreachability from every authoring root holds by construction and no BFS is needed (the only non-test references are two `type-alias-convention.pin.test.ts` rows). Parse: absent outside their own `field.test.ts` cases. Consumers' vocabulary: absent — zero references in objectui; `field-value.test.ts` pins from the other direction that the enforced contract REJECTS the retired `CurrencyValueSchema` object shape. The ADR-0049 answer this class prescribes already exists: ADR-0104's "Reality wins" section decides both removals ("an exported-but-unconsumed value schema is exactly the inert metadata ADR-0078 forbids"), the JSDoc deprecations are on `main` with "Removal rides the next spec major", and the removal is tracked at **#8562** — this row points there, never at a batch. Closing them instead would be #4583's precisely-validated dead slot, and worse than most instances of it: a `strictObject` `surface` name plus did-you-mean suggestions on a shape authors must NOT use is an invitation dressed as enforcement, on the exact spelling (`{value, currency}` / `{latitude, longitude}`) the real contract rejects. The third named shape the old row carried, `Address`, was never this file's site — `AddressSchema` is DECLARED in `field-value.zod.ts` since #7127 and only re-exported here |
 | `driver-sql.zod.ts` | wire | **out of scope** |
-| `field-value.zod.ts` | open | **out of forced scope — re-verdicted from `mixed (p)` at #4001 batch D**, confirming this row's own prediction by measurement rather than reading: `LocationValueSchema` / `AddressSchema` are record-data VALUE contracts (ADR-0104), validation-only at every consumer, whose extras are legitimate stored data (device `heading`/`speed`, geocoder `district`). Enforcement posture belongs to ADR-0104's evidence-gated rollout, not this ratchet — see the triage row for the full read, including the one authored door (`defaultValue` literals) recorded as a caveat |
 
 **Authorable strip in `data/`:**
 [the counts file](./2026-07-unknown-key-strictness-ledger.counts.md#data--open) splits this
@@ -1228,7 +1248,9 @@ authorable on both halves and was CLOSED (8 sites strict — its row leaves this
 way `driver/memory.zod.ts`'s did, by reaching zero), `seed-loader` re-verdicted `wire`
 (12 sites — the "authored" half of the old provisional split did not survive producer
 enumeration), and `field-value` re-verdicted `open` (2 sites — ADR-0104 record-data
-value contracts). (`external-lookup` carried `mixed (p)` too
+value contracts) — **a verdict overruled at #13802 (2026-09-02)**: the maintainer ruled both
+sites closed (option A), the row left this map at zero, and the triage row now carries the
+corpus census and the migration note that the closure owed. (`external-lookup` carried `mixed (p)` too
 until #8075 retired the whole file under ADR-0049 — its per-schema read arrived as a
 zero-consumer verdict, and the strictness question died with the shapes.) The rest is wire/open and out of the
 ruling's forced scope; that count fell by one when #4721 closed `query.zod.ts`'s
@@ -1645,6 +1667,11 @@ readable in one place:
 - the `data/` waves — batch A, batch B, batch D and 批 20 — ending with
   `object.zod.ts` site 14 once its cross-repo hold (#5247 → objectui#4772) was
   spent.
+- one post-campaign flip, **#13802** (2026-09-02): `field-value.zod.ts`'s two value
+  contracts, closed after the maintainer overruled batch D's `open`. The first row in the
+  map to move by RULING rather than by measurement — and note what the ruling corrected:
+  not the door census (batch D's producers were real) but the cost model, which had
+  priced a hypothetical extra key above a measured silent strip.
 
 **The method that survived all of them**: verify who writes the input *before*
 tightening, per schema and never per file, with a positive control in the same
@@ -1738,7 +1765,9 @@ from an abandoned one.
   no slice of this campaign delivered.
 - **The 122 non-authorable strip sites**, in the map's 22 file rows (the
   `view.zod.ts` row is the one that spans both, `1 authorable, 2 wire`). Wire,
-  open, `no door` and `covered` rows stay in the map by design. The `no door`
+  open, `no door` and `covered` rows stay in the map by design. *(2026-09-02:
+  121 non-authorable in 21 rows — #13802 closed `field-value.zod.ts`'s two `open` sites by
+  maintainer ruling; the counts file carries the live number.)* The `no door`
   ones carry the only follow-up in the set, and it is a different ratchet:
   ADR-0049 removal, tracked at #8562 for `field.zod.ts`'s two.
 - **The nine untriaged directories.** They were never in the ruling's forced
