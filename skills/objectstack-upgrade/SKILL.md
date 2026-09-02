@@ -248,12 +248,26 @@ inside the installed package. **Measured** against the published
 | **The error itself** | Your parse / `tsc` output | The same prescription string, delivered at the moment you hit it. |
 
 ```bash
-# every tombstone prescription the installed spec carries, deduped
+# every tombstone prescription the installed spec carries, deduped (`| wc -l` sizes it)
 grep -rho '\[REMOVED\][^"]*' node_modules/@objectstack/spec/json-schema/ | sort -u
+
+# protocol version, support floor, and this crossing's conversion / semantic counts
+node -e "
+  const p = require.resolve('@objectstack/spec/package.json');
+  const j = require(p.replace('package.json','spec-changes.json'));
+  const to = parseInt(j.protocolVersion, 10);
+  const e = j.perMajor.find(x => x.to === to);
+  console.log(j.protocolVersion, 'floor', j.supportFloor, '| →', to + ':',
+              e.converted.length, 'converted,', e.migrated.length, 'semantic');
+"
 
 # the FROM → TO table for one retired key
 grep -n -B4 -A20 'transform' node_modules/@objectstack/spec/CHANGELOG.md | less
 ```
+
+⛔ **Never carry a remembered count or a pinned table into the report.** Every
+number here is a reading of *this* install; measure it at the start of the
+upgrade and again in the report.
 
 > **Not reachable from a consumer project**, so do not send anyone there: the
 > conversion and migration registries (`src/conversions/registry.ts`,
@@ -548,71 +562,6 @@ you must say which you expect:
 Record which one you actually got. A check whose expected direction you did not
 state in advance proves nothing, and "it passed" is a different fact in each of
 the three cases.
-
----
-
-## The v17 prescription set, as of `17.0.0-rc.5`
-
-This section is a **pinned reading**, not a live list. It was measured from the
-spec sources at the `17.0.0-rc.5` publish and is deliberately bounded so that
-entries registered after that publish are a visible *delta* rather than a silent
-contradiction.
-
-| Reading | Value at `17.0.0-rc.5` |
-|:--|:--|
-| `@objectstack/spec` version | `17.0.0-rc.5` (protocol `17.0.0`) |
-| Chain support floor | protocol 10 |
-| D2 conversions for major 17 | **45** |
-| D3 semantic entries for major 17 | **29** |
-| `retiredKey()` tombstones in shipped `*.zod.ts` | **113**, across 32 files |
-| Distinct `[REMOVED]` prescriptions in shipped `json-schema/` | **96** |
-
-`RETIRED_KEYS_BY_MAJOR[17]` — every authorable key formally tombstoned under the
-exact-key registry at this publish (3 entries, one retirement: the property is
-declared once and inherited by two extending schemas, so it is registered three
-times):
-
-- `data/ExternalFieldMapping:transform`
-- `integration/ConnectorFieldMapping:transform`
-- `shared/FieldMapping:transform`
-
-`RETIRED_DEFS_BY_MAJOR[17]` — every whole schema def unpublished at this publish
-(1 entry):
-
-- `shared/FieldMappingTransform`
-
-> **Why these two tables are short and the counts above are not.** They record
-> retirements registered under the exact-key gates that created them, which are
-> newer than most of protocol 17's work; they are explicitly *not* a backfill of
-> every retirement ever. The 45 conversions and 113 tombstones are the real size
-> of the v17 surface. Use the tables to answer "was this retirement formally
-> registered", and the conversions/tombstones to answer "what do I have to
-> change" — the second question is the upgrade's question.
-
-### How this table is refreshed
-
-**Never hand-edit the numbers above from memory.** Re-measure against whatever
-spec the project has installed — one command per row:
-
-```bash
-# protocol version, support floor, and the per-major conversion / semantic counts
-node -e "
-  const p = require.resolve('@objectstack/spec/package.json');
-  const j = require(p.replace('package.json','spec-changes.json'));
-  const e = j.perMajor.find(x => x.to === 17);
-  console.log(j.protocolVersion, 'floor', j.supportFloor, '| 16→17:',
-              e.converted.length, 'converted,', e.migrated.length, 'semantic');
-"
-
-# tombstone prescriptions actually present in this install
-grep -rho '\[REMOVED\][^"]*' node_modules/@objectstack/spec/json-schema/ | sort -u | wc -l
-```
-
-If a reading disagrees with the table, **the install wins** — the table is a
-snapshot of one publish, and post-`rc.5` registrations are expected to add
-entries. Record the delta in the upgrade report rather than editing this
-section's pinned numbers; the pin is what makes a later disagreement legible
-instead of invisible.
 
 ---
 
