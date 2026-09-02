@@ -583,6 +583,14 @@ export function countSessionBindings(text, file) {
  * that a widened alias list could satisfy would be that harness. These can be
  * satisfied only by resolving where the value came from.
  */
+
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const BT = String.fromCharCode(96); // backtick, kept out of the literals below
   const cases = [
@@ -686,6 +694,7 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`✓ check-org-identifier self-test: ${cases.length + 1} cases pass.`);
+  selfTestReachedVerdict = true;
 }
 
 function sourceFiles(root) {
@@ -710,7 +719,18 @@ function repoRoot() {
 }
 
 function main() {
-  if (process.argv.includes('--self-test')) return selfTest();
+  if (process.argv.includes('--self-test')) {
+      const selfTestCode = selfTest();
+      if (!selfTestReachedVerdict) {
+          console.error(
+              '\n✗ check-org-identifier self-test: selfTest() returned without reaching its verdict,\n'
+                  + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                  + 'that never finished as a self-test that passed.\n',
+          );
+          process.exit(1);
+      }
+      return selfTestCode;
+  }
 
   const root = repoRoot();
   const files = sourceFiles(root);

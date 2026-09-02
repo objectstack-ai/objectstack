@@ -1480,6 +1480,12 @@ function unionInto(listPath, changedPath) {
   }
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-cross-package-test-inputs self-test reached its verdict';
+
 function selfTest() {
   const cases = [];
   const ok = (label, cond) => cases.push({ label, cond });
@@ -2319,6 +2325,8 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`\nAll ${cases.length} self-test cases passed.`);
+
+  return SELF_TEST_VERDICT;
 }
 
 // ---------------------------------------------------------------------------
@@ -2346,7 +2354,16 @@ function selfTest() {
 // `check:entry-guard`, which fails any other spelling in `scripts/**`.
 if (isEntrypoint(import.meta.url)) {
   const argv = process.argv.slice(2);
-  if (argv.includes('--self-test')) selfTest();
+  if (argv.includes('--self-test')) {
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-cross-package-test-inputs self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  }
   else if (argv.includes('--list-escapes')) {
     for (const [name, info] of [...findEscapingPackages()].sort()) {
       console.log(`${name}  (${info.dir})`);

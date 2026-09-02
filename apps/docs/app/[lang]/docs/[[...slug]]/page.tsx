@@ -55,14 +55,17 @@ type DocPage = NonNullable<ReturnType<typeof source.getPage>>;
  * `index` node. ⛔ Nothing here splits `page.url` on `/`, and nothing constructs a
  * URL the loader has not already produced.
  *
- * ⚠️ **An ancestor can arrive without a URL, and this drops it.** Fumadocs
- * attaches a folder's `index.mdx` as that folder's `index` node only when the
- * folder's `meta.json` does **not** list `"index"` in `pages`; a folder that
- * lists it reaches this walk with a `name` and no `url`. That was once 17 of the
- * 35 `meta.json` files under `content/docs`, shortening 172 of 404 trails. 16 of
- * the 17 were fixed producer-side (#12352) and 8 short trails remain, all under
- * `content/docs/releases/` — a directory AGENTS.md fences off, so its `meta.json`
- * still lists `"index"`. The condition is therefore live, just rare.
+ * ⚠️ **An ancestor can arrive without a URL, and the loop below drops it.**
+ * `getBreadcrumbItems()` does not drop anything itself — it emits that
+ * ancestor with a `name` and `url: undefined`. The drop happens locally, in
+ * this file: the `if (typeof item.name !== 'string' || !item.url) continue;`
+ * guard in the loop below skips it. Fumadocs attaches a folder's `index.mdx`
+ * as that folder's `index` node only when the folder's `meta.json` does
+ * **not** list `"index"` in `pages`; a folder that lists it reaches this walk
+ * with a `name` and no `url`. #12352 and #13946 fixed every `meta.json` under
+ * `content/docs` that did so — today's corpus has none — but the condition is
+ * structural, not retired: any `meta.json` that lists `"index"` again
+ * reproduces it.
  *
  * ⛔ The missing URL is deliberately **not** reconstructed here — that fence is
  * the reason #12352 was fixable at all. The folder's index page exists, is in the

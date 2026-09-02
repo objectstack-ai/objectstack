@@ -3337,6 +3337,12 @@ function report() {
 // against synthetic sources on BOTH sides of every decision it makes, so a
 // refactor that neuters it fails here instead of turning every future PR green.
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-engine-double-contract self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   const expect = (label, cond) => { if (!cond) failures.push(label); };
@@ -4840,9 +4846,20 @@ const driver: any = { create: async (o: string, d: any) => d, find: async (o: st
       + 'while refusing a router, a file-local look-alike, a wrong-module import, a type '
       + 'argument and a driver-shaped verb, and moving discovery and the census together.',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
-if (process.argv.includes('--self-test')) selfTest();
+if (process.argv.includes('--self-test')) {
+  if (selfTest() !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ check-engine-double-contract self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
+}
 else if (process.argv.includes('--write')) writeLedger();
 else if (process.argv.includes('--census')) censusReport();
 else report();

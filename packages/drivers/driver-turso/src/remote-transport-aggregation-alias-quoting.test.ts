@@ -269,37 +269,44 @@ describe('[#14113] RemoteTransport — the aggregation alias is escaped, not gat
       expect(seen).toEqual([]);
     });
 
-    it('the groupBy alias position is UNCHANGED — still refused, and that is a separate card', async () => {
-      // ⚠️ Deliberate scope line, pinned so it cannot drift silently. The
-      // groupBy `alias` is the same class of thing (an output NAME) and
-      // `driver-sql` escapes it post-#13714 (`aliasIdentifierSql` at its
-      // groupBy select site), so this face diverges there too — but that
-      // position carries a LANDED pin (#6401, `remote-transport-groupby-node`)
-      // asserting the refusal, so reversing it is a judgement this card was not
-      // dispatched to make. Filed separately rather than patched inline; this
-      // control records the state it was left in.
+    it('[#14235] the groupBy alias position is now ESCAPED TOO — the scope line this card left is closed', async () => {
+      // ⚠️ This case REPLACES the deliberate scope line #14113 left here, which
+      // asserted this same input is REFUSED and said of itself: "Filed
+      // separately rather than patched inline; this control records the state
+      // it was left in." #14235 is the card it was waiting for. It reached the
+      // same reference-versus-name line by the same reasoning — an output NAME
+      // is quoted and escaped, a column REFERENCE is validated — so BOTH
+      // output-name positions of `aggregate` now route through
+      // `aliasIdentifierSql`, and this face agrees with `driver-sql` (which has
+      // routed both since #13714) on the whole method rather than one loop.
       //
-      // It is also NOT on the reproducing path: `ObjectQLStrategy` resolves a
-      // dimension to a bare column name, so no analytics query sends a dotted
-      // groupBy alias.
+      // What is pinned here is what the two positions do TOGETHER in one
+      // statement: a dotted dimension alias beside a dotted measure alias, both
+      // quoted, neither refused. That is the assertion #14113's control could
+      // not make while it was holding the scope line.
       const { t, seen } = await capturing();
-      const err = await t
-        .aggregate(DELIVERY_OBJECT.name, {
-          object: DELIVERY_OBJECT.name,
-          groupBy: [{ field: 'region', alias: 'showcase_delivery.region' }],
-          aggregations: [{ function: 'count', alias: 'showcase_delivery.count' }],
-        } as never)
-        .then(
-          () => { throw new Error('expected the groupBy alias to still be refused') },
-          (e) => e as Error,
-        );
-      expect(err.message).toContain('unsafe identifier rejected');
-      expect(err.message).toContain('showcase_delivery.region');
-      // [#14287] The GATING is what this control holds; the ENVELOPE is what
-      // that card added to it. Both are pinned, so the open gating card cannot
-      // be mistaken for having landed.
-      expect(envelopeOf(err)).toEqual(ENVELOPE);
-      expect(seen).toEqual([]);
+      const rows = await t.aggregate(DELIVERY_OBJECT.name, {
+        object: DELIVERY_OBJECT.name,
+        groupBy: [{ field: 'region', alias: 'showcase_delivery.region' }],
+        aggregations: [{ function: 'count', alias: 'showcase_delivery.count' }],
+      } as never);
+      expect(seen).toEqual([
+        'SELECT "region" AS "showcase_delivery.region", count(*) AS "showcase_delivery.count" ' +
+          'FROM "showcase_delivery" GROUP BY "region"',
+      ]);
+      // ⛔ Neither dot may become a qualified reference: both stay INSIDE their
+      // own quotes.
+      expect(seen[0]).not.toContain('"showcase_delivery"."region"');
+      expect(seen[0]).not.toContain('"showcase_delivery"."count"');
+      // Executed, not merely emitted — the values come back under the caller's
+      // own keys, and GROUP BY still keys on the FIELD.
+      const byRegion = Object.fromEntries(
+        (rows as Array<Record<string, unknown>>).map((r) => [
+          r['showcase_delivery.region'],
+          r['showcase_delivery.count'],
+        ]),
+      );
+      expect(byRegion).toEqual({ west: 2, east: 1 });
     });
 
     it('the default alias is byte-identical to what it was before', async () => {

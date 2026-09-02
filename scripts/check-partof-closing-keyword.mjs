@@ -212,6 +212,12 @@ export function judge(ctx) {
 // activity type without which a reworded body can never go green.
 // ---------------------------------------------------------------------------
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-partof-closing-keyword self-test reached its verdict';
+
 function selfTest() {
   const cases = [];
   const t = (name, actual, expected) => cases.push([name, actual, expected]);
@@ -351,6 +357,8 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`✓ check-partof-closing-keyword self-test: ${cases.length} cases pass.`);
+
+  return SELF_TEST_VERDICT;
 }
 
 // The basename comparison, as in the sweep: this file is imported by nothing
@@ -358,7 +366,14 @@ function selfTest() {
 const isMain = isEntrypoint(import.meta.url);
 if (isMain) {
   if (process.argv.includes('--self-test')) {
-    selfTest();
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-partof-closing-keyword self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
   } else {
     const result = judge(readPrContext(process.env));
     const emit = result.exit === EXIT_CLEAN ? console.log : console.error;

@@ -484,6 +484,12 @@ export const FILTER_SLOT_QUERY_PARAMS: readonly string[] = (() => {
 `;
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-filter-alias-parity self-test reached its verdict';
+
 function selfTest() {
     const failures = [];
     const check = (name, condition, detail) => {
@@ -612,13 +618,22 @@ function selfTest() {
         'check:filter-alias-parity --self-test passed (parity at four and at five spellings, both drift '
         + 'directions, the two-hop `$` alias, four rot shapes, and the CI wiring)',
     );
+
+    return SELF_TEST_VERDICT;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 
 function main() {
     if (process.argv.includes('--self-test')) {
-        selfTest();
+        if (selfTest() !== SELF_TEST_VERDICT) {
+            console.error(
+                '\n✗ check-filter-alias-parity self-test: selfTest() returned without reaching its verdict,\n'
+                    + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                    + 'that never finished as a self-test that passed.\n',
+            );
+            process.exit(1);
+        }
         return;
     }
     selfTest();

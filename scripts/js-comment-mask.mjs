@@ -411,6 +411,13 @@ export function maskComments(source) {
  * `GHOST` marks genuinely commented-out text that must NOT survive (keeping it
  * makes the gate FABRICATE a finding out of prose).
  */
+
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'js-comment-mask self-test reached its verdict';
+
 export function selfTest() {
   const BT = String.fromCharCode(96); // backtick, kept out of the literal below
   const cases = [
@@ -569,13 +576,24 @@ export function selfTest() {
     process.exit(1);
   }
   console.log(`\u2713 js-comment-mask self-test: ${total} cases pass (${cases.length} mask/strip corpus, ${extra.length} interpolation view).`);
+
+  return SELF_TEST_VERDICT;
 }
 
 // Executed only as a CLI. Importing this module must have NO side effect: the
 // gates below it are the callers, and a shared module that exits on import is
 // a shared module nobody can share.
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) selfTest();
+  if (process.argv.includes('--self-test')) {
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ js-comment-mask self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  }
   else {
     console.error('usage: node scripts/js-comment-mask.mjs --self-test');
     process.exit(2);
