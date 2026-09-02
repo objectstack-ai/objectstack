@@ -442,6 +442,7 @@
     "UpgradeSnapshotParsed": "src/kernel/package-upgrade.zod.ts#UpgradeSnapshotParsed (type)",
     "UpgradeSnapshotSchema": "src/kernel/package-upgrade.zod.ts#UpgradeSnapshotSchema (const)",
     "VIEW_LAYOUT_WITHOUT_BINDING": "src/kernel/functional-completeness.ts#VIEW_LAYOUT_WITHOUT_BINDING (const)",
+    "VIEW_TREE_WITHOUT_PARENT_FIELD": "src/kernel/functional-completeness.ts#VIEW_TREE_WITHOUT_PARENT_FIELD (const)",
     "ValidationError": "src/kernel/plugin-validator.zod.ts#ValidationError (type)",
     "ValidationErrorSchema": "src/kernel/plugin-validator.zod.ts#ValidationErrorSchema (const)",
     "ValidationResult": "src/kernel/plugin-validator.zod.ts#ValidationResult (type)",

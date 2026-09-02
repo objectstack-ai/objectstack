@@ -27,10 +27,12 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import type {
+  DriverOptions,
   EngineAggregateOptions,
   EngineCountOptions,
   EngineQueryOptions,
 } from '@objectstack/spec/data';
+import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { ObjectQL } from './engine.js';
 
 /**
@@ -65,7 +67,49 @@ const deal = {
   },
 };
 
-interface SeenRead { ast: any }
+/**
+ * WITNESS SEAM 1 — what the driver was handed.
+ *
+ * `ast` is the driver contract's own {@link DriverQuery}
+ * (`Omit<QueryAST, 'object'>`, `@objectstack/spec/contracts`), NOT `any`. Every
+ * assertion in this file reads `lastWhere()` off this record, so the record IS
+ * the unreachability evidence — and evidence typed `any` is checked by nothing:
+ * `ast.where` could be renamed, retyped or dropped at the engine→driver
+ * boundary and this file would keep passing while proving less than it says.
+ * Naming the real type is what makes a drift there redden the pin.
+ */
+interface SeenRead { ast: DriverQuery }
+
+/**
+ * WITNESS SEAM 2 — what the double is standing in for.
+ *
+ * The recording double is annotated against the REAL driver contract rather
+ * than left `any`, for the reason `engine-primary-datasource.test.ts` states
+ * for its own fixture: `registerDriver` takes `IDataDriver`, so an un-annotated
+ * double is checked nowhere and drifts silently as the interface grows. With
+ * the annotation THIS declaration is what fails when a member is added or a
+ * signature moves.
+ *
+ * The one extension: `aggregate` is NOT on `IDataDriver`. The engine reaches it
+ * by duck-typing (`typeof drv.aggregate === 'function'`, `engine.ts`), so it is
+ * declared here explicitly — the pin exercises that verb and must keep
+ * witnessing it. ⚠️ Declared here does NOT make it contractual; it records that
+ * this double answers a call the interface does not describe.
+ */
+interface RecordingDriver extends IDataDriver {
+  aggregate(object: string, query: DriverQuery, options?: DriverOptions): Promise<Record<string, unknown>[]>;
+}
+
+/**
+ * A verb the pin does not exercise, present only because `IDataDriver` requires
+ * it. Throwing rather than no-op'ing keeps the double a WITNESS: if the engine
+ * ever routes one of these paths, this file says so instead of passing on a
+ * silent stub. Nothing here is reached today — the suite's 52 passing cases are
+ * the reading.
+ */
+const unexercised = (verb: string): never => {
+  throw new Error(`recording driver: ${verb}() is not exercised by this pin (#5158/#13357)`);
+};
 
 /**
  * Minimal driver that records every AST it is handed and executes only the
@@ -104,17 +148,17 @@ function makeRecordingDriver() {
     }
     return true;
   };
-  const run = (ast: any) => {
+  const run = (ast: DriverQuery | undefined) => {
     const out = [...rows.values()].filter((r) => matches(r, ast?.where));
     return typeof ast?.limit === 'number' && ast.limit > 0 ? out.slice(0, ast.limit) : out;
   };
-  const driver: any = {
+  const driver: RecordingDriver = {
     name: 'recording', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-    async find(_o: string, ast: any) { reads.push({ ast }); return run(ast); },
-    async findOne(_o: string, ast: any) { reads.push({ ast }); return run(ast)[0] ?? null; },
-    async count(_o: string, ast: any) { reads.push({ ast }); return run(ast).length; },
-    async aggregate(_o: string, ast: any) { reads.push({ ast }); return run(ast); },
+    async find(_o: string, ast: DriverQuery) { reads.push({ ast }); return run(ast); },
+    async findOne(_o: string, ast: DriverQuery) { reads.push({ ast }); return run(ast)[0] ?? null; },
+    async count(_o: string, ast: DriverQuery) { reads.push({ ast }); return run(ast).length; },
+    async aggregate(_o: string, ast: DriverQuery) { reads.push({ ast }); return run(ast); },
     async create(_o: string, data: Record<string, unknown>) {
       const id = (data.id as string) ?? `r_${rows.size + 1}`;
       const row = { ...data, id }; rows.set(id, row); return row;
@@ -123,14 +167,14 @@ function makeRecordingDriver() {
       const cur = rows.get(id); if (!cur) throw new Error(`nf ${id}`);
       const up = { ...cur, ...data, id }; rows.set(id, up); return up;
     },
-    async updateMany(_o: string, ast: any, data: Record<string, unknown>) {
+    async updateMany(_o: string, ast: DriverQuery, data: Record<string, unknown>) {
       writes.push({ ast });
       const hit = run(ast);
       for (const r of hit) rows.set(r.id as string, { ...r, ...data });
       return hit.length;
     },
     async delete(_o: string, id: string) { return rows.delete(id); },
-    async deleteMany(_o: string, ast: any) {
+    async deleteMany(_o: string, ast: DriverQuery) {
       writes.push({ ast });
       const hit = run(ast);
       for (const r of hit) rows.delete(r.id as string);
@@ -141,6 +185,12 @@ function makeRecordingDriver() {
     },
     async beginTransaction() { return { commit: async () => {}, rollback: async () => {} }; },
     async commit() {}, async rollback() {},
+    // ── required by `IDataDriver`, never reached by this pin ──────────────
+    async upsert() { return unexercised('upsert'); },
+    async bulkUpdate() { return unexercised('bulkUpdate'); },
+    async bulkDelete() { return unexercised('bulkDelete'); },
+    async syncSchema() { return unexercised('syncSchema'); },
+    async dropTable() { return unexercised('dropTable'); },
   };
   return { driver, reads, writes };
 }

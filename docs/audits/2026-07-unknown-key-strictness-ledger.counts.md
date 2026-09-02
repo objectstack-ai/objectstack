@@ -22,8 +22,8 @@ regenerate.
 |---|---|
 | Triaged directories | 5 |
 | Object sites in them | 437 |
-| Still-open (strip) sites | 124 |
-| Files carrying at least one | 22 |
+| Still-open (strip) sites | 122 |
+| Files carrying at least one | 21 |
 
 Remaining strip sites by class:
 
@@ -31,7 +31,7 @@ Remaining strip sites by class:
 |---|---|
 | authorable — the ruling's forced scope | 1 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 119 |
+| wire / open — out of forced scope | 117 |
 | no door — no carrier, ADR-0049 territory | 3 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 1 |
@@ -45,11 +45,11 @@ The `strict` column is the one the campaign schedules against; it counts both th
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
 | `ui/` | 169 | 157 | 5 | 0 | 7 |
-| `data/` | 156 | 74 | 1 | 0 | 81 |
+| `data/` | 156 | 76 | 1 | 0 | 79 |
 | `automation/` | 65 | 42 | 0 | 0 | 23 |
 | `security/` | 20 | 7 | 0 | 0 | 13 |
 | `studio/` | 27 | 27 | 0 | 0 | 0 |
-| **total** | **437** | **307** | **6** | **0** | **124** |
+| **total** | **437** | **309** | **6** | **0** | **122** |
 
 ## File-level triage — site counts
 
@@ -176,7 +176,7 @@ over it is here.
 
 ### `data/` — open
 
-**81 strip of 156**, in 12 file(s).
+**79 strip of 156**, in 11 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
@@ -186,19 +186,18 @@ over it is here.
 | `driver-sql.zod.ts` | 2 | 2 |
 | `driver.zod.ts` | 9 | 9 |
 | `external-catalog.zod.ts` | 4 | 4 |
-| `field-value.zod.ts` | 2 | 3 |
 | `field.zod.ts` | 2 | 13 |
 | `filter.zod.ts` | 10 | 11 |
 | `hook.zod.ts` | 5 | 7 |
 | `query.zod.ts` | 4 | 5 |
 | `seed-loader.zod.ts` | 12 | 12 |
-| **total** | **81** | **156** |
+| **total** | **79** | **156** |
 
 | Bucket | Sites |
 |---|---|
 | authorable — the ruling's forced scope | 0 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 79 |
+| wire / open — out of forced scope | 77 |
 | no door — no carrier, ADR-0049 territory | 2 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 0 |

@@ -375,13 +375,20 @@ describe('wait timer teardown when the pause ends another way (#5512)', () => {
  * durable store unreadable, so per #4420 the pause is emphatically NOT gone —
  * that cancelled the only thing left that would ever wake the run.
  *
- * Reachability is not equal across the two sites, and these tests are built to
- * say so rather than to look symmetric: `resumeInternal` reads the durable store
- * only on a hot-cache MISS, and a run that paused in this process stays cached
- * for the life of its suspension. So the end-to-end specimen below is the
- * **re-arm** callback (fresh process, empty cache, store consulted for real);
- * the arming callback's branch is latent by construction and is pinned at the
- * handler level, with the code injected rather than provoked.
+ * Reachability was not equal across the two sites when these tests were built,
+ * and they were shaped to say so rather than to look symmetric: `resumeInternal`
+ * read the durable store only on a MISS of the engine's in-memory map, and a run
+ * that paused in this process was answered from memory for the life of its
+ * suspension. So the end-to-end specimen below is the **re-arm** callback (fresh
+ * process, empty map, store consulted for real), while the arming callback's
+ * branch was latent by construction and is pinned at the handler level, with the
+ * code injected rather than provoked.
+ *
+ * [#13617] The asymmetry is gone — a store-backed engine now reads the store on
+ * every resume — but the arming-path specimen below is unchanged on purpose: it
+ * runs on an engine with NO store at all, where there is no store read to fail,
+ * so what it pins is still the handler's branch and the arming site's routing
+ * through it, not a reachability claim.
  */
 describe('wait timer one-shot vs. a shot that never consumed the pause (#5529)', () => {
   /** A logger that keeps its `error` lines so the diagnostic can be asserted. */
@@ -520,12 +527,11 @@ describe('wait timer one-shot vs. a shot that never consumed the pause (#5529)',
 
   it('arming path: the same handler keeps the job armed on STORE_UNAVAILABLE', async () => {
     // The arming callback shares one handler with the re-arm callback, so this
-    // pins the branch on THAT site too. The code is injected, not provoked: a run
-    // that paused in this process is in the engine's hot cache, so its own resume
-    // never reads the durable store and cannot produce STORE_UNAVAILABLE here.
-    // Fabricating a cache miss to "prove" otherwise would pin a scenario the
-    // engine does not have — what is verified is the handler's branch, and that
-    // the arming site routes through it rather than keeping its own `finally`.
+    // pins the branch on THAT site too. The code is injected, not provoked, and
+    // [#13617] did not change that: this engine is built with NO store, so no
+    // resume of it can produce STORE_UNAVAILABLE however it reads. What is
+    // verified is the handler's branch, and that the arming site routes through
+    // it rather than keeping its own `finally`.
     const { ctx, scheduled, cancelled } = fakeJobCtx();
     const engine = new AutomationEngine(silentLogger());
     const ran: string[] = [];

@@ -103,7 +103,7 @@
 // flows keep being served. What IS refused is the dead flow's own publish — and,
 // on the CLI surface, a package build whose stack contains one.
 
-import { TimeRelativeTriggerSchema } from '@objectstack/spec/automation';
+import { TimeRelativeTriggerSchema, resolveFlowTriggerKind } from '@objectstack/spec/automation';
 
 export type FlowTriggerReadinessSeverity = 'error' | 'warning';
 
@@ -273,9 +273,15 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
       Array.isArray(config.triggerType) &&
       (config.triggerType as unknown[]).some((t) => typeof t === 'string' && t.startsWith('record-'));
     const isTimeRelative = config.timeRelative != null && typeof config.timeRelative === 'object';
-    const isAutoTriggered =
-      isRecordTriggered || triggerType === 'api' || config.schedule != null ||
-      isTimeRelative || flow.type === 'schedule' || flow.type === 'api';
+    // The auto-triggered predicate is the spec's `resolveFlowTriggerKind`: the
+    // same start-node reads this rule makes above, in the engine's precedence,
+    // shared with `defineStack`'s trigger-capability refusal so the two
+    // authoring surfaces answer "does this flow auto-launch?" identically.
+    // Byte-identical to the six-term disjunction it replaces — the resolver
+    // answers a kind exactly when one of those terms held; the array-form
+    // record trigger (1d's subject) never counted here and resolves to no kind
+    // there either.
+    const isAutoTriggered = resolveFlowTriggerKind(flow) !== undefined;
 
     // 1. Record-triggered flow targeting an object this stack does not define.
     if (isRecordTriggered && start) {
@@ -319,9 +325,10 @@ export function validateFlowTriggerReadiness(stack: AnyRec): FlowTriggerReadines
     //     the time-relative trigger, and stays silent about the ones it does not
     //     — which is why the flows on the OTHER side of that predicate need
     //     their own criterion, in 1e below (#5647). Widening this guard was the
-    //     alternative and was rejected: `isTimeRelative` also feeds
-    //     `isAutoTriggered`, so it would have moved two already-published rules'
-    //     coverage as a side effect of adding a third.
+    //     alternative and was rejected: the same predicate also feeds
+    //     `isAutoTriggered` (today through the spec's `resolveFlowTriggerKind`),
+    //     so it would have moved two already-published rules' coverage as a
+    //     side effect of adding a third.
     if (isTimeRelative && start) {
       const tr = config.timeRelative as AnyRec;
 

@@ -11,6 +11,7 @@ const OBJECTS: Record<string, any> = {
       name: { type: 'text' },
       account: { type: 'lookup', reference: 'account' },
       geo: { type: 'location' },
+      addr: { type: 'address' },
       // Engine-owned: never validated on a write, so never scanned either.
       owner_cache: { type: 'lookup', reference: 'sys_user', system: true },
     },
@@ -139,6 +140,39 @@ describe('scanValueShapes (ADR-0104 D1 / #3438)', () => {
     ).toThrow(ValidationError);
     expect(() =>
       validateRecord(OBJECTS.contact, { account: 'acc_1' }, 'update', { valueShapeStrict: true }),
+    ).not.toThrow();
+  });
+
+  it('#13802: an UNDECLARED key on an address/location value is a finding — the class the scan could not measure', async () => {
+    // Both value contracts were all-optional `.strip` objects, so a value with
+    // a completely wrong key set parsed green: the showcase seed's
+    // `postal_code` (#13388) was a violation this scan structurally could not
+    // count, and "zero findings" was the only answer the instrument could give.
+    // Strict since #13802, the same predicate now counts it — and names the key.
+    const engine = makeEngine({
+      contact: [
+        { id: 'c1', addr: { street: '1 Main St', city: 'Seattle', postal_code: '98101' } }, // the seed's shape
+        { id: 'c2', geo: { lat: 37.77, lng: -122.42, heading: 90 } },                   // a device extra
+        { id: 'c3', addr: { street: '1 Main St', city: 'Seattle', postalCode: '98101' } }, // declared — clean
+      ],
+    });
+    const report = await scanValueShapes(engine, silent);
+
+    expect(report.scannedRecords).toBe(3);
+    expect(report.blocking).toBe(2);
+    const addr = report.findings.find((f) => f.field === 'addr')!;
+    expect(addr).toMatchObject({ type: 'address', count: 1, sampleRecordIds: ['c1'] });
+    expect(addr.detail).toContain('`postal_code`');
+    expect(addr.detail).toContain('`postalCode`');
+    expect(report.findings.find((f) => f.field === 'geo')!.detail).toContain('`heading`');
+    expect(valueShapeScanPassed(report)).toBe(false);
+
+    // One predicate: the flagged values are write rejections under strict, the clean one writes.
+    expect(() =>
+      validateRecord(OBJECTS.contact, { addr: { street: '1 Main St', postal_code: '98101' } }, 'update', { valueShapeStrict: true }),
+    ).toThrow(ValidationError);
+    expect(() =>
+      validateRecord(OBJECTS.contact, { addr: { street: '1 Main St', postalCode: '98101' } }, 'update', { valueShapeStrict: true }),
     ).not.toThrow();
   });
 
