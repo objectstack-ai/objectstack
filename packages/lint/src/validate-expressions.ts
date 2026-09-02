@@ -1136,10 +1136,36 @@ export function validateStackExpressions(stack: AnyRec): ExprIssue[] {
         const nodeType = typeof node.type === 'string' ? node.type : '';
         for (const found of resolveFlowNodeExpressions(nodeType, cfg)) {
           if (found.entry.role !== 'predicate') continue;
-          checkDeclaredPredicate(
-            `${at} · node '${node.id}' (${nodeType}) ${found.entry.label} at config.${found.path}`,
-            found.value,
-          );
+          const slotWhere = `${at} · node '${node.id}' (${nodeType}) ${found.entry.label} at config.${found.path}`;
+          checkDeclaredPredicate(slotWhere, found.value);
+          // [#14288] The shadowing warning is about the SCOPE an expression is
+          // evaluated in, not about which key it was authored under — so it
+          // belongs on every `predicate` slot the ledger declares, not just the
+          // two hardcoded `condition` keys #14089 reached. Measured on the
+          // engine before it was extended here, because "same scope" is the
+          // whole premise and a narrower per-node scope would have made this
+          // call site a false positive:
+          //
+          //  • `seedRunVariables` builds ONE map per run (`engine.ts`, declared
+          //    variables first, then the record's fields only where nothing is
+          //    bound yet) and it threads UNCHANGED into every node executor —
+          //    `execute()` seeds it, `executeNode` passes it down, and
+          //    `executor.execute(node, variables, context)` hands that same Map
+          //    object over. No clone, no narrowing, anywhere on the path.
+          //  • `decision.conditions[].expression` (`builtin/logic-nodes.ts`)
+          //    evaluates against that very parameter — literally the same Map
+          //    a node `condition` is judged against.
+          //  • `screen.fields[].visibleWhen` (`refuseInvalidScreenInput`)
+          //    evaluates against `run.variables` — the persisted snapshot of
+          //    the same seeded map — with the SUBMITTED bag overlaid. A
+          //    superset, so the shadow still reaches it: the overlay carries
+          //    the screen's own collected values, never the bound record's
+          //    field, so it can never hand back a field the variable displaced.
+          //
+          // Same `declaredVariables` set, same severity, no new rule id: this
+          // moves no accept set and judges no bare identifier for being bare
+          // (the 2026-09-01 option-C ruling's letter).
+          warnShadowedFieldReads(slotWhere, found.value);
         }
         // #1870 — a `script` node must name a callable, and since #4343 that is
         // the whole of what the node does: `config.function`. A node without one
