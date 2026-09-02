@@ -4659,6 +4659,16 @@ export class AuthManager {
    * asked for nothing this platform ships a row for, or when there is no
    * request at all (invitations, scheduled and admin-initiated mail).
    *
+   * The deployment's declaration has two producers of its own (#14591): the
+   * workspace's `localization.locale` (ADR-0053) whenever the operator has
+   * explicitly set one, and `II18nService.getDefaultLocale()` — the app
+   * artifact's build-time `i18n.defaultLocale` — standing underneath it. Email
+   * read only the build-time half before, so a workspace that switched to
+   * Chinese in Setup received Chinese auth SMS and English auth mail. That
+   * precedence is resolved in `AuthPlugin`; this setter stays a plain sink for
+   * whichever of the two won, and the request rung is applied above it at send
+   * time.
+   *
    * AuthPlugin pushes the value on `kernel:ready`, exactly as it pushes
    * {@link setDefaultSmsLocale}. Unset ⇒ nothing is named and `EmailService`'s
    * ladder resolves its documented `en-US` default.

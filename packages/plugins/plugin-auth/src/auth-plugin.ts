@@ -777,6 +777,72 @@ export class AuthPlugin implements Plugin {
             ctx.logger.info('Auth: no sms service registered — phone-number OTP disabled (password sign-in only)');
           }
 
+          // #8195 / #14319 — the locale named on every auth EMAIL, so the
+          // localized `sys_email_template` rows are reachable through the
+          // platform's own send path instead of sitting dormant.
+          //
+          // This binds the DEPLOYMENT rung, resolved here at the plugin
+          // layer. Since the 2026-09-02 ruling (#14319) it is the SECOND rung:
+          // a request-triggered send whose recipient IS the requester takes
+          // that caller's own `Accept-Language` first, resolved at send time in
+          // `AuthManager` (`authEmailLocaleFromRequest`, which carries the
+          // ruling text). What is bound here answers when the request named no
+          // locale this platform ships a row for, or when there is no request
+          // at all — invitations, scheduled and admin-initiated mail.
+          //
+          // ⚠️ The superseded 2026-08-13 ruling made this rung the WHOLE answer
+          // and rejected `Accept-Language` outright. Do not restore that
+          // reading here; the single place the history is recorded is
+          // `AuthManager.setDefaultEmailLocale`.
+          //
+          // #14319 measured that "the deployment default" has TWO producers,
+          // and that auth email was reading the weaker one:
+          //
+          //  - `II18nService.getDefaultLocale()` is the app artifact's
+          //    BUILD-TIME `i18n.defaultLocale` (`AppPlugin` pushes it through
+          //    `setDefaultLocale`; the CLI passes `config.i18n.defaultLocale`),
+          //    and is the bare `en` when the app declares nothing.
+          //  - `localization.locale` (ADR-0053) is the workspace's RUNTIME
+          //    language — Setup, Localization, tenant-scoped — whose four
+          //    options are exactly `AUTH_EMAIL_TEMPLATE_LOCALES`. It is
+          //    already the authority for auth SMS (#2815) and for audit
+          //    activity summaries (framework#3039).
+          //
+          // A workspace that declared Chinese therefore received Chinese SMS
+          // and ENGLISH mail. The workspace setting now outranks the
+          // build-time default, and only when it is EXPLICIT
+          // (`source !== 'default'`) — the same precedence the `appName`
+          // binding below uses, because `get` answers the manifest default
+          // (`en-US`) for an untouched workspace and taking it unconditionally
+          // would demote every deployment that declared `i18n.defaultLocale`.
+          //
+          // Both i18n hops are probed rather than assumed: `getService` THROWS
+          // for an unregistered service (i18n is not a required dependency of
+          // auth) and `getDefaultLocale` is OPTIONAL on the contract. Nothing
+          // resolvable ⇒ nothing is named, which is precisely the pre-#8195
+          // behaviour — `EmailService` resolves its documented `en-US` default.
+          let i18nDefaultEmailLocale: string | undefined;
+          try {
+            const i18n = ctx.getService<II18nService>('i18n');
+            const locale =
+              typeof i18n?.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+            i18nDefaultEmailLocale = typeof locale === 'string' ? locale : undefined;
+          } catch {
+            // i18n service is optional — leave the build-time default unset.
+          }
+          const applyEmailLocale = (workspaceLocale: string | undefined): void => {
+            this.authManager?.setDefaultEmailLocale(workspaceLocale ?? i18nDefaultEmailLocale);
+          };
+          // Baseline = the build-time default. Superseded below when a settings
+          // service answers with an explicit workspace language, and left
+          // standing when there is no settings service or its read fails.
+          applyEmailLocale(undefined);
+          if (typeof i18nDefaultEmailLocale === 'string' && i18nDefaultEmailLocale.trim()) {
+            ctx.logger.info(
+              `Auth: bound auth email locale to i18n default=${i18nDefaultEmailLocale}`,
+            );
+          }
+
           // Bind the email brand name (`{{appName}}`) to the live
           // `branding.workspace_name` setting so the admin UI can rename the
           // product without a redeploy. Only an *explicitly set* value
@@ -812,68 +878,45 @@ export class AuthPlugin implements Plugin {
 
               // #2815 — bind the auth SMS locale to the deployment default
               // (`localization.locale`) so OTP/invitation texts render in the
-              // workspace language. Live-rebinds on settings changes.
-              const applySmsLocale = async () => {
+              // workspace language. #14319 binds the auth EMAIL locale from
+              // the very same read, so the two auth channels can no longer
+              // disagree about what language this workspace speaks.
+              // Live-rebinds on settings changes.
+              const applyLocalizationLocale = async () => {
                 try {
                   const resolved = await settings.get('localization', 'locale', {});
                   const value = resolved?.value;
                   this.authManager?.setDefaultSmsLocale(
                     typeof value === 'string' ? value : undefined,
                   );
+                  // Email takes the workspace language only when it was
+                  // EXPLICITLY set; a manifest default leaves the app's
+                  // build-time `i18n.defaultLocale` standing (block above).
+                  const explicit =
+                    resolved && resolved.source !== 'default' && typeof value === 'string'
+                      ? value
+                      : undefined;
+                  applyEmailLocale(explicit);
+                  if (explicit) {
+                    ctx.logger.info(
+                      `Auth: bound auth email locale to localization.locale=${explicit}`,
+                    );
+                  }
                 } catch (err: any) {
                   ctx.logger.warn(
                     'Auth: failed to apply localization.locale: ' + (err?.message ?? err),
                   );
                 }
               };
-              await applySmsLocale();
+              await applyLocalizationLocale();
               if (typeof settings.subscribe === 'function') {
                 settings.subscribe('localization', () => {
-                  void applySmsLocale();
+                  void applyLocalizationLocale();
                 });
               }
             }
           } catch {
             // settings service is optional — keep the configured appName.
-          }
-
-          // #8195 — name the deployment-default locale on every auth EMAIL, so
-          // the localized `sys_email_template` rows become reachable through
-          // the platform's own send path instead of sitting dormant.
-          //
-          // This binds the DEPLOYMENT rung only, from
-          // `II18nService.getDefaultLocale()`, resolved here at the plugin
-          // layer. Since the 2026-09-02 ruling (#14319) it is the SECOND rung:
-          // a request-triggered send whose recipient is the requester takes the
-          // caller's own `Accept-Language` first, resolved at send time in
-          // `AuthManager` (`authEmailLocaleFromRequest`, which carries the
-          // ruling text). This rung is what answers when the request named no
-          // locale this platform ships a row for, or when there is no request
-          // at all — invitations, scheduled and admin-initiated mail.
-          //
-          // ⚠️ The superseded 2026-08-13 ruling made this rung the WHOLE answer
-          // and rejected `Accept-Language` outright. Do not restore that
-          // reading here; the one place the history is recorded is
-          // `AuthManager.setDefaultEmailLocale`.
-          //
-          // Both hops are probed rather than assumed: `getService` THROWS for
-          // an unregistered service (i18n is not a required dependency of
-          // auth), and `getDefaultLocale` is OPTIONAL on the contract. Either
-          // one missing must leave the locale unset, which is precisely the
-          // pre-#8195 behaviour — `EmailService` resolves its documented
-          // `en-US` default.
-          try {
-            const i18n = ctx.getService<II18nService>('i18n');
-            const locale =
-              typeof i18n?.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
-            this.authManager?.setDefaultEmailLocale(
-              typeof locale === 'string' ? locale : undefined,
-            );
-            if (typeof locale === 'string' && locale.trim()) {
-              ctx.logger.info(`Auth: bound auth email locale to i18n default=${locale}`);
-            }
-          } catch {
-            // i18n service is optional — leave the email locale unset.
           }
 
           // #2815 — seed the built-in bilingual auth SMS templates into
