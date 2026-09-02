@@ -80,8 +80,15 @@ function makeStubDriver(): any {
     updateManyPayloads: [] as Record<string, unknown>[],
     async connect() {}, async disconnect() {}, async checkHealth() { return true; },
     async execute() { return null; }, async syncSchema() {},
-    async find(_o: string, ast: any) {
-      return Array.from(store.values()).filter((r) => matches(r, ast?.where));
+    async find(_o: string, ast: any, opts?: any) {
+      // The caller's bound is applied AFTER the filter and by PRESENCE — a
+      // limit-blind double silently answers past a bound the engine set, which
+      // is what `check:objectql-double-limit` exists to keep out of new fakes.
+      const rows = Array.from(store.values()).filter((r) => matches(r, ast?.where));
+      const limit = typeof ast?.limit === 'number'
+        ? ast.limit
+        : typeof opts?.limit === 'number' ? opts.limit : undefined;
+      return typeof limit === 'number' ? rows.slice(0, limit) : rows;
     },
     async findOne(_o: string, ast: any) {
       for (const r of store.values()) if (matches(r, ast?.where)) return r;
