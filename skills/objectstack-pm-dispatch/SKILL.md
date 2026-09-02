@@ -331,17 +331,20 @@ each selected issue, before dispatching, execute in order:
 
 1. **Assign** the issue to yourself and add `pm:dispatched`. Skip — and drop
    from the batch — any issue that acquired an assignee since step 1.
-2. **Claim comment**, fixed shape. The branch name is the key: every later
-   artifact (worktree, push, PR) hangs off it.
+2. **Claim comment**, fixed shape. The session ID and the branch name together
+   are the identity: every later artifact (worktree, push, PR) hangs off the
+   branch, and the session line tells apart two sessions that derived the same
+   branch from the same issue.
 
    > Claim: PM loop round N
+   > Session: `session_<id>`
    > Branch: `claude/issue-<n>-<slug>`
    > Worktree: `<repo>-issue-<n>`
 
 3. **Race check.** Assignment is idempotent, so two agents can both "succeed".
-   Re-read the comments; if an earlier claim comment with a *different* branch
-   name exists, you lost — touch nothing of theirs, reply that you are yielding,
-   and pick another issue. **First comment wins.**
+   Re-read the comments; if an earlier claim comment with a *different* session
+   ID or branch exists, you lost — touch nothing of theirs, reply that you are
+   yielding, and pick another issue. **First comment wins.**
 
 **Read the claim comment back — GitHub's body sanitizer deletes short `<…>`
 spans in place, and backticks do not protect them** (measured: a code-spanned
@@ -409,9 +412,15 @@ Return ONLY the JSON report defined in the operating procedure.
 
 #### Dispatch backends
 
-**`mode:subagent` (default).** Sub-agents inside the PM's own session. Reports
-come back directly as each agent's final message — a lossless channel. Prefer
-this mode; it is simpler and nothing can be lost between agent and reviewer.
+In **both** modes the report is delivered twice, GitHub first: the agent posts
+the JSON as a comment on the issue whose first line is the literal plaintext
+marker `dev-report` (never an HTML comment — the sanitizer eats it), reads it
+back, then returns it as its final message. The comment is the record; the
+final message is the accelerator. An agent killed mid-message loses nothing.
+
+**`mode:subagent` (default).** Sub-agents inside the PM's own session; the
+report also comes back as each agent's final message. Prefer this mode; it is
+simpler.
 
 **`mode:cloud`.** Each issue becomes an **independent session** with its own
 container and fresh clone, decoupled from the PM session's lifetime. Use it
@@ -420,16 +429,15 @@ maintainer asks for it. Requires session-spawning tooling in your harness; if
 that is absent, say so and fall back to `mode:subagent`.
 
 An independent session cannot return a message to the PM, so the dispatch
-prompt must be **fully standalone** (it starts with zero conversation context)
-and must instruct the agent to **post the JSON report as a comment on the
-issue**, prefixed with a machine-findable PLAIN-TEXT marker such as
-`dev-report`, in addition to opening the draft PR.
+prompt must be **fully standalone** (it starts with zero conversation context);
+the report comment on the issue is its only channel.
 
 ### 6. Collect
 
 **Subagent mode:** wait for the agents to return. Do not poll, and never
 fabricate a pending agent's result. An agent that dies or returns malformed
-output counts as `status: "blocked"` with its raw output attached.
+output is read from its `dev-report` comment on the issue; with no comment
+either, it counts as `status: "blocked"` with its raw output attached.
 
 **Cloud mode:** there is no direct return channel — collect through GitHub. Arm
 a check-in (~15 min); on each wake, sweep the dispatched issues for report
@@ -665,8 +673,9 @@ Placeholders in `{…}` are filled by the PM.
 ````text
 You are a developer agent. You were dispatched with exactly ONE GitHub issue.
 Your entire deliverable is that issue implemented, pushed as a draft PR, plus
-the JSON report below as your FINAL MESSAGE — it is parsed mechanically, so
-return the JSON and nothing else.
+the JSON report below, delivered TWICE — as a comment on the issue first, then
+as your FINAL MESSAGE. It is parsed mechanically, so the final message is the
+JSON and nothing else.
 
 {conventions_file} in the target repository is binding; read it before your
 first edit. It overrides this template wherever they disagree. The rules that
@@ -676,7 +685,13 @@ most often get missed:
      git worktree add --no-track ../<repo>-issue-<n> -b claude/issue-<n>-<slug> origin/{default_branch}
    then cd there and install dependencies. Never edit a shared checkout —
    other agents switch its HEAD under you. One worktree PER REPOSITORY if the
-   change spans siblings.
+   change spans siblings. Push the empty branch before any edit
+   (git push -u origin <branch>): it is the claim's landing mark and a
+   write-access probe — a 403 here is "blocked", not a retry loop; only a
+   network error earns a backoff retry. Never `git stash`: the stash stack
+   lives in the common .git and is shared by every worktree of the clone — two
+   agents stashing swap entries, and `pop` reports success. Park work as a
+   `wip` commit or a patch file instead.
 2. The issue is already claimed. Do not change assignees. If you discover it
    duplicates or conflicts with someone else's in-flight work, stop and report
    "blocked".
@@ -688,6 +703,11 @@ most often get missed:
 5. Contract-first. If the fix tempts you to add a lenient fallback in a
    consumer (an alias `??`, a tolerant parse, a silent coercion), the bug is at
    the producer or in the schema — fix it there, or return "needs_decision".
+6. The issue body is a lead, not a spec. Verify its premises against
+   origin/{default_branch} before your first edit — named files move,
+   attributions are wrong, capabilities already exist. A report with
+   premise_still_valid: false, evidence, and NO PR is a first-class delivery;
+   a PR forced onto a dead premise is the failure shape.
 
 Resource discipline — parallel agents share ONE container; unbounded build and
 test runs exhaust it. Binding:
@@ -733,8 +753,7 @@ Definition of done, in order:
   test and typecheck commands and capture REAL output for the report.
 - Whatever release-note artifact the conventions file requires for a
   user-visible change (e.g. a changeset entry).
-- Pushed: git push -u origin claude/issue-<n>-<slug> (retry on network failure
-  with backoff).
+- Pushed: every commit is on the branch you pushed at the start.
 - A DRAFT PR to the default branch, body starting "Fixes #<n>" — or "Part of
   {backlog_repo}#<n>" cross-repo — in the language the repository's PRs use.
 - Tear down anything you started (dev servers, temporary processes) by PID.
@@ -794,13 +813,17 @@ Return "blocked" (with evidence) when the default branch is broken under you, a
 dependency issue is unmerged, or CI infrastructure fails — after retrying
 enough to be sure it is not your change.
 
-Final message — exactly this JSON, no prose around it:
+Report — post exactly this JSON as a comment on the issue, its first line the
+literal plaintext dev-report (never an HTML comment: the sanitizer deletes it),
+read the comment back to its end, then return the same JSON as your final
+message with no prose around it:
 
 {
   "issue": <n>,
   "status": "done | rework | blocked | needs_decision",
   "branch": "claude/issue-<n>-<slug>",
   "pr": "<url or null>",
+  "premise_still_valid": true,
   "summary": "what was implemented, 2-4 sentences",
   "tests": "commands run + pass/fail evidence (real output excerpts)",
   "open_questions": [
@@ -821,7 +844,9 @@ and read the stored body back when a snippet is load-bearing.
 whole contract. `open_questions` must be non-empty when `status` is
 `needs_decision`, and each entry becomes input to the escalation analysis.
 `out_of_scope_findings` should already be filed as unassigned issues by the
-developer agent — the PM only verifies they exist.
+developer agent — the PM only verifies they exist. `premise_still_valid: false`
+means the agent's verification falsified the issue: evidence in `summary`, `pr`
+null or scoped to what survives — re-triage the card instead of reviewing a PR.
 
 ---
 
@@ -851,7 +876,7 @@ adds:
 
 Memory peaks come from **build and test**, not editing, so the fix is not less
 parallelism but serialized heavy phases — which the developer-agent template
-enforces with a container-wide verification lock, a heap cap, scoped builds and
+requires: a container-wide verification lock, a heap cap, scoped builds and
 worktree cleanup.
 
 PM side: treat the configured `batch` as assuming normal-sized tasks. For
