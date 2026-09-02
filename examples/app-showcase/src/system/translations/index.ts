@@ -34,6 +34,33 @@ export const ShowcaseTranslationBundle = {
           start_date: { label: 'Start Date' },
           end_date: { label: 'End Date' },
         },
+        // An author-written `validations[].message` is emitted VERBATIM unless
+        // the bundle carries it here (#14253) — the built-in field catalog's
+        // own sentences have shipped zh-CN since #3957, so a rule that declares
+        // its own message is the one way a refusal escapes the caller's
+        // language. `project_status_flow` is the showcase's state machine and
+        // the only refusal a visitor reliably triggers (the New Project wizard
+        // used to offer four statuses the machine will not accept on create),
+        // so it read as the single English sentence on a zh-CN form.
+        // All FOUR of the object's rules, not just the state machines: the New
+        // Project wizard can trip `end_after_start` and `spent_within_budget`
+        // from its budget/schedule step, so translating only the status rule
+        // would move the single English sentence one step later rather than
+        // remove it.
+        _validations: {
+          project_status_flow: {
+            message: 'Projects start as Planned, and then move only along the declared status flow.',
+          },
+          project_health_progression: {
+            message: 'Health changed by more than one step — confirm this is intentional.',
+          },
+          end_after_start: {
+            message: 'Target End Date must be on or after the Start Date.',
+          },
+          spent_within_budget: {
+            message: 'Spend exceeds 120% of budget — escalate before continuing.',
+          },
+        },
       },
       showcase_task: {
         label: 'Task',
@@ -66,6 +93,17 @@ export const ShowcaseTranslationBundle = {
             options: { synced: 'Synced', failed: 'Failed' },
           },
           sync_error: { label: 'Sync Error' },
+        },
+        // The object's ONE authored rule message, on the #14253 channel for the
+        // same reason `showcase_project`'s four are (see the note there). The
+        // `en` entry is the authored sentence VERBATIM: the bundle WINS over
+        // `rule.message` in every locale, so a bundle entry that has drifted
+        // from the object turns the object's own sentence into dead text no
+        // reader ever sees. The pin asserts that equality rather than trusting it.
+        _validations: {
+          task_status_flow: {
+            message: 'Invalid task status transition.',
+          },
         },
         // The FIRST `_views` block on the `en` side of this bundle, and
         // deliberately not a mirror of the zh-CN one below: view LABELS are
@@ -101,6 +139,40 @@ export const ShowcaseTranslationBundle = {
           billing_email: { label: 'Billing Email' },
           support_config: { label: 'Support Config' },
           churn_reason: { label: 'Churn Reason' },
+        },
+        // An author-written `validations[].message` is emitted VERBATIM unless
+        // the bundle carries it here (#14253) — see the note on
+        // `showcase_project` above. All SEVEN names this object declares, and
+        // the two NESTED ones are the point: `checkConditional` dispatches to
+        // the matching branch and renders that BRANCH's message, addressed by
+        // the branch's own `name`, so `churn_reason_consistency`'s own sentence
+        // is structurally unreachable and translating only it would leave both
+        // refusals a caller can actually see in English. Its entry is here
+        // anyway so the bundle mirrors the DECLARED rule set 1:1 — the pin in
+        // `test/new-project-wizard-initial-status.test.ts` asks for every
+        // declared name rather than re-deriving objectql's dispatch.
+        _validations: {
+          account_lifecycle: {
+            message: 'Invalid account lifecycle transition.',
+          },
+          tax_id_format: {
+            message: 'Tax ID must look like 12-3456789.',
+          },
+          billing_email_format: {
+            message: 'Billing Email must be a valid email address.',
+          },
+          support_config_shape: {
+            message: 'Support Config must be { tier: standard|premium|enterprise, seats?: >=1 }.',
+          },
+          churn_reason_consistency: {
+            message: 'Churn reason consistency.',
+          },
+          churn_reason_present: {
+            message: 'A churn reason is required when an account is marked churned.',
+          },
+          churn_reason_absent: {
+            message: 'A churn reason should only be set when the account is churned.',
+          },
         },
       },
       showcase_contact: {
@@ -270,6 +342,16 @@ export const ShowcaseTranslationBundle = {
           start_date: { label: '开始日期' },
           end_date: { label: '结束日期' },
         },
+        // The zh-CN mirror of the `en` `_validations` block — see the note
+        // there. Without these two keys the write path's own refusals arrive in
+        // Chinese (built-in catalog, #3957) while these author-written ones
+        // arrive in English, inside one error envelope.
+        _validations: {
+          project_status_flow: { message: '项目的初始状态为“计划中”,此后只能按既定的状态流转变更。' },
+          project_health_progression: { message: '健康度一次变更超过一级,请确认这是有意为之。' },
+          end_after_start: { message: '结束日期不能早于开始日期。' },
+          spent_within_budget: { message: '已花费超过预算的 120%,请先上报后再继续。' },
+        },
         // `default` — the container's DEFAULT list. `defineView({ list })`
         // declares it without a `name`, and the composer therefore registers it
         // as `<object>.default`; `_views` keys are that bare runtime key
@@ -330,6 +412,11 @@ export const ShowcaseTranslationBundle = {
             options: { synced: '已同步', failed: '同步失败' },
           },
           sync_error: { label: '同步错误' },
+        },
+        // 状态 is the field label above and 状态流转 the same idea
+        // `showcase_project`'s entry uses — one word per idea across the bundle.
+        _validations: {
+          task_status_flow: { message: '任务状态流转无效。' },
         },
         _views: {
           // The default list — keyed `default`, see showcase_project above.
@@ -428,6 +515,21 @@ export const ShowcaseTranslationBundle = {
           billing_email: { label: '账单邮箱' },
           support_config: { label: '支持配置' },
           churn_reason: { label: '流失原因' },
+        },
+        // The zh-CN mirror of the `en` `_validations` block — see the note
+        // there. Vocabulary is the one this bundle already established:
+        // 生命周期 / 税号 / 账单邮箱 / 支持配置 / 流失原因 are the field labels
+        // right above, so a refusal names the field with the same word the form
+        // does. The `support_config_shape` shape stays in its source spelling —
+        // it is a machine contract the author must type back, not prose.
+        _validations: {
+          account_lifecycle: { message: '客户生命周期的状态流转无效。' },
+          tax_id_format: { message: '税号格式应为 12-3456789。' },
+          billing_email_format: { message: '账单邮箱必须是有效的邮箱地址。' },
+          support_config_shape: { message: '支持配置必须为 { tier: standard|premium|enterprise, seats?: >=1 }。' },
+          churn_reason_consistency: { message: '流失原因一致性。' },
+          churn_reason_present: { message: '客户标记为流失时必须填写流失原因。' },
+          churn_reason_absent: { message: '只有客户已流失时才能填写流失原因。' },
         },
       },
       showcase_contact: {

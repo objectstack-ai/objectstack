@@ -157,6 +157,42 @@ export const SCANNED_EXTENSIONS = new Set(['.yml', '.yaml', '.mjs', '.js', '.cjs
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage']);
 
 /**
+ * POPULATION DECLARATION -- what `scripts/pm/dispatch-gates.mjs` is told this
+ * gate reads, in the subtree spelling that tool compares in. Provenance ONLY:
+ * nothing in this file reads this array.
+ *
+ * That tool builds every dispatch's gate list by scanning a gate's own source
+ * for the path literals it operates on, and "looks like a path" there means
+ * "carries a separator". Two of the three `ROOTS` carry one and are recovered
+ * for free; the third is the bare single-segment word `scripts`, which the
+ * extractor cannot see AT ALL. So the only other literals this file offered it
+ * were two `owner/repo` action slugs and the sandbox filenames the fixtures
+ * build -- an artifact roster, not a population. The measured result was a gate
+ * that walks all of `scripts/` and appeared on no card that edited any of it,
+ * while its two `.github` roots were named correctly the whole time.
+ *
+ * ⛔ NOT the bare subtree. One hint per admitted extension, following
+ * `check-ratchet-remedy-authority.mjs` at this same root: `scripts/**` would
+ * name this gate for the JSON, Markdown and text files under the root that
+ * `walk` skips on `SCANNED_EXTENSIONS`. The declared set is SET-EQUAL to what
+ * that walk admits under this root -- nothing walked left uncovered, nothing
+ * covered left unwalked -- which is what `--self-test` pins, in both directions
+ * and against the live tree.
+ *
+ * An extension `SCANNED_EXTENSIONS` admits but the tree does not yet HOLD under
+ * this root is deliberately absent: a hint reaching nothing tracked is a dead
+ * lead, which the consumer reports as a population and is not one. The pin
+ * below reddens the day such a file lands.
+ *
+ * Spelled as a LITERAL array, never computed from `SCANNED_EXTENSIONS`: the
+ * extractor reads SOURCE TEXT, so a built spelling keeps this value identical
+ * at runtime, keeps every assertion about it green, and contributes ZERO hints.
+ * `check-watch-hint-literal.mjs` holds that rule fleet-wide; the self-test
+ * below holds the own-source half.
+ */
+const ROOT_DIR_WATCH_HINTS = ['scripts/**/*.mjs', 'scripts/**/*.ts', 'scripts/**/*.sh'];
+
+/**
  * How far apart the method slot and the `/labels` path may sit and still be
  * read as one call. A backslash-continued `curl` puts them 1-3 lines apart; a
  * multi-line `fetch` options object, 1-4. Six is that with headroom.
@@ -896,6 +932,76 @@ export function selfTest() {
   for (const [action, why] of WHOLE_SET_ACTIONS) {
     if (typeof why === 'string' && why.length >= 60) continue;
     failures.push(`WHOLE_SET_ACTIONS['${action}'] has no source-read reason`);
+  }
+
+  // ── POPULATION DECLARATION: what the dispatch derivation is told this gate reads ──
+  //
+  // Nothing in this file can ENFORCE the declaration: `ROOT_DIR_WATCH_HINTS` is
+  // read by another tool entirely (`extractWatchHints` in
+  // `scripts/pm/dispatch-gates.mjs`), so a stale or wrong one runs green here
+  // forever and pays itself out as a dev dispatched on a `scripts/` card with
+  // this gate absent from the brief. Held against the LIVE WALK rather than a
+  // fixture tree: the fixtures below build sandboxes, and a pin over one of
+  // those would stay green while the real declaration drifted.
+  {
+    const walked = [];
+    walk(REPO_ROOT, 'scripts', walked);
+    const extOf = (path) => path.slice(path.lastIndexOf('.'));
+    // Written INDEPENDENTLY of the consumer's `hintCovers`, deliberately: a pin
+    // that reuses the consumer's own matcher cannot catch it changing underneath.
+    const declares = (path) =>
+      path.startsWith('scripts/') && ROOT_DIR_WATCH_HINTS.includes(`scripts/**/*${extOf(path)}`);
+
+    expect('POPULATION the declaration pin walked files at all (#4690)', walked.length > 0, true);
+    expect(
+      'POPULATION every file this gate walks under scripts/ is declared',
+      walked.every(declares),
+      true,
+    );
+    expect(
+      'POPULATION every declared hint reaches a file this gate walks (no dead lead)',
+      ROOT_DIR_WATCH_HINTS.every((hint) => walked.some((path) => declares(path) && `scripts/**/*${extOf(path)}` === hint)),
+      true,
+    );
+    expect(
+      'POPULATION every declared hint names an extension SCANNED_EXTENSIONS admits',
+      ROOT_DIR_WATCH_HINTS.every((hint) => SCANNED_EXTENSIONS.has(extOf(hint))),
+      true,
+    );
+    expect(
+      'POPULATION the bare subtree and the repo root are NOT declared',
+      ROOT_DIR_WATCH_HINTS.some((hint) => hint === 'scripts' || hint.endsWith('/**') || hint === '.' || hint === '**'),
+      false,
+    );
+    expect(
+      'POPULATION every declared literal carries a separator (a bare word reaches nothing)',
+      ROOT_DIR_WATCH_HINTS.every((hint) => hint.includes('/')),
+      true,
+    );
+    expect(
+      'POPULATION the scripts root is the one ROOTS entry the extractor cannot see, and it is the one declared',
+      ROOTS.filter((root) => !root.includes('/')).join(),
+      'scripts',
+    );
+    // The literal SPELLING is the whole mechanism: a value built from
+    // SCANNED_EXTENSIONS would keep every assertion above green and contribute
+    // ZERO hints. `check-watch-hint-literal` owns that rule fleet-wide.
+    let ownSource = null;
+    try {
+      ownSource = readFileSync(join(REPO_ROOT, 'scripts/check-whole-set-label-write.mjs'), 'utf8');
+    } catch {
+      ownSource = null;
+    }
+    const declSites = ownSource === null
+      ? []
+      : [...ownSource.matchAll(/\bconst\s+ROOT_DIR_WATCH_HINTS\s*=\s*([^;]*);/g)];
+    expect(
+      'POPULATION declared exactly once, as an array of quoted literals the text scan can read',
+      declSites.length === 1
+        && ROOT_DIR_WATCH_HINTS.every((hint) => declSites[0][1].includes(`'${hint}'`))
+        && !/[A-Za-z_$][\w$]*\s*\./.test(declSites[0][1]),
+      true,
+    );
   }
 
   // The checked-in allowlist itself passes the reason rule.

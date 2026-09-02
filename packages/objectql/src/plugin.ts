@@ -4,13 +4,17 @@ import { ObjectQL } from './engine.js';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
-import { resolveArtifactPackageOrder, artifactPackageId } from './artifact-packages.js';
+import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
 import { lifecycleSettingsManifest } from './lifecycle/lifecycle-settings.js';
 import type { DanglingReferenceAuditOptions } from './integrity/dangling-reference-audit.js';
-import { runActionGovernanceInventory } from './action-governance.js';
+import {
+  GLOBAL_ACTION_OBJECT_KEY,
+  runActionGovernanceInventory,
+  standaloneActionOwnerKey,
+} from './action-governance.js';
 // [ADR-0126 §8] The packaged-action activation ledger's durable store. The
 // engine holds the projection; this plugin is what attaches the store and
 // hydrates it once the deployment has finished registering objects.
@@ -2224,25 +2228,6 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
-   * Resolve the engine object key an action registers under. Standalone
-   * `action` metadata declares `objectName` (spec `ActionSchema`); bundle
-   * collectors attach `object`; object-less actions register under the
-   * `'global'` key, matching AppPlugin's bundle registration.
-   *
-   * `'global'` is the CANONICAL object-less key (#3913) — not a wildcard.
-   * `executeAction` is an exact-string `Map` lookup, so every reader has to
-   * probe this literal; the runtime's `actionHandlerObjectKeys` does, and the
-   * runtime's `standaloneActionObjectName` must stay in lockstep with this
-   * method or the declaration the MCP surface resolves stops matching the
-   * handler that actually runs.
-   */
-  private actionObjectKey(action: any): string {
-    if (typeof action?.objectName === 'string' && action.objectName.length > 0) return action.objectName;
-    if (typeof action?.object === 'string' && action.object.length > 0) return action.object;
-    return 'global';
-  }
-
-  /**
    * True when an action of this name is shipped by an installed CODE
    * package — either as a standalone `action` artifact, or embedded in a
    * packaged object's `actions[]` array (the common `defineStack` shape).
@@ -2257,8 +2242,8 @@ export class ObjectQLPlugin implements Plugin {
     const registry: any = this.ql?.registry;
     if (!registry || typeof registry.getArtifactItem !== 'function') return false;
     if (registry.getArtifactItem('action', name) !== undefined) return true;
-    const objectKey = this.actionObjectKey(action);
-    if (objectKey !== 'global') {
+    const objectKey = standaloneActionOwnerKey(action);
+    if (objectKey !== GLOBAL_ACTION_OBJECT_KEY) {
       const artifactObject: any = registry.getArtifactItem('object', objectKey);
       if (Array.isArray(artifactObject?.actions)
           && artifactObject.actions.some((a: any) => a?.name === name)) {
@@ -2609,10 +2594,10 @@ export class ObjectQLPlugin implements Plugin {
 
     const byKey = new Map<string, any>();
     for (const a of serviceActions ?? []) {
-      if (a && typeof a.name === 'string') byKey.set(`${this.actionObjectKey(a)}:${a.name}`, a);
+      if (a && typeof a.name === 'string') byKey.set(`${standaloneActionOwnerKey(a)}:${a.name}`, a);
     }
     for (const a of authoredActions ?? []) {
-      if (a && typeof a.name === 'string') byKey.set(`${this.actionObjectKey(a)}:${a.name}`, a);
+      if (a && typeof a.name === 'string') byKey.set(`${standaloneActionOwnerKey(a)}:${a.name}`, a);
     }
 
     const bindable = Array.from(byKey.values()).filter(
@@ -2650,7 +2635,7 @@ export class ObjectQLPlugin implements Plugin {
         skippedNoHandler++; // no body (target/flow/url action) or invalid body shape
         continue;
       }
-      ql.registerAction(this.actionObjectKey(action), action.name, handler, 'metadata-service');
+      ql.registerAction(standaloneActionOwnerKey(action), action.name, handler, 'metadata-service');
       registered++;
     }
     if (typeof runner !== 'function' && bindable.length > 0) {

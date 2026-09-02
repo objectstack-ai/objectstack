@@ -7,6 +7,7 @@
     "AccessControlConfigParsed": "src/system/object-storage.zod.ts#AccessControlConfigParsed (type)",
     "AccessControlConfigSchema": "src/system/object-storage.zod.ts#AccessControlConfigSchema (const)",
     "ActionLike": "src/system/i18n-resolver.ts#ActionLike (interface)",
+    "ActionParamLike": "src/system/i18n-resolver.ts#ActionParamLike (interface)",
     "ActionResultDialogTranslation": "src/system/translation.zod.ts#ActionResultDialogTranslation (type)",
     "ActionResultDialogTranslationSchema": "src/system/translation.zod.ts#ActionResultDialogTranslationSchema (const)",
     "AddFieldOperation": "src/system/migration.zod.ts#AddFieldOperation (const)",

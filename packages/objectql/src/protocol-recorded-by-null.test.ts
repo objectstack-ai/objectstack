@@ -19,10 +19,23 @@
  * check precisely because this column held a value no `sys_user` row
  * matched. With the sentinel gone the ordinary authoring paths must still
  * pass — that is the regression #4441 was bitten by.
+ *
+ * [#14535] "The real thing" is a claim about the TARGET KEY too, and it was
+ * false here until this change. The declaration spelled `referenceTo` — an
+ * alias `FieldSchema` refuses by name (#11567) and `referenceTargetOf`, the
+ * single arbiter the write-path guard resolves through, does not read at all.
+ * So the lookup presented as TARGET-LESS and the guard skipped it at
+ * `if (!target) continue`, whatever the `readonly` exemption did. Measured on
+ * this very write path by counting the guard's own target probe: with the
+ * alias spelled no probe ran even with the exemption deleted; with `reference`
+ * spelled it runs. The exemption had therefore never been what admitted these
+ * writes. Two pins below keep both halves honest — the declaration resolves,
+ * and the exemption is what admits an actor id no `sys_user` row matches.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { referenceTargetOf } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 
 const sysUserObject = {
@@ -78,9 +91,11 @@ const sysMetadataHistoryObject = {
         source: { name: 'source', label: 'Source', type: 'text' as const },
         organization_id: { name: 'organization_id', label: 'Org', type: 'text' as const },
         // The real declaration, not a `text` stand-in — see the file header.
+        // The target key is `reference`, the ONLY spelling `referenceTargetOf`
+        // reads and the one `Field.lookup` emits; the pin below holds it there.
         recorded_by: {
             name: 'recorded_by', label: 'Recorded By',
-            type: 'lookup' as const, referenceTo: 'sys_user', readonly: true,
+            type: 'lookup' as const, reference: 'sys_user', readonly: true,
         },
         recorded_at: { name: 'recorded_at', label: 'At', type: 'datetime' as const, required: true },
     },
@@ -254,5 +269,36 @@ describe('#4556 — protocol write paths store NULL, not the sentinel string', (
             // Either NULL, or an id that a sys_user row actually has. Nothing else.
             expect(v === null || users.has(v)).toBe(true);
         }
+    });
+
+    it('[#14535] the declaration resolves to sys_user through the platform arbiter', () => {
+        // The fidelity claim in the header, as an assertion instead of prose.
+        // A raw object literal handed to the registry is never parsed by
+        // `FieldSchema`, so the alias this fixture used to spell could never
+        // be refused where it was written; `referenceTargetOf` is the reader
+        // that decides whether the lookup has a target at all, and it is the
+        // one the write-path guard resolves through.
+        expect(referenceTargetOf(sysMetadataHistoryObject.fields.recorded_by)).toBe('sys_user');
+    });
+
+    it('[#14535] an actor id with no sys_user row is still admitted — the #4441 readonly exemption', async () => {
+        // The second half of the file, now that the target resolves. This is
+        // NOT the #4556 sentinel returning: `'system'` was a string the
+        // PLATFORM minted for every actor-less write, which is what this suite
+        // refuses above. An actor the caller named is the caller's own value,
+        // and #4441 deliberately does not police a `readonly` lookup — the
+        // value there was minted outside the check's stated scope, and the
+        // residual is reported by the #4551 audit rather than refused here.
+        //
+        // Before the `reference` rename this passed for the wrong reason: the
+        // field was target-less, so the guard skipped it whether or not the
+        // exemption existed. Delete the exemption now and this goes red.
+        await protocol.saveMetaItem({
+            type: 'view', name: 'cases', organizationId: 'org_x', item: viewBody('A'), actor: 'usr_not_a_row',
+        });
+
+        const rows = await historyRows();
+        expect(rows).toHaveLength(1);
+        expect(rows[0].recorded_by).toBe('usr_not_a_row');
     });
 });

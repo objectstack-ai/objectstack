@@ -51,6 +51,7 @@
  */
 
 import type { ApiError, ErrorCode } from '@objectstack/spec/api';
+import { logServerFault } from './server-fault-log.js';
 
 /**
  * The only thing an envelope builder needs from a response object.
@@ -207,5 +208,22 @@ export function sendError(
   message: string,
   extra?: Pick<ApiError, 'category' | 'httpStatus' | 'details' | 'requestId' | 'declaredCode' | 'userMessage'>,
 ): void {
+  // [#14310] A 5xx is never silent. This writer is the single exit for every
+  // nested-envelope error in the repo, so the rule is applied ONCE here rather
+  // than at each registrar's catch block — a per-door call is a thing a new
+  // door can forget, and the `/api/v1/packages` 500 that motivated the card
+  // went unlogged for a week through exactly such a door.
+  //
+  // ⛔ Not a second opinion about the answer: `logServerFault` reads the same
+  // `status` this call is about to write, and its own 5xx gate keeps every
+  // deliberate 4xx refusal — the coded `409 DESTRUCTIVE_CHANGE`, the
+  // `403 FORBIDDEN` capability denials above it — as quiet as they were.
+  //
+  // The thrown value is not available here (callers resolve it into `message`
+  // before arriving), so this line carries the message and code rather than a
+  // stack. A door still holding the throw can call `logServerFault` itself for
+  // the stack-bearing line; none does today, and the transports that DO hold
+  // it log at their own exits instead.
+  logServerFault({ status, code, message, ...(extra?.requestId ? { request: { requestId: extra.requestId } } : {}) });
   res.status(status).json({ success: false, error: { code, message, ...extra } });
 }

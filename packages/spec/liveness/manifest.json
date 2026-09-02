@@ -263,6 +263,13 @@
       "evidenceScope": "in-repo",
       "note": "Live on a real behavioural fork, not on a read: the value selects whether esbuild bundles dependencies into the artifact or externalizes them for install-time resolution, so the two tiers produce different artifacts. Contrast its neighbour `runtime`, which is read only to be printed. 2026-08-28: RE-ANCHORED (#13003) — both citations were still ACCURATE (`:126` names the read, `:159-161` the externalization), so this is a grammar migration with no repair. The file is 233 lines end to end, which is the batch's clearest correlation: every accurate citation in it sits in a small or structurally quiet file, and every rotted one in a file of 1800 to 20255 lines. Re-closed by hand against c459da6bc."
     },
+    "main": {
+      "status": "live",
+      "evidence": "packages/cli/src/commands/plugin/build.ts#PluginBuild (`typeof rawManifest.main === 'string' ? rawManifest.main : undefined` — the entry module esbuild bundles when `--entry` is absent, ahead of the `src/index.*` probe; the same command then writes `main: 'dist/index.mjs'` into the compiled manifest it packs)",
+      "verifiedAt": "2026-09-02",
+      "evidenceScope": "in-repo",
+      "note": "DECLARED at the strictness close of `ManifestSchema` (2026-09-02), not new behaviour: the build door has read this key off the raw `objectstack.plugin.json` since the plugin-distribution CLI landed, while the schema never declared it — so the key was honoured undeclared, and a naked `strictObject` would have refused every plugin that names its entry (three CLI fixtures author it: `osplugin.test.ts`, `plugin-sign.test.ts`, `plugin-publish.test.ts`). Live on the entry choice, not on a print: the value decides which module is bundled into `dist/index.mjs`. `os plugin publish` does not read it back (it reads `id` / `version` / `name` / `runtime` / `integrity` / `description`); cloud unmeasured (see `_note`)."
+    },
     "integrity": {
       "status": "dead",
       "verifiedAt": "2026-08-30",

@@ -143,6 +143,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { isEntrypoint } from './invoked-as.mjs';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
 
@@ -1445,7 +1447,26 @@ function selfTest() {
 
 const argv = process.argv.slice(2);
 
-if (argv.includes('--self-test')) {
+/**
+ * The guard is INVERTED so the dispatch chain below keeps its indentation:
+ * the imported case is the empty first branch, and every mode that was here
+ * before is untouched in the `else if` chain.
+ *
+ * Measured before this landed: importing this module for its exports ran the
+ * whole gate inside the importer and wrote this gate's verdict to the
+ * importer's stdout before the exports came back — foreign output in a tool
+ * that never asked for it.
+ *
+ * Nothing imports this file today (every reference in `.github/**`,
+ * `package.json` and `scripts/**` spawns it as `node scripts/...`), so the
+ * guard silences no census: the only top-level statement it moves behind
+ * `isEntrypoint` is CLI dispatch.
+ */
+const invokedDirectly = isEntrypoint(import.meta.url);
+
+if (!invokedDirectly) {
+  // imported as a module — expose the exports and do nothing else
+} else if (argv.includes('--self-test')) {
   if (selfTest() !== SELF_TEST_VERDICT) {
       console.error(
           '\n✗ check-empty-changeset self-test: selfTest() returned without reaching its verdict,\n'

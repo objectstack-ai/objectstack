@@ -42,10 +42,21 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 /**
  * Request-scoped marker: "the current async chain is a SCIM protocol
- * request". Entered by the auth manager's `verifyBearerToken` wrapper (the
- * first application code every authenticated SCIM request runs) via
- * `enterWith`, so it holds for the remainder of that request's async chain —
- * including the provisioning writes the plugin performs afterwards.
+ * request". Opened by `AuthManager.handleRequest` with `run(...)` around every
+ * request whose better-auth endpoint path is under `/scim/v2`, so it holds
+ * for that request's whole async chain — the endpoint handler and the
+ * provisioning writes the plugin performs inside it.
+ *
+ * ⛔ Not `enterWith`, and not from inside the `verifyBearerToken` callback:
+ * that is where it used to be stamped, and the store never reached the
+ * writes. An `enterWith` marks only the async resource it runs in and that
+ * resource's descendants; the vendor awaits the verifier from the endpoint's
+ * own frame and resumes the handler from a continuation captured before the
+ * verifier ran. Measured on `@better-auth/scim` 1.7.2: zero
+ * `engine.transaction` calls across `POST /Users` + `PATCH /Users/{id}`,
+ * `inScimRequestScope()` false inside every identity write. `run(...)` has a
+ * callback boundary; every `als.run` the vendor performs underneath nests
+ * inside it. Pinned at run time by `scim-transaction-scope.test.ts`.
  *
  * Read by `objectql-adapter.ts`'s `config.transaction`: SCIM requests get a
  * REAL engine transaction (the atomicity upstream's

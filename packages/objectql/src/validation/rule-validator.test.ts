@@ -1591,6 +1591,81 @@ describe('state_machine initialStates enforcement on INSERT (#3165)', () => {
     ).not.toThrow();
   });
 
+  /**
+   * #14311 — an authored `message` costs the caller the WORDING, not the rest
+   * of the envelope.
+   *
+   * `constraint` and `value` are declared on `FieldValidationError` and are the
+   * half a client ACTS on: which states a record may be created in, and which
+   * one it tried. They were emitted only when the rule left its message empty —
+   * and `ValidationRuleSchema` REQUIRES `message` on every rule, so in practice
+   * the machine-readable half was reachable only by declaring `message: ''`.
+   * A create form that wants to offer exactly the legal initial states had to
+   * parse the author's prose, or hardcode a copy of the state machine.
+   *
+   * Both halves are asserted on the SAME rejection, because the defect was
+   * never "no error" — it was an error carrying less than it declares.
+   */
+  it('carries constraint + value alongside an AUTHORED message (insert)', () => {
+    const [err] = (() => {
+      try {
+        evaluateValidationRules(approvalSchema, { approval_status: 'approved' }, 'insert');
+        throw new Error('expected a ValidationError');
+      } catch (e) {
+        return (e as ValidationError).fields;
+      }
+    })();
+    // Envelope (ADR-0112): the refusal is a VALIDATION_FAILED naming the field.
+    expect(err.field).toBe('approval_status');
+    expect(err.code).toBe('invalid_initial_state');
+    // The author still owns the sentence.
+    expect(err.message).toBe('A request must start as draft.');
+    // …and the facts ride along, exactly as they do without an authored message.
+    expect(err.constraint).toEqual({ allowed: 'draft' });
+    expect(err.value).toBe('approved');
+  });
+
+  it('carries constraint alongside an AUTHORED message (update transition)', () => {
+    const [err] = (() => {
+      try {
+        evaluateValidationRules(
+          approvalSchema,
+          { approval_status: 'approved' },
+          'update',
+          { previous: { approval_status: 'draft' } },
+        );
+        throw new Error('expected a ValidationError');
+      } catch (e) {
+        return (e as ValidationError).fields;
+      }
+    })();
+    expect(err.field).toBe('approval_status');
+    expect(err.code).toBe('invalid_transition');
+    expect(err.message).toBe('A request must start as draft.');
+    expect(err.constraint).toEqual({ from: 'draft', to: 'approved' });
+  });
+
+  /**
+   * The control for the pair above: the built-in path already carried both, and
+   * must keep doing so. If this ever diverges from the authored path again, the
+   * two assertions disagree instead of one silently shrinking.
+   */
+  it('the built-in path (empty message) carries the same constraint + value', () => {
+    const catalogSchema = {
+      validations: [{ ...approvalSchema.validations[0], message: '' }],
+    };
+    const [err] = (() => {
+      try {
+        evaluateValidationRules(catalogSchema, { approval_status: 'approved' }, 'insert');
+        throw new Error('expected a ValidationError');
+      } catch (e) {
+        return (e as ValidationError).fields;
+      }
+    })();
+    expect(err.constraint).toEqual({ allowed: 'draft' });
+    expect(err.value).toBe('approved');
+  });
+
   it('does not affect UPDATE transitions (initialStates is insert-only)', () => {
     // draft → pending is a declared transition; initialStates must not interfere.
     expect(() =>
