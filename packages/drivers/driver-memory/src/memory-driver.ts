@@ -666,7 +666,15 @@ export class InMemoryDriver implements IDataDriver {
     return { ...newRecord };
   }
 
-  async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions) {
+  /**
+   * Declared as the contract declares it (#13878): the `null` arm is the
+   * non-`strictMode` miss the behaviour pin has always held, and the explicit
+   * annotation is what keeps that arm visible to `tsc` — left to inference,
+   * the return type collapses to `any` through the backing store's
+   * `any[]` rows and the union is swallowed, so the published `.d.ts` read
+   * `Promise<any>` and no caller was ever asked to narrow.
+   */
+  async update(object: string, id: string | number, data: Record<string, any>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     this.logger.debug('Update operation', { object, id });
     
     const table = this.getTable(object);
@@ -698,7 +706,7 @@ export class InMemoryDriver implements IDataDriver {
     return { ...updatedRecord };
   }
 
-  async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions) {
+  async upsert(object: string, data: Record<string, any>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {
     this.logger.debug('Upsert operation', { object, conflictKeys });
     
     const table = this.getTable(object);
@@ -712,7 +720,16 @@ export class InMemoryDriver implements IDataDriver {
 
     if (existingRecord) {
         this.logger.debug('Record exists, updating', { object, id: existingRecord.id });
-        return this.update(object, existingRecord.id, data, options);
+        const updated = await this.update(object, existingRecord.id, data, options);
+        // `existingRecord` was read from this same table above and nothing
+        // yields in between, so `update` cannot miss here: the `null` arm of
+        // its declared type is unreachable on this path. An upsert never
+        // answers "not found" — say so loudly rather than widen this door's
+        // declared return to carry an arm it can never produce (#13878).
+        if (updated === null) {
+          throw new Error(`Record with ID ${existingRecord.id} vanished from ${object} during upsert`);
+        }
+        return updated;
     } else {
         this.logger.debug('Record does not exist, creating', { object });
         return this.create(object, data, options);
