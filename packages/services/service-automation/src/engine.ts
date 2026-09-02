@@ -1004,14 +1004,15 @@ function isEngineVariable(name: string): boolean {
  * @returns the rejected key names (already in their final, prefixed form).
  *   Empty ⇒ every write was applied. An engine-built signal
  *   ({@link ENGINE_BUILT_SIGNAL}) is exempt: `bubbleToParent` legitimately
- *   writes the handoff keys, and it is not reachable from a transport.
+ *   writes the handoff keys, and it is not reachable from a transport. The
+ *   signal is never absent here — `resume` normalises a missing one to `{}`
+ *   (#13648), which folds nothing and rejects nothing.
  */
 function applyResumeSignal(
     variables: Map<string, unknown>,
-    signal: ResumeSignal | undefined,
+    signal: ResumeSignal,
     nodeId: string,
 ): string[] {
-    if (!signal) return [];
     const trusted = (signal as Record<symbol, unknown>)[ENGINE_BUILT_SIGNAL] === true;
     const rejected: string[] = [];
     const writes: Array<[string, unknown]> = [];
@@ -4207,7 +4208,21 @@ export class AutomationEngine implements IAutomationService {
     async resume(runId: string, signal?: ResumeSignal): Promise<AutomationResult> {
         const refusal = await this.refuseGatedResume(runId, signal);
         if (refusal) return refusal;
-        return this.resumeInternal(runId, signal, false);
+        // An ABSENT signal is an EMPTY caller submission, never an exemption
+        // (#13648). This is the in-process door, and `resume(runId)` used to
+        // skip the screen contract that `resume(runId, {})` is held to:
+        // `refuseInvalidScreenInput` short-circuited on a falsy signal — a
+        // second, unnamed spelling of the exemption the engine already states
+        // through `ENGINE_BUILT_SIGNAL`, so a run parked on a screen with an
+        // unconditional `required` field proceeded with that variable unbound.
+        // The HTTP door has always assembled `{}` for an empty body; this makes
+        // the two doors agree, and the only exemption left is the engine's own
+        // continuation, which proves itself by BUILDING an engine-built signal.
+        // A pause with no screen contract — `wait`, `approval`, a message-only
+        // or object-form screen — is untouched: an empty submission against no
+        // declared fields is conformant, so the wait node's timer wake
+        // (`engine.resume(runId)`) continues exactly as before.
+        return this.resumeInternal(runId, signal ?? {}, false);
     }
 
     /**
@@ -4668,7 +4683,12 @@ export class AutomationEngine implements IAutomationService {
      */
     private async resumeInternal(
         runId: string,
-        signal: ResumeSignal | undefined,
+        // Never `undefined` past the public door: `resume` normalises an
+        // absent caller signal to `{}` (#13648), and the engine's own
+        // continuations (subflow delegation / up-bubble, `map` re-entry)
+        // always hand over a built signal. Typed so, the chokepoints below
+        // cannot grow a falsy-signal branch again.
+        signal: ResumeSignal,
         skipBubble: boolean,
         childSummary?: FlowRunSummary,
     ): Promise<AutomationResult> {
@@ -4893,7 +4913,7 @@ export class AutomationEngine implements IAutomationService {
                 if (typeof run.correlation === 'string' && run.correlation.startsWith('map:')) {
                     await this.executeNode(node, flow, variables, context, steps);
                 } else {
-                    await this.traverseNext(node, flow, variables, context, steps, signal?.branchLabel);
+                    await this.traverseNext(node, flow, variables, context, steps, signal.branchLabel);
                 }
 
                 // Collect output variables
@@ -5047,7 +5067,12 @@ export class AutomationEngine implements IAutomationService {
      *    pass-through `enforceActionParams` gives a param-less action).
      *  - **Never an engine-built signal.** The subflow output mapping and the
      *    `map` item handoff are the engine's own continuations; they carry
-     *    author-named output variables, not a screen submission.
+     *    author-named output variables, not a screen submission. This is the
+     *    ONLY exemption, and it is spelled once: an absent signal is not a
+     *    case here — `resume` normalises it to `{}` (#13648) — because a bare
+     *    `if (!signal)` beside the flag was a second, unnamed spelling of the
+     *    same exemption that let `resume(runId)` skip every `required` the
+     *    author wrote.
      *
      * `visibleWhen` is evaluated against the SUBMITTED values first (layered
      * over the run's variables, so a predicate may reference a prior node),
@@ -5059,9 +5084,8 @@ export class AutomationEngine implements IAutomationService {
     private refuseInvalidScreenInput(
         run: SuspendedRun,
         runId: string,
-        signal: ResumeSignal | undefined,
+        signal: ResumeSignal,
     ): AutomationResult | null {
-        if (!signal) return null;
         if ((signal as Record<symbol, unknown>)[ENGINE_BUILT_SIGNAL] === true) return null;
         if (!screenDeclaresInputContract(run.screen)) return null;
         const fields = run.screen!.fields;
