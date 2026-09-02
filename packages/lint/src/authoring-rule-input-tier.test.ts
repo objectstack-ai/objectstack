@@ -79,6 +79,10 @@ const cliTierFor = (stack: AnyRec): AnyRec =>
 describe('the mechanism: for a defineStack config the `normalized` tier is POST-parse', () => {
   const flowStack = {
     manifest,
+    // A `schedule` flow auto-launches, and `defineStack` refuses one whose stack
+    // does not declare the trigger capability (#14153) — the flow here is only
+    // the vehicle for a parse-time default, so declare the token it owes.
+    requires: ['triggers'],
     flows: [
       {
         name: 'tier_flow',

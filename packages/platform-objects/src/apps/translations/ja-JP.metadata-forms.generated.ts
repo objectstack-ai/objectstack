@@ -153,10 +153,6 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.options.color": {
         label: "色"
       },
-      "fields.options.icon": {
-        label: "アイコン",
-        helpText: "Lucide アイコン名"
-      },
       "fields.options.description": {
         label: "説明"
       },

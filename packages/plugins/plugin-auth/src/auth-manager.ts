@@ -18,6 +18,7 @@ import {
   isHumanUserRow,
   resolveAudience,
   AUDIENCE_CONFIG_ERROR,
+  type AudienceCreationClass,
   type ResolvedAudience,
 } from './audience-posture.js';
 import { shouldStampOwnerVerifiedAtCreation } from './walled-owner-operator-stamp.js';
@@ -1055,10 +1056,11 @@ export class AuthManager {
 
   /**
    * Result of the dev-only admin seed (set by `AuthPlugin.maybeSeedDevAdmin`
-   * when it provisions the well-known admin on an empty DB). The `serve`
-   * command reads this after boot to surface the credentials in the startup
-   * banner. Undefined when no seed ran (production, opt-out, or a DB that
-   * already had a user).
+   * when it provisions the well-known admin, or re-armed on a later boot while
+   * that account still carries the default password). The `serve` command
+   * reads this after boot to surface the credentials in the startup banner.
+   * Undefined when no seed ran (production, opt-out, or [#14157] a database
+   * that already carries a login).
    */
   public devSeedResult?: { email: string; password: string };
 
@@ -1951,7 +1953,14 @@ export class AuthManager {
           // `catch` read that refusal as "users exist" and the declared
           // bypass never fired on a real deployment. `isBootstrapCreation`
           // owns the answerable form — see its doc.
-          if (await this.isBootstrapCreation()) {
+          // [#14157] …and the deployment's own boot command provisioning its
+          // admin is the OTHER way through this door. It is not a
+          // self-registration and must not depend on a self-registration
+          // carve-out: an app that seeds people makes the bootstrap probe
+          // answer "populated" before the seed ever runs. Cheap synchronous
+          // check first, so the ticket path costs no I/O.
+          const signUpEmail = typeof ctx?.body?.email === 'string' ? ctx.body.email : undefined;
+          if (this.isOperatorProvisioning(signUpEmail) || (await this.isBootstrapCreation())) {
             ctx.context.__osDisableSignUpOrig = ep.disableSignUp;
             ep.disableSignUp = false;
           }
@@ -3662,6 +3671,20 @@ export class AuthManager {
   private static readonly OWNER_STAMP_STAGE_TTL_MS = 10 * 60 * 1000;
 
   /**
+   * [#14157] Addresses the deployment's OWN boot command is provisioning right
+   * now — see {@link stageOperatorProvisioning} for why this exists and why it
+   * is not the bootstrap probe.
+   */
+  private pendingOperatorProvisioning = new Map<string, { stagedAtMs: number }>();
+
+  /**
+   * Deliberately short. The window this covers is a single in-process
+   * `signUpEmail` call that the caller also clears in a `finally`; the TTL is
+   * only the floor under a caller killed between the two.
+   */
+  private static readonly OPERATOR_PROVISIONING_STAGE_TTL_MS = 60 * 1000;
+
+  /**
    * Page size of the bootstrap population probe ({@link isBootstrapCreation}).
    * Matches the bound the dev-admin seed reads with, so the two ask the same
    * question of the same window.
@@ -3747,10 +3770,17 @@ export class AuthManager {
       // EXISTENCE.
       if (data?.source?.action !== 'create-user') return undefined;
       const audience = this.getAudience();
-      const creationClass = classifyCreationMethod(data?.source, {
-        enterpriseOAuthProviderIds: this.enterpriseOAuthProviderIds(),
-      });
       const email = typeof data?.user?.email === 'string' ? (data.user.email as string) : undefined;
+      // [#14157] A creation the deployment's own boot command staged is the
+      // OPERATOR class — the vendor's `source.method` cannot carry that,
+      // because the seed reaches better-auth through the same `signUpEmail`
+      // API a person's sign-up does. See `stageOperatorProvisioning` for why
+      // this is a declared ticket and not a wider bootstrap probe.
+      const creationClass: AudienceCreationClass = this.isOperatorProvisioning(email)
+        ? 'operator'
+        : classifyCreationMethod(data?.source, {
+            enterpriseOAuthProviderIds: this.enterpriseOAuthProviderIds(),
+          });
       let isBootstrap = false;
       let hasPendingInvitation = false;
       if (creationClass === 'self-serve') {
@@ -4028,6 +4058,95 @@ export class AuthManager {
     for (const [key, value] of this.pendingOwnerVerifiedStamps) {
       if (value.stagedAtMs < cutoff) this.pendingOwnerVerifiedStamps.delete(key);
     }
+  }
+
+  /**
+   * [#14157] Declare that the deployment's own boot command is provisioning
+   * this address right now, so its creation is judged as the **operator**
+   * class it actually is rather than as a self-registration.
+   *
+   * ## Why this exists instead of widening the bootstrap probe
+   *
+   * The dev-admin seed provisions through the real `signUpEmail` pipeline (it
+   * must: that is what produces a hashed credential and runs the sign-up
+   * hooks), and until now its admission rode on
+   * {@link isBootstrapCreation} — "zero HUMAN users". That is a **public
+   * self-registration carve-out**: it is what lets an unknown visitor's first
+   * sign-up through under `invite_only`. Its population predicate therefore
+   * has to keep counting humans, because the population it is protecting
+   * against is humans.
+   *
+   * The seed's precondition is a different question — "does a LOGIN exist?"
+   * (`dev-admin-seed-gate.ts`) — and #14157 is what happens when the two are
+   * conflated: an app that seeds people in `defineStack({ data })` makes the
+   * database non-zero-user before the seed runs, and the dev admin is never
+   * minted. Fixing only the seed's own gate does not help, because the
+   * admission still refuses: **measured**, with 13 seeded people and zero
+   * accounts, `api.signUpEmail` comes back `SELF_REGISTRATION_CLOSED` under
+   * the default `invite_only` posture.
+   *
+   * So the seed says what it *is* instead of inferring admission from a
+   * population it does not own. That is the same claim
+   * `walled-owner-operator-stamp.ts` already makes about this account —
+   * "provisioned by the deployment's own boot command with operator-known
+   * credentials" — and it moves no public door: nothing outside this process
+   * can stage a ticket, the only caller is hard-gated to
+   * `NODE_ENV==='development'`, the ticket names ONE address, the caller
+   * clears it in a `finally`, and anything that outlives that is pruned by
+   * {@link OPERATOR_PROVISIONING_STAGE_TTL_MS}.
+   */
+  stageOperatorProvisioning(email: string): void {
+    this.prunePendingOperatorProvisioning();
+    this.pendingOperatorProvisioning.set(email.trim().toLowerCase(), { stagedAtMs: Date.now() });
+  }
+
+  /** [#14157] Drop the ticket staged by {@link stageOperatorProvisioning}. */
+  clearOperatorProvisioning(email: string): void {
+    this.pendingOperatorProvisioning.delete(email.trim().toLowerCase());
+  }
+
+  /**
+   * [#14157] Is this address being provisioned by the deployment's own boot
+   * command? A PEEK, not a consume: both admission seams (the `disableSignUp`
+   * bypass and `validateAudienceAdmission`) ask about the same single
+   * creation, so a one-shot read here would admit at the first seam and refuse
+   * at the second. The ticket's lifetime is bounded by its owner's `finally`
+   * and by the TTL instead.
+   */
+  isOperatorProvisioning(email: unknown): boolean {
+    if (typeof email !== 'string' || email.trim() === '') return false;
+    this.prunePendingOperatorProvisioning();
+    return this.pendingOperatorProvisioning.has(email.trim().toLowerCase());
+  }
+
+  private prunePendingOperatorProvisioning(): void {
+    const cutoff = Date.now() - AuthManager.OPERATOR_PROVISIONING_STAGE_TTL_MS;
+    for (const [key, value] of this.pendingOperatorProvisioning) {
+      if (value.stagedAtMs < cutoff) this.pendingOperatorProvisioning.delete(key);
+    }
+  }
+
+  /**
+   * [#14157] The bootstrap window, as a PUBLIC read — "can a first-run owner
+   * still be created here?".
+   *
+   * `GET /auth/bootstrap-status` answers the console's first-run routing
+   * question, and it used to answer it by counting `sys_user` rows, which
+   * makes it the one call site that disagrees with the three
+   * {@link isHumanUserRow} consumers: on a database still carrying the legacy
+   * `usr_system` service row it reports an owner while the audience gate and
+   * plugin-security's first-user detection both say the first human is still
+   * ahead — i.e. the console withholds the setup flow that the platform is
+   * standing ready to admit and promote. Reading THIS method keeps the console
+   * from ever offering a first-run creation the admission gate would refuse,
+   * and from ever hiding one it would allow.
+   *
+   * Never throws; an unanswerable probe reads as "no window" — the same
+   * fail-closed direction the admission gate takes, and the same answer the
+   * route's own catch produced.
+   */
+  async hasBootstrapWindow(): Promise<boolean> {
+    return this.isBootstrapCreation();
   }
 
   private stageSelfRegistrationGrant(email: string, setName: string): void {

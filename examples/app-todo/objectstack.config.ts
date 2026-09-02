@@ -48,6 +48,15 @@ export default defineStack({
     engines: { protocol: '^17' },
   },
 
+  // Platform services this app needs — the closed `PLATFORM_CAPABILITY_TOKENS`
+  // vocabulary. `automation` mounts the flow engine; `triggers` mounts the
+  // record-change / schedule / time-relative / api triggers that FIRE the
+  // `flows` below (the task-completion flow is `record_change`, the two daily
+  // sweeps are `schedule`). Neither token is in the always-on slate an absent
+  // `requires` falls back to, so without this line the flows registered and
+  // never ran — `defineStack` now refuses that combination at authoring time.
+  requires: ['automation', 'triggers'],
+
   // Seed Data (top-level, registered as metadata)
   data: TodoSeedData,
 

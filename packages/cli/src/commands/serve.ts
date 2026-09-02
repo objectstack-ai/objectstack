@@ -2878,15 +2878,19 @@ export default class Serve extends Command {
         || anyAppPluginHasTranslations
       );
       if (!hasI18nPlugin && configHasTranslations && tierEnabled('i18n')) {
+        // Dynamic import with variable to prevent tsc from resolving the optional package.
+        // Host-anchored: `packages/cli` does NOT declare @objectstack/service-i18n,
+        // so a bare import here resolves against the CLI's own realpath and can
+        // only ever find the package by workspace hoisting — the same defect
+        // class that cost cloud#1013 and #10645 (#10769). An app that does not
+        // declare it still falls back to the CLI's resolution, so the quiet-skip
+        // path below is unchanged.
+        //
+        // Declared OUTSIDE the `try` so the catch can NAME the package it is
+        // reporting on: a diagnosis that cannot say which package it is about
+        // is the thing this site was fixed to stop printing.
+        const i18nPkg = '@objectstack/service-i18n';
         try {
-          // Dynamic import with variable to prevent tsc from resolving the optional package.
-          // Host-anchored: `packages/cli` does NOT declare @objectstack/service-i18n,
-          // so a bare import here resolves against the CLI's own realpath and can
-          // only ever find the package by workspace hoisting — the same defect
-          // class that cost cloud#1013 and #10645 (#10769). An app that does not
-          // declare it still falls back to the CLI's resolution, so the quiet-skip
-          // path below is unchanged.
-          const i18nPkg = '@objectstack/service-i18n';
           const { I18nServicePlugin } = await importFromHost(i18nPkg);
           const i18nCfg = config.i18n || config.manifest?.i18n || {};
           await kernel.use(new I18nServicePlugin({
@@ -2894,8 +2898,17 @@ export default class Serve extends Command {
             fallbackLocale: i18nCfg.fallbackLocale || i18nCfg.defaultLocale || 'en',
           }));
           trackPlugin('I18nService');
-        } catch {
-          // @objectstack/service-i18n not installed — kernel memory fallback will handle i18n
+        } catch (i18nErr) {
+          // NOT a re-throw and never becomes one: a missing
+          // @objectstack/service-i18n is a supported configuration (the kernel
+          // pre-injects `createMemoryI18n` for the unprovided `i18n` core
+          // service), so the tolerance stays and only the SILENCE goes. This
+          // catch used to discard the classification `createHostImporter`
+          // produced, which made "you did not install the optional package"
+          // and "the package you DO declare is broken" the same event — the
+          // #13463 class, repaired at the cluster-driver load two blocks up by
+          // PR #14042 and left standing here.
+          console.warn(formatI18nLoadDiagnostic(i18nPkg, i18nErr));
         }
       } else if (!hasI18nPlugin && !configHasTranslations) {
         // No translations and no explicit i18n plugin — this is fine, kernel fallback works
@@ -5012,6 +5025,71 @@ export function resolveTenancyPostureOrRefusal(): TenancyPostureGateVerdict {
       ),
     };
   }
+}
+
+
+/**
+ * The diagnosis the optional i18n service load prints when it fails — a
+ * DIAGNOSIS ahead of behaviour that does not change (#14042's rule, applied at
+ * the one site its repair did not reach).
+ *
+ * The catch this feeds used to be bare. That was defensible on its stated
+ * ground — a missing `@objectstack/service-i18n` is a supported configuration,
+ * not a failure — and wrong about what it discarded: `createHostImporter`
+ * classifies WHY a host import failed, and an empty catch throws that
+ * classification away along with the absence it was written for. The two are
+ * not the same event. A package the app DECLARES and that then fails to load
+ * (a pruned install, a dist never built, a publish with no loadable entry)
+ * reaches this catch as silence indistinguishable from "you never installed the
+ * optional thing" — which is how a broken install reads as a deliberate opt-out.
+ *
+ * ⛔ It does NOT re-throw, and must not start to: the tolerance IS the point of
+ * the catch. `i18n` is a `core` service with a kernel fallback
+ * (`CORE_FALLBACK_FACTORIES` in `@objectstack/core` pre-injects
+ * `createMemoryI18n` for every unprovided core service), it has no
+ * `Serve.CAPABILITY_PROVIDERS` entry, and `requires: ['i18n']` opens the tier
+ * without ever reaching the fail-fast branch that makes a missing provider a
+ * hard boot error. So this is a FUNCTIONAL degradation in the AGENTS.md sense —
+ * the deployment is visibly smaller and nothing that claims to persist is lost
+ * — which is why it is `warn` and not `error`, and why the consequence is
+ * stated before the diagnosis rather than after it.
+ *
+ * ## The kind wording is the importer's, deliberately
+ *
+ * Only the kind TOKEN is interpolated here; every word of remedy comes from
+ * `err.message`, which `createHostImporter` composes per kind
+ * (`undeclaredMessage` / `unresolvableMessage` / `noLoadableEntryMessage`).
+ * That is what makes this site correct for all three kinds — and for the fourth
+ * — without a branch table to go stale: #14270 exists because three OTHER
+ * consumers picked their remedy with a two-way branch written when only two
+ * kinds existed, and now hand `declared-no-loadable-entry` the "declare it in
+ * your package.json" line for a package that is already declared AND installed.
+ * A local re-wording here would join that population; deferring cannot.
+ *
+ * An error carrying NO kind resolved and then crashed while evaluating, which
+ * is a different fact and gets a different sentence — swallowing that one is
+ * how a package with a broken dependency reads as a package that was never
+ * installed.
+ *
+ * Returns PLAIN text; the caller owns the channel (`console.warn` ⇒ stderr,
+ * which `serve-stdio-stdout-purity.e2e.test.ts` requires of everything that is
+ * not an MCP protocol frame).
+ */
+export function formatI18nLoadDiagnostic(pkg: string, err: unknown): string {
+  const kind = hostImportFailureKind(err);
+  // The stack is carried ONLY for the crash branch, where the throwing frame is
+  // the diagnosis. A classified failure's `message` is already the whole
+  // operator-facing text and its stack points at the importer, not at the cause.
+  const detail = err instanceof Error
+    ? (kind === undefined ? (err.stack ?? err.message) : err.message)
+    : String(err);
+  const consequence =
+    '  Unchanged: this boot serves i18n from the kernel in-memory fallback, so what follows\n'
+    + '  is why the file-based service is absent — not a boot failure.\n';
+  return kind !== undefined
+    ? `[i18n] ${pkg} was requested but could not be loaded (${kind}).\n${consequence}${detail}`
+    : `[i18n] ${pkg} resolved but threw while loading — this is the package's own failure, `
+      + `not a missing package.\n${consequence}${detail}`;
 }
 
 

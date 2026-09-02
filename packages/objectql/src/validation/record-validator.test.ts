@@ -427,6 +427,80 @@ describe('validateRecord — ADR-0104 value shapes (warn-first / strict)', () =>
 });
 
 /**
+ * #13802 — an UNDECLARED key on an `address` / `location` value.
+ *
+ * Both value contracts were all-optional `.strip` objects, so `postal_code`
+ * (the showcase seed's spelling, #13388) parsed green with the key silently
+ * gone. The spec is strict now; what this file pins is that the WRITE PATH's
+ * ADR-0104 posture did not move with it: warn-first admits the value and
+ * reports it to the evidence sink, strict rejects it through the same
+ * `invalid_type` door the other shape violations use, and the refusal names
+ * the key — never a bare "invalid".
+ */
+describe('validateRecord — #13802 undeclared keys on address/location values', () => {
+  const schema = {
+    fields: {
+      addr: { type: 'address' },
+      geo: { type: 'location' },
+    },
+  };
+  const seedTypo = {
+    addr: { street: '1 Main St', city: 'Seattle', state: 'WA', postal_code: '98101', country: 'US' },
+  };
+  const deviceExtras = { geo: { lat: 37.77, lng: -122.42, heading: 90, speed: 3 } };
+  const declared = {
+    addr: { street: '1 Main St', city: 'Seattle', state: 'WA', postalCode: '98101', country: 'US' },
+    geo: { lat: 37.77, lng: -122.42, altitude: 10, accuracy: 5 },
+  };
+
+  it('warn-first (the default): the write is ADMITTED and reported to the evidence sink, naming the key', () => {
+    const admitted: Array<{ gate: string; field: string; type: string; detail: string }> = [];
+    expect(() =>
+      validateRecord(schema, { ...seedTypo, ...deviceExtras }, 'insert', {
+        onAdmittedValueShapeViolation: (v) => admitted.push(v),
+      }),
+    ).not.toThrow();
+    expect(admitted.map((v) => [v.gate, v.field, v.type])).toEqual([
+      ['value-shape', 'addr', 'address'],
+      ['value-shape', 'geo', 'location'],
+    ]);
+    // The detail is the prescription an author acts on: the key, and the spelling the contract lands on.
+    expect(admitted[0]?.detail).toContain('`postal_code`');
+    expect(admitted[0]?.detail).toContain('`postal_code` → `postalCode`');
+    expect(admitted[1]?.detail).toContain('`heading`');
+    expect(admitted[1]?.detail).toContain('`speed`');
+  });
+
+  it('strict (attested deployment, or the env opt-in): rejects with invalid_type and names the key', () => {
+    const rejects = (data: Record<string, unknown>, field: string, keyNamed: string) => {
+      try {
+        validateRecord(schema, { ...data }, 'insert', { valueShapeStrict: true });
+        expect.unreachable('expected ValidationError');
+      } catch (e) {
+        expect(e).toBeInstanceOf(ValidationError);
+        const err = e as ValidationError;
+        expect(err.fields[0]).toMatchObject({ field, code: 'invalid_type' });
+        expect(err.fields[0]?.message).toContain(keyNamed);
+      }
+    };
+    rejects(seedTypo, 'addr', '`postal_code`');
+    rejects(deviceExtras, 'geo', '`heading`');
+    // The env opt-in is the same door.
+    process.env.OS_DATA_VALUE_SHAPE_STRICT_ENABLED = '1';
+    try {
+      expect(() => validateRecord(schema, { ...seedTypo }, 'update')).toThrow(ValidationError);
+    } finally {
+      delete process.env.OS_DATA_VALUE_SHAPE_STRICT_ENABLED;
+    }
+  });
+
+  it('declared keys — including the optional members — write in both modes, byte-identically', () => {
+    expect(() => validateRecord(schema, { ...declared }, 'insert')).not.toThrow();
+    expect(() => validateRecord(schema, { ...declared }, 'insert', { valueShapeStrict: true })).not.toThrow();
+  });
+});
+
+/**
  * #3617 / #3438 — media value shapes enforce per DEPLOYMENT, not per release.
  *
  * A verified deployment has RUN the file-as-reference migration and had its

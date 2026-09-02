@@ -4,7 +4,7 @@ import { ObjectQL } from './engine.js';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
-import { resolveArtifactPackageOrder } from './artifact-packages.js';
+import { resolveArtifactPackageOrder, artifactPackageId } from './artifact-packages.js';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
@@ -433,8 +433,24 @@ export class ObjectQLPlugin implements Plugin {
           return Promise.resolve();
         }
 
+        // [ADR-0130 D1] The artifact's own package list, handed to every
+        // install in it. This is the whole of how the install gate learns
+        // "same artifact": co-ownership is proven by joint delivery, and this
+        // load path is the only place that holds the delivery. ⛔ No owner field
+        // on the manifest (D8) and nothing persisted — the claim cannot outlive,
+        // or drift from, the artifact that IS the claim.
+        //
+        // A single-`manifest` artifact yields a one-element list whose only
+        // member is the installing package itself, which the gate excludes
+        // anyway: that path stays bit-identical (D7).
+        const scope = {
+          packageIds: ordered
+            .map((m) => artifactPackageId(m))
+            .filter((id): id is string => id !== undefined),
+        };
+
         for (const manifest of ordered) {
-          ql.registerApp(manifest);
+          ql.registerApp(manifest, scope);
           ctx.logger.debug('Manifest registered via manifest service', {
             id: manifest.id || manifest.name
           });

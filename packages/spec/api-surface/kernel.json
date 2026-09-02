@@ -442,6 +442,7 @@
     "UpgradeSnapshotParsed (type)",
     "UpgradeSnapshotSchema (const)",
     "VIEW_LAYOUT_WITHOUT_BINDING (const)",
+    "VIEW_TREE_WITHOUT_PARENT_FIELD (const)",
     "ValidationError (type)",
     "ValidationErrorSchema (const)",
     "ValidationResult (type)",
