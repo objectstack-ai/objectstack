@@ -44,13 +44,13 @@
  * Refusal assertions state `code` AND `status` (ADR-0112) — never `toThrow()`
  * alone, which is green for the envelope and for a raw driver error alike.
  *
- * ⚠️ `declaredCode` on this body is a vocabulary MEMBER. The triage ruling on
- * the card (2026-09-02) keeps `UNIQUE_VIOLATION` on the wire and carries the
- * producer's spelling beside it in `declaredCode`; `ApiErrorSchema.declaredCode`
- * and ADR-0112's 2026-08-16 amendment define the field's presence as the
- * DEMOTION of an UNREGISTERED spelling. §0 controls that both codes are
- * registered so the contradiction is stated by a measurement, not assumed; the
- * ruling is pinned as written and the contract question is the review's.
+ * ⚠️ No `declaredCode` on this body — settled by the contract review on the
+ * card (2026-09-02, reading B). `DUPLICATE_RECORD` is a vocabulary MEMBER, and
+ * `ApiErrorSchema.declaredCode` together with ADR-0112's "presence means
+ * demotion" amendment define the field as the demoted spelling of an
+ * UNREGISTERED code — absent when the producer's code IS a member. §0 controls
+ * that both codes parse as `ErrorCode`: that measurement is the REASON the
+ * field is absent, and §1 pins the absence.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -184,7 +184,7 @@ describe('#14389 §0 — controls', () => {
         expect(env.field).toBe('email');
     });
 
-    it('BOTH codes are vocabulary members — the `declaredCode` reading below is measured, not assumed', () => {
+    it('BOTH codes are vocabulary members — the reason the body carries no `declaredCode`', () => {
         expect(ErrorCode.safeParse('UNIQUE_VIOLATION').success).toBe(true);
         expect(ErrorCode.safeParse('DUPLICATE_RECORD').success).toBe(true);
     });
@@ -219,10 +219,10 @@ describe('#14389 §1 — the engine\'s DUPLICATE_RECORD envelope answers 409 UNI
         expect(r.body.error).toBe(CURATED_UNNAMED);
     });
 
-    it('the producer\'s spelling rides beside the wire code as `declaredCode` (triage ruling, as written)', () => {
+    it('carries NO `declaredCode` — the producer\'s spelling is a vocabulary member, not a demotion', () => {
         const r = mapDataError(envelope('duly_note', sqliteRaw()), 'duly_note');
         expect(r.body.code).toBe('UNIQUE_VIOLATION');
-        expect(r.body.declaredCode).toBe('DUPLICATE_RECORD');
+        expect(r.body).not.toHaveProperty('declaredCode');
     });
 
     it('the DELETE_RESTRICTED split: curated sentence on `error`, the engine\'s sentence on `developerMessage`', () => {
@@ -248,7 +248,6 @@ describe('#14389 §1 — the engine\'s DUPLICATE_RECORD envelope answers 409 UNI
         expect(mapDataError(env, 'duly_note').body).toEqual({
             error: CURATED_NAMED,
             code: 'UNIQUE_VIOLATION',
-            declaredCode: 'DUPLICATE_RECORD',
             developerMessage: env.message,
             field: 'email',
             object: 'duly_note',
@@ -258,7 +257,6 @@ describe('#14389 §1 — the engine\'s DUPLICATE_RECORD envelope answers 409 UNI
         expect(mapDataError(composite, 'duly_pair').body).toEqual({
             error: CURATED_UNNAMED,
             code: 'UNIQUE_VIOLATION',
-            declaredCode: 'DUPLICATE_RECORD',
             developerMessage: composite.message,
             object: 'duly_pair',
         });
@@ -355,7 +353,6 @@ describe('#14389 §2 — a real insert conflict, real engine on real better-sqli
         expect(r.body).toEqual({
             error: CURATED_NAMED,
             code: 'UNIQUE_VIOLATION',
-            declaredCode: 'DUPLICATE_RECORD',
             developerMessage: env.message,
             field: 'email',
             object: 'duly_note',

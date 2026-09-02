@@ -8,9 +8,9 @@ Since the ObjectQL engine began answering a driver's unique violation with its o
 
 A dedicated arm for the engine's envelope now sits with the other structured 409s (`DELETE_RESTRICTED`, `CONCURRENT_UPDATE`), ahead of the passthrough:
 
-- `code` stays `UNIQUE_VIOLATION` — the code every client branching on this conflict already reads. The producer's spelling rides beside it as `declaredCode: 'DUPLICATE_RECORD'`.
+- `code` stays `UNIQUE_VIOLATION` — the code every client branching on this conflict already reads.
 - `field` is restored whenever the dialect determinably named the column (SQLite, Postgres); composite keys and index-naming dialects (MySQL) carry no `field` key, exactly as before.
 - `error` is the curated end-user sentence again; the engine's own sentence rides on `developerMessage`, the same split the `DELETE_RESTRICTED` body uses.
 - The body still quotes nothing the driver said — no offending value, no statement, no index name — including on `driver-memory`, whose raw refusal used to echo the offending values as JSON through the passthrough.
 
-`patch`: a restoration of the shipped body's keys and wording; the wire `code` and the status are unchanged, and `declaredCode` is an added sibling, not a rename. The arm fires for the engine's envelope only; a plugin or sandbox body that throws the registered `DUPLICATE_RECORD` itself keeps the answer it gets today.
+`patch`: a restoration of the shipped body's keys and wording; the wire `code` and the status are unchanged. The arm fires for the engine's envelope only; a plugin or sandbox body that throws the registered `DUPLICATE_RECORD` itself keeps the answer it gets today.

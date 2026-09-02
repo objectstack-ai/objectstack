@@ -717,15 +717,19 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     // 2026-09-02: the answer that changes nothing for clients — every consumer
     // branching on this conflict today reads `UNIQUE_VIOLATION`, and renaming
     // a wire code under existing consumers is a published-contract change,
-    // not a door's call). The producer's own spelling rides beside it as
-    // `declaredCode`, per the same ruling. ⚠️ Read the field's contract before
-    // widening this: `ApiErrorSchema.declaredCode` and ADR-0112's 2026-08-16
-    // amendment define presence as the DEMOTION of an UNREGISTERED spelling,
-    // and `DUPLICATE_RECORD` is registered — so this is the one flat emission
-    // where a present `declaredCode` is a vocabulary member. Emitted as the
-    // ruling states it and pinned as such (`rest-duplicate-record-arm.test.ts`
-    // §0/§1); whether the field's contract or this emission moves is the
-    // contract review's question, not this arm's.
+    // not a door's call). **No `declaredCode` beside it.** `DUPLICATE_RECORD`
+    // is a `StandardErrorCode` member, and `ApiErrorSchema.declaredCode`
+    // (`packages/spec/src/api/contract.zod.ts`, with its docblock) together
+    // with ADR-0112's "presence means demotion" amendment define the field as
+    // the demoted spelling of an UNREGISTERED code — absent when the
+    // producer's code IS a vocabulary member. So the field stays ABSENT here
+    // (contract review on the card, 2026-09-02), and the engine's spelling
+    // stays in-process exactly as every dialect code (`SQLITE_CONSTRAINT_UNIQUE`,
+    // `23505`, `ER_DUP_ENTRY`) always has at the `isUniqueViolationError` arm
+    // below. ADR-0112's 2026-08-29 scope correction declares the hand-written
+    // `declaredCode` emission population to be exactly one site; this arm is
+    // not a second. Pinned in `rest-duplicate-record-arm.test.ts`: §0 (both
+    // codes parse as `ErrorCode` — the reason) and §1 (`not.toHaveProperty`).
     //
     // **Two sentences — the `DELETE_RESTRICTED` split above.** `error` is the
     // curated end-user sentence the #6250/#7821 arm has always produced: fixed
@@ -764,7 +768,6 @@ function classifyDataError(error: any, object?: string): { status: number; body:
                     ? `A record with this ${field} already exists`
                     : 'A record with this value already exists',
                 code: 'UNIQUE_VIOLATION',
-                declaredCode: 'DUPLICATE_RECORD',
                 ...(typeof error?.message === 'string' && error.message.length > 0
                     ? { developerMessage: error.message }
                     : {}),
