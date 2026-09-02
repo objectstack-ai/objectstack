@@ -1,31 +1,63 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The artifact boot has TWO readers of the same bytes (#12844).
+ * The artifact boot's security collections have ONE registrar — the artifact
+ * door — and this file is where that is MEASURED (#12892 step 2).
+ *
+ * Two real readers of the same artifact bytes exist in this monorepo:
  *
  *   1. `MetadataPlugin._parseAndRegisterArtifact` (`@objectstack/metadata`) —
- *      re-reads the artifact named by `artifactSource`, replays the versioned
- *      ADR-0087 forward conversion (#12772), then strict-parses. Canonical.
- *   2. `AppPlugin`'s ADR-0057 block (this package) — receives the same JSON
- *      from `loadArtifactBundle` (no validation, no conversion) and registers
- *      `positions` / `permissions` / `capabilities` / `sharingRules` through
- *      `metadata.registerInMemory`. (It also carried a `policies` entry until
- *      #12894 retired it as a dead pointer — the test below is what stays.)
+ *      the ARTIFACT DOOR. Replays the versioned ADR-0087 forward conversion
+ *      (#12772), STRICT-PARSES the definition (schema defaults, ADR-0122 input
+ *      transforms), stamps the ADR-0010 provenance envelope, and since #12892
+ *      step 1 (PR #13125) maps all four security collections in
+ *      `ARTIFACT_FIELD_TO_TYPE`. Canonical.
+ *   2. `AppPlugin`'s ADR-0057 block (this package) — receives the bundle (from
+ *      `loadArtifactBundle` on an artifact boot, from a `defineStack()` module
+ *      on every other boot), forward-converts it through the door's OWN policy
+ *      function (#12844) and registers `positions` / `permissions` /
+ *      `capabilities` / `sharingRules` through `metadata.registerInMemory`. No
+ *      strict parse, no defaults, no provenance.
  *
- * Before this fix reader 2 registered the RAW bytes, so the two copies of the
- * same item differed and which one a consumer saw depended on registration
- * order and read path. No consumer read the difference when the card was
- * filed — but that is a property of the two retired keys involved
- * (`allowRestore`/`allowPurge` gate nothing BY THE DEFINITION of their
- * retirement, #12497), not of this path.
+ * The history, because each step left a pin here:
  *
- * These tests drive BOTH REAL readers over one artifact and pin what the card
- * asked to be falsified rather than asserted:
+ *   - #12844 made reader 2 apply the conversion, so the two copies agreed on
+ *     every CONVERSION-governed key — and measured that they still differed on
+ *     the PARSE axis (a sharing rule's `condition` was a bare STRING on reader
+ *     2's copy and `{ dialect, source }` on the door's). It pinned that
+ *     residual key by key "to go red the day the routes unify".
+ *   - #12892 step 1 put `capabilities` in the door's map: two writers on that
+ *     collection as well, diverging on exactly four keys — pinned likewise.
+ *   - #12892 step 2 (the shape this file has now): `createStandaloneStack`
+ *     declares `securityMetadataRegistrar: 'artifact-door'` on the AppPlugin
+ *     it composes beside the door, and under that declaration the ADR-0057
+ *     block registers NONE of the four. Driving reader 2 as the artifact boot
+ *     now constructs it turned 6 of the 8 cases red on the branch (measured:
+ *     "expected [] to deeply equal [ '_packageId', …(4) ]", "AppPlugin must
+ *     still register the capability: expected undefined to be defined") — the
+ *     pins did the job they were written for, and were then REWRITTEN below to
+ *     pin the unified state. ⛔ Never skipped, relaxed or deleted: that is the
+ *     one repair that would let the route silently keep two writers.
  *
- *   - the two copies AGREE, per collection, for every collection that has two
- *     readers at all (and the ones that do not are pinned as such);
- *   - registration ORDER stops changing what a reader sees;
- *   - the difference the fix removes is real and measurable in the raw bytes.
+ * What is pinned now:
+ *
+ *   - ARTIFACT boot: reader 2 writes nothing under the four kinds; the door's
+ *     copy is the only one, in BOTH start orders; its shape is asserted key by
+ *     key — the four keys the raw copy lacked on a capability, the object-typed
+ *     sharing-rule predicate, every schema default.
+ *   - NON-artifact boot (positive control): the default AppPlugin still
+ *     registers all four collections, forward-converted, exactly as before.
+ *   - The parse-axis difference between the door's copy and the non-artifact
+ *     copy is still real and still measured — as a difference between BOOT
+ *     SHAPES now, never between two writers on one route.
+ *   - `policies`: no reader can see one (a schema fact).
+ *
+ * The discriminator is a composition-site DECLARATION, not a property of the
+ * bytes: a default-constructed `AppPlugin(bytes)` IS the door-less boot and is
+ * meant to stay green here. Only reader 2 constructed the way
+ * `createStandaloneStack` constructs it models the artifact boot —
+ * standalone-stack.test.ts pins that the factory really passes the option, and
+ * standalone-stack-security-registrar.test.ts drives the real kernel.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -130,6 +162,16 @@ function fakeCtx(metadataService?: unknown) {
 
 type Registration = { type: string; name: string; item: any };
 
+const SECURITY_TYPES: readonly string[] = ['position', 'permission', 'capability', 'sharing_rule'];
+
+/** Every `type:name` the artifact above registers, sorted. */
+const SECURITY_KEYS = [
+    'capability:crm.export',
+    'permission:support_agent',
+    'position:sales_rep',
+    'sharing_rule:share_open_deals',
+];
+
 /** Reader 1 — the real artifact door, into its own manager. */
 async function readerDoor(): Promise<Registration[]> {
     const plugin: any = new MetadataPlugin({ watch: false, config: { bootstrap: 'lazy' } });
@@ -143,10 +185,9 @@ async function readerDoor(): Promise<Registration[]> {
     return out;
 }
 
-/** Reader 2 — the real `AppPlugin` ADR-0057 block, capturing its writes in order. */
-async function readerBundle(): Promise<Registration[]> {
+/** Drive the real `AppPlugin` ADR-0057 block, capturing its writes in order. */
+async function driveAppPlugin(plugin: AppPlugin): Promise<Registration[]> {
     const captured: Registration[] = [];
-    const plugin = new AppPlugin(bytes(), undefined, { securityMetadataRegistrar: 'artifact-door' });
     await plugin.start!(
         fakeCtx({
             registerInMemory: (type: string, name: string, item: unknown) => {
@@ -155,6 +196,21 @@ async function readerBundle(): Promise<Registration[]> {
         }),
     );
     return captured;
+}
+
+/**
+ * Reader 2 as the ARTIFACT boot composes it — `createStandaloneStack`, beside a
+ * `MetadataPlugin({ artifactSource })` reading the same file. The declaration
+ * is the only difference from the reader below; everything else the block does
+ * is identical.
+ */
+function readerBundleOnArtifactBoot(): Promise<Registration[]> {
+    return driveAppPlugin(new AppPlugin(bytes(), undefined, { securityMetadataRegistrar: 'artifact-door' }));
+}
+
+/** Reader 2 as every door-less composition constructs it — the default. */
+function readerBundle(): Promise<Registration[]> {
+    return driveAppPlugin(new AppPlugin(bytes()));
 }
 
 /** `type:name` → item, in registration order (last write wins, as the registry does). */
@@ -176,10 +232,10 @@ function diffPaths(a: any, b: any, at = ''): string[] {
 
 /**
  * The keys the ADR-0087 conversion layer governs on these collections — the
- * axis this card is about, enumerated from the registry
+ * axis #12844 was about, enumerated from the registry
  * (`packages/spec/src/conversions/registry.ts`): the two `permissions`
  * entries, the two `sharingRules` entries, and the `roles` -> `positions`
- * collection rename. Nothing else in that registry reaches the five security
+ * collection rename. Nothing else in that registry reaches the four security
  * collections.
  */
 const CONVERSION_GOVERNED_PATHS = [
@@ -192,11 +248,57 @@ const CONVERSION_GOVERNED_PATHS = [
     'sharedWith.type',
 ];
 
-describe('#12844 — the artifact boot\'s two readers register the same bytes', () => {
+/** The ADR-0010 envelope `applyProtection` stamps from the manifest. */
+const PROVENANCE = { _packageId: 'com.test.issue-12844', _packageVersion: '1.0.0', _provenance: 'package' };
+
+/**
+ * The door's copy of every item, WHOLE — measured by running the artifact
+ * through the door's own pipeline (forward conversion, then
+ * `ObjectStackDefinitionSchema.parse`, then `applyProtection`) and written down
+ * here so a drift in any key fails by name. Every key the authored bytes did
+ * not carry is a schema default (`delegatable`, `isDefault`, the three grant
+ * bits, `active`, `scope`), an ADR-0122 input transform (`condition`), or the
+ * provenance envelope.
+ */
+const DOOR_COPY: Record<string, any> = {
+    'position:sales_rep': { name: 'sales_rep', label: 'Sales Rep', delegatable: false, ...PROVENANCE },
+    'permission:support_agent': {
+        name: 'support_agent',
+        label: 'Support Agent',
+        isDefault: false,
+        objects: {
+            crm_ticket: {
+                allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true,
+                allowTransfer: false, viewAllRecords: false, modifyAllRecords: false,
+            },
+            crm_lead: {
+                allowCreate: true, allowRead: false, allowEdit: false, allowDelete: false,
+                allowTransfer: false, viewAllRecords: false, modifyAllRecords: false,
+            },
+        },
+        rowLevelSecurity: [
+            { name: 'own_tasks', object: 'crm_task', operation: 'select', using: 'assignee == current_user.email', enabled: true },
+        ],
+        ...PROVENANCE,
+    },
+    'capability:crm.export': { name: 'crm.export', label: 'Export CRM data', scope: 'platform', ...PROVENANCE },
+    'sharing_rule:share_open_deals': {
+        name: 'share_open_deals',
+        type: 'criteria',
+        object: 'crm_deal',
+        active: true,
+        accessLevel: 'edit',
+        sharedWith: { type: 'position', value: 'sales_mgr' },
+        condition: { dialect: 'cel', source: 'record.status == "open"' },
+        ...PROVENANCE,
+    },
+};
+
+describe('#12892 step 2 — the artifact boot has ONE registrar for its security collections', () => {
     it('premise: the raw bundle really does carry a shape the current schema refuses', () => {
-        // Not a tautology — this is the difference the fix removes. Each of
-        // these is measured against the schema that any re-validating seam
-        // (Studio re-save through `saveMetaItem`) would apply.
+        // Not a tautology — this is the difference the door's parse removes.
+        // Each of these is measured against the schema that any re-validating
+        // seam (Studio re-save through `saveMetaItem`) would apply.
         const raw = bytes();
         expect(raw.permissions[0].objects.crm_ticket.allowRestore).toBe(true);
         expect(raw.permissions[0].rowLevelSecurity[0].priority).toBe(10);
@@ -209,7 +311,79 @@ describe('#12844 — the artifact boot\'s two readers register the same bytes', 
         expect(ObjectStackDefinitionSchema.safeParse(raw).success).toBe(false);
     });
 
-    it('permissions: the bundle reader no longer registers the retired grant bits', async () => {
+    // ── ARTIFACT boot: one registrar ──────────────────────────────────────
+
+    it('artifact boot: AppPlugin registers NOTHING under the four security kinds — and the door reaches every one of them', async () => {
+        const bundle = await readerBundleOnArtifactBoot();
+        expect(
+            bundle.filter((r) => SECURITY_TYPES.includes(r.type)),
+            'under the artifact-door declaration the ADR-0057 block must write no security item',
+        ).toEqual([]);
+
+        // The other half, without which the line above is a HOLE rather than a
+        // fix: the door registers an item under every kind `SECURITY_FIELDS`
+        // enumerates. A declared collection with zero registrars boots green
+        // and logs nothing (measured on #12892 step 1), so removing this
+        // reader is safe exactly as long as this stays true. Whole set, sorted
+        // — a collection the door stops reaching fails here by name.
+        const door = collapse(await readerDoor());
+        expect([...door.keys()].sort()).toEqual(SECURITY_KEYS);
+    });
+
+    it('artifact boot: in BOTH start orders the registry holds exactly the door\'s copy of every item, key by key', async () => {
+        const door = await readerDoor();
+        // The kernel's real order is door first, AppPlugin last (measured on
+        // #12892 step 1) — the order in which the raw copy used to win.
+        const doorFirst = collapse([...door, ...(await readerBundleOnArtifactBoot())]);
+        const bundleFirst = collapse([...(await readerBundleOnArtifactBoot()), ...door]);
+
+        expect([...doorFirst.keys()].sort()).toEqual(SECURITY_KEYS);
+        expect([...bundleFirst.keys()].sort()).toEqual(SECURITY_KEYS);
+        for (const key of SECURITY_KEYS) {
+            expect(doorFirst.get(key), `${key}, door started first`).toEqual(DOOR_COPY[key]);
+            expect(bundleFirst.get(key), `${key}, AppPlugin started first`).toEqual(DOOR_COPY[key]);
+            expect(diffPaths(doorFirst.get(key), bundleFirst.get(key)), `${key} must not depend on start order`).toEqual([]);
+        }
+
+        // The read a consumer can make TODAY, named explicitly on the only
+        // copy there is, whichever plugin started first: the sharing-rule
+        // predicate is an OBJECT whose `.source` is the authored expression,
+        // and a capability carries the schema default and the full envelope.
+        for (const registry of [doorFirst, bundleFirst]) {
+            const rule = registry.get('sharing_rule:share_open_deals') as any;
+            expect(typeof rule.condition).toBe('object');
+            expect(rule.condition.source).toBe('record.status == "open"');
+            const cap = registry.get('capability:crm.export') as any;
+            expect(cap.scope).toBe('platform');
+            expect(cap._packageVersion).toBe('1.0.0');
+        }
+    });
+
+    it('the registrar declaration defaults to the registering branch and refuses a misspelling instead of guessing', () => {
+        expect(new AppPlugin(bytes()).securityMetadataRegistrar).toBe('app-plugin');
+        expect(
+            new AppPlugin(bytes(), undefined, { securityMetadataRegistrar: 'artifact-door' }).securityMetadataRegistrar,
+        ).toBe('artifact-door');
+        // A typo must not silently land in either branch — both are quiet
+        // about what they did not do.
+        expect(() => new AppPlugin(bytes(), undefined, { securityMetadataRegistrar: 'door' as any }))
+            .toThrow(/securityMetadataRegistrar 'door' is not one of 'app-plugin' \| 'artifact-door'/);
+    });
+
+    // ── NON-artifact boot: the positive control ───────────────────────────
+    //
+    // The default AppPlugin is every door-less composition (`new
+    // AppPlugin(config)` over a `defineStack()` module, `DevPlugin`,
+    // `@objectstack/verify`'s `bootStack`). It must keep registering all four
+    // collections, forward-converted, exactly as #12844 left it — a green here
+    // is what makes the artifact-boot cases above a re-routing and not a loss.
+
+    it('non-artifact boot: AppPlugin still registers all four collections', async () => {
+        const bundle = collapse(await readerBundle());
+        expect([...bundle.keys()].sort()).toEqual(SECURITY_KEYS);
+    });
+
+    it('non-artifact boot: permissions — the retired grant bits are gone, every other authored bit survives', async () => {
         const bundle = collapse(await readerBundle());
         const perm = bundle.get('permission:support_agent');
         expect(perm, 'AppPlugin must still register the permission set').toBeDefined();
@@ -218,7 +392,6 @@ describe('#12844 — the artifact boot\'s two readers register the same bytes', 
         expect(perm.objects.crm_lead).not.toHaveProperty('allowRestore');
         expect(perm.objects.crm_lead).not.toHaveProperty('allowPurge');
         expect(perm.rowLevelSecurity[0]).not.toHaveProperty('priority');
-        // Every other authored bit survives untouched.
         expect(perm.objects.crm_ticket).toMatchObject({
             allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true,
         });
@@ -227,7 +400,7 @@ describe('#12844 — the artifact boot\'s two readers register the same bytes', 
         });
     });
 
-    it('sharingRules: the bundle reader registers the canonical recipient type and access level', async () => {
+    it('non-artifact boot: sharingRules — the canonical recipient type and access level', async () => {
         const bundle = collapse(await readerBundle());
         const rule = bundle.get('sharing_rule:share_open_deals');
         expect(rule, 'AppPlugin must still register the sharing rule').toBeDefined();
@@ -235,9 +408,9 @@ describe('#12844 — the artifact boot\'s two readers register the same bytes', 
         expect(rule.sharedWith.type).toBe('position');
     });
 
-    it('positions: the collection-key rename reaches the bundle reader too', async () => {
+    it('non-artifact boot: positions — the collection-key rename reaches AppPlugin', async () => {
         const bundle = collapse(await readerBundle());
-        // Before the fix this reader looked for `positions` on bytes that
+        // Before #12844 this reader looked for `positions` on bytes that
         // spelled the collection `roles`, and registered NOTHING.
         expect(bundle.get('position:sales_rep')).toMatchObject({
             name: 'sales_rep',
@@ -245,22 +418,17 @@ describe('#12844 — the artifact boot\'s two readers register the same bytes', 
         });
     });
 
-    it('the two readers agree on every ADR-0087 CONVERSION-governed key', async () => {
+    it('non-artifact boot: agrees with the door on every ADR-0087 CONVERSION-governed key, and on the canonical value', async () => {
         const door = collapse(await readerDoor());
         const bundle = collapse(await readerBundle());
         const shared = [...bundle.keys()].filter((k) => door.has(k)).sort();
 
-        // Guard the comparison against being vacuously green.
-        // `capability:crm.export` joined this list at #12892 step 1: the door's
-        // `ARTIFACT_FIELD_TO_TYPE` now maps `capabilities`, so that collection
-        // has TWO readers here for the first time. Measured, not predicted —
-        // and the only edit this list took.
-        expect(shared).toEqual([
-            'capability:crm.export',
-            'permission:support_agent',
-            'position:sales_rep',
-            'sharing_rule:share_open_deals',
-        ]);
+        // Guard the comparison against being vacuously green: every security
+        // item has a copy on each side of THIS comparison (door vs door-less
+        // boot). On the artifact boot itself the shared set is empty by
+        // construction — see the cases above — so this list is about the
+        // control, not the route.
+        expect(shared).toEqual(SECURITY_KEYS);
 
         for (const key of shared) {
             const differing = diffPaths(door.get(key), bundle.get(key));
@@ -289,134 +457,41 @@ describe('#12844 — the artifact boot\'s two readers register the same bytes', 
         }
     });
 
-    it('registration ORDER no longer changes any conversion-governed value — but the two copies are STILL not interchangeable', async () => {
-        // The card's inference was that once the copies agree, order stops
-        // mattering. Measured, not assumed — and the measurement says the
-        // inference holds only on the conversion axis.
-        const door = await readerDoor();
-        const bundleFirst = collapse([...(await readerBundle()), ...door]);
-        const doorFirst = collapse([...door, ...(await readerBundle())]);
+    /**
+     * The parse-axis residual #12844 recorded, still measured key by key — but
+     * it is now a difference between BOOT SHAPES (a door-less boot serves the
+     * AppPlugin copy; an artifact boot serves the door's), never between two
+     * writers on one route. If a future change makes the door-less copy match
+     * the door's (a strict parse in AppPlugin, say), this case reports it by
+     * name; if the door's copy drifts, DOOR_COPY above does.
+     */
+    it('the parse-axis difference is between boot shapes now — measured, not reconciled', async () => {
+        const door = collapse(await readerDoor());
+        const bundle = collapse(await readerBundle());
 
-        for (const key of [...doorFirst.keys()].filter((k) => bundleFirst.has(k))) {
-            const differing = diffPaths(doorFirst.get(key), bundleFirst.get(key));
-            for (const governed of CONVERSION_GOVERNED_PATHS) {
-                expect(
-                    differing,
-                    `${key}: '${governed}' must not depend on which reader ran last`,
-                ).not.toContain(governed);
-            }
-        }
-
-        // ⚠️ The residual, recorded rather than reconciled (#12844 report).
-        //
-        // (a) makes the two copies agree on what the ADR-0087 conversion layer
-        // governs. It does NOT make them the same document: the door also
-        // strict-PARSES (schema defaults + ADR-0122 input transforms) and
-        // stamps the ADR-0010 provenance envelope, and the bundle reader does
-        // neither. So which copy survives still depends on registration order
-        // — on three axes that have nothing to do with conversion. The
-        // sharpest is `sharing_rule.condition`: a STRING on the bundle copy
-        // and `{ dialect, source }` on the door copy, so a consumer reading
-        // `.condition.source` reads `undefined` from one of them TODAY, with
-        // no future retired key required.
-        //
-        // Closing that is (b) — "one route, one owner" — which the card and
-        // the triage both put outside this scope. This pin is the evidence for
-        // it, and turns red the day the routes are unified.
-        expect(diffPaths(doorFirst.get('sharing_rule:share_open_deals'), bundleFirst.get('sharing_rule:share_open_deals')).sort())
+        expect(diffPaths(door.get('sharing_rule:share_open_deals'), bundle.get('sharing_rule:share_open_deals')).sort())
             .toEqual(['_packageId', '_packageVersion', '_provenance', 'active', 'condition']);
-        expect(diffPaths(doorFirst.get('position:sales_rep'), bundleFirst.get('position:sales_rep')).sort())
+        expect(diffPaths(door.get('position:sales_rep'), bundle.get('position:sales_rep')).sort())
             .toEqual(['_packageId', '_packageVersion', '_provenance', 'delegatable']);
-        expect(diffPaths(doorFirst.get('permission:support_agent'), bundleFirst.get('permission:support_agent')).sort())
+        expect(diffPaths(door.get('permission:support_agent'), bundle.get('permission:support_agent')).sort())
             .toEqual([
                 '_packageId', '_packageVersion', '_provenance', 'isDefault',
                 'objects.crm_lead.allowTransfer', 'objects.crm_lead.modifyAllRecords', 'objects.crm_lead.viewAllRecords',
                 'objects.crm_ticket.allowTransfer', 'objects.crm_ticket.modifyAllRecords', 'objects.crm_ticket.viewAllRecords',
             ]);
-        // The one a consumer can read today, named explicitly and in the
-        // direction the order actually produces: last write wins, so
-        // `doorFirst` leaves the BUNDLE copy standing and `bundleFirst` leaves
-        // the DOOR copy standing.
-        expect(typeof (doorFirst.get('sharing_rule:share_open_deals') as any).condition).toBe('string');
-        expect(typeof (bundleFirst.get('sharing_rule:share_open_deals') as any).condition).toBe('object');
-    });
-
-    // ── `capabilities`: TWO readers since #12892 step 1 · `policies`: none ────
-    //
-    // Recorded as measurements, not omissions. `policies` still never travels
-    // this path in a way that could produce two copies. `capabilities` did not
-    // either until #12892 step 1 put it in the door's map — the case below used
-    // to assert that ABSENCE, and an assertion of an absence stops being a
-    // guard the moment the absence is deliberately removed. It is REWRITTEN
-    // here rather than relaxed, and rewritten UPWARD: it now pins the interim
-    // divergence key by key.
-
-    /**
-     * ⚠️ THIS CASE EXISTS TO GO RED WHEN STEP 2 LANDS. That is its job, not a
-     * regression.
-     *
-     * The maintainer's 2026-08-29 ruling on #12892 is two ordered steps:
-     *
-     *   step 1 (landed) — the door's `ARTIFACT_FIELD_TO_TYPE` maps
-     *     `capabilities`, so BOTH readers now register the collection. Two
-     *     writers on one route is the INTERIM state the ruling permits, and
-     *     what this case measures is exactly how the two copies differ while
-     *     it lasts.
-     *   step 2 (not landed) — `AppPlugin`'s ADR-0057 `SECURITY_FIELDS` block
-     *     stops registering these five on the ARTIFACT path (it must keep
-     *     registering on non-artifact boots), leaving the door's parsed,
-     *     defaulted, provenance-stamped copy as the only one.
-     *
-     * The day step 2 lands, `readerBundle()` stops producing
-     * `capability:crm.export`, and EVERY assertion below goes red — the
-     * membership pin, the key-by-key divergence set, and the four named-key
-     * pins alike. Whoever lands step 2 rewrites this case to assert the single
-     * remaining copy; ⛔ never by deleting, skipping or weakening it, which is
-     * the one repair that would let the route silently keep two writers.
-     *
-     * Two seams, two answers, both real — do not read one as refuting the other:
-     * HERE the two copies differ on FOUR keys, because `readerBundle()` drives
-     * `AppPlugin` against a bare `registerInMemory` capture. On a full kernel
-     * boot the ObjectQL SchemaRegistry stamps `_packageId` / `_provenance` onto
-     * that same object during package install, so the end-to-end divergence
-     * narrows to the TWO the registry cannot supply: `scope` (the schema
-     * default) and `_packageVersion`. Those two are the seam-invariant core and
-     * are pinned by name below in addition to the set.
-     */
-    it('capabilities: BOTH readers register them since #12892 step 1, and the two copies diverge on exactly four keys', async () => {
-        const door = collapse(await readerDoor());
-        const bundle = collapse(await readerBundle());
-
-        // Membership: two readers, not one. (Before step 1 the door registered
-        // nothing under `capability` and this collection had a single writer.)
-        expect(bundle.get('capability:crm.export'), 'AppPlugin must still register the capability').toBeDefined();
-        expect(door.get('capability:crm.export'), 'the door must now register it too').toBeDefined();
-        expect([...door.keys()].filter((k) => k.startsWith('capability:'))).toEqual(['capability:crm.export']);
-
-        // The divergence, key by key — the whole set, so a key that appears or
-        // disappears fails here rather than passing under a looser shape.
         expect(diffPaths(door.get('capability:crm.export'), bundle.get('capability:crm.export')).sort())
             .toEqual(['_packageId', '_packageVersion', '_provenance', 'scope']);
 
-        // …and the two that survive every seam, pinned BY NAME with the value
-        // each side actually carries. `scope` is the `CapabilitySchema`
-        // default, `_packageVersion` half of the ADR-0010 envelope; the authored
-        // bytes declare neither, so only the copy that met the schema has them.
-        const doorCopy = door.get('capability:crm.export') as any;
-        const bundleCopy = bundle.get('capability:crm.export') as any;
-        expect(doorCopy.scope).toBe('platform');
-        expect(bundleCopy.scope).toBeUndefined();
-        expect(doorCopy._packageVersion).toBe('1.0.0');
-        expect(bundleCopy._packageVersion).toBeUndefined();
-
-        // The authored fields agree — "they differ" must not be satisfiable by
-        // the two copies being different documents altogether.
-        for (const copy of [doorCopy, bundleCopy]) {
-            expect(copy).toMatchObject({ name: 'crm.export', label: 'Export CRM data' });
-        }
+        // The sharpest one, by type: a consumer reading `.condition.source`
+        // gets a value from the door's copy and `undefined` from the door-less
+        // copy — which is why the artifact boot must serve only the former.
+        expect(typeof (bundle.get('sharing_rule:share_open_deals') as any).condition).toBe('string');
+        expect(typeof (door.get('sharing_rule:share_open_deals') as any).condition).toBe('object');
+        expect((door.get('capability:crm.export') as any).scope).toBe('platform');
+        expect((bundle.get('capability:crm.export') as any).scope).toBeUndefined();
     });
 
-    it('policies: not an authorable stack collection at all — neither reader can see one', async () => {
+    it('policies: not an authorable stack collection at all — no reader can see one', async () => {
         // `AppPlugin`'s SECURITY_FIELDS and `ARTIFACT_FIELD_TO_TYPE` each
         // carried a `policies` → `policy` entry until #12894 removed both:
         // `ObjectStackDefinitionSchema` is a strictObject with no `policies`
@@ -424,12 +499,11 @@ describe('#12844 — the artifact boot\'s two readers register the same bytes', 
         // outright and neither entry could ever match. On the permission set
         // `policies` is an ALIAS for `rowLevelSecurity` — a key on an ITEM.
         //
-        // This case is unchanged by that removal, and deliberately so: it pins
-        // the SCHEMA fact the removal rests on, which is what makes the entries
-        // dead. What stops them being re-added is `check:stack-collection-maps`,
-        // which now reconciles both maps (`ARTIFACT_FIELD_TO_TYPE` and
-        // `SECURITY_FIELDS`) against this schema — a green run of THIS test is
-        // not evidence the pointers are gone.
+        // This case pins the SCHEMA fact the removal rests on, which is what
+        // makes the entries dead. What stops them being re-added is
+        // `check:stack-collection-maps`, which reconciles both maps
+        // (`ARTIFACT_FIELD_TO_TYPE` and `SECURITY_FIELDS`) against this schema
+        // — a green run of THIS test is not evidence the pointers are gone.
         const withPolicies = { ...bytes(), policies: [{ name: 'p1', label: 'P1' }] };
         const parsed = ObjectStackDefinitionSchema.safeParse(withPolicies);
         expect(parsed.success).toBe(false);
@@ -438,7 +512,9 @@ describe('#12844 — the artifact boot\'s two readers register the same bytes', 
 
         const door = collapse(await readerDoor());
         const bundle = collapse(await readerBundle());
+        const bundleOnArtifactBoot = collapse(await readerBundleOnArtifactBoot());
         expect([...door.keys()].filter((k) => k.startsWith('policy:'))).toEqual([]);
         expect([...bundle.keys()].filter((k) => k.startsWith('policy:'))).toEqual([]);
+        expect([...bundleOnArtifactBoot.keys()].filter((k) => k.startsWith('policy:'))).toEqual([]);
     });
 });

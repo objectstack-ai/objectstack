@@ -206,6 +206,25 @@ describe('createStandaloneStack — surfaces app RBAC from the artifact (ADR-005
     expect(appDefaultPermissionSetName(config.permissions)).toBe('app_member_default');
   });
 
+  // [#12892 step 2] The composition invariant behind the single-registrar rule:
+  // the AppPlugin this factory composes DECLARES that the artifact door
+  // registers its security collections, and the MetadataPlugin composed in the
+  // same list reads the SAME artifact through that door. Either half alone is
+  // wrong — the declaration without the door leaves four collections with no
+  // registrar (a boot that stays green and logs nothing, measured at step 1);
+  // the door without the declaration is the two-writer state the ruling
+  // refused. Pinned here, on the real factory output, because the two lines
+  // that make it true sit 20 lines apart in standalone-stack.ts and nothing
+  // else ties them together.
+  it('[#12892 step 2] composes the artifact AppPlugin as a NON-registrar of security metadata, beside the MetadataPlugin that reads the same artifact', () => {
+    const app = result.plugins.find((p: any) => p?.type === 'app') as any;
+    expect(app, 'the factory must compose an AppPlugin for a present artifact').toBeDefined();
+    expect(app.securityMetadataRegistrar).toBe('artifact-door');
+    const door = result.plugins.find((p: any) => p?.name === 'com.objectstack.metadata') as any;
+    expect(door, 'the factory must compose the MetadataPlugin (the artifact door)').toBeDefined();
+    expect(door.options?.artifactSource).toEqual({ mode: 'local-file', path: artifactPath });
+  });
+
   it('createDefaultHostConfig (the actual serve artifact-fallback) surfaces the same', async () => {
     const r = await createDefaultHostConfig({
       requireArtifact: true,
