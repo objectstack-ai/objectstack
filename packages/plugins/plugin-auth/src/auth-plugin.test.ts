@@ -580,7 +580,12 @@ describe('AuthPlugin', () => {
     const boot = async (opts: { settings?: unknown; i18nDefault?: string | null }) => {
       hookCapture = createHookCapture();
       mockContext.hook = hookCapture.hookFn;
-      mockContext.getService = vi.fn((name: string) => {
+      // `: any` on the RETURN, not a cast on the assignment: `getService` is
+      // generic (`<T>(name: string) => T`), so an inferred union return is a
+      // TS2322 — the exact debt `check:test-typecheck` ledgers for the older
+      // doubles in this file. That ledger only ratchets down, so this one
+      // states its shape instead of adding to it.
+      mockContext.getService = vi.fn((name: string): any => {
         if (name === 'manifest') return { register: vi.fn() };
         if (name === 'settings') {
           if (opts.settings === undefined) throw new Error('Service not found: settings');
