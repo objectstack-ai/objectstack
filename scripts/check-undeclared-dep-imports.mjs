@@ -709,6 +709,13 @@ function makeTree(root, { manifest, files, workspace }) {
   for (const [rel, text] of Object.entries(files)) fixture(root, `packages/subject/${rel}`, text);
 }
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   let failures = 0;
   const t = (name, ok) => { if (!ok) { failures += 1; console.error(`  FAIL  ${name}`); } else console.log(`  ok    ${name}`); };
@@ -988,10 +995,23 @@ function selfTest() {
   }
 
   console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  check-undeclared-dep-imports --self-test (${failures} failure(s))`);
+  selfTestReachedVerdict = true;
   return failures === 0 ? 0 : 1;
 }
 
 if (isEntrypoint(import.meta.url)) {
   const argv = process.argv.slice(2);
-  process.exit(argv.includes('--self-test') ? selfTest() : argv.includes('--list') ? list() : main());
+  if (argv.includes('--self-test')) {
+      const selfTestCode = selfTest();
+      if (!selfTestReachedVerdict) {
+          console.error(
+              '\n✗ check-undeclared-dep-imports self-test: selfTest() returned without reaching its verdict,\n'
+                  + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                  + 'that never finished as a self-test that passed.\n',
+          );
+          process.exit(1);
+      }
+      process.exit(selfTestCode);
+  }
+  process.exit(argv.includes('--list') ? list() : main());
 }

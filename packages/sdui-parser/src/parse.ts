@@ -20,6 +20,40 @@ import type { Diagnostic, ParseOptions, ParseResult, SchemaElement, SchemaNode }
 const EVENT_ATTR = /^on[A-Z]/;
 const FORBIDDEN_ATTRS = new Set(['dangerouslySetInnerHTML', 'ref', 'key']);
 
+/**
+ * The envelope's own discriminator, which on THIS tier the tag name sets.
+ *
+ * An authored `type=` attribute is a NAME COLLISION with it, and the parser
+ * refuses it at parse time (maintainer ruling 2026-09-01, recorded as an
+ * amendment on ADR-0080 — 「响亮拒绝」, quoted verbatim there). One diagnostic
+ * naming BOTH the tag and the attribute replaces two bad outcomes:
+ *
+ *  - the value named another REGISTERED type (`<flex type="grid">`) — the tree
+ *    carried `type:'grid'`, `validateTree` found `grid` in the manifest, every
+ *    check passed, and the page rendered a grid where the author wrote a flex.
+ *    ZERO diagnostics. On the one tier whose whole premise is that unreviewed
+ *    and AI-authored source is safe to accept.
+ *  - the value named NOTHING registered (`<object-chart type="bar">`, the shape
+ *    a react-tier author carries across) — loud, but `unknown-component`
+ *    naming `"bar"` reads as a missing plugin, never as a bad prop.
+ *
+ * ⛔ NOT rescued as `specType` the way the react tier rescues it (objectui#2880):
+ * that is consumer-side tolerance, and it would spread an alias concept to a
+ * second tier. ⛔ NOT a warning grace period either — the same ruling declined
+ * a staged rollout. ⛔ And NOT fixable at the warning layer: `type` is in
+ * `validate.ts`'s `BASE_PROPS` deliberately (it is correct for every other
+ * member), so removing it there would make every legitimate node warn. The
+ * refusal belongs here, at parse.
+ *
+ * ⚠️ The code is the EXISTING `forbidden-attr`, not a new one, and that is
+ * load-bearing rather than lazy: `scripts/check-sdui-lockstep.mjs` holds this
+ * copy's diagnostic-code set equal to objectui's at the pinned revision, so a
+ * code minted on one side only IS the dialect split that gate exists to catch
+ * (#12719). `forbidden-attr` already carries this shape — an attribute this
+ * tier refuses, named beside its element — and both copies stamp it.
+ */
+const DISCRIMINATOR_ATTR = 'type';
+
 export function parseJsx(source: string, options: ParseOptions = {}): ParseResult {
   return new Parser(source, options).parseDocument();
 }
@@ -69,7 +103,15 @@ class Parser {
       if (c === '' || c === '>' || c === '/') break;
       const attr = this.parseAttr(start, tag);
       if (!attr) break;
-      props[attr.name] = attr.value;
+      // `drop` is set only for the refused discriminator attribute, and only so
+      // that ONE diagnostic is what the author gets. The `__forbidden_<name>`
+      // sentinel the other refusals park in `props` reaches `validateTree`,
+      // which knows no such prop and adds `unknown-prop` naming a key nobody
+      // wrote — loud, and pointing at the wrong thing, which is the species of
+      // diagnostic this whole change exists to remove. The existing sentinel
+      // behaviour is left exactly as it was for the attributes that already had
+      // it (`ref`, `key`, `dangerouslySetInnerHTML`, `on*`).
+      if (!attr.drop) props[attr.name] = attr.value;
     }
 
     this.skipWs();
@@ -82,12 +124,22 @@ class Parser {
       this.error('unterminated-open-tag', `Unterminated <${tag}> open tag`, start, tag);
     }
 
-    const node: SchemaElement = { type: tag, ...props };
+    // DEFENSE IN DEPTH (ruled together with the refusal above). `props` used to
+    // be spread AFTER `type: tag`, so an authored `type` attribute overwrote the
+    // discriminator the tag established and nothing downstream restored it —
+    // `compile()` returns this tree as-is and `validateTree` then looks up
+    // `manifest.components[node.type]`, i.e. the value the author wrote, not the
+    // tag they wrote. The refusal makes that overwrite unreachable; the order
+    // here makes it impossible. ⚠️ Reversing the order ALONE would have been a
+    // regression of its own — the authored value would then be dropped in
+    // silence, trading one silence for another. It is correct only BECAUSE the
+    // attribute is refused loudly one function up.
+    const node: SchemaElement = { ...props, type: tag };
     if (children && children.length) node.children = children;
     return node;
   }
 
-  private parseAttr(elStart: number, tag: string): { name: string; value: unknown } | null {
+  private parseAttr(elStart: number, tag: string): { name: string; value: unknown; drop?: boolean } | null {
     const name = this.readName();
     if (!name) {
       this.error('bad-attr', `Malformed attribute on <${tag}>`, this.pos, tag);
@@ -100,6 +152,19 @@ class Parser {
     if (this.eat('=')) {
       this.skipWs();
       value = this.parseAttrValue(tag);
+    }
+    if (name === DISCRIMINATOR_ATTR) {
+      // ONE diagnostic naming both the tag and the attribute — see
+      // DISCRIMINATOR_ATTR above for why it replaces both prior outcomes.
+      this.error(
+        'forbidden-attr',
+        `Attribute "${DISCRIMINATOR_ATTR}" is not allowed on <${tag}> — on this tier the tag name IS the `
+        + `component, so <${tag}> already means type "${tag}". Delete the attribute, or write the tag of the `
+        + 'component you meant.',
+        elStart,
+        tag,
+      );
+      return { name, value: undefined, drop: true };
     }
     if (EVENT_ATTR.test(name) || FORBIDDEN_ATTRS.has(name)) {
       this.error('forbidden-attr', `Attribute "${name}" is not allowed on <${tag}>`, elStart, tag);

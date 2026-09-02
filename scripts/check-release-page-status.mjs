@@ -536,6 +536,13 @@ const CURRENT_INDEX_V17 =
   + 'against the routes the server actually mounts (21 dead methods out, 40+ real ones in) '
   + '(current series: 17.0.0, released 2026-08-14).';
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const failures = [];
   const expect = (label, cond) => {
@@ -798,6 +805,7 @@ function selfTest() {
     + '"nothing shipped", the two real stale statuses and both stale index entries go RED, the two '
     + 'corrected ones stay GREEN with their RC trains named, and the cutoff is printed on both paths.',
   );
+  selfTestReachedVerdict = true;
   process.exit(0);
 }
 
@@ -894,6 +902,16 @@ function main() {
 // scope floor from it), and unguarded the whole gate ran inside any importer,
 // printing its verdict over theirs.
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) selfTest();
+  if (process.argv.includes('--self-test')) {
+    selfTest();
+      if (!selfTestReachedVerdict) {
+        console.error(
+          '\n✗ check-release-page-status self-test: selfTest() returned without reaching its verdict,\n'
+            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+            + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+      }
+  }
   main();
 }

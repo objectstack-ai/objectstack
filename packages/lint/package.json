@@ -32,7 +32,9 @@
     "build": "tsup && node ../../scripts/check-dts-emitted.mjs",
     "dev": "tsc -w",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && pnpm check:test-typecheck",
+    "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/lint --project tsconfig.test.json",
+    "gen:test-typecheck-debt": "tsx ../../scripts/check-test-typecheck.mts --update --package packages/lint --project tsconfig.test.json",
     "check:doc-formula-expressions": "node scripts/check-doc-formula-expressions.mjs --self-test && node scripts/check-doc-formula-expressions.mjs",
     "check:doc-security-posture": "node scripts/check-doc-security-posture.mjs --self-test && node scripts/check-doc-security-posture.mjs"
   },

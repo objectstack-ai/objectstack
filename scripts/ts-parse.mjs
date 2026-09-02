@@ -513,6 +513,14 @@ export function transpileChecked(fileName, text, transpileOptions = {}) {
  * spawn a real child and read what it printed and what status it left, exactly
  * as `invoked-as.mjs` drives a real symlink rather than a model of one.
  */
+
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 export function selfTest() {
   const cases = [];
   const t = (name, ok, detail) => cases.push({ name, ok: Boolean(ok), detail });
@@ -766,10 +774,22 @@ export function selfTest() {
       + `across all three parser entry points, both ScriptKind directions, a Program's transitive import `
       + `included, and a caller’s try/catch cannot swallow any of it).`,
   );
+  selfTestReachedVerdict = true;
   return 0;
 }
 
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) process.exit(selfTest());
+  if (process.argv.includes('--self-test')) {
+      const selfTestCode = selfTest();
+        if (!selfTestReachedVerdict) {
+            console.error(
+                '\n✗ ts-parse self-test: selfTest() returned without reaching its verdict,\n'
+                    + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                    + 'that never finished as a self-test that passed.\n',
+            );
+            process.exit(1);
+        }
+        process.exit(selfTestCode);
+  }
   console.log('usage: node scripts/ts-parse.mjs --self-test');
 }
