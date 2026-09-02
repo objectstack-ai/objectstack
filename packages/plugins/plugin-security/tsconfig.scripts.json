@@ -1,4 +1,5 @@
-// The SCRIPTS-layer type-check program for this package (#11351).
+// The SCRIPTS-layer type-check program for this package (#11351), WIDENED
+// (#14386) to also carry this package's manifest authoring site.
 //
 // `scripts/i18n-extract.config.ts` is the input to this package's i18n
 // extraction: it composes the package's own objects and translation bundles
@@ -15,6 +16,20 @@
 // `scripts/` would put the directory in front of the emit. This program
 // emits nothing.
 //
+// #14386 ADDED `objectstack.config.ts` (the package-ROOT manifest,
+// `defineStack` composing `./src/manifest`) to `include` below, joining
+// `scripts/**/*` in this same sibling rather than opening a second one: it is
+// a package-root file for the identical reason `scripts/` is -- `tsconfig
+// .json`'s `include` is `src/**/*`, which cannot match a root-level file
+// either. Before this change no tsc program read the manifest:
+// `check:type-check-coverage`'s `isUncheckedSourceCandidate` skips
+// `depth === 0` by construction (the package-root line), so `pnpm --filter
+// @objectstack/plugin-security typecheck` exiting 0 carried no information
+// about it, of the same shape #13284 found and fixed in `packages/drivers/
+// driver-memory` and `packages/plugins/plugin-hono-server`. See
+// `scripts/check-type-check-coverage.mjs`'s `ROOT_SOURCE_FILES` for the
+// declared allowlist this repairs against.
+//
 // STRICTNESS IS INHERITED and deliberately not relaxed: `strict`,
 // `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns` and the rest
 // come from the root config through `tsconfig.json`. The directory
@@ -26,16 +41,17 @@
 // `rootDir` IS NOT OVERRIDDEN HERE, and that is the package-specific half of
 // this file. `tsconfig.json` already widens it to `../..` (= `packages/`) to
 // carry the `paths` redirect of a sibling package to source, so the inherited
-// value ALREADY contains `scripts/` and this program needs no change. Setting
-// it to `.` also measures 0 today, and is still the wrong value: it would
-// re-narrow the root below the redirected source, so the first script here
-// that reaches that sibling would report TS6059 about the CHECK rather than
-// about the code.
+// value ALREADY contains `scripts/` -- and, for the same reason, the
+// package-root `objectstack.config.ts` added above -- and this program needs
+// no change. Setting it to `.` also measures 0 today, and is still the wrong
+// value: it would re-narrow the root below the redirected source, so the
+// first script here that reaches that sibling would report TS6059 about the
+// CHECK rather than about the code.
 //
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true
   },
-  "include": ["scripts/**/*"]
+  "include": ["scripts/**/*", "objectstack.config.ts"]
 }
