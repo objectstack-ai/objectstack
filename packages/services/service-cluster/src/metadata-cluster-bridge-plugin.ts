@@ -92,13 +92,35 @@ export class MetadataClusterBridgePlugin implements Plugin {
     }
 
     /**
-     * Lane 1 — the metadata SERVICE's `metadata.changed` bridge, exactly as
-     * it has always behaved (its log lines are measured facts other cards
-     * lean on — the warn below is #13331's original boot symptom, and it
-     * remains TRUE on the host-config boot: the fallback metadata slot has
-     * no cluster seam, so metadata-SERVICE cache invalidation stays off
-     * there. The data-plane registry gap that warn used to imply is what
-     * lane 2 closes.)
+     * Lane 1 — the metadata SERVICE's `metadata.changed` bridge.
+     *
+     * The warn below is a measured fact other cards lean on: it is #13331's
+     * original boot symptom and it remains TRUE and VERBATIM on the
+     * host-config boot, where the fallback metadata slot has no cluster
+     * seam, so metadata-SERVICE cache invalidation stays off there. The
+     * data-plane registry gap that warn used to imply is what lane 2 closes.
+     *
+     * [#14021] Guarded on {@link isInProcessClusterDriver} — the shape
+     * `AuthzClusterBridgePlugin` uses and the one lane 2 was born with. A
+     * cluster service IS registered — `Runtime` registers the memory driver
+     * by default — but it fans out to nobody. Reporting this as "bridged" is
+     * the exact misreading the posture statement exists to prevent.
+     *
+     * The authz bridge's header exempts THIS bridge from having to speak
+     * when a cluster service is ABSENT, because a missed `metadata.changed`
+     * costs a stale schema and loses no data. That exemption is about
+     * SILENCE; it does not licence asserting "bridged" over a bus that
+     * crosses no process boundary, which is a false positive rather than a
+     * quiet negative. So the in-process arm is stated at `debug`, matching
+     * lane 2 — the deliberate level difference between the two bridges
+     * (#11968) is not what this card touches.
+     *
+     * Skipping the attach — rather than attaching and softening the log — is
+     * what both in-tree exemplars do, and here it reaches nothing: the only
+     * subscriber of `metadata.changed` in the tree is the same
+     * `MetadataManager` that publishes it, and its loopback guard drops
+     * every message whose `originNode` equals its own node id. On an
+     * in-process bus that is every message.
      */
     private attachMetadataServiceLane(ctx: PluginContext, cluster: IClusterService): void {
         let md: unknown;
@@ -116,6 +138,13 @@ export class MetadataClusterBridgePlugin implements Plugin {
         if (typeof attach !== 'function') {
             ctx.logger.warn(
                 'MetadataClusterBridgePlugin: metadata service does not expose attachClusterPubSub(); cross-node cache invalidation disabled',
+            );
+            return;
+        }
+
+        if (isInProcessClusterDriver(cluster.driver)) {
+            ctx.logger.debug(
+                `MetadataClusterBridgePlugin: cluster driver "${cluster.driver}" is in-process; metadata.changed fan-out has no peers to reach, skipping`,
             );
             return;
         }

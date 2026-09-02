@@ -13,11 +13,15 @@
  * objects, indefinitely. The mutation lane must attach exactly there, without
  * the metadata-service lane's absence taking it down.
  *
- * ⚠️ Lane 1's in-process-driver behaviour (it attaches and logs "bridged" on
- * the memory driver that fans out to nobody) is #14021's card, NOT pinned
- * here — these cases drive lane 1 only through its warn/absence paths so that
- * card stays free to fix it. Lane 2 carries the `isInProcessClusterDriver`
- * guard from birth, and that IS pinned here.
+ * ⚠️ Lane 1's in-process-driver behaviour (it attached and logged "bridged"
+ * on the memory driver that fans out to nobody) was #14021's card, and the
+ * #13331 cases below deliberately do NOT pin it — they drive lane 1 only
+ * through its warn/absence paths so that card stayed free to fix it.
+ *
+ * [#14021] It is fixed: lane 1 now carries the same `isInProcessClusterDriver`
+ * guard lane 2 was born with. The block at the BOTTOM of this file pins it,
+ * together with the cross-process control that keeps the guard honest —
+ * without that control a guard is indistinguishable from "never say bridged".
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -110,6 +114,8 @@ const infoLines = (h: ReturnType<typeof makeHarness>) =>
     h.logger.info.mock.calls.map((c) => String(c[0]));
 const warnLines = (h: ReturnType<typeof makeHarness>) =>
     h.logger.warn.mock.calls.map((c) => String(c[0]));
+const debugLines = (h: ReturnType<typeof makeHarness>) =>
+    h.logger.debug.mock.calls.map((c) => String(c[0]));
 
 describe('[#13331] ⭐ the shipped EE shape — fallback metadata slot, real protocol', () => {
     it('warns for lane 1 AND attaches lane 2 in the same boot', async () => {
@@ -210,5 +216,67 @@ describe('[#13331] both lanes present, and both released on shutdown', () => {
 
         expect(h.detachMutation).toHaveBeenCalledTimes(1);
         expect(h.logger.error).toHaveBeenCalled();
+    });
+});
+
+describe('[#14021] lane 1 — an in-process bus must not be reported as “bridged”', () => {
+    it('skips the attach and never claims “bridged” on the memory driver', async () => {
+        const h = makeHarness({ driver: 'memory', metadata: 'manager', protocol: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+
+        // A cluster service IS registered here — `Runtime` registers the memory
+        // driver by default — but it fans out to nobody. Reporting this as
+        // “bridged” is the exact misreading the posture statement exists to
+        // prevent: a false positive, not a quiet negative. The attach is
+        // skipped rather than merely relabelled, which is what BOTH in-tree
+        // exemplars do (`AuthzClusterBridgePlugin`, and lane 2 below).
+        expect(h.attachMetadata).not.toHaveBeenCalled();
+        expect(infoLines(h).some((l) => l.includes('bridged metadata.changed'))).toBe(false);
+        expect(
+            debugLines(h).some(
+                (l) => l.includes('is in-process') && l.includes('metadata.changed'),
+            ),
+        ).toBe(true);
+    });
+
+    it('⭐ reverse control — a cross-process driver STILL attaches and STILL claims “bridged”', async () => {
+        const h = makeHarness({ driver: 'redis', metadata: 'manager', protocol: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+
+        // Without this arm the guard above is indistinguishable from a bridge
+        // that never says “bridged” at all. The line is asserted VERBATIM
+        // because its wording is what an operator reads as “fan-out is on”.
+        expect(h.attachMetadata).toHaveBeenCalledTimes(1);
+        expect(h.attachMetadata).toHaveBeenCalledWith(h.pubsub, 'node-a');
+        expect(infoLines(h)).toContain(
+            'MetadataClusterBridgePlugin: bridged metadata.changed → cluster.pubsub (node=node-a)',
+        );
+    });
+
+    it('the in-process guard does not swallow #13331’s boot warn', async () => {
+        const h = makeHarness({ driver: 'memory', metadata: 'fallback', protocol: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+
+        // Ordering pin: the seam-missing warn is evaluated BEFORE the driver
+        // guard, exactly as in lane 2, so #13331's original boot symptom keeps
+        // firing byte-for-byte on an in-process boot. Fixing a false positive
+        // must not cost a true negative.
+        expect(warnLines(h)).toContain(
+            'MetadataClusterBridgePlugin: metadata service does not expose attachClusterPubSub(); cross-node cache invalidation disabled',
+        );
+        expect(h.attachMetadata).not.toHaveBeenCalled();
+    });
+
+    it('leaves nothing to detach when the in-process guard skipped the attach', async () => {
+        const h = makeHarness({ driver: 'memory', metadata: 'manager', protocol: 'real' });
+        await new MetadataClusterBridgePlugin().init(h.ctx);
+        await h.fire('kernel:ready');
+        await h.fire('kernel:shutdown');
+
+        expect(h.detachMetadata).not.toHaveBeenCalled();
+        expect(h.logger.error).not.toHaveBeenCalled();
     });
 });

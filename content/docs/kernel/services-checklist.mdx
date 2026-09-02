@@ -147,7 +147,7 @@ never reaches disk, which is exactly what it self-declares (`degraded`).
 | Former gap | Where it landed |
 |:----|:------------|
 | **DB Persistence** | `MetadataPlugin` (`@objectstack/metadata`) persists to `sys_metadata`; only the kernel's in-memory fallback is non-persistent |
-| **Multi-instance Sync** | `MetadataClusterBridgePlugin` (`@objectstack/service-cluster`) bridges the `metadata.changed` channel onto the cluster pub/sub bus, so a mutation on one node invalidates peer registry caches. Needs a `cluster` service and a metadata service exposing `attachClusterPubSub()` |
+| **Multi-instance Sync** | `MetadataClusterBridgePlugin` (`@objectstack/service-cluster`) bridges the `metadata.changed` channel onto the cluster pub/sub bus, so a mutation on one node invalidates peer registry caches. Needs a `cluster` service on a cross-process driver (the in-process `memory` driver is skipped — it fans out to no peer) and a metadata service exposing `attachClusterPubSub()` |
 | **Migration / Versioning** | `os diff <before> <after>` compares two configurations and flags breaking changes; `os migrate plan` / `os migrate apply` reconcile the physical database against metadata |
 | **Hot Reload** | `MetadataPlugin` watches its sources (`watch`) and the compiled artifact (`artifactWatch`) with chokidar; `os dev` rebuilds and the server reloads without a restart |
 
