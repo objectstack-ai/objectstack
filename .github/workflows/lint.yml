@@ -2870,24 +2870,28 @@ jobs:
       # line, driven against REAL captured vitest logs of the incident's own
       # test file — one timeout, one assertion, byte-identical FAIL lines and
       # opposite diagnoses, which is the confusion that produced a confidently
-      # wrong card (#10112) and cost a whole dispatch; and (2) the cross-PR
+      # wrong card (#10112) and cost a whole dispatch; (2) the cross-PR
       # aggregation files exactly ONE anchor issue at >= 2 DISTINCT PRs,
       # REFRESHES it on the next ejection instead of filing a second, and files
       # none for two different keys or for one PR ejecting twice. The refresh
       # leg is driven as a PAIR — run 2's world is built from run 1's output —
       # because idempotency is a property of the pair and a hand-written marker
-      # would prove each half while leaving the two runs free to disagree.
+      # would prove each half while leaving the two runs free to disagree; and
+      # (3) the operative guidance prose (the timeout-vs-assertion rule, its
+      # named exception, and the boundary sentence that the re-queue allowance
+      # is governed elsewhere) is present in the posted body, one assertion per
+      # claim over the WHOLE body, not the excerpt.
       #
       # Its --self-test runs first and is the half that stops the battery
-      # rotting into decoration: it mutates the shipped script fourteen ways —
+      # rotting into decoration: it mutates the shipped script twenty ways —
       # drop the reason lookahead, test the FAIL pattern before the reason
       # pattern (which silently loses every assertion), count runs instead of
       # distinct PRs, always create instead of refreshing, drop the sighting
-      # markers, downgrade each anti-no-op announcement to an info line, and
-      # more — and requires the battery to go RED for each, naming the scenario
-      # that catches it. A mutation whose anchor no longer exists is a failure
-      # too, so a rewrite of the workflow cannot leave the mutations silently
-      # matching nothing.
+      # markers, downgrade each anti-no-op announcement to an info line, drop
+      # each half of the guidance prose, and more — and requires the battery to
+      # go RED for each, naming the scenario that catches it. A mutation whose
+      # anchor no longer exists is a failure too, so a rewrite of the workflow
+      # cannot leave the mutations silently matching nothing.
       #
       # Invoked as `node` rather than through a `pnpm check:*` alias, same
       # reason as the step above: see the GATE INVOCATION IDIOM note at the top
