@@ -517,6 +517,169 @@ describe('AuthPlugin', () => {
     });
   });
 
+  /**
+   * #14319 — auth email must speak the workspace's language.
+   *
+   * The reported symptom was a Chinese workspace receiving an English
+   * verification subject. Two halves make that up, and they live apart:
+   *
+   *  - the TEMPLATE half — a `zh-CN` row exists for each auth template and
+   *    reads naturally — is `plugin-email/src/auth-templates-locales.test.ts`;
+   *  - the SEND half — every auth send names the bound locale — is
+   *    `auth-email-locale.test.ts`, which drives all five callbacks.
+   *
+   * This block owns the third and previously missing one: which value the
+   * plugin binds. Before #14319 it was `II18nService.getDefaultLocale()`
+   * alone — the app artifact's BUILD-TIME `i18n.defaultLocale`, `en` unless
+   * the app declares otherwise — while auth SMS (#2815) and audit activity
+   * summaries (framework#3039) read the workspace's RUNTIME language,
+   * `localization.locale` (ADR-0053). A workspace switched to Chinese in
+   * Setup therefore got Chinese SMS and English mail from the same plugin,
+   * on the same `kernel:ready` pass, a dozen lines apart.
+   */
+  describe('Auth email locale binding (localization.locale) — #14319', () => {
+    let hookCapture: ReturnType<typeof createHookCapture>;
+    let setEmailLocaleSpy: ReturnType<typeof vi.spyOn>;
+    let setSmsLocaleSpy: ReturnType<typeof vi.spyOn>;
+
+    type Resolved = { value: unknown; source: string };
+
+    /**
+     * A settings double answering per `(namespace, key)`. `branding` resolves
+     * to its manifest default so the sibling brand binding is inert here, and
+     * `subscribe` records handlers so the live-rebind leg can fire one.
+     */
+    const makeSettings = (locale: Resolved | Error) => {
+      const handlers: Array<() => void> = [];
+      let current = locale;
+      return {
+        handlers,
+        set(next: Resolved) {
+          current = next;
+        },
+        get: vi.fn(async (namespace: string, key: string) => {
+          if (namespace === 'branding') return { value: 'ObjectStack', source: 'default' };
+          if (namespace === 'localization' && key === 'locale') {
+            if (current instanceof Error) throw current;
+            return current;
+          }
+          return undefined;
+        }),
+        subscribe: vi.fn((_namespace: string | undefined, handler: () => void) => {
+          handlers.push(handler);
+          return () => {};
+        }),
+      };
+    };
+
+    /**
+     * `i18n` is passed as `null` to mean "no such service" — `getService`
+     * THROWS for an unregistered service, which is the shape the plugin
+     * probes for, not a falsy return.
+     */
+    const boot = async (opts: { settings?: unknown; i18nDefault?: string | null }) => {
+      hookCapture = createHookCapture();
+      mockContext.hook = hookCapture.hookFn;
+      // `: any` on the RETURN, not a cast on the assignment: `getService` is
+      // generic (`<T>(name: string) => T`), so an inferred union return is a
+      // TS2322 — the exact debt `check:test-typecheck` ledgers for the older
+      // doubles in this file. That ledger only ratchets down, so this one
+      // states its shape instead of adding to it.
+      mockContext.getService = vi.fn((name: string): any => {
+        if (name === 'manifest') return { register: vi.fn() };
+        if (name === 'settings') {
+          if (opts.settings === undefined) throw new Error('Service not found: settings');
+          return opts.settings;
+        }
+        if (name === 'i18n') {
+          if (opts.i18nDefault === undefined) throw new Error('Service not found: i18n');
+          return { getDefaultLocale: () => opts.i18nDefault };
+        }
+        return undefined;
+      });
+      setEmailLocaleSpy = vi.spyOn(AuthManager.prototype, 'setDefaultEmailLocale');
+      setSmsLocaleSpy = vi.spyOn(AuthManager.prototype, 'setDefaultSmsLocale');
+      authPlugin = new AuthPlugin({
+        secret: 'test-secret-at-least-32-chars-long',
+        baseUrl: 'http://localhost:3000',
+      });
+      await authPlugin.init(mockContext);
+      await authPlugin.start(mockContext);
+      await hookCapture.trigger('kernel:ready');
+    };
+
+    afterEach(() => {
+      setEmailLocaleSpy?.mockRestore();
+      setSmsLocaleSpy?.mockRestore();
+    });
+
+    it('a zh-CN workspace binds zh-CN on the EMAIL channel, not just on SMS', async () => {
+      const settings = makeSettings({ value: 'zh-CN', source: 'tenant' });
+      await boot({ settings, i18nDefault: 'en' });
+
+      expect(settings.get).toHaveBeenCalledWith('localization', 'locale', {});
+      // The regression, stated as the two channels agreeing. Before #14319 the
+      // SMS assertion passed and the email one read 'en'.
+      expect(setSmsLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
+      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
+    });
+
+    it.each(['ja-JP', 'es-ES'])('and the same for a %s workspace', async (locale) => {
+      await boot({ settings: makeSettings({ value: locale, source: 'global' }), i18nDefault: 'en' });
+      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith(locale);
+    });
+
+    it('a workspace that never chose a language keeps the app build-time default', async () => {
+      // `get` answers the manifest default ('en-US') for an untouched
+      // workspace, so taking `value` unconditionally would demote every
+      // deployment that declared `i18n.defaultLocale` — the #8195 behaviour
+      // this change must not regress.
+      await boot({
+        settings: makeSettings({ value: 'en-US', source: 'default' }),
+        i18nDefault: 'zh-CN',
+      });
+      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
+    });
+
+    it('names NO locale when neither producer speaks — the documented en-US fallback', async () => {
+      // The issue's second acceptance criterion: absent language ⇒ English.
+      // Spelled as an ABSENT locale rather than 'en-US', because that is what
+      // `EmailService`'s ladder contract ("no locale means the DOCUMENTED
+      // default") is written against.
+      await boot({ settings: makeSettings({ value: 'en-US', source: 'default' }) });
+      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith(undefined);
+    });
+
+    it('binds the build-time default when there is no settings service at all', async () => {
+      await boot({ i18nDefault: 'ja-JP' });
+      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('ja-JP');
+    });
+
+    it('re-binds live when the workspace switches language', async () => {
+      const settings = makeSettings({ value: 'en-US', source: 'default' });
+      await boot({ settings, i18nDefault: 'en' });
+      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('en');
+
+      expect(settings.subscribe).toHaveBeenCalledWith('localization', expect.any(Function));
+      settings.set({ value: 'zh-CN', source: 'tenant' });
+      for (const handler of settings.handlers) handler();
+      // The subscribe handler is fire-and-forget (`void`); flush its promise.
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
+      expect(setSmsLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
+    });
+
+    it('leaves the build-time default standing when the settings read fails', async () => {
+      const settings = makeSettings(new Error('boom'));
+      await expect(boot({ settings, i18nDefault: 'zh-CN' })).resolves.toBeUndefined();
+      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
+      expect(mockContext.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('failed to apply localization.locale'),
+      );
+    });
+  });
+
   describe('Auth settings binding (auth namespace)', () => {
     let hookCapture: ReturnType<typeof createHookCapture>;
     const previousGoogleClientId = process.env.GOOGLE_CLIENT_ID;

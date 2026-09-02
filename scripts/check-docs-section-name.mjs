@@ -2,9 +2,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * check-docs-section-name (#10830, YAML arm #11887) -- every form-section
- * example under `content/docs/**` must carry a `name`, whether it is written
- * as a TypeScript object literal or as a YAML `sections:` mapping.
+ * check-docs-section-name (#10830, YAML arm #11887, singular `section:` +
+ * JSON-family arm #13880) -- every form-section example under
+ * `content/docs/**` must carry a `name`, whatever shape introduces it: a
+ * TypeScript object literal, a YAML `sections:` sequence, a YAML singular
+ * `section:` mapping, or a `sections: [...]` array inside a `json`/`jsonc`/
+ * `json5` fence.
  *
  *   node scripts/check-docs-section-name.mjs              # the gate
  *   node scripts/check-docs-section-name.mjs --list       # the census it judged
@@ -76,15 +79,19 @@
  * Both are cheap to add the day a real occurrence appears. Adding them now
  * would widen the verification surface with no measurement behind it.
  *
- * ## Two arms, two parsers -- and the boundary between them is DECLARED
+ * ## Two parsers, three fence-language groups -- and the boundary is DECLARED
  *
- * TS-family fences (`TS_FENCE_LANGS`) are bracket-matched as object literals.
- * YAML fences (`YAML_FENCE_LANGS`) are handed to the `yaml` package -- the
- * SAME parser the docs build resolves -- and judged on its AST. That is the
- * whole reason the YAML arm is a separate limb rather than a wider regex: the
- * bracket matcher would MISREAD a YAML block rather than judge it, and a gate
- * that fabricates findings out of a syntax it does not parse is worse than no
- * gate.
+ * TS-family fences (`TS_FENCE_LANGS`) AND JSON-family fences
+ * (`JSON_FENCE_LANGS`) are both bracket-matched as object literals -- the same
+ * matcher, the same comment/string masking, because a `json`/`jsonc`/`json5`
+ * teaching fence is not asked to be valid strict JSON (it carries `// <-`
+ * line comments and JSON5 trailing commas same as any other teaching snippet)
+ * and `JSON.parse` would refuse it. YAML fences (`YAML_FENCE_LANGS`) are
+ * handed to the `yaml` package -- the SAME parser the docs build resolves --
+ * and judged on its AST. That is the whole reason the YAML arm is a separate
+ * limb rather than a wider regex: the bracket matcher would MISREAD a YAML
+ * block rather than judge it, and a gate that fabricates findings out of a
+ * syntax it does not parse is worse than no gate.
  *
  * ⛔ The AST is walked, NOT `toJS()`. A projection to plain JS silently
  * collapses DUPLICATE KEYS, and duplicate keys are the normal shape of a
@@ -127,6 +134,35 @@
  * not 21). By `787d75740` the population had fallen to 13 nameless across 10
  * fences -- #13337 and #13532 rewrote `layout-dsl.mdx` out from under the card
  * -- and #11887's sweep took that to 0. Do not re-derive by hand.
+ *
+ * ## #13880 -- the population was still scoped by SPELLING, not by shape
+ *
+ * #13759 gave the three singular `section:` mappings on `layout-dsl.mdx` a
+ * `name`, and its own census reported "3" as if that were the corpus-wide
+ * population of the shape. It was not: it was the population of fences
+ * carrying the `os:check-yaml FormSectionSchema key=section` MARKER, and
+ * `concept.mdx`'s singular `- section:` (no marker at all --
+ * `check:yaml-examples` reports the page `0 tagged / 10 untagged`) was
+ * invisible to that scope even though it sat on the very commit #13759
+ * measured. Triage ruled (#13880): the population is defined by the SHAPE
+ * that introduces a form section -- singular or plural key spelling, YAML or
+ * `json`-family fence language -- never by a marker or a hand-picked
+ * directory. Two selectors closed the gap:
+ *
+ *   - a singular `section:` YAML mapping (any nesting -- a list-item value or
+ *     a top-level key), judged exactly like a `sections:` sequence ITEM;
+ *   - a `sections: [ ... ]` array inside a `json`/`jsonc`/`json5` fence,
+ *     bracket-matched with the SAME comment-masked matcher the TS arm uses
+ *     (`json` is not valid-JSON-strict here on purpose -- a teaching fence is
+ *     allowed `// <-` comments and JSON5-style trailing commas, and the
+ *     bracket matcher tolerates both; a `JSON.parse` arm would refuse the
+ *     corpus's own fences).
+ *
+ * `concept.mdx`'s outer `customizations:` fence turned out to teach a shape
+ * that is not real at all (the retired paper metadata-customization overlay,
+ * ADR-0126 -- see the PR that closed #13880 for the citations), so it was
+ * rewritten rather than given an anchor; the two selectors above are still
+ * exactly what widened the population, independent of that docs decision.
  *
  * ## ⛔ A zero here must be a MEASUREMENT, not a silence
  *
@@ -208,6 +244,15 @@ export const TS_FENCE_LANGS = new Set(['ts', 'tsx', 'typescript', 'js', 'jsx', '
 export const YAML_FENCE_LANGS = new Set(['yaml', 'yml']);
 
 /**
+ * Fence languages read by the JSON-family arm (#13880) -- bracket-matched with
+ * the SAME comment-masked matcher as `TS_FENCE_LANGS`, never `JSON.parse`: a
+ * teaching fence in this corpus carries `// <-` comments and JSON5 trailing
+ * commas (`concept.mdx`'s own "Final Merged Layout" fence does both), and a
+ * strict parse would refuse the very fences this arm exists to judge.
+ */
+export const JSON_FENCE_LANGS = new Set(['json', 'jsonc', 'json5']);
+
+/**
  * Parser error codes that leave a COMPLETE, unguessed tree behind.
  *
  * A duplicate key is a semantic complaint about a document the parser read in
@@ -261,13 +306,40 @@ export const YAML_CENSUS_ANCHORS = [
 ];
 
 /**
- * Floors on the YAML population. Measured on the tree this arm landed against:
- * 10 fences carrying `sections:`, 19 section mappings, 0 skipped on a syntax
- * error. Set below those so ordinary docs editing cannot red the gate, and far
+ * Floors on the YAML population. Measured on the tree this arm landed against
+ * (#13880 widens the key from `sections:`-only to `sections?:`, so this now
+ * includes singular `section:` mappings too): 13 fences carrying
+ * `sections:`/`section:`, 22 section mappings, 0 skipped on a syntax error.
+ * Set below those so ordinary docs editing cannot red the gate, and far
  * enough above zero that an evaporated YAML corpus cannot read as a clean one.
  */
-export const FLOOR_YAML_FENCES = 6;
-export const FLOOR_YAML_SECTIONS = 12;
+export const FLOOR_YAML_FENCES = 8;
+export const FLOOR_YAML_SECTIONS = 16;
+
+/**
+ * The page the JSON-family arm's population lives on (#13880): `concept.mdx`
+ * carries a `sections: [...]` array in its own right (the "Server Response"
+ * example, unrelated to the `customizations:` fence this card also rewrote),
+ * so it is pinned the same way `YAML_CENSUS_ANCHORS` is -- a selector that
+ * stops reaching it has moved, not the docs.
+ */
+export const JSON_CENSUS_ANCHORS = [`${DOCS_ROOT}/protocol/objectui/concept.mdx`];
+
+/**
+ * Floors on the JSON-family population. `FLOOR_JSON_FENCES` mirrors
+ * `FLOOR_TS_FENCES`'s purpose (counts EVERY `json`/`jsonc`/`json5` fence,
+ * `sections` or not -- a walker/lang-detection sanity floor: 148 measured
+ * corpus-wide, but the self-test fixture only stocks 2, so the floor sits at
+ * that fixture's ceiling rather than the real corpus's). The two selector
+ * floors below are the ones with real teeth: measured on the tree this arm
+ * landed against, 3 `json`/`jsonc`/`json5` fences carry a `sections` array
+ * corpus-wide (two on `concept.mdx`, one elided placeholder on
+ * `ui/forms.mdx`) yielding 2 judged section literals -- this arm's live
+ * population is small on purpose, not a sign the extractor stopped working.
+ */
+export const FLOOR_JSON_FENCES = 2;
+export const FLOOR_JSON_SECTION_ARRAYS = 2;
+export const FLOOR_JSON_SECTION_LITERALS = 1;
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.next', 'build', '.turbo', 'coverage', '.git']);
 
@@ -582,12 +654,47 @@ function yamlLine(body, offset) {
 }
 
 /**
- * Every section MAPPING under every `sections:` sequence in one parsed fence.
+ * Describe one YAML mapping node as a judged section entry.
+ *
+ * Shared by both YAML shapes `yamlSectionMappings` judges -- a `sections:`
+ * sequence ITEM and a singular `section:` mapping VALUE -- so the two read
+ * identically to everything downstream (`sites`, `findings`, `--list`).
+ *
+ * @param {string} body
+ * @param {import('yaml').YAMLMap} map
+ * @returns {{offset:number,line:number,named:boolean,label:string|null,excerpt:string}}
+ */
+function describeYamlSectionMapping(body, map) {
+  const keys = map.items.map((p) => (p.key && typeof p.key === 'object' ? p.key.value : undefined));
+  const labelPair = map.items.find((p) => p.key && typeof p.key === 'object' && p.key.value === 'label');
+  const labelValue = labelPair && labelPair.value && typeof labelPair.value === 'object' ? labelPair.value.value : null;
+  const offset = Array.isArray(map.range) ? map.range[0] : 0;
+  return {
+    offset,
+    line: yamlLine(body, offset),
+    named: keys.includes('name'),
+    label: typeof labelValue === 'string' ? labelValue : null,
+    excerpt: yamlExcerpt(body, offset),
+  };
+}
+
+/**
+ * Every section MAPPING this arm judges in one parsed fence -- under a
+ * `sections:` sequence, AND (#13880) every singular `section:` mapping, at
+ * any nesting: a list-item value (`- section: { ... }`) or a plain top-level
+ * key (`section:\n  name: ...`). Both are the same taught shape at a
+ * different cardinality, so they are judged the same way and merged into one
+ * result; only the finding's `excerpt`/`line` distinguish where each came
+ * from.
  *
  * A `sections:` whose value is not a sequence is not this shape and is passed
  * over. A sequence ITEM that is not a mapping -- a scalar, an alias, a nested
  * sequence -- is COUNTED and never judged: it carries no key to require, the
  * same treatment `arrayEntries` gives a spread or an elision on the TS side.
+ * A singular `section:` whose value is not a mapping (a scalar, a sequence)
+ * is not this shape either and is silently passed over -- it introduces no
+ * form section, so it is not counted as a non-mapping item (there is no
+ * array of items to count against).
  *
  * @param {string} body
  * @param {import('yaml').Document[]} docs
@@ -599,24 +706,21 @@ export function yamlSectionMappings(body, docs) {
   for (const doc of docs) {
     walkYaml(doc, (pair) => {
       const key = pair.key;
-      if (!key || typeof key !== 'object' || key.value !== 'sections') return;
-      if (!YAML.isSeq(pair.value)) return;
-      for (const item of pair.value.items) {
-        if (!YAML.isMap(item)) {
-          nonMappingItems++;
-          continue;
+      if (!key || typeof key !== 'object') return;
+      if (key.value === 'sections') {
+        if (!YAML.isSeq(pair.value)) return;
+        for (const item of pair.value.items) {
+          if (!YAML.isMap(item)) {
+            nonMappingItems++;
+            continue;
+          }
+          mappings.push(describeYamlSectionMapping(body, item));
         }
-        const keys = item.items.map((p) => (p.key && typeof p.key === 'object' ? p.key.value : undefined));
-        const labelPair = item.items.find((p) => p.key && typeof p.key === 'object' && p.key.value === 'label');
-        const labelValue = labelPair && labelPair.value && typeof labelPair.value === 'object' ? labelPair.value.value : null;
-        const offset = Array.isArray(item.range) ? item.range[0] : 0;
-        mappings.push({
-          offset,
-          line: yamlLine(body, offset),
-          named: keys.includes('name'),
-          label: typeof labelValue === 'string' ? labelValue : null,
-          excerpt: yamlExcerpt(body, offset),
-        });
+        return;
+      }
+      if (key.value === 'section') {
+        if (!YAML.isMap(pair.value)) return;
+        mappings.push(describeYamlSectionMapping(body, pair.value));
       }
     });
   }
@@ -639,31 +743,75 @@ function yamlExcerpt(body, offset) {
 /* ──────────────────────────────── the sweep ───────────────────────────────── */
 
 /**
- * `sections` as a YAML KEY. The same leading class as `SECTIONS_KEY` keeps
- * `_sections:` and a `.sections` member out; it only decides whether a fence is
- * worth PARSING, and the AST -- never this regex -- decides what is judged.
+ * `sections` OR singular `section` as a YAML KEY (#13880 widens this from
+ * plural-only). The same leading class as `SECTIONS_KEY` keeps `_sections:`,
+ * `_section:` and a `.sections`/`.section` member out; it only decides
+ * whether a fence is worth PARSING, and the AST -- never this regex --
+ * decides what is judged (a scalar `section: general`, say, still parses and
+ * is silently passed over by `yamlSectionMappings` for not being a mapping).
  */
-const YAML_SECTIONS_KEY = /(^|[^A-Za-z0-9_$.])sections\s*:/m;
+const YAML_SECTIONS_KEY = /(^|[^A-Za-z0-9_$.])sections?\s*:/m;
+
+/**
+ * The bracket-matched arm shared by TS-family AND JSON-family fences
+ * (#13880): identical matcher, identical comment/string masking -- only the
+ * counters and the finding `kind` (so the fix text quotes correctly) differ
+ * by fence-language group. Mutates the four counters/`sites` array it is
+ * passed so `sweep()` can keep one set of TS counters and one of JSON
+ * counters without duplicating this walk.
+ *
+ * @param {string} file
+ * @param {{line:number, body:string}} block
+ * @param {'ts'|'json'} kind
+ * @param {{arrays:number, literals:number, nonObjectEntries:number}} counters
+ * @param {{file:string,line:number,label:string|null,named:boolean}[]} sites
+ * @param {{file:string,line:number,label:string|null,excerpt:string,kind:'ts'|'json'}[]} findings
+ */
+function sweepBracketMatchedFence(file, block, kind, counters, sites, findings) {
+  if (!block.body.includes('sections')) return;
+  const proj = project(block.body);
+  for (const array of sectionArrays(block.body, proj)) {
+    counters.arrays++;
+    for (const entry of arrayEntries(proj, array.open, array.close)) {
+      if (!entry.isObject) {
+        counters.nonObjectEntries++;
+        continue;
+      }
+      counters.literals++;
+      const keys = topLevelKeys(block.body, proj, entry.start, entry.end);
+      const line = block.line + countNewlines(block.body, entry.start);
+      const label = literalKeyValue(block.body, proj, entry.start, entry.end, 'label');
+      const named = keys.includes('name');
+      sites.push({ file, line, label, named });
+      if (!named) {
+        findings.push({ file, line, label, excerpt: firstLine(block.body, entry.start, entry.end), kind });
+      }
+    }
+  }
+}
 
 /**
  * @param {string} root
  * @returns {{
  *   files: string[], tsFences: number,
  *   arrays: number, literals: number, nonObjectEntries: number,
+ *   jsonFences: number, jsonArrays: number, jsonLiterals: number, jsonNonObjectEntries: number,
+ *   jsonSites: {file:string,line:number,label:string|null,named:boolean}[],
  *   yamlFences: number, yamlJudgedFences: number, yamlNonMappingItems: number,
  *   yamlSkipped: {file:string,line:number,codes:string[]}[],
  *   yamlRecovered: {file:string,line:number,codes:string[]}[],
  *   yamlSites: {file:string,line:number,label:string|null,named:boolean}[],
  *   sites: {file:string,line:number,label:string|null,named:boolean}[],
- *   findings: {file:string,line:number,label:string|null,excerpt:string,kind:'ts'|'yaml'}[],
+ *   findings: {file:string,line:number,label:string|null,excerpt:string,kind:'ts'|'yaml'|'json'}[],
  * }}
  */
 export function sweep(root) {
   const files = docsFiles(root);
   let tsFences = 0;
-  let arrays = 0;
-  let literals = 0;
-  let nonObjectEntries = 0;
+  const tsCounters = { arrays: 0, literals: 0, nonObjectEntries: 0 };
+  let jsonFences = 0;
+  const jsonCounters = { arrays: 0, literals: 0, nonObjectEntries: 0 };
+  const jsonSites = [];
   let yamlFences = 0;
   let yamlJudgedFences = 0;
   let yamlNonMappingItems = 0;
@@ -702,33 +850,20 @@ export function sweep(root) {
         }
         continue;
       }
+      if (JSON_FENCE_LANGS.has(block.lang)) {
+        jsonFences++;
+        sweepBracketMatchedFence(file, block, 'json', jsonCounters, jsonSites, findings);
+        continue;
+      }
       if (!TS_FENCE_LANGS.has(block.lang)) continue;
       tsFences++;
-      if (!block.body.includes('sections')) continue;
-      const proj = project(block.body);
-      for (const array of sectionArrays(block.body, proj)) {
-        arrays++;
-        for (const entry of arrayEntries(proj, array.open, array.close)) {
-          if (!entry.isObject) {
-            nonObjectEntries++;
-            continue;
-          }
-          literals++;
-          const keys = topLevelKeys(block.body, proj, entry.start, entry.end);
-          const line = block.line + countNewlines(block.body, entry.start);
-          const label = literalKeyValue(block.body, proj, entry.start, entry.end, 'label');
-          const named = keys.includes('name');
-          sites.push({ file, line, label, named });
-          if (!named) {
-            findings.push({ file, line, label, excerpt: firstLine(block.body, entry.start, entry.end), kind: 'ts' });
-          }
-        }
-      }
+      sweepBracketMatchedFence(file, block, 'ts', tsCounters, sites, findings);
     }
   }
   findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
   return {
-    files, tsFences, arrays, literals, nonObjectEntries,
+    files, tsFences, arrays: tsCounters.arrays, literals: tsCounters.literals, nonObjectEntries: tsCounters.nonObjectEntries,
+    jsonFences, jsonArrays: jsonCounters.arrays, jsonLiterals: jsonCounters.literals, jsonNonObjectEntries: jsonCounters.nonObjectEntries, jsonSites,
     yamlFences, yamlJudgedFences, yamlNonMappingItems, yamlSkipped, yamlRecovered, yamlSites,
     sites, findings,
   };
@@ -814,6 +949,24 @@ export function censusFailures(result) {
       + `the parse succeeded, so a silent zero here reads exactly like a clean corpus.`,
     );
   }
+  if (result.jsonFences < FLOOR_JSON_FENCES) {
+    failures.push(
+      `found ${result.jsonFences} json/jsonc/json5 fence(s); floor is ${FLOOR_JSON_FENCES}. `
+      + `The JSON-family arm stopped reaching its corpus -- a language tag changed, or the fence walker broke.`,
+    );
+  }
+  if (result.jsonArrays < FLOOR_JSON_SECTION_ARRAYS) {
+    failures.push(
+      `found ${result.jsonArrays} \`"sections": [\` array(s) in json/jsonc/json5 fences; floor is ${FLOOR_JSON_SECTION_ARRAYS}. `
+      + `This is the #13880 selector; a collapse here means it broke.`,
+    );
+  }
+  if (result.jsonLiterals < FLOOR_JSON_SECTION_LITERALS) {
+    failures.push(
+      `judged ${result.jsonLiterals} JSON-family section object literal(s); floor is ${FLOOR_JSON_SECTION_LITERALS}. `
+      + `A green over an evaporated JSON-family population is the exact failure this gate exists to make impossible.`,
+    );
+  }
   const judgedFiles = new Set(result.sites.map((s) => s.file));
   for (const anchor of CENSUS_ANCHORS) {
     if (!judgedFiles.has(anchor)) {
@@ -832,6 +985,15 @@ export function censusFailures(result) {
       );
     }
   }
+  const jsonFiles = new Set(result.jsonSites.map((s) => s.file));
+  for (const anchor of JSON_CENSUS_ANCHORS) {
+    if (!jsonFiles.has(anchor)) {
+      failures.push(
+        `JSON census anchor contributed no section literal: ${anchor} `
+        + `(#13880's whole population lived on this page -- if it no longer contributes, the JSON-family arm moved, not the docs).`,
+      );
+    }
+  }
   return failures;
 }
 
@@ -844,6 +1006,10 @@ const CONVENTION =
 const CONVENTION_YAML =
   'add `name: <snake_case>` as the mapping\'s first key, derived from its label '
   + '(`label: Basic Information` -> `name: basic_information`)';
+
+const CONVENTION_JSON =
+  'add `"name": "<snake_case>"` as the object\'s first key, derived from its label '
+  + '(`"label": "Basic Information"` -> `"name": "basic_information"`)';
 
 /**
  * @param {string} root
@@ -864,7 +1030,10 @@ export function run(root = REPO_ROOT, log = console.error) {
     + ` · ${result.yamlFences} YAML fence(s) (${result.yamlJudgedFences} parsed, `
     + `${result.yamlSkipped.length} skipped on a syntax error) · `
     + `${result.yamlSites.length} YAML section mapping(s) JUDGED`
-    + (result.yamlNonMappingItems ? ` · ${result.yamlNonMappingItems} non-mapping item(s) skipped` : '');
+    + (result.yamlNonMappingItems ? ` · ${result.yamlNonMappingItems} non-mapping item(s) skipped` : '')
+    + ` · ${result.jsonFences} json/jsonc/json5 fence(s) · ${result.jsonArrays} \`"sections": [\` array(s) · `
+    + `${result.jsonLiterals} JSON-family section literal(s) JUDGED`
+    + (result.jsonNonObjectEntries ? ` · ${result.jsonNonObjectEntries} non-object entry(ies) skipped` : '');
 
   const problems = censusFailures(result);
   if (problems.length > 0) {
@@ -888,7 +1057,7 @@ export function run(root = REPO_ROOT, log = console.error) {
         + ` \`objects.<object>._sections.<name>.label\`, so it renders`,
       );
       log(`    ${finding.label ? `"${finding.label}"` : 'its authored label'} in EVERY locale.`);
-      log(`    fix: ${finding.kind === 'yaml' ? CONVENTION_YAML : CONVENTION}`);
+      log(`    fix: ${finding.kind === 'yaml' ? CONVENTION_YAML : finding.kind === 'json' ? CONVENTION_JSON : CONVENTION}`);
       log('');
     }
     log('  ⛔ Do NOT "fix" this by making `name` required in packages/spec — a nameless');
@@ -899,12 +1068,13 @@ export function run(root = REPO_ROOT, log = console.error) {
 
   log(`✓ check-docs-section-name: 0 nameless form-section examples — ${census}`);
   log(
-    `  ⚠️ The violating population is empty, but ${result.literals} section literal(s) and `
-    + `${result.yamlSites.length} YAML`,
+    `  ⚠️ The violating population is empty, but ${result.literals} section literal(s), `
+    + `${result.yamlSites.length} YAML section mapping(s) and ${result.jsonLiterals} `
+    + `JSON-family section literal(s)`,
   );
   log(
-    '     section mapping(s) were JUDGED across '
-    + new Set([...result.sites, ...result.yamlSites].map((s) => s.file)).size
+    '     were JUDGED across '
+    + new Set([...result.sites, ...result.yamlSites, ...result.jsonSites].map((s) => s.file)).size
     + ' page(s) — run --list to see every one.',
   );
   log('     A zero that names its population reads differently from a zero that names nothing;');
@@ -940,6 +1110,10 @@ function list(root = REPO_ROOT, log = console.log) {
   log(`YAML fences w/ sections : ${result.yamlFences}   (${result.yamlJudgedFences} parsed, ${result.yamlSkipped.length} skipped on a syntax error)`);
   log(`YAML mappings JUDGED    : ${result.yamlSites.length}`);
   log(`YAML non-mapping items  : ${result.yamlNonMappingItems}   (scalars / aliases — no key to require)`);
+  log(`json/jsonc/json5 fences : ${result.jsonFences}`);
+  log(`\`"sections": [\` arrays  : ${result.jsonArrays}`);
+  log(`JSON section literals   : ${result.jsonLiterals}`);
+  log(`JSON non-object entries : ${result.jsonNonObjectEntries}   (spreads / elisions — no key to require)`);
   log(`violations              : ${result.findings.length}`);
   log('');
   log('every section object literal this gate judged (TS arm):');
@@ -952,9 +1126,19 @@ function list(root = REPO_ROOT, log = console.log) {
     log(`    :${site.line}  ${site.named ? '✓ named' : '✗ NAMELESS'}  ${site.label ? `label=${JSON.stringify(site.label)}` : '(no label key)'}`);
   }
   log('');
-  log('every YAML section mapping this gate judged (YAML arm):');
+  log('every YAML section mapping this gate judged (YAML arm -- `sections:` sequences AND singular `section:` mappings):');
   current = '';
   for (const site of result.yamlSites) {
+    if (site.file !== current) {
+      current = site.file;
+      log(`  ${current}`);
+    }
+    log(`    :${site.line}  ${site.named ? '✓ named' : '✗ NAMELESS'}  ${site.label ? `label=${JSON.stringify(site.label)}` : '(no label key)'}`);
+  }
+  log('');
+  log('every section object literal this gate judged (JSON-family arm):');
+  current = '';
+  for (const site of result.jsonSites) {
     if (site.file !== current) {
       current = site.file;
       log(`  ${current}`);
@@ -1011,6 +1195,44 @@ function yamlPage(count) {
     + `${FENCE}yaml\nlayout:\n  sections:\n${items('b', '    ')}\n${FENCE}\n`;
 }
 
+/**
+ * `count` NAMED singular `section:` mappings (#13880), each its OWN document
+ * in one multi-document fence (`---`-separated) -- the shape `layout-dsl.mdx`
+ * teaches, one `section:` key per fence, several fences concatenated the way
+ * a teaching page's snippets are.
+ */
+function yamlSingularPage(count) {
+  const docs = Array.from(
+    { length: count },
+    (_, i) => `section:\n  name: sec${i}\n  label: SEC${i}\n  fields: [a]`,
+  ).join('\n---\n');
+  return `\n\n${FENCE}yaml\n${docs}\n${FENCE}\n`;
+}
+
+/**
+ * `count` NAMED singular `section:` mappings NESTED as sequence-item values
+ * (#13880) -- the `concept.mdx` shape: `- section: { ... }` inside an outer
+ * sequence that also carries unrelated (non-`section`) items, so the fixture
+ * exercises the AST walk finding `section:` at a nesting depth, not only at
+ * a document root.
+ */
+function yamlSingularNestedPage(count) {
+  const items = Array.from(
+    { length: count },
+    (_, i) => `  - other: ${i}\n  - section:\n      name: nsec${i}\n      label: NSEC${i}\n      fields: [a]`,
+  ).join('\n');
+  return `\n\n${FENCE}yaml\ncustomizations:\n${items}\n${FENCE}\n`;
+}
+
+/** `count` NAMED section literals in a `json` fence (#13880). */
+function jsonPage(count) {
+  const literals = Array.from(
+    { length: count },
+    (_, i) => `      { "name": "j${i}", "label": "J${i}", "fields": ["a"] },`,
+  ).join('\n');
+  return `\n\n${FENCE}json\n{\n  "sections": [\n${literals}\n  ]\n}\n${FENCE}\n`;
+}
+
 /** Filler pages so the file and fence floors are cleared by REAL files. */
 function fillerPages(from, to) {
   /** @type {Record<string,string>} */
@@ -1031,7 +1253,9 @@ function baseFixtureFiles(extra = {}) {
     [CENSUS_ANCHORS[0]]: namedPage(6),
     [CENSUS_ANCHORS[1]]: namedPage(6),
     [CENSUS_ANCHORS[2]]: namedPage(6),
-    [YAML_CENSUS_ANCHORS[0]]: yamlPage(3),
+    // `YAML_CENSUS_ANCHORS[0]` doubles as `JSON_CENSUS_ANCHORS[0]` on the real
+    // corpus (`concept.mdx` carries both arms), so this fixture does too.
+    [YAML_CENSUS_ANCHORS[0]]: yamlPage(3) + jsonPage(3),
     [YAML_CENSUS_ANCHORS[1]]: yamlPage(3),
     [YAML_CENSUS_ANCHORS[2]]: yamlPage(3),
     [`${DOCS_ROOT}/extra/a.mdx`]: namedPage(3),
@@ -1039,6 +1263,9 @@ function baseFixtureFiles(extra = {}) {
     [`${DOCS_ROOT}/extra/c.mdx`]: namedPage(3),
     [`${DOCS_ROOT}/extra/d.mdx`]: namedPage(3),
     [`${DOCS_ROOT}/extra/e.mdx`]: namedPage(3),
+    [`${DOCS_ROOT}/extra/f.mdx`]: yamlSingularPage(3),
+    [`${DOCS_ROOT}/extra/g.mdx`]: yamlSingularNestedPage(3),
+    [`${DOCS_ROOT}/extra/h.mdx`]: jsonPage(2),
     ...extra,
   };
 }
@@ -1136,9 +1363,16 @@ export function selfTest() {
     // The arm makes both of those wrong by design. They are REPLACED rather
     // than deleted, in place, so the inversion is legible to the next reader
     // instead of looking like coverage that quietly went missing.
-    t('the base fixture clears the YAML floors', cleanSweep.yamlSites.length, 18);
-    t('...over two fences per anchor page', cleanSweep.yamlFences, 6);
+    t('the base fixture clears the YAML floors', cleanSweep.yamlSites.length, 24);
+    t('...over two `sections:` fences per anchor page plus two singular-`section:` extras', cleanSweep.yamlFences, 8);
     t('...and the nested `layout: sections:` mappings are reached too', cleanSweep.yamlSites.filter((s) => /^b/.test(String(s.label ?? '').toLowerCase())).length, 9);
+    t(
+      '...and the singular `section:` mappings (#13880) are reached too, both cardinalities',
+      cleanSweep.yamlSites.filter((s) => /^(sec|nsec)/.test(String(s.label ?? '').toLowerCase())).length,
+      6,
+    );
+    t('...and the JSON-family arm is reached too', cleanSweep.jsonLiterals, 5);
+    t('...over 2 json/jsonc/json5 fences', cleanSweep.jsonFences, 2);
 
     const yamlNameless = tree(
       baseFixtureFiles({
@@ -1160,6 +1394,119 @@ export function selfTest() {
       }),
     );
     t('a NAMED YAML mapping satisfies the rule', run(yamlNamed, quiet), EXIT_CLEAN);
+
+    // ── ⭐ #13880 selector ③: a singular `section:` mapping, nameless ───────
+    // The exact shape `concept.mdx:426` carried live: `section:` (not
+    // `sections:`) whose value is a mapping, nested under an unrelated outer
+    // key -- the `- section:` sequence-item cardinality.
+    const yamlSingularNameless = tree(
+      baseFixtureFiles({
+        [`${DOCS_ROOT}/extra/yaml-case.mdx`]:
+          `# e\n\n${FENCE}yaml\ncustomizations:\n  - field: phone\n    required: true\n`
+          + `  - section:\n      label: Billing Info\n      fields: [a]\n${FENCE}\n`,
+      }),
+    );
+    const yamlSingularNamelessSweep = sweep(yamlSingularNameless);
+    t('a singular `section:` fence is PARSED (widened from `sections:`-only)', yamlSingularNamelessSweep.yamlFences, cleanSweep.yamlFences + 1);
+    t('...and its nameless mapping is JUDGED', yamlSingularNamelessSweep.yamlSites.length, cleanSweep.yamlSites.length + 1);
+    t('...producing exactly one finding (the `field:` sibling has no key to require)', yamlSingularNamelessSweep.findings.length, 1);
+    t('...at the right file and line', at(yamlSingularNamelessSweep.findings[0]), `${DOCS_ROOT}/extra/yaml-case.mdx:8`);
+    t('...carrying its label into the message', yamlSingularNamelessSweep.findings[0]?.label ?? NONE, 'Billing Info');
+    t('...tagged `yaml` so the fix text is YAML-shaped', yamlSingularNamelessSweep.findings[0]?.kind ?? NONE, 'yaml');
+    t('...and the real sweep goes RED on it', run(yamlSingularNameless, quiet), EXIT_VIOLATIONS);
+
+    // ── a singular `section:` at the document ROOT, not nested ──────────────
+    const yamlSingularRootNameless = tree(
+      baseFixtureFiles({
+        [`${DOCS_ROOT}/extra/yaml-case.mdx`]: `# e\n\n${FENCE}yaml\nsection:\n  label: Nameless\n  fields: [a]\n${FENCE}\n`,
+      }),
+    );
+    t('a document-root singular `section:` is judged too', run(yamlSingularRootNameless, quiet), EXIT_VIOLATIONS);
+
+    const yamlSingularNamed = tree(
+      baseFixtureFiles({
+        [`${DOCS_ROOT}/extra/yaml-case.mdx`]: `# e\n\n${FENCE}yaml\nsection:\n  name: ok\n  label: Ok\n${FENCE}\n`,
+      }),
+    );
+    t('a NAMED singular `section:` mapping satisfies the rule', run(yamlSingularNamed, quiet), EXIT_CLEAN);
+
+    // ── negative controls: the widened `sections?:` prefilter must not ──────
+    // fabricate a population out of `_section:`, `.section` member access, or
+    // a scalar `section:` value (no mapping to judge -- the doc-pages.mdx:257
+    // control this card's own triage named: "...from the previous section:"
+    // is prose outside any fence and never reaches this regex at all).
+    const yamlSingularNegatives = tree(
+      baseFixtureFiles({
+        [`${DOCS_ROOT}/extra/yaml-case.mdx`]:
+          `# e\n\n${FENCE}yaml\n`
+          + `_section:\n  label: x\n`
+          + `mySection:\n  label: not a section either\n`
+          + `section: a scalar, not a mapping\n`
+          + `${FENCE}\n`,
+      }),
+    );
+    const yamlSingularNegSweep = sweep(yamlSingularNegatives);
+    t('`_section`, `mySection` and a scalar `section:` contribute no finding', yamlSingularNegSweep.findings.length, 0);
+    t('...and no YAML mapping either', yamlSingularNegSweep.yamlSites.length, cleanSweep.yamlSites.length);
+
+    // ── ⭐ #13880 selector ④: a `sections: [...]` array in a JSON-family fence
+    const jsonNameless = tree(
+      baseFixtureFiles({
+        [`${DOCS_ROOT}/extra/json-case.mdx`]:
+          `# e\n\n${FENCE}json\n{\n  "sections": [\n    { "label": "Nameless", "fields": ["a"] }\n  ]\n}\n${FENCE}\n`,
+      }),
+    );
+    const jsonNamelessSweep = sweep(jsonNameless);
+    t('a json fence is now PARSED, not declared out of scope', jsonNamelessSweep.jsonFences, cleanSweep.jsonFences + 1);
+    t('...and its nameless literal is JUDGED', jsonNamelessSweep.jsonLiterals, cleanSweep.jsonLiterals + 1);
+    t('...producing exactly one finding', jsonNamelessSweep.findings.length, 1);
+    t('...at the right file and line', at(jsonNamelessSweep.findings[0]), `${DOCS_ROOT}/extra/json-case.mdx:6`);
+    t('...carrying its label into the message', jsonNamelessSweep.findings[0]?.label ?? NONE, 'Nameless');
+    t('...tagged `json` so the fix text is JSON-shaped', jsonNamelessSweep.findings[0]?.kind ?? NONE, 'json');
+    t('...and the real sweep goes RED on it', run(jsonNameless, quiet), EXIT_VIOLATIONS);
+
+    const jsonNamed = tree(
+      baseFixtureFiles({
+        [`${DOCS_ROOT}/extra/json-case.mdx`]:
+          `# e\n\n${FENCE}json\n{\n  "sections": [\n    { "name": "ok", "label": "Ok" }\n  ]\n}\n${FENCE}\n`,
+      }),
+    );
+    t('a NAMED json section satisfies the rule', run(jsonNamed, quiet), EXIT_CLEAN);
+
+    // ── a `jsonc` fence with a `// <-` line comment and a trailing comma ────
+    // (the exact shape `concept.mdx`'s own "Final Merged Layout" fence used)
+    // -- proves this arm tolerates what `JSON.parse` would refuse.
+    const jsonWithComments = tree(
+      baseFixtureFiles({
+        [`${DOCS_ROOT}/extra/json-case.mdx`]:
+          `# e\n\n${FENCE}jsonc\n{\n  "sections": [\n    {\n      "name": "ok",\n      "label": "Ok", // <- trailing comment\n    },\n  ],\n}\n${FENCE}\n`,
+      }),
+    );
+    t('a `jsonc` fence with comments and a trailing comma is judged, not refused', run(jsonWithComments, quiet), EXIT_CLEAN);
+
+    // ── an ELIDED placeholder array: judged as ZERO entries, not skipped ────
+    // (`forms.mdx:183`'s real shape: `"sections": [/* … */]`)
+    const jsonElided = tree(
+      baseFixtureFiles({
+        [`${DOCS_ROOT}/extra/json-case.mdx`]: `# e\n\n${FENCE}json\n{\n  "sections": [/* … */]\n}\n${FENCE}\n`,
+      }),
+    );
+    const jsonElidedSweep = sweep(jsonElided);
+    t('an elided `[/* … */]` array is counted', jsonElidedSweep.jsonArrays, cleanSweep.jsonArrays + 1);
+    t('...but contributes zero literals, not a fabricated finding', jsonElidedSweep.jsonLiterals, cleanSweep.jsonLiterals);
+    t('...and produces no finding', jsonElidedSweep.findings.length, 0);
+    t('...so the gate stays clean', run(jsonElided, quiet), EXIT_CLEAN);
+
+    // ── negative controls: a `json` fence with no `sections` key ────────────
+    const jsonNegatives = tree(
+      baseFixtureFiles({
+        [`${DOCS_ROOT}/extra/json-case.mdx`]:
+          `# e\n\n${FENCE}json\n{\n  "mySections": [{ "label": "not a section array" }]\n}\n${FENCE}\n`,
+      }),
+    );
+    const jsonNegSweep = sweep(jsonNegatives);
+    t('`mySections` does not contribute a JSON array', jsonNegSweep.jsonArrays, cleanSweep.jsonArrays);
+    t('...or a finding', jsonNegSweep.findings.length, 0);
 
     // ── ⭐ a DUPLICATE-KEY fence: a complete tree, judged anyway ─────────────
     // The shape a teaching page produces when it concatenates two snippets
@@ -1240,6 +1587,23 @@ export function selfTest() {
     t(
       'a YAML anchor kept as a file but emptied of mappings refuses',
       run(tree(baseFixtureFiles({ [YAML_CENSUS_ANCHORS[1]]: `# kept\n\n${FENCE}yaml\nfoo: bar\n${FENCE}\n` })), quiet),
+      EXIT_REFUSED,
+    );
+
+    // ── the JSON-family refusals (#13880) ────────────────────────────────────
+    t(
+      'a JSON census anchor kept as a file but emptied of json fences refuses',
+      // `YAML_CENSUS_ANCHORS[0]` doubles as `JSON_CENSUS_ANCHORS[0]`; drop
+      // only its json half so this isolates the ANCHOR check from the floor
+      // one below (`extra/h.mdx` alone still clears `FLOOR_JSON_FENCES`).
+      run(tree(baseFixtureFiles({ [YAML_CENSUS_ANCHORS[0]]: yamlPage(3) })), quiet),
+      EXIT_REFUSED,
+    );
+    t(
+      'a corpus whose JSON-family population collapses below floor refuses',
+      // Drop the standalone `extra/h.mdx` json fences; the anchor page alone
+      // (1 fence) sits below `FLOOR_JSON_FENCES` (2).
+      run(tree(baseFixtureFiles({ [`${DOCS_ROOT}/extra/h.mdx`]: '# h\n\ntext only\n' })), quiet),
       EXIT_REFUSED,
     );
 

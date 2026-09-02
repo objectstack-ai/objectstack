@@ -12,12 +12,38 @@
  *
  *   {
  *     cloudUrl: string,            // base URL of the upstream cloud ('' = same origin)
+ *     upgradeUrl?: string,         // absolute URL of the control plane's upgrade / billing entry — absent unless declared (#14514)
  *     singleEnvironment: boolean,
  *     defaultOrgId?, defaultEnvironmentId?,   // multi-tenant, per-hostname
  *     features: { installLocal, marketplace, aiStudio, autoPublishAiBuilds, ... },
  *     branding: { productName, productShortName, stage?, logoUrl, faviconUrl, brandColor, pwaDescription, pwaThemeColor },
  *     telemetry: { errorReporting?: { dsn, sendDefaultPii, environment?, tracesSampleRate, replaysOnErrorSampleRate } }
  *   }
+ *
+ * ## `upgradeUrl` — the control plane's upgrade entry is published, not derived (#14514)
+ *
+ * The tenant Console offers an "upgrade" exit when the AI quota guardrail
+ * refuses a turn. It used to COMPOSE the target from `cloudUrl` plus a guessed
+ * console mount, app slug and page route — three facts owned by whoever
+ * deploys the control plane — and missed all three, landing on the control
+ * plane's API 404. The control plane's own two call sites did not even agree
+ * on the spelling, which settles it: a consumer in another repo cannot derive
+ * what the producer cannot keep to one dialect. Maintainer ruling 2026-09-02
+ * (cloud#1850, option A): this payload carries the ABSOLUTE URL, the host that
+ * owns the page declares it, and the Console renders a link only when the key
+ * is present.
+ *
+ * Optional and default-absent — the same shape as `branding.stage` below: a
+ * runtime that says nothing serves no key, never `''` or a guessed default,
+ * because a vanilla `objectstack dev`, a self-hosted box and an air-gapped
+ * deployment have no billing page to point at. Declared, it passes through
+ * VERBATIM. The one thing enforced is that it is absolute (`http:` /
+ * `https:`): the Console opens it from the TENANT origin, so a relative path —
+ * the control plane's own current `upgrade_url` dialect — would resolve against
+ * the tenant runtime and recreate the guessed-path 404 this key removes.
+ * Refused loudly at mount, never coerced, like every other knob in this file.
+ * Host option only, no env var: the value belongs to the distribution whose
+ * control plane serves the page, and the cloud subclass fills it.
  *
  * ## `branding.stage` — a documented knob that this runtime never sent (#9252)
  *
@@ -435,6 +461,22 @@ function asPlatformStage(value: string | undefined): PlatformStage | undefined {
 }
 
 /**
+ * Is this host-supplied upgrade entry an ABSOLUTE http(s) URL? (#14514)
+ *
+ * The parse decides only whether the value is forwarded at all; the value
+ * itself is served verbatim, never re-serialised, so what the host declared
+ * is byte-for-byte what the Console opens. Anything the WHATWG parser cannot
+ * resolve without a base (a relative path, a bare host) and any scheme other
+ * than http(s) — this string is rendered as a link in every browser that
+ * loads the Console — is refused.
+ */
+function isAbsoluteHttpUrl(value: string): boolean {
+    let parsed: URL;
+    try { parsed = new URL(value); } catch { return false; }
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+}
+
+/**
  * Feature-flag overrides a host's distribution policy can derive per request.
  *
  * Open-ended on purpose: the framework's own flags (`aiStudio`,
@@ -463,6 +505,34 @@ export interface RuntimeConfigPluginConfig {
      * for marketplace + install).
      */
     controlPlaneUrl?: string;
+    /**
+     * Absolute URL of the control plane's upgrade / billing entry, served
+     * verbatim as the top-level `upgradeUrl` key beside `cloudUrl` (#14514).
+     *
+     * The tenant Console offers an "upgrade" exit when the AI quota guardrail
+     * refuses a turn. It used to compose the target from `cloudUrl` plus a
+     * guessed console mount, app slug and route — three facts that belong to
+     * whoever deploys the control plane — and missed all three (a 404 on the
+     * control plane's API router). The destination is therefore declared here
+     * by the host that owns it, and the Console renders the link only when
+     * the key is present.
+     *
+     * ⛔ Default **absent**: unset serves no `upgradeUrl` key at all, never an
+     * empty string or a guessed default. A vanilla `objectstack dev`, a
+     * self-hosted box and an air-gapped deployment have no billing page, and
+     * the Console already reads "no key" as "no link". Empty / whitespace-only
+     * reads as unset (absent, silent).
+     *
+     * ⛔ Must be ABSOLUTE (`http:` / `https:`). A relative path such as
+     * `/settings/billing` is refused and named at mount time, never forwarded:
+     * the Console opens this URL from the TENANT origin, where a relative path
+     * would resolve against the tenant runtime and recreate exactly the
+     * guessed-path 404 this key exists to remove.
+     *
+     * Host option only — no env var. The value belongs to the distribution
+     * whose control plane serves the page; the cloud subclass fills it.
+     */
+    upgradeUrl?: string;
     /**
      * CEILING for the `features.installLocal` flag — no longer its source
      * (#8388).
@@ -613,6 +683,10 @@ export class RuntimeConfigPlugin implements Plugin {
      * invisible from the SPA end.
      */
     private readonly refusedStage: string | undefined;
+    /** The declared upgrade entry, or `undefined` for "send no key" (unset or refused). */
+    private readonly upgradeUrl: string | undefined;
+    /** The refused spelling, kept so `start()` can name it once — same reason as `refusedStage`. */
+    private readonly refusedUpgradeUrl: string | undefined;
     private readonly logoUrl: string | undefined;
     private readonly faviconUrl: string | undefined;
     private readonly brandColor: string | undefined;
@@ -655,6 +729,19 @@ export class RuntimeConfigPlugin implements Plugin {
         const requestedStage = config.stage ?? (envStage || undefined);
         this.stage = asPlatformStage(requestedStage);
         this.refusedStage = this.stage === undefined ? requestedStage : undefined;
+        // Upgrade / billing entry (#14514). Empty reads as unset; anything
+        // actually said that is not an absolute http(s) URL is refused and
+        // named at mount, never forwarded. Verbatim on acceptance — the
+        // original string, not the parser's re-serialisation.
+        const requestedUpgradeUrl = typeof config.upgradeUrl === 'string' && config.upgradeUrl.trim() !== ''
+            ? config.upgradeUrl
+            : undefined;
+        this.upgradeUrl = requestedUpgradeUrl !== undefined && isAbsoluteHttpUrl(requestedUpgradeUrl)
+            ? requestedUpgradeUrl
+            : undefined;
+        this.refusedUpgradeUrl = requestedUpgradeUrl !== undefined && this.upgradeUrl === undefined
+            ? requestedUpgradeUrl
+            : undefined;
         const envLogoUrl = (typeof process !== 'undefined' ? process.env?.OS_LOGO_URL : undefined)?.trim();
         const envFaviconUrl = (typeof process !== 'undefined' ? process.env?.OS_FAVICON_URL : undefined)?.trim();
         const envBrandColor = (typeof process !== 'undefined' ? process.env?.OS_BRAND_COLOR : undefined)?.trim();
@@ -740,6 +827,20 @@ export class RuntimeConfigPlugin implements Plugin {
                     `[RuntimeConfigPlugin] ignoring unrecognised product stage ${JSON.stringify(this.refusedStage)} `
                     + `(OS_PRODUCT_STAGE / the \`stage\` option) — branding.stage will be omitted and the Console `
                     + `keeps its default preview badge. Accepted values: ${PLATFORM_STAGES.join(', ')}.`,
+                );
+            }
+
+            // A host that declared an upgrade entry the Console could not
+            // safely open (#14514) — a relative path, or a non-http scheme.
+            // Same shape as the stage refusal above: they meant to configure
+            // something, it was refused rather than coerced, and the
+            // consequence (no upgrade link rendered) must not be silent.
+            if (this.refusedUpgradeUrl !== undefined) {
+                ctx.logger?.warn?.(
+                    `[RuntimeConfigPlugin] ignoring upgradeUrl ${JSON.stringify(this.refusedUpgradeUrl)} `
+                    + `(the \`upgradeUrl\` option): it must be an absolute http(s) URL — the Console opens it `
+                    + `from the tenant origin, so a relative path would resolve against the wrong host. `
+                    + `No upgradeUrl key is served and the Console renders no upgrade link.`,
                 );
             }
 
@@ -858,6 +959,13 @@ export class RuntimeConfigPlugin implements Plugin {
                 }
                 return c.json({
                     cloudUrl: this.cloudUrl,
+                    // Declared by the host, never derived (#14514). Spread,
+                    // not `upgradeUrl: this.upgradeUrl`, for the same reason
+                    // as `branding.stage` below: the contract is asserted on
+                    // KEY PRESENCE and the Console reads "no key" as "no
+                    // link", so a present-and-undefined property must never
+                    // reach a non-JSON consumer or a test.
+                    ...(this.upgradeUrl !== undefined ? { upgradeUrl: this.upgradeUrl } : {}),
                     singleEnvironment: resolvedSingleEnv,
                     defaultOrgId,
                     defaultEnvironmentId,
