@@ -377,6 +377,28 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
     expect(f!.severity).toBe('error');
   });
 
+  it('REFUSES a predicate calling a function the CEL environment does not register', () => {
+    // #13594 — the arm that used to walk through. `current_user.can(object, verb)`
+    // is the authored shape from objectui#4421: it PARSES, so the syntax arm has
+    // nothing to say, and `current_user` is a declared root, so the bare-ref arm
+    // cannot reach the call. Before the ruling this reached a tenant's runtime
+    // and faulted fail-CLOSED on every surface.
+    const { errors } = gateView(runtimeView('current_user.can(object, verb)'));
+    const f = errors.find((e) => e.rule === 'visibility-predicate-unknown-function');
+    expect(f, 'the publish door must refuse an unresolvable call, not just the validator').toBeDefined();
+    expect(f!.severity).toBe('error');
+    expect(f!.path).toBe('views[0].form.sections[0].fields[0]');
+    expect(f!.message).toMatch(/`can`/);
+    expect(f!.message).toMatch(/found no matching overload/);
+  });
+
+  it('ACCEPTS a predicate whose functions all resolve — the control for the arm above', () => {
+    // Same door, same shape, a registered function. Without this the test above
+    // would still pass if the arm had started refusing every call.
+    const { errors } = gateView(runtimeView("upper(record.name) == 'X'"));
+    expect(errors.map((e) => e.rule)).not.toContain('visibility-predicate-unknown-function');
+  });
+
   it('REFUSES a predicate path the target schema does not declare', () => {
     const { errors } = gateView(schemaBoundForm("data.tpye == 'text'"));
     const f = errors.find((e) => e.rule === 'predicate-path-unresolved');

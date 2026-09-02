@@ -21,7 +21,9 @@
   "scripts": {
     "build": "tsup && node ../../../scripts/check-dts-emitted.mjs",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.examples.json"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.examples.json && pnpm check:test-typecheck",
+    "check:test-typecheck": "tsx ../../../scripts/check-test-typecheck.mts --self-test && tsx ../../../scripts/check-test-typecheck.mts --package packages/plugins/plugin-auth --project tsconfig.test.json",
+    "gen:test-typecheck-debt": "tsx ../../../scripts/check-test-typecheck.mts --update --package packages/plugins/plugin-auth --project tsconfig.test.json"
   },
   "dependencies": {
     "@better-auth/core": "^1.7.2",
@@ -44,6 +46,7 @@
     "@objectstack/plugin-security": "workspace:*",
     "@types/node": "^26.2.0",
     "hono": "^4.13.2",
+    "tsx": "^4.23.12",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },

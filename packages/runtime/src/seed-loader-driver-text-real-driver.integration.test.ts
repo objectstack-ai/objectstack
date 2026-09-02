@@ -179,24 +179,64 @@ describe('[#8442] a REAL driver constraint violation is withheld from the seed r
     expect(validationFailureDetails(raw)).toBeUndefined();
     expect(raw.status).toBeUndefined();
 
-    // ── The withhold ───────────────────────────────────────────────────────
+    // ── The row's SENTENCE moved populations (#14095) ──────────────────────
+    // ⚠️ RETRIAGED, not re-baselined. `declaresSeedClientRefusal` is a POSITIVE
+    // list — a 4xx status, or the VALIDATION_FAILED shape — and it did not
+    // move. What moved is which side of it this error is on: since #14095 the
+    // insert door answers a driver unique violation with the ADR-0112 envelope
+    // `DUPLICATE_RECORD` / `status: 409`, so the seed row is a DECLARED refusal
+    // and `quotableSeedFailureDetail` quotes it. The rejection is still
+    // located the same way ("record #1 (name=second)"); only the tail changed,
+    // from the generic reason to the platform's own sentence.
+    //
+    // ⛔ The withheld population is NOT vacated. `raw.status` is asserted
+    // `undefined` twelve lines up: the DRIVER's error still declares nothing
+    // and would still be withheld — what the sink now sees is the engine's
+    // envelope, not that error. A regression that started quoting undeclared
+    // driver faults would redden the `seed-loader-driver-text.test.ts` cases
+    // that drive this sink with a bare driver throw.
     expect(result.success).toBe(false);
     const failed = result.errors.find((e: any) => e.recordIndex === 1);
     expect(failed, 'the duplicate row was not reported').toBeDefined();
-    expect(failed!.message).toContain('the data engine rejected the write; the reason is in the server log');
+    expect(failed!.message).toContain("Duplicate record refused on 'dt_acct'");
+    expect(failed!.message).toContain("a unique constraint on 'email' already holds this value");
+    expect(failed!.message).toContain('record #1 (name=second)');
 
-    // Nothing of the driver's sentence reaches the caller — asserted over the
-    // WHOLE payload, because this message carries the statement AND the values.
+    // Nothing of the DRIVER's sentence reaches the caller — asserted over the
+    // WHOLE payload, and every one of these is unchanged. They hold against
+    // the new sentence for the reason the envelope was built that way: the
+    // platform sentence carries no statement, no bound value and no dialect
+    // text, because the driver's error is preserved WHOLE on `cause` and
+    // `cause` never reaches the wire.
     const wire = JSON.stringify(result);
     expect(wire).not.toContain('UNIQUE constraint failed');
     expect(wire).not.toContain('SQLITE_CONSTRAINT');
     expect(wire).not.toContain('insert into');
     expect(wire).not.toContain('dup@example.com');
 
-    // ── …and the operator still gets it ────────────────────────────────────
+    // ── …and the operator still gets it — the half #14095 had to REPAIR ────
+    // Both assertions are the ORIGINAL ones, byte for byte, and that is the
+    // point: the envelope nearly cost them. `seedFailureCause` read
+    // `err.message` alone, so with a platform sentence on `message` the
+    // driver's own words would have reached NEITHER the response nor the log —
+    // withholding becoming indistinguishable from deleting the diagnostic,
+    // which is the exact failure this file's sink was built against. It now
+    // reaches through `cause` to the deepest sentence, so the operator keeps
+    // `UNIQUE constraint failed: dt_acct.email`.
+    //
+    // And the MARKER stays true for a newly subtle reason: the payload quoted
+    // the PLATFORM sentence while this line prints the DRIVER sentence, so the
+    // reporter genuinely did not see these words. `seedCauseLabel` now asks its
+    // question about the sentence being printed rather than about the error,
+    // which is what keeps `Cause (withheld from the seed response)` honest
+    // here while a plainly-declared refusal (whose printed and quoted sentence
+    // are the same string) still reads `Cause`.
     const logged = ((logger.error as any).calls as string[]).join('\n');
     expect(logged).toContain('UNIQUE constraint failed');
     expect(logged).toContain('Cause (withheld from the seed response)');
+    // The platform sentence is on the payload; the driver's is on the log.
+    // Asserted together so a future edit cannot quietly collapse them into one.
+    expect(logged).toContain('dt_acct');
 
     // The structured authoring feedback survives: which row failed.
     expect(failed!.sourceObject).toBe('dt_acct');

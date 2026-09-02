@@ -153,10 +153,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.options.color": {
         label: "颜色"
       },
-      "fields.options.icon": {
-        label: "图标",
-        helpText: "Lucide 图标名称"
-      },
       "fields.options.description": {
         label: "描述"
       },

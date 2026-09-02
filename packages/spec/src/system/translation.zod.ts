@@ -27,6 +27,24 @@ const TRANSLATION_HISTORY =
   + 'loaded, and whatever it was meant to translate rendered in the source language with no '
   + 'diagnostic, indistinguishable from a translation nobody had written yet.';
 
+/**
+ * The measured exclusion on `objects.<o>._views.<v>.bulkActions.<def>.params.<p>`.
+ *
+ * Identical in kind to `FLOW_SCREEN_FIELD_NO_OPTIONS` below, and for the same
+ * measured reason rather than by symmetry: `BulkActionParamSchema.options[].value`
+ * is `z.union([z.string(), z.number(), z.boolean()])`, so an option map keyed by
+ * value — the shape `objects.<object>.fields.<field>.options` uses — cannot
+ * address `true` and `"true"` apart. There is no right key to send the author
+ * to, which is why this is `guidance` and not an alias.
+ */
+const BULK_PARAM_NO_OPTIONS =
+  'select-option labels are not translatable on a bulk-action param: '
+  + '`BulkActionParamSchema.options[].value` is unconstrained (numbers and booleans are legal), so an '
+  + 'option map keyed by value — the shape `objects.<object>.fields.<field>.options` uses — cannot '
+  + 'address them unambiguously. Point the param at a declared field (`type` + the object\'s own '
+  + 'options, which ARE translatable under `objects.<object>.fields.<field>.options`), or accept the '
+  + 'authored option labels.';
+
 // ────────────────────────────────────────────────────────────────────────────
 // Object-level Translation (per-object file)
 // ────────────────────────────────────────────────────────────────────────────
@@ -154,7 +172,8 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
   aliases: {
     // The group prefixes are the whole point of the `_`-prefixed convention,
     // and the un-prefixed spelling is the one an author reaches for first.
-    views: '_views', actions: '_actions', sections: '_sections',
+    views: '_views', actions: '_actions', sections: '_sections', validations: '_validations',
+    validationRules: '_validations', rules: '_validations',
     plural: 'pluralLabel', labelPlural: 'pluralLabel', name: 'label', title: 'label',
     columns: 'fields', properties: 'fields', attributes: 'fields',
   },
@@ -184,11 +203,26 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    *   objects.<object>._views.<view_name>.description
    *   objects.<object>._views.<view_name>.emptyState.title
    *   objects.<object>._views.<view_name>.emptyState.message
+   *   objects.<object>._views.<view_name>.bulkActions.<def_name>.*
    */
   _views: z.record(z.string(), strictObject({
     surface: 'this view translation',
     history: TRANSLATION_HISTORY,
-    aliases: { name: 'label', title: 'label', empty: 'emptyState', emptyMessage: 'emptyState' },
+    aliases: {
+      name: 'label', title: 'label', empty: 'emptyState', emptyMessage: 'emptyState',
+      // The authoring key is `bulkActionDefs`; the translation group drops the
+      // `Defs` suffix the way `_actions` drops nothing and `_tabs` drops
+      // `tabs[]`'s bracket — one address per surface, and the authoring
+      // spelling is the one an author reaches for first.
+      bulkActionDefs: 'bulkActions', bulkActionDef: 'bulkActions', bulk: 'bulkActions',
+    },
+    guidance: {
+      rowActions:
+        '`rowActions` names actions the OBJECT declares — a row-action label is translated where the '
+        + "action lives: 'objects.<object>._actions.<action_name>.label' (or 'globalActions.<name>.label' "
+        + 'for an object-less action). Only a `bulkActionDefs` entry, which is authored inside the view '
+        + "and is not an action document, is addressed here — under 'bulkActions'.",
+    },
   }, {
     label: z.string().optional().describe('Translated view label'),
     description: z.string().optional().describe('Translated view description'),
@@ -200,6 +234,98 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
       title: z.string().optional().describe('Translated empty-state title'),
       message: z.string().optional().describe('Translated empty-state message'),
     }).optional().describe('Translated empty-state copy shown when the view has no rows'),
+
+    /**
+     * Selection-bar copy for the view's `bulkActionDefs[]`, keyed by the def's
+     * `name` (`BulkActionDefSchema.name`, snake_case).
+     *
+     * **The hole this closes.** A bulk-action def is part of the VIEW document,
+     * not an action document, so it never reaches `translateAction` and no
+     * group addressed it: the selection bar rendered
+     * `已选择 1 项 · Complete · Skip · 清除` — two English words between two
+     * Chinese ones, on a fully translated screen. Not a drifted key; no key.
+     * The bar renders `def.label` verbatim (`resolveBulkActions` documents that
+     * an authored def is "left as-authored"), so the source-locale string was
+     * the only string there was.
+     *
+     * **Why this and not the `bulkActions: ['<name>']` promotion.** Naming a
+     * declared action instead DOES localize — that path runs through
+     * `translateAction` — but it is not the same capability: it dispatches the
+     * action once per selected record, where a def is one data-plane
+     * `updateMany`/`deleteMany` (or one `execution: 'aggregate'` call). Telling
+     * an author to trade N elevated dispatches for a translated label is a
+     * workaround, not a translation route.
+     *
+     * **Why a bundle key and not `I18nLabelSchema` on the def.** The def's
+     * `label` stays `z.string()` deliberately (`ui/bulk-action.zod.ts` module
+     * header): the def reaches the grid verbatim and the bar renders it as a
+     * React child, so an inline `{ en, zh-CN }` map would render as a blank
+     * cell rather than a parse error. Overlaying from the bundle in
+     * `translateView` keeps the wire value a plain string — the renderer's
+     * contract is untouched, and it is the same seat that already localizes the
+     * view's own `label`/`description`.
+     *
+     * **The key face is measured against `BulkActionDefSchema`, not mirrored
+     * from the report.** Every key below is copy the def actually declares:
+     * `label`, `confirmText`, `confirmLabel`, and per-param `label` / `help` /
+     * `placeholder`. Two deliberate exclusions carry `guidance` instead:
+     * `successMessage` (a def declares none — the run reports a per-record
+     * outcome summary the console words itself) and per-param `options`.
+     *
+     * ⚠️ `help`, not `helpText`. An ACTION param spells its hint `helpText`
+     * and a bulk param spells it `help` (`BulkActionParamSchema.help`) — the
+     * known divergence `ui/bulk-action.zod.ts` names. This face follows the
+     * authored key, and the neighbouring spelling is an alias rather than a
+     * second declared key, so one string keeps one address.
+     */
+    bulkActions: z.record(z.string(), strictObject({
+      surface: 'this bulk action translation',
+      history: TRANSLATION_HISTORY,
+      // Mirrors `BulkActionDefSchema`'s own alias table so an author's habits
+      // land on the same canonical key on both the authoring and the
+      // translation side.
+      aliases: {
+        name: 'label', title: 'label',
+        confirm: 'confirmText', confirmation: 'confirmText', confirmMessage: 'confirmText',
+        confirmButton: 'confirmLabel', confirmButtonLabel: 'confirmLabel', runLabel: 'confirmLabel',
+        parameters: 'params', args: 'params', inputs: 'params',
+      },
+      guidance: {
+        successMessage:
+          '`successMessage` is not part of the bulk-action translation surface — a `bulkActionDefs` '
+          + 'entry declares no success copy (`BulkActionDefSchema` has no such key). The run reports a '
+          + 'per-record outcome summary the console words from its own catalog. Translate the button '
+          + '(`label`), the confirmation prompt (`confirmText`) and the confirm button (`confirmLabel`).',
+        description:
+          '`description` is not part of the bulk-action translation surface — a def declares no '
+          + 'description. The explanatory sentence above the affected-record summary is `confirmText`.',
+        icon:
+          '`icon` is a Lucide icon name, not display copy — it is the same string in every locale. '
+          + 'Omit it here.',
+      },
+    }, {
+      label: z.string().optional().describe('Translated selection-bar button label (overlays `bulkActionDefs[].label`)'),
+      confirmText: z.string().optional().describe('Translated confirmation prompt shown above the affected-record summary'),
+      confirmLabel: z.string().optional().describe('Translated Confirm button label'),
+      params: z.record(z.string(), strictObject({
+        surface: 'this bulk action parameter translation',
+        history: TRANSLATION_HISTORY,
+        // `helpText` is the correct spelling on an ACTION param and `help` on a
+        // FIELD translation and a settings key; a BULK param declares `help`.
+        // Neighbouring-surface borrowing, which edit distance reads as a
+        // legitimate word rather than a slip.
+        aliases: { helpText: 'help', hint: 'help', tooltip: 'help', description: 'help', name: 'label', title: 'label' },
+        guidance: {
+          options: BULK_PARAM_NO_OPTIONS,
+          choices: BULK_PARAM_NO_OPTIONS,
+          values: BULK_PARAM_NO_OPTIONS,
+        },
+      }, {
+        label: z.string().optional().describe('Translated bulk-dialog field label'),
+        help: z.string().optional().describe('Translated help text under the field (the def spells this `help`, not `helpText`)'),
+        placeholder: z.string().optional().describe('Translated bulk-dialog field placeholder'),
+      })).optional().describe('Bulk-dialog parameter translations keyed by param name (`BulkActionParamSchema.name`)'),
+    })).optional().describe('Selection-bar translations keyed by bulk-action def name (`BulkActionDefSchema.name`)'),
   })).optional().describe('View translations keyed by view name'),
 
   /**
@@ -258,6 +384,73 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
   }, {
     label: z.string().optional().describe('Translated tab label'),
   })).optional().describe('Filter-preset tab translations keyed by tab name'),
+
+  /**
+   * Custom validation-rule messages keyed by rule name
+   * (`ValidationRuleSchema.name`, snake_case).
+   *
+   * Convention (resolved on the WRITE path by the ObjectQL rule evaluator):
+   *   objects.<object>._validations.<rule_name>.message
+   *
+   * **The hole this closes (#14253).** `object.validations[].message` is the
+   * sentence a rejected write returns, and the evaluator emitted it verbatim.
+   * A deployment therefore got platform-generated refusals in the caller's
+   * language — the built-in field catalog has shipped `zh-CN` since #3957 — and
+   * author-written refusals in the source language, side by side in one error
+   * envelope.
+   *
+   * **This is not `validationMessages` coming back.** That group (retired in
+   * 17.0.0, #4667) was keyed by rule name at the TOP level, so it could not
+   * tell two objects' rules apart, and — the reason it was retired — nothing
+   * read it. This one is object-scoped, sits beside `_views` / `_actions` /
+   * `_tabs`, and has a reader in the same change: `objectValidationMessageKey`
+   * (`system/i18n-resolver.ts`) spells the address, and the rule evaluator asks
+   * the **existing** `i18nService` channel (`engine.ts`'s `setI18nService`,
+   * #3957 — the one that already localizes built-in messages and field labels).
+   * No second i18n path into objectql.
+   *
+   * **`messages['validation.field.*']` is a different thing** and stays as it
+   * is: it overrides the platform's BUILT-IN field catalog
+   * (`BUILTIN_VALIDATION_MESSAGES`), which is keyed by constraint, not by rule.
+   * It cannot address an author's own rule.
+   *
+   * **The key face is one key, measured.** A rule declares `label` (its entry
+   * in the admin rule listing) and `description` (administrative notes) as well
+   * as `message` — neither reaches a rejected caller, and declaring them here
+   * would parse clean and translate nothing, the ADR-0078 shape this file keeps
+   * paying to remove. Both carry `guidance` instead.
+   *
+   * A nested `conditional` branch rule carries its own `name` and is addressed
+   * by it; the wrapping `conditional`'s own `message` never reaches a user (the
+   * branch supplies the violation), so it has nothing to translate.
+   */
+  _validations: z.record(z.string(), strictObject({
+    surface: 'this validation rule translation',
+    history: TRANSLATION_HISTORY,
+    aliases: {
+      text: 'message', error: 'message', errorMessage: 'message', errorText: 'message',
+      violation: 'message', violationMessage: 'message', msg: 'message',
+    },
+    guidance: {
+      label:
+        "`label` is the rule's entry in the admin rule listing, not the text a rejected write returns "
+        + '— nothing resolves it through the bundle, so a key here would parse clean and translate '
+        + 'nothing. Only `message` is addressed on this surface.',
+      description:
+        "`description` is the rule's administrative note (the business reason, for whoever maintains "
+        + 'the rule) and never reaches a user. Translate `message`, the sentence a rejected write '
+        + 'returns.',
+      condition:
+        '`condition` / `when` is a CEL predicate, not display copy — it is the same expression in '
+        + 'every locale. Only `message` is translatable on a validation rule.',
+      when:
+        '`when` / `condition` is a CEL predicate, not display copy — it is the same expression in '
+        + 'every locale. Only `message` is translatable on a validation rule.',
+    },
+  }, {
+    message: z.string().optional()
+      .describe("Translated rejection message — overlays the rule's authored `message` on every rejected write"),
+  })).optional().describe('Custom validation-rule messages keyed by rule name (`ValidationRuleSchema.name`)'),
 }).describe('Translation data for a single object'));
 
 export type ObjectTranslationData = z.input<typeof ObjectTranslationDataSchema>;
@@ -338,10 +531,12 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
   // through to the client tree and nothing downstream consumed it.
   validationMessages:
     '`validationMessages` was removed in @objectstack/spec 17.0.0 (ADR-0049) — no '
-    + 'resolver ever read it, so a translated rule message was stored and never shown. '
-    + 'Validation messages are not translated through a translation group: author the '
+    + 'resolver ever read it, so a translated rule message was stored and never shown, and its '
+    + 'rule-name-only keying could not tell two objects\' rules apart. Author the '
     + 'message on the rule itself (`object.validations[].message`), which the engine '
-    + 'evaluates and returns on every rejected write. Delete the key. Run '
+    + 'evaluates and returns on every rejected write, and translate it under the object-scoped '
+    + "group 'objects.<object_name>._validations.<rule_name>.message', which the write "
+    + 'path resolves. Delete this key. Run '
     + '`os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   o: "`o` is the retired object-first dialect, which no resolver reads — use 'objects.<object_name>'",
   app: "`app` is the retired object-first dialect, which no resolver reads — use 'apps.<app_name>'",
@@ -354,9 +549,9 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
   // `validationMessages`, which was itself dead, so taking the advice moved the
   // content from one unread group to another. Both are gone now (#4667).
   errors:
-    '`errors` is the retired object-first dialect and has no replacement — rule messages are '
-    + 'not translated through a translation group at all. Author the message on the rule '
-    + "itself (`object.validations[].message`); omit `errors`.",
+    '`errors` is the retired object-first dialect and has no replacement under that name. Author '
+    + 'the message on the rule itself (`object.validations[].message`) and translate it under '
+    + "'objects.<object_name>._validations.<rule_name>.message'; omit `errors`.",
   _globalOptions: "`_globalOptions` is the retired object-first dialect — use 'objects.<object_name>.fields.<field_name>.options'",
   _meta: "`_meta` is the retired object-first dialect — use the top-level 'locale' field (on a bundle, the locale is the map key)",
   namespace: '`namespace` is not part of the translation contract — omit it (ADR-0129 D3 retired the separate namespace declaration platform-wide)',
@@ -410,6 +605,23 @@ const FLOW_SCREEN_FIELD_NO_HELP =
   'a screen field declares no help/hint copy — `ScreenFieldConfig` is '
   + '`name`/`label`/`type`/`required`/`options`/`defaultValue`/`placeholder`/`visibleWhen`, so there is '
   + 'nothing here to translate. Use `placeholder` for the in-input hint the field does declare.';
+
+/**
+ * The measured exclusion on `datasets.<name>.dimensions.<d>` and
+ * `.measures.<m>`.
+ *
+ * Not inherited by symmetry from the dataset's own `description`: the authoring
+ * schema states it directly. `DatasetDimensionSchema` and `DatasetMeasureSchema`
+ * each carry a `guidance` entry for `description` reading "its author-facing
+ * text is `label`. `description` is declared on the DATASET itself" — so a key
+ * here would parse clean and translate nothing, the ADR-0078 shape this file
+ * keeps paying to remove.
+ */
+const DATASET_MEMBER_NO_DESCRIPTION =
+  'a dataset dimension/measure has no `description` — its author-facing text is `label`, and '
+  + '`DatasetDimensionSchema` / `DatasetMeasureSchema` say so at the authoring site too. '
+  + '`description` is declared on the DATASET itself: translate it at '
+  + "'datasets.<dataset_name>.description'.";
 
 const FLOW_SCREEN_FIELD_NO_OPTIONS =
   'select-option labels are not translatable on a screen field: `ScreenFieldConfig.options[].value` is '
@@ -514,6 +726,84 @@ const translationDataShape = () => ({
       subCaption: z.string().optional().describe("Translated metric sub-caption (overlays the widget's `options.description`, a different authored field from `description`)"),
     })).optional().describe('Widget translations keyed by widget id'),
   })).optional().describe('Dashboard translations keyed by dashboard name'),
+
+  /**
+   * Analytics dataset translations keyed by dataset name (`Dataset.name`).
+   *
+   * Convention (auto-resolved by `translateDataset`):
+   *   datasets.<name>.label
+   *   datasets.<name>.description
+   *   datasets.<name>.dimensions.<dimension_name>.label
+   *   datasets.<name>.measures.<measure_name>.label
+   *
+   * **The hole this closes (#14253).** A dataset reads like a back-office
+   * definition, but a measure label is drawn ON THE DASHBOARD — under every
+   * metric tile and on every chart axis — and `dataset` was neither in
+   * `TRANSLATABLE_METADATA_TYPES` nor addressed by any group. Measured on a
+   * translated dashboard: the tile titles and descriptions were Chinese (those
+   * are `dashboards.<name>.widgets.<id>.*`) and directly beneath each one the
+   * measure label rendered `Untouched > 14 days` / `Oldest touch`. Not a
+   * drifted key: no key.
+   *
+   * **Why a top-level group and not `dashboards.<name>.…`.** A dataset is the
+   * ONE semantic definition every presentation binds to by reference
+   * (ADR-0021 D1) — the same measure is drawn by N widgets across M dashboards.
+   * Addressing it under a dashboard would ask the translator to write the same
+   * string once per presentation and would leave a dataset that no dashboard
+   * references (a report's, or an API consumer's) unaddressable. One
+   * definition, one key.
+   *
+   * **The key face is measured against `DatasetSchema`.** A dimension and a
+   * measure each declare exactly one piece of display copy — `label` — and
+   * `dataset.zod.ts` says so twice, in the `guidance` it already gives an
+   * author who writes `description` on either: *"its author-facing text is
+   * `label`. `description` is declared on the DATASET itself"*. So
+   * `description` is declared here on the dataset and NOWHERE below it; a
+   * `dimensions.<d>.description` key would parse clean and translate nothing.
+   *
+   * ⚠️ These four are `I18nLabelSchema` at the authoring site, so a dataset's
+   * copy may already be an inline `{ en, 'zh-CN' }` map (#5728).
+   * `translateDataset` writes ONLY where the bundle actually has an entry, so
+   * an inline map the bundle does not cover is left intact rather than
+   * flattened to one language — the same rule `translatePage` follows.
+   */
+  datasets: z.record(z.string(), strictObject({
+    surface: 'this dataset translation',
+    history: TRANSLATION_HISTORY,
+    aliases: {
+      name: 'label', title: 'label', displayName: 'label',
+      dimension: 'dimensions', axes: 'dimensions', groupBy: 'dimensions',
+      measure: 'measures', metrics: 'measures', metric: 'measures', values: 'measures',
+    },
+    guidance: {
+      // The dataset layer is deliberately smaller than a query, and none of
+      // these is display copy — pointing an author at `label` would translate
+      // the wrong thing.
+      object: '`object` is the dataset\'s base object name, not display copy — the object\'s own label is translated at \'objects.<object_name>.label\'.',
+      include: '`include` lists relationship names/paths the joins are compiled from — machine names, identical in every locale.',
+      filter: '`filter` is the dataset\'s intrinsic scope predicate, not display copy.',
+      format: '`format` is a number format string (e.g. "$0,0.00"), not display copy. For a locale-correct currency symbol declare `currency` (ISO 4217) on the measure — presentations render it through `Intl`.',
+    },
+  }, {
+    label: z.string().optional().describe('Translated dataset label'),
+    description: z.string().optional().describe('Translated dataset description'),
+    dimensions: z.record(z.string(), strictObject({
+      surface: 'this dataset dimension translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { name: 'label', title: 'label', displayName: 'label', text: 'label' },
+      guidance: { description: DATASET_MEMBER_NO_DESCRIPTION },
+    }, {
+      label: z.string().optional().describe('Translated dimension label (drawn on chart axes and group headers)'),
+    })).optional().describe('Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`)'),
+    measures: z.record(z.string(), strictObject({
+      surface: 'this dataset measure translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { name: 'label', title: 'label', displayName: 'label', text: 'label' },
+      guidance: { description: DATASET_MEMBER_NO_DESCRIPTION },
+    }, {
+      label: z.string().optional().describe('Translated measure label (drawn under every metric tile and on chart axes)'),
+    })).optional().describe('Measure translations keyed by measure name (`DatasetMeasureSchema.name`)'),
+  })).optional().describe('Analytics dataset translations keyed by dataset name'),
 
   /**
    * Page translations keyed by page name (`Page.name`).
@@ -911,7 +1201,7 @@ export const TranslationDataSchema = lazySchema(() => strictObject({
   surface: 'this locale of the translation bundle',
   history: TRANSLATION_HISTORY,
   guidance: TRANSLATION_KEY_GUIDANCE,
-  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
   // `locale` lives on the ITEM, not on a bundle entry (the bundle keys ARE the
   // locales). Naming it keeps the suggestion useful for an author who moved a
   // `translation` item into a bundle and left the field behind.
@@ -1037,7 +1327,7 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
   surface: 'this translation',
   history: TRANSLATION_HISTORY,
   guidance: TRANSLATION_KEY_GUIDANCE,
-  aliases: { object: 'objects', app: 'apps', page: 'pages', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
+  aliases: { object: 'objects', app: 'apps', page: 'pages', dataset: 'datasets', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
 }, {
   ...translationDataShape(),
   locale: LocaleSchema.describe('BCP-47 locale this item translates (e.g. "zh-CN")'),

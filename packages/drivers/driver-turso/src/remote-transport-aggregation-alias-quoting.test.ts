@@ -216,6 +216,21 @@ describe('[#14113] RemoteTransport — the aggregation alias is escaped, not gat
   });
 
   describe('regression controls — the positions this card did NOT touch', () => {
+    /**
+     * [#14287] Every control below asserts the ADR-0112 envelope beside the
+     * sentence, because "still refuses" was the half that was true all along
+     * and the half that was WRONG was invisible to it: these positions threw a
+     * bare `Error`, which `mapDataError` served as an opaque 500. #14287 gave
+     * the one producer `code: 'INVALID_REQUEST'` / `status: 400`. Asserting
+     * `message` alone here would let a regression to the bare `Error` land
+     * green through the very controls written to hold this shape.
+     */
+    const envelopeOf = (err: unknown) => ({
+      code: (err as { code?: unknown }).code,
+      status: (err as { status?: unknown }).status,
+    });
+    const ENVELOPE = { code: 'INVALID_REQUEST', status: 400 };
+
     it('the `field` position still refuses an unsafe identifier, and sends nothing', async () => {
       // `SAFE_IDENTIFIER` is doing real work here: `field` becomes a column
       // REFERENCE, which is grammar. Escaping is the answer for a NAME only.
@@ -233,6 +248,8 @@ describe('[#14113] RemoteTransport — the aggregation alias is escaped, not gat
       // itself safe is what makes this case reach the `field` check at all.
       expect(err.message).toContain('unsafe identifier rejected');
       expect(err.message).toContain('amount"; DROP TABLE showcase_delivery; --');
+      // [#14287] …and it is a 400 the caller can act on, not an opaque 500.
+      expect(envelopeOf(err)).toEqual(ENVELOPE);
       expect(seen).toEqual([]);
     });
 
@@ -248,6 +265,7 @@ describe('[#14113] RemoteTransport — the aggregation alias is escaped, not gat
           (e) => e as Error,
         );
       expect(err.message).toContain('unsafe identifier rejected');
+      expect(envelopeOf(err)).toEqual(ENVELOPE);
       expect(seen).toEqual([]);
     });
 
@@ -277,6 +295,10 @@ describe('[#14113] RemoteTransport — the aggregation alias is escaped, not gat
         );
       expect(err.message).toContain('unsafe identifier rejected');
       expect(err.message).toContain('showcase_delivery.region');
+      // [#14287] The GATING is what this control holds; the ENVELOPE is what
+      // that card added to it. Both are pinned, so the open gating card cannot
+      // be mistaken for having landed.
+      expect(envelopeOf(err)).toEqual(ENVELOPE);
       expect(seen).toEqual([]);
     });
 

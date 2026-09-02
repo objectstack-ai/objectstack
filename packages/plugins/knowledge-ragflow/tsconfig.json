@@ -16,5 +16,24 @@
     "rootDir": "./src"
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  // [#14062] `**/*.test.ts` moved OUT of this program and INTO the sibling
+  // `tsconfig.test.json`, which `typecheck` names via `check:test-typecheck`.
+  // Read the direction carefully — this is not a package hiding its tests:
+  //
+  // This package declared NO `typecheck` script at all until #14062, so the
+  // fact that its tests were inside the BUILD program bought nothing; no tsc
+  // program was ever RUN over them, and the 3 errors they carry sat there
+  // unseen. Adding the script is what makes the program real, and it must
+  // invoke tsc (`check:type-check-coverage` refuses a `typecheck` that never
+  // type-checks). With the tests still here, that first limb would be red on
+  // arrival at debt this card is explicitly NOT chartered to repair — the
+  // ruling of 2026-09-01 says the job is to let the ratchet SEE the errors, and
+  // that repair follows the ratchet's own shrink-only discipline afterwards.
+  //
+  // So the split is the family's shape, not an exemption: `tsc --noEmit` here
+  // judges the shipped source, and every test file is judged one command later
+  // by `check:test-typecheck` against an EXACT, shrink-only per-signature
+  // ledger. Nothing stops being compiled; the two halves are named separately
+  // so each can be true about its own layer.
+  "exclude": ["node_modules", "dist", "**/*.test.ts"]
 }

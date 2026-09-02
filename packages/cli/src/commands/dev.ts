@@ -139,7 +139,7 @@ export default class Dev extends Command {
       default: false,
     }),
     'seed-admin': Flags.boolean({
-      description: 'Seed a known, loginable dev admin (admin@objectos.ai / admin123) in-process via the runtime on an EMPTY DB, then promote it to platform admin. Default: on (idempotent — only acts on a zero-user DB, never overwrites an existing account). Disable with --no-seed-admin.',
+      description: 'Seed a known, loginable dev admin (admin@objectos.ai / admin123) in-process via the runtime when the database carries NO LOGIN yet, then promote it to platform admin. Default: on (idempotent — it acts only while no account holds the seed address and no local password login exists anywhere, never overwrites an existing account). Disable with --no-seed-admin.',
       allowNo: true,
     }),
     'admin-email': Flags.string({
@@ -331,11 +331,14 @@ export default class Dev extends Command {
       // loader off.
       // ── Dev admin seeding (in-process) ──────────────────────────────
       // Seeding is performed IN-PROCESS by the runtime
-      // (@objectstack/plugin-auth → maybeSeedDevAdmin) on an empty DB — no
-      // HTTP POST, no port, no readiness race. The CLI's only job is to pass
-      // the toggle + credentials through to the serve child via env.
-      // Default ON in dev; `--no-seed-admin` disables it. The seed is
-      // idempotent (empty-DB only) and never overwrites an existing account.
+      // (@objectstack/plugin-auth → maybeSeedDevAdmin) — no HTTP POST, no
+      // port, no readiness race. The CLI's only job is to pass the toggle +
+      // credentials through to the serve child via env. Default ON in dev;
+      // `--no-seed-admin` disables it. [#14157] The seed is idempotent and
+      // gated on the absence of a LOGIN (no account on the seed address, no
+      // local password login anywhere) rather than on an empty user table —
+      // an app that declares people in `defineStack({ data })` fills that
+      // table before the seed runs. It never overwrites an existing account.
       const seedAdmin = flags['seed-admin'] ?? true;
 
       // Resolve the database through the ONE shared resolution (#6469) —

@@ -80,12 +80,23 @@
  *  - **#6114 / #5979 read-failure discrimination.** A missing table still seeds
  *    from 0; every other read failure still propagates and writes NOTHING —
  *    including on a RE-seed, which is the new call site. Pinned below.
- *  - **A conflict on some OTHER unique field** is rethrown untouched (#5495's
+ *  - **A conflict on some OTHER unique field is not re-issued** (#5495's
  *    disposition: «非本字段的冲突原样上抛»).
  *  - **The batch path is re-seeded but never re-issued.** `bulkCreate` may be
  *    partially applied, so re-writing a batch could duplicate the rows that did
- *    land. The stale counter is dropped and the driver's error is rethrown as
- *    before.
+ *    land. The stale counter is dropped and the batch is not re-written.
+ *
+ * ⚠️ [#14095] What those two cases REPORT did change, and the assertions below
+ * moved with it: the door no longer hands the driver's raw error to the caller.
+ * A recognised unique violation leaves `engine.insert` as the ADR-0112
+ * `DUPLICATE_RECORD` envelope with that driver error whole on `cause`, on every
+ * driver and on the batch path too. So the pins here assert the same FACTS
+ * through `cause` — `driver.create` call counts, the dialect's own `code` and
+ * `detail`, the converging next number — rather than being re-baselined. The
+ * one identity that does NOT move is `ERR_AUTONUMBER_COLLISION`: it says
+ * something `DUPLICATE_RECORD` cannot ("re-seeded, re-issued, still refused"),
+ * so the engine raises it instead of the envelope, and its `cause` is still the
+ * driver's error at one step, not two.
  *
  * The unique-violation questions are asked of `@objectstack/types`'
  * `isUniqueViolationError` / `uniqueViolationColumn` (#6250 / #6544) — never a
@@ -542,10 +553,16 @@ describe('ObjectQL autonumber resync (#6806)', () => {
       expect((await engine.insert('doc', { title: 'second' })).doc_no).toBe('D-0006');
     });
 
-    it('a conflict on a DIFFERENT column is rethrown untouched, with no re-issue', async () => {
+    it('a conflict on a DIFFERENT column is NOT re-issued, and keeps the driver diagnosis', async () => {
       // «非本字段的冲突原样上抛» — #5495's disposition. A duplicate email is the
       // caller's business error; re-issuing a record number cannot fix it, and
-      // swallowing it into an engine error would hide what actually failed.
+      // swallowing what actually failed would hide it.
+      //
+      // [#14095] "Not re-issued" is the disposition, and it is unchanged: ONE
+      // create, no second attempt. What the caller receives is now the
+      // `DUPLICATE_RECORD` envelope, and the driver's own diagnosis — the
+      // SQLSTATE and the DETAIL line naming the real column — is preserved
+      // whole on `cause` rather than replaced.
       const { engine, driver } = makeRig(SCHEMA, storedRows('doc_no', ['D-0003']), {
         uniqueOn: 'doc_no',
         alwaysDuplicate: true,
@@ -553,7 +570,15 @@ describe('ObjectQL autonumber resync (#6806)', () => {
       });
       await engine.init();
 
-      await expect(engine.insert('doc', { title: 'first' })).rejects.toMatchObject({
+      const failure = await engine.insert('doc', { title: 'first' }).then(
+        () => { throw new Error('expected the insert to be refused'); },
+        (e) => e as any,
+      );
+
+      expect(failure.code).toBe('DUPLICATE_RECORD');
+      expect(failure.status).toBe(409);
+      expect(failure.field).toBe('email');
+      expect(failure.cause).toMatchObject({
         code: '23505',
         detail: 'Key (email)=(a@b.example) already exists.',
       });
@@ -624,9 +649,18 @@ describe('ObjectQL autonumber resync (#6806)', () => {
       // An exempt writer replaying a number that is already taken. The engine
       // issued nothing on this row, so there is nothing of its own to re-issue
       // and the collision is the writer's to see.
-      await expect(
-        engine.insert('doc', { title: 'replay', doc_no: 'D-0003' }, { context: { isSystem: true } } as any),
-      ).rejects.toThrow(/E11000/);
+      const failure = await engine
+        .insert('doc', { title: 'replay', doc_no: 'D-0003' }, { context: { isSystem: true } } as any)
+        .then(
+          () => { throw new Error('expected the insert to be refused'); },
+          (e) => e as any,
+        );
+
+      // [#14095] Nothing of the engine's is re-issued, and the collision is the
+      // writer's to see — through the envelope, with MongoDB's own `E11000`
+      // sentence intact one step down.
+      expect(failure.code).toBe('DUPLICATE_RECORD');
+      expect(String((failure.cause as Error).message)).toMatch(/E11000/);
       expect(driver.create).toHaveBeenCalledTimes(1);
     });
 
@@ -642,16 +676,21 @@ describe('ObjectQL autonumber resync (#6806)', () => {
       // indistinguishable here, and only the drop reaches the real max.
       rows.push(...storedRows('doc_no', ['D-0005', 'D-0006', 'D-0007', 'D-0008', 'D-0009']).map((r, i) => ({ ...r, id: `x${i}` })));
 
-      // What an author actually gets on a batch: the DRIVER's own error, not
-      // the single-row path's `ERR_AUTONUMBER_COLLISION` — because nothing was
-      // re-issued, so "re-issued and still refused" would be a false statement.
+      // What an author actually gets on a batch: the `DUPLICATE_RECORD`
+      // envelope (#14095), never the single-row path's
+      // `ERR_AUTONUMBER_COLLISION` — because nothing was re-issued, so
+      // "re-issued and still refused" would be a false statement. The driver's
+      // own `E11000` is on `cause`, at one step: the batch seam does not stack
+      // an envelope on top of another engine error.
       const failure = await engine.insert('doc', [{ title: 'a' }]).then(
         () => { throw new Error('expected the batch to be refused'); },
         (e) => e as any,
       );
-      expect(failure.message).toMatch(/E11000/);
-      expect(failure.code).toBe(11000);
+      expect(failure.code).toBe('DUPLICATE_RECORD');
+      expect(failure.status).toBe(409);
       expect(failure.code).not.toBe('ERR_AUTONUMBER_COLLISION');
+      expect(String((failure.cause as Error).message)).toMatch(/E11000/);
+      expect((failure.cause as any).code).toBe(11000);
       const createsAfterBatch = (driver.create as any).mock.calls.length;
 
       // The counter was dropped, so the next single insert RE-SEEDS and lands
@@ -662,7 +701,7 @@ describe('ObjectQL autonumber resync (#6806)', () => {
       expect((driver.create as any).mock.calls.length).toBe(createsAfterBatch + 1);
     });
 
-    it('insertMany reports the same way — driver error, counter dropped', async () => {
+    it('insertMany reports the same way — DUPLICATE_RECORD, counter dropped', async () => {
       const rows = storedRows('doc_no', ['D-0003']);
       const { engine } = makeRig(SCHEMA, rows, { uniqueOn: 'doc_no' });
       await engine.init();
@@ -671,7 +710,11 @@ describe('ObjectQL autonumber resync (#6806)', () => {
 
       // Partial-row mode culls rows that fail PREPARATION; a driver write that
       // fails is still a whole-call rejection, so this is the same contract.
-      await expect(engine.insertMany('doc', [{ title: 'a' }])).rejects.toMatchObject({ code: 11000 });
+      await expect(engine.insertMany('doc', [{ title: 'a' }])).rejects.toMatchObject({
+        code: 'DUPLICATE_RECORD',
+        status: 409,
+        cause: { code: 11000 },
+      });
 
       expect((await engine.insert('doc', { title: 'after' })).doc_no).toBe('D-0010');
     });
