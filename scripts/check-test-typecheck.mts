@@ -510,6 +510,12 @@ function runTsc(): string {
   return output;
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-test-typecheck self-test reached its verdict';
+
 function selfTest(): void {
   // The two REAL signatures from the ablation that produced #13470: `packages/
   // rest`'s two call sites passed a bad request AND a bad response, tsc showed
@@ -970,10 +976,19 @@ function selfTest(): void {
       + 'measured counts through unchanged, and preserves an authored `_note` verbatim in its own key) '
       + 'all hold.',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 if (process.argv.includes('--self-test')) {
-  selfTest();
+  if (selfTest() !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ check-test-typecheck self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
   process.exit(0);
 }
 

@@ -476,6 +476,12 @@ async function runSelfTestCases(parse) {
   return { failures, cases };
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-comment-mask-corpus self-test reached its verdict';
+
 export async function selfTest() {
   const parse = await loadParser();
   const { failures, cases } = await runSelfTestCases(parse);
@@ -485,10 +491,21 @@ export async function selfTest() {
     process.exit(EXIT_DISAGREEMENT);
   }
   console.log(`\nAll ${cases.length} self-test cases passed.`);
+
+  return SELF_TEST_VERDICT;
 }
 
 if (isEntrypoint(import.meta.url)) {
   const argv = process.argv.slice(2);
-  if (argv.includes('--self-test')) await selfTest();
+  if (argv.includes('--self-test')) {
+    if ((await selfTest()) !== SELF_TEST_VERDICT) {
+        console.error(
+          '\n✗ check-comment-mask-corpus self-test: selfTest() returned without reaching its verdict,\n'
+            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+            + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+      }
+  }
   else await main(argv);
 }

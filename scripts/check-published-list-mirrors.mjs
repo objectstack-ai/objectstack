@@ -354,6 +354,12 @@ async function main() {
   );
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-published-list-mirrors self-test reached its verdict';
+
 async function selfTest() {
   const cases = [];
   const ok = (label, cond) => cases.push({ label, cond });
@@ -481,9 +487,20 @@ async function selfTest() {
     process.exit(1);
   }
   console.log(`\nAll ${cases.length} self-test cases passed.`);
+
+  return SELF_TEST_VERDICT;
 }
 
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) await selfTest();
+  if (process.argv.includes('--self-test')) {
+    if ((await selfTest()) !== SELF_TEST_VERDICT) {
+        console.error(
+          '\n✗ check-published-list-mirrors self-test: selfTest() returned without reaching its verdict,\n'
+            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+            + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+      }
+  }
   else await main();
 }

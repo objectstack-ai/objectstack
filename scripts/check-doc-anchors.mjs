@@ -524,6 +524,12 @@ function idOf(headingLine) {
   return headingIds(headingLine)[0];
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-doc-anchors self-test reached its verdict';
+
 function selfTest() {
   // 1. Slug parity with the renderer, on the two shapes that actually broke.
   for (const [heading, expected] of PARITY_PINS) {
@@ -623,12 +629,23 @@ function selfTest() {
   console.log(
     `✅ check-doc-anchors --self-test: slug parity, custom ids, duplicate counters, extraction discrimination and both finding classes verified (${live.checked} live fragment links)`,
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 /* Run only when invoked as a program — the extractor and the slug helpers are
  * exported so a caller chasing a false positive can import them without the
  * import itself sweeping the repo. */
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) selfTest();
+  if (process.argv.includes('--self-test')) {
+    if (selfTest() !== SELF_TEST_VERDICT) {
+        console.error(
+          '\n✗ check-doc-anchors self-test: selfTest() returned without reaching its verdict,\n'
+            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+            + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+      }
+  }
   else runCheck();
 }

@@ -305,6 +305,12 @@ function assert(condition, message) {
     }
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-kernel-hook-pairs self-test reached its verdict';
+
 function selfTest() {
     const PINNED = (hook) => `
         describe('Kernel', () => {
@@ -441,6 +447,8 @@ function selfTest() {
     }
 
     console.log('✓ self-test: 10 cases');
+
+    return SELF_TEST_VERDICT;
 }
 
 // Only act when invoked as the entry point. The audit helpers above are
@@ -449,7 +457,16 @@ function selfTest() {
 // before it is pinned in CI) — an import that audited, printed and possibly
 // called process.exit(1) as a side effect would make that impossible.
 if (isEntrypoint(import.meta.url)) {
-    if (process.argv.includes('--self-test')) selfTest();
+    if (process.argv.includes('--self-test')) {
+        if (selfTest() !== SELF_TEST_VERDICT) {
+                console.error(
+                    '\n✗ check-kernel-hook-pairs self-test: selfTest() returned without reaching its verdict,\n'
+                        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                        + 'that never finished as a self-test that passed.\n',
+                );
+                process.exit(1);
+            }
+    }
     else if (process.argv.includes('--list')) list();
     else run();
 }

@@ -1145,6 +1145,12 @@ const MUTATIONS = [
   },
 ];
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-cross-repo-closer-outcome self-test reached its verdict';
+
 async function selfTest() {
   const root = repoRoot();
   const { source, problems } = extractScript(root);
@@ -1213,6 +1219,8 @@ async function selfTest() {
     `✓ check-cross-repo-closer-outcome --self-test: ${checked} assertions, ` +
       `${MUTATIONS.length} mutations of the shipped script each driven to red.`,
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 // The CLI dispatch is guarded so that IMPORTING this module is inert. The
@@ -1220,7 +1228,16 @@ async function selfTest() {
 // tree (a pre-fix checkout), and a module that runs its gate on import would
 // silently judge THIS repo instead and print a pass about the wrong subject.
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) await selfTest();
+  if (process.argv.includes('--self-test')) {
+      if ((await selfTest()) !== SELF_TEST_VERDICT) {
+            console.error(
+                '\n✗ check-cross-repo-closer-outcome self-test: selfTest() returned without reaching its verdict,\n'
+                    + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                    + 'that never finished as a self-test that passed.\n',
+            );
+            process.exit(1);
+        }
+  }
   else if (process.argv.includes('--list')) list();
   else await main();
 }

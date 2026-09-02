@@ -241,6 +241,12 @@ function main() {
   console.log('check-live-db-isolation: PASS -- every live suite derives its database');
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-live-db-isolation self-test reached its verdict';
+
 function selfTest() {
   const cases = [];
   const bt = String.fromCharCode(96);
@@ -313,6 +319,8 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`\ncheck-live-db-isolation --self-test: PASS (${cases.length} cases)`);
+
+  return SELF_TEST_VERDICT;
 }
 
 // This file exports its detector so `--self-test` drives the real functions
@@ -321,6 +329,15 @@ function selfTest() {
 // and its `process.exit`, inside the importer. `check:entry-guard` enforces this
 // (and caught exactly that here on the first run).
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) selfTest();
+  if (process.argv.includes('--self-test')) {
+    if (selfTest() !== SELF_TEST_VERDICT) {
+        console.error(
+          '\n✗ check-live-db-isolation self-test: selfTest() returned without reaching its verdict,\n'
+            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+            + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+      }
+  }
   else main();
 }
