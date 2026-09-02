@@ -496,6 +496,13 @@ function discoverProvenanceServing() {
   return rows;
 }
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   let failures = 0;
   const expect = (what, ok) => {
@@ -720,6 +727,7 @@ function selfTest() {
   );
 
   console.log(failures === 0 ? '\ncheck-i18n-stale-fill: self-test OK\n' : `\ncheck-i18n-stale-fill: self-test FAILED (${failures})\n`);
+  selfTestReachedVerdict = true;
   process.exit(failures === 0 ? 0 : 1);
 }
 
@@ -913,6 +921,16 @@ console.log(`\ncheck-i18n-stale-fill: OK (${sets.length} bundle set(s) — no ne
 }
 
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) selfTest();
+  if (process.argv.includes('--self-test')) {
+    selfTest();
+      if (!selfTestReachedVerdict) {
+        console.error(
+          '\n✗ check-i18n-stale-fill self-test: selfTest() returned without reaching its verdict,\n'
+            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+            + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+      }
+  }
   main();
 }
