@@ -37,6 +37,22 @@ metadata:
 
 ---
 
+## Quick Reference — Detailed Rules
+
+For comprehensive documentation with incorrect/correct examples:
+
+- **[Naming Conventions](./rules/naming.md)** — snake_case rules, option values, config properties
+- **[Field Types](./rules/field-types.md)** — All 49 field types with decision tree and configs
+- **[Relationships](./rules/relationships.md)** — lookup vs master_detail, junction patterns, delete behaviors
+- **[Validation Rules](./rules/validation.md)** — All validation types, script inversion, severity levels
+- **[Index Strategy](./rules/indexing.md)** — btree/gin/gist/fulltext, composite indexes, partial indexes
+- **[Data Lifecycle & Retention](./rules/lifecycle.md)** — `lifecycle` classes (record/audit/telemetry/transient/event), retention/TTL/rotation/archive policies; ❗ append-only objects must declare one (distinct from lifecycle *hooks* below)
+- **[Lifecycle Hooks](./references/data-hooks.md)** — the 8 lifecycle events, `handler` vs sandboxed `body` (ctx + capability contract), registration, canonical patterns
+- **[Datasources & Federation](./rules/datasources.md)** — `defineDatasource`, external/federated objects (`remoteName`/`columnMap`), auto-connect gating, credentials; ❌ no `field.columnName` on external objects
+- **[Security & Access Control](./rules/security.md)** — permission sets, assignment rows, RLS policies, `secret` / `requiredPermissions`, `tenancy`, platform-global posture
+
+---
+
 ## Core Concepts
 
 ### Object Definition
@@ -277,22 +293,6 @@ export const Invoice = ObjectSchema.create({
 - For complex predicates, load **objectstack-formula** and emit CEL via
   `P\`...\``; do not use Salesforce-style `AND`, `IN (...)`, or `{field}`
   syntax.
-
----
-
-## Quick Reference — Detailed Rules
-
-For comprehensive documentation with incorrect/correct examples:
-
-- **[Naming Conventions](./rules/naming.md)** — snake_case rules, option values, config properties
-- **[Field Types](./rules/field-types.md)** — All 49 field types with decision tree and configs
-- **[Relationships](./rules/relationships.md)** — lookup vs master_detail, junction patterns, delete behaviors
-- **[Validation Rules](./rules/validation.md)** — All validation types, script inversion, severity levels
-- **[Index Strategy](./rules/indexing.md)** — btree/gin/gist/fulltext, composite indexes, partial indexes
-- **[Data Lifecycle & Retention](./rules/lifecycle.md)** — `lifecycle` classes (record/audit/telemetry/transient/event), retention/TTL/rotation/archive policies; ❗ append-only objects must declare one (distinct from lifecycle *hooks* below)
-- **[Lifecycle Hooks](./references/data-hooks.md)** — the 8 lifecycle events, `handler` vs sandboxed `body` (ctx + capability contract), registration, canonical patterns
-- **[Datasources & Federation](./rules/datasources.md)** — `defineDatasource`, external/federated objects (`remoteName`/`columnMap`), auto-connect gating, credentials; ❌ no `field.columnName` on external objects
-- **[Security & Access Control](./rules/security.md)** — permission sets, assignment rows, RLS policies, `secret` / `requiredPermissions`, `tenancy`, platform-global posture
 
 ---
 
