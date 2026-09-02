@@ -675,6 +675,34 @@ function isSandboxOrigin(error: any): boolean {
 }
 
 /**
+ * [#14541, contract-review condition 4] A structured arm answering a **5xx**
+ * never displaces a status the producer declared in the **4xx** band — asked by
+ * BOTH doors, so the answer cannot depend on which one caught the error.
+ *
+ * The 5xx band is fenced out of this card in both directions: a producer-declared
+ * 5xx keeps {@link resolveErrorResponse}'s prose-withholding arm (#5437 / #5582 /
+ * #5907), and — this rule — a 5xx-answering arm never overrides a caller-facing
+ * 4xx the producer named. Only one arm answers a 5xx today
+ * (`ERR_DATASOURCE_UNAVAILABLE`'s 503) and its producer declares no `status` at
+ * all, so this changes nothing on the wire; it is here because the review
+ * measured the two doors giving `503` and `400` for the same synthesised error,
+ * which made "identical by construction" false in a shape no test held.
+ *
+ * ⛔ Deliberately NOT the guard-1 rule as well. A producer-declared 5xx meeting a
+ * 4xx arm is a DIFFERENT question, answered per door on purpose and pinned as a
+ * named divergence in `error-response-structured-arm-door-parity.test.ts` §4
+ * rather than silently converged here.
+ */
+function fiveXxArmDisplacesDeclared4xx(
+    error: any,
+    structured: { status: number } | undefined,
+): boolean {
+    if (structured === undefined || structured.status < 500) return false;
+    const declared = error?.status;
+    return typeof declared === 'number' && declared >= 400 && declared < 500;
+}
+
+/**
  * [#14541] The bespoke structured arms, in ONE place, so BOTH REST error doors
  * can ask them FIRST.
  *
@@ -723,9 +751,54 @@ function isSandboxOrigin(error: any): boolean {
  * error `name` where a class is the contract. Nothing here reads message TEXT
  * to decide WHICH condition this is; that is the line, and it is why the
  * `PERMISSION_DENIED` arm (whose third limb sniffs a `[Security] Access denied`
- * prefix) and the sandbox unwrap door stay in {@link classifyDataError} below,
- * ahead of nothing. Answering `undefined` means "no bespoke arm knows this
- * error" — the caller decides what that means for its own door.
+ * prefix) stays in {@link classifyDataError} below rather than being lifted.
+ * Answering `undefined` means "no bespoke arm knows this error" — the caller
+ * decides what that means for its own door, and
+ * {@link fiveXxArmDisplacesDeclared4xx} is the one condition BOTH doors put on
+ * taking the answer.
+ *
+ * ## What the `UNIQUE_VIOLATION` answer restores, per driver
+ *
+ * Corrected under the #14541 contract review (condition 7), which measured the
+ * earlier statement backwards.
+ *
+ * On the **SQL** drivers the bulk doors answered `409 UNIQUE_VIOLATION` with the
+ * curated sentence and `field` until #14095: the raw driver error declares no
+ * `status`, so it fell past the declared-status passthrough into
+ * `isUniqueViolationError` below. #14095's envelope DOES declare one, so from
+ * then on those doors answered the engine spelling. This restores them.
+ *
+ * On **driver-memory** the wire CODE was already `UNIQUE_VIOLATION` before
+ * #14095 and never moved: its raw refusal declares `code = 'UNIQUE_VIOLATION'`
+ * and `status = 409` itself (`memory-unique-constraint.ts`, `conflictRefusal`),
+ * so it took the passthrough — which relays a REGISTERED code verbatim through
+ * {@link thrownCodeFields}. What changes for that driver is the SENTENCE: its
+ * raw message quotes the offending values as JSON, and the curated one does
+ * not. ⛔ So "the code is new there" is the wrong way round; the withheld value
+ * is the change.
+ *
+ * ## ⚠️ A vocabulary fork this lifts onto routes where the other side lives
+ *
+ * Disclosed under the #14541 contract review (condition 2) rather than implied
+ * away by the "one condition, one wire code" framing above, which is true of
+ * the DOORS and not of the rows beside them.
+ *
+ * The `DUPLICATE_RECORD` arm answers the wire spelling `UNIQUE_VIOLATION`
+ * (#14389's ruling). A batch or import ROW does not go through this
+ * classification at all: `metadata-protocol`'s `toRowApiError` puts a thrown
+ * REGISTERED code on the row verbatim, and `import-runner`'s row report does
+ * the same, so a `DuplicateRecordError` row reports `DUPLICATE_RECORD` —
+ * deliberately, per #14095. ⇒ after this change a WHOLE-REQUEST failure on
+ * `POST /data/:object/batch` or `POST /data/:object/import` answers
+ * `UNIQUE_VIOLATION` while a ROW failure on the SAME route answers
+ * `DUPLICATE_RECORD`. Neither half is new and neither is a regression; what is
+ * new is that the two now sit side by side in one route's responses.
+ *
+ * ⛔ Not decided here, and deliberately not decided by this file: the ledger's
+ * "if it merely re-spells a standard member, that registration is a recorded
+ * waiver" and ADR-0112's one-name-per-concept both bear on it, and moving
+ * either spelling is a published-contract change rather than a door's call.
+ * **#14723 carries the decision.**
  */
 function structuredCodeAnswer(
     error: any,
@@ -944,12 +1017,24 @@ function structuredCodeAnswer(
     // point of #3770 is that this 404 no longer depends on a driver erroring
     // on a missing table. Must precede the generic 4xx passthrough, which
     // would otherwise ship the internal SCREAMING_CASE code verbatim.
-    // [#14541] Gated on `!isSandboxOrigin` because this arm used to sit BELOW
-    // the sandbox unwrap door and now sits above it. The clause is that
-    // position, written down: the sentence this arm ships is `error.message`,
-    // which for a sandboxed producer is the QuickJS DEBUG WRAPPER, and the
-    // unwrap door owns that producer (#11588 / #7543). Without it, lifting the
-    // arm would ship the wrapper on both doors.
+    // [#14541, corrected under contract-review condition 5] Gated on
+    // `!isSandboxOrigin` because this arm used to sit BELOW the sandbox unwrap
+    // door and now sits above it. The clause is that POSITION, written down —
+    // and position is its WHOLE justification here. ⛔ Not the sibling arm's
+    // reason: this arm ships a FIXED sentence (`Object '…' is not registered`),
+    // never `error.message`, so no debug wrapper could reach the wire through
+    // it. What the clause preserves is which DOOR answers a sandboxed producer:
+    // on `origin/main` the unwrap door (#11588 / #7543) got there first and
+    // shipped `innerMessage` with the producer's declared status, and without
+    // this clause the lift would have taken that answer away from it.
+    //
+    // One measured consequence, stated rather than left to be rediscovered: a
+    // sandboxed producer declaring a **5xx** with this code used to fall PAST
+    // the unwrap door (declared >= 500) into this arm and answer `404`. It now
+    // keeps its declared 5xx with the prose withheld, on both doors. That is
+    // #5582's rule rather than this arm's, and it is a status move on the
+    // single-record door — pinned in
+    // `error-response-structured-arm-door-parity.test.ts` §4.
     if (error?.code === 'OBJECT_NOT_FOUND' && !isSandboxOrigin(error)) {
         const name = error?.object ?? object;
         return {
@@ -968,9 +1053,11 @@ function structuredCodeAnswer(
     // form of the identical mistake), so one condition has one wire shape no
     // matter which layer noticed it. Must precede the generic 4xx passthrough,
     // which would ship the message but drop `field`.
-    // [#14541] `!isSandboxOrigin`: the same clause as the arm above, for the
-    // same reason — this arm ships `error.message`, and the unwrap door owns
-    // the sandboxed producer.
+    // [#14541] `!isSandboxOrigin`: the same clause as the arm above, and here
+    // it carries the sentence reason TOO — this arm really does ship
+    // `error.message`, which for a sandboxed producer is the QuickJS debug
+    // wrapper #11588 exists to keep off this wire. The same declared-5xx status
+    // move recorded above applies to this code as well.
     if (error?.code === 'INVALID_FIELD' && !isSandboxOrigin(error)) {
         const name = error?.object ?? object;
         return {
@@ -990,8 +1077,13 @@ function classifyDataError(error: any, object?: string): { status: number; body:
     // [#14541] The bespoke structured arms first, exactly as they were inline
     // here — same arms, same order, same position — now stated once so
     // {@link resolveErrorResponse} can ask them before ITS passthrough too.
+    //
+    // The one condition on taking their answer is
+    // {@link fiveXxArmDisplacesDeclared4xx}, asked at BOTH doors: a 5xx arm does
+    // not override a 4xx the producer declared. Without it this door answered
+    // `503` where the other answered the declared `400`, for the same error.
     const structured = structuredCodeAnswer(error, object);
-    if (structured !== undefined) return structured;
+    if (structured !== undefined && !fiveXxArmDisplacesDeclared4xx(error, structured)) return structured;
     // Short-circuit: explicit security denial → 403. Match by `code` /
     // `name` to avoid pulling a runtime dependency on plugin-security.
     if (
@@ -1833,7 +1925,10 @@ function resolveErrorResponse(error: any, object?: string): { status: number; bo
     //    for it.
     const structured = isSandboxOrigin(error) ? undefined : structuredCodeAnswer(error, object);
     const declaresServerBand = typeof error?.status === 'number' && error.status >= 500 && error.status < 600;
-    if (structured !== undefined && structured.status < 500 && !declaresServerBand) {
+    if (structured !== undefined
+        && !fiveXxArmDisplacesDeclared4xx(error, structured)
+        && structured.status < 500
+        && !declaresServerBand) {
         return mapDataError(error, object);
     }
     // [#3770] `OBJECT_NOT_FOUND` is deliberately excluded from this
