@@ -51,6 +51,10 @@
  *      construction (#13816 — unchanged by this card).
  *  (f) `DELETE /Users/{id}` leaves the tombstoned account disabled (the
  *      vendor no longer deletes the better-auth user on 1.7.2).
+ *  (g) `POST /Users` with `active: false` provisions the account disabled.
+ *      And, under (d): a deactivation makes an administrator's EXPIRING ban
+ *      permanent, so the vendor's auto-lift cannot re-admit a deactivated
+ *      principal.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -83,7 +87,7 @@ import { mintScimConnectionCredential } from './scim-connection-service.js';
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
 import { registerIdentityWriteGuard, registerManagedUpdateWhitelist } from './identity-write-guard.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
-import { SCIM_DEACTIVATION_BAN_REASON } from './admin-ban-endpoints.js';
+import { SCIM_DEACTIVATION_BAN_REASON } from './user-ban-write.js';
 import { CREDENTIAL_ISSUER } from './backfill-account-issuer.js';
 
 const BASE = 'http://localhost:3000';
@@ -245,8 +249,8 @@ interface Provisioned {
   email: string;
 }
 
-/** `POST /Users` — an IdP provisioning an active user. */
-async function provision(h: Harness, localPart: string): Promise<Provisioned> {
+/** `POST /Users` — an IdP provisioning a user, active unless the case says otherwise. */
+async function provision(h: Harness, localPart: string, active = true): Promise<Provisioned> {
   const email = `${localPart}@example.com`;
   const res = await h.send(
     scimRequest(h, 'POST', '/Users', {
@@ -255,12 +259,12 @@ async function provision(h: Harness, localPart: string): Promise<Provisioned> {
       name: { givenName: localPart, familyName: 'Example' },
       displayName: `${localPart} Example`,
       emails: [{ value: email, primary: true, type: 'work' }],
-      active: true,
+      active,
     }),
   );
   expect(res.status, `SCIM POST /Users failed: ${await res.clone().text()}`).toBe(201);
   const body = (await res.json()) as { id: string; active?: boolean };
-  expect(body.active).toBe(true);
+  expect(body.active).toBe(active);
   const row = await userRow(h, email);
   expect(row, 'the SCIM create must have landed a sys_user row').toBeTruthy();
   return { scimId: body.id, userId: String(row!.id), email };
@@ -563,6 +567,44 @@ describe('[#14360] a SCIM update that does not change `active` touches no ban co
     expect(isBanned(row)).toBe(true);
     expect(row?.ban_reason).toBe('Policy violation');
   }, 60_000);
+
+  it("(d) a deactivation makes an administrator's EXPIRING ban permanent — the expiry cannot re-admit a deactivated principal", async () => {
+    const h = await boot();
+    const hana = await provision(h, 'hana');
+    await attachPassword(h, hana);
+
+    // A timed administrator ban: the vendor's session hook auto-lifts it the
+    // moment `banExpires` is in the past, and nothing re-invokes the SCIM
+    // callback until the IdP mutates the user again — so an expiry left in
+    // place would ADMIT a principal the IdP still holds deactivated.
+    const expiresAt = new Date(Date.now() + 1_500);
+    await h.engine.update(
+      'sys_user',
+      { id: hana.userId, banned: true, ban_reason: 'Policy violation', ban_expires: expiresAt },
+      SYSTEM,
+    );
+    expect((await userRow(h, hana.email))?.ban_expires ?? null).not.toBeNull();
+    await expectSignInBanned(h, hana.email);
+
+    const res = await setActive(h, hana.scimId, false);
+    expect(res.status, `SCIM PATCH active:false failed: ${await res.clone().text()}`).toBe(200);
+    let row = await userRow(h, hana.email);
+    expect(isBanned(row)).toBe(true);
+    // The administrator's reason is kept — the ban stays theirs to lift.
+    expect(row?.ban_reason).toBe('Policy violation');
+    // …and only the expiry is gone.
+    expect(row?.ban_expires ?? null).toBeNull();
+
+    // Let the administrator's expiry pass, then prove the refusal still holds
+    // (status AND code): without the clearing above the vendor would have
+    // auto-unbanned here and answered 2xx.
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    expect(Date.now()).toBeGreaterThan(expiresAt.getTime());
+    await expectSignInBanned(h, hana.email);
+    row = await userRow(h, hana.email);
+    expect(isBanned(row)).toBe(true);
+    expect(row?.ban_reason).toBe('Policy violation');
+  }, 60_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -580,6 +622,30 @@ describe('[#14360] a host that declines the admin plugin beside SCIM is still re
         } as never),
     ).toThrow(/conflicting auth plugin configuration/);
   });
+});
+
+// ---------------------------------------------------------------------------
+// (g) — POST with active:false: provisioned disabled from the first write
+// ---------------------------------------------------------------------------
+
+describe('[#14360] POST /Users with active:false provisions the account disabled', () => {
+  it('(g) the created user is banned with the SCIM reason and refused at sign-in', async () => {
+    const h = await boot();
+    // The vendor invokes the callback on create too; 1.6.x banned at
+    // creation as well, so this is restored behaviour, pinned so it is
+    // declared rather than incidental.
+    const ivan = await provision(h, 'ivan', false);
+
+    const row = await userRow(h, ivan.email);
+    expect(isBanned(row)).toBe(true);
+    expect(row?.ban_reason).toBe(SCIM_DEACTIVATION_BAN_REASON);
+    expect(row?.ban_expires ?? null).toBeNull();
+
+    // Even with a local password attached afterwards, the refusal holds —
+    // status AND code.
+    await attachPassword(h, ivan);
+    await expectSignInBanned(h, ivan.email);
+  }, 60_000);
 });
 
 // ---------------------------------------------------------------------------

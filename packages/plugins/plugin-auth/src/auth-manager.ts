@@ -106,7 +106,7 @@ import {
   applyUserBan,
   applyUserUnban,
   SCIM_DEACTIVATION_BAN_REASON,
-} from './admin-ban-endpoints.js';
+} from './user-ban-write.js';
 import {
   PHONE_SMS_TOPICS,
   builtinPhoneSmsBody,
@@ -4878,11 +4878,22 @@ export class AuthManager {
    *  - `active: false` on a row that is not banned ⇒ `applyUserBan` with
    *    `SCIM_DEACTIVATION_BAN_REASON` and no expiry. The vendor's
    *    `session.create` hook (`BANNED_USER`) then refuses sign-in — the same
-   *    enforcement the admin ban has, because it is the same write.
+   *    enforcement the admin ban has, because it is the same write. On a row
+   *    that is ALREADY banned with an expiry (an administrator's timed ban),
+   *    the deactivation makes that ban permanent — `banExpires` is cleared,
+   *    `banned` and the administrator's reason are left untouched — because
+   *    the vendor's session hook auto-lifts an expired ban and would admit a
+   *    principal the IdP still holds deactivated, and this callback is not
+   *    re-invoked until the IdP mutates that user again.
    *  - `active: true` on a row banned WITH that reason ⇒ `applyUserUnban`.
    *    A ban carrying any other reason was placed by an administrator and is
    *    not the IdP's to lift: an attribute sync (every SCIM PUT carries
    *    `active: true`) must not silently re-admit a user banned for cause.
+   *    Known collision, documented rather than reserved: an administrator
+   *    who types the reason `Deactivated via SCIM` on the admin mount
+   *    produces a ban this rule reads as the IdP's, so an `active: true`
+   *    lifts it. Reserving the string on the admin mount would change that
+   *    surface, which is not this hook's to do.
    *  - Anything else is a no-op. The callback is contractually idempotent
    *    ("Implementations must be idempotent") and the vendor invokes it on
    *    EVERY user mutation, so a PATCH that changes only `displayName`
@@ -4935,7 +4946,7 @@ export class AuthManager {
     context: SCIMTransactionContext,
   ): Promise<void> {
     const db = context.database;
-    const user = await db.findOne<{ banned?: unknown; banReason?: unknown }>({
+    const user = await db.findOne<{ banned?: unknown; banReason?: unknown; banExpires?: unknown }>({
       model: 'user',
       where: [{ field: 'id', value: state.userId }],
     });
@@ -4955,8 +4966,18 @@ export class AuthManager {
     };
     const banned = user.banned === true;
     if (!state.active) {
-      // Already disabled — by an earlier SCIM pass or by an administrator.
-      if (banned) return;
+      if (banned) {
+        // Already disabled — by an earlier SCIM pass or by an administrator.
+        // An administrator's TIMED ban is made permanent: the vendor's session
+        // hook auto-lifts an expired ban, and nothing re-invokes this callback
+        // until the IdP mutates the user again — so left alone, the expiry
+        // would re-admit a principal the IdP still holds deactivated. The
+        // reason stays the administrator's; only the expiry goes.
+        if (user.banExpires !== null && user.banExpires !== undefined) {
+          await writer.updateUser(state.userId, { banExpires: null, updatedAt: new Date() });
+        }
+        return;
+      }
       await applyUserBan(writer, state.userId, {
         banReason: SCIM_DEACTIVATION_BAN_REASON,
         banExpires: null,
