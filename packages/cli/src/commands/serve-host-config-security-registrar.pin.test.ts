@@ -70,6 +70,9 @@
  *   • it declares NOTHING (so `AppPlugin` defaults to `'app-plugin'`) when the
  *     door does not — because a host config with no compiled artifact, and
  *     every non-dev host boot, would otherwise lose its ONLY registrar.
+ *     Measured: `os serve` over the same host config has a metadata service
+ *     and the wrap is its only writer (`Registered stack-declared security
+ *     metadata {"appId":"com.probe.hostcfg","count":4}`, no door in the boot).
  *
  * ⛔ The second direction has a trap that RESOLVING hides: under `os dev` the
  * supervisor always writes its channel, and `resolveDefaultArtifactPath`
@@ -83,9 +86,6 @@
  * a writer that never writes, and all four collections would end the boot with
  * ZERO registrars — green and quiet, and strictly worse than the divergence
  * this composition removes. So the gate is EXISTENCE, not resolution.
- *     Measured: `os serve` over the same host config has a metadata service
- *     and the wrap is its only writer (`Registered stack-declared security
- *     metadata {"appId":"com.probe.hostcfg","count":4}`, no door in the boot).
  *
  * That is why the door instance is constructed next to the wrap and only
  * `kernel.use`d at its ordering-constrained site: ONE value decides both
