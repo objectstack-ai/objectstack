@@ -209,7 +209,17 @@ export const CEILINGS = new Map([
   // one ruling sized to the merged end-state of the three stacked PRs on this file. The +4 is
   // the measured residual of the ⑦-method section after compression to its reasoned floor and
   // real-deletion cuts were exhausted; re-wrap funding was refused per the 2026-08-17 rule.
-  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 278],
+  // 278 -> 280 (maintainer ruling, 2026-09-02, live PM chat with the director seat, replying to
+  // decision batch #4 in which this card was item 2 — verbatim and untranslated:
+  // 「13973 帮我综合分析，并参考主流平台的方案，并给我解释为什么不能都用日期类型。其他同意」
+  // — 「其他同意」 adopts option A): the stop-condition bullet becomes the MERGED bullet, carrying the
+  // executability criterion — a fence clause is executable by a one-shot dev only if the action it
+  // demands is TERMINAL within the run — plus the two executable rewrite forms, so neither can be
+  // copied without the other. Prose, never a table row: the widest-table-row pin below stays at 0,
+  // which is what forecloses the compact two-row table the card and its triage both used. Funding
+  // the growth by deleting sibling rationale was refused by the same ruling (option D). Landed
+  // count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/dispatch-runbook.md', 280],
   // Whole-text restructuring round (maintainer ruling 2026-08-23, Q1 = A):
   // mechanism detail extracted from SKILL.md — the four long state-table rows
   // (state-machine.md) and the clause-② review-chain operational detail
