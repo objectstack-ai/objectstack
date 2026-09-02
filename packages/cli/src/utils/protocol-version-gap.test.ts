@@ -20,13 +20,15 @@ describe('checkProtocolVersionGap', () => {
   // ── The reachability this advisory never had ───────────────────────────
   //
   // Before the axis moved, the advisory read `manifest.specVersion` — a key
-  // `ManifestSchema` does not declare, on a schema that is not `.strict()`.
-  // It was therefore DEAD for stack configs: it could only fire for a manifest
-  // carrying a key the schema does not offer. These two cases are the pins for
-  // that: the axis it reads now survives the schema parse, and the axis it
-  // retired does not. Assert them THROUGH `ManifestSchema.parse` rather than on
-  // a hand-built literal — a literal would prove the function works on input
-  // the platform never produces, which is exactly the state being repaired.
+  // `ManifestSchema` does not declare, on a schema that was not `.strict()` at
+  // the time. It was therefore DEAD for stack configs: it could only fire for a
+  // manifest carrying a key the schema does not offer. These two cases are the
+  // pins for that: the axis it reads now survives the schema parse, and the
+  // axis it retired is REFUSED there (the schema is closed now, and the
+  // refusal points at `engines.protocol`). Assert them THROUGH `ManifestSchema`
+  // rather than on a hand-built literal — a literal would prove the function
+  // works on input the platform never produces, which is exactly the state
+  // being repaired.
 
   it('FIRES for a gap on a manifest the schema actually declares', () => {
     const parsed = ManifestSchema.parse(manifest({ engines: { protocol: '^16' } }));
@@ -42,15 +44,23 @@ describe('checkProtocolVersionGap', () => {
     expect(gap!.hint).toContain('https://objectstack.ai/docs/releases/v17');
   });
 
-  it('is silent for the RETIRED `specVersion` key, which the schema drops', () => {
+  it('the RETIRED `specVersion` key is refused at parse, pointing at `engines.protocol`', () => {
     // The pin the old suite spent on `checkSpecVersionGap({ specVersion:
-    // '^12.0.0' }, '14.7.0')`, re-aimed at the contract that replaced it.
-    // `ManifestSchema` is not `.strict()`, so the key is accepted and dropped
-    // with nothing said — the silence that made the old advisory unreachable.
-    const parsed = ManifestSchema.parse(manifest({ specVersion: '^12.0.0' })) as Record<string, unknown>;
-    expect(parsed.specVersion, 'ManifestSchema does not declare specVersion').toBeUndefined();
+    // '^12.0.0' }, '14.7.0')`, re-aimed at the contract that replaced it. This
+    // used to assert the key was accepted and DROPPED with nothing said — the
+    // silence that made the old advisory unreachable. `ManifestSchema` is
+    // closed now, so the same input is a named refusal carrying the axis that
+    // replaced it; the advisory itself still has nothing to say about a
+    // hand-built literal that names only the retired axis.
+    const result = ManifestSchema.safeParse(manifest({ specVersion: '^12.0.0' }));
+    expect(result.success, 'specVersion must be refused, not dropped').toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find((i) => i.code === 'unrecognized_keys');
+    expect(issue, 'the refusal is an unrecognized_keys issue at the manifest root').toBeDefined();
+    expect(issue!.path).toEqual([]);
+    expect((issue as unknown as { keys: string[] }).keys).toContain('specVersion');
+    expect(issue!.message).toContain('engines.protocol');
     expect(checkProtocolVersionGap({ specVersion: '^12.0.0' }, '17.2.0')).toBeNull();
-    expect(checkProtocolVersionGap(parsed, '17.2.0')).toBeNull();
   });
 
   it('is silent when the declared range covers the installed platform', () => {
