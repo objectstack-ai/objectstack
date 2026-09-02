@@ -1871,9 +1871,25 @@ export class AuthPlugin implements Plugin {
       // accounts. The ticket says what this creation IS (the deployment's own
       // boot command provisioning its admin — the operator class) for exactly
       // this address, and is cleared whatever happens.
-      this.authManager.stageOperatorProvisioning(email);
+      //
+      // [#14373] The address alone is not the ticket — it is the documented
+      // default and the boot banner prints it, so it does not narrow a
+      // concurrent stranger's guess. `stageOperatorProvisioning` also returns
+      // a random value that exists only in this process's memory; threading
+      // it into THIS SAME call's body (under `AuthManager
+      // .OPERATOR_PROVISIONING_TICKET_FIELD`) is what a stranger's own
+      // concurrent sign-up for this address cannot replay, however it times
+      // the window — see that method's doc for the full argument.
+      const provisioningTicket = this.authManager.stageOperatorProvisioning(email);
       try {
-        await api.signUpEmail({ body: { email, password, name } });
+        await api.signUpEmail({
+          body: {
+            email,
+            password,
+            name,
+            [AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD]: provisioningTicket,
+          },
+        });
       } finally {
         this.authManager.clearOperatorProvisioning(email);
       }
