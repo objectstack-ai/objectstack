@@ -766,10 +766,10 @@ export const ActionAiSchema = strictObject({
 
   /**
    * Override confirmation for AI calls. When unset, the bridge defaults to
-   * `true` for actions that look destructive (`confirmText` set, `mode:'delete'`,
-   * or `variant:'danger'`). Set explicitly to `false` to assert a destructive-
-   * looking action is safe to run without human approval, or `true` to force a
-   * human-in-the-loop gate on an otherwise-safe action.
+   * `true` for actions that look destructive: `mode:'delete'` or
+   * `variant:'danger'` (#7828 Option A). `confirmText` is dialog copy, not a
+   * destructive signal. Set explicitly to `false` to assert such an action is
+   * safe without human approval, or `true` to gate an otherwise-safe one.
    */
   requiresConfirmation: z.boolean().optional().describe('Override HITL confirmation for AI invocations.'),
 });
