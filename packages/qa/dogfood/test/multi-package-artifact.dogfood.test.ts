@@ -81,12 +81,23 @@ describe('dogfood: one artifact, two co-owning packages (ADR-0130 D4)', () => {
     expect(orders?.manifest?.namespace).toBe('crm');
   });
 
-  // TODO(#14430): once `GET /packages` rows carry the server's own writability
-  // verdict, assert `writable: false` on BOTH rows here — a package booted from
-  // an artifact through `registerApp` is read-only whatever its scope says
-  // (ADR-0070 D2), and the scope-less module is the row that separates that
-  // verdict from a client-side `scope !== 'project'` heuristic. PR #14430 was
-  // still open when this fixture landed, so the assertion is named, not faked.
+  it('both rows are read-only — the server\'s own verdict, not a scope heuristic', () => {
+    // ADR-0070 D2 / ADR-0130 Consequences row 6: a package booted from an
+    // artifact through `registerApp` is read-only whatever its scope says,
+    // because `isWritablePackage` reads `engine.manifests` FIRST. The module is
+    // the row that separates that verdict from Studio's client-side
+    // `scope !== 'project'` heuristic — it is authored with no `scope` key at
+    // all, and a client rule reading the row alone cannot tell it from a
+    // Studio-created writable base.
+    const core = rows.find((r) => r.manifest?.id === CORE);
+    const orders = rows.find((r) => r.manifest?.id === ORDERS);
+
+    // Asserted as a boolean, not as falsiness: `undefined` is what this row
+    // carried before the verdict shipped, and `expect(...).toBeFalsy()` would
+    // read a missing key as a passing answer.
+    expect(core?.writable).toBe(false);
+    expect(orders?.writable).toBe(false);
+  });
 
   it('each object is owned by the package that declared it — not by the artifact', async () => {
     // The half a manifest-only `packages[]` cannot deliver. `_packageId` is the
