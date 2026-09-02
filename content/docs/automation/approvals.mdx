@@ -630,6 +630,10 @@ that request's drawer directly instead of a generic list.
 and pick an `action` — `notify` (default), `reassign`, `auto_approve`, or
 `auto_reject`. Auto decisions run through the normal decide path, so the flow
 resumes exactly as if a human had clicked. Every escalation writes an audit row.
+`timeoutHours` counts **calendar (wall-clock) hours** — nights, weekends and
+holidays included, because the platform ships no business-hours calendar — so a
+request opened at 17:00 on a Friday with `timeoutHours: 4` escalates at 21:00
+that same Friday.
 
 <Callout type="warn">
 **Escalation needs the job service.** The plugin sweeps pending requests on an
