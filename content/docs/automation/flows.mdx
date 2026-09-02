@@ -1314,10 +1314,22 @@ import { approvalFlow } from './flows/approval';
 
 export default defineStack({
   manifest: { id: 'com.example.crm', version: '1.0.0', type: 'app', name: 'CRM' },
+  requires: ['automation', 'triggers'],   // ← the engine, and the triggers that FIRE flows
   objects: [...],
   flows: [approvalFlow],   // ← registered with the engine on boot
 });
 ```
+
+Registration is not arming. A `record_change`, `schedule`, `time_relative` or
+`api` flow fires only when its trigger is mounted, and the triggers ship
+separately (`@objectstack/trigger-*`) behind **one** capability token on the
+same stack: `requires: ['triggers']` (`automation` mounts the engine itself;
+neither is in the always-on slate an absent `requires` falls back to).
+`defineStack` refuses a stack that declares such a flow without the token,
+naming the flow, the trigger kind it resolved and the fix — because the
+alternative was measured: the flow registers, `os validate` and `os build`
+pass, and it never runs. A `screen` flow, or an `autolaunched` one you start
+by hand, owes nothing.
 
 The plugin is a **soft dependency** on `metadata` — it tolerates running
 without `MetadataPlugin` and it logs (not throws) on per-flow registration
