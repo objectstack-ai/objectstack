@@ -53,6 +53,21 @@
  * specifically (range operators `>=`/`<=` are not flagged — they're the building
  * block of the correct pattern), keeping false positives near zero.
  *
+ * #13681 / #14394 — per-iteration containment, as a PAIR of rules. A `loop`
+ * body has no error handling of its own: `loop-node.ts` iterates with a bare
+ * `await`, so the first item whose node fails ends the entire run and every
+ * later item goes unprocessed, silently. The containment spelling exists and was
+ * measured to work — `loop { body: [ try_catch { try, catch } ] }` processed all
+ * 5 rows of a sweep whose 3rd row fails — but it is undiscoverable, and its
+ * near-miss form fails *identically to no wrapper at all*: with `catch` omitted
+ * the container fails through (`try-catch-node.ts:190`). So
+ * {@link FLOW_LOOP_BODY_UNCONTAINED} names the uncontained body and
+ * {@link FLOW_TRY_CATCH_WITHOUT_CATCH} names the wrapper that contains nothing,
+ * and they divide one node between them: any enclosing `try_catch` counts as
+ * containment for the first rule, so a catch-less one is reported once, by the
+ * second, which is the rule that can name the missing key. Both stay warnings —
+ * fail-fast on the first bad row, and retry-then-fail, are legitimate readings.
+ *
  * ## Every graph in the flow, not just the top-level one (#5383)
  *
  * These rules used to read `flow.nodes` / `flow.edges` flat, so every one of
@@ -146,7 +161,7 @@ import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automatio
 // driver-sql, driver-mongodb and driver-memory execute. This linter asks it
 // rather than hand-writing a fourth copy; see {@link filterCarriesNoCondition}.
 import { reduceFilterVerdict } from '@objectstack/spec/data';
-import { stripRegions } from './flow-walk.js';
+import { stripRegions, REGION_SLOTS, MAX_REGION_DEPTH } from './flow-walk.js';
 
 export interface FlowLintFinding {
   where: string;
@@ -230,6 +245,40 @@ export const FLOW_INERT_NODE_CONDITION = 'flow-inert-node-condition';
  * how it divides labour with the #3810 run-time guard.
  */
 export const FLOW_MULTI_WRITE_UNFILTERED = 'flow-multi-write-unfiltered';
+/**
+ * #13681 / #14394 — a `loop` body that runs a node which can fail, with no
+ * `try_catch` between the loop and that node. The first failing item kills the
+ * whole sweep: `loop-node.ts:123-135` iterates with a bare `await` and no
+ * `try`/`catch` anywhere in the file, so the body's failure propagates out of
+ * the container and the remaining items are never processed.
+ *
+ * A **warning**, per the severity policy at the top of this file: a loop whose
+ * body is deliberately allowed to die (fail fast on the first bad row) is a
+ * legitimate reading, and the rule cannot prove the author did not mean it. What
+ * it can do is make the choice visible at authoring time — today it is silent,
+ * and the measured consequence is a 5-row sweep that processes 3 rows and
+ * reports a run that "completed" nothing unusual.
+ *
+ * See {@link scanUncontainedLoopBodies} for the containment judgement, and
+ * {@link FALLIBLE_NODE_TYPES} for what counts as fallible and why.
+ */
+export const FLOW_LOOP_BODY_UNCONTAINED = 'flow-loop-body-uncontained';
+/**
+ * #13681 / #14394 — the near-miss shape: a `try_catch` that declares no `catch`
+ * region. `catch` is optional in the schema (`control-flow.zod.ts:315`) and
+ * omitting it makes the container **fail** (`try-catch-node.ts:190`), so the
+ * wrapped region dies exactly like an unwrapped one — measured side by side, the
+ * no-`catch` run and the no-wrapper control produce identical output.
+ *
+ * This is the family's first target for the containment pair, not an extra: an
+ * author who reaches for `try_catch` has recognised the hazard and stopped one
+ * key short, and before this rule got **zero containment and zero diagnostics**.
+ * A warning rather than an error under the same policy — a `retry`-only
+ * `try_catch` (retry the region, then fail loudly) is a legitimate reading.
+ *
+ * See {@link scanTryCatchWithoutCatch}.
+ */
+export const FLOW_TRY_CATCH_WITHOUT_CATCH = 'flow-try-catch-without-catch';
 
 /**
  * Node types that ship in the box. `config.condition` is only ever READ on the
@@ -256,6 +305,79 @@ const INERT_CONDITION_NODE_TYPES = new Set([
 
 /** Node types that perform a data operation — the ones `flow.runAs` governs (#1888). */
 const DATA_NODE_TYPES = new Set(['get_record', 'create_record', 'update_record', 'delete_record']);
+
+/**
+ * #14394 — node types whose executor can end a run: it returns `success: false`
+ * (or throws) for a reason that is **not knowable at authoring time** — an
+ * absent row, a refused write, a 500, a connector outage, a child flow that
+ * died. These are the nodes {@link FLOW_LOOP_BODY_UNCONTAINED} judges a loop
+ * body by.
+ *
+ * Membership means "we have READ this executor and found such a path", the same
+ * stronger claim {@link INERT_CONDITION_NODE_TYPES} makes, and for the same
+ * reason: `node.type` is an open namespace (ADR-0018), so a literal list is the
+ * only honest one. Per-type, with the failure the reading found:
+ *
+ *  - `get_record` / `create_record` / `update_record` / `delete_record` — each
+ *    wraps its ObjectQL call in `try`/`catch` and returns
+ *    `success: false, error: '<op>(<object>) failed: …'`
+ *    (`crud-nodes.ts:262, :359, :452, :515`).
+ *  - `http` — a non-2xx (when `failOnError`), a timeout/abort, or a failed
+ *    durable enqueue (`http-nodes.ts:208, :249-253`).
+ *  - `notify` — no title, an empty resolved recipient set, or a delivery throw
+ *    (`notify-node.ts:293, :300, :446`). The measured #13681 case exactly: one
+ *    row with a null owner killed the sweep.
+ *  - `connector_action` — a degraded connector, an unresolvable action, or a
+ *    throwing call (`connector-nodes.ts:69, :76, :124`).
+ *  - `script` — the named function is not registered on this host, or it threw
+ *    (`screen-nodes.ts:250, :294`).
+ *  - `subflow` — the child flow failed, or paused without a run id
+ *    (`subflow-node.ts:118, :147`).
+ *  - `map` — the collection did not resolve to an array, exceeded the item cap,
+ *    or an item's child run failed (`map-node.ts:115, :118, :189`).
+ *  - `approval` — invalid config, a missing `$runId` / object / record id in
+ *    context, or a throwing request (`plugin-approvals/src/approval-node.ts:136,
+ *    :145-147, :212`). Plugin-registered but in-box, and this file already
+ *    imports its type constant for the ADR-0044 rules.
+ *
+ * Deliberately **absent**, each also by reading the executor:
+ *
+ *  - `assignment`, `decision` — every path returns `success: true`
+ *    (`logic-nodes.ts:76-78, :137-141`). `assignment` is also the documented
+ *    minimal `catch` handler, so flagging it would warn about the fix.
+ *  - `wait`, `screen` — they suspend (`success: true, suspend: true`) and have
+ *    no failure return (`wait-node.ts:262, :284, :290`; `screen-nodes.ts:44-96`).
+ *  - `start` / `end` — sentinels, and a region may not contain them at all.
+ *  - `loop` / `parallel` / `try_catch` — containers. They do fail, but only
+ *    *because* something inside them failed, so the walk descends to the leaf
+ *    that carries the real failure instead of reporting the wrapper (which would
+ *    also double-report).
+ *  - **Every node type not in this list**, including plugin-registered ones. An
+ *    unknown executor can certainly return `success: false`, so counting them
+ *    fallible would be defensible for a warning — but it would flag nodes nobody
+ *    here has read, and this family's precedent is that the list is a record of
+ *    readings, not a guess. The cost is a false negative on a third-party node;
+ *    the alternative is a false positive on every one of them.
+ */
+const FALLIBLE_NODE_TYPES: ReadonlySet<string> = new Set([
+  'get_record', 'create_record', 'update_record', 'delete_record',
+  'http', 'notify', 'connector_action', 'script', 'subflow', 'map',
+  APPROVAL_NODE_TYPE,
+]);
+
+/**
+ * The container that provides containment inside a loop body, and the config key
+ * whose absence makes it provide none (#14394).
+ *
+ * Rule A treats **any** enclosing `try_catch` as containment — including one
+ * with no `catch`, which contains nothing. That is deliberate division of
+ * labour, not an oversight: the catch-less container is reported once, by
+ * {@link FLOW_TRY_CATCH_WITHOUT_CATCH}, naming the one key that fixes it.
+ * Reporting it from both rules would tell an author who wrapped their node that
+ * they must wrap it, which is the one thing they did do.
+ */
+const TRY_CATCH_NODE_TYPE = 'try_catch';
+const LOOP_NODE_TYPE = 'loop';
 
 /**
  * How {@link FLOW_RUNAS_UNSCOPED} names the identity the run would use — ONE
@@ -1072,6 +1194,180 @@ function scanApprovalReviseLoops(
 }
 
 /**
+ * The minimal `catch` region, measured end to end on the real `AutomationEngine`
+ * (#13681) and quoted verbatim by both containment rules and by
+ * `content/docs/automation/flows.mdx`.
+ *
+ * `catch` cannot be empty: `FlowRegionSchema.nodes` is `.min(1)`
+ * (`control-flow.zod.ts:142`), so `catch: {}` and `catch: { nodes: [] }` are
+ * both refused by the parse. The shortest handler that works is one bare
+ * `assignment` node with no `config` at all — its descriptor declares no
+ * `required` keys and its executor with no assignments sets nothing and returns
+ * success. `edges` may be omitted (it defaults to `[]`), and `errorVariable` may
+ * be omitted (it defaults to `$error`).
+ */
+const MINIMAL_CATCH_SPELLING =
+  "`catch: { nodes: [ { id: 'handled', type: 'assignment', label: 'Handled' } ] }` — one bare " +
+  '`assignment` node with no `config` is the shortest handler that works; `edges` and ' +
+  '`errorVariable` may both be omitted';
+
+/** `catch` cannot be empty — the two spellings the schema refuses. */
+const EMPTY_CATCH_REFUSALS =
+  'A `catch` region cannot be empty: its `nodes` is `.min(1)`, so `catch: {}` and ' +
+  '`catch: { nodes: [] }` are both refused by the parse.';
+
+/**
+ * Is this value a region dictionary — `{ nodes: [...] }` — as authored?
+ *
+ * Read raw rather than parsed, like the rest of this module: `FlowNodeSchema.config`
+ * is an open `z.record`, so a region arrives as an ordinary record even in a
+ * parsed stack, and this file promises never to throw on a malformed one.
+ */
+function regionNodesOf(value: unknown): AnyRec[] | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const nodes = (value as AnyRec).nodes;
+  return Array.isArray(nodes) ? (nodes as AnyRec[]) : undefined;
+}
+
+/**
+ * #14394 rule A — a `loop` body that runs a fallible node with no `try_catch`
+ * between the loop and that node.
+ *
+ * The judgement is **ancestry, not depth**: a `try_catch` two levels down inside
+ * a `parallel` branch still contains what it wraps, and a fallible node three
+ * levels down with no `try_catch` on the path to the loop still kills the sweep.
+ * So the descent from a loop body reports a fallible node and otherwise walks on
+ * through any container, with two stops:
+ *
+ *  - **`try_catch` — stop.** Everything below it is contained (see
+ *    {@link TRY_CATCH_NODE_TYPE} for why a catch-less one counts here and is
+ *    reported by rule B instead). One finding per fallible node, never two.
+ *  - **a nested `loop` — stop.** That loop is its own subject: it appears as a
+ *    node of its own graph in {@link collectFlowGraphs}, this scan runs per
+ *    graph, and it is judged there. Without the stop every fallible node in a
+ *    nested body would be reported once per enclosing loop, and the finding that
+ *    matters — the innermost loop, where the wrap belongs — would be the one
+ *    buried in duplicates.
+ *
+ * Loops with **no `body`** are skipped entirely: `LoopConfigSchema.body` is
+ * optional (`control-flow.zod.ts:216`) and a body-less `loop` is the legacy
+ * flat-graph form, which has no region to judge.
+ */
+function scanUncontainedLoopBodies(
+  at: string,
+  nodes: AnyRec[],
+  findings: FlowLintFinding[],
+): void {
+  for (const node of nodes) {
+    if (node.type !== LOOP_NODE_TYPE) continue;
+    const bodyNodes = regionNodesOf(((node.config ?? {}) as AnyRec).body);
+    if (!bodyNodes) continue;
+    const loopId = typeof node.id === 'string' && node.id ? node.id : '(unnamed loop)';
+
+    const visit = (region: AnyRec[], trail: string, depth: number): void => {
+      if (depth > MAX_REGION_DEPTH) return;
+      for (const child of region) {
+        if (!child || typeof child !== 'object') continue;
+        const type = typeof child.type === 'string' ? child.type : '';
+        if (type === TRY_CATCH_NODE_TYPE || type === LOOP_NODE_TYPE) continue;
+
+        const childId = typeof child.id === 'string' && child.id ? child.id : '(unnamed node)';
+        if (FALLIBLE_NODE_TYPES.has(type)) {
+          findings.push({
+            where: `${at} · ${trail} · node '${childId}' (${type})`,
+            message:
+              `runs inside loop '${loopId}' with no \`try_catch\` between them — a '${type}' node can return ` +
+              `\`success: false\` or throw, and the loop body's failure propagates straight out of the ` +
+              `container (\`loop-node.ts\` iterates with a bare \`await\` and has no \`try\`/\`catch\` at all). ` +
+              `The first failing item therefore ends the whole run: every later item is never processed, and ` +
+              `the work already done is not even reported (measured on the real engine — a 5-item sweep ` +
+              `failing at item 3 touched 3 items and reported \`acted: 0\`).`,
+            hint:
+              `Contain the failure per iteration: put a \`try_catch\` INSIDE the body and move this node into ` +
+              `its \`try\` region — \`loop { body: { nodes: [ { type: 'try_catch', config: { try, catch } } ] } }\`. ` +
+              `${EMPTY_CATCH_REFUSALS} The minimal handler is ${MINIMAL_CATCH_SPELLING}. Measured: with it, all ` +
+              `5 items are processed and the run completes. If this loop is MEANT to stop at the first failure, ` +
+              `that is a legitimate reading and this stays a warning. ` +
+              `See content/docs/automation/flows.mdx §"Per-iteration containment". (#13681, #14394)`,
+            // Warning, not `error`: see the severity policy at the top of this
+            // file. Fail-fast on the first bad row is a real intent this rule
+            // cannot distinguish from an oversight.
+            rule: FLOW_LOOP_BODY_UNCONTAINED,
+          });
+          continue;
+        }
+
+        // Any other container (`parallel` today; whatever the protocol adds
+        // next) is walked through: its region slots come from the one shared
+        // table, so a new construct is descended without editing this rule.
+        const slots = REGION_SLOTS.get(type);
+        if (!slots) continue;
+        const cfg = (child.config ?? {}) as AnyRec;
+        for (const slot of slots) {
+          const value = cfg[slot];
+          if (Array.isArray(value)) {
+            // A `many` slot (`parallel.config.branches`) — an array of regions.
+            value.forEach((branch, index) => {
+              const branchNodes = regionNodesOf(branch);
+              if (branchNodes) visit(branchNodes, `${trail} → ${type} '${childId}' branch ${index}`, depth + 1);
+            });
+            continue;
+          }
+          const slotNodes = regionNodesOf(value);
+          if (slotNodes) visit(slotNodes, `${trail} → ${type} '${childId}' ${slot}`, depth + 1);
+        }
+      }
+    };
+
+    visit(bodyNodes, `loop '${loopId}' body`, 0);
+  }
+}
+
+/**
+ * #14394 rule B — a `try_catch` with no `catch` region, anywhere in the flow.
+ *
+ * Measured (#13681): the container fails through, and the run is byte-identical
+ * to the one with no `try_catch` at all. `retry`, when present, only delays it.
+ *
+ * A `catch` that is PRESENT but malformed is deliberately not this rule's
+ * business: `catch: {}` and `catch: { nodes: [] }` are refused by the parse
+ * itself, loudly, with the schema's own message. Lint speaks for the shape the
+ * schema accepts and the runtime then makes useless.
+ */
+function scanTryCatchWithoutCatch(
+  at: string,
+  nodes: AnyRec[],
+  findings: FlowLintFinding[],
+): void {
+  for (const node of nodes) {
+    if (node.type !== TRY_CATCH_NODE_TYPE) continue;
+    const cfg = (node.config ?? {}) as AnyRec;
+    if (cfg.catch !== undefined) continue;
+    const nodeId = typeof node.id === 'string' && node.id ? node.id : '(unnamed node)';
+    const hasRetry = (cfg as AnyRec).retry !== undefined;
+    findings.push({
+      where: `${at} · node '${nodeId}' (${TRY_CATCH_NODE_TYPE})`,
+      message:
+        `declares no \`catch\` region, so it contains NOTHING — when the \`try\` region fails the container ` +
+        `fails with it and the failure propagates exactly as if the nodes had never been wrapped (measured: ` +
+        `the no-\`catch\` run and the unwrapped control produce identical output).` +
+        (hasRetry
+          ? ' Its `retry` policy re-runs the `try` region first, which delays that outcome rather than changing it.'
+          : '') +
+        ` Inside a \`loop\` body this is the silent one: the author has recognised the hazard, wrapped the ` +
+        `node, and still loses every item after the first failure.`,
+      hint:
+        `Add the handler: ${MINIMAL_CATCH_SPELLING}. ${EMPTY_CATCH_REFUSALS} If failing loudly really is the ` +
+        `intent, a \`try_catch\` with only \`try\` (and optionally \`retry\`) is a legitimate retry-then-fail ` +
+        `shape — this is a warning, not a gate. ` +
+        `See content/docs/automation/flows.mdx §"Per-iteration containment". (#13681, #14394)`,
+      // Warning, not `error`: retry-then-fail is a real reading of this shape.
+      rule: FLOW_TRY_CATCH_WITHOUT_CATCH,
+    });
+  }
+}
+
+/**
  * Lint every flow for known authoring anti-patterns — its own graph AND every
  * nested ADR-0031 region (#5383). Returns a (possibly empty) list of findings;
  * never throws. A finding marked `severity: 'error'` fails the build, and since
@@ -1256,6 +1552,21 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
       //     what puts the loop-body sweep — the standard shape for a scheduled
       //     purge, and this rule's main habitat — in range (#5383/#5635).
       scanUnboundedBulkWrites(at, graphNodes, findings);
+
+      // (g) #13681/#14394 — a `loop` body running a fallible node with no
+      //     `try_catch` between the loop and it. Per graph like the rest, and
+      //     that is what keeps the count right: every `loop` node belongs to
+      //     exactly one graph, so its body is descended exactly once, and a
+      //     nested loop is judged in its own graph rather than through its
+      //     parent (see {@link scanUncontainedLoopBodies}).
+      scanUncontainedLoopBodies(at, graphNodes, findings);
+
+      // (h) #13681/#14394 — the near-miss: a `try_catch` with no `catch`. Scanned
+      //     everywhere, not only inside a loop: the container fails through
+      //     wherever it is written. Inside a loop body it is the shape (g)
+      //     deliberately treats as contained, so exactly one of the two rules
+      //     ever speaks about a given node.
+      scanTryCatchWithoutCatch(at, graphNodes, findings);
     }
   }
   return findings;
