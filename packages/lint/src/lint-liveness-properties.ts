@@ -203,12 +203,16 @@ function describe(entry: LedgerEntry): { kind: string; rule: string; defaultHint
         'evidence for the enforcer.',
     };
   }
+  // #14057 is the second time this sentinel's prediction came true, and the id
+  // stays HERE rather than in the message: a runtime string reaches authors and
+  // generated surfaces, and none of them can resolve a tracker id
+  // (`check:doc-authoring`, maintainer ruling 2026-08-12).
   throw new Error(
     `lintLivenessProperties: ledger entry has unrecognised status ${JSON.stringify(entry.status)} — ` +
     "describe() only knows 'experimental' | 'planned' | 'dead' | 'live-elsewhere'. This is a " +
     'shipped-ledger integrity bug, not an authoring error: either the ledger JSON has a typo, or a ' +
     'new status was added to the vocabulary without teaching describe() in ' +
-    'lint-liveness-properties.ts about it (#11384, and again #14057).',
+    'lint-liveness-properties.ts about it (#11384).',
   );
 }
 
