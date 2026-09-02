@@ -1123,6 +1123,91 @@ describe('Content Elements', () => {
 });
 
 // ---------------------------------------------------------------------------
+// element:number `filter` — the ViewFilterRule ARRAY orthography (ui#6206-B)
+// ---------------------------------------------------------------------------
+describe("element:number `filter` — one filter orthography platform-wide (ui#6206 Option B)", () => {
+  const number = ComponentPropsMap['element:number'];
+  const relatedList = ComponentPropsMap['record:related_list'];
+  const RULES = [{ field: 'status', operator: 'equals', value: 'won' }];
+  const RECORD_FORM = { status: 'won' };
+  /** The issues a parse raised AT `key` (top-level), whatever else it raised. */
+  const issuesAt = (r: { success: boolean; error?: { issues: Array<{ path: PropertyKey[]; code: string }> } }, key: string) =>
+    r.success ? [] : r.error!.issues.filter((i) => i.path[0] === key);
+
+  it('accepts a ViewFilterRule[] filter — the acceptance criterion', () => {
+    // Before the 2026-08-25 ruling this exact value was REFUSED here (the entry
+    // said `FilterConditionSchema`, the MongoDB-style record) while every
+    // sibling `filter` input in the map accepted it.
+    const r = number.safeParse({ object: 'order', aggregate: 'count', filter: RULES });
+    expect(r.success).toBe(true);
+    expect(r.data!.filter).toEqual(RULES);
+  });
+
+  it('the array carries the REAL ViewFilterRuleSchema, not a lookalike: operators normalize, value shapes are checked', () => {
+    // `eq` is a legacy spelling `normalizeFilterOperator` lowers to `equals` — a
+    // plain `z.array(z.object(...))` would have echoed it back unchanged.
+    const legacy = number.safeParse({
+      object: 'order', aggregate: 'count',
+      filter: [{ field: 'status', operator: 'eq', value: 'won' }],
+    });
+    expect(legacy.success).toBe(true);
+    expect(legacy.data!.filter![0].operator).toBe('equals');
+    // `in` takes an array; a scalar is refused at `filter.0.value` by the rule's
+    // own superRefine — the value-shape check rides in with the schema.
+    const scalarIn = number.safeParse({
+      object: 'order', aggregate: 'count',
+      filter: [{ field: 'status', operator: 'in', value: 'won' }],
+    });
+    expect(scalarIn.success).toBe(false);
+    expect(scalarIn.error!.issues.map((i) => i.path.join('.'))).toContain('filter.0.value');
+  });
+
+  it('the MongoDB-style record form — what this entry alone used to accept — is REFUSED at the `filter` path', () => {
+    // Reverse verification of the convergence, asserted on the issue envelope
+    // rather than on a bare `success === false`: the refusal is located at
+    // `filter` and names the expected kind. Migration:
+    // `element-number-filter-rule-array`.
+    const r = number.safeParse({ object: 'order', aggregate: 'count', filter: RECORD_FORM });
+    expect(r.success).toBe(false);
+    const atFilter = issuesAt(r, 'filter');
+    expect(atFilter).toHaveLength(1);
+    expect(atFilter[0].code).toBe('invalid_type');
+    expect(atFilter[0]).toMatchObject({ expected: 'array' });
+    // An operator-object record (`{ amount: { $gt: 100 } }`) is the same form
+    // and gets the same verdict — no arm accepts any spelling of the record.
+    const opRecord = number.safeParse({ object: 'order', aggregate: 'sum', field: 'amount', filter: { amount: { $gt: 100 } } });
+    expect(opRecord.success).toBe(false);
+    expect(issuesAt(opRecord, 'filter').map((i) => i.code)).toEqual(['invalid_type']);
+  });
+
+  it('shares the array orthography with the sibling `filter` inputs — one value, two doors, the same verdicts', () => {
+    // The ruling is "one filter orthography platform-wide", so the pin is
+    // cross-entry: the same rule array raises no issue at `filter` on either
+    // door, and the same record form is refused at `filter` with the same
+    // issue code on both. Each door is asked only about ITS `filter` — the
+    // other keys the related list requires are not this pin's subject.
+    expect(issuesAt(number.safeParse({ object: 'order', aggregate: 'count', filter: RULES }), 'filter')).toEqual([]);
+    expect(issuesAt(relatedList.safeParse({ filter: RULES }), 'filter')).toEqual([]);
+    const numberRefusal = issuesAt(number.safeParse({ object: 'order', aggregate: 'count', filter: RECORD_FORM }), 'filter');
+    const relatedRefusal = issuesAt(relatedList.safeParse({ filter: RECORD_FORM }), 'filter');
+    expect(numberRefusal.map((i) => i.code)).toEqual(['invalid_type']);
+    expect(relatedRefusal.map((i) => i.code)).toEqual(numberRefusal.map((i) => i.code));
+  });
+
+  it('positive control: a well-formed multi-rule array with a real `in` rule parses through the element', () => {
+    const r = number.safeParse({
+      object: 'order', aggregate: 'sum', field: 'amount',
+      filter: [
+        { field: 'status', operator: 'in', value: ['won', 'closed'] },
+        { field: 'amount', operator: 'greater_than', value: 100 },
+      ],
+    });
+    expect(r.success).toBe(true);
+    expect(r.data!.filter).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Element Props Schemas
 // ---------------------------------------------------------------------------
 describe('ElementTextPropsSchema', () => {
@@ -1171,11 +1256,14 @@ describe('ElementNumberPropsSchema', () => {
       object: 'order',
       field: 'amount',
       aggregate: 'sum',
-      filter: { status: 'paid' },
+      // The ViewFilterRule array form (ui#6206-B) — this fixture authored the
+      // record form `{ status: 'paid' }` while the entry alone accepted it.
+      filter: [{ field: 'status', operator: 'equals', value: 'paid' }],
       format: 'currency',
       prefix: '$',
       suffix: ' USD',
     });
+    expect(props.filter).toEqual([{ field: 'status', operator: 'equals', value: 'paid' }]);
     expect(props.format).toBe('currency');
     expect(props.prefix).toBe('$');
     expect(props.suffix).toBe(' USD');
