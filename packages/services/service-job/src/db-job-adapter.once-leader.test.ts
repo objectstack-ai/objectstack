@@ -182,15 +182,17 @@ describe('DbJobAdapter — once schedules are leader-elected (#13918)', () => {
     // One deadline on the wall clock reaches BOTH replicas.
     await vi.advanceTimersByTimeAsync(TICK);
 
-    // SOFT on purpose, and only here: when this pin is red the row count below
-    // is the other half of the card's evidence ("two `sys_job_run` rows today,
-    // one after"), and a hard throw here would hide it. Every other assertion
-    // in this file is hard.
+    // SOFT on purpose, and only in this test: THIS is the card's pin, so when it
+    // is red its job is to state the whole of today's picture in one run — the
+    // execution count, the fence that was never consulted, AND the run-row count
+    // below ("two `sys_job_run` rows today, one after"). A hard throw on the
+    // first of those hides the other two. Every other assertion in this file,
+    // this test's own row assertions included, is hard.
     expect.soft(handler, 'one deadline must execute the job once across the cluster, not once per replica').toHaveBeenCalledTimes(1);
-    expect(fence.acquire).toHaveBeenCalledTimes(2);
+    expect.soft(fence.acquire, 'each replica must ASK the fence — an unrouted fire never consults it at all').toHaveBeenCalledTimes(2);
     // waitMs:0 is the "skip", spelled structurally — a waiting acquire would let
     // the loser run the same one-shot a moment later.
-    expect(fence.acquire).toHaveBeenCalledWith('job:flow_wake', { ttlMs: 60000, waitMs: 0 });
+    expect.soft(fence.acquire).toHaveBeenCalledWith('job:flow_wake', { ttlMs: 60000, waitMs: 0 });
 
     open();
     await vi.advanceTimersByTimeAsync(0);
