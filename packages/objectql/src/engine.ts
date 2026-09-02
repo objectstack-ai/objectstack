@@ -199,6 +199,10 @@ import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, str
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
 // why neither end may move.
 import { recordHookPayloadWrites } from './hook-write-provenance.js';
+import {
+  divergingHookPayloadKeys,
+  MultiUpdateHookKeyDivergenceError,
+} from './multi-update-hook-key-divergence.js';
 import type { HookWriteRecording } from './hook-write-provenance.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
@@ -2928,10 +2932,27 @@ export class ObjectQL implements IObjectQLEngine {
    * A rewrite CONDITIONED on the row (`ctx.previous`, `ctx.input.id`) is
    * outside the contract: it does not scope itself to the row it was decided
    * on, it widens to every matched row. Per-row `previous` is supplied so a
-   * guard can REFUSE the write (throw), not so a rewrite can be aimed. That is
-   * a contract statement, not an enforcement — no static rule can decide
-   * whether a rewrite is row-invariant — and the ADR names it as such rather
-   * than hiding it.
+   * guard can REFUSE the write (throw), not so a rewrite can be aimed.
+   *
+   * ## D3, ENFORCED — divergent key sets refuse the batch [#14099]
+   *
+   * That last paragraph used to end "a contract statement, not an enforcement
+   * — no static rule can decide whether a rewrite is row-invariant". The second
+   * half is still true and the conclusion no longer follows: nothing STATIC can
+   * decide it, but the dispatch can MEASURE it. #14088's recorder is armed once
+   * more per row here, so each dispatch reports the set of payload keys THAT
+   * row's hook chain assigned; if two rows disagree, the batch is refused whole
+   * before any write ({@link MultiUpdateHookKeyDivergenceError}).
+   *
+   * Maintainer ruling of 2026-09-02, on the corruption `duly` measured against
+   * published 17.2.0 — a `completed_at` transition stamp moved an
+   * already-completed row's timestamp, silently, on a two-row batch. The
+   * criterion is the key SET and never the values, which is what lets the
+   * clock-reading audit stamp through: every row writes `updated_at`, so an
+   * honest batch is never refused non-deterministically. The full argument,
+   * both rejected value-comparison variants, and the blind spot the ruling
+   * carries openly (same key, per-row VALUES) live on
+   * `multi-update-hook-key-divergence.ts`.
    *
    * ## D4 — `input.id` is not a reroute lever here
    *
@@ -2948,6 +2969,30 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<void> {
     const schema = this._registry.getObject(object);
     const carriesPayload = event === 'beforeUpdate';
+    // ── [#14099] D3's ENFORCEMENT half: one observation window per row ──────
+    //
+    // The #14088 recorder, armed a SECOND time for this loop and NESTED over
+    // the batch-scoped recording `update()` already armed at its entry. The
+    // nesting is what makes both readings true at once: a write through this
+    // view lands on the outer recording's view, which lands on the real
+    // payload — so the outer record (the one the read-only strips read for
+    // provenance) still sees every hook write, while `closeWindow()` gives
+    // this loop what only it needs: the keys assigned by ONE row's chain.
+    //
+    // ⭐ ONE recording for the whole loop, not one per row, and that is a
+    // contract point rather than a saving: every per-row context must carry
+    // THE SAME payload object (D3, pinned by reference identity in
+    // `bulk-write-per-row-hooks.test.ts`). A fresh view per row would still be
+    // write-through onto one payload — no copy, nothing to reconcile — but it
+    // would hand each row a DIFFERENT object, which is a difference an author
+    // can observe and which this contract says is not there.
+    const batchPayloadAtEntry = (batchCtx.input as { data?: unknown }).data;
+    const hookWrites =
+      carriesPayload && batchPayloadAtEntry !== null && typeof batchPayloadAtEntry === 'object'
+        ? recordHookPayloadWrites(batchPayloadAtEntry as Record<string, unknown>)
+        : undefined;
+    if (hookWrites) (batchCtx.input as { data?: unknown }).data = hookWrites.payload;
+    const perRowHookWrittenKeys: ReadonlySet<string>[] = [];
     for (let index = 0; index < rows.length; index++) {
       const row = rows[index];
       const rowId = (row as { id?: unknown }).id;
@@ -2976,6 +3021,9 @@ export class ObjectQL implements IObjectQLEngine {
       // D3, the accumulate half — see the class doc above.
       if (carriesPayload) {
         (batchCtx.input as { data?: unknown }).data = (rowCtx.input as { data?: unknown }).data;
+        // [#14099] and the enforcement half: close THIS row's window, so the
+        // next row opens a fresh one.
+        if (hookWrites) perRowHookWrittenKeys.push(hookWrites.closeWindow());
       }
       // D4.
       const observed = (rowCtx.input as { id?: unknown }).id;
@@ -2983,6 +3031,43 @@ export class ObjectQL implements IObjectQLEngine {
         throw new HookTargetRebindError({
           object, event, path: 'per-row', expectedId: rowId, observedId: observed,
         });
+      }
+    }
+
+    // [#14099] Close this loop's recording and put the underlying payload back
+    // in `batchCtx.input.data`, so no recording VIEW travels on to the outer
+    // seal, the strips or a driver.
+    //
+    // `hookWrittenKeys` is `undefined` exactly when a hook REPLACED the payload
+    // object somewhere in this batch (`hook-write-provenance.ts`'s KNOWN
+    // LIMIT). Then the whole batch ABSTAINS: the windows collected before the
+    // replacement describe writes the replacement discarded, so refusing on
+    // them would be a verdict about a payload that is no longer the one being
+    // written. Abstaining keeps the pre-#14099 behaviour for that shape, which
+    // is the same fail-safe direction #14088 chose for the same limit.
+    const sealedLoopWrites = hookWrites?.seal((batchCtx.input as { data?: unknown }).data);
+    if (sealedLoopWrites) {
+      (batchCtx.input as { data?: unknown }).data = sealedLoopWrites.data;
+    }
+
+    // [#14099] The refusal, ruled 2026-09-02 (recommendation C). Placed after
+    // the loop and not inside it, for two reasons that are both about the
+    // envelope rather than about cost: the diverging set is `union` minus
+    // `intersection` over EVERY row, so the message names every offending key
+    // instead of the first pair to disagree, and it is order-independent — the
+    // same batch answers the same way whatever order the driver returned the
+    // matched rows in.
+    //
+    // ⭐ Still BEFORE any write, which is the load-bearing half. This method is
+    // called from `update()`'s predicate branch ahead of the outer hook-write
+    // seal, both readonly strips, `evaluateValidationRules` and every
+    // `driver.updateMany` — and it runs outside `update()`'s own `try`, so the
+    // envelope reaches the caller undecorated. Not "after the first row", not
+    // "inside a transaction that then rolls back": nothing was written.
+    if (sealedLoopWrites?.hookWrittenKeys !== undefined) {
+      const diverging = divergingHookPayloadKeys(perRowHookWrittenKeys);
+      if (diverging.length > 0) {
+        throw new MultiUpdateHookKeyDivergenceError(object, diverging, rows.length);
       }
     }
   }
