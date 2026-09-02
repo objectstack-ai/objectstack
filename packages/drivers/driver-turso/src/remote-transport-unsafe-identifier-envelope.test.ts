@@ -67,7 +67,24 @@
  *   neither the predicate nor the prose moved. That asymmetry is the claim: a
  *   change that flipped which inputs are refused would take it red too.
  *
- * Measured after writing the above — see the PR body for the run.
+ * MEASURED, and the second prediction was too coarse — recorded rather than
+ * quietly rewritten (19 failed / 13 passed across this file and the #14113
+ * regression file):
+ *
+ * - the first prediction held exactly. All 19 failures are `toEqual`
+ *   comparisons reading `{ code: undefined, status: undefined }`; not one is a
+ *   "expected the transport to refuse …" — every input the gate refuses today
+ *   is still refused with the ablated helper.
+ * - the accept-set describe went half red, because its REFUSED half asserts
+ *   the envelope in the same `toEqual` as the message. Its ACCEPTED half —
+ *   the direction that would catch a TIGHTENED gate — stayed green, and the
+ *   red half's diff shows the `message` line UNMARKED between `-` and `+`:
+ *   only `code` and `status` moved. `still refuses the empty string` is the
+ *   worked example, in the PR body.
+ *
+ * That unmarked message line is the sharper form of what the prediction was
+ * reaching for: prose and predicate are provably untouched, so this is an
+ * envelope change and not a gating one.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
