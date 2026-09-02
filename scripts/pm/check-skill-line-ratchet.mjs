@@ -266,7 +266,37 @@ export const CEILINGS = new Map([
   // a ruled clause, and the nearest candidates were the governed-surface
   // boundary and the terminal clause (refused on the state-machine precedent).
   // Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 60],
+  // Raised 60 → 65 by the clause-② GRADING ruling — the criterion itself, which
+  // this file carried nowhere: the claim-time `Clause-②: yes|no` declaration is
+  // PROVISIONAL by design (it fixes the conservative dispatch tier; the real gate
+  // is the at-tier review at PR/report time, where the evidence and the cost
+  // live, and a declaration overturned there is the mechanism working, not a seat
+  // fault); the mechanical floor (any NEW exported symbol or NEW key on an
+  // already-published payload is always `yes`, checkable in the tree at claim
+  // time); and the conformance class held back from mechanization (populating an
+  // already-declared field, re-selecting an input class between two published
+  // codes), which needs at-tier judgement and dispatches as `yes` when the claim
+  // cannot tell — a false `yes` self-corrects, a false `no` ships. The full
+  // taxonomy and the claim-time decision procedure are BOTH declined under the
+  // startup-scope lens, and that refusal is itself ruled content here.
+  // The ruling is the maintainer's, 2026-09-01, verbatim and untranslated:
+  // 「同意」; it authorizes this raise in its own words, verbatim and
+  // untranslated, in comment 5494466874:
+  //   「若触行数天花板,按 #13900 裁决同型引用本评论提额」
+  // Paid in place FIRST, and the payment is real deleted bytes, never a re-wrap:
+  // the 放行 bullet's restated FAIL / 卡在决策 triple went (single source is
+  // SKILL.md 条款②入队闸门, which this file's own header already points at), and
+  // with it the 三样不变 clause — self-declared as 「单源见主文件」, and its
+  // governed-surface limb survives in-file in 落地前检三条 (「受管面不适用,
+  // draft-only 终局不变」). That bullet fell 6 lines → 4. Two further restatements
+  // were measured and REJECTED as payment because a LINE ratchet cannot bank
+  // them: 停靠短暂 in the 双载体 bullet (−45 B, 3 lines → 3) and 非放行必要条件
+  // in the 外部评审链 bullet (−24 B, 4 lines → 4). The residual +5 is the ruled
+  // addition at its reasoned floor — 773 bytes of ruled content is 7 lines at the
+  // 120-byte cap, and no sixth-line spelling exists that keeps 不是出货缺陷, the
+  // ruling's own justification for declining the taxonomy. Landed count, headroom
+  // 0, same convention.
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 65],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).
