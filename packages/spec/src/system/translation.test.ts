@@ -1506,6 +1506,24 @@ describe('retired translation.validationMessages (#4667)', () => {
       .toThrow(/object\.validations\[\]\.message/s);
   });
 
+  /**
+   * The tombstone stopped at "author it on the rule" while the rule's own text
+   * had no translation route at all — true when written, and the reason a
+   * `zh-CN` deployment read author-written refusals in English. There is a
+   * route now, and a tombstone that does not name it sends an author to a dead
+   * end a second time.
+   */
+  it('names the live replacement group as well as the authoring site', () => {
+    for (const payload of [{ validationMessages: { x: 'y' } }, { errors: { x: 'y' } }]) {
+      let msg = '';
+      try { TranslationDataSchema.parse(payload); } catch (e) { msg = String(e); }
+      expect(msg).toMatch(/_validations\.<rule_name>\.message/s);
+      // …and stays free of internal issue ids: this text is printed AT the
+      // author, verbatim, where `#NNNN` resolves to nothing (check:doc-authoring).
+      expect(msg).not.toMatch(/#\d{3,}/);
+    }
+  });
+
   it('the retired `errors` dialect no longer signposts a dead key', () => {
     // #3778 retired `errors` by telling authors to use `validationMessages` —
     // a signpost into another unread group. Taking that advice moved content
