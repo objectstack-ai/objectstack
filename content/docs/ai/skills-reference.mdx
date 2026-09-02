@@ -48,7 +48,7 @@ ObjectStack ships **11 skills** — one per authoring domain, plus process skill
 | 3 | [Query](#query) | `query` | `skills/objectstack-query/` | Construct ObjectQL queries — filters, sorting, pagination, aggregation, relation expansion, and full-text search. |
 | 4 | [UI](#ui) | `ui` | `skills/objectstack-ui/` | Author ObjectStack UI metadata — Views (list/form/kanban/calendar/gantt), Apps (navigation), Pages (structured plus the HTML and React source-authoring tiers, ADR-0080/0081), Dashboards, Reports, Charts, Actions, and package Docs (`src/docs/*.md`). |
 | 5 | [Automation](#automation) | `automation` | `skills/objectstack-automation/` | Design ObjectStack automation — Flows (visual logic), Triggers, Approvals, state machines, and the `jobs` (`defineJob`) / `webhooks` (`defineWebhook`) stack collections. |
-| 6 | [AI](#ai) | `ai` | `skills/objectstack-ai/` | Design ObjectStack AI skills, tools, knowledge sources, conversations, model registry entries, and MCP integrations. |
+| 6 | [AI](#ai) | `ai` | `skills/objectstack-ai/` | Design ObjectStack AI skills, tools, knowledge sources, and the open-edition MCP server surface. |
 | 7 | [API](#api) | `api` | `skills/objectstack-api/` | Design the server-side API surface that an ObjectStack runtime exposes — REST endpoints, auth providers, realtime channels, error envelopes, batch contracts. |
 | 8 | [i18n](#i18n) | `i18n` | `skills/objectstack-i18n/` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the per-locale source layout. |
 | 9 | [Formula](#formula) | `expression` | `skills/objectstack-formula/` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. This is the companion skill that objectstack-data, -ui, -api and -automation each tell you to load alongside them. |
@@ -131,13 +131,13 @@ Do not use for data lifecycle hooks at the object layer (see objectstack-data) o
 
 **Domain** `ai` · **Path** `skills/objectstack-ai/`
 
-Design ObjectStack AI skills, tools, knowledge sources, conversations, model registry entries, and MCP integrations.
+Design ObjectStack AI skills, tools, knowledge sources, and the open-edition MCP server surface.
 
-Use when the user is adding `*.skill.ts` / `*.tool.ts`, configuring an LLM provider, wiring agent tools, or indexing ObjectStack data as a knowledge source for RAG. Agents themselves are platform-internal (`ask` / `build`) — third parties extend them via skills and tools, not by authoring `*.agent.ts`.
+Use when the user is adding `*.skill.ts` / `*.tool.ts`, configuring an LLM provider, wiring the tools a skill grants, or indexing ObjectStack data as a knowledge source for RAG. Agents themselves are platform-internal (`ask` / `build`) — third parties extend them via skills, not by authoring `*.agent.ts`.
 
 Do not use for general LLM prompting questions unrelated to ObjectStack metadata.
 
-**Tags:** `agent`, `tool`, `skill`, `conversation`, `llm`, `embedding`, `mcp`
+**Tags:** `agent`, `tool`, `skill`, `knowledge`, `llm`, `embedding`, `mcp`
 
 ---
 
