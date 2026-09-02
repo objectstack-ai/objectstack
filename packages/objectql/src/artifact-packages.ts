@@ -186,8 +186,12 @@ export function resolveArtifactPackageOrder(artifact: unknown): unknown[] {
     // header: the schema is a gate here, and a parsed clone carries defaults
     // and drops undeclared keys the singular-`manifest` branch keeps.
     const manifest = (entry as { manifest?: unknown }).manifest;
+    // `||`, not `??`, on purpose: `ObjectQL.registerApp` keys the installed
+    // package on `manifest.id || manifest.name`, so an empty-string `id` falls
+    // back to `name` there — this seam must agree on what the id IS, or the
+    // sorter would order a package under a key the registry never stores it by.
     const id = (manifest as { id?: unknown; name?: unknown }).id
-      ?? (manifest as { name?: unknown }).name;
+      || (manifest as { name?: unknown }).name;
 
     if (typeof id !== 'string' || id === '') {
       throw refuse(

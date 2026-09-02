@@ -1907,6 +1907,26 @@ export class ObjectQLPlugin implements Plugin {
   }
 
   /**
+   * [ADR-0130 D5] Bridge each package of one artifact, in the SAME
+   * dependency-topological order they registered in.
+   *
+   * Sequential, not `Promise.all`: {@link bridgeManifestObjectsToMetadataService}
+   * reads an object out of the metadata service and decides whether the copy
+   * sitting there is its own before overwriting it, so two packages
+   * contributing to one object must not interleave that read-then-write. For an
+   * artifact carrying one package this awaits exactly the one bridge the
+   * pre-ADR-0130 path returned (D7).
+   */
+  private async bridgeArtifactObjectsToMetadataService(
+    ctx: PluginContext,
+    manifests: any[],
+  ): Promise<void> {
+    for (const manifest of manifests) {
+      await this.bridgeManifestObjectsToMetadataService(ctx, manifest);
+    }
+  }
+
+  /**
    * Bridge ONE manifest's objects into the metadata service — the
    * late-registration companion to {@link bridgeObjectsToMetadataService}.
    *
@@ -1937,26 +1957,6 @@ export class ObjectQLPlugin implements Plugin {
    * Never throws — a bridge failure must not fail the install that
    * triggered it.
    */
-  /**
-   * [ADR-0130 D5] Bridge each package of one artifact, in the SAME
-   * dependency-topological order they registered in.
-   *
-   * Sequential, not `Promise.all`: {@link bridgeManifestObjectsToMetadataService}
-   * reads an object out of the metadata service and decides whether the copy
-   * sitting there is its own before overwriting it, so two packages
-   * contributing to one object must not interleave that read-then-write. For an
-   * artifact carrying one package this awaits exactly the one bridge the
-   * pre-ADR-0130 path returned (D7).
-   */
-  private async bridgeArtifactObjectsToMetadataService(
-    ctx: PluginContext,
-    manifests: any[],
-  ): Promise<void> {
-    for (const manifest of manifests) {
-      await this.bridgeManifestObjectsToMetadataService(ctx, manifest);
-    }
-  }
-
   private async bridgeManifestObjectsToMetadataService(
     ctx: PluginContext,
     manifest: any,
