@@ -209,7 +209,7 @@ describe('defineStack - the duplicate-key check joins the existing walk', () => 
       apps: [{
         name: 'probe_app',
         label: 'Probe',
-        navigation: [{ type: 'object' as const, objectName: 'probe_item', runAction: 'ghost_action' }],
+        navigation: [{ id: 'nav_probe', type: 'object' as const, label: 'Probe', objectName: 'probe_item', runAction: 'ghost_action' }],
       }],
     });
     expect(msg).toContain('defineStack cross-reference validation failed (2 issues):');
