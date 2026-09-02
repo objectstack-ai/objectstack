@@ -1142,13 +1142,13 @@ async function selfTest() {
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
     if ((await selfTest()) !== SELF_TEST_VERDICT) {
-        console.error(
-          '\n✗ qa-rollup self-test: selfTest() returned without reaching its verdict,\n'
-            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
-            + 'that never finished as a self-test that passed.\n',
-        );
-        process.exit(1);
-      }
+      console.error(
+        '\n✗ qa-rollup self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
   }
   else await main(process.argv.slice(2));
 }

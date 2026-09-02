@@ -905,13 +905,13 @@ function runSelfTest() {
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
     if (runSelfTest() !== SELF_TEST_VERDICT) {
-        console.error(
-          '\n✗ check-turbo-task-graph self-test: runSelfTest() returned without reaching its verdict,\n'
-            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
-            + 'that never finished as a self-test that passed.\n',
-        );
-        process.exit(1);
-      }
+      console.error(
+        '\n✗ check-turbo-task-graph self-test: runSelfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
   }
   else main();
 }

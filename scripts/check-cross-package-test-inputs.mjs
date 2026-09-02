@@ -2356,13 +2356,13 @@ if (isEntrypoint(import.meta.url)) {
   const argv = process.argv.slice(2);
   if (argv.includes('--self-test')) {
     if (selfTest() !== SELF_TEST_VERDICT) {
-        console.error(
-          '\n✗ check-cross-package-test-inputs self-test: selfTest() returned without reaching its verdict,\n'
-            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
-            + 'that never finished as a self-test that passed.\n',
-        );
-        process.exit(1);
-      }
+      console.error(
+        '\n✗ check-cross-package-test-inputs self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
   }
   else if (argv.includes('--list-escapes')) {
     for (const [name, info] of [...findEscapingPackages()].sort()) {
