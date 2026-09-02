@@ -343,6 +343,250 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     });
   });
 
+  /**
+   * ── #14089 — the flattened-scope SHADOWING warning ────────────────────────
+   *
+   * Maintainer ruling 2026-09-01 (director batch #23), option C: warn ONLY when
+   * a bare name is BOTH a declared flow variable AND a field on the bound
+   * object. Both halves are authored metadata, so the criterion is closed. The
+   * two negative controls below are the ruling's other two branches, and they
+   * are load-bearing rather than decorative: a bare name that is only a field is
+   * the form `@objectstack/formula`'s published contract calls correct and both
+   * example apps ship, and a bare name that is only a variable is an ordinary
+   * flow-variable read. Either one warning here would be the trust-killer
+   * ADR-0072 D1 names — which is why options A and B were excluded.
+   */
+  describe('flattened-scope shadowing (#14089)', () => {
+    const shadowFields = { status: { type: 'select' }, amount: { type: 'currency' } };
+
+    it('warns when a bare name is BOTH a declared flow variable and a field', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'duly_assignment', fields: shadowFields }],
+        flows: [{
+          name: 'record_change',
+          variables: [{ name: 'status', type: 'text' }],
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'duly_assignment', condition: 'status == "dispatched"' } },
+          ],
+          edges: [],
+        }],
+      });
+      expect(issues).toHaveLength(1);
+      expect(issues[0].severity).toBe('warning');
+      expect(issues[0].where).toContain("node 'start'");
+      expect(issues[0].message).toMatch(/BOTH a declared flow variable and a field on `duly_assignment`/);
+      // The prescription names both repairs, because either may be the intent.
+      expect(issues[0].message).toMatch(/Write `record\.status`/);
+      expect(issues[0].message).toMatch(/rename the variable/);
+    });
+
+    it('warns on the same shape on an EDGE condition', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'duly_assignment', fields: shadowFields }],
+        flows: [{
+          name: 'record_change',
+          variables: [{ name: 'amount', type: 'number' }],
+          nodes: [{ id: 'start', type: 'start', config: { objectName: 'duly_assignment' } }],
+          edges: [{ id: 'e1', source: 'start', target: 'end', condition: 'amount > 100000' }],
+        }],
+      });
+      expect(issues).toHaveLength(1);
+      expect(issues[0].severity).toBe('warning');
+      expect(issues[0].where).toContain("edge 'e1'");
+      expect(issues[0].message).toMatch(/bare reference `amount`/);
+    });
+
+    // NEGATIVE CONTROL 1 — the shipped, canon-taught form. Option A would have
+    // turned this into a build error and option B into a warning; both excluded.
+    it('stays silent when the bare name is a FIELD ONLY (no such variable)', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'duly_assignment', fields: shadowFields }],
+        flows: [{
+          name: 'record_change',
+          variables: [{ name: 'retry_count', type: 'number' }],
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'duly_assignment', condition: 'status == "dispatched"' } },
+          ],
+          edges: [],
+        }],
+      });
+      expect(issues).toHaveLength(0);
+    });
+
+    // NEGATIVE CONTROL 2 — an ordinary flow-variable read.
+    it('stays silent when the bare name is a VARIABLE ONLY (no such field)', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'duly_assignment', fields: shadowFields }],
+        flows: [{
+          name: 'record_change',
+          variables: [{ name: 'batch_size', type: 'number' }],
+          nodes: [{ id: 'start', type: 'start', config: { objectName: 'duly_assignment' } }],
+          edges: [{ id: 'e1', source: 'start', target: 'end', condition: 'batch_size > 0' }],
+        }],
+      });
+      expect(issues).toHaveLength(0);
+    });
+
+    // The dotted spelling is never the shadowed one — `record.status` reads the
+    // field whatever the variable map holds, so it must stay clean even here.
+    it('stays silent on the dotted spelling, which is what the warning prescribes', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'duly_assignment', fields: shadowFields }],
+        flows: [{
+          name: 'record_change',
+          variables: [{ name: 'status', type: 'text' }],
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'duly_assignment', condition: 'record.status == "dispatched"' } },
+          ],
+          edges: [],
+        }],
+      });
+      expect(issues).toHaveLength(0);
+    });
+
+    /**
+     * ROW 7 SHAPE 3 — an `assignment` node with NO `assignments` wrapper: the
+     * top-level `config` keys ARE the variable names (`logic-nodes.ts`'s `else`
+     * branch, and the shape `engine.test.ts` pins live). A collector that only
+     * looks for `assignments` collects zero names from this node and the warning
+     * never fires.
+     */
+    it('collects assignment targets written with NO `assignments` wrapper (row 7 shape 3)', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'duly_assignment', fields: shadowFields }],
+        flows: [{
+          name: 'record_change',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'duly_assignment' } },
+            { id: 'set', type: 'assignment', config: { status: 'approved' } },
+          ],
+          edges: [{ id: 'e1', source: 'set', target: 'end', condition: 'status == "approved"' }],
+        }],
+      });
+      expect(issues).toHaveLength(1);
+      expect(issues[0].severity).toBe('warning');
+      expect(issues[0].message).toMatch(/bare reference `status`/);
+    });
+
+    it('collects assignment targets from the wrapper OBJECT and ARRAY shapes too (row 7 shapes 1-2)', () => {
+      const objectShape = validateStackExpressions({
+        objects: [{ name: 'duly_assignment', fields: shadowFields }],
+        flows: [{
+          name: 'wrapper_object',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'duly_assignment' } },
+            { id: 'set', type: 'assignment', config: { assignments: { status: 'approved' } } },
+          ],
+          edges: [{ id: 'e1', source: 'set', target: 'end', condition: 'status == "approved"' }],
+        }],
+      });
+      expect(objectShape).toHaveLength(1);
+      expect(objectShape[0].message).toMatch(/bare reference `status`/);
+
+      const arrayShape = validateStackExpressions({
+        objects: [{ name: 'duly_assignment', fields: shadowFields }],
+        flows: [{
+          name: 'wrapper_array',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'duly_assignment' } },
+            { id: 'set', type: 'assignment', config: { assignments: [{ variable: 'status', value: 'approved' }] } },
+          ],
+          edges: [{ id: 'e1', source: 'set', target: 'end', condition: 'status == "approved"' }],
+        }],
+      });
+      expect(arrayShape).toHaveLength(1);
+      expect(arrayShape[0].message).toMatch(/bare reference `status`/);
+    });
+
+    // The row-7 gate is on the node TYPE, and it has to be: shape 3 reads every
+    // top-level config key, so an ungated collector would donate `objectName`,
+    // `url`, `condition` … from every other node and manufacture warnings.
+    it('does NOT read a non-assignment node\'s config keys as variable names', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'duly_assignment', fields: { status: { type: 'select' }, url: { type: 'text' } } }],
+        flows: [{
+          name: 'record_change',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'duly_assignment' } },
+            { id: 'fetch', type: 'http', config: { url: 'https://example.test' } },
+          ],
+          edges: [{ id: 'e1', source: 'fetch', target: 'end', condition: 'url != ""' }],
+        }],
+      });
+      expect(issues).toHaveLength(0);
+    });
+
+    /**
+     * ROW 8 — a node id is a bare CEL root at runtime. The engine writes a
+     * node's outputs under a variable key spelled "node id, dot, output key",
+     * and `evaluateCondition` expands that dotted key into a nested object AT
+     * the node id — overwriting the scalar the record flattening put there. So a
+     * node id colliding with a field name shadows harder than a plain variable.
+     */
+    it('treats a NODE ID as a bare root (row 8)', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'duly_assignment', fields: shadowFields }],
+        flows: [{
+          name: 'record_change',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'duly_assignment' } },
+            { id: 'status', type: 'query_records', config: { objectName: 'duly_assignment' } },
+          ],
+          edges: [{ id: 'e1', source: 'status', target: 'end', condition: 'status == "dispatched"' }],
+        }],
+      });
+      expect(issues).toHaveLength(1);
+      expect(issues[0].severity).toBe('warning');
+      expect(issues[0].message).toMatch(/bare reference `status`/);
+    });
+
+    // Variables are FLOW-scoped, not graph-scoped: `seedRunVariables` builds one
+    // map per run, so a name declared inside a `loop` body is in scope for a
+    // condition on the top-level graph. This is the case that forces collection
+    // to complete before any condition is judged.
+    it('sees a variable declared inside a region from a top-level condition', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'duly_assignment', fields: shadowFields }],
+        flows: [{
+          name: 'record_change',
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'duly_assignment' } },
+            {
+              id: 'sweep',
+              type: 'loop',
+              config: {
+                collection: '{items}',
+                iteratorVariable: 'status',
+                body: { nodes: [{ id: 'inner', type: 'assignment', config: { assignments: {} } }], edges: [] },
+              },
+            },
+          ],
+          edges: [{ id: 'e1', source: 'start', target: 'sweep', condition: 'status == "dispatched"' }],
+        }],
+      });
+      expect(issues).toHaveLength(1);
+      expect(issues[0].severity).toBe('warning');
+      expect(issues[0].message).toMatch(/bare reference `status`/);
+    });
+
+    // The diagnostic never fails a build (ruling 1.5), so a stack carrying only
+    // this finding still lints clean at `error` severity.
+    it('is advisory only — never an error', () => {
+      const issues = validateStackExpressions({
+        objects: [{ name: 'duly_assignment', fields: shadowFields }],
+        flows: [{
+          name: 'record_change',
+          variables: [{ name: 'status', type: 'text' }],
+          nodes: [
+            { id: 'start', type: 'start', config: { objectName: 'duly_assignment', condition: 'status == "dispatched"' } },
+          ],
+          edges: [],
+        }],
+      });
+      expect(issues.filter((i) => i.severity !== 'warning')).toEqual([]);
+    });
+  });
+
   // #1928 tier 4 — a text/boolean field used with an arithmetic/ordering
   // operator against a number is a silent-null bug; the lint surfaces it as a
   // non-blocking warning, threading each object's field types into the checker.
@@ -2447,6 +2691,13 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // here would have been excused into masking a genuine
       // `validations[].message` read.
       'verdict', 'diagnostic',
+      // [#14089] NOT a receiver at all — the tail of the `'./flow-variable-scope.js'`
+      // import specifier, which this scan cannot tell from `scope.j…`. The two
+      // entries above it in this set (`fields`, `guards`) are the same artefact
+      // of `'./system-fields.js'` / `'./validate-null-guards.js'`. Nothing in
+      // this file is a local named `scope`; `graph.scope` is a KEY read off the
+      // tabled `graph` receiver, so the metadata guard loses no coverage here.
+      'scope',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
