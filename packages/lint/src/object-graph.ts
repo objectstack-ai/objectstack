@@ -358,23 +358,36 @@ export function isUnjudgeable(verdict: FieldPathVerdict | undefined): boolean {
 
 /**
  * Nearest declared name for a typo'd reference, or `undefined` when nothing is
- * close enough. The budget — `max(2, floor(len/3))` — is the one
- * `validate-sortable-fields.ts` and `validate-object-references.ts` already
- * use, restated here rather than imported from either because neither exports
- * it; consolidating the three copies is recorded as a follow-up rather than
- * done under this card's scope.
+ * close enough. The sole shared helper behind every "Did you mean?" hint in
+ * this package (issue #14268 consolidated the four hand-copied instances that
+ * had drifted apart into this one).
+ *
+ * Containment is checked first, ahead of edit distance: the ADR-0021 cutover's
+ * canonical drift is base column → prefixed measure name (`amount` →
+ * `sum_amount`), which is far in edit distance but obvious to a human. A
+ * candidate that contains the target (or vice versa, when both are at least 3
+ * characters) scores on the length delta instead and always wins over an
+ * edit-distance match; otherwise the target must be within budget —
+ * `max(2, floor(len/3))` — of a candidate to be offered at all.
  */
 export function nearestName(target: string, known: Iterable<string>): string | undefined {
   let best: string | undefined;
   let bestScore = Infinity;
   for (const candidate of known) {
-    const d = distance(target, candidate);
-    if (d < bestScore) {
-      bestScore = d;
+    let score: number;
+    if (target.length >= 3 && (candidate.includes(target) || target.includes(candidate))) {
+      score = Math.abs(candidate.length - target.length);
+    } else {
+      const d = distance(target, candidate);
+      if (d > Math.max(2, Math.floor(target.length / 3))) continue;
+      score = 100 + d;
+    }
+    if (score < bestScore) {
+      bestScore = score;
       best = candidate;
     }
   }
-  return best && bestScore <= Math.max(2, Math.floor(target.length / 3)) ? best : undefined;
+  return best;
 }
 
 /** ` Did you mean "x"?`, or the empty string — the platform's message shape. */

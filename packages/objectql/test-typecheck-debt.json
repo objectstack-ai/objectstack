@@ -137,7 +137,7 @@
       "TS2322: Type '…' is not assignable to type 'QueryInput'.": 2
     },
     "src/registry-invalidate.test.ts": {
-      "TS2459: Module '\"@objectstack/spec\"' declares 'ServiceObject' locally, but it is not exported.": 1
+      "TS2352: Conversion of type '…' to type '…' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.": 1
     },
     "src/registry.test.ts": {
       "TS18048: 'out.enable' is possibly 'undefined'.": 7,
