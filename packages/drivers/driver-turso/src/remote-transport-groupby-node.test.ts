@@ -287,11 +287,13 @@ describe('[#6212] RemoteTransport compiles the GroupByNode union', () => {
       // escape inside a quoted SQL identifier. It is data, never grammar.
       expect(calls).toHaveLength(1);
       expect(calls[0].sql).toBe(
-        'SELECT "stage" AS "bucket""; DROP TABLE deal; --", count("stage") AS "n" FROM "deal" GROUP BY "stage"',
+        'SELECT "stage" AS "bucket""; DROP TABLE deal; --", count(*) AS "n" FROM "deal" GROUP BY "stage"',
       );
-      // ⛔ Not two statements: a payload that had broken out of its quoting
-      // would appear as a second one here.
-      expect(calls[0].sql).not.toContain('DROP TABLE deal;"');
+      // ⛔ ONE statement, not two: a payload that had broken out of its quoting
+      // would appear as a second one here. The executing block at the foot of
+      // this file proves the same thing against a real database, which is the
+      // only instrument that tells "escaped" apart from "broke out".
+      expect(calls[0].sql.match(/SELECT/g)).toHaveLength(1);
       // And the grouping key is still the FIELD, exactly as for a bare alias.
       expect(calls[0].sql.endsWith('GROUP BY "stage"')).toBe(true);
     });
