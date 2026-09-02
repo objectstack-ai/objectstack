@@ -11,6 +11,7 @@
  *   node scripts/pm/dispatch-gates.mjs --tier <path> ...     # the tier verdict alone, for the claim comment
  *   node scripts/pm/dispatch-gates.mjs --commands <path> ... # MACHINE-READABLE: one runnable command per line on stdout, nothing else
  *   node scripts/pm/dispatch-gates.mjs --json <path> ...     # MACHINE-READABLE: the whole derivation as one JSON document
+ *   node scripts/pm/dispatch-gates.mjs --ran <file> ...      # VERDICT: reconcile what you RAN against what this derives; exit 1 if any family is unrun
  *   node scripts/pm/dispatch-gates.mjs                       # NO paths: derive them from git, off the merge base
  *   node scripts/pm/dispatch-gates.mjs --changed             # the same, said out loud
  *   node scripts/pm/dispatch-gates.mjs --repo <owner>/<name> ...  # refuse unless this checkout IS that repo
@@ -48,6 +49,47 @@
  * rendering with the arithmetic tying it to both sections, and
  * `spellingFooterLines` no longer spells its matched-block subtotal in the
  * vocabulary of a total. See those two for the measurements.
+ *
+ * ## The THIRD link, and the one no better list can close: EXECUTED (#13774)
+ *
+ * The two sections above are about a harvest that comes out SHORT. `--ran`
+ * answers the next link in the same chain — harvested ⟶ executed — and it is a
+ * different defect, not a stronger version of the same one. Measured: a dev
+ * harvested this tool's list correctly, twice, with `--commands`; the gate that
+ * later reddened CI was named explicitly in both harvests; and the list was
+ * then used only to diff the two derivations against each other, never as a
+ * checklist. Of the 62 families its union named, 19 had been run. ⭐ A better
+ * list does not make anyone run it, so #13642's remedy — a perfect flat list —
+ * leaves this hole exactly as wide as it was.
+ *
+ * Getting one CI red out of 43 unrun families was luck, and the report that
+ * preceded it was honest, named real green families, and claimed a coverage it
+ * did not have. That is the shape: a partial run is INVISIBLE unless something
+ * compares the two lists, and the comparison has to be an exact set difference
+ * against this tool's own output taken as an external artefact — never a count,
+ * never a running total, never a matcher written per dev per card. Three
+ * independent devs produced three confident, well-formed, false claims of
+ * complete coverage: one made no comparison at all, one wrote a prefix matcher
+ * that reported 0 where the raw comparison scored 36, and one did arithmetic
+ * over its own loop counter that balanced perfectly because the missing family
+ * had left the numerator and the denominator in the same operation.
+ * `runReconciliation` carries all three measurements and what defeats each.
+ *
+ * The capture idiom is the load-bearing half, and it is one line: RECORD THE
+ * COMMAND THIS TOOL PRINTED, as it runs, byte for byte.
+ *
+ *     node scripts/pm/dispatch-gates.mjs --commands > gates.list
+ *     while IFS= read -r cmd; do
+ *       eval "$cmd" > "logs/$n" 2>&1
+ *       printf '%s\n' "$cmd" >> ran.list      # what RAN — pass or fail
+ *     done < gates.list
+ *     node scripts/pm/dispatch-gates.mjs --ran ran.list      # exit 1 if any family is unrun
+ *
+ * Both sides of that comparison are then strings this file emitted from one
+ * expression, so there is nothing to normalise and no shape for a matcher to
+ * be lenient about. ⛔ Do not build the record from log FILE NAMES: that is the
+ * step that needs a slug, and the slug is where the first hand-built
+ * reconciliation went wrong.
  *
  * ## This tool answers about the tree it RUNS IN, and says so on every run
  *
@@ -8361,6 +8403,335 @@ export function familyReconciliationLines(recon) {
   return lines;
 }
 
+// ── The RUN reconciliation: harvested ⟶ EXECUTED (#13774) ────────────────────
+
+/**
+ * The marker a run record puts in front of a family the runner is claiming it
+ * could not measure, and the separator between that claim and its reason.
+ *
+ * Both are compared BYTE-EXACTLY and case-sensitively, and neither carries a
+ * slash, so this file's own watch-hint extraction cannot read them as paths.
+ */
+export const RUN_RECORD_UNMEASURED_MARKER = 'NOT-MEASURED';
+export const RUN_RECORD_REASON_SEPARATOR = ' :: ';
+
+/**
+ * A run record, parsed. One entry per line that claims something.
+ *
+ * ## The format is the tool's, and it is the exact strings `--commands` emits
+ *
+ * That sentence is the whole design, and it is what makes the comparison below
+ * an EXACT set difference rather than a normalisation problem. The triage
+ * ruling that selected this producer-side shape attached a condition to it:
+ * if the run record's names cannot be reliably normalised tool-side — "各 dev
+ * 的日志名形状不受控" — report back rather than shipping a fuzzy matcher. The
+ * answer here is not a better normaliser. It is that there is NOTHING to
+ * normalise: the record's lines are the tool's own output lines, copied by the
+ * runner as it goes, so both sides of the comparison were produced by one
+ * expression in this file and are identical in shape by construction.
+ *
+ * The measured alternative is the reason. A dev built the first hand-made
+ * reconciliation by slugging LOG FILE NAMES back into family names, and the
+ * bash that wrote those names used `tr -c` on `echo` output, so every log name
+ * carried a trailing underscore the dev's Python slug did not reproduce. Its
+ * prefix matcher paired names that did not correspond and reported a confident
+ * `unreconciled 0` over a set on which the raw `comm` reported 36. ⭐ A fuzzy
+ * reconciliation reproduces exactly the failure a reconciliation exists to
+ * catch, one level up. So no matcher in this file is allowed to be clever:
+ * every comparison below is `Set.has` on the untouched string.
+ *
+ * ## What is decoded, and why that is not normalisation
+ *
+ * A line is split on `\n` and one trailing `\r` is removed, because a CRLF file
+ * ends its lines with two bytes and the second is a line TERMINATOR, not
+ * content. Nothing else is touched: leading and trailing spaces INSIDE a line
+ * are content, and stripping them would be a normalisation applied to one side
+ * of the comparison only — which is the fuzzy shape wearing a smaller hat. A
+ * line whose content is only whitespace carries no command (no command is
+ * whitespace) and is skipped with the blank lines; a line opening with `#`
+ * is a comment for the same reason, since no runnable invocation starts there.
+ *
+ * ## The NOT-MEASURED claim, and why it costs a reason
+ *
+ * A family a gate REFUSES to judge — it states its own unmet prerequisite — is
+ * genuinely not the same as one that never ran, and a record has to be able to
+ * say so. But the category is also where a family you simply did not FINISH
+ * running goes to hide: measured on a real card, a gate cap-killed at the
+ * container's foreground ceiling (exit 143) was written off as NOT MEASURED,
+ * and on re-running to completion it was green. So the claim parses only with
+ * a stated reason after `RUN_RECORD_REASON_SEPARATOR`; a marked line without
+ * one leaves its family UNRUN, which is the direction that costs a rerun
+ * instead of a false green.
+ */
+export function parseRunRecord(text) {
+  const entries = [];
+  const lines = String(text ?? '').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i].endsWith('\r') ? lines[i].slice(0, -1) : lines[i];
+    const line = i + 1;
+    if (raw.trim() === '' || raw.startsWith('#')) continue;
+    if (raw.startsWith(`${RUN_RECORD_UNMEASURED_MARKER} `)) {
+      const rest = raw.slice(RUN_RECORD_UNMEASURED_MARKER.length + 1);
+      const at = rest.indexOf(RUN_RECORD_REASON_SEPARATOR);
+      if (at < 0) {
+        entries.push({ command: rest, claim: 'not-measured', reason: null, line, raw, malformed: `no '${RUN_RECORD_REASON_SEPARATOR.trim()}' and no reason after it` });
+        continue;
+      }
+      const reason = rest.slice(at + RUN_RECORD_REASON_SEPARATOR.length).trim();
+      entries.push({
+        command: rest.slice(0, at),
+        claim: 'not-measured',
+        reason: reason || null,
+        line,
+        raw,
+        malformed: reason ? null : 'an empty reason',
+      });
+      continue;
+    }
+    entries.push({ command: raw, claim: 'ran', reason: null, line, raw, malformed: null });
+  }
+  return entries;
+}
+
+/**
+ * What this card's derivation names, against what the record says was run.
+ *
+ * ## The link this closes, and why the count line above does not close it
+ *
+ * `familyReconciliation` answers PRINTED ⟶ HARVESTED: it states the union's
+ * total so a consumer that harvested one section of the human rendering can
+ * detect that its list is short. This answers the NEXT link, HARVESTED ⟶
+ * EXECUTED, and the two are not the same defect. Measured: a dev harvested the
+ * family list correctly — the gate that later reddened CI was in both of its
+ * `--commands` harvests, named explicitly, twice — and then used the list only
+ * to diff its two derivations against each other, never as a checklist. Of the
+ * 62 families its merged-head union named, 19 had been run. ⭐ A better list
+ * does not make anyone run it, so a perfect answer to the first link leaves
+ * this one wide open.
+ *
+ * ## Why the denominator is recomputed here and never read from the record
+ *
+ * `derived` is `commandsFor`'s union, recomputed in THIS process from this
+ * tree, and it is the same expression `--commands` prints. That is what makes
+ * this a set difference against an external artefact rather than arithmetic
+ * over the runner's own bookkeeping, and the distinction is measured, not
+ * aesthetic. A dev recovering from a cap kill by counting a loop counter
+ * reported "58 families, 57 exit 0, 1 accounted for" — and the books balanced
+ * PERFECTLY, because the dropped family had left the numerator and the
+ * denominator in the same operation. ⭐ An arithmetic reconciliation over a
+ * list you maintain yourself cannot detect an item you never added to it: it
+ * is self-consistent by construction, and self-consistency is precisely what
+ * it is being offered as evidence of. The reviewing PM accepted the number for
+ * the same reason — checking the arithmetic runs the same broken instrument.
+ *
+ * Here the record can only ever SUBTRACT from a total it did not produce. A
+ * family the runner never wrote down is a family that stays in `unrun`, and an
+ * empty record over a non-empty derivation reports every family unrun rather
+ * than a balanced nothing.
+ *
+ * ## The classes, and why the tool owns the remainder rather than the prose
+ *
+ * A reconciliation whose output is routinely non-empty trains its readers to
+ * wave it through, and that has already been measured here: one card's
+ * remainder of 18 was accepted because the dev named every entry in prose — 16
+ * of them CI-owned job steps, 2 of them spelling duplicates of gates already
+ * run. Neither can appear in this remainder, and neither is classified away by
+ * a rule: `derived` is `commandsFor`'s union, which never contained the
+ * always-runs tail (it is a listing about the REPO, printed under its own
+ * heading) and which deduplicates the two spellings of one family into one
+ * command before this function ever sees them. What the tool CAN still meet in
+ * a record it classifies itself — a CI-measured-only family, which `commandsFor`
+ * subtracts by design, and a pending-changeset family, derived against a path
+ * that did not exist at derivation time. Both are matched byte-exactly against
+ * sets this same derivation produced.
+ *
+ * What is left for the runner to explain is therefore only what the tool
+ * genuinely cannot know: a gate that refused with its own prerequisite. That is
+ * the `not-measured` class, it costs a stated reason, and it is reported apart
+ * from `ran` because this tool did not measure it and must not imply it did.
+ *
+ * ## Near misses are a DIAGNOSTIC and can never move a verdict
+ *
+ * A record entry that differs from a derived command only by surrounding
+ * whitespace is reported as such — and the derived command stays UNRUN. That
+ * asymmetry is deliberate: the trailing-underscore incident above is exactly
+ * this shape, and the failure was not that the mismatch went unnoticed but that
+ * a matcher RESOLVED it. Naming it while refusing to pair it gives the runner
+ * the repair without giving the instrument a blind spot.
+ */
+export function runReconciliation({
+  derived = [],
+  ciOnlyCommands = new Set(),
+  pendingCommands = new Set(),
+  record = [],
+} = {}) {
+  const derivedSet = new Set(derived);
+  const ranClaims = new Set();
+  const unmeasuredClaims = new Map();
+  const malformed = [];
+  for (const entry of record) {
+    if (entry.claim === 'ran') {
+      ranClaims.add(entry.command);
+      continue;
+    }
+    if (entry.malformed) malformed.push({ line: entry.line, raw: entry.raw, why: entry.malformed });
+    if (!unmeasuredClaims.has(entry.command)) unmeasuredClaims.set(entry.command, entry);
+  }
+  // A command claimed BOTH ways is read as run — running it is the stronger
+  // fact — and the contradiction is reported rather than resolved silently.
+  const conflicts = [...unmeasuredClaims.keys()].filter((command) => ranClaims.has(command)).sort();
+
+  const ran = [];
+  const unrun = [];
+  const notMeasured = [];
+  for (const command of [...derivedSet].sort()) {
+    if (ranClaims.has(command)) {
+      ran.push(command);
+      continue;
+    }
+    const claim = unmeasuredClaims.get(command);
+    if (claim && claim.reason) {
+      notMeasured.push({ command, reason: claim.reason, line: claim.line });
+      continue;
+    }
+    unrun.push({
+      command,
+      why: claim
+        ? `recorded as ${RUN_RECORD_UNMEASURED_MARKER} on line ${claim.line} with ${claim.malformed} — an unexplained refusal is the shape a cap-killed run wears, so it is read as unrun`
+        : 'absent from the run record',
+    });
+  }
+
+  const explainedCiOnly = [];
+  const explainedPending = [];
+  const extra = [];
+  const nearMiss = [];
+  const seen = new Set();
+  for (const entry of record) {
+    if (seen.has(entry.command)) continue;
+    seen.add(entry.command);
+    if (derivedSet.has(entry.command)) continue;
+    if (ciOnlyCommands.has(entry.command)) {
+      explainedCiOnly.push(entry.command);
+      continue;
+    }
+    if (pendingCommands.has(entry.command)) {
+      explainedPending.push(entry.command);
+      continue;
+    }
+    // Diagnostic only — see the header. The entry stays in `extra` and its
+    // near neighbour stays in `unrun`, whatever this reports.
+    const trimmed = entry.command.trim();
+    if (trimmed !== entry.command && derivedSet.has(trimmed)) {
+      nearMiss.push({ recorded: entry.command, derived: trimmed, line: entry.line });
+    }
+    extra.push(entry.command);
+  }
+
+  const recon = {
+    derivedTotal: derivedSet.size,
+    ran,
+    unrun,
+    notMeasured,
+    explainedCiOnly: explainedCiOnly.sort(),
+    explainedPending: explainedPending.sort(),
+    extra: extra.sort(),
+    nearMiss,
+    malformed,
+    conflicts,
+    recordEntries: record.length,
+    ok: unrun.length === 0,
+  };
+  // Every derived family lands in exactly one of three places, and the parts
+  // are built from the SAME set the total is taken from — so this closes by
+  // construction, and it is asserted anyway for the reason the count
+  // reconciliation above asserts its own: a total that cannot fail toward its
+  // target is the defect this file keeps finding one level up, and #4690's rule
+  // is that a broken instrument refuses rather than printing a verdict.
+  if (recon.ran.length + recon.unrun.length + recon.notMeasured.length !== recon.derivedTotal) {
+    throw new Error(
+      'dispatch-gates: the run reconciliation does not close — ' +
+        `${recon.ran.length} run + ${recon.unrun.length} unrun + ${recon.notMeasured.length} not-measured ≠ ${recon.derivedTotal} derived. ` +
+        'The classes and the derivation came from different structures. Refusing rather than printing a verdict that cannot be trusted (#4690).',
+    );
+  }
+  return recon;
+}
+
+/**
+ * The run reconciliation, rendered — and the ONE bit at the end of it.
+ *
+ * The verdict is a single line and a single exit code, for the reason the
+ * remainder is classified by the tool: a verdict a reader has to assemble from
+ * several counts is a verdict that gets waved through once the counts are
+ * routinely non-empty.
+ */
+export function runReconciliationLines(recon) {
+  const lines = [];
+  const marker = RUN_RECORD_UNMEASURED_MARKER;
+  lines.push(
+    `Run reconciliation — ${recon.derivedTotal} derived, ${recon.ran.length} run, ${recon.notMeasured.length} ${marker}, ${recon.unrun.length} UNRUN.`,
+  );
+  lines.push(
+    `  The ${recon.derivedTotal} is THIS tree's derivation, recomputed in this process from the same expression --commands prints —` +
+      ' never read back from your record. A family you never wrote down is still counted, which is what an arithmetic over your own list cannot do.',
+  );
+  if (recon.unrun.length > 0) {
+    lines.push(`  ⛔ UNRUN (${recon.unrun.length}) — derived for these paths, and the record does not account for them:`);
+    for (const { command, why } of recon.unrun) lines.push(`    - ${command}   [${why}]`);
+  }
+  if (recon.notMeasured.length > 0) {
+    lines.push(
+      `  ${marker} (${recon.notMeasured.length}) — the RUNNER's claim, recorded with a reason. ⛔ This tool did not measure them and cannot verify the reason:`,
+    );
+    for (const { command, reason } of recon.notMeasured) lines.push(`    - ${command}   [${reason}]`);
+    lines.push(
+      `    ⚠️ ${marker} is for a gate that REFUSES with its own stated prerequisite. A run the OS killed is not that —` +
+        ' a cap kill (exit 143) leaves no verdict and the family is simply unrun. The two are easy to conflate under time pressure, and one of them was.',
+    );
+  }
+  if (recon.explainedCiOnly.length > 0) {
+    lines.push(
+      `  Classified by this tool, no explanation owed (${recon.explainedCiOnly.length}) — CI-MEASURED ONLY, and outside the derived total by design:`,
+    );
+    for (const command of recon.explainedCiOnly) lines.push(`    - ${command}`);
+  }
+  if (recon.explainedPending.length > 0) {
+    lines.push(
+      `  Classified by this tool, no explanation owed (${recon.explainedPending.length}) — pending-changeset famil(ies), derived against a path that did not exist at derivation time:`,
+    );
+    for (const command of recon.explainedPending) lines.push(`    - ${command}`);
+  }
+  if (recon.extra.length > 0) {
+    lines.push(
+      `  Outside this card's derivation (${recon.extra.length}) — recorded, and named by nothing this run derived. Not an error: a run beyond the union costs nothing.`,
+    );
+    for (const command of recon.extra) lines.push(`    - ${command}`);
+  }
+  for (const { recorded, derived, line } of recon.nearMiss) {
+    lines.push(
+      `  ⚠️ line ${line} '${recorded}' differs from the derived '${derived}' by surrounding whitespace ONLY — and is NOT paired with it.` +
+        ' Record the command as --commands emits it, byte for byte. ⛔ A matcher that resolved this difference is how a reconciliation reported 0 over a set the raw comparison scored 36.',
+    );
+  }
+  for (const { line, raw, why } of recon.malformed) {
+    lines.push(`  ⚠️ line ${line} claims ${marker} with ${why}: '${raw}'. Spelling: ${marker} <command>${RUN_RECORD_REASON_SEPARATOR}<reason>.`);
+  }
+  for (const command of recon.conflicts) {
+    lines.push(`  ⚠️ '${command}' is recorded BOTH as run and as ${marker}. Read as run; fix the record so it states one thing.`);
+  }
+  lines.push(
+    '  ⛔ This answers ONE link: what this card DERIVES against what you RAN. It is not a complete account of what CI runs on the PR —' +
+      ' the always-runs tail, the unreachable listing and the pending-changeset families are each outside the derived total, each printed under its own heading by a run without --ran.',
+  );
+  lines.push(
+    recon.ok
+      ? `✓ dispatch-gates --ran: ${recon.derivedTotal} derived famil(ies) accounted for — ${recon.ran.length} run, ${recon.notMeasured.length} ${marker}.`
+      : `✗ dispatch-gates --ran: ${recon.unrun.length} of ${recon.derivedTotal} derived famil(ies) UNRUN.`,
+  );
+  return lines;
+}
+
 /**
  * `--json`, as one document. Everything the human rendering places, placed the
  * same way, so a consumer never has to choose between a machine-readable answer
@@ -8452,7 +8823,7 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
   );
 }
 
-function derive(paths, { showResidue = false, mode = 'human' } = {}) {
+function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } = {}) {
   // The reachability sweep runs BEFORE a line is printed, so its refusals
   // (#4690: an empty corpus, or an all-unreachable answer) come out as a
   // failed derivation rather than as a footnote under an answer that already
@@ -8515,6 +8886,23 @@ function derive(paths, { showResidue = false, mode = 'human' } = {}) {
   // and this comes back empty. See pendingChangesetFamilies for the round of
   // five dispatches that measured the gap.
   const pending = pendingChangesetFamilies([...byCheck], new Set(matched.keys()));
+
+  if (mode === 'ran') {
+    // Built from the SAME three expressions the other renderings read, in this
+    // process, on this tree: the union `--commands` prints, the CI-measured set
+    // that union subtracts, and the pending families it holds back. A second
+    // traversal here would be a second answer to a question this file already
+    // answers once — and it would be the answer the reconciliation is judged
+    // against, which is the worst possible place to keep a duplicate.
+    const recon = runReconciliation({
+      derived: commandsFor({ matchedRows, kindGroups }),
+      ciOnlyCommands: ciOnlyCommandSet(matchedRows),
+      pendingCommands: new Set(pending.map(({ entry }) => runnableInvocation(entry))),
+      record: runRecord,
+    });
+    for (const line of runReconciliationLines(recon)) console.log(line);
+    return recon.ok ? 0 : 1;
+  }
 
   if (mode !== 'human') {
     machineReadableOutput(mode, {
@@ -8895,6 +9283,13 @@ function derivationProvenance({ paths, base, mergeBase, counts }) {
 const REPO_FLAG = '--repo';
 
 /**
+ * The run-record flag (#13774). Same spelling rule as the assertion above: the
+ * leading dashes keep it out of this file's own hint set, and its VALUE is a
+ * path this tool reads at runtime rather than a literal it declares.
+ */
+const RAN_FLAG = '--ran';
+
+/**
  * `<owner>/<name>` out of a git remote URL, or null when it is not recoverable.
  *
  * Both spellings git writes end in the same two segments — the URL form and the
@@ -9204,41 +9599,63 @@ export function driftLines(drift) {
 }
 
 /**
- * Split argv into paths, flags and the repo assertion.
+ * Every flag that takes a VALUE, and what that value is — the one table the
+ * split below consults, so a flag added to it cannot be added to the parse
+ * incorrectly.
  *
- * The assertion's VALUE must not fall through into the path list. The previous
- * parse took every non-`--` argument as a path, so a two-token flag added
- * without touching it would have quietly derived gates for a repo NAME read as
- * a file — a new silent wrong answer inside the fix for a silent wrong answer.
+ * The hint is carried here rather than at the refusal site because the refusal
+ * used to name the repo flag's value unconditionally. With one value-taking
+ * flag that was merely redundant; with two it is a message that LIES about
+ * which argument is wrong — the failure shape this file spends itself refusing,
+ * in the sentence a caller reads when it is already confused.
+ */
+const VALUE_FLAGS = new Map([
+  [REPO_FLAG, 'the repo this answer must be about, as an owner and a name'],
+  [RAN_FLAG, 'the run record to reconcile against, as a readable file path'],
+]);
+
+/**
+ * Split argv into paths, flags and the value-taking flags' values.
+ *
+ * A value must not fall through into the path list. The original parse took
+ * every non-`--` argument as a path, so a two-token flag added without touching
+ * it would have quietly derived gates for a repo NAME read as a file — a new
+ * silent wrong answer inside the fix for a silent wrong answer. That prediction
+ * came true the moment a SECOND value-taking flag was added, which is why the
+ * table above exists and the loop below reads it rather than naming flags.
  * Both spellings are accepted because both get typed.
  */
 export function splitArgv(argv) {
   const paths = [];
   const flags = [];
-  let assertion = null;
+  const values = new Map([...VALUE_FLAGS.keys()].map((flag) => [flag, null]));
   let malformed = null;
+  const needsValue = (flag) => {
+    malformed = `${flag} needs a value — ${VALUE_FLAGS.get(flag)}`;
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === REPO_FLAG) {
+    if (values.has(arg)) {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith('-')) {
-        malformed = `${REPO_FLAG} needs a value`;
+        needsValue(arg);
       } else {
-        assertion = value;
+        values.set(arg, value);
         i++;
       }
       continue;
     }
-    if (arg.startsWith(`${REPO_FLAG}=`)) {
-      const value = arg.slice(REPO_FLAG.length + 1);
-      if (!value) malformed = `${REPO_FLAG} needs a value`;
-      else assertion = value;
+    const joined = [...values.keys()].find((flag) => arg.startsWith(`${flag}=`));
+    if (joined) {
+      const value = arg.slice(joined.length + 1);
+      if (!value) needsValue(joined);
+      else values.set(joined, value);
       continue;
     }
     if (arg.startsWith('-')) flags.push(arg);
     else paths.push(arg);
   }
-  return { paths, flags, assertion, malformed };
+  return { paths, flags, assertion: values.get(REPO_FLAG), runRecord: values.get(RAN_FLAG), malformed };
 }
 
 /**
@@ -15772,6 +16189,239 @@ function selfTest() {
     t('and keeps it out of the runnable list, which is the same list --commands prints', Boolean(guardDoc) && !guardDoc.commands.includes(guardCommand));
   }
 
+
+  // ── The RUN reconciliation: harvested ⟶ EXECUTED (#13774) ─────────────────
+  //
+  // Three measured mechanisms produced three confident, well-formed, FALSE
+  // claims of complete coverage, and each one has cases here: no comparison at
+  // all, a fuzzy comparison, and an arithmetic over the runner's own counter.
+  // The unit half below drives the pure functions; the end-to-end half at the
+  // bottom builds the record BY CONSTRUCTION from a real `--commands` run,
+  // which is the property the whole design rests on.
+  {
+    const marker = RUN_RECORD_UNMEASURED_MARKER;
+    const sep = RUN_RECORD_REASON_SEPARATOR;
+
+    // ── The record format: what is decoded, and what is content ─────────────
+    const parsed = parseRunRecord(
+      [
+        'pnpm check:a',
+        '',
+        '   ',
+        '# a comment the runner left for itself',
+        'node scripts/check-b.mjs\r',
+        `${marker} pnpm check:c${sep}refuses without a built dist — its own stated prerequisite`,
+      ].join('\n'),
+    );
+    t('a plain line is a ran claim, byte for byte', parsed[0].command === 'pnpm check:a' && parsed[0].claim === 'ran');
+    t('blank and whitespace-only lines carry no command and are skipped', parsed.length === 3);
+    t('a comment line is skipped — no runnable invocation starts with a hash', !parsed.some((e) => e.raw.startsWith('#')));
+    t(
+      'a CRLF line loses its terminator and NOTHING else',
+      parsed[1].command === 'node scripts/check-b.mjs' && !parsed[1].command.includes('\r'),
+    );
+    t(
+      `a ${marker} claim parses into its command and its reason`,
+      parsed[2].claim === 'not-measured' && parsed[2].command === 'pnpm check:c' && parsed[2].reason.startsWith('refuses without'),
+    );
+    // ⭐ The exactness rule, in the parser: whitespace INSIDE a line is content,
+    // and trimming it would be a normalisation applied to one side of the
+    // comparison only — the fuzzy shape wearing a smaller hat.
+    t('leading whitespace is NOT trimmed away into a match', parseRunRecord('  pnpm check:a')[0].command === '  pnpm check:a');
+    t(
+      `the ${marker} marker is exact and case-sensitive — a command merely containing the word is a ran claim`,
+      parseRunRecord('pnpm check:not-measured-things')[0].claim === 'ran'
+        && parseRunRecord(`not-measured pnpm check:a${sep}x`)[0].claim === 'ran',
+    );
+    const unreasoned = parseRunRecord([`${marker} pnpm check:a`, `${marker} pnpm check:b${sep}   `].join('\n'));
+    t(
+      `a ${marker} claim with no reason, and one with an empty reason, are both MALFORMED and still name their command`,
+      unreasoned.every((e) => e.malformed && e.reason === null) && unreasoned[0].command === 'pnpm check:a' && unreasoned[1].command === 'pnpm check:b',
+    );
+
+    // ── The classes ────────────────────────────────────────────────────────
+    const derived = ['node scripts/check-b.mjs', 'pnpm check:a', 'pnpm check:c'];
+    const full = runReconciliation({ derived, record: parseRunRecord(derived.join('\n')) });
+    t('a complete record reconciles green, with every derived family run', full.ok && full.ran.length === 3 && full.unrun.length === 0);
+    const short = runReconciliation({ derived, record: parseRunRecord(['pnpm check:a', 'node scripts/check-b.mjs'].join('\n')) });
+    t('a record missing one family NAMES it rather than counting it', !short.ok && short.unrun.length === 1 && short.unrun[0].command === 'pnpm check:c');
+    t('and the reason it gives is the absence itself', short.unrun[0].why.includes('absent from the run record'));
+
+    // ⭐ MECHANISM 3, at its limit: the denominator is this tree's derivation,
+    // so an EMPTY record cannot balance against it. An arithmetic over the
+    // runner's own list would have reported 0 of 0 and closed.
+    const nothingRan = runReconciliation({ derived, record: parseRunRecord('') });
+    t(
+      'an EMPTY record over a non-empty derivation reports EVERY family unrun, never a balanced nothing',
+      !nothingRan.ok && nothingRan.unrun.length === 3 && nothingRan.derivedTotal === 3,
+    );
+    const junkOnly = runReconciliation({ derived, record: parseRunRecord(['pnpm check:something-else', '# note'].join('\n')) });
+    t(
+      'and a record of entries that name nothing derived does the same — the total cannot be lowered from the record side',
+      junkOnly.derivedTotal === 3 && junkOnly.unrun.length === 3 && junkOnly.extra.length === 1,
+    );
+    t('an entry outside the derivation is reported and is NOT an error on its own', junkOnly.extra[0] === 'pnpm check:something-else');
+
+    // ⭐ MECHANISM 2, structurally: no prefix, substring or whitespace
+    // relation is ever a pairing.
+    const prefixish = runReconciliation({
+      derived: ['pnpm check:foo'],
+      record: parseRunRecord(['pnpm check:foo-extra', 'check:foo', 'pnpm check:fo'].join('\n')),
+    });
+    t(
+      'a prefix, a substring and a truncation of a derived command pair with NOTHING',
+      !prefixish.ok && prefixish.unrun.length === 1 && prefixish.extra.length === 3,
+    );
+    const nearMiss = runReconciliation({ derived: ['pnpm check:foo'], record: parseRunRecord('pnpm check:foo  ') });
+    t(
+      'a whitespace-only difference is REPORTED and still leaves the family unrun — the diagnostic can never move a verdict',
+      !nearMiss.ok && nearMiss.unrun[0].command === 'pnpm check:foo' && nearMiss.nearMiss.length === 1,
+    );
+    t('and the near-miss names both spellings, so the repair is mechanical', nearMiss.nearMiss[0].recorded === 'pnpm check:foo  ' && nearMiss.nearMiss[0].derived === 'pnpm check:foo');
+
+    // ── NOT-MEASURED is its own class, and it costs a reason ────────────────
+    const claimed = runReconciliation({
+      derived: ['pnpm check:a', 'pnpm check:b'],
+      record: parseRunRecord(['pnpm check:a', `${marker} pnpm check:b${sep}refuses without a built dist`].join('\n')),
+    });
+    t(
+      `a reasoned ${marker} family is neither run nor unrun — it is its own class, and the verdict stays green`,
+      claimed.ok && claimed.ran.length === 1 && claimed.unrun.length === 0 && claimed.notMeasured.length === 1,
+    );
+    t('and the reason travels with it, because the report is what it is for', claimed.notMeasured[0].reason === 'refuses without a built dist');
+    // ⭐ The cap-kill conflation, mechanically refused: the category exists for
+    // a gate that refuses with its own prerequisite, and it is exactly where a
+    // family you merely did not FINISH running goes to hide.
+    const unexplained = runReconciliation({ derived: ['pnpm check:a'], record: parseRunRecord(`${marker} pnpm check:a`) });
+    t(
+      `an unexplained ${marker} claim is read as UNRUN, not as a refusal`,
+      !unexplained.ok && unexplained.unrun.length === 1 && unexplained.notMeasured.length === 0,
+    );
+    t('and the run says why, naming the cap kill it would otherwise absorb', unexplained.unrun[0].why.includes('cap-killed'));
+    t('the malformed line is reported against its line number too', unexplained.malformed.length === 1 && unexplained.malformed[0].line === 1);
+
+    // ── What the TOOL classifies, so no prose has to ────────────────────────
+    const explained = runReconciliation({
+      derived: ['pnpm check:a'],
+      ciOnlyCommands: new Set(['node scripts/check-payload-guard.mjs']),
+      pendingCommands: new Set(['pnpm check:changeset-shape']),
+      record: parseRunRecord(['pnpm check:a', 'node scripts/check-payload-guard.mjs', 'pnpm check:changeset-shape'].join('\n')),
+    });
+    t(
+      'a CI-measured-only entry and a pending-changeset entry are classified by the tool, not dumped into the remainder',
+      explained.ok && explained.explainedCiOnly.length === 1 && explained.explainedPending.length === 1 && explained.extra.length === 0,
+    );
+
+    // ── Bookkeeping the classes cannot lose ─────────────────────────────────
+    const dupes = runReconciliation({ derived: ['pnpm check:a'], record: parseRunRecord(['pnpm check:a', 'pnpm check:a'].join('\n')) });
+    t('a duplicated record line cannot double-count a family', dupes.ok && dupes.ran.length === 1 && dupes.derivedTotal === 1);
+    const contradicted = runReconciliation({
+      derived: ['pnpm check:a'],
+      record: parseRunRecord(['pnpm check:a', `${marker} pnpm check:a${sep}also claimed`].join('\n')),
+    });
+    t('a family claimed BOTH ways reads as run and the contradiction is reported, not resolved silently', contradicted.ok && contradicted.conflicts.length === 1);
+    const zero = runReconciliation({ derived: [], record: parseRunRecord('') });
+    t('an empty derivation and an empty record is a green EMPTY answer, not a missing one', zero.ok && zero.derivedTotal === 0);
+
+    // ⭐ The closure assertion, driven: the three classes partition the derived
+    // set, and an instrument that could not fail toward its own target is the
+    // defect this file keeps finding one level up.
+    for (const n of [0, 1, 5]) {
+      const many = Array.from({ length: n }, (_, i) => `pnpm check:g${i}`);
+      const half = many.filter((_, i) => i % 2 === 0);
+      const r = runReconciliation({ derived: many, record: parseRunRecord(half.join('\n')) });
+      t(
+        `the classes partition the derived set exactly (${n} derived, ${half.length} recorded)`,
+        r.ran.length + r.unrun.length + r.notMeasured.length === r.derivedTotal && r.derivedTotal === n,
+      );
+    }
+
+    // ── The rendering, and the ONE bit at the end of it ─────────────────────
+    const redLines = runReconciliationLines(short);
+    const redText = redLines.join('\n');
+    t('the rendering leads with the four counts in an assertable shape', /^Run reconciliation — 3 derived, 2 run, 0 NOT-MEASURED, 1 UNRUN\.$/.test(redLines[0]));
+    t('it states where the denominator came from — the claim an arithmetic cannot make', redText.includes('recomputed in this process'));
+    t('every unrun family is NAMED, never just counted', short.unrun.every(({ command }) => redText.includes(command)));
+    t('the verdict is one line and it is the LAST one', redLines[redLines.length - 1].startsWith('✗ dispatch-gates --ran:'));
+    const greenText = runReconciliationLines(full).join('\n');
+    t('and the green verdict is the same line in the same place', greenText.trim().endsWith('3 derived famil(ies) accounted for — 3 run, 0 NOT-MEASURED.'));
+    t('the rendering discloses what this number does NOT cover', greenText.includes('always-runs tail'));
+    t(
+      `the ${marker} block warns about the cap kill the category absorbs`,
+      runReconciliationLines(claimed).join('\n').includes('exit 143'),
+    );
+    t(
+      'the near-miss line refuses the pairing out loud rather than quietly',
+      runReconciliationLines(nearMiss).join('\n').includes('is NOT paired with it'),
+    );
+
+    // ── argv: a two-token flag's value must not become a path ───────────────
+    const ranSplit = splitArgv([RAN_FLAG, 'ran.list', 'packages/spec/src/index.ts', '--residue']);
+    t('the run record value never falls through into the path list', ranSplit.paths.length === 1 && ranSplit.runRecord === 'ran.list');
+    t('and the two value-taking flags coexist', splitArgv([RAN_FLAG, 'ran.list', REPO_FLAG, 'an-owner/a-repo']).assertion === 'an-owner/a-repo');
+    t('the joined spelling parses to the same thing', splitArgv([`${RAN_FLAG}=ran.list`]).runRecord === 'ran.list');
+    t('no run record passed stays null, so every other run is untouched', splitArgv(['packages/spec/src/index.ts']).runRecord === null);
+    // ⭐ The message that would LIE: with one value-taking flag the hint was a
+    // constant, and a second flag turned that constant into a sentence naming
+    // the wrong argument.
+    const ranMalformed = splitArgv([RAN_FLAG]).malformed ?? '';
+    t('a valueless run record is malformed, and the message names THIS flag', ranMalformed.includes(RAN_FLAG) && !ranMalformed.includes('repo'));
+    t('and the assertion keeps its own hint', (splitArgv([REPO_FLAG]).malformed ?? '').includes('owner'));
+  }
+
+  // ── END TO END: the record built BY CONSTRUCTION from --commands (#13774) ──
+  //
+  // Everything above stays green if `--ran` is never wired into the CLI, or if
+  // the mode reads a derivation of its own rather than the one `--commands`
+  // prints. Only a real run can tell those apart — and only a real run can
+  // demonstrate the property the whole design rests on: the two sides of the
+  // comparison are the SAME strings, because the record is this tool's own
+  // output copied line for line. That is what makes the comparison exact
+  // without a normaliser, which is the condition triage attached to this shape.
+  {
+    const ranCard = 'scripts/measure-durability-swallow-family.mjs';
+    const ranTmp = mkdtempSync(join(tmpdir(), 'dg-ran-'));
+    try {
+      const cmdRun = runCli(['--commands', ranCard]);
+      const rows = (cmdRun.stdout ?? '').split('\n').filter(Boolean);
+      t('CONTROL: the card derives a runnable union at all', cmdRun.status === 0 && rows.length >= 2);
+
+      const completePath = join(ranTmp, 'ran-complete.list');
+      writeFileSync(completePath, `${rows.join('\n')}\n`);
+      const green = runCli([RAN_FLAG, completePath, ranCard]);
+      const greenOut = green.stdout ?? '';
+      t(
+        '⭐ a record that is --commands output copied verbatim reconciles GREEN and exits 0',
+        green.status === 0 && greenOut.includes(`${rows.length} derived famil(ies) accounted for`),
+      );
+      t('and it needed no normalisation to do it — the two lists are the same strings', greenOut.includes(`${rows.length} derived, ${rows.length} run`));
+
+      const dropped = rows[rows.length - 1];
+      const shortPath = join(ranTmp, 'ran-short.list');
+      writeFileSync(shortPath, `${rows.slice(0, -1).join('\n')}\n`);
+      const red = runCli([RAN_FLAG, shortPath, ranCard]);
+      const redOut = red.stdout ?? '';
+      t('⭐ dropping ONE line from that record exits 1 — a verdict a report cannot paraphrase', red.status === 1);
+      t('and the run names exactly the family that was dropped', redOut.includes('UNRUN (1)') && redOut.includes(dropped));
+
+      // The refusals, and the unreadable input. All three exit before the tree
+      // walk, so they cost nothing to assert.
+      t(
+        'combining the verdict mode with a derivation mode is REFUSED, not blended',
+        runCli([RAN_FLAG, completePath, '--commands', ranCard]).status === 2
+          && runCli([RAN_FLAG, completePath, '--json', ranCard]).status === 2,
+      );
+      t('and so is asking for a tier verdict there is nothing to reconcile against', runCli([RAN_FLAG, completePath, '--tier', ranCard]).status === 2);
+      const missing = runCli([RAN_FLAG, join(ranTmp, 'no-such-record.list'), ranCard]);
+      t('an unreadable record REFUSES rather than reconciling against nothing (#4690)', missing.status === 2 && (missing.stdout ?? '').trim() === '');
+      t('and the refusal names the file it could not read', (missing.stderr ?? '').includes('no-such-record.list'));
+      const valueless = runCli([RAN_FLAG]);
+      t('a valueless run record refuses, and its message does not name the OTHER flag', valueless.status === 2 && !(valueless.stderr ?? '').includes('as an owner and a name'));
+    } finally {
+      rmSync(ranTmp, { recursive: true, force: true });
+    }
+  }
+
   let failed = 0;
   for (const [name, cond] of cases) {
     if (!cond) failed++;
@@ -15838,7 +16488,19 @@ if (invokedDirectly) {
   if (process.argv.includes('--self-test')) {
     selfTest();
   } else if (argv.malformed) {
-    console.error(`dispatch-gates: ${argv.malformed} — the repo this answer must be about, as an owner and a name.`);
+    console.error(`dispatch-gates: ${argv.malformed}.`);
+    process.exit(2);
+  } else if (argv.runRecord !== null && (process.argv.includes('--commands') || process.argv.includes('--json'))) {
+    // The same rule as the pair below, and it is not a courtesy: `--ran` renders
+    // a VERDICT on stdout and those two render the derivation, so blending them
+    // would put prose in a stream whose caption promises commands.
+    console.error(`dispatch-gates: ${RAN_FLAG} renders a verdict on stdout; --commands and --json render the derivation. Pass one.`);
+    process.exit(2);
+  } else if (argv.runRecord !== null && process.argv.includes('--tier')) {
+    // `--tier` reads no workflow and no check script, so it derives no family —
+    // there is nothing for a run record to be reconciled against, and answering
+    // with the tier alone would silently drop the flag the caller passed.
+    console.error(`dispatch-gates: --tier derives no gate family, so ${RAN_FLAG} would have nothing to reconcile against. Pass one.`);
     process.exit(2);
   } else if (process.argv.includes('--commands') && process.argv.includes('--json')) {
     // Two answers to "what shape is stdout" is no answer. Blending them — or
@@ -15865,7 +16527,9 @@ if (invokedDirectly) {
       ? 'json'
       : process.argv.includes('--commands')
         ? 'commands'
-        : 'human';
+        : argv.runRecord !== null
+          ? 'ran'
+          : 'human';
     const declaredPaths = argvPaths.map((p) => p.replace(/^\.\//, ''));
     for (const line of bannerLines({ identity, paths: declaredPaths, drift: baseDrift() })) console.error(line);
     if (argv.assertion !== null) {
@@ -15880,6 +16544,25 @@ if (invokedDirectly) {
       console.error(`  ${REPO_FLAG} '${argv.assertion}' checked against this checkout's '${DEFAULT_BASE_REMOTE}' remote — it holds.`);
     }
     console.error('');
+    // Read BEFORE the derivation, not inside it. A record that cannot be read
+    // is an input problem, and #4690's rule is that an unreadable input must
+    // never look like an empty answer — reading it after the derivation would
+    // also spend a full tree walk to reach a message about a filename. An
+    // EMPTY but readable record is NOT an error: it means nothing ran, and
+    // saying so is the whole point of the mode.
+    let runRecord = [];
+    if (argv.runRecord !== null) {
+      try {
+        runRecord = parseRunRecord(readFileSync(resolve(argv.runRecord), 'utf8'));
+      } catch (err) {
+        console.error(`dispatch-gates: could not read the run record '${argv.runRecord}' — ${err.message}`);
+        console.error(
+          `  ${RAN_FLAG} takes a file of the commands you ran, one per line, exactly as --commands emits them.` +
+            ' Capture them as you run, never by slugging log file names back into family names.',
+        );
+        process.exit(2);
+      }
+    }
     let paths;
     if (argvPaths.length > 0) {
       paths = declaredPaths;
@@ -15893,7 +16576,7 @@ if (invokedDirectly) {
         derived = changedPathsFromGit();
       } catch (err) {
         console.error(`dispatch-gates: could not derive the change set — ${err.message}`);
-        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [--commands | --json] [--repo owner/name] [<path> ...] | --changed | --self-test');
+        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [--commands | --json | --ran <file>] [--repo owner/name] [<path> ...] | --changed | --self-test');
         process.exit(2);
       }
       if (derived.paths.length === 0) {
@@ -15917,7 +16600,13 @@ if (invokedDirectly) {
       if (process.argv.includes('--tier')) {
         for (const line of tierLines(deriveTier(paths))) console.log(line);
       } else {
-        derive(paths, { showResidue: process.argv.includes('--residue'), mode });
+        // The only mode with a VERDICT in it, so the only one whose exit code
+        // carries an answer rather than "the derivation completed". A run that
+        // names unrun families must not exit 0: this mode exists because a
+        // report claiming coverage it did not have read exactly like one that
+        // did, and an exit code is the half of that a caller cannot paraphrase.
+        const status = derive(paths, { showResidue: process.argv.includes('--residue'), mode, runRecord });
+        if (status) process.exit(status);
       }
     } catch (err) {
       console.error(`dispatch-gates: derivation failed — ${err.message}`);
