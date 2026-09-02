@@ -710,6 +710,14 @@ export async function main(argv, io = {}) {
  * this repo -- all seven guarded steps carry distinct names, which case 8 asserts
  * rather than assumes -- and a refusal branch nobody can trigger is decoration.
  */
+
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 export async function selfTest() {
   const failures = [];
   let checked = 0;
@@ -1026,11 +1034,25 @@ export async function selfTest() {
     return 1;
   }
   console.log(`measure-stall-guard-headroom --self-test: ${checked} assertion(s) passed.`);
+  selfTestReachedVerdict = true;
   return 0;
 }
 
 if (isEntrypoint(import.meta.url)) {
   const argv = process.argv.slice(2);
-  const code = argv.includes('--self-test') ? await selfTest() : await main(argv);
+  let code;
+  if (argv.includes('--self-test')) {
+      code = await selfTest();
+      if (!selfTestReachedVerdict) {
+          console.error(
+              '\n✗ measure-stall-guard-headroom self-test: selfTest() returned without reaching its verdict,\n'
+                  + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                  + 'that never finished as a self-test that passed.\n',
+          );
+          process.exit(1);
+      }
+  } else {
+      code = await main(argv);
+  }
   process.exit(code);
 }
