@@ -67,7 +67,10 @@ describe('InMemoryDriver', () => {
           { active: false }
       );
       
-      expect(updateResult.active).toBe(false);
+      // The declared type carries the not-found arm (#13878); a caller reading
+      // fields narrows first. The row exists, so the arm is not taken here.
+      expect(updateResult).not.toBeNull();
+      expect(updateResult!.active).toBe(false);
       
       const results = await driver.find(testTable, { fields: ['active'] });
       expect(results[0].active).toBe(false);
@@ -98,8 +101,9 @@ describe('InMemoryDriver', () => {
       const originalCreatedAt = created.created_at;
       
       const updated = await driver.update(testTable, '1', { name: 'Alice Updated' });
-      expect(updated.created_at).toBe(originalCreatedAt);
-      expect(updated.name).toBe('Alice Updated');
+      expect(updated).not.toBeNull();
+      expect(updated!.created_at).toBe(originalCreatedAt);
+      expect(updated!.name).toBe('Alice Updated');
     });
   });
   
