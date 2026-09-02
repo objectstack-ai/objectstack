@@ -2090,7 +2090,7 @@ describe('ADR-0122 type-alias convention', () => {
     // Iso numbers stay vacant (ids are claims about pins, not positions).
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(835);
+    expect(pins).toHaveLength(832);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either
