@@ -654,7 +654,83 @@ export function boundedDeclaredUserMessage(error: unknown): string | undefined {
     return userMessage === undefined ? undefined : truncateClientMessage(userMessage);
 }
 
-function classifyDataError(error: any, object?: string): { status: number; body: Record<string, unknown> } {
+/**
+ * [#11588 / #7543 / #14541] Did this error come out of a sandboxed body?
+ *
+ * `SandboxError.innerMessage` is the QuickJS side-channel: `message` carries a
+ * `<kind> '<name>' threw: <msg>` DEBUG WRAPPER written for the server log, and
+ * the sentence addressed to the caller is `innerMessage`. Every arm in
+ * {@link structuredCodeAnswer} ships `error.message`, so a sandboxed producer
+ * is a DIFFERENT producer for their purposes and is answered by the unwrap
+ * door instead — the rule #14389 already wrote into the `DUPLICATE_RECORD`
+ * arm's `name` gate, stated once here for the arms that need it by POSITION.
+ *
+ * Deliberately NOT {@link sandboxBusinessMessage}: that one declines a CRASH
+ * (#7543) so the crash reaches the fault terminal, and a crash carrying a
+ * bespoke `code` must reach the unwrap door too rather than an arm that would
+ * dress the wrapper up as a refusal.
+ */
+function isSandboxOrigin(error: any): boolean {
+    return typeof error?.innerMessage === 'string' && error.innerMessage.length > 0;
+}
+
+/**
+ * [#14541] The bespoke structured arms, in ONE place, so BOTH REST error doors
+ * can ask them FIRST.
+ *
+ * ## The defect this retires
+ *
+ * `classifyDataError` has always surfaced these arms ahead of its own
+ * declared-status passthrough, "so the structured fields survive the generic
+ * catch-alls". {@link resolveErrorResponse} — the door every route reporting
+ * through {@link handleRouteError} / {@link sendThrownError} uses (createMany,
+ * updateMany, deleteMany, batch, clone, the import/export routes and the
+ * metadata / UI families) — takes its OWN declared-status passthrough BEFORE
+ * delegating here, so on those routes the arms were never reached at all. One
+ * refusal, two bodies, decided by which route caught it:
+ *
+ *   engine `DELETE_RESTRICTED`  (status 409) → `developerMessage`,
+ *       `dependentObject`, `dependentCount`, `object` all dropped
+ *   `ConcurrentUpdateError`     (status 409) → `currentVersion`,
+ *       `currentRecord`, `object` dropped
+ *   `DuplicateRecordError`      (status 409) → `field`, `object`,
+ *       `developerMessage` dropped, and `code` left as the engine spelling
+ *       `DUPLICATE_RECORD` instead of the wire's `UNIQUE_VIOLATION`
+ *   `FEEDS_DISABLED` / `FILES_DISABLED` / `ATTACHMENT_PARENT_ACCESS` /
+ *       `ATTACHMENT_DELETE_DENIED` / `RECORD_NOT_ACCESSIBLE` (status 403)
+ *       → `object` dropped
+ *   engine `INVALID_FIELD`      (status 400) → `field`, `object` dropped
+ *
+ * ## Why a shared classification rather than a second exclusion list
+ *
+ * The passthrough already carried one exclusion, and it is this same argument
+ * accepted once for one code:
+ *
+ * > [#3770] `OBJECT_NOT_FOUND` is deliberately excluded from this
+ * > status-passthrough: `mapDataError` owns its canonical envelope, and
+ * > short-circuiting here would ship a second wire code for the same condition
+ * > depending on which route caught it.
+ *
+ * That exclusion never grew past its first case, which is what produced the
+ * five rows above. A list that must be extended by hand for every new arm
+ * fails the same way again; a classification both doors ASK cannot, because
+ * adding an arm here fixes both doors at once. Pinned door-to-door in
+ * `error-response-structured-arm-door-parity.test.ts` rather than asserted.
+ *
+ * ## The boundary
+ *
+ * Every arm here is decided on what the PRODUCER DECLARED — its `code`, or the
+ * error `name` where a class is the contract. Nothing here reads message TEXT
+ * to decide WHICH condition this is; that is the line, and it is why the
+ * `PERMISSION_DENIED` arm (whose third limb sniffs a `[Security] Access denied`
+ * prefix) and the sandbox unwrap door stay in {@link classifyDataError} below,
+ * ahead of nothing. Answering `undefined` means "no bespoke arm knows this
+ * error" — the caller decides what that means for its own door.
+ */
+function structuredCodeAnswer(
+    error: any,
+    object?: string,
+): { status: number; body: Record<string, unknown> } | undefined {
     // Referential-integrity restrict on delete → 409 with the dependent count.
     // Surfaced FIRST so the structured fields survive the generic catch-alls.
     if (error?.code === 'DELETE_RESTRICTED') {
@@ -860,6 +936,65 @@ function classifyDataError(error: any, object?: string): { status: number; body:
             },
         };
     }
+    // [#14541] Gated on `!isSandboxOrigin` because this arm used to sit BELOW
+    // the sandbox unwrap door and now sits above it. The clause is that
+    // position, written down: the sentence this arm ships is `error.message`,
+    // which for a sandboxed producer is the QuickJS DEBUG WRAPPER, and the
+    // unwrap door owns that producer (#11588 / #7543). Without it, lifting the
+    // arm would ship the wrapper on both doors.
+    // [#3770] Object does not exist — thrown by the protocol's registry gate
+    // (`assertObjectRegistered`, which covers every data entry point) and by
+    // `cloneData`. Mapped to the SAME envelope the driver-string branch below
+    // produces, so one condition has exactly one wire code (`OBJECT_NOT_FOUND`,
+    // a `StandardErrorCode` member) no matter which layer detected it — the
+    // point of #3770 is that this 404 no longer depends on a driver erroring
+    // on a missing table. Must precede the generic 4xx passthrough, which
+    // would otherwise ship the internal SCREAMING_CASE code verbatim.
+    if (error?.code === 'OBJECT_NOT_FOUND' && !isSandboxOrigin(error)) {
+        const name = error?.object ?? object;
+        return {
+            status: 404,
+            body: {
+                error: name ? `Object '${name}' is not registered` : 'Object not found',
+                code: 'OBJECT_NOT_FOUND',
+                ...(name ? { object: name } : {}),
+            },
+        };
+    }
+    // [#14541] Gated on `!isSandboxOrigin` because this arm used to sit BELOW
+    // the sandbox unwrap door and now sits above it. The clause is that
+    // position, written down: the sentence this arm ships is `error.message`,
+    // which for a sandboxed producer is the QuickJS DEBUG WRAPPER, and the
+    // unwrap door owns that producer (#11588 / #7543). Without it, lifting the
+    // arm would ship the wrapper on both doors.
+    // [#4134] Unknown field named by a READ — the protocol's list normalizer
+    // refusing to lower a query parameter that matches no field into an
+    // implicit filter that could only ever match zero rows. Emitted in the SAME
+    // envelope as the driver-string branch below (which catches the write-path
+    // form of the identical mistake), so one condition has one wire shape no
+    // matter which layer noticed it. Must precede the generic 4xx passthrough,
+    // which would ship the message but drop `field`.
+    if (error?.code === 'INVALID_FIELD' && !isSandboxOrigin(error)) {
+        const name = error?.object ?? object;
+        return {
+            status: 400,
+            body: {
+                error: String(error?.message ?? 'Request references a field that does not exist'),
+                code: 'INVALID_FIELD',
+                ...(typeof error?.field === 'string' && error.field ? { field: error.field } : {}),
+                ...(name ? { object: name } : {}),
+            },
+        };
+    }
+    return undefined;
+}
+
+function classifyDataError(error: any, object?: string): { status: number; body: Record<string, unknown> } {
+    // [#14541] The bespoke structured arms first, exactly as they were inline
+    // here — same arms, same order, same position — now stated once so
+    // {@link resolveErrorResponse} can ask them before ITS passthrough too.
+    const structured = structuredCodeAnswer(error, object);
+    if (structured !== undefined) return structured;
     // Short-circuit: explicit security denial → 403. Match by `code` /
     // `name` to avoid pulling a runtime dependency on plugin-security.
     if (
@@ -982,44 +1117,6 @@ function classifyDataError(error: any, object?: string): { status: number; body:
         // answer. (The structured `code` branches in between keep outranking
         // the passthrough for this producer exactly as they do for every
         // other — the #7525 §5 pins.)
-    }
-    // [#3770] Object does not exist — thrown by the protocol's registry gate
-    // (`assertObjectRegistered`, which covers every data entry point) and by
-    // `cloneData`. Mapped to the SAME envelope the driver-string branch below
-    // produces, so one condition has exactly one wire code (`OBJECT_NOT_FOUND`,
-    // a `StandardErrorCode` member) no matter which layer detected it — the
-    // point of #3770 is that this 404 no longer depends on a driver erroring
-    // on a missing table. Must precede the generic 4xx passthrough, which
-    // would otherwise ship the internal SCREAMING_CASE code verbatim.
-    if (error?.code === 'OBJECT_NOT_FOUND') {
-        const name = error?.object ?? object;
-        return {
-            status: 404,
-            body: {
-                error: name ? `Object '${name}' is not registered` : 'Object not found',
-                code: 'OBJECT_NOT_FOUND',
-                ...(name ? { object: name } : {}),
-            },
-        };
-    }
-    // [#4134] Unknown field named by a READ — the protocol's list normalizer
-    // refusing to lower a query parameter that matches no field into an
-    // implicit filter that could only ever match zero rows. Emitted in the SAME
-    // envelope as the driver-string branch below (which catches the write-path
-    // form of the identical mistake), so one condition has one wire shape no
-    // matter which layer noticed it. Must precede the generic 4xx passthrough,
-    // which would ship the message but drop `field`.
-    if (error?.code === 'INVALID_FIELD') {
-        const name = error?.object ?? object;
-        return {
-            status: 400,
-            body: {
-                error: String(error?.message ?? 'Request references a field that does not exist'),
-                code: 'INVALID_FIELD',
-                ...(typeof error?.field === 'string' && error.field ? { field: error.field } : {}),
-                ...(name ? { object: name } : {}),
-            },
-        };
     }
     // Generic passthrough for domain errors that already carry an explicit
     // HTTP status (e.g. plugin-sharing's record-scope denial: status 403 +
@@ -1700,10 +1797,59 @@ function logWithheldServerFault(
  * drift this whole seam exists to prevent (#4886).
  */
 function resolveErrorResponse(error: any, object?: string): { status: number; body: Record<string, unknown> } {
+    // [#14541] The bespoke structured arms are asked BEFORE this door's
+    // declared-status passthrough, because that ordering is the whole defect
+    // this card reports: an engine envelope declaring `status: 409` left
+    // through the passthrough and never reached the arm that owns its wire
+    // body, so `DELETE_RESTRICTED` lost `developerMessage` /
+    // `dependentObject` / `dependentCount`, `ConcurrentUpdateError` lost
+    // `currentVersion` / `currentRecord`, and `DuplicateRecordError` lost
+    // `field` and kept the engine's `code` — on every route reporting through
+    // {@link handleRouteError} / {@link sendThrownError}, while the
+    // single-record `/data` routes calling `mapDataError` directly got the
+    // curated envelope. One refusal, two bodies.
+    //
+    // This GENERALISES the exclusion the arm below already carried rather than
+    // adding a second one — see {@link structuredCodeAnswer}, which holds the
+    // #3770 ruling this applies and the measured per-code delta.
+    //
+    // Answered through `mapDataError` rather than by returning the arm's body
+    // here, so the two doors are identical BY CONSTRUCTION — same arm, same
+    // {@link withDeclaredUserMessage} wrapper, nothing for a future edit to
+    // desynchronise. The second classification pass is on an error path and
+    // the function is pure.
+    //
+    // Three guards, each one a boundary this card was fenced away from:
+    //
+    //  - a producer-declared **5xx** keeps the passthrough's 5xx arm. Its
+    //    unconditional prose-drop (#5437 / #5582 / #5907, argued at length
+    //    below) is load-bearing and is NOT narrowed here; this card is about
+    //    ordering for 4xx codes that have a bespoke arm, nothing else.
+    //  - an arm that answers a **5xx** (`ERR_DATASOURCE_UNAVAILABLE`'s 503)
+    //    never displaces a declared 4xx either — the same band, fenced from
+    //    the other side. Measured: its producer declares no `status` at all,
+    //    so this guard changes nothing today and states the boundary anyway.
+    //  - a **sandbox** producer keeps the unwrap answer it has today. The arms
+    //    ship `error.message`, which for a sandboxed body is the QuickJS debug
+    //    wrapper #11588 exists to keep off this wire; the passthrough below
+    //    reads {@link sandboxBusinessMessage} instead and is the right door
+    //    for it.
+    const structured = isSandboxOrigin(error) ? undefined : structuredCodeAnswer(error, object);
+    const declaresServerBand = typeof error?.status === 'number' && error.status >= 500 && error.status < 600;
+    if (structured !== undefined && structured.status < 500 && !declaresServerBand) {
+        return mapDataError(error, object);
+    }
     // [#3770] `OBJECT_NOT_FOUND` is deliberately excluded from this
     // status-passthrough: `mapDataError` owns its canonical envelope
     // (`OBJECT_NOT_FOUND`), and short-circuiting here would ship a second wire
     // code for the same condition depending on which route caught it.
+    //
+    // [#14541] The consult above now answers that for every DECLARED-code
+    // producer, so this clause survives for exactly one residue: a SANDBOXED
+    // body throwing `OBJECT_NOT_FOUND`, which the consult declines. Measured:
+    // without the clause that error takes the 4xx arm below and loses
+    // `object`. ⛔ Not a list to extend — a new bespoke code belongs in
+    // {@link structuredCodeAnswer}, where both doors read it.
     //
     // [#7525] Deliberately still a `status`-only read HERE. An error that
     // declares its status as `statusCode` instead is not skipped — it falls to
