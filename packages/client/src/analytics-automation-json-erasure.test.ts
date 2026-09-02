@@ -1,9 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#12104 — the in-repo half] What the five `return res.json()` methods of the
- * `analytics.*` / `automation.*` families actually resolve to, measured against
- * their REAL producers.
+ * [#12104 — the in-repo half; #13079 — the convergence] What the five
+ * `analytics.*` / `automation.trigger` methods actually resolve to, measured
+ * against their REAL producers.
  *
  * ## The erasure these five carried
  *
@@ -35,20 +35,26 @@
  * ## The load-bearing fact these five share, and the one that splits them
  *
  * `unwrapResponse` strips the `{ success, data }` envelope; `res.json()` does
- * NOT. So a `res.json()` method resolves to the WHOLE body, and the shape of
- * that body is decided by which surface serves the route:
+ * NOT. The shape of the body is decided by which surface serves the route,
+ * and the reader has to match it:
  *
  *   - `query` / `meta` / `explain` and `automation.trigger` are DISPATCHER
  *     routes, and every dispatcher domain answers through `deps.success(v)` —
- *     `{ success: true, data: v }`. Their true type is the envelope, not `v`.
+ *     `{ success: true, data: v }`. Since #13079 (maintainer ruling
+ *     2026-08-31, option A) all four end `unwrapResponse`, so they resolve to
+ *     `v`; until then they ended `res.json()` and resolved to the envelope,
+ *     which #12104 had stated in their declarations.
  *   - `queryDataset` is a REST route (`@objectstack/rest` mounts it; the
- *     dispatcher mounts no twin) and it answers `res.json(result)` — BARE. Its
- *     true type is `v` itself.
+ *     dispatcher mounts no twin) and it answers `res.json(result)` — BARE. It
+ *     keeps `res.json()`, which there IS the payload read; ⛔ PROTECTED by the
+ *     ruling from being "converged" into the others' shape.
  *
- * Binding the payload where the envelope is served (or the reverse) would
- * typecheck against `any` and ship a false declaration, which is the census's
- * highest-risk band (`return-type-precision.test.ts`, shape class 2). Hence one
- * driven case per method rather than a family-wide assumption.
+ * So all five now resolve to `v`, by two different readers, and each
+ * (reader, surface) pair is driven here against the real producer: converting
+ * the bare route to `unwrapResponse`, or sliding a dispatcher route back to
+ * `res.json()`, would leave the declarations false with no type error — this
+ * file's cases are what go red. Hence one driven case per method rather than
+ * a family-wide assumption.
  *
  * ## Two spec response schemas WERE narrower than their producer — measured here
  *
@@ -72,8 +78,10 @@
  * Removing an annotation from any of the five leaves THIS file green — the wire
  * value does not change — and turns `return-type-precision.test.ts` RED under
  * `tsc`, plus `check:exported-any-returns` red on the un-deleted ledger entry.
- * That asymmetry is the whole reason both files exist; the ablation is recorded
- * on the PR against the halves a declaration change can move.
+ * Reverting one of the four #13079 conversions (`unwrapResponse` back to
+ * `res.json()`) turns THIS file red on that method's case — the resolved value
+ * regains the envelope — and `return-type-precision.test.ts` red on its
+ * reversed pin. Both asymmetries are why the files exist as a pair.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -299,72 +307,73 @@ function producerBackedClient() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('#12104 — the four DISPATCHER-served methods resolve to the envelope, not the payload', () => {
-    it('analytics.query answers `{ success, data: AnalyticsResult }`', async () => {
+describe('#13079 — the four DISPATCHER-served methods resolve to the PAYLOAD, measured against the real producers', () => {
+    it('analytics.query answers the AnalyticsResult itself — the producer\'s own return, no envelope', async () => {
         const { client, analytics } = producerBackedClient();
 
-        const body = await client.analytics.query({
+        const result = await client.analytics.query({
             cube: 'crm_account',
             measures: ['account_count'],
             dimensions: ['industry'],
         });
 
-        // ① The envelope is the value — NOT the payload. This is the whole
-        //    difference between `res.json()` and `unwrapResponse`.
-        expect(Object.keys(body).sort()).toEqual(['data', 'meta', 'success']);
-        expect(body.success).toBe(true);
-        // ② …and `data` is verbatim what the producer's own contract method
+        // ① The payload is the value — NOT the envelope. Before #13079 the
+        //    keys here were `['data', 'meta', 'success']`; `unwrapResponse`
+        //    strips exactly that layer and nothing else.
+        expect('success' in result).toBe(false);
+        expect('data' in result).toBe(false);
+        // ② …and the value is verbatim what the producer's own contract method
         //    returned, asserted against a second call to the service itself
         //    rather than against a literal written here.
-        expect(body.data).toEqual(await analytics.query({
+        expect(result).toEqual(await analytics.query({
             cube: 'crm_account',
             measures: ['account_count'],
             dimensions: ['industry'],
         }));
-        expect(body.data.rows).toEqual(ROWS);
+        expect(result.rows).toEqual(ROWS);
     });
 
-    it('analytics.meta answers `{ success, data: CubeMeta[] }`', async () => {
+    it('analytics.meta answers the bare CubeMeta[] — no envelope, no `cubes` wrapper', async () => {
         const { client, analytics } = producerBackedClient();
 
-        const body = await client.analytics.meta();
+        const cubes = await client.analytics.meta();
 
-        expect(body.success).toBe(true);
-        expect(body.data).toEqual(await analytics.getMeta());
-        // A BARE array under `data` — there is no `cubes` wrapper (#6442).
-        expect(Array.isArray(body.data)).toBe(true);
-        expect(body.data[0]?.name).toBe('crm_account');
-        expect(body.data[0]?.measures.map((m) => m.name)).toContain('crm_account.account_count');
+        expect(cubes).toEqual(await analytics.getMeta());
+        // A BARE array — there is no `cubes` wrapper (#6442) and, since
+        // #13079, no `{ success, data }` around it either.
+        expect(Array.isArray(cubes)).toBe(true);
+        expect(cubes[0]?.name).toBe('crm_account');
+        expect(cubes[0]?.measures.map((m) => m.name)).toContain('crm_account.account_count');
     });
 
-    it('analytics.explain answers `{ success, data: { sql, params } }`', async () => {
+    it('analytics.explain answers `{ sql, params }`', async () => {
         const { client } = producerBackedClient();
 
-        const body = await client.analytics.explain({
+        const dryRun = await client.analytics.explain({
             cube: 'crm_account',
             measures: ['account_count'],
             dimensions: ['industry'],
         });
 
-        expect(body.success).toBe(true);
-        expect(Object.keys(body.data).sort()).toEqual(['params', 'sql']);
-        expect(body.data.sql).toMatch(/SELECT/i);
-        expect(Array.isArray(body.data.params)).toBe(true);
+        expect(Object.keys(dryRun).sort()).toEqual(['params', 'sql']);
+        expect(dryRun.sql).toMatch(/SELECT/i);
+        expect(Array.isArray(dryRun.params)).toBe(true);
     });
 
-    it('automation.trigger answers `{ success, data: AutomationResult }` — the whole result', async () => {
+    it('automation.trigger answers the AutomationResult — the whole run, the same value `execute` answers', async () => {
         const { client } = producerBackedClient();
 
-        const body = await client.automation.trigger('approve_account', {});
+        const run = await client.automation.trigger('approve_account', {});
 
-        expect(body.success).toBe(true);
         // The keys `TriggerFlowResponseSchema.data` did NOT declare before
-        // #13078, served by the real engine: this measurement is why the
-        // annotation binds `AutomationResult` (and, since #13078, why the
-        // schema had to move to parity with it).
-        expect(body.data.status).toBe('paused');
-        expect(typeof body.data.runId).toBe('string');
-        expect(body.data.screen?.title).toBe('Approve the account');
+        // #13078, served by the real engine and — since #13079 — read at the
+        // top level, exactly where `automation.execute` has always put them.
+        expect(run.status).toBe('paused');
+        expect(typeof run.runId).toBe('string');
+        expect(run.screen?.title).toBe('Approve the account');
+        // `AutomationResult` carries its OWN `success`; the envelope's is gone.
+        expect(run.success).toBe(true);
+        expect('data' in run).toBe(false);
     });
 });
 
@@ -406,12 +415,13 @@ describe('#12104 — the REST-served method resolves to the BARE payload', () =>
     });
 });
 
-describe('#12104 — the premise the four envelope annotations rest on', () => {
-    it('the dispatcher wraps exactly once, and `res.json()` strips nothing', async () => {
-        // Runtime-observable and deliberately so: every envelope annotation this
-        // card adds describes the PRE-unwrap value, so if a domain stopped
-        // wrapping (or the SDK started unwrapping here) the declarations would
-        // become false without a single type error.
+describe('#13079 — the premise the four payload annotations rest on', () => {
+    it('the dispatcher wraps exactly once, and `unwrapResponse` strips exactly once', async () => {
+        // Runtime-observable and deliberately so: every payload annotation
+        // describes the POST-unwrap value, so if a domain stopped wrapping (the
+        // SDK would then hand back `data`'s `data`, or the pass-through) or a
+        // method slid back to `res.json()` (the envelope would return) the
+        // declarations would become false without a single type error.
         const { client, dispatcher } = producerBackedClient();
 
         const raw = await dispatcher.handleAnalytics('/meta', 'GET', undefined, CONTEXT(), {});
@@ -420,7 +430,8 @@ describe('#12104 — the premise the four envelope annotations rest on', () => {
         expect(produced.success).toBe(true);
         expect(Array.isArray(produced.data)).toBe(true);
 
-        // The SDK hands the caller the producer's body itself — envelope included.
-        expect(await client.analytics.meta()).toEqual(produced);
+        // The SDK hands the caller the producer's `data` — one envelope
+        // stripped, nothing else touched.
+        expect(await client.analytics.meta()).toEqual(produced.data);
     });
 });

@@ -1,36 +1,46 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13079] HOW MANY EXISTING CALL SITES WOULD BREAK if the four
- * envelope-returning SDK methods started unwrapping? The per-site census.
+ * [#13079] THE CALL-SITE CENSUS of the four SDK methods the 2026-08-31 ruling
+ * converged on `unwrapResponse` — regenerated to describe the POST-convergence
+ * world, and kept as the ratchet that stops the envelope read from returning.
  *
- * ⛔ This is a MEASUREMENT file. It converts nothing, repairs nothing and
- * proposes nothing. The convergence #13079 contemplates is a RUNTIME BREAKING
- * CHANGE to four published methods and a decision reserved for the maintainer;
- * this file exists only to put a number under it.
+ * ⛔ This is a MEASUREMENT file. It converts nothing and repairs nothing. PR
+ * #13647 wrote it to put a number under the decision the card carried ("how
+ * many callers break if the four start unwrapping?" — 13 loud in-repo pins,
+ * zero production sites); the ruling took option A on that number; and this
+ * revision re-measures the same population after the conversion, so a green
+ * run now means: zero call sites in this repo still read the envelope off
+ * these four, and the four really end in `unwrapResponse`.
  *
  * ## The four, and the one that must not join them
  *
  * `unwrapResponse` strips the dispatcher's `{ success, data }` envelope;
- * `res.json()` strips nothing. Four methods take the second path against a
- * DISPATCHER-served route, so their callers receive the envelope:
- * `analytics.query`, `analytics.meta`, `analytics.explain`,
- * `automation.trigger`.
+ * `res.json()` strips nothing. Four DISPATCHER-served methods used to take the
+ * second path and hand their callers the envelope: `analytics.query`,
+ * `analytics.meta`, `analytics.explain`, `automation.trigger`. Since #13079
+ * all four end `unwrapResponse` — section 4 reads that off the SDK source.
  *
  * ⚠️ `analytics.queryDataset` also ends `res.json()` and is NOT one of them.
  * Its route is mounted by `@objectstack/rest` and ends `res.json(result)` with
- * no envelope to strip, so it is correct as it stands. It is deliberately
- * absent from `METHODS` below and section 4 asserts that absence, because
- * folding it in is the one thing a mechanical sweep gets wrong.
+ * no envelope to strip, so `res.json()` there IS the payload read. It is
+ * deliberately absent from `METHODS` below, section 4 asserts that absence
+ * AND that its source still reads `res.json()`, because folding it in is the
+ * one thing a mechanical sweep gets wrong (ruling item 1: protected).
  *
- * ## Why `tsc` and a type search cannot answer this
+ * ## Why `tsc` and a type search could not answer the original question
  *
  * All five were erased to `Promise< any >` until #12104 (no annotation, and
  * `lib.dom` declares `Response.json(): Promise< any >`). Under `any` BOTH
  * spellings compiled: `(await client.analytics.query(q)).rows` and
  * `.data.rows` were equally legal, and nothing in the type system
- * distinguished them. So the population cannot be recovered from types — it
- * has to come from reading call sites, which is what this file enumerates.
+ * distinguished them. So the population could not be recovered from types —
+ * it had to come from reading call sites, which is what this file enumerates.
+ * After #13079 the type system DOES refuse the envelope read (the reversed
+ * `@ts-expect-error` pins in `return-type-precision.test.ts`) — for
+ * TypeScript callers. A JavaScript caller, or a call reached through a
+ * runtime alias, is still only visible to a source scan, which is why the
+ * scan stays.
  *
  * ## ⭐ The method, and the false negative it was built to catch
  *
@@ -39,8 +49,8 @@
  * assumed, both in section 2:
  *
  *  1. **Comments dominate the raw signal.** A plain `git grep` for these four
- *     spellings returns 30 hits in this repo, and 10 of them are docblocks and
- *     inline comments naming the method — not call sites. `scanCallSites`
+ *     spellings returns dozens of hits in this repo, and many are docblocks
+ *     and inline comments naming the method — not call sites. `scanCallSites`
  *     blanks comments before matching.
  *  2. **A line-based matcher UNDER-REPORTS.** `git grep` is line-oriented, so
  *     it cannot see a call split across lines — and this repo contains exactly
@@ -49,10 +59,10 @@
  *         const err: any = await client.automation
  *             .trigger('my_flow', { amount: 0 })
  *
- *     Two real `automation.trigger` call sites are spelled that way in
- *     `client.test.ts` and a line-oriented sweep misses BOTH. A short list
- *     reads as compliance, which is why section 2 pins the gap as a number
- *     instead of trusting the matcher.
+ *     Five SDK call sites are spelled that way today (two in `client.test.ts`,
+ *     three in `envelope-convergence.test.ts`) and a line-oriented sweep misses
+ *     ALL of them. A short list reads as compliance, which is why section 2
+ *     pins the gap as a number instead of trusting the matcher.
  *
  * ## The receiver split — a false POSITIVE, measured the same way
  *
@@ -64,25 +74,34 @@
  *
  * ## The verdicts
  *
- *  - `ENVELOPE_DEPENDENT` — the site reads `.data`, reads the envelope's
- *    `success`, compares the whole envelope, or pins the envelope TYPE. These
- *    break if the methods start unwrapping. Every one is loud: an assertion
- *    failure or a compile error, never a silent wrong value.
+ *  - `ENVELOPE_DEPENDENT` — the site reads `.data` off the resolved value,
+ *    reads the envelope's `success`, compares the whole envelope, or pins the
+ *    envelope TYPE. After #13079 such a site is a BUG (a runtime `undefined`
+ *    or a type error), and section 3 ratchets the count at ZERO.
+ *  - `PAYLOAD_DEPENDENT` — the site reads the post-unwrap payload (`.rows`,
+ *    `[0].name`, `.sql`, `.status` …), asserts the envelope keys are absent,
+ *    or pins the payload TYPE. These are the convergence's own pins: every one
+ *    goes red if a method slides back to `res.json()`.
  *  - `RESULT_INSENSITIVE` — the site discards the resolved value (it asserts
- *    the URL the SDK dialled) or takes the REJECTION path and reads
- *    `err.code` / `err.httpStatus`. Unwrapping cannot reach it.
+ *    the URL the SDK dialled), takes the REJECTION path and reads
+ *    `err.code` / `err.httpStatus`, or reads a body BOTH readers hand back
+ *    unchanged (a 2xx with no `data` key). The reader cannot reach it.
  *  - `NOT_SDK` — a call on the producer service, not on the client.
  *
  * ## ⚠️ What this file does NOT measure, stated so a green run cannot be read
  * ## as a clean bill
  *
- *  - **`objectstack-ai/cloud` — NOT MEASURED.** It is not reachable from the
- *    session class that produced this census. `CLOUD_CENSUS_COMMAND` below is
- *    the ready-to-run sweep for whoever has access. An unreachable repo is not
- *    a clean one.
+ *  - **`objectstack-ai/cloud` — NOT MEASURED, and RULED so.** It is not
+ *    reachable from the session class that produced this census, and the
+ *    maintainer ruled the convergence with that cell recorded as unmeasured
+ *    (2026-08-31, 「A,cloud 未测量照裁」). ⚠️ Since #13079 a `.data` read on any of
+ *    these four methods in cloud is a RUNTIME BREAK, not a style difference:
+ *    the value is the payload, so `.data` is `undefined`. `CLOUD_CENSUS_COMMAND`
+ *    below is the ready-to-run sweep; any seat with access should run it
+ *    inside the migration wave and record a non-zero result on #13079.
  *  - **Published npm consumers outside these repos — UNMEASURABLE.** The SDK
- *    ships to consumers no repo sweep can see. This census bounds the
- *    first-party population only.
+ *    ships to consumers no repo sweep can see; the changeset carries their
+ *    migration. This census bounds the first-party population only.
  *  - **`objectui` is a RECORDED constant, not a live scan.** A test in this
  *    repo cannot read that checkout. `OBJECTUI_CENSUS` carries the revision it
  *    was measured at and the command that reproduces it.
@@ -118,8 +137,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
 
 /**
- * The four DISPATCHER-served `res.json()` methods. ⛔ `queryDataset` is
- * deliberately NOT here — see the header and section 4.
+ * The four DISPATCHER-served methods the ruling converged. ⛔ `queryDataset`
+ * is deliberately NOT here — see the header and section 4.
  */
 const METHODS: ReadonlyArray<readonly [namespace: string, method: string]> = [
     ['analytics', 'query'],
@@ -193,7 +212,7 @@ const CENSUS = scanCallSites(REPO_ROOT);
 // The classification ledger — reviewed by hand, cross-checked mechanically
 // ---------------------------------------------------------------------------
 
-type Verdict = 'ENVELOPE_DEPENDENT' | 'RESULT_INSENSITIVE' | 'NOT_SDK';
+type Verdict = 'ENVELOPE_DEPENDENT' | 'PAYLOAD_DEPENDENT' | 'RESULT_INSENSITIVE' | 'NOT_SDK';
 
 interface LedgerRow {
     file: string;
@@ -209,55 +228,88 @@ interface LedgerRow {
  * (file, method, receiver) rather than by line so an unrelated edit that
  * shifts a line does not turn this red — while a NEW call site anywhere in
  * the workspace still does, which is the point: the number cannot drift in
- * silence.
+ * silence. A key may carry MORE than one row when its sites split across
+ * verdicts (a payload pin beside a rejection-path pin in one file); section 3
+ * sums a key's rows before comparing.
  */
 const LEDGER: readonly LedgerRow[] = [
-    // ── the #12104 wire measurement: reads `.data` and `success` throughout ──
+    // ── the mocked-transport convergence pins (`envelope-convergence.test.ts`) ──
+    {
+        file: 'packages/client/src/envelope-convergence.test.ts',
+        method: 'analytics.query', receiver: 'sdk', count: 1, verdict: 'PAYLOAD_DEPENDENT',
+        why: 'asserts the value equals the `data` member and that success/data/meta are absent',
+    },
+    {
+        file: 'packages/client/src/envelope-convergence.test.ts',
+        method: 'analytics.query', receiver: 'sdk', count: 1, verdict: 'RESULT_INSENSITIVE',
+        why: 'takes the rejection path of a 400 envelope and reads err.code / err.httpStatus',
+    },
+    {
+        file: 'packages/client/src/envelope-convergence.test.ts',
+        method: 'analytics.meta', receiver: 'sdk', count: 1, verdict: 'PAYLOAD_DEPENDENT',
+        why: 'asserts a bare array equal to `data`, reads [0].name and [0].measures',
+    },
+    {
+        file: 'packages/client/src/envelope-convergence.test.ts',
+        method: 'analytics.explain', receiver: 'sdk', count: 1, verdict: 'PAYLOAD_DEPENDENT',
+        why: 'asserts Object.keys(value) === [params, sql] and reads .sql / .params',
+    },
+    {
+        file: 'packages/client/src/envelope-convergence.test.ts',
+        method: 'automation.trigger', receiver: 'sdk', count: 2, verdict: 'PAYLOAD_DEPENDENT',
+        why: 'the run itself (status / runId / screen, no `data`), and the exactly-once strip on a payload carrying its own `success`',
+    },
+    {
+        file: 'packages/client/src/envelope-convergence.test.ts',
+        method: 'automation.trigger', receiver: 'sdk', count: 3, verdict: 'RESULT_INSENSITIVE',
+        why: 'two rejection-path reads (400 FLOW_FAILED, 409 FLOW_DISABLED) and the 2xx no-`data` pass-through, which both readers hand back unchanged',
+    },
+    // ── the producer-backed wire measurement: reads the payload throughout ──
     {
         file: 'packages/client/src/analytics-automation-json-erasure.test.ts',
-        method: 'analytics.query', receiver: 'sdk', count: 1, verdict: 'ENVELOPE_DEPENDENT',
-        why: 'asserts Object.keys(body) === [data, meta, success], body.success and body.data.rows',
+        method: 'analytics.query', receiver: 'sdk', count: 1, verdict: 'PAYLOAD_DEPENDENT',
+        why: 'asserts success/data absent and the value equals what the producer returned, reads .rows',
     },
     {
         file: 'packages/client/src/analytics-automation-json-erasure.test.ts',
         method: 'analytics.query', receiver: 'service', count: 1, verdict: 'NOT_SDK',
-        why: 'the real AnalyticsService, called to assert body.data equals what the producer returned',
+        why: 'the real AnalyticsService, called to assert the SDK value equals what the producer returned',
     },
     {
         file: 'packages/client/src/analytics-automation-json-erasure.test.ts',
-        method: 'analytics.meta', receiver: 'sdk', count: 2, verdict: 'ENVELOPE_DEPENDENT',
-        why: 'body.success / body.data, and a whole-envelope toEqual against the dispatcher body',
+        method: 'analytics.meta', receiver: 'sdk', count: 2, verdict: 'PAYLOAD_DEPENDENT',
+        why: 'a bare array equal to getMeta(), and a whole-value toEqual against the dispatcher body\'s `data`',
     },
     {
         file: 'packages/client/src/analytics-automation-json-erasure.test.ts',
-        method: 'analytics.explain', receiver: 'sdk', count: 1, verdict: 'ENVELOPE_DEPENDENT',
-        why: 'body.success and Object.keys(body.data) === [params, sql]',
+        method: 'analytics.explain', receiver: 'sdk', count: 1, verdict: 'PAYLOAD_DEPENDENT',
+        why: 'Object.keys(value) === [params, sql]',
     },
     {
         file: 'packages/client/src/analytics-automation-json-erasure.test.ts',
-        method: 'automation.trigger', receiver: 'sdk', count: 1, verdict: 'ENVELOPE_DEPENDENT',
-        why: 'body.success and body.data.status / runId / screen',
+        method: 'automation.trigger', receiver: 'sdk', count: 1, verdict: 'PAYLOAD_DEPENDENT',
+        why: 'reads .status / .runId / .screen at the top level, asserts no `data`, equals execute()\'s value',
     },
-    // ── the #12104 type pins: bind the envelope, and refuse the payload read ──
+    // ── the type pins: bind the payload, and refuse the envelope read ─────────
     {
         file: 'packages/client/src/return-type-precision.test.ts',
-        method: 'analytics.query', receiver: 'sdk', count: 2, verdict: 'ENVELOPE_DEPENDENT',
-        why: 'expectTypeOf === BaseResponse & { data: AnalyticsResult }, plus a @ts-expect-error on .rows',
-    },
-    {
-        file: 'packages/client/src/return-type-precision.test.ts',
-        method: 'analytics.meta', receiver: 'sdk', count: 2, verdict: 'ENVELOPE_DEPENDENT',
-        why: 'expectTypeOf === AnalyticsMetadataResponse, plus a @ts-expect-error on .length',
+        method: 'analytics.query', receiver: 'sdk', count: 2, verdict: 'PAYLOAD_DEPENDENT',
+        why: 'expectTypeOf === AnalyticsResult, plus a @ts-expect-error on .data',
     },
     {
         file: 'packages/client/src/return-type-precision.test.ts',
-        method: 'analytics.explain', receiver: 'sdk', count: 2, verdict: 'ENVELOPE_DEPENDENT',
-        why: 'expectTypeOf === AnalyticsSqlResponse, plus a @ts-expect-error on .sql',
+        method: 'analytics.meta', receiver: 'sdk', count: 2, verdict: 'PAYLOAD_DEPENDENT',
+        why: 'expectTypeOf === AnalyticsMetadataResponse[data], plus a @ts-expect-error on .data',
     },
     {
         file: 'packages/client/src/return-type-precision.test.ts',
-        method: 'automation.trigger', receiver: 'sdk', count: 2, verdict: 'ENVELOPE_DEPENDENT',
-        why: 'expectTypeOf === BaseResponse & { data: AutomationResult }, plus a @ts-expect-error on .runId',
+        method: 'analytics.explain', receiver: 'sdk', count: 2, verdict: 'PAYLOAD_DEPENDENT',
+        why: 'expectTypeOf === AnalyticsSqlResponse[data], plus a @ts-expect-error on .data',
+    },
+    {
+        file: 'packages/client/src/return-type-precision.test.ts',
+        method: 'automation.trigger', receiver: 'sdk', count: 2, verdict: 'PAYLOAD_DEPENDENT',
+        why: 'expectTypeOf === AutomationResult, plus a @ts-expect-error on .data',
     },
     // ── URL and rejection pins: the resolved value is never read ─────────────
     {
@@ -283,20 +335,23 @@ const LEDGER: readonly LedgerRow[] = [
  * checkout. Reproduce with `OBJECTUI_CENSUS_COMMAND`.
  *
  * ⭐ The single production call site in either reachable repo, and it SURVIVES
- * convergence untouched. `aggregate()` feeds the resolved value through a
- * tolerant chain that already accepts both spellings:
+ * the convergence untouched. `aggregate()` feeds the resolved value through a
+ * tolerant chain that accepts both spellings:
  *
  *     const rawRows = Array.isArray(data) ? data
- *       : data?.rows        && Array.isArray(data.rows)        ? data.rows        // post-unwrap
+ *       : data?.rows        && Array.isArray(data.rows)        ? data.rows        // post-#13079: this branch
  *       : data?.data        && Array.isArray(data.data)        ? data.data
- *       : data?.data?.rows  && Array.isArray(data.data.rows)   ? data.data.rows   // envelope, today
+ *       : data?.data?.rows  && Array.isArray(data.data.rows)   ? data.data.rows   // pre-#13079: this branch
  *       : data?.results     && Array.isArray(data.results)     ? data.results
  *       : [];
  *
- * Today branch 4 matches; after convergence branch 2 matches. ⚠️ It survives
+ * Before #13079 branch 4 matched; after it branch 2 matches. ⚠️ It survives
  * by DEFENSIVE CODING, not by a designed migration path — the adapter was
  * written tolerant because the producer was ambiguous, which is the shape a
- * contract-first fix is supposed to remove rather than rely on.
+ * contract-first fix removes rather than relies on. Ruling item 3: objectui#7028
+ * tightens the chain to the single post-unwrap spelling, time-gated behind
+ * this convergence landing and objectui taking the SDK version — the chain is
+ * load-bearing until then, so it is deliberately NOT part of this change.
  */
 const OBJECTUI_CENSUS = {
     revision: 'b84dc1854922c266850d6e573daf3ad59cbd0623',
@@ -305,23 +360,50 @@ const OBJECTUI_CENSUS = {
     productionCallSites: 1,
     wouldBreak: 0,
     site: 'packages/data-objectstack/src/index.ts:4846 (analytics.query, via this.client)',
+    tighteningOwner: 'objectui#7028',
 } as const;
 
 const OBJECTUI_CENSUS_COMMAND =
     "git -C <objectui> grep -nE 'analytics\\s*\\.\\s*(query|meta|explain)\\s*\\(|automation\\s*\\.\\s*trigger\\s*\\(' origin/main -- '*.ts' '*.tsx' '*.js'";
 
-/** ⛔ `objectstack-ai/cloud` is NOT MEASURED — see the header. */
+/**
+ * ⛔ `objectstack-ai/cloud` is NOT MEASURED — see the header. Post-#13079
+ * semantics for whoever runs it: every hit is a call that now resolves to the
+ * PAYLOAD, so a `.data` read on the resolved value at that site is a runtime
+ * break (`undefined`), and a read of the envelope's `success` is one too.
+ * Classify each hit the way `LEDGER` does; record non-zero results on #13079.
+ */
 const CLOUD_CENSUS_COMMAND =
     "git -C <cloud> fetch origin main && git -C <cloud> grep -nE 'analytics\\s*\\.\\s*(query|meta|explain)\\s*\\(|automation\\s*\\.\\s*trigger\\s*\\(' origin/main -- '*.ts' '*.tsx' '*.js'"
     + " # then re-check for SPLIT calls, which a line-oriented grep misses:"
-    + " git -C <cloud> grep -nE '\\.(analytics|automation)\\s*$' origin/main -- '*.ts' '*.tsx' '*.js'";
+    + " git -C <cloud> grep -nE '\\.(analytics|automation)\\s*$' origin/main -- '*.ts' '*.tsx' '*.js'"
+    + " # post-#13079: a `.data` read on any hit is a RUNTIME BREAK (the value is the payload now); record non-zero on #13079";
 
-const CLOUD_CENSUS = { status: 'NOT_MEASURED', reason: 'repo not reachable from this session class' } as const;
+const CLOUD_CENSUS = {
+    status: 'NOT_MEASURED',
+    reason: 'repo not reachable from this session class; ruled as such on 2026-08-31 (「A,cloud 未测量照裁」)',
+} as const;
 
 const sdkSites = CENSUS.sites.filter((s) => s.receiver === 'sdk');
 const ledgerTotal = LEDGER.reduce((n, r) => n + r.count, 0);
 const verdictTotal = (v: Verdict) =>
     LEDGER.filter((r) => r.verdict === v).reduce((n, r) => n + r.count, 0);
+
+/**
+ * The SDK source of one namespace's method, from `NAME: async` to the closing
+ * `},` at the same indentation — so section 4 reads what each method ENDS with
+ * off the source rather than restating it. Anchored to the NAMESPACE first
+ * (`analytics = {` … `};` is a class field at two-space indentation) because
+ * `query: async` and `explain: async` are spelled in other namespaces too, and
+ * the first match in the file is not the analytics one.
+ */
+function methodSource(src: string, ns: string, name: string): string {
+    const block = new RegExp(`\\n  ${ns} = \\{[\\s\\S]*?\\n  \\};`).exec(src);
+    if (!block) throw new Error(`namespace \`${ns}\` not found in index.ts`);
+    const m = new RegExp(`\\n(\\s+)${name}: async[\\s\\S]*?\\n\\1\\},`).exec(block[0]);
+    if (!m) throw new Error(`method \`${ns}.${name}\` not found in index.ts`);
+    return m[0];
+}
 
 // ---------------------------------------------------------------------------
 
@@ -345,6 +427,7 @@ describe('#13079 §2 — positive controls on the matcher itself', () => {
     it('finds real call sites (a zero here would invalidate every count below)', () => {
         expect(sdkSites.length).toBeGreaterThan(0);
         const files = new Set(sdkSites.map((s) => s.file));
+        expect(files.has('packages/client/src/envelope-convergence.test.ts')).toBe(true);
         expect(files.has('packages/client/src/analytics-automation-json-erasure.test.ts')).toBe(true);
         expect(files.has('packages/client/src/return-type-precision.test.ts')).toBe(true);
         expect(files.has('packages/client/src/client.test.ts')).toBe(true);
@@ -352,10 +435,16 @@ describe('#13079 §2 — positive controls on the matcher itself', () => {
 
     it('⭐ catches the SPLIT calls a line-oriented grep misses, and reports the gap', () => {
         const missedByLineGrep = CENSUS.sites.filter((s) => !s.visibleToLineGrep);
-        // Both are `await client.automation` / newline / `.trigger(...)`.
-        expect(missedByLineGrep.length).toBe(2);
-        expect(missedByLineGrep.every((s) => s.method === 'automation.trigger')).toBe(true);
-        expect(missedByLineGrep.every((s) => s.file === 'packages/client/src/client.test.ts')).toBe(true);
+        // `await client.automation` / newline / `.trigger(...)` twice in
+        // `client.test.ts`; the same shape twice for `trigger` and once for
+        // `analytics.query` in `envelope-convergence.test.ts`.
+        expect(missedByLineGrep.length).toBe(5);
+        const byFile = new Map<string, string[]>();
+        for (const s of missedByLineGrep) byFile.set(s.file, [...(byFile.get(s.file) ?? []), s.method]);
+        expect(Object.fromEntries([...byFile].map(([f, ms]) => [f, ms.sort()]))).toEqual({
+            'packages/client/src/client.test.ts': ['automation.trigger', 'automation.trigger'],
+            'packages/client/src/envelope-convergence.test.ts': ['analytics.query', 'automation.trigger', 'automation.trigger'],
+        });
     });
 
     it('does not count comment mentions as call sites', () => {
@@ -380,7 +469,10 @@ describe('#13079 §3 — every call site is classified', () => {
             enumerated.set(k, (enumerated.get(k) ?? 0) + 1);
         }
         const ledgered = new Map<string, number>();
-        for (const r of LEDGER) ledgered.set(`${r.file}|${r.method}|${r.receiver}`, r.count);
+        for (const r of LEDGER) {
+            const k = `${r.file}|${r.method}|${r.receiver}`;
+            ledgered.set(k, (ledgered.get(k) ?? 0) + r.count);
+        }
 
         // An UNCLASSIFIED site is the failure this ratchet exists to produce:
         // whoever adds a call site to these four methods must say what it reads.
@@ -390,51 +482,70 @@ describe('#13079 §3 — every call site is classified', () => {
         expect(ledgerTotal).toBe(CENSUS.sites.length);
     });
 
-    it('⭐ THE NUMBER: zero call sites in this repo would break SILENTLY', () => {
-        // Every envelope-dependent site is a test assertion or a type pin —
-        // loud by construction. There is no production call site in this repo.
+    it('⭐ THE NUMBER, post-convergence: ZERO call sites still read the envelope, and none is production code', () => {
+        // The ratchet the convergence leaves behind. A site that reads `.data`
+        // or the envelope's `success` off these four now reads `undefined`
+        // (or fails to compile); the only legal way to add one is to classify
+        // it here — and this line refuses the classification.
+        expect(verdictTotal('ENVELOPE_DEPENDENT')).toBe(0);
+        // Every site is a test pin. There is still no production call site in
+        // this repo, so the migration in-repo was exactly this change's diff.
         const production = sdkSites.filter((s) => !/\.test\.tsx?$/.test(s.file));
         expect(production).toEqual([]);
     });
 
-    it('records the split: 13 loud pin sites, 6 result-insensitive, 1 not-SDK', () => {
-        expect(verdictTotal('ENVELOPE_DEPENDENT')).toBe(13);
-        expect(verdictTotal('RESULT_INSENSITIVE')).toBe(6);
+    it('records the split: 18 payload pins, 10 result-insensitive, 1 not-SDK', () => {
+        expect(verdictTotal('PAYLOAD_DEPENDENT')).toBe(18);
+        expect(verdictTotal('RESULT_INSENSITIVE')).toBe(10);
         expect(verdictTotal('NOT_SDK')).toBe(1);
-        expect(sdkSites.length).toBe(19);
+        expect(sdkSites.length).toBe(28);
     });
 });
 
-describe('#13079 §4 — `analytics.queryDataset` is a protected counter-example', () => {
+describe('#13079 §4 — the four end in `unwrapResponse`; `analytics.queryDataset` is the protected counter-example', () => {
+    // Read from the SDK source rather than restated, so a change to a method
+    // cannot leave these claims behind.
+    const src = readFileSync(join(HERE, 'index.ts'), 'utf8');
+
+    it('each of the four methods ends `return this.unwrapResponse(...)` and no longer reads `res.json()`', () => {
+        for (const [ns, method] of METHODS) {
+            const body = methodSource(src, ns, method);
+            expect(body, `${ns}.${method} must unwrap`).toMatch(/return this\.unwrapResponse</);
+            expect(body, `${ns}.${method} must not read res.json()`).not.toMatch(/res\.json\(\)/);
+        }
+    });
+
     it('is not in the affected set', () => {
         expect(METHODS.some(([, m]) => m === 'queryDataset')).toBe(false);
         expect(CENSUS.sites.some((s) => s.method.includes('queryDataset'))).toBe(false);
     });
 
-    it('is served BARE by @objectstack/rest — there is no envelope to strip', () => {
-        // Read from the SDK source rather than restated, so a change to the
-        // method cannot leave this claim behind.
-        const src = readFileSync(join(HERE, 'index.ts'), 'utf8');
-        expect(src).toMatch(/queryDataset:\s*async/);
-        expect(src).toMatch(/analytics\/dataset\/query/);
+    it('is served BARE by @objectstack/rest and still reads `res.json()` — there is no envelope to strip', () => {
+        const body = methodSource(src, 'analytics', 'queryDataset');
+        expect(body).toMatch(/analytics\/dataset\/query/);
+        expect(body).toMatch(/return res\.json\(\);/);
+        expect(body).not.toMatch(/unwrapResponse/);
         // Its sibling `query` dials the dispatcher route; these are two dialects.
-        expect(src).toMatch(/\$\{route\}\/query/);
+        expect(methodSource(src, 'analytics', 'query')).toMatch(/\$\{route\}\/query`/);
     });
 });
 
 describe('#13079 §5 — what was NOT measured', () => {
-    it('objectui is recorded with its revision, and its one production site survives', () => {
+    it('objectui is recorded with its revision, its one production site survives, and its tightening has an owner', () => {
         expect(OBJECTUI_CENSUS.productionCallSites).toBe(1);
         expect(OBJECTUI_CENSUS.wouldBreak).toBe(0);
         expect(OBJECTUI_CENSUS.revision).toMatch(/^[0-9a-f]{40}$/);
+        expect(OBJECTUI_CENSUS.tighteningOwner).toBe('objectui#7028');
         expect(OBJECTUI_CENSUS_COMMAND).toContain('origin/main');
     });
 
-    it('⛔ cloud is NOT MEASURED and must not be read as clean', () => {
+    it('⛔ cloud is NOT MEASURED, ruled so, and must not be read as clean', () => {
         expect(CLOUD_CENSUS.status).toBe('NOT_MEASURED');
         // The ready-to-run sweep includes the split-call second pass, because
-        // the single-line form alone under-reported by 2 in THIS repo.
+        // the single-line form alone under-reported by 2 in THIS repo before
+        // #13079 (and by 5 after it), and states the post-#13079 reading.
         expect(CLOUD_CENSUS_COMMAND).toContain('fetch origin main');
         expect(CLOUD_CENSUS_COMMAND).toContain('(analytics|automation)');
+        expect(CLOUD_CENSUS_COMMAND).toContain('RUNTIME BREAK');
     });
 });

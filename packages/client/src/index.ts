@@ -87,14 +87,13 @@ import {
   // [#11924] The GLOBAL cross-object search body — NOT the per-object
   // `SearchResult` in `@objectstack/spec/contracts` (the #8140 near-miss trap).
   SearchAllResponse,
-  // [#12104] The `{ success, data }` envelope SKELETON, plus the two analytics
-  // route response types that already transcribe their producer's declared
-  // return. The four `return res.json()` methods bound by that card resolve to
-  // the WHOLE body — `res.json()` strips nothing, unlike `unwrapResponse` — so
-  // the envelope IS the annotation, not the payload under it. `BaseResponse` is
-  // reused rather than hand-spelled so a field added to the envelope reaches
-  // these annotations with it.
-  BaseResponse,
+  // [#12104 → #13079] The two analytics route response types whose `data`
+  // member already transcribes the producer's declared return. Since #13079
+  // the methods resolve to that `data` member (post-`unwrapResponse`), so the
+  // annotations INDEX these envelope types — `AnalyticsMetadataResponse['data']`,
+  // `AnalyticsSqlResponse['data']` — rather than re-declaring the payload: a
+  // change to the route's declared `data` reaches the SDK with it, and no
+  // payload type has to be declared in `packages/spec` for the SDK's sake.
   AnalyticsMetadataResponse,
   AnalyticsSqlResponse,
   // [#12038] The meta history/diagnostics and package lifecycle response
@@ -1498,24 +1497,31 @@ export class ObjectStackClient {
    * Analytics Services
    */
   /**
-   * [#12104] ⚠️ THE THREE DISPATCHER-SERVED METHODS HERE RESOLVE TO THE
-   * ENVELOPE, not to the payload — read `.data`.
+   * [#13079] EVERY method here resolves to the PAYLOAD — never to the
+   * dispatcher's `{ success, data }` envelope.
    *
-   * They end `return res.json()` rather than `return this.unwrapResponse(res)`,
-   * and `res.json()` strips nothing, so the caller receives the dispatcher's
-   * `{ success, data }` body whole. That was invisible while the methods were
-   * erased to `Promise< any >` (no annotation, and `Response.json()` is declared
-   * `Promise< any >` in `lib.dom`); it is stated by the declarations now.
-   * `queryDataset` below is the exception and says why.
+   * `query` / `meta` / `explain` are dispatcher-served and end
+   * `return this.unwrapResponse(res)`, which strips that envelope, exactly as
+   * every other dispatcher-served method of this class does. Until #13079
+   * they ended `return res.json()`, which strips nothing, and handed the
+   * envelope back whole — so their callers alone had to read `.data`
+   * (invisible while the methods were erased to `Promise< any >`, stated by
+   * the #12104 declarations, converged by the 2026-08-31 ruling on #13079).
+   * `queryDataset` is served by `@objectstack/rest` with no envelope at all
+   * and keeps `res.json()` — see its docblock; ⛔ it is PROTECTED, not a fifth
+   * instance. Either way the caller reads one shape: the producer's declared
+   * return.
    */
   analytics = {
     /**
      * Run an `AnalyticsQuery` (`POST /analytics/query`).
      *
-     * The `data` member is `IAnalyticsService.query`'s declared return, relayed
-     * verbatim by the domain (`deps.success(await analyticsService.query(…))`).
+     * Resolves to `IAnalyticsService.query`'s declared return — relayed
+     * verbatim by the domain (`deps.success(await analyticsService.query(…))`)
+     * and unwrapped here. **BREAKING since #13079**: read `result.rows`, not
+     * `result.data.rows`; the method used to resolve to the whole envelope.
      *
-     * Deliberately bound to the CONTRACT, not to `AnalyticsResultResponse`
+     * Deliberately bound to the CONTRACT, not to `AnalyticsResultResponse['data']`
      * (`@objectstack/spec/api`). When #12104 wrote this annotation the schema
      * was a stale projection — its `data.fields` declared `{ name, type }`
      * only, while the contract this route relays also carries `label` /
@@ -1529,49 +1535,53 @@ export class ObjectStackClient {
      * source rather than the copy is what keeps this method immune to the
      * transcription drifting again.
      */
-    query: async (payload: any): Promise<BaseResponse & { data: AnalyticsResult }> => {
+    query: async (payload: any): Promise<AnalyticsResult> => {
       const route = this.getRoute('analytics');
       const res = await this.fetch(`${this.baseUrl}${route}/query`, {
          method: 'POST',
          body: JSON.stringify(payload)
       });
-      return res.json();
+      return this.unwrapResponse<AnalyticsResult>(res);
     },
     /**
      * Cube metadata listing. Pass `cube` to filter to a single cube
      * (`?cube=` — [#3584] the dispatcher shape; the old `/meta/:cube` path
      * segment was served by nothing and 404ed everywhere).
      *
-     * [#12104] `AnalyticsMetadataResponse` is the route's own declared response
-     * type and it AGREES with the producer: its `data` is the bare `CubeMeta[]`
+     * Resolves to `AnalyticsMetadataResponse['data']` — the bare `CubeMeta[]`
      * discovery projection `IAnalyticsService.getMeta` returns (#6442 narrowed
-     * the schema to exactly that, and `spec`'s `analytics.test.ts` pins
+     * the route's schema to exactly that, and `spec`'s `analytics.test.ts` pins
      * `data[number]` ≡ `CubeMeta` at compile time). There is no `cubes`
-     * wrapper under `data`.
+     * wrapper and, **since #13079**, no envelope either:
+     * `(await client.analytics.meta())[0].name`, where the method used to
+     * resolve to `{ success, data }` and the caller read `.data[0].name`. The
+     * annotation INDEXES the route's declared response type rather than
+     * re-declaring the payload, so the schema and this method cannot drift
+     * into saying two things.
      */
-    meta: async (cube?: string): Promise<AnalyticsMetadataResponse> => {
+    meta: async (cube?: string): Promise<AnalyticsMetadataResponse['data']> => {
         const route = this.getRoute('analytics');
         const qs = cube ? `?cube=${encodeURIComponent(cube)}` : '';
         const res = await this.fetch(`${this.baseUrl}${route}/meta${qs}`);
-        return res.json();
+        return this.unwrapResponse<AnalyticsMetadataResponse['data']>(res);
     },
     /**
      * Dry-run a query to its generated SQL (`POST /analytics/sql` — [#3584]
      * the dispatcher route; the old `/explain` route name was served by
      * nothing and 404ed everywhere).
      *
-     * [#12104] `AnalyticsSqlResponse` is the route's own declared response type
-     * and its `data` — `{ sql, params }` — is exactly
+     * Resolves to `AnalyticsSqlResponse['data']` — `{ sql, params }`, exactly
      * `IAnalyticsService.generateSql`'s declared return, so the schema and the
-     * producer say one thing here.
+     * producer say one thing here. **Since #13079** the value is that payload
+     * itself: read `result.sql`, not `result.data.sql`.
      */
-    explain: async (payload: any): Promise<AnalyticsSqlResponse> => {
+    explain: async (payload: any): Promise<AnalyticsSqlResponse['data']> => {
         const route = this.getRoute('analytics');
         const res = await this.fetch(`${this.baseUrl}${route}/sql`, {
             method: 'POST',
             body: JSON.stringify(payload)
          });
-         return res.json();
+         return this.unwrapResponse<AnalyticsSqlResponse['data']>(res);
     },
     /**
      * ADR-0021 semantic-layer dataset query — the REST dialect
@@ -1580,10 +1590,13 @@ export class ObjectStackClient {
      * `datasetName` (saved), plus `selection.measures`; `previewDrafts`
      * runs over draft-overlaid definitions (ADR-0037 P3). (#3587 gap closure)
      *
-     * [#12104] ⚠️ The ONE method in this namespace that resolves to the BARE
-     * payload. It is served by `@objectstack/rest` (the dispatcher mounts no
-     * twin), and that route ends `res.json(result)` with no envelope around it
-     * — so unlike its three siblings above there is no `.data` to read. Both
+     * [#12104] ⚠️ The one method in this namespace served with NO envelope at
+     * all: `@objectstack/rest` mounts it (the dispatcher mounts no twin) and
+     * the route ends `res.json(result)`, so `res.json()` here IS the payload
+     * read — there is nothing for `unwrapResponse` to strip. ⛔ PROTECTED by
+     * the #13079 ruling: its three siblings above were converged on
+     * `unwrapResponse` because their routes answer the envelope; this one was
+     * correct as it stood and must not be "fixed" into their shape. Both
      * halves measured on the real route in
      * `analytics-automation-json-erasure.test.ts`; the shape is
      * `IAnalyticsService.queryDataset`'s declared return.
@@ -3860,14 +3873,20 @@ export class ObjectStackClient {
        * | `400` | `FLOW_FAILED` | the flow RAN and was rejected | read `err.details.summary` for the failing node |
        * | `404` | — | no such flow in this deployment | check the name |
        *
-       * [#12104] ⚠️ **This method resolves to the ENVELOPE — read `.data`.** It
-       * ends `return res.json()`, which strips nothing, so the value is the
-       * dispatcher's `{ success, data }` body; its sibling
-       * `automation.execute` calls the SAME door through `unwrapResponse` and
-       * therefore resolves to the `AutomationResult` alone. The two differ in
-       * the wrapper only, which is why the payload type is the same one.
+       * [#13079] **Resolves to the `AutomationResult` alone — the SAME value
+       * its sibling `automation.execute` resolves to**, because both reach one
+       * handler through `unwrapResponse`. **BREAKING since #13079**: read
+       * `result.status` / `result.runId` / `result.screen`, not
+       * `result.data.…` — until then this method ended `return res.json()`,
+       * which strips nothing, and handed the dispatcher's `{ success, data }`
+       * envelope back whole while `execute` unwrapped it (#12104 stated that
+       * split in the declarations; the 2026-08-31 ruling closed it). The
+       * rejection table above is untouched: every non-2xx throws out of the
+       * fetch layer BEFORE either reader runs, and a 2xx body without `data`
+       * (nothing on this door sends one) passes through `unwrapResponse`
+       * unchanged, as on every other unwrapped method.
        *
-       * Deliberately bound to the CONTRACT, not to `TriggerFlowResponse`
+       * Deliberately bound to the CONTRACT, not to `TriggerFlowResponse['data']`
        * (`@objectstack/spec/api`). When #12104 wrote this annotation the
        * schema was a stale projection — its `data` declared
        * `{ success, output?, error?, durationMs? }` while the door also
@@ -3883,13 +3902,13 @@ export class ObjectStackClient {
        * annotating the source rather than the copy is what keeps this method
        * immune to the transcription drifting again.
        */
-      trigger: async (triggerName: string, payload: any): Promise<BaseResponse & { data: AutomationResult }> => {
+      trigger: async (triggerName: string, payload: any): Promise<AutomationResult> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(`${this.baseUrl}${route}/trigger/${triggerName}`, {
               method: 'POST',
               body: JSON.stringify(payload)
           });
-          return res.json();
+          return this.unwrapResponse<AutomationResult>(res);
       },
 
       /**

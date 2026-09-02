@@ -38,7 +38,6 @@ import type { SearchAllResponse } from '@objectstack/spec/api';
 import type {
     AnalyticsMetadataResponse,
     AnalyticsSqlResponse,
-    BaseResponse,
     TriggerFlowResponse,
 } from '@objectstack/spec/api';
 import type {
@@ -448,53 +447,64 @@ export async function returnTypePrecisionPins12034(): Promise<void> {
  * with only the socket stood in for). The other 38 are the better-auth-backed
  * `auth.*` / `organizations.*` / `oauth.*` families and are NOT touched here.
  *
- * ## What makes these five different from every binding above
+ * ## What makes these five different from every binding above — and what
+ * ## #13079 changed
  *
  * `unwrapResponse` strips the `{ success, data }` envelope; `res.json()` does
- * not. So four of the five resolve to the ENVELOPE and the annotation says so;
- * the fifth is served by `@objectstack/rest` with no envelope at all and binds
- * the bare payload. Getting that split wrong in either direction typechecks
- * against `any` and ships a false declaration — the census's highest-risk band.
+ * not. When #12104 bound them, four of the five ended `res.json()` and
+ * resolved to the ENVELOPE, and the annotations said so. #13079 (maintainer
+ * ruling 2026-08-31, option A) converged those four on `unwrapResponse`, so
+ * all five now resolve to the PAYLOAD: three to the route's declared `data`
+ * member, one to the same `AutomationResult` its sibling `execute` unwraps,
+ * and `queryDataset` — served by `@objectstack/rest` with no envelope at all,
+ * PROTECTED by the ruling — to the bare payload it always answered. The pins
+ * below are the #12104 pins REVERSED, not deleted: the payload read compiles,
+ * the envelope read (`.data`) is the type error. Getting any of them wrong
+ * typechecks against `any` and ships a false declaration — the census's
+ * highest-risk band.
  *
  * Type-level for the reason this file's header gives: a runtime test cannot
- * observe a return-type narrowing at all.
+ * observe a return-type change at all — `envelope-convergence.test.ts` pins
+ * the VALUE, this function pins the DECLARATION.
  */
 export async function returnTypePrecisionPins12104(): Promise<void> {
-    // ── the three dispatcher-served analytics reads: the ENVELOPE ─────────
-    // `data` is the producer's declared return, relayed by `deps.success(v)`.
+    // ── [#13079] the three dispatcher-served analytics reads: the PAYLOAD ──
+    // Each is the route's declared `data` member — what `deps.success(v)`
+    // wrapped and `unwrapResponse` hands back — indexed off the envelope type
+    // rather than re-declared, so the annotation follows the route's schema.
     expectTypeOf(await client.analytics.query({ cube: 'crm_account', measures: ['n'] }))
-        .toEqualTypeOf<BaseResponse & { data: AnalyticsResult }>();
-    expectTypeOf(await client.analytics.meta()).toEqualTypeOf<AnalyticsMetadataResponse>();
+        .toEqualTypeOf<AnalyticsResult>();
+    expectTypeOf(await client.analytics.meta()).toEqualTypeOf<AnalyticsMetadataResponse['data']>();
     expectTypeOf(await client.analytics.explain({ cube: 'crm_account', measures: ['n'] }))
-        .toEqualTypeOf<AnalyticsSqlResponse>();
+        .toEqualTypeOf<AnalyticsSqlResponse['data']>();
 
-    // ── the trigger door: the ENVELOPE over the same payload its sibling
-    //    `automation.execute` unwraps ─────────────────────────────────────
+    // ── the trigger door: the SAME payload its sibling `automation.execute`
+    //    unwraps — one handler, one shape, since #13079 ─────────────────────
     expectTypeOf(await client.automation.trigger('approve_account', {}))
-        .toEqualTypeOf<BaseResponse & { data: AutomationResult }>();
+        .toEqualTypeOf<AutomationResult>();
 
-    // ── the one REST-served method: the BARE payload ──────────────────────
+    // ── the one REST-served method: the BARE payload, unchanged ───────────
     expectTypeOf(await client.analytics.queryDataset({ selection: { measures: ['n'] } }))
         .toEqualTypeOf<AnalyticsResult>();
 
-    // ── direction 2: the reads the erasure allowed must now FAIL ──────────
-    // Each suppression is unused — a TS2578 error — while the method still
-    // returns `any`, because `any` satisfies every one of these.
+    // ── direction 2, REVERSED by #13079: the ENVELOPE reads must now FAIL ──
+    // Before #13079 these four suppressions sat on the PAYLOAD read (`.rows`,
+    // `.length`, `.sql`, `.runId`) because the methods answered the envelope.
+    // Reversed, not deleted: each now sits on the `.data` read a pre-#13079
+    // caller wrote, so a method that slid back to `res.json()` — or a
+    // declaration that slid back to the envelope — leaves its suppression
+    // unused (TS2578) and this file red.
+    // @ts-expect-error `analytics.query` answers the AnalyticsResult itself; there is no `.data`
+    void (await client.analytics.query({ cube: 'crm_account', measures: ['n'] })).data;
+    // @ts-expect-error `analytics.meta` answers the bare cube list; there is no `.data`
+    void (await client.analytics.meta()).data;
+    // @ts-expect-error `analytics.explain` answers `{ sql, params }`; there is no `.data`
+    void (await client.analytics.explain({ cube: 'crm_account', measures: ['n'] })).data;
+    // @ts-expect-error `automation.trigger` answers the run itself; there is no `.data`
+    void (await client.automation.trigger('approve_account', {})).data;
 
-    // The envelope/payload confusion, in the direction a caller writes it:
-    // reading a payload key off the enveloped value.
-    // @ts-expect-error `analytics.query` answers the envelope; the rows are under `.data`
-    void (await client.analytics.query({ cube: 'crm_account', measures: ['n'] })).rows;
-    // @ts-expect-error `analytics.meta` answers the envelope; the cubes are under `.data`
-    void (await client.analytics.meta()).length;
-    // @ts-expect-error `analytics.explain` answers the envelope; the statement is under `.data`
-    void (await client.analytics.explain({ cube: 'crm_account', measures: ['n'] })).sql;
-    // @ts-expect-error `automation.trigger` answers the envelope; the run is under `.data`
-    void (await client.automation.trigger('approve_account', {})).runId;
-
-    // …and the SAME confusion in the opposite direction on the one method that
-    // really is bare. This is the half that makes the split load-bearing rather
-    // than a family-wide guess.
+    // …and the method that was ALWAYS bare keeps its pin verbatim: the
+    // convergence made the other four look like it, it did not touch it.
     // @ts-expect-error `queryDataset` is served bare by @objectstack/rest — there is no envelope
     void (await client.analytics.queryDataset({ selection: { measures: ['n'] } })).data;
 
