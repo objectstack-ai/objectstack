@@ -7198,6 +7198,28 @@ export class ObjectStackProtocolImplementation implements
             items = (items as any[]).map((app) => this.engine.registry.applyNavContributions(app));
         }
 
+        // [#14375 / ADR-0130 Consequences row 6] A package row carries the
+        // server's OWN writability verdict. The REST `GET /packages` door is
+        // this producer with the durable rows spread over it, and Studio's
+        // package switcher reads that list; it used to derive "writable"
+        // client-side from `manifest.scope` alone, which is not this server's
+        // rule — ADR-0070 D2 (`isWritablePackage`) reads `engine.manifests`
+        // FIRST, so a scope-less module booted from a multi-package artifact is
+        // read-only while a scope-less Studio-created base is writable, and only
+        // the server can tell the two apart. Same predicate the authoring and
+        // lifecycle gates use (#8146: one answer), computed on a spread COPY:
+        // the registry record is never mutated and the verdict is never stored.
+        // The runtime dispatcher door decorates its own read of the same
+        // records the same way (`withWritableVerdict` in
+        // `packages/runtime/src/domains/packages.ts`).
+        if (request.type === 'package' || request.type === 'packages') {
+            items = (items as any[]).map((pkg) => {
+                const manifestId = pkg?.manifest?.id;
+                const id = typeof manifestId === 'string' ? manifestId : (typeof pkg?.id === 'string' ? pkg.id : undefined);
+                return { ...pkg, writable: this.isWritablePackage(id) };
+            });
+        }
+
         return {
             type: request.type,
             items: decorateMetadataItems(

@@ -132,6 +132,100 @@ describe('validateFunctionalCompleteness — the walk', () => {
     })).toEqual([]);
   });
 
+  // ── The OBJECT-NESTED door (ADR-0017 "Object has-many View") ────────────
+  // A container authored on the object itself — `objects[].list` /
+  // `objects[].listViews.*` — reaches the same renderer as the top-level
+  // `views[]` copy, so it must reach the same rules. The walk used to stop at
+  // `stack.views`, which is precisely the half-blind instrument this suite's
+  // docblock names.
+
+  it('walks an object-nested `listViews` view — ARRAY-form objects', () => {
+    const findings = validateFunctionalCompleteness({
+      objects: [{ name: 'task', fields: [{ name: 'title', type: 'text' }], listViews: { plan: { type: 'gantt' } } }],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe('view/layout-without-binding');
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].where).toBe('object "task" › listViews.plan');
+    expect(findings[0].path).toBe('objects[0].listViews.plan.gantt');
+  });
+
+  it('walks the same view when objects are name-keyed MAPS', () => {
+    // The fixture pair the card asks for: both authorable object spellings,
+    // one rule, one location grammar (the object segment is positional in
+    // both — the field walk above and `validate-list-view-field-refs` spell
+    // it the same way).
+    const findings = validateFunctionalCompleteness({
+      objects: { task: { fields: { title: { type: 'text' } }, listViews: { plan: { type: 'gantt' } } } },
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe('view/layout-without-binding');
+    expect(findings[0].where).toBe('object "task" › listViews.plan');
+    expect(findings[0].path).toBe('objects[0].listViews.plan.gantt');
+  });
+
+  it('walks the object-nested default `list` slot too', () => {
+    expect(validateFunctionalCompleteness({
+      objects: [{ name: 'task', fields: [], list: { type: 'timeline' } }],
+    }).map((f) => [f.rule, f.where, f.path])).toEqual([
+      ['view/layout-without-binding', 'object "task" › list', 'objects[0].list.timeline'],
+    ]);
+  });
+
+  it('carries `view/tree-without-parent-field` through the nested door as well', () => {
+    // Not a second wiring step: the tree rule needs the BOUND OBJECT, and the
+    // nested door resolves it to the container's own object, so every rule the
+    // predicate has arrives here by construction.
+    expect(validateFunctionalCompleteness({
+      objects: [{ name: 'unit', fields: [{ name: 'name', type: 'text' }], listViews: { org: { type: 'tree', tree: {} } } }],
+    }).map((f) => [f.rule, f.where, f.path])).toEqual([
+      ['view/tree-without-parent-field', 'object "unit" › listViews.org', 'objects[0].listViews.org.tree.parentField'],
+    ]);
+
+    // A self-lookup on the object → the renderer auto-detects → silent.
+    expect(validateFunctionalCompleteness({
+      objects: { unit: { fields: { parent: { type: 'lookup', reference: 'unit' } }, listViews: { org: { type: 'tree', tree: {} } } } },
+    })).toEqual([]);
+
+    // ADR-0047: the nested view's own `data.object` retargets the lookup, so
+    // the rule reads `cat`'s fields, not `unit`'s.
+    expect(validateFunctionalCompleteness({
+      objects: [
+        { name: 'unit', fields: [], listViews: { org: { type: 'tree', tree: {}, data: { provider: 'object', object: 'cat' } } } },
+        { name: 'cat', fields: [{ name: 'parent', type: 'tree' }] },
+      ],
+    })).toEqual([]);
+  });
+
+  it('does not over-report: a nested view WITH its binding is silent', () => {
+    // The negative half of the pair. A widened walk that fired on complete
+    // metadata would be worse than the blind one it replaces.
+    expect(validateFunctionalCompleteness({
+      objects: [{
+        name: 'task',
+        fields: [{ name: 'title', type: 'text' }, { name: 'starts', type: 'datetime' }, { name: 'parent', type: 'lookup', reference: 'task' }],
+        list: { type: 'grid' },
+        listViews: {
+          plan: { type: 'gantt', gantt: { startDateField: 'starts', titleField: 'title' } },
+          org: { type: 'tree', tree: {} },
+          flat: { type: 'grid' },
+        },
+      }],
+    })).toEqual([]);
+  });
+
+  it('reports the nested and the top-level copy independently', () => {
+    // The two doors are separate authorable surfaces, not two readings of one
+    // definition — an author who wrote both gets a finding for each.
+    expect(validateFunctionalCompleteness({
+      objects: [{ name: 'task', fields: [], listViews: { plan: { type: 'gantt' } } }],
+      views: [{ object: 'task', listViews: { plan: { type: 'gantt' } } }],
+    }).map((f) => f.path).sort()).toEqual([
+      'objects[0].listViews.plan.gantt',
+      'views[0].listViews.plan.gantt',
+    ]);
+  });
+
   it('walks webhooks in both spellings', () => {
     expect(validateFunctionalCompleteness({
       webhooks: [{ name: 'notify', url: 'https://x' }],
@@ -167,6 +261,8 @@ describe('validateFunctionalCompleteness — the walk', () => {
       undefined, null, 42, 'x', [], {},
       { objects: 'nope' }, { objects: [null, 7] },
       { objects: [{ name: 'o', fields: 'nope' }] },
+      { objects: [{ name: 'o', list: null, listViews: 'nope' }] },
+      { objects: { o: { list: 7, listViews: [null, 'x'] } } },
       { views: [{ list: null }] },
       { views: 'nope' },
       { webhooks: 'nope' }, { webhooks: [null, 7] },
@@ -239,6 +335,91 @@ describe('#14106 acceptance — timeline / map / tree bindings reach `validate` 
     });
 
     it(`the bound stack passes \`${command}\``, () => {
+      const { errors, advisories } = splitBySeverity(runAuthoringRules(command, { normalized: clean as never }));
+      expect([...errors, ...advisories].filter((f) => BINDING_RULES.includes(f.rule))).toEqual([]);
+    });
+  }
+});
+
+/**
+ * The #14320 acceptance criteria, pinned end-to-end through the rule table on
+ * the card's own repro path (`runAuthoringRules('validate' | 'build', …)`) —
+ * because the walk being wired is only worth as much as the surface it reaches.
+ *
+ * The stack below authors nothing at `stack.views`: every list view lives on
+ * its object, the ADR-0017 spelling `os validate` used to walk right past.
+ */
+describe('#14320 acceptance — object-nested `list` / `listViews` reach `validate` AND `build`', () => {
+  const fields = {
+    subject: { type: 'text' },
+    last_update_at: { type: 'datetime' },
+    site: { type: 'text' },
+  };
+  const BINDING_RULES = ['view/layout-without-binding', 'view/tree-without-parent-field'];
+
+  /** Array-form objects — the `defineObject` spelling. */
+  const repro = {
+    objects: [{
+      name: 'duly_task',
+      fields,
+      list: { type: 'timeline', columns: ['subject'] },
+      listViews: {
+        plan: { type: 'gantt', columns: ['subject'] },
+        sites: { type: 'map', columns: ['subject'] },
+        flat: { type: 'tree', tree: {}, columns: ['subject'] },
+      },
+    }],
+  };
+
+  /** Map-form objects — the same stack, the other authorable spelling. */
+  const reproMap = {
+    objects: {
+      duly_task: {
+        fields,
+        list: { type: 'timeline', columns: ['subject'] },
+        listViews: {
+          plan: { type: 'gantt', columns: ['subject'] },
+          sites: { type: 'map', columns: ['subject'] },
+          flat: { type: 'tree', tree: {}, columns: ['subject'] },
+        },
+      },
+    },
+  };
+
+  const EXPECTED = [
+    'view/layout-without-binding @ objects[0].list.timeline',
+    'view/layout-without-binding @ objects[0].listViews.plan.gantt',
+    'view/layout-without-binding @ objects[0].listViews.sites.map',
+    'view/tree-without-parent-field @ objects[0].listViews.flat.tree.parentField',
+  ];
+
+  const clean = {
+    objects: [{
+      name: 'duly_task',
+      fields: { ...fields, parent: { type: 'lookup', reference: 'duly_task' } },
+      list: { type: 'timeline', columns: ['subject'], timeline: { startDateField: 'last_update_at', titleField: 'subject' } },
+      listViews: {
+        plan: { type: 'gantt', columns: ['subject'], gantt: { startDateField: 'last_update_at', titleField: 'subject' } },
+        sites: { type: 'map', columns: ['subject'], map: { locationField: 'site' } },
+        flat: { type: 'tree', tree: {}, columns: ['subject'] },
+        declared: { type: 'tree', tree: { parentField: 'parent' }, columns: ['subject'] },
+      },
+    }],
+  };
+
+  for (const command of ['validate', 'build'] as const) {
+    for (const [spelling, stack] of [['array-form', repro], ['map-form', reproMap]] as const) {
+      it(`the ${spelling} repro is diagnosed by \`${command}\``, () => {
+        const { advisories } = splitBySeverity(runAuthoringRules(command, { normalized: stack as never }));
+        const hits = advisories
+          .filter((f) => BINDING_RULES.includes(f.rule))
+          .map((f) => `${f.rule} @ ${f.path}`)
+          .sort();
+        expect(hits).toEqual(EXPECTED);
+      });
+    }
+
+    it(`the bound object-nested stack passes \`${command}\``, () => {
       const { errors, advisories } = splitBySeverity(runAuthoringRules(command, { normalized: clean as never }));
       expect([...errors, ...advisories].filter((f) => BINDING_RULES.includes(f.rule))).toEqual([]);
     });

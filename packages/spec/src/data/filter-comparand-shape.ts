@@ -104,6 +104,29 @@
  * `$or: [{$in: […]}, {$null: true}]` — and the refusal text prescribes it.
  * #5041's question (ISO date strings as legitimate `$between` bounds) and
  * #5234's (object members on the `driver-sql` face) stand untouched.
+ *
+ * ## Refused BY RULING, 2026-09-01: a `null` ORDERING comparand (#14080)
+ *
+ * The same carve-out, one position over — and the last one. A `null`
+ * comparand of `$gt` / `$gte` / `$lt` / `$lte` was the only null-comparand
+ * position the contract neither RULED (`$eq: null` / `$ne: null` ARE the null
+ * predicate, #5332) nor REFUSED (the list positions above): #5332's landing
+ * had recorded it in writing as one "no ruling covers", and `driver-memory`'s
+ * two faces answered it differently — the live path reads two absences as
+ * EQUAL (so `$gte: null` admits the no-value row and `$gt: null` does not),
+ * the reference matcher compares through JS coercion (`5 > null` is
+ * `5 > 0`). Ruled 2026-09-01 (option A): refused at this door, same envelope,
+ * so the divergent cells are constructively unreachable — ⛔ the matcher is
+ * not repaired (dead code once refused), ⛔ no ordering-vs-null semantics is
+ * defined anywhere (the live path's reading needs a strictness rule, "two
+ * absences compare equal", that no ruling states), ⛔ no cross-backend
+ * alignment. `null` is not ordered; the refusal text prescribes the ruled
+ * spellings, `$eq: null` / `$ne: null`. Strictly `null`: `undefined` keeps the
+ * TYPE door's own sentence (`undefinedComparandRefusal`, one file over), every
+ * non-null comparand type and the `{ $field }` reference keep passing, and
+ * `$eq` / `$ne` are untouched. The door's NAME predates both null carve-outs;
+ * it stays, because the engine binds it by that name (`@objectstack/objectql`,
+ * a delegating wrapper) and there is still exactly one implementation.
  * - **A field spec with no `$` keys** (`{ author: { name: 'x' } }`) — a
  *   deep-equality comparand to `driver-memory` and `driver-mongodb` alike. This
  *   gate does not descend into one: a comparand is data, and a stricter reading
@@ -139,6 +162,24 @@ const LIST_COMPARAND_OPERATORS: ReadonlyMap<string, readonly string[]> = new Map
   ['$in', ['in']],
   ['$nin', ['nin', 'not_in', 'notin']],
   ['$between', ['between']],
+]);
+
+/**
+ * The ordering operators, with the authoring spellings that lower to each —
+ * the four positions of the 2026-09-01 null-comparand refusal (#14080).
+ *
+ * Same shape and same reason as {@link LIST_COMPARAND_OPERATORS}: the
+ * spellings serve the MESSAGE (an author writes `after` on a `ViewFilterRule`
+ * and never types `$gt`), they are the `AST_OPERATOR_MAP` keys that map to
+ * each operator, spelled here because `filter.zod.ts` imports this module, and
+ * `filter-comparand-shape.test.ts` reconciles the two sets so a new ordering
+ * spelling cannot land unnamed.
+ */
+const ORDERING_COMPARAND_OPERATORS: ReadonlyMap<string, readonly string[]> = new Map([
+  ['$gt', ['>', 'gt', 'greater_than', 'greaterthan', 'after']],
+  ['$gte', ['>=', 'gte', 'greater_than_or_equal', 'greaterthanorequal', 'greaterorequal']],
+  ['$lt', ['<', 'lt', 'less_than', 'lessthan', 'before']],
+  ['$lte', ['<=', 'lte', 'less_than_or_equal', 'lessthanorequal', 'lessorequal']],
 ]);
 
 /** What a caller most likely meant when they wrote a scalar. */
@@ -331,15 +372,46 @@ function nullRangeBoundError(
 }
 
 /**
+ * A `null` comparand of `$gt` / `$gte` / `$lt` / `$lte` — refused BY RULING,
+ * 2026-09-01 (#14080); see the module note's second "Refused BY RULING"
+ * section.
+ *
+ * The prescription is the ruling's own: `$eq: null` / `$ne: null` ARE the
+ * null predicates (#5332), so the refusal names both halves — an author who
+ * wrote `$gte: null` was reaching for one of them. Same #5346/#5348 wording
+ * contract as {@link nullListMemberError}: operator, field, position,
+ * corrected shape, authoring spellings, front-loaded and inside the 500-char
+ * client bound; the schema door's twin is `nullOrderingComparandMessage`
+ * (`./filter.zod.ts`), reconciled by pin.
+ */
+function nullOrderingComparandError(
+  context: string | undefined,
+  op: string,
+  field: string,
+  path: string,
+): Error {
+  const spellings = ORDERING_COMPARAND_OPERATORS.get(op) ?? [];
+  return invalidFilterComparandError(
+    context,
+    `Operator "${op}" on field "${field}" does not accept a null comparand (at ${path}). ` +
+    `null is not ordered; no two evaluation faces agree on what it matches. State absence ` +
+    `with the null predicate: {"$eq": null} is "has no value", {"$ne": null} is "has a value". ` +
+    `Authoring spellings: ${spellings.join(', ')}. The filter was NOT applied, and an ` +
+    `unapplied filter would have returned the UNFILTERED result set.`,
+  );
+}
+
+/**
  * Walk one `FilterCondition` and refuse every list-shaped operator whose
- * comparand cannot be one.
+ * comparand cannot be one — and, since the two null rulings (2026-08-31,
+ * 2026-09-01), the null comparand positions those rulings carved out.
  *
  * Read-only and allocation-free on the overwhelmingly common path (a filter
  * with no list operator walks its own keys and returns). Runs on every engine
  * read and write and inside every {@link parseFilterAST} call, so it stays a
  * walk rather than a schema parse — that cost is now the whole reason, and this
  * gate deliberately enforces only the three list declarations the drivers
- * genuinely cannot agree on.
+ * genuinely cannot agree on, plus the null carve-outs ruled onto the same door.
  *
  * @param node    the LOWERED `FilterCondition` — never the authoring array.
  * @param context optional caller prefix (`find('deal')`), the engine's #5346
@@ -400,6 +472,15 @@ function assertFieldListComparands(
   // condition. Not descended into; see the module note.
   if (!keys.some((key) => key.startsWith('$'))) return;
   for (const op of keys) {
+    // The ordering carve-out (2026-09-01 ruling, #14080). Strictly `null`:
+    // `undefined` keeps the TYPE door's own sentence, and every other
+    // comparand type in these slots is that door's question, not this one's.
+    if (ORDERING_COMPARAND_OPERATORS.has(op)) {
+      if (spec[op] === null) {
+        throw nullOrderingComparandError(context, op, field, `${path}.${op}`);
+      }
+      continue;
+    }
     if (!LIST_COMPARAND_OPERATORS.has(op)) continue;
     const comparand = spec[op];
     if (op === '$between') {
