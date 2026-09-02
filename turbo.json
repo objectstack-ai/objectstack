@@ -77,7 +77,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
-        "$TURBO_ROOT$/packages/**"
+        "$TURBO_ROOT$/packages/**/*.ts"
       ]
     },
     "@objectstack/cli#test": {

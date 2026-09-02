@@ -183,21 +183,28 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
   },
   '@objectstack/types': {
     // src/driver-error-classification.callers.test.ts is the #13440 gate: it
-    // walks every TypeScript source under `packages/` and fails any call of
+    // walks every `.ts` source under `packages/` and fails any call of
     // `isMissingTableError` that does not name the object being read.
     //
-    // The whole subtree rather than `packages/**/*.ts`, for the reason the
-    // `skills/**` glob on @objectstack/spec gives: the walk READS DIRECTORIES
-    // (`readdirSync` from `packages/` down), and a glob that names only files
-    // does not cover a directory listing -- `coversDirectory` is the check. A
-    // new package directory changes this gate's verdict, so it is an input.
+    // ⛔ `.ts` and NOT the `packages/**` subtree, which is what this entry said
+    // first. These globs are inherited as watch hints by
+    // `check:cross-package-test-inputs`, and the dispatch-gates self-test pins
+    // that no hint of that family reaches
+    // the `realtime-hooks.test.tsx` file in `packages/client-react` -- its live
+    // specimen for a test class the hint route cannot reach. Named in two
+    // halves deliberately: literals in this module are inherited as that
+    // family's watch hints, and a quoted whole path here would hand it the very
+    // hint the entry must not have. `packages/**` was the only
+    // entry in this table that covered a `.tsx` file, so it turned that case
+    // red. The scanner was narrowed to match: extensions and glob widen
+    // together or not at all, and that test's header carries the measurement.
     //
-    // The radius stops at `packages/**` on purpose: the test anchors its repo
+    // The radius stops inside `packages/` on purpose: the test anchors its repo
     // root by ARITHMETIC off this package's own manifest rather than by walking
     // to a workspace-root marker file, so it names no root-level path and this
     // entry adds no new top-level root for `check-ci-filter-parity.mjs` to want
     // in ci.yml's `crosspkg:` filter. Its own header records that trade.
-    globs: ['packages/**'],
+    globs: ['packages/**/*.ts'],
   },
   '@objectstack/cli': {
     // src/commands/serve-verify-security-parity.contract.test.ts diffs

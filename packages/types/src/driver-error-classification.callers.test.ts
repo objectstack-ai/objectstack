@@ -78,6 +78,38 @@
  * `CROSS_PACKAGE_TEST_INPUTS` (and, for a NEW top-level root, a matching entry
  * in ci.yml's `crosspkg:` filter — `check-ci-filter-parity.mjs` is the gate
  * that says so).
+ *
+ * ⚠️ The EXTENSION boundary is `.ts` alone, and unlike the tree above that one
+ * is not free — it is a deliberate trade with a second gate. Measured on the
+ * commit this landed, under `packages/`:
+ *
+ *     .ts    5181 tracked, 48 mention the predicate   <- the scanned set
+ *     .tsx      8 tracked,  0 mention the predicate   <- excluded
+ *     .mts     17 tracked,  0 mention the predicate   <- excluded
+ *     .cts      0 tracked,  0 mention the predicate   <- excluded
+ *
+ * So nothing is lost today. What forbids simply widening it is that this
+ * package's declared radius is INHERITED as watch hints by
+ * `check:cross-package-test-inputs`, and the dispatch-gates self-test pins that
+ * no hint of that family reaches the `realtime-hooks.test.tsx` file in
+ * `packages/client-react` — the live specimen for "a test class the hint route
+ * cannot reach". A glob here that covers `.tsx` makes that case fail. It is a
+ * real red and not a nuisance: the specimen is how that tool proves its residue
+ * classes are not empty.
+ *
+ * (That file is named in two halves rather than as one quoted path on purpose.
+ * This gate's own registrar collects quoted whole paths out of COMMENTS, so
+ * spelling it here would put it on this package's roster and demand the very
+ * `.tsx` glob the paragraph exists to forbid — measured, it fails exactly that
+ * way.)
+ *
+ * ⇒ If a `.tsx` (or `.mts`) caller of this predicate ever appears, widening
+ * `SOURCE_FILE` below is only HALF the change: the declared glob must widen
+ * with it, and re-pointing that self-test specimen is a `scripts/pm/` edit
+ * owned by another lane. Do not widen the scanner alone — that reads as
+ * coverage while turbo never re-runs this test for the files it now claims to
+ * judge, which is the #7802 shape the declaration table exists to prevent. The
+ * two pins below keep this paragraph honest rather than decorative.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -135,6 +167,15 @@ const SCANNED_TREE = join(REPO_ROOT, 'packages');
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', '.turbo', '.next']);
 
 /**
+ * The scanned extension set, spelled ONCE so the pins below can assert it and
+ * so it stays in exact correspondence with this package's declared glob in
+ * `CROSS_PACKAGE_TEST_INPUTS` (`packages/**\/*.ts`). Read the extension
+ * boundary in the header before changing either — they widen together or not
+ * at all.
+ */
+const SOURCE_FILE = (name: string): boolean => name.endsWith('.ts') && !name.endsWith('.d.ts');
+
+/**
  * The defining package's own contract tests — the tests OF the optional form.
  * The glob is deliberately anchored to the whole repo-relative path: a
  * same-named file in another package is not a contract test of this predicate.
@@ -168,8 +209,7 @@ function sourceFilesUnder(root: string): string[] {
         continue;
       }
       if (!entry.isFile()) continue;
-      if (!/\.(?:ts|tsx|mts|cts)$/.test(entry.name)) continue;
-      if (entry.name.endsWith('.d.ts')) continue;
+      if (!SOURCE_FILE(entry.name)) continue;
       out.push(join(dir, entry.name));
     }
   };
@@ -281,6 +321,41 @@ describe('isMissingTableError — every in-repo call names the object it read (#
         'which would make this gate vacuous',
     ).toBeGreaterThanOrEqual(15);
     expect(packages.size).toBeGreaterThanOrEqual(3);
+  });
+
+  // ── THE EXTENSION BOUNDARY ────────────────────────────────────────────────
+  // The header explains why this gate reads `.ts` and nothing else. These two
+  // keep that paragraph from becoming decoration.
+
+  it('the scanned extension set is exactly `.ts`, matching the declared glob', () => {
+    // Pure predicate assertions — no I/O, so this adds nothing to the radius
+    // this package must declare. Widening any line here without widening
+    // `packages/**\/*.ts` in CROSS_PACKAGE_TEST_INPUTS is the #7802 shape:
+    // the scan would judge files turbo never re-runs it for.
+    expect(SOURCE_FILE('engine.ts')).toBe(true);
+    expect(SOURCE_FILE('engine.d.ts')).toBe(false);
+    expect(SOURCE_FILE('realtime-hooks.test.tsx')).toBe(false);
+    expect(SOURCE_FILE('thing.mts')).toBe(false);
+    expect(SOURCE_FILE('thing.cts')).toBe(false);
+    expect(FILES.every((f) => f.endsWith('.ts') && !f.endsWith('.d.ts'))).toBe(true);
+  });
+
+  it('POSITIVE CONTROL: `.tsx` files really do exist under packages/, so excluding them is a decision', () => {
+    // Filename-only: this counts directory ENTRIES and never opens a `.tsx`
+    // file, so the exclusion cannot smuggle in a content dependence on files
+    // outside the declared glob. A floor, not a pin — adding `.tsx` files can
+    // never redden it, and finding zero would mean the header's measurement
+    // (8 when this landed) had quietly become a statement about nothing.
+    const countTsx = (dir: string): number => {
+      let n = 0;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          if (!SKIP_DIRS.has(entry.name)) n += countTsx(join(dir, entry.name));
+        } else if (entry.isFile() && entry.name.endsWith('.tsx')) n += 1;
+      }
+      return n;
+    };
+    expect(countTsx(SCANNED_TREE)).toBeGreaterThanOrEqual(1);
   });
 
   it('no renamed import hides a call from the by-name matcher', () => {
