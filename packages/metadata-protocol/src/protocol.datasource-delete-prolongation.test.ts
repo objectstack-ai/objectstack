@@ -47,14 +47,12 @@
  *      header names exactly this residue — "a PEER node's write on a deployment
  *      with no bridge attached". ⭐ This is the BOUNDED seam.
  *
- * ⚠️ A precision the card's checklist did not have: at THIS door the bounded
- * residue the ruling allows ("listCache TTL is the one bounded residue that may
- * legitimately remain, per #5109") is `meta-overlay-cache`'s TTL, not
- * `MetadataManager.LIST_CACHE_TTL_MS`. Both default to 30_000 ms, so the
- * ruling's bound is unchanged in magnitude — but the cache that holds the
- * residue is a different one, and a future author tuning `LIST_CACHE_TTL_MS`
- * would not move this number. The constant is imported here, never retyped, so
- * this pin tracks whichever value ships.
+ * ⚠️ A precision the card's checklist did not have: at THIS door the cache in
+ * play is `meta-overlay-cache`'s, not `MetadataManager.LIST_CACHE_TTL_MS`. Both
+ * default to 30_000 ms, so the ruling's bound is unchanged in magnitude — but
+ * they are different caches, a future author tuning `LIST_CACHE_TTL_MS` would
+ * not move this number, and only this one feeds the registry. The constant is
+ * imported here, never retyped, so this pin tracks whichever value ships.
  *
  * ---------------------------------------------------------------------------
  * Topology: a PROXY for a live multi-node deployment, declared as one
@@ -77,53 +75,101 @@
  * those, and it is not run here.
  *
  * ---------------------------------------------------------------------------
- * Arms, with directions declared BEFORE the run
+ * Arms — predicted BEFORE the run, and the prediction was FALSIFIED
  * ---------------------------------------------------------------------------
- *  • Arm B (bridge attached — the landed #13331 shape): the peer's registry
- *    converges on the DELETE within one bus hop, so the unbounded seam is shut;
- *    the peer's own overlay cache still serves the pre-delete row set until its
- *    TTL lapses.                    -> BOUNDED at exactly one TTL window
- *  • Arm A (control, no bridge — the pre-fix production shape): the peer's
- *    registry is never healed, so the entry outlives the cache TTL and every
- *    window after it.               -> UNBOUNDED (still served past 10 windows)
- *  • Negative control: an unrelated datasource on the peer is untouched by
- *    either arm.                    -> still served in both
+ * Predicted, in writing, before running:
  *
- * Arm A is what makes Arm B a measurement: it proves this probe CAN see a
- * prolongation, so Arm B's bound is the bridge's doing and not an artifact of a
- * harness that forgets rows on its own.
+ *  • Arm B (bridge attached — the landed #13331 shape): the peer's registry
+ *    converges within one bus hop, so the unbounded seam is shut and the only
+ *    residue is the peer's own overlay cache.  -> BOUNDED at one TTL window
+ *  • Arm A (control, no bridge — the pre-fix shape): the peer's registry is
+ *    never healed.                             -> UNBOUNDED past 10 windows
+ *  • Negative control: an unrelated datasource is untouched in every arm.
+ *
+ * ⭐ MEASURED: Arm A came out as predicted. Arm B did NOT, and the direction of
+ * the miss is the finding — it is worse than predicted, not better. The first
+ * half of the prediction holds: the bridge really does heal the peer's registry
+ * within one bus hop, before the clock moves (case 3 below pins it). The second
+ * half does not:
+ *
+ *      A SINGLE READ of the peer's own `/api/v1/meta/datasource` door,
+ *      landing while the peer's stale overlay-cache entry is still fresh,
+ *      writes the deleted row straight back into the registry the bridge
+ *      just healed — and the registry has no TTL.
+ *
+ * So the prolongation is neither unconditionally bounded nor unconditionally
+ * unbounded, and the discriminator is not time but TRAFFIC:
+ *
+ *      read lands inside the residue window  -> UNBOUNDED  (cases 4, 6)
+ *      no read lands inside it               -> BOUNDED, one TTL window (case 5)
+ *
+ * Both are pinned, side by side and differing in exactly that one step, because
+ * either one alone reads as a clean verdict and neither one alone is true.
+ *
+ * ⚠️ On a replica actually serving `/api/v1/meta/datasource` — the door QA was
+ * watching — a read inside a 30s window is the ordinary case, not the unlucky
+ * one. The bounded arm is the quiet-replica arm.
+ *
+ * ---------------------------------------------------------------------------
+ * Why the re-hydration happens, precisely
+ * ---------------------------------------------------------------------------
+ * Nothing on the bridge's receipt path touches the WRITE EPOCH that keys the
+ * overlay cache. `applyRemoteMetadataMutation` re-reads the row and repairs the
+ * registry; it performs no engine write, and a peer replica does no writing of
+ * its own on this path, so the peer's epoch does not move and its pre-delete
+ * row set stays "fresh" for the rest of its TTL. `getMetaItems` then does what
+ * the cache's own header says it always does, hit or miss — it runs
+ * `hydrateOverlayIntoRegistry` over those rows.
+ *
+ * ⭐ The comparison that makes this a gap rather than a design: the SIBLING
+ * bridge for the same substrate does bump it. `authz-invalidation-bridge.ts`
+ * calls `epoch.bump('remote')` when it applies a peer hint, and the overlay
+ * cache's own header cites that as the reason cross-node convergence "narrows
+ * for free" there. The `metadata.mutated` bridge added for #13331 contains no
+ * epoch reference at all. So the two cross-node paths over one substrate
+ * disagree, and this door sits on the half that does not invalidate.
+ *
+ * ⛔ NOT FIXED HERE. This card is a measurement carrier and its source surface
+ * is read-only, so the reading is reported and the repair is left to a card
+ * that can be decided on it.
  *
  * ---------------------------------------------------------------------------
  * Four-seam checklist (the card's own elimination list) — verdicts
  * ---------------------------------------------------------------------------
- *  1. pubsub / bridge not attached ....... RE-MEASURED here. Arm A reproduces
- *     the unbounded prolongation; Arm B shows the landed publisher + bridge
- *     bounds it. This is the seam, and it is now closed to a TTL.
+ *  1. pubsub / bridge not attached ....... RE-MEASURED. Arm A reproduces the
+ *     unbounded pre-fix prolongation; the landed publisher + bridge do fan the
+ *     DELETE out and do heal the peer's registry. This seam is CLOSED — and it
+ *     is not the whole story, see 3.
  *  2. `restoreRuntimeDatasources` re-seeding ... ELIMINATED by PR #13883 —
  *     boot-only, and it reads the already-corrected DB, so it cannot explain a
- *     steady-state cross-replica prolongation without a restart. Not re-derived
- *     here (the card's dispatch forbids re-deriving §A).
- *  3. list-cache TTL (#5109) ............. The one BOUNDED residue the ruling
- *     allows, and it is what Arm B measures — refined to the overlay cache, see
- *     the precision note above.
+ *     steady-state cross-replica prolongation without a restart. Cited, not
+ *     re-derived (the dispatch forbids re-deriving that finding).
+ *  3. list-cache TTL (#5109) ............. ⛔ NOT the bounded residue the ruling
+ *     expected. At this door the cache is `meta-overlay-cache`, not
+ *     `MetadataManager.listCache` — and it does not merely delay the correct
+ *     answer, it FEEDS the untimed registry, converting a 30s residue into an
+ *     unbounded one on any read. That conversion is what this file measures.
  *  4. same class as #13578 ............... ELIMINATED by PR #13883 — same
  *     symptom, opposite mechanism (that driver registry had NO eviction door;
- *     this one's door exists and does broadcast). Not re-derived here.
+ *     this one's door exists and does broadcast). Cited, not re-derived.
  *
  * ⛔ Neither the QA observation nor the source counter-evidence is discarded by
- * this file, and it is written so it cannot be: Arm A reproduces the observed
- * cluster-wide prolongation, and Arm B reproduces the counter-evidence that the
- * delete path really does fan out. Both readings are true; the seam was the
- * transport between them.
+ * this file, and it is written so it cannot be: Arm A and case 4 reproduce the
+ * observed cluster-wide prolongation, and case 3 reproduces the counter-
+ * evidence that the delete path really does fan out and really does heal. Both
+ * readings are true, then and now.
  *
  * ---------------------------------------------------------------------------
  * Reverse verification (ablation), direction predicted BEFORE the run
  * ---------------------------------------------------------------------------
- * Flipping Arm B's `attach: true` to `false` — neutering the bridge in the
- * HARNESS, never in source, which this card may not touch — must turn EXACTLY
- * the Arm-B bound case RED, reporting an unbounded prolongation where a
- * one-window bound is expected, while Arm A, the negative control and the
- * mechanism cases stay GREEN. No rebuild leg applies: this test imports the
+ * Flipping the `attach: true` of the two cases that depend on the bridge — the
+ * registry-heal case and the bounded no-read case — to `false`, neutering the
+ * bridge in the HARNESS and never in source, which this card may not touch,
+ * must turn EXACTLY those two RED (an unhealed registry, and a row still served
+ * after the window) while every other case stays GREEN. The already-unbounded
+ * cases cannot move, which is the point: they are unbounded with the bridge as
+ * well, so an ablation that reddened them would mean the harness, not the
+ * bridge, was deciding the outcome. No rebuild leg applies: this test imports the
  * subject as `./protocol.js`, a relative specifier inside its own package that
  * vitest resolves to `src/protocol.ts`, so nothing is served from `dist/`.
  * Measured in the PR body.
@@ -228,6 +274,11 @@ function makeRegistry() {
                 return bucket(type).delete(name);
             },
             removeRuntimeShadow: () => false,
+            // The read door filters by package state and merges nav
+            // contributions for `app`; neither is under measurement here, so
+            // both answer the neutral value rather than being left absent.
+            isPackageDisabled: () => false,
+            applyNavContributions: (app: unknown) => app,
             registerObject: () => {},
             unregisterObject: () => true,
             removeObjectOverlay: () => {},
@@ -255,7 +306,7 @@ function makeRegistry() {
  * to hold it locally. That is the QA-observed precondition: all three replicas
  * were serving the entry before the delete.
  */
-function makeReplica(store: ReturnType<typeof makeSharedStore>) {
+function makeReplica(store: ReturnType<typeof makeSharedStore>, environmentId?: string) {
     const { rows, historyRows, nextId } = store;
     const { registry, removedEntries } = makeRegistry();
 
@@ -354,7 +405,7 @@ function makeReplica(store: ReturnType<typeof makeSharedStore>) {
     };
 
     const protocol = new ObjectStackProtocolImplementation(
-        engine, () => new Map(), undefined,
+        engine, () => new Map(), environmentId,
     ) as any;
 
     return { protocol, engine, registry, removedEntries };
@@ -395,11 +446,20 @@ const datasourceBody = (name: string) => ({
     config: { host: 'db.internal', database: name },
 });
 
-/** Both replicas over one store, joined (or not) by the bus. */
-function makeCluster(opts: { attach: boolean }) {
+/**
+ * Both replicas over one store, joined (or not) by the bus.
+ *
+ * `environmentId` selects the KERNEL SHAPE, and it is a variable of this
+ * measurement rather than a detail: it is the flag `getMetaItems` and
+ * `applyRegistryWriteThrough` both gate registry hydration on, so it decides
+ * whether a replica keeps a local registry copy of an overlay row at all —
+ * which is precisely the difference between a bounded and an unbounded
+ * prolongation. Unscoped (`undefined`) is the control-plane shape.
+ */
+function makeCluster(opts: { attach: boolean; environmentId?: string }) {
     const store = makeSharedStore();
-    const writer = makeReplica(store);
-    const peer = makeReplica(store);
+    const writer = makeReplica(store, opts.environmentId);
+    const peer = makeReplica(store, opts.environmentId);
     const { bus, published } = makeBus();
     if (opts.attach) {
         writer.protocol.attachMetadataMutationPubSub(bus, 'node-a');
@@ -425,10 +485,21 @@ async function settle(): Promise<void> {
     for (let i = 0; i < 50; i++) await Promise.resolve();
 }
 
-/** What `GET /api/v1/meta/datasource` answers on this replica, by name. */
+/**
+ * What `GET /api/v1/meta/datasource` answers on this replica, by name.
+ *
+ * Both response shapes are unwrapped, exactly as the REST list route unwraps
+ * them: `getMetaItems` is typed `{ type, items[] }` while the implementation
+ * may answer the bare array, and the route handles both. Reading only one shape
+ * here would make the door's answer look empty and every prolongation below
+ * would measure zero.
+ */
 async function servedNames(replica: { protocol: any }): Promise<string[]> {
-    const items = await replica.protocol.getMetaItems({ type: 'datasource' });
-    return (items as Array<{ name?: unknown }>).map((i) => String(i?.name));
+    const answer = await replica.protocol.getMetaItems({ type: 'datasource' });
+    const items: Array<{ name?: unknown }> = Array.isArray(answer)
+        ? answer
+        : ((answer as { items?: Array<{ name?: unknown }> })?.items ?? []);
+    return items.map((i) => String(i?.name));
 }
 
 const serves = async (replica: { protocol: any }, name: string): Promise<boolean> =>
@@ -458,25 +529,37 @@ async function measureProlongationMs(
 }
 
 /**
- * Bring both replicas to the QA-observed pre-condition: a runtime-authored
- * datasource that BOTH replicas are serving on their own read door.
+ * Bring both replicas to the QA-observed pre-condition: runtime-authored
+ * datasources that BOTH replicas are serving on their own read door.
  *
- * The peer's read is what hydrates the row into the peer's registry — the local
- * copy that later outlives the shared row. Doing it through the door (rather
- * than by reaching into the registry) is the point: this is exactly how a
- * replica that only ever SERVED the entry ends up holding it.
+ * Every name is written BEFORE the peer's first read, deliberately. The peer's
+ * overlay cache memoises the whole row SET for `datasource`, and the peer's own
+ * write epoch never moves (it does no writing), so a name created after the
+ * peer has read once is invisible to the peer until that cache lapses. Seeding
+ * name-by-name through the peer's door would therefore fail on the second name
+ * for a reason that has nothing to do with deletes.
+ *
+ * The peer's read is what hydrates the rows into the peer's registry on an
+ * unscoped kernel — the local copy that later outlives the shared row. Doing it
+ * through the door (rather than by reaching into the registry) is the point:
+ * this is exactly how a replica that only ever SERVED an entry ends up holding
+ * it.
  */
-async function seedServedDatasource(
+async function seedServedDatasources(
     cluster: ReturnType<typeof makeCluster>,
-    name: string,
+    names: string[],
 ): Promise<void> {
-    const res = await cluster.writer.protocol.saveMetaItem({
-        type: 'datasource', name, item: datasourceBody(name), mode: 'publish',
-    });
-    expect(res.success).toBe(true);
+    for (const name of names) {
+        const res = await cluster.writer.protocol.saveMetaItem({
+            type: 'datasource', name, item: datasourceBody(name), mode: 'publish',
+        });
+        expect(res.success).toBe(true);
+    }
     await settle();
-    expect(await serves(cluster.writer, name)).toBe(true);
-    expect(await serves(cluster.peer, name)).toBe(true);
+    for (const name of names) {
+        expect(await serves(cluster.writer, name)).toBe(true);
+        expect(await serves(cluster.peer, name)).toBe(true);
+    }
 }
 
 describe('[#13609] the read door under measurement', () => {
@@ -493,9 +576,9 @@ describe('[#13609] the read door under measurement', () => {
         await settle();
 
         // `datasource` is `allowRuntimeCreate: true`, so `deleteMetaItem`'s
-        // `useRepoPath` fork takes the REPOSITORY exit — the one that emits.
-        // A code-only exit would publish nothing and this card's
-        // re-verification would be measuring a channel the delete never uses.
+        // `useRepoPath` fork takes the REPOSITORY exit — the one that emits. A
+        // code-only exit would publish nothing and this card's re-verification
+        // would be measuring a channel the delete never uses.
         expect(published).toHaveLength(1);
         expect(published[0].channel).toBe(METADATA_MUTATION_CLUSTER_CHANNEL);
         expect(published[0].payload.event).toEqual({
@@ -505,10 +588,10 @@ describe('[#13609] the read door under measurement', () => {
 
     it('the peer serves the row from its OWN registry, so the shared DB alone cannot answer for it', async () => {
         const cluster = makeCluster({ attach: false });
-        await seedServedDatasource(cluster, 'billing_db');
+        await seedServedDatasources(cluster, ['billing_db']);
 
         // The peer never wrote this row; it hydrated it by READING. This is the
-        // local copy whose lifetime the rest of the file measures.
+        // local, untimed copy whose lifetime the rest of the file measures.
         expect(cluster.peer.registry.listItems('datasource').map((i: any) => i.name))
             .toEqual(['billing_db']);
     });
@@ -518,32 +601,93 @@ describe('[#13609] ⭐ the re-verification: how long does the peer keep serving 
     beforeEach(() => { vi.useFakeTimers(); });
     afterEach(() => { vi.useRealTimers(); });
 
-    it('Arm B — WITH the landed publisher + bridge: BOUNDED at exactly one overlay-cache TTL window', async () => {
+    it('Arm B — WITH the landed publisher + bridge, the bridge DOES heal the peer registry', async () => {
         const cluster = makeCluster({ attach: true });
-        await seedServedDatasource(cluster, 'billing_db');
+        await seedServedDatasources(cluster, ['billing_db']);
 
         const res = await cluster.writer.protocol.deleteMetaItem({ type: 'datasource', name: 'billing_db' });
         expect(res.success).toBe(true);
         await settle();
 
-        // ⭐ The unbounded seam is SHUT: the peer's registry — the copy with no
-        // TTL — is healed within one bus hop, before the clock moves at all.
-        // This assertion is also what proves `settle()` is a sufficient drain.
+        // ⭐ The #13331 counter-evidence is vindicated, cross-node and on the
+        // DELETE direction: the publish crosses, the peer re-reads its own DB,
+        // finds no active row, and runs the same heal walk the writer ran. The
+        // peer's untimed registry copy is retired within one bus hop, before
+        // the clock moves at all.
+        //
+        // This assertion is also what proves `settle()` is a sufficient drain:
+        // an inadequate drain fails HERE, loudly, instead of silently inflating
+        // a prolongation in the cases below.
         expect(cluster.peer.registry.listItems('datasource')).toEqual([]);
         expect(cluster.peer.removedEntries).toContain('datasource|billing_db');
+    });
 
-        // …and what remains is the bounded residue, on the clock.
+    it('⛔ …but the peer’s very next READ re-hydrates the deleted row from its own stale overlay cache', async () => {
+        const cluster = makeCluster({ attach: true });
+        await seedServedDatasources(cluster, ['billing_db']);
+
+        await cluster.writer.protocol.deleteMetaItem({ type: 'datasource', name: 'billing_db' });
+        await settle();
+        expect(cluster.peer.registry.listItems('datasource')).toEqual([]);
+
+        // One read of the peer's own door, with the clock untouched.
+        expect(await serves(cluster.peer, 'billing_db')).toBe(true);
+
+        // ⭐ THE SEAM. The convergence retired the registry entry but did NOT
+        // retire the peer's overlay-cache entry — nothing on the receipt path
+        // touches the write epoch that keys it, and the peer does no writing of
+        // its own, so the pre-delete row set is still "fresh". `getMetaItems`
+        // then does what its cache's own header says it always does, hit or
+        // miss: it runs `hydrateOverlayIntoRegistry` over those rows. The
+        // deleted row is written straight back into the registry the bridge
+        // just cleaned — and the registry has no TTL.
+        expect(cluster.peer.registry.listItems('datasource').map((i: any) => i.name))
+            .toEqual(['billing_db']);
+    });
+
+    it('⛔ Arm B measured, door READ during the residue window: UNBOUNDED, past 10 windows', async () => {
+        const cluster = makeCluster({ attach: true });
+        await seedServedDatasources(cluster, ['billing_db']);
+
+        await cluster.writer.protocol.deleteMetaItem({ type: 'datasource', name: 'billing_db' });
+        await settle();
+
+        // `measureProlongationMs` reads the door once BEFORE advancing the
+        // clock — i.e. inside the residue window, which is what a replica under
+        // load does continuously. That read converts the bounded cache residue
+        // into an unbounded registry entry, so waiting the TTL out no longer
+        // helps: once the cache lapses the registry is the only source left,
+        // and it is the one now holding the deleted row.
         const prolongation = await measureProlongationMs(cluster.peer, 'billing_db');
-        expect(prolongation).not.toBeNull();
-        expect(prolongation).toBe(TTL_MS);
+        expect(prolongation).toBeNull();
+        expect(await serves(cluster.peer, 'billing_db')).toBe(true);
+    });
 
-        // Stated as the ruling asks for it: a NUMBER, and a bound.
-        expect(TTL_MS).toBe(30_000);
+    it('⭐ Arm B measured, door NOT read during the residue window: BOUNDED by one TTL window', async () => {
+        const cluster = makeCluster({ attach: true });
+        await seedServedDatasources(cluster, ['billing_db']);
+
+        await cluster.writer.protocol.deleteMetaItem({ type: 'datasource', name: 'billing_db' });
+        await settle();
+
+        // Identical to the case above in every respect except one: nothing
+        // reads the peer's door while its stale cache entry is still fresh, so
+        // nothing re-hydrates the registry the bridge just healed. The entry
+        // lapses on its own and the peer converges.
+        //
+        // ⇒ The two cases together are the finding. The prolongation is not
+        // unconditionally unbounded and not unconditionally bounded: a SINGLE
+        // read of `/api/v1/meta/datasource` inside the residue window is what
+        // separates them, and that door under live traffic is read constantly.
+        vi.setSystemTime(Date.now() + TTL_MS);
+        await settle();
+        expect(await serves(cluster.peer, 'billing_db')).toBe(false);
+        expect(cluster.peer.registry.listItems('datasource')).toEqual([]);
     });
 
     it('Arm A — CONTROL, no bridge (the pre-fix shape): UNBOUNDED, still served past 10 windows', async () => {
         const cluster = makeCluster({ attach: false });
-        await seedServedDatasource(cluster, 'billing_db');
+        await seedServedDatasources(cluster, ['billing_db']);
 
         const res = await cluster.writer.protocol.deleteMetaItem({ type: 'datasource', name: 'billing_db' });
         expect(res.success).toBe(true);
@@ -556,32 +700,63 @@ describe('[#13609] ⭐ the re-verification: how long does the peer keep serving 
         expect(cluster.peer.registry.listItems('datasource').map((i: any) => i.name))
             .toEqual(['billing_db']);
 
-        // ⭐ This is the firing positive control. It proves the probe above CAN
-        // see a prolongation — Arm B's bound is the bridge's doing, not a
-        // harness that drops rows by itself.
+        // ⭐ The firing positive control. It proves the probe CAN see a
+        // prolongation and CAN see it end — the bounded case below returns a
+        // number on the same instrument — so the two unbounded readings above
+        // are measurements, not an instrument that never clears anything.
         const prolongation = await measureProlongationMs(cluster.peer, 'billing_db');
         expect(prolongation).toBeNull();
-
-        // And it outlives the cache window by a factor of ten, which is why the
-        // original QA prolongation read LONGER than any TTL: the stale answer
-        // is not in anything that expires.
-        expect(await serves(cluster.peer, 'billing_db')).toBe(true);
     });
 
-    it('negative control — an unrelated datasource is untouched by either arm', async () => {
-        for (const attach of [true, false]) {
-            const cluster = makeCluster({ attach });
-            await seedServedDatasource(cluster, 'billing_db');
-            await seedServedDatasource(cluster, 'analytics_db');
+    it('⭐ SCOPED kernel: the same delete IS bounded — at exactly one overlay-cache TTL window', async () => {
+        const cluster = makeCluster({ attach: true, environmentId: 'env_prod' });
+        await seedServedDatasources(cluster, ['billing_db']);
+
+        // On a scoped kernel BOTH hydration seams are gated off — the read-side
+        // loop and the write-through alike — so no replica ever holds a local
+        // registry copy of an overlay row, and the only local source is the
+        // overlay cache, which does expire.
+        expect(cluster.peer.registry.listItems('datasource')).toEqual([]);
+
+        const res = await cluster.writer.protocol.deleteMetaItem({ type: 'datasource', name: 'billing_db' });
+        expect(res.success).toBe(true);
+        await settle();
+
+        // ⭐ The bound, stated as a number: one window, and the constant is
+        // imported rather than retyped so this tracks whatever ships.
+        const prolongation = await measureProlongationMs(cluster.peer, 'billing_db');
+        expect(prolongation).toBe(TTL_MS);
+        expect(TTL_MS).toBe(30_000);
+
+        // This is the residue the ruling permits ("listCache TTL is the one
+        // bounded residue that may legitimately remain") — refined to the cache
+        // that actually holds it at this door.
+        expect(await serves(cluster.peer, 'billing_db')).toBe(false);
+    });
+
+    it('negative control — an unrelated datasource is untouched, in every arm', async () => {
+        for (const shape of [
+            { attach: true, environmentId: undefined },
+            { attach: false, environmentId: undefined },
+            { attach: true, environmentId: 'env_prod' },
+        ]) {
+            const cluster = makeCluster(shape);
+            await seedServedDatasources(cluster, ['billing_db', 'analytics_db']);
 
             await cluster.writer.protocol.deleteMetaItem({ type: 'datasource', name: 'billing_db' });
             await settle();
             vi.setSystemTime(Date.now() + TTL_MS * (WINDOWS_PROBED + 1));
             await settle();
 
-            // The delete reached exactly one name on the peer, whichever arm.
+            // The delete reached exactly one name on the peer, in every shape —
+            // so the prolongations measured above are about the deleted row and
+            // not about a peer that has stopped answering.
             expect(await serves(cluster.peer, 'analytics_db')).toBe(true);
-            expect(await serves(cluster.peer, 'billing_db')).toBe(attach ? false : true);
+            // No read landed inside the residue window here (the clock jumps
+            // straight past it), so the bridged shapes converge and only the
+            // unbridged one prolongs — the same discriminator as above, seen
+            // from the other side.
+            expect(await serves(cluster.peer, 'billing_db')).toBe(!shape.attach);
         }
     });
 });
