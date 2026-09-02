@@ -27,6 +27,14 @@
 # failed run must leave no half-applied state: `.objectui-sha` is byte-identical
 # to what it was before the run (#10797).
 #
+# It also refuses — before writing anything, same invariant — when the OLD..NEW
+# range cannot be walked in the objectui checkout and a deepen does not repair
+# it. The changeset's bump LEVEL comes from what objectui declared over that
+# range; with the range unreadable there is nothing to declare, and the degraded
+# entry this used to emit carried the default level (`patch`) into published
+# CHANGELOG text as if it were one (#14178). Deepen the checkout and re-run, or
+# pass `--no-changeset` to move the pin while claiming nothing about the range.
+#
 # Env:
 #   CONSOLE_BUMP=major|minor|patch  # force the changeset bump type (default: auto —
 #                             # the HIGHEST level objectui itself declared in the
@@ -34,12 +42,14 @@
 #   CONSOLE_CHANGES_MAX=<n>   # cap the rendered list (default 100). A cap that
 #                             # fires says so, with the real count — never silently.
 #   OBJECTUI_NO_DEEPEN=1      # do NOT run 'git fetch --unshallow' on the objectui
-#                             # checkout when the pin range is truncated inside it.
+#                             # checkout when the pin range cannot be walked in it —
+#                             # whether an endpoint is absent or the history stops
+#                             # inside the range (#9408 / #14178, one remedy for both).
 #                             # Default is to deepen: measured on objectui the fetch
 #                             # costs ~6s and ~4MB and turns a 110-commit walk into
 #                             # the true 191 (#9408). Set this offline, or when the
-#                             # checkout must not be touched — the bump then takes
-#                             # the DEGRADED path and says why.
+#                             # checkout must not be touched — the bump then REFUSES
+#                             # and says why, rather than deriving a weaker record.
 #
 # Assumes sibling layout:
 #   ~/work/objectui
@@ -402,6 +412,143 @@ if [[ "$OLD_SHA" == "$NEW_SHA" ]]; then
   exit 0
 fi
 
+# --- CAN THE OLD..NEW RANGE BE WALKED? Asked BEFORE the first mutation --------
+# (#9408 for the question, #14178 for where it is asked and what a "no" costs.)
+#
+# THE TEST IS WALK COMPLETENESS, NOT OBJECT PRESENCE (#9408). It used to be
+# `git cat-file -e OLD_SHA` — "does the OLD endpoint exist" — which is a
+# different question, and the gap between them is measured: on the bump that
+# landed `.changeset/console-82a94170c405.md` that test PASSED against a history
+# truncated at commit 110 of 191, so the guard reported a walkable range, the
+# degraded path never fired, and the digest exited 0 on a record crediting 36 of
+# its 119 entries to one commit that adds exactly one. A truncated history is
+# worse than an absent endpoint precisely because it ANSWERS: git shows its
+# oldest visible commit as parentless, diffs it against the empty tree, and that
+# one commit absorbs a whole batch.
+#
+# The question is asked IN THE DIGEST (`--check-walkable`) so there is one
+# implementation of the rule rather than a shell copy that can drift from the
+# thing it guards — see `findRangeTruncation` and `findAbsentEndpoints`. Exit
+# 2 = an endpoint is missing, 3 = the endpoints are here but the history stops
+# inside the range.
+#
+# ONE FAILURE, TWO CAUSES, ONE REMEDY SHAPE (#14178). 2 used to skip the deepen
+# entirely: the digest's endpoint guard returned before `findRangeTruncation`
+# ran, so a shallow clone whose boundary sits AFTER the old pin — what
+# `git clone --depth N` produces — never reached the fetch that would have
+# repaired it. Both causes now take the same path: deepen, then RE-ASK.
+#
+# AND A "no" AFTER THAT REFUSES. Measured on a shallow checkout, same range and
+# same command before and after `git fetch --unshallow`: the degraded record
+# carried `patch` where the range declared `minor`, 15 declared-breaking entries
+# were invisible in it, the ADR-0087 disposition prompt never fired (it keys on a
+# declared-breaking changeset, and the degraded one declares none), and the run
+# exited 0 having written and offered to commit it. That level publishes into
+# @objectstack/console's CHANGELOG and the curated release notes, where it reads
+# as a declaration. No record beats a wrong one (triage ruling, 2026-09-01), so
+# the unwalkable range is now a REFUSAL rather than a fourth kind of artifact.
+#
+# ASKED HERE, above the pin write, for the #10797 invariant: a run that refuses
+# must leave `.objectui-sha` byte-identical. The deepen this block may perform is
+# additive to the OBJECTUI checkout (it adds objects and drops `.git/shallow`; it
+# moves no branch and touches no working tree) and writes nothing in the
+# framework tree, so nothing here can leave half-applied state behind.
+RANGE_OK=0
+if [[ "$NO_CHANGESET" -eq 0 && "$OLD_SHA" != "<none>" ]]; then
+  range_walkable() {
+    node "${FRAMEWORK_ROOT}/scripts/objectui-changeset-digest.mjs" \
+      --objectui-root "$OBJECTUI_ROOT" --from "$1" --to "$2" --check-walkable
+  }
+
+  WALK_RC=0
+  range_walkable "$OLD_SHA" "$NEW_SHA" || WALK_RC=$?
+  DEEPEN_NOTE=""
+  if [[ "$WALK_RC" -ne 0 ]]; then
+    if [[ "$WALK_RC" -ne 2 && "$WALK_RC" -ne 3 ]]; then
+      # The probe did not ANSWER. 2 and 3 are its two verdicts; anything else
+      # means it never reached one (no node, a syntax error, a killed process).
+      # Deepening would be a remedy applied to a diagnosis nobody made, so it is
+      # not attempted — and the refusal below says which of the two this was.
+      DEEPEN_NOTE="  no deepen was attempted: the probe never returned a verdict, so there is nothing to repair yet."
+    elif [[ "${OBJECTUI_NO_DEEPEN:-0}" == "1" ]]; then
+      echo "→ the objectui pin range cannot be walked here; OBJECTUI_NO_DEEPEN=1, not deepening." >&2
+      DEEPEN_NOTE="  OBJECTUI_NO_DEEPEN=1 was set for this run, so no deepen was attempted."
+    elif [[ "$(git -C "$OBJECTUI_ROOT" rev-parse --is-shallow-repository 2>/dev/null)" != "true" ]]; then
+      # Not shallow, yet the range does not walk: an object that was never
+      # fetched, a graft, a `git replace`, or unrelated histories. `--unshallow`
+      # cannot repair those and errors out on a complete repository, so do not
+      # pretend it might.
+      echo "→ the objectui pin range cannot be walked here, and the clone is NOT shallow" >&2
+      echo "  (an unfetched object, a graft, git replace, or unrelated histories) —" >&2
+      echo "  'fetch --unshallow' cannot repair that." >&2
+      DEEPEN_NOTE="  the clone is NOT shallow, so 'fetch --unshallow' is not the repair here."
+    else
+      # REPAIR THE INPUT BEFORE DERIVING FROM IT. A console changeset becomes
+      # published CHANGELOG text, so a bad record is permanent — while the
+      # correct history is one fetch away and cheap: measured on objectui,
+      # `fetch --unshallow` costs ~6s and ~4MB and takes the walk from 110
+      # commits to the true 191. The fetch is ADDITIVE by construction, which is
+      # what makes doing it on the operator's checkout defensible rather than
+      # presumptuous. Announced before and after, and skippable with
+      # OBJECTUI_NO_DEEPEN=1 for an offline run.
+      #
+      # RE-CHECK, never trust the fetch's exit code. Measured: `git fetch
+      # --unshallow` in a checkout with no remote configured exits 0 and changes
+      # nothing at all, so a status-only test would have declared the range
+      # walkable on a still-broken tree — this card's failure shape, one layer
+      # further in.
+      echo "→ objectui is a shallow clone and the pin range cannot be walked in it — deepening…"
+      DEEPEN_RC=0
+      git -C "$OBJECTUI_ROOT" fetch --unshallow || DEEPEN_RC=$?
+      if [[ "$DEEPEN_RC" -eq 0 ]]; then
+        WALK_RC=0
+        range_walkable "$OLD_SHA" "$NEW_SHA" || WALK_RC=$?
+        if [[ "$WALK_RC" -eq 0 ]]; then
+          echo "✓ deepened — the range walks completely now."
+        else
+          DEEPEN_NOTE="  'git fetch --unshallow' exited 0, but the RE-CHECK still refuses — the re-check decides, never the fetch's status."
+        fi
+      else
+        echo "✗ 'git fetch --unshallow' failed (exit ${DEEPEN_RC})." >&2
+        DEEPEN_NOTE="  'git fetch --unshallow' failed (exit ${DEEPEN_RC}), so the input was not repaired."
+      fi
+    fi
+  fi
+
+  if [[ "$WALK_RC" -eq 0 ]]; then
+    RANGE_OK=1
+  else
+    case "$WALK_RC" in
+      2) WALK_CAUSE="an endpoint of the range is not present as a commit object in that checkout" ;;
+      3) WALK_CAUSE="both endpoints are present but the history STOPS INSIDE the range (objectstack#9408)" ;;
+      *) WALK_CAUSE="the walkability probe itself did not answer (exit ${WALK_RC}); its verdicts are 2 and 3" ;;
+    esac
+    {
+      echo "✗ REFUSING to bump: the objectui range ${OLD_SHA:0:12}..${NEW_SHA:0:12} cannot be walked in"
+      echo "  ${OBJECTUI_ROOT} — ${WALK_CAUSE}."
+      echo "  (the digest's own diagnostic is above.)"
+      # An `[[ … ]] && echo` here would be a top-level AND-list whose status is
+      # the test's — false when there is no note — and `set -e` kills the run on
+      # exactly that, mid-refusal. Same trap the #12071 loop below documents.
+      if [[ -n "$DEEPEN_NOTE" ]]; then echo "$DEEPEN_NOTE"; fi
+      echo "  The @objectstack/console changeset takes BOTH its list and its bump level from the"
+      echo "  changesets objectui declared over this range. Neither can be derived here. This bump"
+      echo "  used to emit a degraded entry carrying the default level instead — measured on a"
+      echo "  shallow checkout: \`patch\` for a range that declared \`minor\`, every declared-breaking"
+      echo "  entry invisible, the ADR-0087 disposition prompt silently skipped, exit 0"
+      echo "  (objectstack#14178). That level publishes into @objectstack/console's CHANGELOG and"
+      echo "  the release notes, where it reads as a declaration — so this refuses instead."
+      echo "  NOTHING WAS WRITTEN — .objectui-sha is untouched and still holds the old pin."
+      echo "  Fix it, then re-run this bump:"
+      echo "      git -C ${OBJECTUI_ROOT} fetch --unshallow   # a shallow clone (the usual case)"
+      echo "      git -C ${OBJECTUI_ROOT} fetch origin        # an object that was never fetched"
+      echo "  Or move the pin without a release record at all: scripts/bump-objectui.sh --no-changeset"
+      echo "  (the pin moves, nothing is derived, and nothing is claimed about the range)."
+    } >&2
+    exit 1
+  fi
+fi
+
 # FIRST MUTATION OF THE WORKING TREE. Everything read out of the objectui commit
 # was read above, and an unreadable commit already refused — nothing below this
 # line can fail on a read of `$NEW_SHA` that has not already been attempted
@@ -413,80 +560,11 @@ echo "→ objectui pin: ${OLD_SHA:0:12} → ${NEW_SHA:0:12}${REACH_TAG}"
 # --- Emit the @objectstack/console changeset for the frontend delta ----------
 CS_FILE=""
 if [[ "$NO_CHANGESET" -eq 0 ]]; then
-  # Can we walk the OLD..NEW range in the objectui checkout? (A shallow clone or
-  # a first-ever pin may not have OLD reachable — degrade to the tip subject,
-  # and SAY SO in the artifact: a degraded list and a complete one must never
-  # look alike, #4731.)
-  #
-  # THE TEST IS WALK COMPLETENESS, NOT OBJECT PRESENCE (#9408). It used to be
-  # `git cat-file -e OLD_SHA` — "does the OLD endpoint exist" — which is a
-  # different question, and the gap between them is measured: on the bump that
-  # landed `.changeset/console-82a94170c405.md` that test PASSED against a
-  # history truncated at commit 110 of 191, so this guard set RANGE_OK=1, the
-  # degraded path below never fired, and the digest exited 0 on a record
-  # crediting 36 of its 119 entries to one commit that adds exactly one. A
-  # truncated history is worse than an absent endpoint precisely because it
-  # ANSWERS: git shows its oldest visible commit as parentless, diffs it against
-  # the empty tree, and that one commit absorbs a whole batch.
-  #
-  # The question is asked IN THE DIGEST (`--check-walkable`) so there is one
-  # implementation of the rule rather than a shell copy that can drift from the
-  # thing it guards — see `findRangeTruncation`. Exit 2 = an endpoint is missing,
-  # 3 = the endpoints are here but the history stops inside the range.
-  range_walkable() {
-    node "${FRAMEWORK_ROOT}/scripts/objectui-changeset-digest.mjs" \
-      --objectui-root "$OBJECTUI_ROOT" --from "$1" --to "$2" --check-walkable
-  }
-
-  RANGE_OK=0
-  TRUNCATED=0
-  if [[ "$OLD_SHA" != "<none>" ]]; then
-    WALK_RC=0
-    range_walkable "$OLD_SHA" "$NEW_SHA" || WALK_RC=$?
-    if [[ "$WALK_RC" -eq 0 ]]; then
-      RANGE_OK=1
-    elif [[ "$WALK_RC" -eq 3 ]]; then
-      TRUNCATED=1
-      # REPAIR THE INPUT BEFORE LABELLING A DERIVATION OF IT. A console changeset
-      # becomes published CHANGELOG text, so a degraded record is permanent —
-      # while the correct history is one fetch away and cheap: measured on
-      # objectui, `fetch --unshallow` costs ~6s and ~4MB and takes the walk from
-      # 110 commits to the true 191. The fetch is ADDITIVE by construction (it
-      # adds objects and drops .git/shallow; it moves no branch and touches no
-      # working tree), which is what makes doing it on the operator's checkout
-      # defensible rather than presumptuous. Announced before and after, and
-      # skippable with OBJECTUI_NO_DEEPEN=1 for an offline run.
-      if [[ "${OBJECTUI_NO_DEEPEN:-0}" == "1" ]]; then
-        echo "→ objectui history is truncated inside the range; OBJECTUI_NO_DEEPEN=1, not deepening." >&2
-      elif [[ "$(git -C "$OBJECTUI_ROOT" rev-parse --is-shallow-repository 2>/dev/null)" != "true" ]]; then
-        # Not shallow, yet the walk stops: a graft, a `git replace`, or unrelated
-        # histories. `--unshallow` cannot repair those and errors out on a
-        # complete repository, so do not pretend it might.
-        echo "→ objectui history is truncated inside the range but the clone is NOT shallow" >&2
-        echo "  (graft, git replace, or unrelated histories) — 'fetch --unshallow' cannot repair that." >&2
-      else
-        # RE-CHECK, never trust the fetch's exit code. Measured: `git fetch
-        # --unshallow` in a checkout with no remote configured exits 0 and
-        # changes nothing at all, so a status-only test would set RANGE_OK=1 on
-        # a still-truncated tree — this card's failure, one layer further in.
-        echo "→ objectui is a shallow clone and the pin range is truncated inside it — deepening…"
-        DEEPEN_RC=0
-        git -C "$OBJECTUI_ROOT" fetch --unshallow || DEEPEN_RC=$?
-        if [[ "$DEEPEN_RC" -eq 0 ]]; then
-          WALK_RC=0
-          range_walkable "$OLD_SHA" "$NEW_SHA" || WALK_RC=$?
-          if [[ "$WALK_RC" -eq 0 ]]; then
-            RANGE_OK=1
-            TRUNCATED=0
-            echo "✓ deepened — the range walks completely now."
-          fi
-        else
-          echo "✗ 'git fetch --unshallow' failed (exit ${DEEPEN_RC}) — falling back to the degraded path." >&2
-        fi
-      fi
-    fi
-  fi
-
+  # `RANGE_OK` was settled ABOVE, before the pin write — walkability is a
+  # PRECONDITION of this whole section, and an unwalkable range already refused
+  # (#14178). Reaching here means one of exactly two things: the range walks
+  # (derive), or this is the initial pin with no previous SHA to walk from
+  # (degrade, and say so). There is no third input state left to test.
   CS_FILE="${FRAMEWORK_ROOT}/.changeset/console-${SHORT}.md"
   DIGEST_OK=0
   BUMP=""
@@ -507,25 +585,27 @@ if [[ "$NO_CHANGESET" -eq 0 ]]; then
   fi
 
   if [[ "$DIGEST_OK" -eq 0 ]]; then
-    # Degraded path: no walkable range (initial pin, shallow clone, or the
-    # digest could not run). Emit the tip subject ONLY, labelled as degraded —
-    # the reader must be able to tell this list from a derived one.
+    # Degraded path. Emit the tip subject ONLY, labelled as degraded — the reader
+    # must be able to tell this list from a derived one (#4731).
+    #
+    # WHAT IS NO LONGER HERE (#14178): "the range could not be walked". That
+    # input refuses above rather than degrading, because its artifact carried a
+    # bump LEVEL nobody declared — `patch` on a range that declared `minor` —
+    # into published CHANGELOG text. The initial pin is a different fact and
+    # keeps its degraded entry: there is no previous SHA to walk from, no remedy
+    # to name, and nothing is being guessed about a range that does not exist.
     BUMP="${CONSOLE_BUMP:-patch}"
-    RANGE_LABEL="${OLD_SHA:0:12}...${NEW_SHA:0:12}"
-    WHY="the range \`${RANGE_LABEL}\` could not be walked in this objectui checkout"
     if [[ "$OLD_SHA" == "<none>" ]]; then
       RANGE_LABEL="(initial pin) → ${NEW_SHA:0:12}"
       WHY="this is the initial pin, so there is no previous SHA to walk from"
-    elif [[ "${TRUNCATED:-0}" -eq 1 ]]; then
-      # A degraded list must be distinguishable from a complete one (#4731); a
-      # TRUNCATED range must further be distinguishable from an ABSENT endpoint,
-      # because the two take different remedies and only one of them is a fetch
-      # away. Naming the remedy here is the difference between a reader who
-      # re-runs the bump correctly and one who edits the table by hand.
-      WHY="the objectui history at \`${OBJECTUI_ROOT}\` STOPS INSIDE the range \`${RANGE_LABEL}\`, so \
-walking it would credit a whole batch of upstream releases to the single commit where the \
-history is cut off (objectstack#9408). Deepen the checkout — \`git -C ${OBJECTUI_ROOT} fetch \
---unshallow\` — and re-run this bump to get the real list"
+    else
+      # The range WALKS (settled above) and the digest still failed — a read
+      # error inside the derivation, not a precondition. Named as itself: the
+      # remedies above would not apply, and claiming them would send the reader
+      # to fetch a history that is already complete.
+      RANGE_LABEL="${OLD_SHA:0:12}...${NEW_SHA:0:12}"
+      WHY="the range \`${RANGE_LABEL}\` walks in this checkout, but the digest failed while \
+deriving from it — its diagnostic is in this run's output, above"
     fi
     cat > "$CS_FILE" <<EOF
 ---
