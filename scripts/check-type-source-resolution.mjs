@@ -352,15 +352,23 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
   // was already counted, and nothing here launders such a case.
   //
   // Condition 2 — the numbers, `--list` on the same checkout with the workspace
-  // closure built, before at `f7d92d364` and after on this branch:
+  // closure built, taken at this branch's merge base (`79b6a22a5`) and on the
+  // branch:
   //
-  //   before   96 programs / 77 packages, 54 entries, 242 package-dep pairs
-  //   after   109 programs / 77 packages, 55 entries, 269 package-dep pairs
+  //   before   98 programs / 77 packages, 54 entries, 242 package-dep pairs
+  //   after   111 programs / 77 packages, 55 entries, 269 package-dep pairs
   //
   // so +13 programs (the thirteen new `tsconfig.test.json`), +1 entry
   // (`plugin-dev`, which had none) and +27 pairs — the ones marked below and
   // nothing else. The other nine onboarded packages add ZERO pairs: their test
   // files import no workspace dep their `tsconfig.json` did not already reach.
+  //
+  // ⚠️ The program total moves under this branch for reasons that are NOT this
+  // change: measured against the earlier base `f7d92d364` the same pair read
+  // 96 -> 109, because `#13284` landed two `tsconfig.typecheck.json` on `main`
+  // in between. The DELTA is the invariant to read here (+13 programs, +1
+  // entry, +27 pairs) — an absolute taken at one moment is a number about that
+  // moment, and re-deriving it after any merge is what keeps it honest.
   //
   // Condition 3 — reviewed as a re-baseline. `paths` is not the tool here, by
   // the doc-block's own measurement on PR #12570 rather than by preference.
