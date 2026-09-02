@@ -63,7 +63,7 @@ export interface AuditPluginOptions {
  */
 export class AuditPlugin implements Plugin {
   name = 'com.objectstack.audit';
-  type = 'standard';
+  type = 'standard' as const;
   version = '1.0.0';
   dependencies = ['com.objectstack.engine.objectql'];
   /**

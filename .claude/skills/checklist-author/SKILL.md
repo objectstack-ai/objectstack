@@ -28,27 +28,18 @@ metadata:
 `node scripts/check-platform-checklist.mjs` 下校验为绿,并按 AGENTS.md
 (worktree-first,PD#11)落在任务分支上。
 
-## 编排契约
+## 编排契约 —— 只写 SWEEP 没有的
 
-1. **Worktree 先行**(PD#11):`git fetch origin main && git worktree add --no-track ../objectstack-<task>
-   -b <branch> origin/main`。全部编辑都在那里做。派发任何 agent 之前先读清单现状。
-2. **五个只读 gap hunter 并行** —— 每个 SWEEP.md 角度一个(console UI / spec 枚举 /
-   路由与运行时 / 内置应用 / 文档声称)。每个拿到:当前 item-id 清单、已知的 waiver
-   与 blocked 项(不重复上报),以及输出契约 `surface | evidence path | coverage
-   verdict | proposed id | sketch | fixture?`。hunter 不写任何文件。
-3. **去重并入一个草稿登记表**(落地前删掉)。跨角度的重复命中是高优先级信号,不是噪
-   音。
-4. **按区 writer agent** —— 每个 `areas/*.json` 文件一个 agent,writer 之间永不相
-   撞;除编排者外谁都不碰 `coverage.json` 与 `scripts/`。每个测试项都遵守 README.md
-   的 deep-test 契约;缺 fixture 就记 `blocked`/`knownGaps`,永不伪造覆盖。writer
-   断言之前把每个 endpoint、枚举、错误码都对到源码上 —— 把本技能的简报当假设,源码
-   才是真相。
-5. **集中对账**:hunter 证明有现成 fixture 的种类一律解除 waiver(2026-08 那轮
-   sweep 里六条 waiver 有四条已过期 —— 每次都重审全部 waiver),新项映射进
-   `coverage.json`,新的 variants 矩阵钉上 `enumSource`(见 README「Variants stay
-   fresh automatically」)。
-6. **校验 + 落地**:校验器绿,再提交到任务分支。产品缺陷与文档漂移进
-   `FOLLOW-UPS.md`;安全敏感的发现,没有维护者的决定**永不**公开立单。
+六步流程照 `SWEEP.md`「How to run it」执行,⛔ 这里不复述。它没有、而这一轮必须成
+立的三条:
+
+1. **Worktree 先行**(PD#11):`git fetch origin main && git worktree add --no-track
+   ../objectstack-<task> -b <branch> origin/main`。全部编辑落在那里;派发任何 agent
+   之前先读清单现状。
+2. **只有编排者碰 `coverage.json` 与 `scripts/`。** hunter 一个文件都不写,writer 一
+   个区文件一人 —— 这是并行 agent 之间唯一的串行化依据。
+3. **本技能的简报是假设,源码才是真相** —— 每个测试项按 README.md「Item anatomy」
+   的契约写;缺 fixture 记 `blocked`/`knownGaps`,永不伪造覆盖。
 
 ## 规模指引
 

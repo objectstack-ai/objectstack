@@ -277,7 +277,7 @@ export interface KnowledgeRagflowPluginOptions extends KnowledgeRagflowAdapterOp
 export class KnowledgeRagflowPlugin implements Plugin {
   name = 'com.objectstack.plugin.knowledge-ragflow';
   version = '0.1.0';
-  type = 'standard';
+  type = 'standard' as const;
 
   private readonly adapter: KnowledgeRagflowAdapter;
 

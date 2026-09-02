@@ -131,7 +131,7 @@ const template = () => ({
 /** Registers the collaborators the email plugin resolves. Nothing under test. */
 class FixturePlugin implements Plugin {
     name = 'com.objectstack.engine.objectql';
-    type = 'standard';
+    type = 'standard' as const;
     version = '1.0.0';
     providesServices = ['objectql', 'manifest', 'metadata', 'protocol'];
     readonly engine = fakeEngine();

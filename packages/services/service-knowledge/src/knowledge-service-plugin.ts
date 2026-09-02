@@ -59,7 +59,7 @@ export interface KnowledgeServicePluginOptions {
 export class KnowledgeServicePlugin implements Plugin {
   name = 'com.objectstack.service.knowledge';
   version = '0.1.0';
-  type = 'standard';
+  type = 'standard' as const;
   /**
    * init() resolves the `objectql` engine for RLS re-checks —
    * order-if-present so the resolution is deterministic (ADR-0116, #4471).

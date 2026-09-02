@@ -2,6 +2,7 @@
 
 import { ObjectKernel } from './kernel.js';
 import type { Logger, LifecycleEventName } from '@objectstack/spec/contracts';
+import type { CORE_PLUGIN_TYPES } from '@objectstack/spec/kernel';
 
 /**
  * PluginContext - Runtime context available to plugins
@@ -92,6 +93,18 @@ export interface PluginContext {
 }
 
 /**
+ * The closed set of plugin types (#13925): `'standard'` plus the seven
+ * `CORE_PLUGIN_TYPES` members, in exactly the shape `PluginSchema.type`
+ * declares in `@objectstack/spec` (`kernel/plugin.zod.ts`:
+ * `z.enum(['standard', ...CORE_PLUGIN_TYPES])`). Derived from the spec's own
+ * constant rather than re-spelled here, so the compiler's accept set and the
+ * Zod gate's cannot drift apart: `plugin-type-closed-set.test.ts` pins the
+ * parity at runtime, and `packages/rest`'s `plugin-type-closed-set.pin.test.ts`
+ * pins the published `.d.ts` at compile time.
+ */
+export type PluginType = 'standard' | (typeof CORE_PLUGIN_TYPES)[number];
+
+/**
  * Plugin Interface
  * 
  * All ObjectStack plugins must implement this interface.
@@ -108,16 +121,13 @@ export interface Plugin {
     version?: string;
 
     /**
-     * Plugin type (standard, ui, driver, server, app, theme, agent, objectql)
-     *
-     * Authoritative set: `CORE_PLUGIN_TYPES` in `@objectstack/spec`
-     * (`kernel/plugin.zod.ts`), which `PluginSchema.type` enumerates as
-     * `z.enum(['standard', ...CORE_PLUGIN_TYPES])`. This field is typed
-     * `string`, so nothing type-checks an author against the list above —
-     * keep the two in step when the declared set changes.
+     * Plugin type categorisation for runtime behaviour — a {@link PluginType},
+     * the closed set the spec declares. The enumeration lives on that type
+     * (derived from `CORE_PLUGIN_TYPES`), not in this comment: a value outside
+     * it no longer type-checks, and `PluginSchema.type` refuses it at parse.
      * @default 'standard'
      */
-    type?: string;
+    type?: PluginType;
 
     /**
      * List of other plugin names that this plugin depends on.
