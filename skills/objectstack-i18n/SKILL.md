@@ -373,30 +373,12 @@ The contract also declares optional methods — `getFieldLabels`, `getCoverage`,
 as extension points for a custom workbench or TMS adapter. (`getAppBundle` /
 `loadAppBundle` went with the `o.*` shape they returned.)
 
-### Plugin Setup
+### Registration
 
-```typescript
-import { ObjectKernel } from '@objectstack/core';
-import { I18nServicePlugin } from '@objectstack/service-i18n';
-
-const kernel = new ObjectKernel();
-kernel.use(new I18nServicePlugin({
-  defaultLocale: 'en',
-  localesDir: './i18n',
-  fallbackLocale: 'en',
-  registerRoutes: true,  // Auto-register REST endpoints
-  basePath: '/api/v1/i18n',
-}));
-
-await kernel.bootstrap();
-
-const i18n = kernel.getService<II18nService>('i18n');
-```
-
-> `localesDir` loads only flat, top-level `{locale}.json` files from the directory
-> (subdirectories are skipped). `registerRoutes: true` (the default) self-registers
-> `GET {basePath}/locales`, `/translations/:locale`, and `/labels/:object/:locale`
-> once an HTTP server is available.
+You do not wire this plugin: `os serve` registers `I18nServicePlugin` itself whenever the
+stack config carries `translations` or `i18n` (kernel bootstrap is
+**objectstack-platform → Runtime Boot Sequence**). It self-registers
+`GET /api/v1/i18n/locales`, `/translations/:locale` and `/labels/:object/:locale`.
 
 ---
 
