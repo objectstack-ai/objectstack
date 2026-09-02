@@ -400,7 +400,8 @@ const verdictTotal = (v: Verdict) =>
 function methodSource(src: string, ns: string, name: string): string {
     const block = new RegExp(`\\n  ${ns} = \\{[\\s\\S]*?\\n  \\};`).exec(src);
     if (!block) throw new Error(`namespace \`${ns}\` not found in index.ts`);
-    const m = new RegExp(`\\n(\\s+)${name}: async[\\s\\S]*?\\n\\1\\},`).exec(block[0]);
+    // `},?` — the LAST property of a namespace closes with a bare `}`.
+    const m = new RegExp(`\\n(\\s+)${name}: async[\\s\\S]*?\\n\\1\\},?`).exec(block[0]);
     if (!m) throw new Error(`method \`${ns}.${name}\` not found in index.ts`);
     return m[0];
 }
