@@ -27,6 +27,7 @@ import {
   FIELD_RELATIONSHIP_WITHOUT_REFERENCE,
   FIELD_CHOICE_WITHOUT_OPTIONS,
   VIEW_LAYOUT_WITHOUT_BINDING,
+  VIEW_TREE_WITHOUT_PARENT_FIELD,
   WEBHOOK_WITHOUT_TRIGGERS,
 } from './functional-completeness';
 
@@ -114,25 +115,164 @@ describe('checkFieldCompleteness — the verified inert shapes go red', () => {
 });
 
 describe('checkViewCompleteness — layout bindings', () => {
-  it.each(['kanban', 'calendar', 'gantt'])('flags a %s view missing its block as a WARNING', (type) => {
+  // Six of the view `type` members carry a binding block. The renderer's
+  // fallback for every one is a literal field name (measured in objectui's
+  // ListView adapter — see the table's docblock), so the missing block is the
+  // same defect on all six, not a lesser one on the last three.
+  it.each(['kanban', 'calendar', 'gantt', 'timeline', 'map', 'tree'])('flags a %s view missing its block as a WARNING', (type) => {
     const f = only(checkViewCompleteness({ type }) as never);
     expect(f.rule).toBe(VIEW_LAYOUT_WITHOUT_BINDING);
     expect(f.severity).toBe('warning');
     expect(f.path).toBe(type);
+    // The prescription names the block and the keys that make it a binding.
+    expect(f.fix.startsWith(`${type}: {`)).toBe(true);
   });
 
-  it('is silent when the block is present', () => {
+  it('is silent when the block is present and bound — one fixture per covered type', () => {
     expect(checkViewCompleteness({
       type: 'calendar',
       calendar: { startDateField: 'due_at', titleField: 'title' },
     })).toEqual([]);
+    // The card's own repro, the direction that was silent before this table
+    // reached `timeline`: the declared block must stay clean.
+    expect(checkViewCompleteness({
+      type: 'timeline',
+      timeline: { startDateField: 'last_update_at', titleField: 'subject' },
+    })).toEqual([]);
+    // Both coordinate forms `ListMapConfigSchema` documents.
+    expect(checkViewCompleteness({ type: 'map', map: { locationField: 'site' } })).toEqual([]);
+    expect(checkViewCompleteness({
+      type: 'map',
+      map: { latitudeField: 'lat', longitudeField: 'lng' },
+    })).toEqual([]);
+    expect(checkViewCompleteness({ type: 'tree', tree: { parentField: 'parent' } })).toEqual([]);
   });
 
-  it('is silent on grid and on the unverified types (timeline, tree)', () => {
-    // timeline/tree have config schemas too, but their renderer behaviour has
-    // not had its verification pass — verify-then-enforce, one shape at a time.
-    for (const type of ['grid', 'gallery', 'timeline', 'tree', 'map']) {
+  it('names the schema-required keys in the timeline prescription', () => {
+    // `TimelineConfigSchema` requires exactly these two; the hint must not
+    // send an author to declare a block the parser then refuses.
+    const f = only(checkViewCompleteness({ type: 'timeline' }) as never);
+    expect(f.fix).toContain('startDateField');
+    expect(f.fix).toContain('titleField');
+  });
+
+  it('flags a `map` block that declares neither coordinate form — `map: {}` is the unbound view with braces', () => {
+    // `ListMapConfigSchema` requires no key, so block presence alone would
+    // bless `map: { titleField }` on its way to `locationField || 'location'`.
+    for (const map of [{}, { titleField: 'title' }, { latitudeField: 'lat' }, { longitudeField: 'lng' }]) {
+      const f = only(checkViewCompleteness({ type: 'map', map }) as never);
+      expect(f.rule).toBe(VIEW_LAYOUT_WITHOUT_BINDING);
+      expect(f.severity).toBe('warning');
+      expect(f.path).toBe('map.locationField');
+      expect(f.message).toContain("locationField || 'location'");
+      expect(f.fix).toContain('locationField');
+      expect(f.fix).toContain('latitudeField');
+    }
+  });
+
+  it('is silent on the types with no binding block to demand (grid, gallery, chart)', () => {
+    // `gallery` IS measured (`titleField || 'name'`) and deliberately absent:
+    // `GalleryConfigSchema` requires no key, so block presence would assert
+    // nothing, and the fallback mis-titles cards rather than emptying them.
+    for (const type of ['grid', 'gallery', 'chart']) {
       expect(checkViewCompleteness({ type })).toEqual([]);
+    }
+  });
+});
+
+describe('checkViewCompleteness — the tree parent pointer (the silent-flat half)', () => {
+  // A `tree: {}` block satisfies the binding-block table (every key is
+  // optional) and still renders flat on an object with no self-reference —
+  // the shape a block-presence gate would vouch for. This rule is the second
+  // check the triage asked for, and it mirrors objectui's `detectParentField`
+  // exactly: `type: 'tree'`, else a lookup / master_detail back to the object.
+  const flatObject = {
+    name: 'business_unit',
+    fields: { name: { type: 'text' }, manager: { type: 'lookup', reference: 'sys_user' } },
+  };
+  const rulesOf = (view: unknown, object: unknown) =>
+    checkViewCompleteness(view, object).map((f) => f.rule).sort();
+
+  it('flags a tree view whose block is EMPTY on an object with nothing to auto-detect', () => {
+    const f = only(checkViewCompleteness({ type: 'tree', tree: {} }, flatObject) as never);
+    expect(f.rule).toBe(VIEW_TREE_WITHOUT_PARENT_FIELD);
+    expect(f.severity).toBe('warning');
+    expect(f.path).toBe('tree.parentField');
+    // The message carries the renderer evidence — the discipline every rule
+    // in this module is held to.
+    expect(f.message).toContain('ObjectTree.tsx');
+    expect(f.message).toContain('depth 0');
+    expect(f.fix).toContain('parentField');
+  });
+
+  it('flags a tree view whose block is ABSENT — both the binding rule and the parent-pointer rule', () => {
+    expect(rulesOf({ type: 'tree' }, flatObject)).toEqual([
+      VIEW_LAYOUT_WITHOUT_BINDING,
+      VIEW_TREE_WITHOUT_PARENT_FIELD,
+    ]);
+  });
+
+  it('a block that binds only the label is still flat', () => {
+    expect(rulesOf({ type: 'tree', tree: { labelField: 'name' } }, flatObject))
+      .toEqual([VIEW_TREE_WITHOUT_PARENT_FIELD]);
+    // An empty string is not a declaration either.
+    expect(rulesOf({ type: 'tree', tree: { parentField: '' } }, flatObject))
+      .toEqual([VIEW_TREE_WITHOUT_PARENT_FIELD]);
+  });
+
+  it('is silent when `parentField` is declared, whatever the object declares', () => {
+    expect(checkViewCompleteness({ type: 'tree', tree: { parentField: 'parent' } }, flatObject)).toEqual([]);
+  });
+
+  it('is silent when the object carries a `tree` field — the renderer auto-detects it', () => {
+    expect(checkViewCompleteness({ type: 'tree', tree: {} }, {
+      name: 'category',
+      fields: { name: { type: 'text' }, parent: { type: 'tree' } },
+    })).toEqual([]);
+  });
+
+  it.each(['lookup', 'master_detail'])('is silent when the object carries a %s back to itself', (type) => {
+    expect(checkViewCompleteness({ type: 'tree', tree: {} }, {
+      name: 'business_unit',
+      fields: { name: { type: 'text' }, parent: { type, reference: 'business_unit' } },
+    })).toEqual([]);
+    // …and not when the same field points at ANOTHER object: a lookup is only
+    // a parent pointer when it comes back to the object it lives on.
+    expect(rulesOf({ type: 'tree', tree: {} }, {
+      name: 'business_unit',
+      fields: { name: { type: 'text' }, parent: { type, reference: 'department' } },
+    })).toEqual([VIEW_TREE_WITHOUT_PARENT_FIELD]);
+  });
+
+  it('reads array-form fields too — both authorable spellings', () => {
+    expect(checkViewCompleteness({ type: 'tree', tree: {} }, {
+      name: 'business_unit',
+      fields: [{ name: 'name', type: 'text' }, { name: 'parent', type: 'lookup', reference: 'business_unit' }],
+    })).toEqual([]);
+    expect(rulesOf({ type: 'tree', tree: {} }, {
+      name: 'business_unit',
+      fields: [{ name: 'name', type: 'text' }],
+    })).toEqual([VIEW_TREE_WITHOUT_PARENT_FIELD]);
+  });
+
+  it('needs the object name to recognise a self-reference — mirrors the renderer, which needs it too', () => {
+    expect(rulesOf({ type: 'tree', tree: {} }, {
+      fields: { parent: { type: 'lookup', reference: 'business_unit' } },
+    })).toEqual([VIEW_TREE_WITHOUT_PARENT_FIELD]);
+  });
+
+  it('stays silent with no object in hand — the second clause cannot be asserted', () => {
+    // The one-argument call is the pre-existing signature every other consumer
+    // uses; it must not start guessing about objects it was never shown. A
+    // view naming an object the stack does not declare belongs to
+    // `validate-object-references`.
+    expect(checkViewCompleteness({ type: 'tree', tree: {} })).toEqual([]);
+    expect(checkViewCompleteness({ type: 'tree', tree: {} }, undefined)).toEqual([]);
+  });
+
+  it('never throws on junk objects', () => {
+    for (const junk of [null, 42, 'x', [], {}, { fields: 'nope' }, { fields: [null, 7] }, { fields: { a: null } }]) {
+      expect(() => checkViewCompleteness({ type: 'tree', tree: {} }, junk)).not.toThrow();
     }
   });
 });
@@ -189,6 +329,7 @@ describe('registry hygiene', () => {
       'field/relationship-without-reference',
       'field/summary-without-operations',
       'view/layout-without-binding',
+      'view/tree-without-parent-field',
       'webhook/without-triggers',
     ]);
   });
@@ -201,9 +342,10 @@ describe('registry hygiene', () => {
       ...checkFieldCompleteness({ type: 'select' }),
       ...checkFieldCompleteness({ type: 'checkboxes' }),
       ...checkViewCompleteness({ type: 'kanban' }),
+      ...checkViewCompleteness({ type: 'tree', tree: {} }, { name: 'unit', fields: {} }),
       ...checkWebhookCompleteness({ url: 'https://x' }),
     ];
-    expect(all).toHaveLength(7);
+    expect(all).toHaveLength(8);
     for (const f of all) {
       expect(f.fix.length).toBeGreaterThan(8);
       expect(f.message.length).toBeGreaterThan(60);

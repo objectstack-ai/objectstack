@@ -32,6 +32,7 @@ import { ActionSchema, InlineActionSchema } from './ui/action.zod';
 
 // Automation Protocol
 import { FlowSchema } from './automation/flow.zod';
+import { resolveFlowTriggerKind } from './automation/flow-trigger-kind';
 import { FlowFunctionEntrySchema, FlowFunctionEffectSchema } from './automation/flow-function.zod';
 import { JobSchema } from './system/job.zod';
 
@@ -1657,6 +1658,54 @@ function validateHierarchyScopeCapability(data: unknown): string[] {
 }
 
 /**
+ * Auto-launched flows are an ENFORCED capability class, exactly like the
+ * hierarchy scopes above: the trigger that fires a `record_change` /
+ * `schedule` / `time_relative` / `api` flow ships in `@objectstack/trigger-*`
+ * and is installed by ONE token, `requires: ['triggers']`
+ * (`PLATFORM_CAPABILITY_PROVIDERS.triggers`). A stack that declares such a
+ * flow while `requires` omits the token registers the flow, validates, builds
+ * — and never fires it. The automation engine's boot audit names it after
+ * deploy (`declares a '…' trigger but is NOT bound`), and nothing before that.
+ * That is the fail-SILENT half of the pair: a hierarchy scope without its
+ * capability fails closed (a user notices the missing rows); an autolaunched
+ * flow without its trigger fails silent (the automation simply does not
+ * happen). Refuse it here, at authoring, in the boot audit's own words — one
+ * vocabulary, moved from post-deploy to author time.
+ *
+ * An ABSENT `requires` counts as omitting the token: the CLI reads it as `[]`
+ * and appends only the always-on slate (`PLATFORM_ALWAYS_ON_CAPABILITIES`),
+ * which carries neither `automation` nor `triggers`, so a stack that declares
+ * nothing gets no trigger either (measured on `serve`'s capability resolver).
+ *
+ * Flows whose `status` disables them (`obsolete` / `invalid`) are skipped —
+ * the engine never binds those, its boot audit skips them for the same
+ * reason, and a stack that deliberately retired a triggered flow owes no
+ * capability for it. The kind is `resolveFlowTriggerKind`, shared with
+ * `@objectstack/lint`, so the two authoring surfaces cannot disagree on which
+ * flows auto-launch.
+ */
+function validateTriggerCapability(data: unknown): string[] {
+  const errors: string[] = [];
+  const d = data as { requires?: unknown; flows?: unknown };
+  const requires = Array.isArray(d?.requires) ? (d.requires as string[]) : [];
+  if (requires.includes('triggers')) return errors;
+  const flows = Array.isArray(d?.flows) ? (d.flows as unknown[]) : [];
+  for (const flow of flows) {
+    const f = flow as { name?: unknown; status?: unknown } | null;
+    if (f?.status === 'obsolete' || f?.status === 'invalid') continue;
+    const kind = resolveFlowTriggerKind(flow);
+    if (!kind) continue;
+    const name = typeof f?.name === 'string' ? f.name : '?';
+    errors.push(
+      `flow '${name}' declares a '${kind}' trigger but \`requires\` does not include 'triggers' — ` +
+        `no '${kind}' trigger would be registered, so the flow would never auto-launch. ` +
+        `Add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*).`,
+    );
+  }
+  return errors;
+}
+
+/**
  * Reject `requires` tokens that are not part of the platform capability
  * vocabulary (framework#3265). An unknown token is a genuine typo or a stale
  * reference that NO runtime provides, so every runtime would otherwise SILENTLY
@@ -1813,6 +1862,13 @@ export function defineStack(
   if (hierErrors.length > 0) {
     const header = `defineStack hierarchy-scope capability validation failed (${hierErrors.length} issue${hierErrors.length === 1 ? '' : 's'}):`;
     const lines = hierErrors.map((e) => `  ✗ ${e}`);
+    throw new Error(`${header}\n\n${lines.join('\n')}`);
+  }
+
+  const triggerErrors = validateTriggerCapability(data);
+  if (triggerErrors.length > 0) {
+    const header = `defineStack trigger capability validation failed (${triggerErrors.length} issue${triggerErrors.length === 1 ? '' : 's'}):`;
+    const lines = triggerErrors.map((e) => `  ✗ ${e}`);
     throw new Error(`${header}\n\n${lines.join('\n')}`);
   }
 

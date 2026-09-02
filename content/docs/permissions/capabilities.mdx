@@ -25,6 +25,7 @@ Read the next section before you write either.
 | **Vocabulary** | Author-chosen names, `^[a-z][a-z0-9_.]*$` — `export_data`, `billing.refund` | A **closed** vocabulary: canonical kebab-case tokens from `PLATFORM_CAPABILITY_TOKENS` — `ai`, `automation`, `hierarchy-security` |
 | **Entry shape** | `defineCapability({ name, label, description, scope })` (`CapabilityDeclarationSchema`) | A plain `string` |
 | **Unknown value** | There is no "unknown" — you are minting the name | A `defineStack` **error** at authoring time (a typo, or a token no runtime provides) |
+| **Needed but undeclared** | Nothing to detect — a name is minted here, then granted | A `defineStack` **error** too: a hierarchy scope (`unit` / `unit_and_below` / `own_and_reports`) needs `hierarchy-security`, and a `record_change` / `schedule` / `time_relative` / `api` flow needs `triggers` — without them the runtime fails closed (owner-only visibility) or, for flows, silently never fires |
 | **Consumed by** | `systemPermissions` (grant) and `requiredPermissions` (requirement), by name string | The runtime capability loader, which resolves each token to a service plugin |
 | **When it bites** | Never at boot — an ungranted capability is simply held by nobody | **Fail-fast at startup**: a declared-but-missing provider aborts boot instead of degrading silently |
 | **Spec** | ADR-0066 D1 | Platform service vocabulary — see the [CLI reference](/docs/deployment/cli) |

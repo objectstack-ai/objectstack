@@ -74,8 +74,9 @@ describe('getSuspendedScreen is durable (#4515)', () => {
         const paused = await engine.execute('onboard');
         expect(paused.status).toBe('paused');
 
-        // Same process — served from the in-memory hot cache, no store read
-        // needed. (Async now, but the answer is identical.)
+        // Same process. [#13617] made this read store-authoritative, so it does
+        // consult the store — the point of the case is unchanged: the engine
+        // that paused the run still renders its screen.
         const screen = await engine.getSuspendedScreen(paused.runId!);
         expect(screen).toMatchObject({ nodeId: 'collect', title: 'Your details' });
         expect(screen!.fields[0]).toMatchObject({ name: 'full_name', required: true });

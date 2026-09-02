@@ -329,3 +329,458 @@ describe('update strip acts on CALLER-submitted values (#5591)', () => {
     expect(row.case_number).not.toBe('FORGED-9');
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+// #14088 — the SAME sentence failing a second time, one rung further along.
+//
+// #5591 (above) retired the key SET because it made the contract
+// ("hook-written keys are NOT caller-supplied") true only BY ACCIDENT. Value
+// equality is accidental in precisely the same way, and this is the accident:
+// `Object.is(payload[k], supplied[k])` cannot separate *the hook deliberately
+// wrote the value the caller also sent* from *the hook never touched the key*.
+//
+// Measured downstream (published 17.2.0, `duly_task`): a `readonly`
+// `completed_at` stamped by a `beforeUpdate` hook on the transition INTO `done`
+// and CLEARED on the transition out. Reopening works — until the caller ALSO
+// sends `completed_at: null`, which is what a form round-trip of the whole
+// record does. `Object.is(null, null)` is true, the hook's clear dies with the
+// caller's null, and the row commits `status = in_progress` still carrying its
+// OLD completion timestamp. No error. Nothing downstream can tell that row from
+// one that really was completed — the corruption is the exact inverse of what a
+// validation rule can express ("a completed task must carry a timestamp" has no
+// purchase on a NON-completed task that carries one), so every on-time metric
+// reading `completed_at` counts it.
+//
+// ⛔ THE FIX IS PROVENANCE, NOT A `null` CASE, and this suite is written to
+// fail if anyone narrows it to one: the `0` case below collides identically,
+// and so would `''`, `false` and a shared object reference. The strip now reads
+// a RECORD of the keys the hook chain actually assigned
+// (`recordHookPayloadWrites`, sealed at the engine's post-hook confluence).
+//
+// ⛔ AND IT IS NOT "STOP STRIPPING READONLY FIELDS". The discriminator pair is
+// the point of this suite: the same payload (`completed_at: null` over a stored
+// timestamp) must CLEAR when a hook wrote the null and must be STRIPPED when no
+// hook did. Two opposite verdicts on byte-identical caller input — which is
+// exactly what value equality cannot deliver and a record can.
+describe('the strip reads hook-write PROVENANCE, not value equality (#14088)', () => {
+  let engine: ObjectQL;
+  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
+  let warns: string[];
+  /** The completion instant already ON the stored row — the value a lost clear leaves behind. */
+  const STAMPED = '2026-08-01T09:00:00.000Z';
+
+  const registerTransitionHook = (e: ObjectQL) => {
+    // `duly_task`'s hook, reproduced: stamp on the way INTO `done`, clear on
+    // the way out. The clear is the direction the card measured.
+    e.registerHook('beforeUpdate', async (ctx: any) => {
+      const next = ctx.input.data.status;
+      if (next === undefined) return;
+      const wasDone = ctx.previous?.status === 'done';
+      if (next === 'done' && !wasDone) {
+        ctx.input.data.completed_at = NOW;
+        ctx.input.data.elapsed_minutes = 42;
+      } else if (next !== 'done' && wasDone) {
+        ctx.input.data.completed_at = null;
+        ctx.input.data.elapsed_minutes = 0;
+      }
+    }, { object: 'duly_task', priority: 50 });
+  };
+
+  beforeEach(async () => {
+    warns = [];
+    const logger: any = {
+      warn: (m: string) => warns.push(String(m)),
+      debug() {}, info() {}, error() {}, trace() {}, fatal() {},
+      child() { return logger; },
+    };
+    engine = new ObjectQL({ logger });
+    const d = makeDriver();
+    storeFor = d.storeFor;
+    engine.registerDriver(d.driver, true);
+    await engine.init();
+
+    engine.registry.registerObject({
+      name: 'duly_task',
+      fields: {
+        title: { type: 'text' },
+        status: { type: 'text' },
+        completed_at: { type: 'datetime', readonly: true },
+        // The `0` twin of the same collision — proof the repair is provenance
+        // and not a `null` sentinel.
+        elapsed_minutes: { type: 'number', readonly: true },
+      },
+    } as any);
+
+    // The kernel `previous` binder (`object: '*'`, priority 5), replicated —
+    // a transition cannot be expressed in a hook without it.
+    engine.registerHook('beforeUpdate', async (ctx: any) => {
+      if (!ctx.previous && ctx.input?.id) {
+        const priorQuery: EngineQueryOptionsParsed = { where: { id: ctx.input.id }, limit: 1 };
+        ctx.previous = await engine.findOne(ctx.object, priorQuery);
+      }
+    }, { priority: 5 });
+  });
+
+  const task = (id: string) => storeFor('duly_task').get(id);
+  const seedDone = (id: string) => storeFor('duly_task').set(id, {
+    id, title: 'T', status: 'done', completed_at: STAMPED, elapsed_minutes: 42,
+  });
+  const seedOpen = (id: string) => storeFor('duly_task').set(id, {
+    id, title: 'T', status: 'in_progress', completed_at: null, elapsed_minutes: null,
+  });
+
+  // ── The card's exact failure ──────────────────────────────────────────────
+
+  it("THE REPORT: a reopen that also sends completed_at: null lands the hook's CLEAR", async () => {
+    // The reported call, byte for byte: reopen a completed task while echoing
+    // the field the form round-trips. Before the repair the row kept STAMPED
+    // and nothing errored.
+    registerTransitionHook(engine);
+    seedDone('t_1');
+
+    await engine.update('duly_task', {
+      id: 't_1', title: 'T', status: 'in_progress', completed_at: null,
+    });
+
+    expect(task('t_1').status).toBe('in_progress');
+    // The regression, stated as the value it must NOT be.
+    expect(task('t_1').completed_at).not.toBe(STAMPED);
+    expect(task('t_1').completed_at).toBeNull();
+  });
+
+  it('the same collision on `0` — so the repair cannot be a `null` sentinel', async () => {
+    // `elapsed_minutes` is reset to 0 by the same hook while the caller also
+    // sent 0. `Object.is(0, 0)` is true for exactly the reason
+    // `Object.is(null, null)` is, and a fix that reads `null` specially leaves
+    // this one corrupt. (`-0` is why the test uses a plain 0: `Object.is`
+    // separates the two, and relying on that would be the same accident again.)
+    registerTransitionHook(engine);
+    seedDone('t_2');
+
+    await engine.update('duly_task', {
+      id: 't_2', status: 'in_progress', completed_at: null, elapsed_minutes: 0,
+    });
+
+    expect(task('t_2').elapsed_minutes).toBe(0);
+    expect(task('t_2').completed_at).toBeNull();
+  });
+
+  // ── The STAMP direction — the card measures only the CLEAR ────────────────
+
+  it('the STAMP direction is broken by the same mechanism, and is fixed with it', async () => {
+    // The card measures the clear. The stamp collides identically whenever the
+    // caller's echoed value happens to equal what the hook writes — the ordinary
+    // way being a whole-record write-back of a value some other client already
+    // stamped, or an idempotent retry of the very same request. Same verdict,
+    // opposite direction: before the repair the hook's stamp was deleted and
+    // the row committed `status = done` with `completed_at = null`.
+    registerTransitionHook(engine);
+    seedOpen('t_3');
+
+    await engine.update('duly_task', {
+      id: 't_3', title: 'T', status: 'done', completed_at: NOW, elapsed_minutes: 42,
+    });
+
+    expect(task('t_3').status).toBe('done');
+    expect(task('t_3').completed_at).toBe(NOW);
+    expect(task('t_3').elapsed_minutes).toBe(42);
+  });
+
+  // ── Both update branches, off the one record ──────────────────────────────
+
+  it('the PREDICATE branch clears on the same terms (both call sites, one record)', async () => {
+    // `stripReadonlyFields` runs on both update branches, so a repair that
+    // reaches only the by-id one is a divergence, not a fix — the #3106 / #4441
+    // shape. Both matched rows are already `done`, so the batch's single
+    // payload is correct for every row it touches and this measures the strip
+    // rather than the batch-hook question (#14099).
+    registerTransitionHook(engine);
+    seedDone('t_4');
+    seedDone('t_5');
+
+    await engine.update(
+      'duly_task',
+      { status: 'in_progress', completed_at: null },
+      { where: { status: 'done' }, multi: true } as any,
+    );
+
+    expect(task('t_4').completed_at).toBeNull();
+    expect(task('t_5').completed_at).toBeNull();
+    expect(task('t_4').status).toBe('in_progress');
+  });
+
+  it('the PREDICATE branch stamps on the same terms', async () => {
+    registerTransitionHook(engine);
+    seedOpen('t_6');
+
+    await engine.update(
+      'duly_task',
+      { status: 'done', completed_at: NOW },
+      { where: { status: 'in_progress' }, multi: true } as any,
+    );
+
+    expect(task('t_6').completed_at).toBe(NOW);
+  });
+
+  // ── The discriminator: same payload, no hook write, OPPOSITE verdict ──────
+
+  it('⛔ THE FORGERY FACE: the identical payload with NO hook write is still STRIPPED', async () => {
+    // The one test that separates "provenance" from "stopped stripping". Byte
+    // for byte the caller input of THE REPORT above — `completed_at: null` over
+    // a stored timestamp — but no hook writes the key (no transition: the task
+    // is already `in_progress`). Nobody authorised the clear, so the stored
+    // timestamp must survive and the caller must be told.
+    registerTransitionHook(engine);
+    storeFor('duly_task').set('t_7', {
+      id: 't_7', title: 'T', status: 'in_progress', completed_at: STAMPED, elapsed_minutes: 42,
+    });
+
+    await engine.update('duly_task', {
+      id: 't_7', title: 'T2', status: 'in_progress', completed_at: null,
+    });
+
+    expect(task('t_7').title).toBe('T2');
+    expect(task('t_7').completed_at).toBe(STAMPED);
+    expect(warns.some((w) => w.includes("Field 'completed_at'"))).toBe(true);
+  });
+
+  it('⛔ a hook that runs but writes some OTHER key confers nothing on this one', async () => {
+    // Provenance is per KEY, never "a hook ran on this write". A hook touching
+    // `title` must not make a caller's forged `completed_at` hook-owned.
+    engine.registerHook('beforeUpdate', async (ctx: any) => {
+      ctx.input.data.title = 'rewritten-by-hook';
+    }, { object: 'duly_task', priority: 50 });
+    seedDone('t_8');
+
+    await engine.update('duly_task', {
+      id: 't_8', title: 'T', completed_at: '1999-01-01T00:00:00.000Z',
+    });
+
+    expect(task('t_8').title).toBe('rewritten-by-hook');
+    expect(task('t_8').completed_at).toBe(STAMPED);
+  });
+
+  it('⛔ #2948 UNCHANGED: a plain forge with no hook at all is still stripped', async () => {
+    seedDone('t_9');
+    await engine.update('duly_task', {
+      id: 't_9', completed_at: '1999-01-01T00:00:00.000Z',
+    });
+    expect(task('t_9').completed_at).toBe(STAMPED);
+    expect(warns.some((w) => w.includes("Field 'completed_at'"))).toBe(true);
+  });
+
+  it('⛔ the PREDICATE branch strips a forge no hook wrote, too', async () => {
+    registerTransitionHook(engine);
+    storeFor('duly_task').set('t_10', {
+      id: 't_10', title: 'T', status: 'archived', completed_at: STAMPED, elapsed_minutes: 42,
+    });
+    await engine.update(
+      'duly_task',
+      { title: 'T2', completed_at: null },
+      { where: { status: 'archived' }, multi: true } as any,
+    );
+    expect(task('t_10').title).toBe('T2');
+    expect(task('t_10').completed_at).toBe(STAMPED);
+  });
+
+  // ── The two "common paths" the card says are unaffected — negative controls ─
+
+  it('NEGATIVE CONTROL: the bare { status } reopen is unaffected', async () => {
+    // The card's own explanation for why this survived casual testing: the hook
+    // ADDS the key, so it was never in the caller's snapshot and the old
+    // key/value test already kept it. It must still be kept, and for a reason
+    // the repair did not have to invent.
+    registerTransitionHook(engine);
+    seedDone('t_11');
+
+    await engine.update('duly_task', { id: 't_11', status: 'in_progress' });
+
+    expect(task('t_11').status).toBe('in_progress');
+    expect(task('t_11').completed_at).toBeNull();
+    expect(task('t_11').elapsed_minutes).toBe(0);
+  });
+
+  it('NEGATIVE CONTROL: a partial patch that touches no transition is unaffected', async () => {
+    registerTransitionHook(engine);
+    seedDone('t_12');
+
+    await engine.update('duly_task', { id: 't_12', title: 'renamed' });
+
+    expect(task('t_12').title).toBe('renamed');
+    expect(task('t_12').status).toBe('done');
+    expect(task('t_12').completed_at).toBe(STAMPED);
+    expect(task('t_12').elapsed_minutes).toBe(42);
+  });
+
+  it('NEGATIVE CONTROL: an isSystem caller still bypasses the strip entirely', async () => {
+    seedDone('t_13');
+    await engine.update(
+      'duly_task',
+      { id: 't_13', completed_at: '1999-01-01T00:00:00.000Z' },
+      { context: { isSystem: true } } as any,
+    );
+    expect(task('t_13').completed_at).toBe('1999-01-01T00:00:00.000Z');
+  });
+
+  // ── The observability seams move with the verdict, not against it ──────────
+
+  it('a hook-written clear is NOT reported to onFieldsDropped', async () => {
+    // `DroppedFieldsEvent` means "dropped, and the write completed WITHOUT
+    // them" (#3407). The column IS written now — with the platform's null — so
+    // reporting it would make the seam lie, exactly as #5591 argued for the
+    // differing-value case one describe up.
+    registerTransitionHook(engine);
+    seedDone('t_14');
+    const events: any[] = [];
+
+    await engine.update(
+      'duly_task',
+      { id: 't_14', status: 'in_progress', completed_at: null },
+      { onFieldsDropped: (e: any) => events.push(e) } as any,
+    );
+
+    expect(events).toEqual([]);
+    expect(task('t_14').completed_at).toBeNull();
+  });
+
+  it('strictReadonlyWrites does not REFUSE a write whose only "drop" was a hook clear', async () => {
+    // The loud half of the same seam (#5126). Before the repair this write was
+    // refused outright for a field the caller never successfully wrote — the
+    // strict caller's punishment for its own hook's clear.
+    registerTransitionHook(engine);
+    seedDone('t_15');
+
+    await engine.update(
+      'duly_task',
+      { id: 't_15', status: 'in_progress', completed_at: null },
+      { strictReadonlyWrites: true } as any,
+    );
+
+    expect(task('t_15').completed_at).toBeNull();
+  });
+
+  it('strictReadonlyWrites still REFUSES a real forge', async () => {
+    registerTransitionHook(engine);
+    seedDone('t_16');
+
+    await expect(engine.update(
+      'duly_task',
+      { id: 't_16', completed_at: '1999-01-01T00:00:00.000Z' },
+      { strictReadonlyWrites: true } as any,
+    )).rejects.toThrow();
+    expect(task('t_16').completed_at).toBe(STAMPED);
+  });
+
+  // ── The declared limit, pinned so nobody "fixes" it into an escalation ─────
+
+  it('KNOWN LIMIT: a hook that REPLACES the payload leaves no record, and falls back', async () => {
+    // `ctx.input.data = { …ctx.input.data, completed_at: null }` produces a
+    // fresh object whose keys are indistinguishable from the caller's — because
+    // most of them ARE the caller's, spread across. So there is no record for
+    // this call and the pre-#14088 value test decides, i.e. the clear is still
+    // lost here.
+    //
+    // Pinned as the FAIL-SAFE direction on purpose. The alternative — reading a
+    // replacement's keys as hook-owned — would launder a caller's forged
+    // `created_by` into a platform write on any object carrying such a hook.
+    // Keeping the old over-strip is strictly better than opening the lock, and
+    // this test exists so that trade is re-argued rather than quietly inverted.
+    engine.registerHook('beforeUpdate', async (ctx: any) => {
+      if (ctx.input.data.status !== 'done' && ctx.previous?.status === 'done') {
+        ctx.input.data = { ...ctx.input.data, completed_at: null };
+      }
+    }, { object: 'duly_task', priority: 50 });
+    seedDone('t_17');
+
+    await engine.update('duly_task', {
+      id: 't_17', status: 'in_progress', completed_at: null,
+    });
+
+    expect(task('t_17').status).toBe('in_progress');
+    expect(task('t_17').completed_at).toBe(STAMPED);
+  });
+
+  it('...but a REPLACING hook still lands a key the caller did NOT send', async () => {
+    // The fallback is the pre-#14088 behaviour in full, not a new hole: with no
+    // record, a replaced payload is judged by the #5591 test, and a key absent
+    // from the caller's snapshot is kept exactly as it always was.
+    engine.registerHook('beforeUpdate', async (ctx: any) => {
+      ctx.input.data = { ...ctx.input.data, completed_at: null };
+    }, { object: 'duly_task', priority: 50 });
+    seedDone('t_18');
+
+    await engine.update('duly_task', { id: 't_18', status: 'in_progress' });
+
+    expect(task('t_18').completed_at).toBeNull();
+  });
+
+  it('the recording is transparent to a hook reading its own payload', async () => {
+    // Hooks read `ctx.input.data` for diagnostics (plugin-auth's identity write
+    // guard NAMES the keys it found). The recording view must be indistinguishable
+    // from the payload for every read shape a hook uses.
+    const seen: any[] = [];
+    engine.registerHook('beforeUpdate', async (ctx: any) => {
+      seen.push({
+        keys: Object.keys(ctx.input.data),
+        spread: { ...ctx.input.data },
+        json: JSON.stringify(ctx.input.data),
+        has: 'completed_at' in ctx.input.data,
+        own: Object.prototype.hasOwnProperty.call(ctx.input.data, 'title'),
+      });
+    }, { object: 'duly_task', priority: 1 });
+    seedDone('t_19');
+
+    await engine.update('duly_task', { id: 't_19', title: 'T', completed_at: null });
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].keys).toEqual(['id', 'title', 'completed_at']);
+    expect(seen[0].spread).toEqual({ id: 't_19', title: 'T', completed_at: null });
+    expect(seen[0].json).toBe(JSON.stringify({ id: 't_19', title: 'T', completed_at: null }));
+    expect(seen[0].has).toBe(true);
+    expect(seen[0].own).toBe(true);
+  });
+
+  it('no recording view reaches the driver — the seal puts the RAW payload back', async () => {
+    // A driver handed the recording view would be writing into a recorder the
+    // engine has stopped reading, and on a driver that keeps the object it is
+    // given, engine-internal machinery ends up on a row.
+    //
+    // A `Proxy` is invisible to `typeof` and `instanceof`, so the assertion has
+    // to be IDENTITY against the caller's own object — the recorder's target.
+    // The predicate branch is chosen deliberately: with no `id` key and nothing
+    // stripped, every pass returns the SAME reference, so `updateMany` receives
+    // `hookContext.input.data` verbatim and the identity is decisive rather
+    // than laundered through one of the copies the by-id path makes.
+    const seenByDriver: any[] = [];
+    const d2 = makeDriver();
+    const e2 = new ObjectQL({});
+    const wrapped: any = {
+      ...d2.driver,
+      async updateMany(object: string, ast: any, data: Record<string, unknown>) {
+        seenByDriver.push(data);
+        return d2.driver.updateMany(object, ast, data, undefined as any);
+      },
+    };
+    e2.registerDriver(wrapped, true);
+    await e2.init();
+    e2.registry.registerObject({
+      name: 'duly_task',
+      fields: {
+        title: { type: 'text' }, status: { type: 'text' },
+        completed_at: { type: 'datetime', readonly: true },
+      },
+    } as any);
+    e2.registerHook('beforeUpdate', async (ctx: any) => {
+      ctx.input.data.completed_at = NOW;
+    }, { object: 'duly_task', priority: 50 });
+    d2.storeFor('duly_task').set('t_20', { id: 't_20', title: 'T', status: 'open', completed_at: null });
+
+    const payload: Record<string, unknown> = { status: 'done', completed_at: null };
+    await e2.update('duly_task', payload as any, { where: { status: 'open' }, multi: true } as any);
+
+    expect(seenByDriver).toHaveLength(1);
+    expect(seenByDriver[0]).toBe(payload);
+    expect(seenByDriver[0].completed_at).toBe(NOW);
+    expect(d2.storeFor('duly_task').get('t_20').completed_at).toBe(NOW);
+  });
+});

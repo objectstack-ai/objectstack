@@ -343,7 +343,11 @@ describe('[#13640] the FK→attribute resolution is the same door, and is guarde
 
 // ── Immobility: the two routes #13649 already settled ───────────────────────
 
-describe('[#13640] IMMOBILITY — NativeSQL and the `/analytics/sql` echo did not move', () => {
+// (#13926 later added the same guard AFTER the compiler at both of those
+// routes' merge sites — `read-scope-vacancy-three-faces.test.ts` owns that
+// story. What THIS block pins is unchanged either way: the compiler's own
+// answers, and that for the shapes it refuses, its message still names it.)
+describe('[#13640] IMMOBILITY — `compileScopedFilterToSql` itself did not move', () => {
   it('`compileScopedFilterToSql` still refuses an empty `$nin` with ITS OWN #13571 message', async () => {
     // Not the new guard's message. The two refusals stay distinguishable, which
     // is how a reader can tell which door turned a query away — and how this
@@ -380,8 +384,10 @@ describe('[#13640] IMMOBILITY — NativeSQL and the `/analytics/sql` echo did no
   });
 
   it('the ObjectQL `/analytics/sql` echo refuses through the COMPILER, not the new guard', async () => {
-    // `generateSql` renders the scope through `compileScopedFilterToSql`, and
-    // that is deliberately untouched: the echo's disposition is #13571's.
+    // `generateSql` renders the scope through `compileScopedFilterToSql`,
+    // which for THIS spelling refuses before the merge-site guard #13926
+    // added after it can run — so the compiler's own message still names
+    // the door that answered.
     const ctx = {
       getCube: (name: string) => (name === 'deals' ? CUBE : undefined),
       queryCapabilities: () => ({ nativeSql: false, objectqlAggregate: true, inMemory: false }),
