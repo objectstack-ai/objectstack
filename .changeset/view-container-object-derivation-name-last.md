@@ -46,10 +46,10 @@ requiring `viewKind`) still keys by its own `name` first, which is its identity
 and not a binding. `item.id` is untouched and cannot fire for a container —
 `ViewSchema` is a `strictObject` declaring `name` and `object` and no `id`.
 
-**No migration surface.** No container in this repo carries a `name` that differs
-from its `object`, and none existed when the divergence was filed — every
-in-tree container derived identically at all three sites before this change and
-does after it. What moves is the latent shape only.
+**No migration surface.** Measured on this tree: of the 54 non-test sources that
+author or carry view containers, ZERO declare a `name` that differs from the
+object they bind to, so every in-tree container derived identically at all three
+sites before this change and does after it. What moves is the latent shape only.
 
 ⚠️ One card premise was measured false and is recorded in the new pin rather
 than quietly dropped: the artifact/HMR registrar does not silently mint a second
