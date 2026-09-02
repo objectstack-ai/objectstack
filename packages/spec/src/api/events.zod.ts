@@ -215,6 +215,18 @@ export type MetadataEvent = z.input<typeof MetadataEventSchema>;
  *
  * Represents a data record change event (create, update, delete).
  * Used for real-time synchronization of data records across clients.
+ *
+ * **This payload IS the contract a consumer discriminates on.** It travels as
+ * the `payload` of the `RealtimeEventPayload` envelope
+ * (`contracts/realtime-service.ts`), and the envelope is a transport shape —
+ * `type` / `object` / `payload` / `timestamp`, a TypeScript interface no
+ * parse ever validates. Every consumer that must read a per-event fact
+ * already reads it HERE, not on the envelope: the webhook fan-out takes
+ * `recordId` from the payload at its match site, and the client SDK
+ * `safeParse`s the payload against this schema before it delivers anything.
+ * So the tenant term below is a member of this validated payload rather than
+ * a second, unvalidated envelope field: one declaration, enforced at the
+ * publish site by the same `parse` that enforces `recordId`.
  */
 export const DataEventSchema = lazySchema(() => z.object({
   /** Unique event identifier */
@@ -228,6 +240,66 @@ export const DataEventSchema = lazySchema(() => z.object({
 
   /** Record ID */
   recordId: z.string().describe('Record ID'),
+
+  /**
+   * Organization the record belongs to — its `organization_id` column, under
+   * the camelCase spelling every published payload in this package uses for
+   * the tenant term (`organizationId`, the blessed developer-facing name).
+   *
+   * **Why a first-class member and not a read of the record body.** A
+   * tenant-scoped consumer — the webhook fan-out matching subscriptions to
+   * events, a per-organization realtime subscriber — must discriminate the
+   * event's tenant BEFORE it touches the record: `after` is absent on
+   * `data.record.deleted`, `before` is absent on create, and both are the
+   * unfiltered row body the consumer may not be entitled to read at all. The
+   * match term therefore rides beside `object` and `recordId`, validated
+   * with the rest of the event at the publish site.
+   *
+   * **Absent = the record belongs to no organization.** Two situations, one
+   * meaning:
+   *  - a `single`-posture deployment — `postureEnforcesWall(posture)` is
+   *    `false` and `postureStampsOrganization(posture)` with it (see
+   *    `@objectstack/spec/security`): there is no organization wall and
+   *    nothing stamps the column, so EVERY event is organization-less;
+   *  - a row that carries no organization under a walled posture (`group` /
+   *    `isolated`): an environment-wide row (`organization_id IS NULL`), or a
+   *    row of an object that stands outside the wall — `tenancy.enabled:
+   *    false` by declaration, or no `organization_id` column at all (the
+   *    identity tables).
+   * In both, a consumer may read absence as "not behind any organization
+   * wall" — the reading it already gives an `organization_id IS NULL` row on
+   * the read path. It may NOT read absence as "unknown, resolve it yourself":
+   * either the producer had the organization in hand or the record has none,
+   * and a per-event lookup on the fan-out path is exactly the hot-path read
+   * this member exists to make unnecessary.
+   *
+   * **Present = exactly that organization, never a guess.** It names the
+   * organization the RECORD belongs to — not the caller's active organization
+   * standing in for the row's, which would mislabel an administrator's write
+   * into another organization. It is never fabricated: no `.default()`, and
+   * the empty string is refused, so "no organization" has exactly one
+   * spelling — the key is absent.
+   *
+   * **Optional as a contract fact, not as a transition.** A `single`-posture
+   * deployment stays organization-less for its whole life, so a required key
+   * would either force a fabricated tenant there or leave the engine unable to
+   * publish at all (the publish site `parse`s the event and drops it on
+   * failure). Declared = enforced: this optionality is exactly what validation
+   * enforces, and no consumer tolerates any other shape. The producer
+   * obligation is the other half of the same contract: a producer that omits
+   * the key on an organization-stamped row publishes a cross-tenant event,
+   * which is fixed at the publish site — never by a consumer-side lookup.
+   */
+  organizationId: z.string().min(1).optional().describe(
+    'Organization the record belongs to (its organization_id), so a tenant-scoped '
+    + 'consumer can discriminate the event\'s tenant without reading the record body. '
+    + 'Absent when the record belongs to no organization: every event on a single-posture '
+    + 'deployment (no organization wall, nothing stamps the column), and a row that '
+    + 'carries no organization under a walled posture (environment-wide, or an object '
+    + 'outside the wall) — read absence as '
+    + '"not behind any organization wall", never as "unknown". Present = exactly that '
+    + 'organization; never fabricated, and the empty string is refused.',
+  ),
 
   /** Changed fields (update events only) */
   changes: z.record(z.string(), z.unknown()).optional().describe('Changed fields'),

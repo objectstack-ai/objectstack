@@ -106,9 +106,31 @@ export const AUTHZ_STORE_UNAVAILABLE_MESSAGE =
 
 /**
  * The own-property brand {@link isAuthzStoreUnavailableError} tests for.
- * A string-keyed own property (not a `Symbol.for` registry key) so it survives
- * `structuredClone`, and so a duplicated copy of this module still brands
- * identically.
+ * A string-keyed own property (not a `Symbol.for` registry key), so a
+ * duplicated copy of this module still brands identically — which is exactly
+ * what `instanceof` cannot do (module doc above).
+ *
+ * ⚠️ The brand does NOT survive `structuredClone`, and no claim here depends
+ * on it doing so — the same measured behaviour `service-not-registered.ts`
+ * records for its own brand. Reproduce on Node 22.22.2:
+ *
+ * ```js
+ * const e = new Error('x'); e.__brand = true; e.code = 'C';
+ * const c = structuredClone(e);
+ * // c.__brand === undefined   c.code === undefined   c.message === 'x'
+ * // control: structuredClone({ __brand: true, code: 'C' }) keeps BOTH keys
+ * ```
+ *
+ * `Error` has a dedicated serialization carrying `message`, `stack` and
+ * `cause` only, so it DROPS every other own property — this brand, the
+ * ADR-0112 `code`, `status` and `object` alike (and a subclass's own `name`
+ * returns as `'Error'`). The plain-object control is the half that proves the
+ * loss is specific to `Error`, not general to `structuredClone`.
+ *
+ * ⛔ So never branch on this brand across a worker or `postMessage` boundary:
+ * it would answer `false` and fail OPEN. Every call site today is in-process —
+ * `rethrowAuthzStoreUnavailable` on the rest rethrow paths and
+ * `isAuthzStoreUnavailableError` inside service `catch` blocks.
  */
 const AUTHZ_STORE_UNAVAILABLE_BRAND = '__objectstackAuthzStoreUnavailable' as const;
 

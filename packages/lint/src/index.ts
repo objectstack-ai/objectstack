@@ -734,6 +734,8 @@ export {
   FLOW_MULTIPLE_DEFAULT_EDGES,
   FLOW_INERT_NODE_CONDITION,
   FLOW_MULTI_WRITE_UNFILTERED,
+  FLOW_LOOP_BODY_UNCONTAINED,
+  FLOW_TRY_CATCH_WITHOUT_CATCH,
 } from './lint-flow-patterns.js';
 
 export { lintLivenessProperties } from './lint-liveness-properties.js';
@@ -748,6 +750,10 @@ export {
   LIVENESS_DEAD_PROPERTY,
   LIVENESS_EXPERIMENTAL_PROPERTY,
   LIVENESS_PLANNED_PROPERTY,
+  // #14057 — the fifth ledger verdict's own rule id. `live-elsewhere` is dead
+  // HERE by measurement but genuinely enforced in a sibling repo, so it must
+  // never share the `dead` id: the two ask the author for opposite actions.
+  LIVENESS_LIVE_ELSEWHERE_PROPERTY,
 } from './lint-liveness-properties.js';
 
 export { lintAutonumberFormats } from './lint-autonumber-formats.js';

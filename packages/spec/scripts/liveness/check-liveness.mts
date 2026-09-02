@@ -152,6 +152,12 @@ import { ValidationRuleSchema } from '../../src/data/validation.zod';
 import { TestSuiteSchema } from '../../src/qa/testing.zod';
 import { ManifestSchema } from '../../src/kernel/manifest.zod';
 import {
+  BatchEndpointsConfigSchema,
+  CrudEndpointsConfigSchema,
+  MetadataEndpointsConfigSchema,
+  RouteGenerationConfigSchema,
+} from '../../src/api/rest-server.zod';
+import {
   BOUND_PROOF_PATHS,
   HIGH_RISK_CLASSES,
   KNOWN_PROOF_IDS,
@@ -228,7 +234,7 @@ const ledgerRoot = ledgerRootArg
 
 // Governed metadata types, rolled out highest-frequency / highest-risk first.
 // (`query` is not a metadata type — see SPEC_ONLY_SCHEMAS below.)
-const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest'];
+const GOVERNED = ['object', 'field', 'flow', 'action', 'hook', 'permission', 'position', 'agent', 'tool', 'skill', 'dataset', 'page', 'view', 'report', 'dashboard', 'webhook', 'query', 'datasource', 'app', 'book', 'doc', 'email_template', 'job', 'mapping', 'seed', 'translation', 'validation', 'api', 'capability', 'qa', 'manifest', 'crud_endpoints', 'metadata_endpoints', 'batch_endpoints', 'route_generation'];
 
 // Registered metadata types that are NOT yet governed — the coverage ratchet.
 //
@@ -325,12 +331,45 @@ const PENDING_GOVERNANCE: Record<string, string> = {
 // asked either question, because the manifest was not in the denominator.
 // There is no registry to fold this one back onto — like `query` and `qa`, the
 // override IS its governance.
+// The FOUR `RestServerConfig` sub-objects are the fourth category, and the one
+// that made the override's boundary explicit: SERVER configuration. An author
+// writes `RestServerConfigSchema` (src/api/rest-server.zod.ts) as the REST
+// server's construction argument — not a metadata item, not a request body, not
+// a manifest — so no registry has ever held it and no ratchet rooted in one
+// could reach it. #11984 made `RestServer.normalizeConfig` PARSE and CONSUME
+// these four instead of casting them, which settles accept/reject; executing a
+// declared contract is not the same as having a consumer, and the census that
+// rode along with it found TEN normalized keys nothing reads (`routes` entire,
+// `crud.patterns` / `crud.objectParamStyle`, `metadata.cacheTtl` /
+// `metadata.endpoints.schema`, `batch.defaultAtomic` /
+// `batch.operations.upsertMany`). One of them is customer-visible today: the
+// schema's own `@example` advertises `routes: { excludeObjects: [...] }`, which
+// is accepted, validated, normalized — and excludes nothing.
+//
+// WHY FOUR ROOTS AND NOT ONE. `RestServerConfigSchema` is the obvious root and
+// it does not work: the walk drills exactly ONE level, so with the whole config
+// as the root the four sub-objects are the drilled level and their own keys sit
+// one level deeper — `metadata.endpoints.schema` and
+// `batch.operations.upsertMany` would then have no row of their own, and their
+// container's blanket verdict (`live` — three of four members gate a real route
+// mount) would silently cover a dead key. That is #4956's shape, in the file
+// written to end it. Rooting on the four sub-schemas instead puts every one of
+// the ten keys at a drillable depth, so each carries its own falsifiable
+// verdict. `RestApiConfigSchema` (the fifth sub-object, `api`) is deliberately
+// NOT enrolled here: its consumption seam is still validate-only and is the
+// subject of its own card, so a census of it would be recording a half that is
+// about to move. Like `query`, `qa` and `manifest`, there is no registry to
+// fold any of these back onto — the override IS their governance.
 const SPEC_ONLY_SCHEMAS: Record<string, unknown> = {
   webhook: WebhookSchema,
   query: QuerySchema,
   validation: ValidationRuleSchema,
   qa: TestSuiteSchema,
   manifest: ManifestSchema,
+  crud_endpoints: CrudEndpointsConfigSchema,
+  metadata_endpoints: MetadataEndpointsConfigSchema,
+  batch_endpoints: BatchEndpointsConfigSchema,
+  route_generation: RouteGenerationConfigSchema,
 };
 
 // ADR-0010 provenance/lock overlay fields — system-stamped, on every type; auto-live.

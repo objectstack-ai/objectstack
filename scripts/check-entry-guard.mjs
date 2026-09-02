@@ -457,10 +457,7 @@ export function importUnsafeStatements(source) {
  * a line in here. An entry whose file has since been fixed fails as STALE and
  * names itself, which is what stops this from rotting into an allowlist.
  */
-const KNOWN_IMPORT_UNSAFE = new Set([
-  'scripts/check-changeset-no-major.mjs',
-  'scripts/check-empty-changeset.mjs',
-]);
+const KNOWN_IMPORT_UNSAFE = new Set([]);
 
 /**
  * The SCAN SURFACE, written in the syntax `scripts/pm/dispatch-gates.mjs` can
