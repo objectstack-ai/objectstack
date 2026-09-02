@@ -188,6 +188,11 @@ import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
+// [#14088] The before-phase write recorder — the provenance channel the static
+// `readonly` strip needs to tell a hook's write from a caller's echo of the
+// SAME value. Armed and sealed in `update()`; the module owns the argument for
+// why neither end may move.
+import { recordHookPayloadWrites } from './hook-write-provenance.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
 // total over the MASTER's declared fields before it leaves this engine — the
@@ -10351,10 +10356,46 @@ export class ObjectQL implements IObjectQLEngine {
        )[0];
        if (undeclared) throw undeclared;
 
+       // ── [#14088] ARM the hook-write recording ────────────────────────────
+       //
+       // `suppliedValues` above answers "what did the caller send". This
+       // answers the other half — "which keys did a HOOK assign" — and it must
+       // be RECORDED, because it cannot be recovered from the values
+       // afterwards: `Object.is(payload[k], supplied[k])` reads a hook that
+       // deliberately wrote the value the caller also sent as a hook that never
+       // touched the key, and the static `readonly` strip below then deletes
+       // the hook's write. Measured: a `readonly` `completed_at` CLEARED by a
+       // reopen hook against a caller that round-tripped the whole record and
+       // so also sent `completed_at: null` — the row committed `in_progress`
+       // with its old completion timestamp and no error.
+       //
+       // The two ends of this window are load-bearing, not stylistic (the
+       // module's own header carries the full argument):
+       //
+       //  - ARMED HERE, after the entry snapshot and after the caller's payload
+       //    has stopped being written by anything the caller controls. A
+       //    caller cannot execute an assignment on this object; echoing a key,
+       //    a value, a `null` or a `Proxy` back is not a `set`. So no key a
+       //    caller supplied can enter the record, and a hook-owned key is a key
+       //    the strip stops defending.
+       //  - SEALED at the confluence below, BEFORE `encryptSecretFields` /
+       //    `normalizeMultiValueFields` / the strips write to the payload. A
+       //    recorder still armed for those would report ENGINE writes as HOOK
+       //    writes, which on a caller-forged secret column is precisely the
+       //    escalation this is built to make impossible.
+       //
+       // Writes through the recording land on the SAME object, so a hook
+       // mutating `ctx.input.data.x` in place is mutating the engine's payload
+       // exactly as it always has, and `opCtx.data` stays in step.
+       const hookWrites =
+         opCtx.data !== null && typeof opCtx.data === 'object'
+           ? recordHookPayloadWrites(opCtx.data as Record<string, unknown>)
+           : undefined;
+
        const hookContext: HookContext = {
           object,
           event: 'beforeUpdate',
-          input: { id, data: opCtx.data, options: opCtx.options },
+          input: { id, data: hookWrites?.payload ?? opCtx.data, options: opCtx.options },
           session: this.buildSession(opCtx.context),
           provenance: this.buildProvenance(opCtx.context),
           // [#13644] The declared referential-cleanup marker. Conditional
@@ -10646,6 +10687,32 @@ export class ObjectQL implements IObjectQLEngine {
            }
        }
 
+       // ── [#14088] SEAL the hook-write recording ───────────────────────────
+       //
+       // The same CONFLUENCE #13657 uses one comment down, and for the same
+       // reason: on either branch this is the line at which
+       // `hookContext.input.data` is the final POST-hook payload and nothing
+       // engine-owned has written to it yet. One seal covers both branches, so
+       // the by-id and predicate paths can never end up with different notions
+       // of who wrote a key — the divergence "both call sites" (#3106 / #4441)
+       // is the standing shape for.
+       //
+       // Sealing does two things, and the write is wrong without either: it
+       // freezes the record before the engine's own passes can be mis-recorded
+       // as hook writes, and it puts the RAW payload back in `input.data` so no
+       // recording view reaches a driver.
+       //
+       // `hookWrittenKeys` is `undefined` — not empty — when the recording
+       // cannot speak for this call, which happens when a hook REPLACED the
+       // payload object (`ctx.input.data = { …ctx.input.data }`) rather than
+       // mutating it. Consumers must read that as "fall back to the #5591 value
+       // test", never as "no hook wrote anything": treating a replacement's
+       // keys as hook-owned would launder a caller's forgery, so the fallback
+       // deliberately keeps the pre-#14088 over-strip instead.
+       const sealedHookWrites = hookWrites?.seal(hookContext.input.data);
+       if (sealedHookWrites) hookContext.input.data = sealedHookWrites.data as any;
+       const hookWrittenKeys = sealedHookWrites?.hookWrittenKeys;
+
        // ── [#13657] The POST-hook half of the declared-field door ──────────
        //
        // The insert path's twin, applied to the second write verb — same
@@ -10926,7 +10993,13 @@ export class ObjectQL implements IObjectQLEngine {
                    // WITHOUT IT" while `driverWrites` was 0. The seam that
                    // composes the sentence has to know the mode the sentence
                    // describes; nothing else here can tell it.
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites }) as any;
+                   // [#14088] `hookWrittenKeys` — the other half of the same
+                   // question `suppliedValues` answers, and the half no
+                   // comparison of values can reach. Without it a hook CLEARING
+                   // a read-only column loses its write to any caller that
+                   // echoed the same value back, which on `null` is every
+                   // whole-record form round-trip.
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites, hookWrittenKeys }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Both strip passes are done; refuse now if the caller
@@ -11084,7 +11157,14 @@ export class ObjectQL implements IObjectQLEngine {
                    // branch still passes no `addressKey` (nothing addresses a
                    // row by key here), which is what keeps it byte-identical
                    // to #8141 in every other respect.
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites }) as any;
+                   // [#14088] The SAME record the by-id branch consumes,
+                   // sealed once at the shared confluence. Not a second
+                   // derivation: two notions of "a hook wrote this key" that
+                   // disagree in one edge case would be a worse defect than the
+                   // one they were each added to close, and a bulk write that
+                   // reached a different verdict about authorship than a by-id
+                   // write is the #3106 / #4441 divergence verbatim.
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites, hookWrittenKeys }) as any;
                    reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Same refusal on the predicate path. A bulk strip is
