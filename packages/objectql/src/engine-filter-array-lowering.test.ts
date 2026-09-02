@@ -596,6 +596,77 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
     expect(reads).toHaveLength(0);
   });
 
+  // ── [#14080] the ORDERING carve-out, ruled 2026-09-01: a null comparand ──
+  // ── of $gt/$gte/$lt/$lte is refused at this seam, so driver-memory's ─────
+  // ── two-face divergence on it is UNREACHABLE through the engine ─────────
+  //
+  // Ruling point 4's negative pin, engine half, in the exact shape of the
+  // #13357 block above: the witness is the recording driver's call log, not
+  // the thrown envelope alone. The compile-face half (`parseFilterAST`, both
+  // input forms) is pinned in `@objectstack/spec`'s
+  // `filter-comparand-shape.test.ts`; the matcher-side statement lives in
+  // driver-memory's `memory-null-ordering-comparand-unreachable.test.ts`.
+  // ⛔ Nothing here asserts what either face WOULD have answered, and no
+  // ordering-vs-null semantics is defined — the divergence is sealed.
+
+  it.each([
+    ['$gt: null', { amount: { $gt: null } }],
+    ['$gte: null', { amount: { $gte: null } }],
+    ['$lt: null', { amount: { $lt: null } }],
+    ['$lte: null', { amount: { $lte: null } }],
+    ['lowered array form, ">="', [['amount', '>=', null]]],
+  ])('a null ordering comparand is refused on EVERY verb before any driver call — %s', async (_l, where) => {
+    await expect(engine.find('deal', { where } as any))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.findOne('deal', { where } as any))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.count('deal', { where } as unknown as EngineCountOptions))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.aggregate('deal', {
+      where: where as unknown as EngineAggregateOptions['where'],
+      groupBy: ['stage'],
+      aggregations: [{ function: 'count', field: 'id', alias: 'n' }],
+    })).rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.update('deal', { amount: 1 }, { where, multi: true } as any))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    await expect(engine.delete('deal', { where, multi: true } as any))
+      .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
+    // The negative half: refused BEFORE the store — no read, no write, no row
+    // moved. (The count() control below adds its own read, so it runs after.)
+    expect(reads).toHaveLength(0);
+    expect(writes).toHaveLength(0);
+    expect(await engine.count('deal')).toBe(3);
+  });
+
+  it('the null-ordering refusal is not vacuous — the same operator WITHOUT null reaches the driver', async () => {
+    // Positive control for the zero-call reading above: one comparand
+    // swapped for a value, same operator, same field, and the dispatch happens.
+    const rows = await engine.find('deal', { where: { amount: { $gt: 10 } } });
+    expect(reads).toHaveLength(1);
+    expect(lastWhere()).toEqual({ amount: { $gt: 10 } });
+    expect(rows.map((r: any) => r.id).sort()).toEqual(['d2', 'd3']);
+  });
+
+  it('the null PREDICATE still reaches the driver — the refusal is ordering-shaped, not null-shaped', async () => {
+    // `$eq: null` / `$ne: null` ARE the null predicate (#5332) and are the
+    // spellings the refusal prescribes; the seam must keep passing them.
+    await engine.find('deal', { where: { owner_id: { $ne: null } } });
+    expect(reads).toHaveLength(1);
+    expect(lastWhere()).toEqual({ owner_id: { $ne: null } });
+  });
+
+  it('a nested null ordering comparand is refused at its own path, engine prefix and all', async () => {
+    const err = await engine.find(
+      'deal',
+      { where: { $or: [{ amount: { $lte: null } }] } },
+    ).then(() => null, (e: any) => e);
+    expect(err?.status).toBe(400);
+    expect(err?.code).toBe('INVALID_FILTER');
+    expect(err.message).toMatch(/^find\('deal'\): /);
+    expect(err.message).toContain('where.$or[0].amount.$lte');
+    expect(reads).toHaveLength(0);
+  });
+
   // ── what must KEEP working: the declared list shapes ───────────────────
 
   it('a proper list comparand still reaches the driver untouched', async () => {
