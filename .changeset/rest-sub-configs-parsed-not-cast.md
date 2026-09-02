@@ -89,7 +89,8 @@ spelled out.
 schemas declare (the `routes: { data: '', ... }` fixtures are `discovery.routes`
 payloads, and every `metadata: { ... }` inside those files is endpoint or plugin
 metadata — verified by scanning each block for the schema's own keys; positive
-control: `rest-server.ts`'s own `@example` and `normalizeConfig` blocks hit).
+control: `rest-server.ts`'s own `NormalizedRestServerConfig` and `normalizeConfig`
+blocks hit).
 Repo-wide value census of the constrained keys, every file type: `maxBatchSize`
 24 lines, 3 out-of-range literals — two are `packages/spec`'s own schema tests
 (`0`, `2000`, which never construct a server) and one is a different schema's
