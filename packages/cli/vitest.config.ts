@@ -493,7 +493,7 @@
 // Before adding a `test` block for speed, re-measure: if `tests` is still the
 // dominant term, the block is not the lever.
 //
-// ## THE TWO TIERS (#13504) — `unit` and `integration`, measured on 00ff228fe0
+// ## THE TWO TIERS (#13504) — `unit` and `integration`, population on 3b5f8168b5
 //
 // Maintainer ruling (2026-09-01): split this suite into two NAMED tiers — a
 // unit-fast tier that is the local default and does not monopolise the shared
@@ -530,9 +530,14 @@
 // `client: 'better-sqlite3'`, and prose do not count — the pin's own header
 // carries the regexes and the false positives they were tuned against.
 //
-// Population on this commit: 228 files = 158 unit + 70 integration (48 spawn
-// the CLI, 23 boot a kernel/driver, 1 both). Reconciled against the #13872
-// census (f532630d02, 220 files, 35 spawners / 29 kernel-booters / 1 both):
+// Population on 3b5f8168b5 (merge of origin/main 2a26536196): 230 files =
+// 158 unit + 72 integration (49 spawn the CLI, 24 boot a kernel/driver, 1
+// both). The list moved twice between the first cut (00ff228fe0: 228 = 158 +
+// 70) and this one, and the pin caught both in the merge queue: one NEW
+// spawner file and one EXISTING file that started constructing `new ObjectQL(`
+// — the second is the shape a name-based tier can never see. Reconciled
+// against the #13872 census (f532630d02, 220 files, 35 spawners / 29
+// kernel-booters / 1 both):
 // on that same tree this predicate finds 46 spawners and 22 kernel-booters.
 // The spawner side GROWS by 11 files the basename census could not see — six
 // that spawn only through `runServe()` and five through the helper's exported
@@ -589,6 +594,7 @@ export const INTEGRATION_FILES = [
   'src/utils/schema-migrate.integration.test.ts',
   'src/utils/schema-migrate.readonly-probe.integration.test.ts',
   'src/utils/schema-migrate.teardown.integration.test.ts',
+  'src/utils/schema-migration-plugins.declaration-boot-write-guard.test.ts',
   'src/utils/secret-reference-union.test.ts',
   'src/utils/sqlite-occupancy.test.ts',
   'src/utils/sys-secret-orphan-sweep.test.ts',
@@ -599,6 +605,7 @@ export const INTEGRATION_FILES = [
   'test/build-json-failure-conversions.e2e.test.ts',
   'test/build-json-failure-warnings.e2e.test.ts',
   'test/build-json-undeclared-key-parity.e2e.test.ts',
+  'test/build-multi-package-artifact.e2e.test.ts',
   'test/cloud-login-json-ndjson.e2e.test.ts',
   'test/compile-artifact-packages.e2e.test.ts',
   'test/emit-json-pipe.test.ts',
