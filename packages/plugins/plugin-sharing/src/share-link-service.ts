@@ -348,7 +348,11 @@ export interface ShareLinkServiceOptions {
    * [#14033] Mint ONLY. `publicSharing.enabled` is a standing policy held
    * again at every redemption, and `resolveToken` reads the object's CURRENT
    * block regardless of how a row was minted: a link minted under this bypass
-   * while the block is off does not resolve until the block is enabled.
+   * while the block is off does not resolve until the block is enabled. So
+   * during a late schema scan the option helps MINTING, not serving: an object
+   * the engine cannot return a schema for is `enabled: false` by `getPolicy`'s
+   * definition (the same definition `createLink` uses), and redemption refuses
+   * until the schema resolves and the block is enabled.
    */
   permissive?: boolean;
   /**

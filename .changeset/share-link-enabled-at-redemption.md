@@ -35,7 +35,12 @@ switched-off object refuses exactly like one orphaned by an author turning the
 block off, and an object with no `publicSharing` block at all is the same switch
 at its default and refuses too. With the block on, `eligibility` (#13608) and
 the declared `redactFields` (#13856) keep their existing redemption-time
-behaviour; nothing new is evaluated.
+behaviour; nothing new is evaluated. An object the engine cannot return a
+schema for — no `getSchema` on the engine, or an object not registered at the
+moment of redemption — is `enabled: false` by `getPolicy`'s definition and is
+refused at redemption: fail-closed, the same definition `createLink` uses. The
+#13856 entry's "an opted-out object's links keep resolving with the declared
+redactions" state is superseded: with the block off they do not resolve at all.
 
 **The refusal is deliberately indistinguishable.** It is the same answer a
 revoked, expired, unknown or no-longer-eligible token already gets: the
@@ -57,6 +62,8 @@ enable the block — and narrow it with `eligibility` / `redactFields` if the
 feature was off for a reason; there is no per-link opt-out, deliberately.
 Minting is unchanged: `createLink` still refuses `SHARING_NOT_ENABLED` for an
 ordinary caller, and the system / `permissive` bypass still mints — what it
-mints simply does not serve until the block is on.
+mints simply does not serve until the block is on. The refusal logs one `warn`
+line per refused hit and is not latched, so a retroactive deploy with many live
+links on switched-off objects will burst the log once.
 
 <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed, renamed or re-shaped: `publicSharing.enabled` keeps its name, its type, its default and its accept-set, and the change is WHEN the platform holds it. There is therefore no tombstone for `objectstack migrate meta` to carry and no mechanical rewrite it could perform — a deployment whose links stop resolving must decide whether the block should be on at all, which is an authoring decision no ledger entry can make on its behalf. -->
