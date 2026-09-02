@@ -24,11 +24,14 @@ CEL predicate rather than a repeater text input.
 **Why remove rather than declare.** The route rests on a premise measured for
 the FIELD-option surface rather than inherited from #5016, which measured the
 ACTION-param path — objectui's `SelectOptionMetadata` does declare `icon`, so
-the two faces had to be measured apart. Measured on objectui `67dadd60` with a
-live positive control: the select/multiselect cell renderer
-(`packages/fields/src/index.tsx`) reads `option?.label` and `option?.color` off
-a `SelectOptionMetadata[]` and never `option?.icon`, and no field-option render
-path in that tree reads the key at all. Declaring `icon` instead would widen
+the two faces had to be measured apart. Measured twice with a live positive
+control, same answer both times: at the objectui pin this repo ships
+(`.objectui-sha` = `d8ec8d6d4f011b11c8eb1e6dbd364ef206711391`) and again at
+that repo's `origin/main` (`67dadd602a3a891666ea1513c5de677140784b6a`). The
+select/multiselect cell renderer (`packages/fields/src/index.tsx`) reads
+`option?.label` and `option?.color` off a `SelectOptionMetadata[]` and never
+`option?.icon`, and no field-option render path in either tree reads the key at
+all. Declaring `icon` instead would widen
 the accepted set, which needs a maintainer ruling and is deliberately not taken
 here.
 

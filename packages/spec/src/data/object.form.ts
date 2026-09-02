@@ -160,11 +160,14 @@ export const objectForm = defineForm({
             // Remove rather than declare, on a premise measured for THIS
             // surface rather than inherited from #5016's action-param reading:
             // objectui declares `icon` on `SelectOptionMetadata`, but no
-            // field-option render path READS it. Measured on objectui
-            // `67dadd60` with a live positive control — the select/multiselect
-            // cell renderer (`packages/fields/src/index.tsx`) reads
-            // `option?.label` and `option?.color` off that very
-            // `SelectOptionMetadata[]` and never `option?.icon`; the only
+            // field-option render path READS it. Measured at the
+            // `.objectui-sha` pin `d8ec8d6d4f011b11c8eb1e6dbd364ef206711391`
+            // (the console this repo ships) and again on that repo's
+            // `origin/main`, same answer both times, with a live positive
+            // control: the select/multiselect cell renderer
+            // (`packages/fields/src/index.tsx`, the `renderOne` badge/dot
+            // branch) reads `option?.label` and `option?.color` off that very
+            // `SelectOptionMetadata[]` and never `option?.icon`. The only
             // `opt.icon` read in that tree belongs to the config-panel
             // `ConfigField` vocabulary, whose `icon` is a `React.ReactNode` an
             // authored field option cannot reach. Declaring it instead would
