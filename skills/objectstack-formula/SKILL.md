@@ -418,7 +418,6 @@ to the envelope.
 | `View` / `Page` | `visibleWhen` (form section/field, page component) | cel |
 | `Field` | `defaultValue` (envelope only; bare string = literal) | cel |
 | `ConditionalValidation` | `when` | cel |
-| `View` / `Page` | `visibleOn` / `visibility` (deprecated aliases of `visibleWhen`, ADR-0089) | cel |
 | `Action` | `disabled` | cel (or boolean) |
 | `Hook` | `condition` | cel |
 | `SharingRule` | `condition` | cel |
@@ -427,87 +426,25 @@ to the envelope.
 | `audit` / `metrics` / `tracing` | `condition` / `successCriteria` | structured \| cel |
 
 View list filters are **not** a CEL surface — they are structured JSON filter
-rules (`ViewFilterRuleSchema`), so do not emit CEL there.
+rules (`ViewFilterRuleSchema`), so do not emit CEL there. For "last 30 days"
+style windows use the **date macro tokens** (`data/date-macros.zod.ts`) —
+objectstack-query `rules/filters.md` has the token list.
 
-### Cron surfaces (recurring schedules)
+### Cron and template surfaces
 
-All accept bare strings (auto-wrapped to `{dialect:'cron', source}`) or the
-`` cron`...` `` helper. 5- or 6-field cron + aliases (`@daily`, `@hourly`, …).
+Two more registered dialects ride the same envelope. Neither is CEL, both
+accept a bare string (auto-wrapped at validate time) or their helper, and both
+read the same variable scope.
 
-| Surface | Field |
-|:---|:---|
-| `Job.schedule.expression` | canonical |
-| `connector.schedule` | scheduled connector sync |
-| `system/cache.schedule` | warmup |
-| `system/disaster-recovery.schedule` | backup + drill |
-| `automation/execution.cronExpression` | scheduled state |
-| `api/export.cronExpression` | scheduled exports (×2) |
+| Dialect | Helper | Grammar | Carriers |
+|:---|:---|:---|:---|
+| `cron` | `` cron`0 6 * * MON` `` | 5- or 6-field cron plus `@daily` / `@hourly` aliases | `Job.schedule.expression` (canonical), `connector.schedule`, `automation/execution.cronExpression`, `api/export.cronExpression` |
+| `template` | `` tmpl`Hello {{ record.first_name }}` `` | `{{ path }}` or `{{ path \| formatter[:arg] }}` — double braces only, whitelisted formatters, no conditionals | `system/email-template` `subject` / `bodyHtml` / `bodyText`, `ai/model-registry` `promptTemplate.system` / `.user`, `Object.titleFormat` (deprecated → `nameField`, ADR-0079) |
 
-### Template surfaces (`{{ path }}` interpolation)
-
-Mustache subset — a **field/variable path** plus an optional **whitelisted
-formatter**: `{{ path }}` or `{{ path | formatter[:arg] }}`. No conditionals,
-no arbitrary logic (move logic into a CEL field). Same variable scope as CEL.
-Double braces only — single `{x}` is **not** a valid hole.
-
-**Formatters (7.6)** — value→string is defined per formatter (not implicit):
-
-| Formatter | Example | Output |
-|:---|:---|:---|
-| `currency[:CODE]` | `{{ record.amount \| currency }}` / `:EUR` | `$1,234.50` |
-| `number[:decimals]` | `{{ record.n \| number:2 }}` | `1,234.50` |
-| `percent[:decimals]` | `{{ record.rate \| percent }}` (0.42→) | `42%` |
-| `date[:short\|long\|iso]` / `datetime[:…]` | `{{ record.due \| date:long }}` | locale date |
-| `upper` / `lower` / `trim` | `{{ record.code \| upper }}` | `ABC` |
-| `truncate:N` | `{{ record.body \| truncate:80 }}` | `…` |
-| `default:'…'` | `{{ record.x \| default:'N/A' }}` | fallback |
-| `json` | `{{ record.obj \| json }}` | JSON |
-
-```ts
-tmpl`Deal {{ record.name }} — {{ record.amount | currency }} closes {{ record.close_date | date:long }}`
-```
-
-| Surface | Field |
-|:---|:---|
-| `Object.titleFormat` | record title — **deprecated** (→ `nameField`, ADR-0079) |
-| `ai/model-registry` | `promptTemplate.system`, `promptTemplate.user` |
-| `system/email-template` | `subject`, `bodyHtml`, `bodyText` (plain strings, `{{ }}` rendered by the email pipeline) |
-
-There is no JS expression surface: procedural JS is the L2
-`ScriptBody { language: 'js' }` surface (hook bodies), not an expression
-dialect.
-
----
-
-## Cron quick reference
-
-<!-- os:check -->
-```ts
-import { cron } from '@objectstack/spec';
-
-schedule: cron`0 6 * * MON`        // every Monday at 06:00
-schedule: cron`@daily`             // alias — every midnight
-schedule: cron`*/15 * * * *`       // every 15 minutes
-```
-
-Bare strings work too on cron-typed fields, but the `cron` helper makes intent
-explicit.
-
----
-
-## Template quick reference
-
-<!-- os:check -->
-```ts
-import { tmpl } from '@objectstack/spec';
-
-subject: tmpl`Deal {{record.name}} needs review, {{os.user.name}}`
-body:    tmpl`{{record.name}} closes {{record.close_date | date:long}}`
-```
-
-Missing paths render as empty string. `Date` instances are ISO-formatted.
-(`Object.titleFormat` also takes a template but is deprecated — use `nameField`,
-ADR-0079.)
+Both surfaces are declared in `shared/expression.zod.ts`; read it for the full
+carrier list, the formatter whitelist and the cron alias set. Missing template
+paths render as the empty string. Move logic into a CEL field — a template
+holds a path and a formatter, nothing else.
 
 ---
 
