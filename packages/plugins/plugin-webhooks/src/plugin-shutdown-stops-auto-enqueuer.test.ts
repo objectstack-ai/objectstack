@@ -85,7 +85,7 @@ function fakeEngine() {
  */
 class FixturePlugin implements Plugin {
     name = 'com.objectstack.service.messaging';
-    type = 'standard';
+    type = 'standard' as const;
     version = '1.0.0';
     providesServices = ['manifest', 'objectql', 'realtime', 'messaging'];
     readonly realtime = fakeRealtime();

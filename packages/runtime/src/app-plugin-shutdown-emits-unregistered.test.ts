@@ -53,7 +53,7 @@ const BUNDLE = { manifest: { id: 'demo_app', name: 'demo_app', label: 'Demo' } }
 /** Captures the catalog events AppPlugin puts on the kernel bus. */
 class CatalogRecorderPlugin implements Plugin {
     name = 'test.catalog-recorder';
-    type = 'standard';
+    type = 'standard' as const;
     version = '1.0.0';
     readonly events: string[] = [];
     init(ctx: PluginContext): void {

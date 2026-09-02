@@ -7935,6 +7935,26 @@ export function residueLines(
 // ---------------------------------------------------------------------------
 
 /**
+ * The single source of truth for the model tier the PM lane's governance
+ * reads — clause ②'s CONTRACT-REVIEW tier: the tier a card that changes
+ * contract accept/reject behaviour or widens the public surface must be
+ * dispatched at, and the tier the `needs:contract-review` re-review sub-round
+ * must itself be running at (its opening self-check reads this). Declared HERE
+ * and only here, as a constant, so a model upgrade is a one-line change in one
+ * file — the clause-① mandate rows below read it, the self-test compares
+ * against it, and the PM skill's prose names it, so the model id is spelled as
+ * a VALUE on this one line and nowhere else across `scripts/pm/**` and
+ * `.claude/skills/pm-dispatch/**` (a second value site is what let this
+ * constant drift from the served tier unnoticed). The comparison against the
+ * served tier is EXACT, never a family or prefix floor — widening a governance
+ * gate's accept set is the maintainer's decision, not a refresh-time
+ * convenience. The review label deliberately names WHAT is reviewed, never a
+ * model (maintainer, 2026-08-16: 「needs:fable-review 这个标签不好,下次模型升级怎么办」).
+ * Rulebook: `.claude/skills/pm-dispatch/SKILL.md` 「入队与落地」 — the clause-② gate and the `needs:contract-review` review-chain bullets.
+ */
+export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
+
+/**
  * The globs that MANDATE a model tier for any card whose file surface touches
  * them, as DATA. This is the one list in this file besides CHANGE_KIND_GATES,
  * and it is here for the same reason: it is enumerable, so a guard can hold it.
@@ -7967,7 +7987,7 @@ export function residueLines(
  * about paths:
  *
  *   - clause ①, encoded below: a card editing the PM lane's PROTOCOL-SEMANTIC
- *     surfaces is `claude-fable-5` — the pm-dispatch SKILL.md main file, every
+ *     surfaces is `CONTRACT_REVIEW_TIER` — the pm-dispatch SKILL.md main file, every
  *     file carrying an enforced copy of the decision frame (the COPIES table
  *     of check:skill-frame-sync), and the dev-agent definition. Narrowed from
  *     "the whole skill tree, references included" by the maintainer's
@@ -7977,7 +7997,7 @@ export function residueLines(
  *     file-surface predicate, and exactly what this script takes as argv;
  *   - clause ②, NOT encoded and deliberately not: a card that changes contract
  *     accept/reject behaviour or widens the public surface is also
- *     `claude-fable-5`. That is judged from the card's CONTENT — what the change
+ *     `CONTRACT_REVIEW_TIER`. That is judged from the card's CONTENT — what the change
  *     does to the contract — and a path cannot answer it. An ordinary-looking
  *     surface (one package's source file) is the NORMAL shape of a clause-②
  *     card. The closest a path can honestly get is SUSPICION:
@@ -8061,34 +8081,20 @@ export function residueLines(
 export const MANDATORY_TIER_GLOBS = [
   {
     glob: '.claude/skills/pm-dispatch/SKILL.md',
-    tier: 'claude-fable-5',
+    tier: CONTRACT_REVIEW_TIER,
     why: 'clause ① of the model-tiering ruling (narrowed to protocol semantics, 2026-08-20): the PM dispatch skill MAIN file is the lane\'s own operating protocol and a wrong edit propagates to every later dispatch — references/** dropped out of the path mandate that day',
   },
   {
     glob: '.claude/agents/os-dev.md',
-    tier: 'claude-fable-5',
+    tier: CONTRACT_REVIEW_TIER,
     why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and it carries an enforced copy of the decision frame',
   },
   {
     glob: 'skills/objectstack-pm-dispatch/SKILL.md',
-    tier: 'claude-fable-5',
+    tier: CONTRACT_REVIEW_TIER,
     why: 'clause ① (2026-08-20 narrowing): the published PM skill carries two enforced copies of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
   },
 ];
-
-/**
- * Clause ②'s single source of truth for the CONTRACT-REVIEW tier: the tier a
- * card that changes contract accept/reject behaviour or widens the public
- * surface must be dispatched at, and the tier the `needs:contract-review`
- * re-review sub-round must itself be running at (its opening self-check reads
- * this). Declared HERE and only here, as a constant, so a model upgrade is a
- * one-line change in one file. The review label deliberately names WHAT is
- * reviewed, never a model (maintainer, 2026-08-16: 「needs:fable-review 这个标
- * 签不好,下次模型升级怎么办」), and the PM skill's prose points at this
- * constant instead of spelling a model name.
- * Rulebook: `.claude/skills/pm-dispatch/SKILL.md` 「入队与落地」 — the clause-② gate and the `needs:contract-review` review-chain bullets.
- */
-export const CONTRACT_REVIEW_TIER = 'claude-fable-5';
 
 /**
  * The globs that make a surface a clause-② SUSPECT — a HINT, never a verdict.
@@ -12150,20 +12156,34 @@ function selfTest() {
       JSON.stringify({ verdict: verdict?.verdict, hints: entry?.hints }),
     );
     // The ablation, run in-place: strip the declared SUBTREE from the live hint
-    // set and the verdict must fall back to what it was before this landed.
+    // set and the verdict must fall back to NOT MATCHED — that is the whole
+    // claim, since a brand-new file is nameable only through the subtree half.
     // Without it the case above could pass through any hint that happened to
     // cover the probe, and the reader could not tell which half was load-bearing.
+    //
+    // WHICH not-matched verdict it lands on is not fixed, and pinning one
+    // spelling was a latent trap: for `check:entry-guard` the residual depends
+    // on whether its KNOWN_IMPORT_UNSAFE roster still contributes path literals
+    // as hints — `silent` while it held entries, `undetermined` once it emptied
+    // and the stripped hint set is bare. That ledger is ⛔ SHRINK-ONLY and
+    // reaching zero is its GOAL, so the day it emptied this case went red over
+    // a gate that had not changed at all. Either verdict proves the subtree
+    // hint is the load-bearing half, so both are accepted — spelled as an
+    // explicit pair rather than `!== 'matched'`, so a NEW verdict value added
+    // later cannot slip through here as a pass.
     const undeclared = entry ? { ...entry, hints: entry.hints.filter((h) => !h.includes('/*')) } : null;
+    const residual = undeclared ? classifyEntry(undeclared, [unwrittenScript]).verdict : null;
     t(
-      `…and it is the subtree declaration doing it: strip it and ${gate} goes back to silent`,
+      `…and it is the subtree declaration doing it: strip it and ${gate} goes back to NOT MATCHED`,
       // The length check is what stops this passing VACUOUSLY. With no subtree
-      // hint to remove, `undeclared` is the entry itself and `silent === silent`
-      // reads as a pass — measured, on the ablation run that removed both
-      // declarations: this case stayed green while the two above went red.
+      // hint to remove, `undeclared` is the entry itself and a not-matched
+      // verdict compared against itself reads as a pass — measured, on the
+      // ablation run that removed both declarations: this case stayed green
+      // while the two above went red.
       Boolean(undeclared) &&
         undeclared.hints.length < entry.hints.length &&
-        classifyEntry(undeclared, [unwrittenScript]).verdict === 'silent',
-      JSON.stringify({ before: entry?.hints?.length, after: undeclared?.hints?.length }),
+        ['silent', 'undetermined'].includes(residual),
+      JSON.stringify({ before: entry?.hints?.length, after: undeclared?.hints?.length, residual }),
     );
   }
 
@@ -15298,12 +15318,12 @@ function selfTest() {
   // mandate, and the ordinary surface that must NOT be mandated (a tool that
   // mandates everything is ignored, which loses the guardrail by the other road).
   const fableOf = (paths) => deriveTier(paths);
-  t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === 'claude-fable-5');
-  t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === 'claude-fable-5');
-  t('the published PM skill (two enforced frame copies) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === 'claude-fable-5');
+  t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
+  t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === CONTRACT_REVIEW_TIER);
+  t('the published PM skill (two enforced frame copies) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).mandatory === false);
   const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/agents/os-dev.md']);
-  t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === 'claude-fable-5');
+  t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === CONTRACT_REVIEW_TIER);
   t('the mixed verdict reports the offending path, not just the verdict', mixed.hits.length === 1 && mixed.hits[0].path.endsWith('.claude/agents/os-dev.md'));
   t('an ordinary surface carries no path-derived mandate', fableOf(['packages/spec/src/data/filter.zod.ts']).mandatory === false);
   t("this tool's own file is not mandatory — the card that added this section reads itself correctly", fableOf(['scripts/pm/dispatch-gates.mjs']).mandatory === false);
@@ -15316,7 +15336,7 @@ function selfTest() {
   // The rendering is where the invariant is actually delivered: the claim
   // comment quotes THESE lines.
   const mandLines = tierLines(mixed).join('\n');
-  t('the mandatory rendering names the tier', mandLines.includes('claude-fable-5'));
+  t('the mandatory rendering names the tier', mandLines.includes(CONTRACT_REVIEW_TIER));
   t('the mandatory rendering says MANDATORY in a word a reader cannot skim past', mandLines.includes('MANDATORY'));
   t('the mandatory rendering shows its provenance — the path and the glob that covered it', mandLines.includes("- .claude/agents/os-dev.md ⇢ '.claude/agents/os-dev.md'"));
   t('the mandatory rendering names every sanctioned exit, so a downgrade needs a stated reason', mandLines.includes('quota exemption') && mandLines.includes('opus, never lower') && mandLines.includes('one-line-class') && mandLines.includes('proactive low-headroom'));
@@ -15337,7 +15357,7 @@ function selfTest() {
   let ambiguityRefused = false;
   try {
     deriveTier(['.claude/skills/pm-dispatch/SKILL.md'], [
-      { glob: '.claude/skills/pm-dispatch/**', tier: 'claude-fable-5', why: 'a' },
+      { glob: '.claude/skills/pm-dispatch/**', tier: CONTRACT_REVIEW_TIER, why: 'a' },
       { glob: '.claude/skills/**', tier: 'opus', why: 'b' },
     ]);
   } catch {
@@ -15375,7 +15395,7 @@ function selfTest() {
     /* frameFiles stays empty and the cases below fail loudly */
   }
   t('the frame-sync COPIES table is readable and non-empty, so the pin below is not vacuous', frameProbe.status === 0 && Array.isArray(frameFiles) && frameFiles.length > 0);
-  t(`every frame-sync-enforced copy is fable-mandated (unmandated: ${frameFiles.filter((f) => !deriveTier([f]).mandatory).join(', ') || 'none'})`, frameFiles.length > 0 && frameFiles.every((f) => deriveTier([f]).tier === 'claude-fable-5'));
+  t(`every frame-sync-enforced copy is fable-mandated (unmandated: ${frameFiles.filter((f) => !deriveTier([f]).mandatory).join(', ') || 'none'})`, frameFiles.length > 0 && frameFiles.every((f) => deriveTier([f]).tier === CONTRACT_REVIEW_TIER));
   t('the SKILL.md main file and the dev-agent definition are declared in their own right, not only via the frame table', MANDATORY_TIER_GLOBS.some((g) => g.glob === '.claude/skills/pm-dispatch/SKILL.md') && MANDATORY_TIER_GLOBS.some((g) => g.glob === '.claude/agents/os-dev.md'));
 
   // ── Clause-② suspicion (the enqueue-gate card): hit / no hit / wording ────

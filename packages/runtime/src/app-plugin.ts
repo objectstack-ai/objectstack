@@ -87,7 +87,7 @@ export type AppPluginSecurityMetadataRegistrar = 'app-plugin' | 'artifact-door';
  */
 export class AppPlugin implements Plugin {
     name: string;
-    type = 'app';
+    type = 'app' as const;
     version?: string;
     /**
      * Ordering — declared, not positional (ADR-0116, the #4131 close of

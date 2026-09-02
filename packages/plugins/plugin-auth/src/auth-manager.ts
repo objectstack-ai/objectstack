@@ -924,6 +924,22 @@ export function ipMatchesRange(ip: string, range: string): boolean {
 const SMS_QUOTA_EXCEEDED_CODE = 'TOO_MANY_REQUESTS';
 
 /**
+ * [#14522] The better-auth endpoint path prefix every SCIM 2.0 protocol
+ * endpoint lives under (`/scim/v2/Users`, `/scim/v2/Groups/:groupId`, …) —
+ * the same predicate `@better-auth/scim` uses for its own after-hook matcher
+ * (`context.path?.startsWith("/scim/v2")`). A request under it runs inside
+ * `scimRequestScope`; see `handleRequest`.
+ */
+const SCIM_PROTOCOL_PATH_PREFIX = '/scim/v2';
+
+function isScimProtocolPath(endpointPath: string | undefined): boolean {
+  return (
+    endpointPath === SCIM_PROTOCOL_PATH_PREFIX ||
+    endpointPath?.startsWith(`${SCIM_PROTOCOL_PATH_PREFIX}/`) === true
+  );
+}
+
+/**
  * #6039 — is this `SendSmsResult.error` the quota wall's refusal?
  *
  * Matched as a PREFIX of the service's `CODE: message` envelope, never as a
@@ -3266,17 +3282,22 @@ export class AuthManager {
     if (enabled.scim) {
       await this.addOptionalPlugin(plugins, 'scim', async () => {
         const { scim } = await import('@better-auth/scim');
-        const { verifyScimBearerToken, scimRequestScope } = await import('./scim-connection-service.js');
+        const { verifyScimBearerToken } = await import('./scim-connection-service.js');
         const secret = this.resolveAuthSecret();
         return scim({
           connections: [],
           authentication: {
             verifyBearerToken: async (input) => {
-              // Mark the remainder of this request's async chain as a SCIM
-              // protocol request, so the adapter runs its provisioning writes
-              // inside a REAL engine transaction (see scimRequestScope's
-              // rationale in scim-connection-service.ts).
-              scimRequestScope.enterWith({ scim: true });
+              // ⛔ No `scimRequestScope.enterWith(...)` here. The SCIM request
+              // scope that makes the adapter open a REAL engine transaction is
+              // opened by `handleRequest` with `run(...)` around the whole
+              // request (see `SCIM_PROTOCOL_PATH_PREFIX`). It used to be
+              // stamped from this callback and never reached the writes: an
+              // `enterWith` marks only the async resource it runs in and that
+              // resource's descendants, and the vendor resumes the endpoint
+              // handler from a continuation captured BEFORE this verifier ran
+              // (measured on 1.7.2 — zero engine transactions across a SCIM
+              // POST + PATCH; pinned by `scim-transaction-scope.test.ts`).
               const engine = this.config.dataEngine;
               if (!engine) return null; // no store to verify against — fail closed
               return verifyScimBearerToken(engine as never, secret, input.token);
@@ -4740,10 +4761,32 @@ export class AuthManager {
     // is left with an identity that still occupies the org roster and can no
     // longer sign in. Nothing tells the operator, and there is no way back.
     const endpointPath = this.betterAuthEndpointPath(request);
+
+    // [#3653 / #14522] A SCIM protocol request (`/scim/v2/*`) runs inside
+    // `scimRequestScope`, which is what makes the adapter's `transaction`
+    // config open a REAL engine transaction around the vendor's provisioning
+    // multi-writes (`objectql-adapter.ts`, the scoping note there). Opened
+    // HERE, with `run(...)` around the whole request, for the same reason the
+    // actor-attribution scope above is: `run` has a callback boundary that
+    // every `als.run` the vendor performs underneath nests inside. The stamp
+    // used to be an `enterWith` inside the SCIM plugin's `verifyBearerToken`
+    // callback, and it never reached the writes — the vendor resumes the
+    // endpoint handler from a continuation captured before the verifier ran
+    // (measured on 1.7.2: zero `engine.transaction` calls across
+    // `POST /Users` + `PATCH /Users/{id}`). Keyed on the endpoint path prefix
+    // so it is exactly as narrow as before — SCIM protocol requests only; the
+    // non-SCIM flows keep their sequential posture, which the scoping note
+    // records as load-bearing. Pinned by `scim-transaction-scope.test.ts`.
+    const runRequest = isScimProtocolPath(endpointPath)
+      ? async (): Promise<Response> => {
+          const { scimRequestScope } = await import('./scim-connection-service.js');
+          return scimRequestScope.run({ scim: true }, runHandler);
+        }
+      : runHandler;
     const vendorResponse =
       endpointPath !== undefined && SESSION_ERASURE_PATHS.has(endpointPath)
-        ? await this.runSubjectErasureAtomically(runHandler)
-        : await runHandler();
+        ? await this.runSubjectErasureAtomically(runRequest)
+        : await runRequest();
 
     // [#10349] The better-auth-native `/admin/` routes refuse an anonymous
     // caller through the vendor's `adminMiddleware`
@@ -4925,15 +4968,15 @@ export class AuthManager {
    * so it never half-lands: the account stays enabled and nothing is
    * skipped silently.
    *
-   * ⚠️ What does NOT roll back today: the vendor runs this callback inside
+   * What ALSO rolls back: the vendor runs this callback inside
    * `runWithTransaction`, which on this adapter is a real engine transaction
-   * only while `scimRequestScope` is set — and that scope, stamped inside
-   * `verifyBearerToken`, is not observed at write time on 1.7.2 (measured:
-   * zero `engine.transaction` calls across a SCIM POST + PATCH; #14522). So
+   * while `scimRequestScope` is set — and `handleRequest` opens that scope
+   * around every SCIM protocol request (#14522; it was once stamped inside
+   * `verifyBearerToken` with `enterWith` and never reached the writes). So
    * the vendor's own `scimUser.active = false` write, made before this
-   * callback, survives a refusal and the SCIM resource reads inactive while
-   * the account is enabled. #14522 owns that seam; the #14360 suite pins the
-   * residual so its fix flips the pin deliberately.
+   * callback, is rolled back with the refusal, and the SCIM resource keeps
+   * reading `active: true` for the account that stayed enabled — pinned by
+   * the #14360 suite's face (c).
    *
    * Deliberately NOT applied here: the last-LOCAL-credential guard the admin
    * mount re-runs (`isLastLocalCredentialHolder`). That guard protects the
@@ -4946,8 +4989,8 @@ export class AuthManager {
    *
    * Every read and write goes through `context.database` — the adapter the
    * vendor bound to its transaction — never through an `internalAdapter`
-   * resolved outside it, so the moment #14522 makes that transaction real,
-   * the ban commits or rolls back with the SCIM mutation it belongs to.
+   * resolved outside it, so the ban commits or rolls back with the SCIM
+   * mutation it belongs to.
    */
   private async reconcileScimUserLifecycle(
     state: SCIMIdentityState,

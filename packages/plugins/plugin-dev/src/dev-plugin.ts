@@ -393,7 +393,7 @@ function reportOptionalLoadFailure(ctx: PluginContext, err: unknown, spec: Optio
  */
 export class DevPlugin implements Plugin {
   name = 'com.objectstack.plugin.dev';
-  type = 'standard';
+  type = 'standard' as const;
   version = '1.0.0';
 
   private options: Required<

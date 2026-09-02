@@ -31,7 +31,7 @@ interface AutomationTriggerRegistry {
  */
 export class RecordChangeTriggerPlugin implements Plugin {
     name = 'com.objectstack.trigger.record-change';
-    type = 'standard';
+    type = 'standard' as const;
     version = '7.3.0';
     dependencies = ['com.objectstack.engine.objectql'];
 

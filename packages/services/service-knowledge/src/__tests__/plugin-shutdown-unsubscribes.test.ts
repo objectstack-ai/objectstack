@@ -42,7 +42,7 @@ interface RealtimeLog {
 class FakeRealtimePlugin implements Plugin {
   name = 'test.fake.realtime';
   version = '1.0.0';
-  type = 'standard';
+  type = 'standard' as const;
 
   constructor(private readonly log: RealtimeLog) {}
 

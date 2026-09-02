@@ -77,11 +77,29 @@
 // exactly this: its `WORD` is a module-level single regex, so a second term
 // there is a change to its shape rather than a row in a table.
 //
-// ⛔ The same ruling bounds it: ship the `$exists` family ONLY. Each further
-// word pays its own baseline on its own card, because a row is only as good as
-// the legitimate usages someone measured before adding it. `VOCABULARY` holds
-// exactly one row and a self-test assertion pins that, so filling the table is a
-// deliberate, reviewable edit and never a drive-by.
+// ⛔ The same ruling bounds it: each word pays its own baseline on its own card,
+// because a row is only as good as the legitimate usages someone measured before
+// adding it. #13582 shipped the `$exists` family alone; #13745 is the card that
+// added the next three, one survey at a time and none of them batched:
+//
+//   exists-portability            the `(NoSQL)` gloss — the claim is PORTABILITY,
+//                                 not key presence, which is why it is a row of
+//                                 its own rather than a member on the row above.
+//   regex-retired                 the retired `$regex` spelling.
+//   section-visiblewhen-unbound   #13532's section-binding claims.
+//
+// Each cost ZERO baseline entries, and each was tuned so the corpus prose that
+// says the TRUE thing — "portable, not a NoSQL-only operator", the page that
+// teaches the `$regex` retirement, the sentence saying an OBJECT-LEVEL field rule
+// does not bind `current_user` — stays green. ⛔ The tuning goes in the claim, never
+// in the corpus: rewriting a legitimate usage to make a row fit, or baselining
+// one to silence it, is the failure this table's survey requirement exists to
+// prevent.
+//
+// The self-test pins the shipped set as an EXACT ENUMERATION of row ids, in
+// order, so filling the table further is a deliberate, reviewable edit and never
+// a drive-by. ⛔ Never relax that to `>= 1` or to "at most N" — a floor lets a row
+// be smuggled in with no survey, which is the one thing the assertion is for.
 //
 // The genericity is proven WITHOUT shipping a second word: every engine function
 // takes the table as a parameter, and `--self-test` drives a SYNTHETIC second
@@ -137,7 +155,9 @@ const BASELINE_PATH = 'scripts/corpus-claim-drift-baseline.json';
  *
  * ⛔ Adding a row here is a card of its own (#13582's triage ruling). A row
  * costs a measured survey of the LEGITIMATE usages of its claims, and a row
- * added without one turns this into a noise gate.
+ * added without one turns this into a noise gate. #13582 shipped row 1; #13745
+ * shipped rows 2-4, each surveyed separately and none of them batched, and the
+ * `--self-test` enumeration below is where the next row's survey gets collected.
  */
 const VOCABULARY = [
   {
@@ -159,6 +179,84 @@ const VOCABULARY = [
       + 'driver lowers it to `{ $ne: null }` / `{ $eq: null }` and never emits MongoDB\'s own '
       + '`$exists`, which WOULD have been key presence and would have kept a null-valued field.',
     refs: '#13539 (the repair) · #13582 (this gate)',
+  },
+  {
+    id: 'exists-portability',
+    subject: '`$exists`',
+    spelling: /\$exists\b/,
+    claims: [
+      /\((?:primarily\s+for\s+|only\s+(?:for|on)\s+|for\s+)?nosql(?:[-\s]only)?\)/,
+      /(?<!\bnot\s)(?<!\bnot\s(?:a|an)\s)(?<!\bnever\s)(?<!\bnever\s(?:a|an)\s)\b(?:nosql|mongo(?:db)?)[-\s]only\b/,
+    ],
+    window: 4,
+    truth:
+      '`$exists` is PORTABLE: it is one declared operator answered the same way by every backend, '
+      + 'never a NoSQL-only or MongoDB-only one. The SQL family compiles it to `IS NOT NULL` / '
+      + '`IS NULL`, and the MongoDB driver lowers it to `{ $ne: null }` / `{ $eq: null }` — it '
+      + 'never emits MongoDB\'s own `$exists`. A `(NoSQL)` gloss beside this operator therefore '
+      + 'names a backend restriction that does not exist, which is a DIFFERENT false claim from '
+      + 'key presence and is why it is a row of its own.',
+    refs: '#13539 (the repair) · #13582 (this gate) · #13745 (this row)',
+  },
+  {
+    id: 'regex-retired',
+    subject: '`$regex`',
+    spelling: /\$regex\b/,
+    claims: [
+      /\b(?:supported|valid|available|accepted|allowed)\s+(?:filter\s+|field\s+|query\s+)?operators?\b/,
+      /\bfield\s+operators?\b/,
+      /\b(?:use|write|pass|supply)\s+[`'"]?\$regex\b/,
+      /\bsupports?\s+[`'"]?\$regex\b/,
+      /\$regex[`'"]?\s+(?:is|are|remains?)\s+(?:still\s+)?(?:an?\s+)?(?:supported|available|valid|accepted|declared|implemented)\b/,
+    ],
+    window: 4,
+    truth:
+      '`$regex` (with its `$options` companion) was NEVER a declared filter operator and is '
+      + 'retired: it is absent from `FILTER_OPERATORS` and present only as prescription data in '
+      + '`RETIRED_FILTER_OPERATORS` (`@objectstack/spec/data`). Every backend now refuses it with '
+      + '`code: INVALID_FILTER` / `status: 400` naming the replacement — `$icontains` for the '
+      + 'case-insensitive substring match it was almost always used for, `$contains` for a '
+      + 'case-sensitive one, `$startsWith` / `$endsWith` for an anchored pattern. Standing it '
+      + 'beside a live-operator list therefore teaches a filter key that is answered 400 on every '
+      + 'driver. ⚠️ MENTIONING it is not the claim: the corpus pages that teach the retirement '
+      + 'name it on every line, and the claim members are tuned to the live-operator phrasings '
+      + 'only.',
+    refs: '#4706 / #5701 / #5702 (the retirement) · #13582 (this gate) · #13745 (this row)',
+  },
+  {
+    id: 'section-visiblewhen-unbound',
+    subject: '`visibleWhen`',
+    spelling: /\bvisibleWhen\b/,
+    claims: [
+      /\bFormSection\b[^\n]{0,32}current_user[^\n]{0,16}\bis not\b/,
+      /\bsections?\*{0,2}[^\n]{0,72}\*{0,2}not\*{0,2}\s+.?current_user/,
+      /\bsection\*{0,2}\s+predicates?\b[^\n]{0,32}\bdoes not\b/,
+      /\bevaluates?\s+it\s+unbound\b[^\n]{0,240}\bsection-level\s+predicates?\b/,
+    ],
+    /* 9, not 4, and the number is measured. Swept over the PRE-REPAIR tree
+     * (`b2dea862c^`, the state #13532 corrected) at 4, 6, 9, 12, 20 and 40:
+     * widths 4-6 reach three of the four per-line-capturable false sites and
+     * MISS the binding-root table row, which sits 9 lines below the nearest
+     * `visibleWhen`; every width from 9 to 40 yields the IDENTICAL ledger. Over
+     * TODAY's corpus the row reports ZERO sites at every one of those widths, so
+     * the wider window costs no baseline entry — 9 is the smallest width that
+     * reaches the measured defect, sitting at the bottom of a plateau that runs
+     * to 40. */
+    window: 9,
+    truth:
+      'A form-view **section** `visibleWhen` DOES bind `current_user`, exactly as the field '
+      + 'surface has since objectui#6010: objectui#6110 threads the host shell\'s scope into the '
+      + 'console renderer\'s `isSectionVisible` (it used to pass `undefined`) and objectui#6111 '
+      + 'stopped the object-view chain dropping the key before an evaluator sees it. Two TRUE '
+      + 'qualifications travel with that and must survive any rewrite: the binding is CLIENT-SIDE '
+      + 'ONLY — nothing on the write path evaluates a form-view field or section `visibleWhen` — '
+      + 'and the scope belongs to the HOST, so it is empty on the public `/f/:slug` route, which '
+      + 'is mounted outside any provider on purpose. ⚠️ Saying a predicate is unbound is not the '
+      + 'claim: that is true of `/f/:slug` and of an object-level field rule. The claim is that '
+      + 'the SECTION surface does not bind it.',
+    refs:
+      '#13077 / #13532 (the repair) · objectui#6110 + objectui#6111 (the binding) · '
+      + '#13582 (this gate) · #13745 (this row)',
   },
 ];
 
@@ -474,10 +572,29 @@ function selfTest() {
   // FILL IT (so each word pays its own baseline on its own card). A gate that
   // honoured only the first would grow words by drive-by; one that honoured only
   // the second is a hardcoded regex again.
-  expect('#13582 — VOCABULARY ships exactly ONE row, the `$exists` family. Adding a word is a '
-    + 'CARD, not an edit: a row is only as good as the survey of legitimate usages someone did '
-    + 'before adding it, and this assertion is where that cost is collected',
-    VOCABULARY.length === 1 && VOCABULARY[0].id === 'exists-key-presence');
+  const SHIPPED_ROW_IDS = [
+    'exists-key-presence',
+    'exists-portability',
+    'regex-retired',
+    'section-visiblewhen-unbound',
+  ].join(',');
+  expect('#13582 / #13745 — VOCABULARY ships EXACTLY these rows, in this order: '
+    + `${SHIPPED_ROW_IDS}. Adding a word is a CARD, not an edit: a row is only as good as the `
+    + 'survey of legitimate usages someone did before adding it, and this assertion is where that '
+    + 'cost is collected. It is an EXACT ENUMERATION and ⛔ never a floor — `>= 1` or "at most N" '
+    + 'would let a row be smuggled in with no survey, which is the one thing this assertion '
+    + 'exists to prevent. Each shipped row, its card, and the survey it paid: '
+    + '`exists-key-presence` (#13582 — the `$exists` key-presence family); '
+    + '`exists-portability` (#13745 — the `(NoSQL)` portability gloss: 8 NoSQL hits over 7 corpus '
+    + 'files, 2 of them within 4 lines of `$exists` and BOTH legitimate, 0 baseline entries); '
+    + '`regex-retired` (#13745 — the retired `$regex` spelling: 8 hits over 3 corpus files, ALL '
+    + 'of them legitimate retirement notices, 0 baseline entries); '
+    + '`section-visiblewhen-unbound` (#13745 — #13532\'s section-binding claims: 88 `visibleWhen` '
+    + 'hits over 21 corpus files, 0 sites at every window from 4 to 40, 0 baseline entries)',
+    VOCABULARY.map((r) => r.id).join(',') === SHIPPED_ROW_IDS);
+  expect('#13745 — and the enumeration DISCRIMINATES: a smuggled row fails it (without this, the '
+    + 'assertion above passes on a comparison that approves everything)',
+    [...VOCABULARY, { id: 'smuggled' }].map((r) => r.id).join(',') !== SHIPPED_ROW_IDS);
   expect('#13582 — every row carries every field the diagnostics interpolate (a row missing '
     + '`truth` or `refs` renders a message that names a rule and teaches nothing)',
     VOCABULARY.every((r) => r.id && r.subject && r.spelling instanceof RegExp
@@ -554,21 +671,25 @@ function selfTest() {
     [WAS_TABLE_ROW, WAS_OSCHECK, WAS_HTTP, WAS_SKILL, WAS_FILTERS]
       .every((t) => /\$exists\b/i.test(t)));
 
+  // Scoped to [RULE] from #13745 on: three of these lines carry the `(NoSQL)`
+  // gloss as well, which is a SEPARATE row's debt. An unscoped total would blur
+  // the two and make one row's repair read as the other's regression — the exact
+  // confusion the per-row ledger keys exist to prevent.
   expect('#13539 — the markdown table row that taught the false semantic is a site',
-    count(WAS_TABLE_ROW) === 1);
+    count(WAS_TABLE_ROW, [RULE]) === 1);
   expect('#13539 — THE site os:check ran green over: a `//` comment on the line ABOVE the code. '
     + 'A line-scoped rule would miss exactly this one, which is the reason `window` exists',
-    count(WAS_OSCHECK) === 1);
+    count(WAS_OSCHECK, [RULE]) === 1);
   expect('#13539 — the HTTP protocol bullet ("Field existence check") is ONE site, not two or '
     + 'three: the claim members overlap and the alternation consumes the span once',
-    count(WAS_HTTP) === 1);
+    count(WAS_HTTP, [RULE]) === 1);
   expect('#13539 — the shipped skills row is TWO sites: the false gloss and the MongoDB '
     + 'attribution are separate claims, and repairing one must move the number',
-    count(WAS_SKILL) === 2);
+    count(WAS_SKILL, [RULE]) === 2);
   expect('#13539 — the `| Existence |` axis label is a site too. The card\'s literal word-face '
     + 'does not name a bare "Existence"; it was added after measuring that it costs ZERO baseline '
     + 'entries on today\'s corpus and catches this fourth false site',
-    count(WAS_FILTERS) === 1);
+    count(WAS_FILTERS, [RULE]) === 1);
 
   // The repaired text must be GREEN where it says the true thing without naming
   // the false one, or the gate punishes the repair.
@@ -577,6 +698,216 @@ function selfTest() {
       === 0);
   expect('the repaired skills row is NOT a site',
     count('| `$exists` | Has a value | `IS NOT NULL` / `IS NULL` |') === 0);
+
+  // ── #13745 row 2: the `(NoSQL)` PORTABILITY gloss ─────────────────────────
+  //
+  // A different CLAIM from key presence, which is why it is a row and not a
+  // member on the row above. Its whole survey turns on ONE fact: the corpus
+  // says "NoSQL" beside `$exists` twice, and BOTH times legitimately — the
+  // repaired sentence names it in order to DENY the restriction, and a skills
+  // table has it in a column header three lines away. A bare /NoSQL/ claim
+  // reddens both. So the claim is the RESTRICTION (a parenthesised gloss, or an
+  // unnegated "NoSQL-only" / "MongoDB-only"), never the word.
+  const PORTABILITY = VOCABULARY.find((r) => r.id === 'exists-portability');
+  expect('#13745 — the pre-repair table row carries the portability claim as well, and it is a '
+    + 'SEPARATE debt from the key-presence one on the same line: two rows, two ledger keys, so '
+    + 'repairing one cannot read as the other regressing',
+    count(WAS_TABLE_ROW, [PORTABILITY]) === 1 && count(WAS_TABLE_ROW, [RULE]) === 1);
+  expect('#13745 — the `//` comment INSIDE the os:check block carried it too (the site the type '
+    + 'checker ran green over is a site for BOTH rows)',
+    count(WAS_OSCHECK, [PORTABILITY]) === 1);
+  expect('#13745 — and so did the shipped skills row and the filters axis row',
+    count(WAS_SKILL, [PORTABILITY]) === 1 && count(WAS_FILTERS, [PORTABILITY]) === 1);
+  expect('#13745 — the HTTP bullet is NOT a portability site: it taught key presence and never '
+    + 'named a backend restriction. The two rows do not report the same thing',
+    count(WAS_HTTP, [PORTABILITY]) === 0);
+  expect('#13745 — the `packages/spec` twin\'s wording (#13709, repaired there; ⛔ outside this '
+    + 'gate\'s ROOTS, which are content/docs + skills only) is the same claim in a longer '
+    + 'spelling of the gloss, and the claim reaches it',
+    count('/** Field exists check (primarily for NoSQL) - MongoDB: $exists */',
+      [PORTABILITY]) === 1);
+  expect('#13745 — the REPAIRED portability sentence is NOT a site. It names NoSQL in order to '
+    + 'DENY the restriction, and a row that fired on it would punish the very repair it exists '
+    + 'to protect — this is the leg that makes a bare /NoSQL/ claim unshippable',
+    count('same rows as `{ $null: !b }` — and it is portable, not a NoSQL-only operator.',
+      [PORTABILITY]) === 0);
+  expect('#13745 — and the negation guard is not tied to one wording',
+    count('`$exists` was never a NoSQL-only operator, and never a MongoDB-only one.',
+      [PORTABILITY]) === 0
+      && count('It is not NoSQL-only.', [PORTABILITY]) === 0);
+  // Quoted at the real spacing: the header line and the `$exists` row three
+  // lines under it. A one-line fixture would be green because no spelling is
+  // near it, which proves nothing about a claim that is a CO-OCCURRENCE.
+  const SKILL_NOSQL_HEADER = [
+    '| Operator | Purpose | SQL / NoSQL |',
+    '|---|---|---|',
+    '| `$null` | Is null | `IS NULL` |',
+    '| `$exists` | Has a value | `IS NOT NULL` / `IS NULL` |',
+  ].join('\n');
+  const LEGITIMATE_NOSQL = [
+    ['skills/objectstack-query/SKILL.md:154 — the "SQL / NoSQL" column header, quoted with the '
+      + 'two rows that follow it so `$exists` is THREE lines away and the header is INSIDE the '
+      + 'window: this one stays green on the CLAIM, not on distance',
+      SKILL_NOSQL_HEADER],
+    ['kernel/contracts/index.mdx:35 — the driver-kind list',
+      '| Data Driver | `IDataDriver` | Low-level database adapter (SQL, NoSQL, API) |'],
+    ['kernel/contracts/index.mdx:20 — the portability promise itself',
+      '| **Portability** | Swap SQL for NoSQL, local auth for OAuth — same contract |'],
+    ['getting-started/glossary.mdx:132 — a Collection in NoSQL',
+      'Roughly equivalent to a "Table" in SQL or a "Collection" in NoSQL.'],
+    ['protocol/objectql/index.mdx:8 — the backend families ObjectQL spans',
+      'work consistently across SQL, NoSQL, Graph, and Time-series databases.'],
+    ['protocol/diagram.mdx:173 — a sequence-diagram edge', '    D->>DB: SQL / NoSQL Operation'],
+  ];
+  for (const [label, text] of LEGITIMATE_NOSQL) {
+    expect(`#13745 — legitimate NoSQL usage stays GREEN — ${label}`,
+      count(text, [PORTABILITY]) === 0);
+  }
+  expect('#13745 — and the portability row DISCRIMINATES: the SAME skills column header goes RED '
+    + 'the moment the gloss is written as a restriction (without this, every green above would '
+    + 'also be produced by a row that never fires)',
+    count(SKILL_NOSQL_HEADER.replace('| Purpose |', '| Purpose (NoSQL) |'), [PORTABILITY]) === 1);
+
+  // ── #13745 row 3: the retired `$regex` spelling ───────────────────────────
+  //
+  // Survey outcome: every `$regex` in the corpus today is a RETIREMENT NOTICE.
+  // There is no live false claim to repair and none to baseline, so this row is
+  // a regression pin — and the whole difficulty is that the pages teaching the
+  // retirement say the word on every line. The claim is therefore the
+  // LIVE-OPERATOR phrasing, never the mention.
+  const REGEX_ROW = VOCABULARY.find((r) => r.id === 'regex-retired');
+  expect('#13745 — `$regex` inside a live operator list is a site',
+    count('**Supported operators:** `$eq`, `$ne`, `$contains`, `$regex`, `$null`',
+      [REGEX_ROW]) === 1);
+  expect('#13745 — and under the other spelling the corpus actually uses for such a list',
+    count('**Field Operators:** `$eq`, `$ne`, `$regex`, `$null`.', [REGEX_ROW]) === 1);
+  expect('#13745 — prose telling an author to reach for it is a site, in both directions',
+    count('Use `$regex` for pattern matching.', [REGEX_ROW]) === 1
+      && count('The filter layer supports `$regex` on every backend.', [REGEX_ROW]) === 1
+      && count('`$regex` is still supported on MongoDB.', [REGEX_ROW]) === 1);
+  // The retirement page, verbatim, at its real line spacing.
+  const LEGIT_REGEX_PAGE = [
+    '| Instead of | Write |',
+    '|:---|:---|',
+    "| `{ name: { $regex: 'acme' } }` | `{ name: { $icontains: 'acme' } }` |",
+    '',
+    'A pattern that genuinely needs a regular expression has no filter-level',
+    'replacement — narrow the query with the declared operators and match in application',
+    'code. The prescriptions above are declared as data in `RETIRED_FILTER_OPERATORS`',
+  ].join('\n');
+  expect('#13745 — the retirement page\'s own rewrite table stays GREEN, "declared operators" '
+    + 'sentence included. `declared` is deliberately NOT a claim member: the page that TEACHES '
+    + 'the retirement writes it three lines under a `$regex` row, and the page above it writes '
+    + '"was never a declared operator" on the same line as the spelling',
+    count(LEGIT_REGEX_PAGE, [REGEX_ROW]) === 0
+      && count('`$regex` (and its `$options` companion) was never a declared operator and is',
+        [REGEX_ROW]) === 0
+      && count('### `$regex` — removed', [REGEX_ROW]) === 0);
+  expect('#13745 — and the misspelling table in the troubleshooting page stays GREEN: `$regex` '
+    + 'appears there in the ❌ column, which is the retirement being taught',
+    count(['Common mistakes:', '| ❌ Wrong | ✅ Correct |', '|:---|:---|',
+      '| `$isNull` | `$null` |', '| `$regex` | `$icontains` |'].join('\n'), [REGEX_ROW]) === 0);
+  expect('#13745 — and the row DISCRIMINATES on that very block: change the ONE word that turns '
+    + 'the sentence into a live-operator claim and the same text goes RED',
+    count(LEGIT_REGEX_PAGE.replace('the declared operators', 'the supported operators'),
+      [REGEX_ROW]) === 1);
+
+  // ── #13745 row 4: #13532's section `visibleWhen` binding claims ───────────
+  //
+  // Read verbatim out of git at `b2dea862c^`, the tree #13532 corrected, at the
+  // real line spacing — which is the whole reason this row's window is 9: the
+  // binding-root table row sits nine lines below the nearest `visibleWhen`.
+  const VW = VOCABULARY.find((r) => r.id === 'section-visiblewhen-unbound');
+  const WAS_VW_OSCHECK = [
+    '{/* os:check */}',
+    '```typescript',
+    '// e.g. on a view FormField — `record`, `previous` and (since objectui#6010)',
+    '// `current_user` are bound; on a FormSection, `current_user` is not:',
+    "visibleWhen: \"record.status != 'closed'\"",
+    '```',
+  ].join('\n');
+  const WAS_VW_TABLE = [
+    "visibleWhen: \"record.status != 'closed'\"",
+    '```',
+    '',
+    "The predicate's **binding root** is set by the layer, not the key:",
+    '',
+    '| Layer | Predicate binds |',
+    '|---|---|',
+    '| Page components (`*.page.ts`) | `record` + `current_user` (plus `page.<var>`) |',
+    '| Runtime record form **fields** (`*.view.ts`) | `record` + `previous` + `current_user` (objectui#6010) |',
+    '| Runtime record form **sections** (`*.view.ts`) | `record` + `previous` — **not** `current_user` |',
+  ].join('\n');
+  const WAS_VW_LIMITS = [
+    'view form **field** predicate binds this scope since objectui#6010; a form',
+    '**section** predicate does not (objectui#6111), and neither does an object-level',
+    'field rule (`Field.*({ visibleWhen })`, ADR-0036) — that one is evaluated by',
+  ].join('\n');
+  const WAS_VW_VIEWS = '| `visibleWhen` | `string` | Visibility predicate (CEL); runtime form '
+    + 'fields bind `record` (+ `previous`, `parent`) and, since objectui#6010, `current_user`. '
+    + 'Two surfaces still evaluate it unbound, where the predicate faults open: the console\'s '
+    + 'standalone form routes `/forms/:name` and `/f/:slug` (objectui#6110), and section-level '
+    + 'predicates (objectui#6111). |';
+  expect('#13532 — positive control: every pre-repair `visibleWhen` fixture really does carry the '
+    + 'spelling, so a count from it is the rule working and not an empty string',
+    [WAS_VW_OSCHECK, WAS_VW_TABLE, WAS_VW_LIMITS, WAS_VW_VIEWS]
+      .every((t) => /\bvisibleWhen\b/.test(t)));
+  expect('#13532 — the `//` comment inside the os:check block ("on a FormSection, `current_user` '
+    + 'is not") is a site',
+    count(WAS_VW_OSCHECK, [VW]) === 1);
+  expect('#13532 — the binding-root TABLE ROW is a site, and it is the reason this row\'s window '
+    + 'is 9: it sits nine lines below the nearest `visibleWhen`, so at the shipped row\'s width '
+    + 'of 4 the clearest false statement on the page would be invisible',
+    count(WAS_VW_TABLE, [VW]) === 1
+      && count(WAS_VW_TABLE, [{ ...VW, window: 8 }]) === 0);
+  expect('#13532 — the "two limits" prose is a site', count(WAS_VW_LIMITS, [VW]) === 1);
+  expect('#13532 — and the views.mdx field-table row is a site: one long line, where the false '
+    + 'half is "section-level predicates" inside a list of surfaces that evaluate it unbound',
+    count(WAS_VW_VIEWS, [VW]) === 1);
+  // The repaired text — every one of these is live corpus prose today.
+  const IS_VW = [
+    ['the repaired os:check comment', [
+      '// e.g. on a view FormField or FormSection — `record`, `previous` and',
+      '// `current_user` are all bound (objectui#6010, then #6110 + #6111):',
+      "visibleWhen: \"record.status != 'closed'\"",
+    ].join('\n')],
+    ['the repaired binding-root table row', [
+      "visibleWhen: \"record.status != 'closed'\"", '```', '', '| Layer | Predicate binds |',
+      '|---|---|',
+      '| Runtime record form **sections** (`*.view.ts`) | `record` + `previous` + `current_user` (objectui#6110 + #6111) |',
+    ].join('\n')],
+    ['the repaired "two limits" prose', [
+      'view form **field** predicate binds this scope since objectui#6010 and a form',
+      '**section** predicate since objectui#6110 + #6111; an object-level field rule',
+      '(`Field.*({ visibleWhen })`, ADR-0036) is the exception — that one is evaluated by',
+    ].join('\n')],
+    ['⭐ the OBJECT-LEVEL field rule, which legitimately DOES NOT bind `current_user` and says '
+      + 'so two lines from a `visibleWhen` — the single sharpest reason this row is pinned on '
+      + 'the SECTION surface and never on "unbound near visibleWhen"', [
+      '(`Field.*({ visibleWhen })`, ADR-0036) is the exception — that one is evaluated by',
+      'the server as well as by the client, its write-path evaluator binds `record` (plus',
+      '`previous`, `parent`) only, and naming `current_user` there is refused by',
+    ].join('\n')],
+    ['⭐ the TRUE unbound caveat about the public route, which the repair KEPT', [
+      'any provider deliberately — an anonymous visitor has no principal — so',
+      '`current_user` is unbound there, the predicate faults, and visibility\'s fallback is',
+      '*visible*. The authed `/forms/:name` route renders inside a shell that publishes',
+      'the session principal and binds normally. **Second, the binding is client-side',
+      'only.** Nothing on the write path evaluates a form-view field or section',
+      '`visibleWhen` — it evaluates field `readonlyWhen` / `requiredWhen` and per-option',
+    ].join('\n')],
+    ['the repaired views.mdx row, which still says "evaluates it unbound" — about ONE surface, '
+      + 'and never about sections',
+      '| `visibleWhen` | `string` | Visibility predicate (CEL); Form **sections** bind the same '
+      + 'scope since objectui#6110 + objectui#6111. One surface still evaluates it unbound, where '
+      + 'the predicate faults open: the public `/f/:slug` route. |'],
+    ['an ordinary authored predicate, the shape 88 corpus hits have',
+      'visibleWhen: "record.account_type == \'premium\'"'],
+  ];
+  for (const [label, text] of IS_VW) {
+    expect(`#13532 — repaired / legitimate \`visibleWhen\` prose stays GREEN — ${label}`,
+      count(text, [VW]) === 0);
+  }
 
   // ── The LEGITIMATE usages, measured on the corpus this gate walks ──────────
   //
@@ -626,11 +957,25 @@ function selfTest() {
     count('`$exists` — Field existence check for a key') === 1);
 
   // ── A row whose subject is unreachable is REFUSED, not silently green ──────
-  const CORPUS_WITH = [{ text: 'uses `$exists` somewhere' }];
+  // Every shipped row's SPELLING has to be reachable in any tree the legs below
+  // build, or `unreachableRows` refuses BEFORE the leg under test runs — and a
+  // refusal is not the outcome any of them is asserting. Derived from the table
+  // so a new row cannot leave these fixtures behind silently, with a positive
+  // control proving the derivation really does carry each spelling.
+  const REACHABLE_LINE = `Reachability fixture: ${VOCABULARY.map((r) => r.subject).join(' ')}`;
+  expect('#13745 — the reachability fixture carries EVERY shipped spelling. Derived from each '
+    + 'row\'s `subject`, so a row whose subject does not spell its own operator is caught HERE '
+    + 'rather than as an unexplained refusal inside a leg that is testing something else',
+    VOCABULARY.every((r) => new RegExp(r.spelling.source, 'i').test(REACHABLE_LINE)));
+  expect('#13745 — and the reachability fixture is itself CLEAN: it names the spellings without '
+    + 'any claim beside them, so a leg that expects a green tree gets one',
+    count(REACHABLE_LINE) === 0);
+
+  const CORPUS_WITH = [{ text: REACHABLE_LINE }];
   const CORPUS_WITHOUT = [{ text: 'no operator here at all' }];
   expect('a row whose SPELLING appears nowhere in the corpus is reported (a row that cannot fire '
     + 'reports green forever while checking nothing)',
-    unreachableRows(VOCABULARY, CORPUS_WITHOUT).join(',') === 'exists-key-presence');
+    unreachableRows(VOCABULARY, CORPUS_WITHOUT).join(',') === SHIPPED_ROW_IDS);
   expect('and the probe DISCRIMINATES — a corpus that does carry the spelling reports nothing '
     + '(without this, the assertion above passes on a probe that reports everything)',
     unreachableRows(VOCABULARY, CORPUS_WITH).length === 0);
@@ -788,7 +1133,8 @@ function selfTest() {
       // (4) Discrimination at the program level: (1)-(3) would all pass on a
       // gate that refused unconditionally.
       const passing = runIn(buildTree('pass', {
-        [CLEAN]: '| `$exists` | Field has a value — the inverse of `$null` |\n',
+        [CLEAN]: `${REACHABLE_LINE}\n\n| \`$exists\` | Field has a value — the inverse of `
+          + '`$null` |\n',
       }));
       expect('a tree carrying the subject with only TRUE prose beside it is GREEN, with no '
         + 'baseline entry (a gate that refused unconditionally would satisfy every leg above and '
@@ -797,11 +1143,20 @@ function selfTest() {
         passing.out.includes('file(s) read across') && passing.out.includes('exists-key-presence'));
 
       // (5) The real defect, end to end, with no baseline in the tree.
-      const failing = runIn(buildTree('fail', { [CLEAN]: `${WAS_TABLE_ROW}\n` }));
+      const failing = runIn(buildTree('fail', {
+        [CLEAN]: `${REACHABLE_LINE}\n\n${WAS_TABLE_ROW}\n`,
+      }));
       expect('the pre-repair table row fails at the PROGRAM level and is reported as a NEW claim '
         + 'site', failing.status === 1 && failing.out.includes('NEW claim site'));
       expect('and the program-level failure TEACHES the truth, not just the ban',
         failing.out.includes('HAS A VALUE'));
+      // #13745: that one line carries BOTH false claims, and the program reports
+      // them as two rows with two truths. A single verdict here would mean the
+      // second row is being reached only by the self-test's own predicates.
+      expect('#13745 — and the SAME pre-repair line is reported under BOTH rows at the program '
+        + 'level, each teaching its own truth: key presence AND portability',
+        failing.out.includes('exists-key-presence') && failing.out.includes('exists-portability')
+          && failing.out.includes('PORTABLE'));
 
       // (6) Both refusals precede the `--update` write. Pinned as byte-identity,
       // not as an exit code: the claim is that the refusal happens BEFORE the
@@ -829,9 +1184,22 @@ function selfTest() {
     process.exit(1);
   }
   console.log(
-    'OK  self-test: the vocabulary is a TABLE — a synthetic second row is driven through the real '
+    'OK  self-test: the vocabulary is a TABLE — a synthetic row is driven through the real '
     + 'engine, keyed separately in the ledger and honouring its own window — while the shipped '
-    + 'table holds exactly one row, so the next word is a card rather than a drive-by. Every '
+    + 'table is pinned as an EXACT ENUMERATION of its four row ids in order, so the next word is '
+    + 'a card rather than a drive-by. #13745\'s three rows each carry their own survey: the '
+    + '`(NoSQL)` portability gloss is caught on all four pre-repair sites and on the '
+    + '`packages/spec` twin\'s longer spelling, while the repaired "portable, not a NoSQL-only '
+    + 'operator" sentence and six legitimate NoSQL usages — the skills column header three lines '
+    + 'from `$exists` among them — stay green, with a discrimination leg reddening that same '
+    + 'header once the gloss is written as a restriction; the retired `$regex` row fires on '
+    + 'live-operator lists and on "use / supports `$regex`" prose while the whole retirement page '
+    + 'stays green, "declared operators" included, and reddens when that one word becomes '
+    + '"supported"; #13532\'s section-binding claims are caught on all four per-line-capturable '
+    + 'pre-repair sites, including the binding-root table row NINE lines from its spelling, while '
+    + 'the repaired prose stays green — the object-level field rule that legitimately does NOT '
+    + 'bind `current_user`, and the true "unbound" caveat about the public `/f/:slug` route, '
+    + 'included. Every '
     + 'false site #13539 repaired is caught from its verbatim pre-repair text, including the `//` '
     + 'comment INSIDE the os:check block that a line-scoped rule would miss and that the type '
     + 'checker ran green over, and the repaired wording is green. Every legitimate usage measured '

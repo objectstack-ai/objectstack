@@ -41,7 +41,7 @@ export interface PinyinSearchPluginOptions {
 export class PinyinSearchPlugin implements Plugin {
   name = 'com.objectstack.plugin.pinyin-search';
   version = '1.0.0';
-  type = 'standard';
+  type = 'standard' as const;
   dependencies = ['com.objectstack.engine.objectql'];
 
   private readonly options: PinyinSearchPluginOptions;

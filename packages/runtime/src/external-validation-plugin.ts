@@ -204,7 +204,7 @@ export interface ExternalSchemaDriftEvent {
  */
 export class ExternalValidationPlugin implements Plugin {
   name = 'com.objectstack.external-validation';
-  type = 'standard';
+  type = 'standard' as const;
   version = '1.0.0';
 
   /** Active background drift-check timers, keyed by datasource name. */

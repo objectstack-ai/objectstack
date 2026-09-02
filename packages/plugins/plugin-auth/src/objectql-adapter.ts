@@ -791,8 +791,16 @@ export function createObjectQLAdapterFactory(rawDataEngine: IDataEngine) {
   // Core better-auth flows never had native DB transactions here (the factory
   // default is the sequential as-is fallback), so they KEEP that historical
   // posture; the real transaction opens exactly where upstream's assertion
-  // demands it — inside an authenticated SCIM protocol request, marked by the
-  // auth manager's `verifyBearerToken` via `scimRequestScope`. Remaining
+  // demands it — inside a SCIM protocol request (`/scim/v2/*`), the scope
+  // `AuthManager.handleRequest` opens with `scimRequestScope.run(...)` around
+  // the whole request. ⚠️ It was once stamped with `enterWith` inside the
+  // `verifyBearerToken` callback and never reached this seam: an `enterWith`
+  // marks only the async resource it runs in and that resource's descendants,
+  // and the vendor resumes the endpoint handler from a continuation captured
+  // before the verifier ran — measured on 1.7.2 as zero engine transactions
+  // across POST + PATCH /Users while the mount-time assertion stayed green.
+  // The scope is therefore pinned at RUN time (`scim-transaction-scope.test.ts`:
+  // a SCIM mutation observed to call `engine.transaction`). Remaining
   // declared degrades on that path: an engine with no `transaction` API runs
   // the callback directly, and a driver without `beginTransaction` follows
   // the engine's ADR-0119 D1 warn-once degrade.
