@@ -336,12 +336,20 @@ describe('[#11984] §D the four siblings consume the parsed output', () => {
         });
     });
 
-    it('KEEPS a partial `crud.patterns` without inventing entries for the operations it does not name', () => {
-        // `patterns` is an enum-keyed record with an OPTIONAL value: zod walks
-        // every declared operation, and this pin is the guarantee that the
-        // ones an author did not write do not come back as explicit
-        // `undefined` entries (a consumer iterating the record would see them).
-        const cfg = normalized({ crud: { patterns: { list: { method: 'GET', path: '/x' } } } });
-        expect(Object.keys(cfg.crud.patterns ?? {})).toEqual(['list']);
+    it('KEEPS a partial `crud.patterns` — the written pattern survives, and no pattern is invented', () => {
+        // `patterns` is `z.record(CrudOperation, CrudEndpointPatternSchema.optional())`,
+        // which zod 4 reads as an EXHAUSTIVE record: the parse walks all five
+        // operations and writes each one's value into the output, so the four
+        // an author did not write come back as explicit `undefined` entries —
+        // exactly the declared shape (`Record<CrudOperation, Pattern | undefined>`,
+        // which is also why this fixture needs `as never`: the input TYPE
+        // demands all five keys while the runtime accepts a partial). That
+        // key-enumeration quirk is the spec's to settle (`z.partialRecord`),
+        // filed separately, so this pin asserts only what the contract
+        // promises whichever way that lands: the one written pattern is
+        // preserved, and no operation gains a pattern it was not given.
+        const cfg = normalized({ crud: { patterns: { list: { method: 'GET', path: '/x' } } as never } });
+        expect(cfg.crud.patterns?.list).toEqual({ method: 'GET', path: '/x' });
+        expect(Object.values(cfg.crud.patterns ?? {}).filter((pattern) => pattern !== undefined)).toHaveLength(1);
     });
 });
