@@ -29,7 +29,11 @@ set as *unbounded*, which would have turned every single-row system update into
 an object-wide revoke plus an asynchronous re-grant). The INFO line that
 announced the skip — `[sharing-rule] sharing materialisation skipped for isSystem
 writes; re-evaluate rules or restart to backfill` — is retired with it, along
-with the unexported `SYSTEM_WRITE_SKIP_NOTICE` constant.
+with the `SYSTEM_WRITE_SKIP_NOTICE` constant, which was not exported from the
+package entry point. Operationally this means seed- and import-time system writes
+on rule-covered objects now pay per-record sharing evaluation at write time — the
+cost a user write of the same shape has always paid, with the
+`kernel:bootstrapped` backfill still reconciling behind it.
 
 **What does not change.** `afterDelete` still skips system writes, on separate
 grounds: what it skips is revocation, and `record-share-cascade.ts` delivers that
