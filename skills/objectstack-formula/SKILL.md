@@ -120,9 +120,11 @@ ADR-0068 — spec field docs write predicates like `current_user.positions`.
 `null`. To check for "value present and non-blank" use the stdlib helper
 `isBlank()` or compare to `null` explicitly.
 
-Every predicate reads a record that is **total over the object's declared
-fields**, so `has(record.<declared_field>)` is uniformly `true` and
-tells you nothing at all. The idiom that reads like a guard is not one:
+Every predicate reads a `record` — and, where §5 binds it, a `previous` — that
+is **total over the object's declared fields**: a declared column the driver
+never returned reads as `null`, not as a fault. So `has(record.<declared_field>)`
+and `has(previous.<declared_field>)` are uniformly `true` and tell you nothing at
+all. The idiom that reads like a guard is not one:
 
 ```text
 # WRONG — both has() calls are true on a NULL row, so this reaches `null < null`,
@@ -314,20 +316,10 @@ roots — one scope, one meaning, whichever surface reads it.
 `previous` where it is unbound — like a typo'd key (`record.stauts`), a retired
 field, or a comparison CEL has no overload for — does **not** degrade to "the
 hook did not fire": it **fails the write**, with an error naming the hook and
-the key. Until protocol 17 the gate emitted a `logger.warn` and returned
-`false`, which is what makes this table load-bearing rather than stylistic: a
-`before*` guard swallowed into `false` silently let writes through, and an audit
-hook swallowed into `false` silently dropped records. Those are opposite
-failures, so "the condition said no" and "the platform could not work out what
-the condition says" are now different outcomes and the second one is loud —
-`before*` and `after*` in the same direction, with no `onError` escape
-(`onError` governs a handler that throws, and the condition is evaluated before
-any handler runs). A condition that does not even **compile** aborts the same
-way.
-
-So write insert-event conditions over `record` alone — that mistake used to cost
-you a hook that quietly never ran, and now costs you every write the hook is
-attached to.
+the key — `before*` and `after*` alike, with no `onError` escape (`onError`
+governs a handler that throws, and the condition is evaluated before any handler
+runs). A condition that does not even **compile** aborts the same way. So write
+insert-event conditions over `record` alone.
 
 **A transition condition needs no special handling for bulk writes.**
 Write it once, on an `after*` event, and it means the same thing whether the
@@ -339,37 +331,17 @@ write carries an id or a predicate:
 P`previous.status != 'done' && record.status == 'done'`
 ```
 
-A predicate (`multi: true`) write is N record changes, so the platform evaluates
-and fires every record-scoped declaration on it **per row**: `previous` is that
-row's own pre-write state and `record` is that row's real state, not the bare
-payload (ADR-0058, bulk-write addendum). The matched rows are read once for the
-whole batch, so this costs one extra query, not one per row. Record-change flow
-triggers ride the same dispatch, so an `record-after-update` flow's start
-condition behaves identically.
-
-⚠️ **The exception is a `before*` hook, and it is not a bug to be fixed later.**
-`beforeUpdate` / `beforeDelete` fire ONCE for the whole batch — they may still
-rewrite the payload, and one `updateMany` carries one payload — so `previous` is
-unbound there and a condition reading it fails the write. The error is a
-diagnosis rather than a raw `No such key: previous`: it names the batch, says the
-`before*` phase is why, and points at the matching `after*` event, where the
-same condition evaluates per row exactly as authored. Put transition conditions
-on `after*`; keep `before*` conditions to the incoming payload
-(`record.<field this write sets>`).
+A predicate (`multi: true`) write is N record changes, so every record-scoped
+declaration on it is evaluated **per row** — `previous` is that row's own
+pre-write state, `record` its real state, not the bare payload (ADR-0058,
+bulk-write addendum). Record-change flow triggers ride the same dispatch. The
+one exception is the `before*` row of the table above, and it is not a bug to be
+fixed later: put transition conditions on `after*`, and keep `before*`
+conditions to the incoming payload (`record.<field this write sets>`).
 
 Above ~10 000 matched rows the platform refuses a predicate write on an object
 with after-hooks rather than fan out that many handler runs inside one write —
 paginate the write. It is a refusal, never a silent downgrade to one hook call.
-
-**`previous` is total over the object's declared fields.** A declared column the
-driver never returned reads as `null`, not as a fault. Guard with `!= null`,
-**never** with `has(...)`: a materialised `null` is a *present* key, so
-`has(previous.spent)` is uniformly true for a declared field and tells you
-nothing about its value.
-
-**Cost:** none of its own. `previous` rides on the prior row the engine already
-fetches for update hooks; a condition that never mentions it adds no fetch at
-all.
 
 ---
 
