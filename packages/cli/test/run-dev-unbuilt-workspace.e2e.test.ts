@@ -157,9 +157,15 @@ const STALL_MS = 10_000;
 /**
  * The shim's own no-progress bound, mirrored from `bin/run-dev.js`
  * (`STDERR_DRAIN_STALL_MS`) and held equal to it by a case below rather than
- * trusted. It is the INELASTIC half of case 5's budget: the shim enforces it
- * with a `Date.now()` comparison, so a busy runner makes the child's WORK take
- * longer while this term stays 15 s.
+ * trusted. Case 5's ceiling no longer budgets it — that ceiling is a constant
+ * now — but two cases here are still sized against it and would quietly stop
+ * discriminating if it moved:
+ *
+ *   • `STALL_MS` above must stay strictly BELOW it, or case 4's stalled reader
+ *     outlasts the shim's own give-up and reds against a WORKING fix;
+ *   • case 6 reads the closed-reader path as released in less than `STALL_MS`,
+ *     which is evidence of a fast path only while `STALL_MS` is itself below
+ *     the bound.
  */
 const SHIM_DRAIN_STALL_MS = 15_000;
 
@@ -167,67 +173,61 @@ const SHIM_DRAIN_STALL_MS = 15_000;
 const SHIM = resolve(HERE, '../bin/run-dev.js');
 
 /**
- * Case 5's ceiling, DERIVED per run rather than declared as a constant.
+ * Case 5's ceiling — a CONSTANT, and deliberately this file's existing
+ * per-child budget rather than a number of its own.
  *
- * ⚠️ What went wrong with the constant this replaces, stated so that nobody
- * re-buys it at a bigger round number. It read `UNREAD_HARD_CAP_MS = 40_000`,
- * derived as "comfortably above the worst child runtime plus the shim's 15 s
- * bound (~22 s measured)" — correct arithmetic over a sum whose two terms do
- * not behave alike:
+ * ⚠️ Two ceilings have been tried here and both failed the same way, so the
+ * history is written down instead of left to be rediscovered:
  *
- *   • the shim's bound is wall clock and does not move with load;
- *   • the child's pre-drain work — tsx cold start, `Config.load()`, ~58 failing
- *     command imports — is the ONLY elastic term, and `bin/run-dev.js` itself
- *     records it at 1.0 s idle against 6.9 s contended, a 6.9x spread.
+ *   • `UNREAD_HARD_CAP_MS = 40_000`, read as "comfortably above the worst child
+ *     runtime plus the shim's 15 s bound (~22 s measured)". Merge-queue shards
+ *     running the full suite six ways sharded went over it three times in a
+ *     day, on three trees that cannot reach this file.
+ *   • then a per-run derivation, `clamp(40_000, RUN_TIMEOUT_MS, 4 x a case-1
+ *     calibration + 2 x the shim's bound)`, on the theory that a contended
+ *     shard can calibrate itself. It was evicted from the queue by its own new
+ *     assertion at `cap 61464 ms = clamp(40000, 180000, 4 x 7866 ms measured
+ *     child runtime + 2 x 15000 ms shim bound)`: the child outlived a ceiling
+ *     built from a sample taken minutes earlier on that same runner by more
+ *     than 7.8x that sample, against a FACTOR of 4.
  *
- * So the elastic term's real budget was `40 − 15 = 25 s`, sized against one
- * box. Measured while writing this, on a 4-core container, same child: 7.4-8.3 s
- * with the repo's heavy-verify lock held, 15.1-20.0 s against 4 competing
- * copies of itself, 22.6 s against 8 — where the case finished in 38.5 s
- * against the 40 s cap. Merge-queue shards run the full suite six ways sharded
- * and went over it three times in a day, on three trees that cannot reach this
- * file.
+ * Raising the factor would be the same move a third time. Both ceilings were
+ * sized comfortably above the worst thing on record when they were written, and
+ * both were beaten by a runner that got busier afterwards. Nothing measures the
+ * spread between a calibration and a later run on a shared, six-way-sharded
+ * queue runner, so no factor can be justified as ENOUGH — only as not beaten
+ * yet, which is what the constant it replaced could also say.
  *
- * ⭐ The ceiling is not what makes this case discriminate, which is why deriving
- * it upward costs nothing. What it catches is an UNBOUNDED wait — the version
- * this case was written against was observed alive at 25 s, 30 s and 60 s — and
- * ANY finite ceiling catches an unbounded wait. The constant was buying false
- * reds, not detection.
+ * ⭐ What removes the choice is the property this case actually pins. The
+ * failure it was written against is an UNBOUNDED wait: a drain wait with no
+ * bound armed at all, observed alive at 25 s, 30 s and 60 s and ending only
+ * when something else killed it. ANY finite ceiling catches that. Tightening a
+ * ceiling buys no detection at all — it buys false reds, and each one here
+ * costs a queue rebuild. So the ceiling wants to be the LARGEST value that
+ * keeps the failure legible, and it must not track load: a term tracking load
+ * is a prediction about contention drawn from a sample of the past, which is
+ * the one thing a shared runner will not honour.
  *
- * The derivation, recorded the way `STALL_MS` above records its own:
+ * `RUN_TIMEOUT_MS` is that largest legible value, and it is not a new number:
  *
- *   cap = clamp(FLOOR, CEILING, FACTOR x measured child runtime + 2 x the shim's bound)
+ *   • past it this case stops reporting a SIGKILL and starts reporting the
+ *     `beforeAll` timeout, which reds all six cases and names none of them. So
+ *     it is where legibility ends, not a preference;
+ *   • it is already this file's budget for ONE child of this suite, and cases
+ *     1-4 run the same child. A child here that legitimately needs more than
+ *     180 s has broken the whole file, not this case — one number to get
+ *     wrong instead of two;
+ *   • every load figure on record clears it by an order of magnitude: 23x the
+ *     7.9 s calibration, and 3.4x the worst legitimate lifetime yet measured
+ *     (22.6 s of contended work against 8 competing copies of this child, plus
+ *     both of the shim's 15 s bounds).
  *
- *   • the measured child runtime is read IN BAND, from case 1 — the same argv
- *     under the same `--import` hook, run minutes earlier on this runner, and
- *     the first child of the file, so it also pays tsx's cold start and reads
- *     high. A contended shard therefore calibrates itself, which is the one
- *     thing a constant cannot do;
- *   • FACTOR covers the load getting WORSE between that sample and this case.
- *     It is not sized for the idle-to-contended spread, because the sample is
- *     already whatever the runner is;
- *   • the bound is counted TWICE because `run-dev.js` awaits two announcers
- *     (`announceInvocationFailure`, then `announceUnbuiltWorkspace`) and each
- *     one can pay it. Only the second writes on this path today —
- *     `invocationFailureLine` returns `undefined` unless the error is an oclif
- *     PARSE error and "command … not found" is not one — so widening that
- *     predicate would add a whole bound to the child's legitimate lifetime.
- *     Budgeting two means that change lands as a red in ITS own suite instead
- *     of as a queue ejection here;
- *   • FLOOR keeps the ceiling from ever falling BELOW the constant it replaces,
- *     on a runner fast enough for the derivation to go small;
- *   • CEILING keeps a real hang legible. Past `RUN_TIMEOUT_MS` this case stops
- *     reporting a SIGKILL and starts reporting the `beforeAll` timeout, which
- *     reds all six cases and names none of them.
+ * The measurement is KEPT — as evidence in the failure message, never as an
+ * input to the threshold. That is the whole correction: case 1's wall clock
+ * tells a triage whether a red is a hang or a runner on fire, and it decides
+ * nothing.
  */
-const UNREAD_CAP_RUNTIME_FACTOR = 4;
-const UNREAD_CAP_FLOOR_MS = 40_000;
-const UNREAD_CAP_CEILING_MS = RUN_TIMEOUT_MS;
-
-function deriveUnreadCapMs(measuredChildRuntimeMs: number): number {
-  const derived = UNREAD_CAP_RUNTIME_FACTOR * measuredChildRuntimeMs + 2 * SHIM_DRAIN_STALL_MS;
-  return Math.min(UNREAD_CAP_CEILING_MS, Math.max(UNREAD_CAP_FLOOR_MS, derived));
-}
+const UNREAD_HARD_CAP_MS = RUN_TIMEOUT_MS;
 
 interface Lifetime {
   code: number | null;
@@ -293,8 +293,6 @@ let genuinelyMissing: Run;
 let stalled: Run;
 let unread: Lifetime;
 let closedEnd: Lifetime;
-/** Set in `beforeAll` from the measurement above; the floor until then. */
-let unreadCapMs = UNREAD_CAP_FLOOR_MS;
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-run-dev-unbuilt-'));
@@ -302,13 +300,11 @@ beforeAll(async () => {
   built = await runCli(REAL_COMMAND, dir, undefined);
   genuinelyMissing = await runCli(['definitely-not-a-command'], dir, undefined);
   stalled = await runCliWhileParentStalls(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`);
-  // Case 1 is the calibration sample: same argv, same hook, same runner, read
-  // by a parent that never stalls — so its wall clock IS the elastic term the
-  // ceiling has to clear. Everything after this point is sized against what
-  // this box just did, not against what some other box once did.
-  unreadCapMs = deriveUnreadCapMs(unbuilt.elapsedMs);
-  unread = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'never-read', unreadCapMs);
-  closedEnd = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'destroy-read-end', unreadCapMs);
+  // ⛔ Nothing measured above is consulted here. Case 1's wall clock is read by
+  // the failure message below, as evidence; the ceiling is a constant, so a
+  // slow sample can no longer size the instrument that judges the next run.
+  unread = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'never-read', UNREAD_HARD_CAP_MS);
+  closedEnd = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'destroy-read-end', UNREAD_HARD_CAP_MS);
 }, RUN_TIMEOUT_MS * 6);
 
 afterAll(() => {
@@ -400,18 +396,27 @@ describe('the mirror direction: a reader that is never coming back', () => {
     // A child still alive at the cap was SIGKILLed: signal set, code null.
     // That is the hang, and it is the whole point of this case.
     //
-    // ⚠️ Each assertion carries the derivation, because THIS is the line a
-    // merge-queue triage reads and `expected 'SIGKILL' to be null` on its own
-    // does not distinguish the two readings it can have: a child that hung, or
-    // a ceiling that was too small for the runner. The numbers below say which,
-    // without anyone having to open this file.
-    const derivation =
-      `cap ${unreadCapMs} ms = clamp(${UNREAD_CAP_FLOOR_MS}, ${UNREAD_CAP_CEILING_MS}, ` +
-      `${UNREAD_CAP_RUNTIME_FACTOR} x ${unbuilt.elapsedMs} ms measured child runtime ` +
-      `+ 2 x ${SHIM_DRAIN_STALL_MS} ms shim bound); this child ran ${unread.elapsedMs} ms`;
-    expect(unread.signal, `the harness SIGKILLed the child — it was still alive at the ceiling. ${derivation}`).toBeNull();
-    expect(unread.code, `the child did not exit 2 on its own. ${derivation}`).toBe(2);
-    expect(unread.elapsedMs, derivation).toBeLessThan(unreadCapMs);
+    // ⚠️ Both surviving assertions are about the PRODUCT: the child ends on
+    // its OWN, and it ends with the status any other reader would have got.
+    //
+    // ⛔ The third assertion this case used to carry — `elapsedMs` below the
+    // ceiling — is deliberately gone. Against a constant cap it asserts nothing
+    // the first line does not: the harness kills at exactly that cap, so a
+    // child that was not killed ran less than it. What it added was a race, at
+    // the one instant where a child exiting on its own and the timer firing
+    // are simultaneous, and it was the only reading here that a slower box
+    // could move on its own. Detection unchanged, one fewer way to red.
+    //
+    // The numbers move into the message, because `expected 'SIGKILL' to be
+    // null` alone does not tell a merge-queue triage which of two readings it
+    // has. A child killed at 180 s whose calibration was 8 s is a hang; one
+    // whose calibration was also minutes indicts the runner, not this code.
+    const evidence =
+      `cap ${UNREAD_HARD_CAP_MS} ms (RUN_TIMEOUT_MS, constant and load-independent by design); ` +
+      `this child ran ${unread.elapsedMs} ms; case 1 measured the same child at ` +
+      `${unbuilt.elapsedMs} ms on this runner minutes earlier`;
+    expect(unread.signal, `the harness SIGKILLed the child — it was still alive at the ceiling. ${evidence}`).toBeNull();
+    expect(unread.code, `the child did not exit 2 on its own. ${evidence}`).toBe(2);
   });
 
   // ⛔ There is deliberately NO assertion here that the child WAITED for the
