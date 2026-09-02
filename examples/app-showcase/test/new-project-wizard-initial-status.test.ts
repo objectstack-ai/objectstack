@@ -137,22 +137,31 @@ describe('#14311 — the New Project wizard and the status state machine', () =>
     expect(defaulted).toEqual(statusRule.initialStates);
   });
 
-  it("the rule's refusal is on the translation channel in both shipped locales", () => {
+  it('EVERY rule on the object is on the translation channel in both shipped locales', () => {
     // An authored `validations[].message` is emitted VERBATIM unless the bundle
-    // carries `objects.<o>._validations.<rule>.message` (#14253). This was the
-    // only English sentence on an otherwise zh-CN form.
-    const name = statusRule.name!;
-    for (const locale of ['en', 'zh-CN'] as const) {
-      const entry = (ShowcaseTranslationBundle as any)[locale]
-        ?.objects?.showcase_project?._validations?.[name];
-      expect(entry?.message, `${locale} is missing a message for ${name}`).toBeTruthy();
+    // carries `objects.<o>._validations.<rule>.message` (#14253). Scoped to the
+    // whole object rather than to the status rule on purpose: this one wizard
+    // can also trip `end_after_start` and `spent_within_budget` from its
+    // budget/schedule step, so pinning only the status rule would let the single
+    // English sentence move one step later instead of disappearing.
+    const rules = ((Project as unknown as { validations?: Rule[] }).validations ?? [])
+      .filter((r) => typeof r?.name === 'string');
+    expect(rules.length).toBeGreaterThan(1);
+
+    for (const rule of rules) {
+      const name = rule.name!;
+      for (const locale of ['en', 'zh-CN'] as const) {
+        const entry = (ShowcaseTranslationBundle as any)[locale]
+          ?.objects?.showcase_project?._validations?.[name];
+        expect(entry?.message, `${locale} is missing a message for ${name}`).toBeTruthy();
+      }
+      // The zh-CN entry must actually BE Chinese — an English copy satisfies
+      // "a key exists" while reproducing the defect exactly.
+      const zh = (ShowcaseTranslationBundle as any)['zh-CN']
+        .objects.showcase_project._validations[name].message as string;
+      expect(zh, `${name}'s zh-CN message is not Chinese`).toMatch(/[一-龥]/);
+      expect(zh, `${name}'s zh-CN message is a copy of the authored one`).not.toBe(rule.message);
     }
-    // The zh-CN entry must actually be Chinese — an English copy would satisfy
-    // "a key exists" while reproducing the defect exactly.
-    const zh = (ShowcaseTranslationBundle as any)['zh-CN']
-      .objects.showcase_project._validations[name].message as string;
-    expect(zh).toMatch(/[一-龥]/);
-    expect(zh).not.toBe(statusRule.message);
   });
 
   it('creates with the wizard payload and refuses the status it used to offer', async () => {

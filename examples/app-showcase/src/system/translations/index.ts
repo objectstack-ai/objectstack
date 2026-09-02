@@ -42,12 +42,23 @@ export const ShowcaseTranslationBundle = {
         // the only refusal a visitor reliably triggers (the New Project wizard
         // used to offer four statuses the machine will not accept on create),
         // so it read as the single English sentence on a zh-CN form.
+        // All FOUR of the object's rules, not just the state machines: the New
+        // Project wizard can trip `end_after_start` and `spent_within_budget`
+        // from its budget/schedule step, so translating only the status rule
+        // would move the single English sentence one step later rather than
+        // remove it.
         _validations: {
           project_status_flow: {
             message: 'Projects start as Planned, and then move only along the declared status flow.',
           },
           project_health_progression: {
             message: 'Health changed by more than one step — confirm this is intentional.',
+          },
+          end_after_start: {
+            message: 'Target End Date must be on or after the Start Date.',
+          },
+          spent_within_budget: {
+            message: 'Spend exceeds 120% of budget — escalate before continuing.',
           },
         },
       },
@@ -293,6 +304,8 @@ export const ShowcaseTranslationBundle = {
         _validations: {
           project_status_flow: { message: '项目的初始状态为“计划中”,此后只能按既定的状态流转变更。' },
           project_health_progression: { message: '健康度一次变更超过一级,请确认这是有意为之。' },
+          end_after_start: { message: '结束日期不能早于开始日期。' },
+          spent_within_budget: { message: '已花费超过预算的 120%,请先上报后再继续。' },
         },
         // `default` — the container's DEFAULT list. `defineView({ list })`
         // declares it without a `name`, and the composer therefore registers it
