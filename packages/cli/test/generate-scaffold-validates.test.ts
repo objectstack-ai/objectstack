@@ -61,8 +61,9 @@
  *   skill      clean
  *
  * Those four are a separate card by triage's own fence — a census of the other
- * artifacts is explicitly NOT folded into #14087 — so this file RECORDS them
- * instead of fixing them, in the shrink-only shape this repo uses elsewhere
+ * artifacts is explicitly NOT folded into #14087 — and are filed as #14336, so
+ * this file RECORDS them instead of fixing them, in the shrink-only shape this
+ * repo uses elsewhere
  * (`KNOWN_UNALIASED_TEST_IMPORTS`, the type-check debt ledger). Two properties
  * follow, and both are asserted below:
  *
@@ -96,6 +97,8 @@ import { BUNDLE_REQUIRE_EXTERNALS } from '../src/utils/config.js';
  * Scaffolds `os validate` still refuses, with the measured reason. SHRINK-ONLY
  * — see the header. Adding an entry to silence a failure is the one edit this
  * table must never receive; the assertions below make a stale entry fail too.
+ *
+ * All four are #14336. Repair the template, delete the line, same PR.
  */
 const KNOWN_UNVALIDATED_SCAFFOLDS: Record<string, string> = {
   object:
