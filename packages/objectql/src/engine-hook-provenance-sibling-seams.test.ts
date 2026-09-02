@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
-// #14259 — the two SIBLING seams of the strip #14088 repaired must decide
-// hook-vs-caller by the same RECORD, not by `Object.is`.
+// #14259 — the INSERT-side runtime-owned strip must decide hook-vs-caller by
+// the same RECORD `stripReadonlyFields` uses, not by `Object.is`.
 //
 // #14088 replaced `Object.is(payload[k], supplied[k])` inside
 // `stripReadonlyFields` with a recording of the keys the before-phase hook
@@ -11,26 +11,32 @@
 //   - the hook deliberately wrote the value the caller also sent, from
 //   - the hook never touched the key at all,
 //
-// and the two demand opposite verdicts. Two functions in the same file were
-// left on the comparison that argument retired, and this suite pins both:
+// and the two demand opposite verdicts. `stripRuntimeOwnedFields` — the
+// INSERT-side twin — was left on the comparison that argument retired, and
+// #6339's own prose is the finding: it argued a key SET made the contract true
+// "only BY ACCIDENT" and moved to VALUES, which is accidental in the identical
+// way. So a `beforeInsert` hook that re-issues or normalises a record number
+// still loses its write to the one caller that submitted the same value.
 //
-//  1. `isCallerSuppliedValue` — the shared predicate behind
-//     `stripReadonlyWhenFields` and `stripReadonlyWhenFieldsMulti`, whose own
-//     docblock says it is written to be textually parallel with the test inside
-//     `stripReadonlyFields` so the two "can never disagree about what
-//     caller-supplied means". Between #14088 and this, they did.
-//  2. `stripRuntimeOwnedFields` — the INSERT-side twin. #6339's own prose is
-//     the finding: it argued a key SET made the contract true "only BY
-//     ACCIDENT" and moved to values, which is accidental in the identical way.
+// ⛔ THE SIBLING SEAM IS DELIBERATELY NOT HERE. #14259 named a second one —
+// `isCallerSuppliedValue`, behind the two `readonlyWhen` strips — and it is
+// WITHHELD pending a maintainer ruling, not forgotten. Measured on this branch:
+// threading the record into that predicate turns the existing #9107 pin
+// `LOCK 3b` red, because a hook spelled `ctx.input.data.x = ctx.input.data.x`
+// is a `set` on the recorded object, so the CALLER's forged value becomes
+// hook-owned and survives a TRUE `readonlyWhen` predicate (measured:
+// `closed_note` committed `'1999-01-01'` where the lock had stripped it to
+// `null`). That is the card's own fork clause — a caller value surviving a TRUE
+// predicate — and it goes to the decision inbox, never resolved here.
 //
 // ⛔ WHAT THIS SUITE IS NOT, and is written to fail if anyone reads it that
-// way: it is NOT a relaxation of #3042 / #4889 / #5503, and it is NOT a `null`
-// case. The DISCRIMINATOR PAIRS are the deliverable's proof — the same caller
-// payload, byte for byte, on the same locked key, reaching OPPOSITE verdicts
-// depending on whether a hook assigned it. A caller-supplied value that no hook
-// wrote is still stripped, still warns with the same text, and still reports
-// through `onFieldsDropped` / `strictReadonlyWrites`. That is what value
-// equality cannot deliver and a record can.
+// way: it is NOT a relaxation of #5503. The DISCRIMINATOR PAIRS are the
+// deliverable's proof — the same caller payload, byte for byte, on the same
+// runtime-owned key, reaching OPPOSITE verdicts depending on whether a hook
+// assigned it. A caller-seeded record number that no hook wrote is still
+// stripped, still warns with the same text, and still reports through
+// `onFieldsDropped` / `strictReadonlyWrites`. That is what value equality
+// cannot deliver and a record can.
 //
 // ⛔ And the forgery boundary is inherited unchanged: A CALLER-SUPPLIED VALUE
 // MUST NEVER BECOME HOOK-OWNED. The insert-side recording this card arms is new
@@ -112,307 +118,6 @@ const makeLogger = (sink: string[]) => {
   };
   return logger;
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SEAM 1 — `readonlyWhen`, UPDATE path
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** What the recompute hook derives. A client mirroring the formula sends this. */
-const DERIVED = '2026-11-14';
-/** What sits on the stored row before the write — the value a lost hook write leaves behind. */
-const STALE = '2026-01-01';
-/** What a caller forges. Never allowed to reach the row on a locked field. */
-const FORGED = '1999-01-01';
-/** A fault instant already on the stored row — the `null` collision's stale residue. */
-const FAULT_AT = '2026-08-01T09:00:00.000Z';
-
-describe('seam 1 — the readonlyWhen strips read PROVENANCE, not value equality (#14259)', () => {
-  let engine: ObjectQL;
-  let storeFor: ReturnType<typeof makeDriver>['storeFor'];
-  let warns: string[];
-
-  beforeEach(async () => {
-    warns = [];
-    engine = new ObjectQL({ logger: makeLogger(warns) });
-    const d = makeDriver();
-    storeFor = d.storeFor;
-    engine.registerDriver(d.driver, true);
-    await engine.init();
-
-    // The #9107 downstream object, trimmed to the fields this card turns on.
-    // Three ALWAYS-locked columns so the collision can be shown on a string, on
-    // `null` and on `0` — proof the repair is provenance and not a sentinel —
-    // plus one STATE lock for the #4889 direction.
-    engine.registry.registerObject({
-      name: 'prov_equipment',
-      fields: {
-        name: { type: 'text' },
-        status: { type: 'text' },
-        period_days: { type: 'number' },
-        next_maintenance_date: { type: 'date', readonlyWhen: 'true' },
-        last_fault_at: { type: 'datetime', readonlyWhen: 'true' },
-        overdue_days: { type: 'number', readonlyWhen: 'true' },
-        closed_note: { type: 'text', readonlyWhen: "record.status == 'closed'" },
-      },
-      // `packageId` is REQUIRED and passed on purpose: omitting it is what the
-      // TEST_DEBT ledger counts in this package, and a new test file may not
-      // add to a shrink-only ratchet.
-    } as any, 'test');
-
-    // The recompute hook, exactly #9107's shape: derive the locked columns
-    // whenever the write touches the cycle. It CLEARS the fault instant and
-    // ZEROES the overdue counter in the same pass, which is where the `null`
-    // and `0` collisions live.
-    engine.registerHook('beforeUpdate', async (ctx: any) => {
-      if (!Object.prototype.hasOwnProperty.call(ctx.input.data, 'period_days')) return;
-      ctx.input.data.next_maintenance_date = DERIVED;
-      ctx.input.data.last_fault_at = null;
-      ctx.input.data.overdue_days = 0;
-    }, { object: 'prov_equipment', priority: 50 });
-  });
-
-  const seed = (id: string, over: Record<string, unknown> = {}) =>
-    storeFor('prov_equipment').set(id, {
-      id, name: 'Autoclave', status: 'open', period_days: 90,
-      next_maintenance_date: STALE, last_fault_at: FAULT_AT, overdue_days: 7,
-      closed_note: null, ...over,
-    });
-  const eq = (id: string) => storeFor('prov_equipment').get(id);
-
-  // ── THE DEFECT ────────────────────────────────────────────────────────────
-
-  it('THE DEFECT: a hook write the caller ECHOED now LANDS on a TRUE readonlyWhen field', async () => {
-    // The card's reproduction shape. A thick client (or a retried submit)
-    // mirrors the server's formula and sends the same date the hook is about to
-    // derive. `Object.is(DERIVED, DERIVED)` is true, so the pre-#14259 predicate
-    // read the hook's deliberate write as "the hook never touched the key",
-    // deleted it, and committed the new cycle beside the OLD maintenance date —
-    // the duplicate-plans loop #9107 measured, reopened on one input.
-    seed('eq_1');
-
-    await engine.update('prov_equipment', {
-      id: 'eq_1', period_days: 120, next_maintenance_date: DERIVED,
-    });
-
-    expect(eq('eq_1').period_days).toBe(120);
-    // The regression, stated as the value it must NOT be.
-    expect(eq('eq_1').next_maintenance_date).not.toBe(STALE);
-    expect(eq('eq_1').next_maintenance_date).toBe(DERIVED);
-    // The write landed, so nothing was dropped and nothing may be logged.
-    expect(warns).toEqual([]);
-  });
-
-  it('the same collision on `null` — the `Object.is(null, null)` case the file names', async () => {
-    // The hook CLEARS the fault instant; the caller's form round-trip submits
-    // the disabled input as `null`. Identical bytes on the key, and the stored
-    // row keeps a stale fault timestamp beside a freshly serviced machine.
-    seed('eq_2');
-
-    await engine.update('prov_equipment', {
-      id: 'eq_2', period_days: 120, last_fault_at: null,
-    });
-
-    expect(eq('eq_2').last_fault_at).not.toBe(FAULT_AT);
-    expect(eq('eq_2').last_fault_at).toBeNull();
-  });
-
-  it('the same collision on `0` — so the repair cannot be a `null` sentinel', async () => {
-    // `Object.is(0, 0)` is true for exactly the reason `Object.is(null, null)`
-    // is. A fix that reads `null` specially leaves this one corrupt. (A plain
-    // `0`, never `-0`: `Object.is` separates those two, and leaning on that
-    // would be the same accident a third time.)
-    seed('eq_3');
-
-    await engine.update('prov_equipment', {
-      id: 'eq_3', period_days: 120, overdue_days: 0,
-    });
-
-    expect(eq('eq_3').overdue_days).toBe(0);
-  });
-
-  // ── ⛔ THE NEGATIVE CONTROL — the deliverable's proof ──────────────────────
-
-  it('⛔ NEGATIVE CONTROL: the IDENTICAL caller payload with NO hook write is still STRIPPED', async () => {
-    // The one case that separates "provenance" from "stopped locking". The key
-    // and the value are byte-identical to THE DEFECT above —
-    // `next_maintenance_date: DERIVED` — but the payload omits `period_days`,
-    // so the hook returns without assigning and nobody authorised the write.
-    // The stored value must survive and the caller must be told.
-    seed('eq_4');
-
-    await engine.update('prov_equipment', {
-      id: 'eq_4', name: 'Renamed', next_maintenance_date: DERIVED,
-    });
-
-    expect(eq('eq_4').name).toBe('Renamed');
-    expect(eq('eq_4').next_maintenance_date).toBe(STALE);
-    // The same warning text as before this card — the strip's documented line.
-    expect(warns.some((w) =>
-      w.includes("Field 'next_maintenance_date' is read-only (readonlyWhen) — ignoring incoming change"),
-    )).toBe(true);
-  });
-
-  it('⛔ NEGATIVE CONTROL on `null`: an unauthorised clear is still stripped', async () => {
-    seed('eq_5');
-    await engine.update('prov_equipment', { id: 'eq_5', name: 'R', last_fault_at: null });
-    expect(eq('eq_5').last_fault_at).toBe(FAULT_AT);
-    expect(warns.some((w) => w.includes("Field 'last_fault_at' is read-only (readonlyWhen)"))).toBe(true);
-  });
-
-  it('⛔ NEGATIVE CONTROL: the drop still reaches onFieldsDropped as readonly_when', async () => {
-    seed('eq_6');
-    const events: any[] = [];
-
-    await engine.update(
-      'prov_equipment',
-      { id: 'eq_6', next_maintenance_date: DERIVED },
-      { onFieldsDropped: (e: any) => events.push(e) } as any,
-    );
-
-    expect(events.some((e) => e.reason === 'readonly_when' && e.fields.includes('next_maintenance_date'))).toBe(true);
-    expect(eq('eq_6').next_maintenance_date).toBe(STALE);
-  });
-
-  it('⛔ NEGATIVE CONTROL: strictReadonlyWrites still REFUSES the unauthorised write', async () => {
-    seed('eq_7');
-    let refused: any;
-
-    await engine.update(
-      'prov_equipment',
-      { id: 'eq_7', next_maintenance_date: DERIVED },
-      { strictReadonlyWrites: true } as any,
-    ).catch((e: unknown) => { refused = e; });
-
-    // The refusal ENVELOPE, not merely "it threw": a bare `toThrow()` would
-    // stay green against any unrelated failure on this path.
-    // ⚠️ `ReadonlyFieldRejectedError` carries `code` and `name` only — it has no
-    // `status` member (the HTTP mapping lives at the protocol layer), so
-    // asserting one here would pin a property this class does not have.
-    expect(refused).toBeDefined();
-    expect(refused.name).toBe('ReadonlyFieldRejectedError');
-    expect(refused.code).toBe('ERR_READONLY_FIELD_REJECTED');
-    expect(refused.fields).toContain('next_maintenance_date');
-    // And nothing was written.
-    expect(eq('eq_7').next_maintenance_date).toBe(STALE);
-  });
-
-  it('⛔ a hook that runs but writes some OTHER key confers nothing on this one', async () => {
-    // Provenance is per KEY, never "a hook ran on this write".
-    engine.registerHook('beforeUpdate', async (ctx: any) => {
-      ctx.input.data.name = 'rewritten-by-hook';
-    }, { object: 'prov_equipment', priority: 60 });
-    seed('eq_8');
-
-    await engine.update('prov_equipment', { id: 'eq_8', next_maintenance_date: FORGED });
-
-    expect(eq('eq_8').name).toBe('rewritten-by-hook');
-    expect(eq('eq_8').next_maintenance_date).toBe(STALE);
-  });
-
-  // ── The #4889 lock: provenance leaves CALLER writes exactly where they were ─
-
-  it('#4889 UNCHANGED: a caller value on a TRUE STATE predicate is still stripped', async () => {
-    // The frozen-record class the triage ruling names. No hook assigns
-    // `closed_note`, so no record exempts it, and the state lock holds.
-    seed('eq_9', { status: 'closed' });
-
-    await engine.update('prov_equipment', { id: 'eq_9', closed_note: 'caller note' });
-
-    expect(eq('eq_9').closed_note).toBeNull();
-    expect(warns.some((w) => w.includes("Field 'closed_note' is read-only (readonlyWhen)"))).toBe(true);
-  });
-
-  it('#4889 UNCHANGED: isSystem still does NOT exempt a caller value (Option B stays rejected)', async () => {
-    seed('eq_10', { status: 'closed' });
-    await engine.update(
-      'prov_equipment', { id: 'eq_10', closed_note: 'caller note' },
-      { context: { isSystem: true } } as any,
-    );
-    expect(eq('eq_10').closed_note).toBeNull();
-  });
-
-  it("what persists is always the HOOK's value, never the caller's", async () => {
-    // The forgery boundary read as an outcome: a caller cannot launder its own
-    // value through the hook phase, because the hook's assignment is what stands
-    // on the key afterwards.
-    seed('eq_11');
-
-    await engine.update('prov_equipment', {
-      id: 'eq_11', period_days: 120, next_maintenance_date: FORGED,
-    });
-
-    expect(eq('eq_11').next_maintenance_date).not.toBe(FORGED);
-    expect(eq('eq_11').next_maintenance_date).toBe(DERIVED);
-  });
-
-  it('MEASURED-UNCHANGED: a hook writing a DIFFERENT value than the caller behaves as before', async () => {
-    // Pinned because the card asks for today's behaviour on this input to be
-    // measured before it moves — and it must NOT move. Pre-#14259 the value
-    // test already answered "not the caller's" here (`Object.is(DERIVED,
-    // FORGED)` is false) and kept the hook's write; under provenance the record
-    // answers the same way for a different reason. Same verdict, both routes,
-    // which is what makes the record a strictly narrower gate than the
-    // comparison it fronts.
-    seed('eq_12');
-    await engine.update('prov_equipment', {
-      id: 'eq_12', period_days: 120, next_maintenance_date: FORGED,
-    });
-    expect(eq('eq_12').next_maintenance_date).toBe(DERIVED);
-    expect(warns).toEqual([]);
-  });
-
-  // ── The BULK branch reaches the same verdict off the SAME sealed record ────
-
-  it('MULTI: the echoed hook write lands on the predicate branch too', async () => {
-    seed('eq_20', { status: 'active' });
-    seed('eq_21', { status: 'active' });
-
-    await engine.update(
-      'prov_equipment',
-      { period_days: 120, next_maintenance_date: DERIVED },
-      { where: { status: 'active' }, multi: true } as any,
-    );
-
-    expect(eq('eq_20').next_maintenance_date).toBe(DERIVED);
-    expect(eq('eq_21').next_maintenance_date).toBe(DERIVED);
-  });
-
-  it('⛔ MULTI NEGATIVE CONTROL: the identical payload with no hook write is still stripped', async () => {
-    // #3106 / #4441 "both call sites": a bulk write must not reach a different
-    // verdict about who wrote a key than a by-id write does — in EITHER
-    // direction. This is the by-id negative control, run through
-    // `stripReadonlyWhenFieldsMulti`.
-    seed('eq_22', { status: 'active' });
-
-    await engine.update(
-      'prov_equipment',
-      { name: 'Renamed', next_maintenance_date: DERIVED },
-      { where: { status: 'active' }, multi: true } as any,
-    );
-
-    expect(eq('eq_22').name).toBe('Renamed');
-    expect(eq('eq_22').next_maintenance_date).toBe(STALE);
-    expect(warns.some((w) => w.includes("Field 'next_maintenance_date' is read-only (readonlyWhen) in ≥1 matched row"))).toBe(true);
-  });
-
-  it('a hook that REPLACES ctx.input.data falls back to the value test, not to "keep everything"', async () => {
-    // The recorder's KNOWN LIMIT, inherited: a replacement's keys are mostly
-    // the CALLER's, so reading them as hook-owned would launder a forgery. With
-    // no attributable record the strip must behave exactly as it did before
-    // this card — i.e. over-strip. Fail-safe means "keep the old bug".
-    engine.registerHook('beforeUpdate', async (ctx: any) => {
-      ctx.input.data = { ...ctx.input.data, next_maintenance_date: DERIVED };
-    }, { object: 'prov_equipment', priority: 60 });
-    seed('eq_23');
-
-    await engine.update('prov_equipment', {
-      id: 'eq_23', name: 'R', next_maintenance_date: DERIVED,
-    });
-
-    expect(eq('eq_23').name).toBe('R');
-    expect(eq('eq_23').next_maintenance_date).toBe(STALE);
-  });
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SEAM 2 — runtime-owned (`autonumber`), INSERT path
@@ -621,6 +326,43 @@ describe('seam 2 — the insert-side runtime-owned strip reads PROVENANCE (#1425
     // value, so it is stripped — the old bug, kept on purpose.
     expect(row.code).not.toBe('HOOK-replace');
     expect(row.code).toBe('0001');
+  });
+
+  // ── The measured consequence of "an assignment ran", stated out loud ──────
+
+  it('MEASURED: a lone self-assigning hook leaves the CALLER value on the key', async () => {
+    // ⚠️ RECORDING BEHAVIOUR, NOT BLESSING IT. This is the direct consequence
+    // of the mechanism the card mandates: the record says an ASSIGNMENT RAN and
+    // is deliberately blind to the value, so `ctx.input.data.code =
+    // ctx.input.data.code` — which computes nothing — is a `set`, and the
+    // caller's seed becomes hook-owned and survives. `title: 'no-hook'`
+    // short-circuits the priority-50 hook so the self-assignment is the ONLY
+    // write to `code`, which is what makes the surviving value the caller's.
+    //
+    // Pinned so the consequence is visible rather than discovered later, and
+    // pinned rather than argued: it is the exact shape that forked the
+    // `readonlyWhen` seam out of this PR, whose #9107 pin `LOCK 3b` pins the
+    // OPPOSITE verdict for a STATE lock ("a hook that writes the caller value
+    // BACK is the caller value, and goes"). #14259's fork clause sends that one
+    // to the decision inbox; nothing here resolves it.
+    //
+    // Why the same mechanism ships on THIS seam: `stripRuntimeOwnedFields`
+    // guards a runtime-owned COLUMN (#5503) — the same class of protection
+    // #14088 already moved to provenance on the update side, and the class
+    // whose exemption `runtimeOwnedStripWarning` promises hook authors in prose
+    // — not a STATE lock whose whole purpose is that no caller write survives a
+    // TRUE predicate. INSERT is exempt from `readonlyWhen` entirely, so no lock
+    // of that class exists on this path to open. A ruling that self-assignment
+    // must NOT count would move this pin and #14088's seam together; that is a
+    // deliberate follow-up, not silent drift.
+    engine.registerHook('beforeInsert', async (ctx: any) => {
+      ctx.input.data.code = ctx.input.data.code;
+    }, { object: 'prov_ticket', priority: 60 });
+
+    const row: any = await engine.insert('prov_ticket', { title: 'no-hook', code: 'CALLER-SEEDED' });
+
+    expect(row.code).toBe('CALLER-SEEDED');
+    expect(warns).toEqual([]);
   });
 
   // ── The exemptions above this seam are untouched ──────────────────────────

@@ -11044,18 +11044,7 @@ export class ObjectQL implements IObjectQLEngine {
                // is unchanged — a caller cannot make its own value look
                // hook-written (see `ReadonlyWhenStripOptions`) — and `isSystem`
                // is still NOT an exemption here, unlike the static strip below.
-               //
-               // [#14259] `hookWrittenKeys` — the SAME record sealed at the
-               // confluence above and consumed by the static strip below, now
-               // feeding the conditional one too. Threaded rather than
-               // re-derived: #9107 put this predicate in ONE shared function so
-               // the two `readonlyWhen` call sites could not fork, and a third
-               // derivation of "a hook wrote this key" would fork it against
-               // the static strip instead — which is the state #14088 left
-               // behind and this closes. The `supplied` snapshot is unchanged
-               // and still answers the caller-side half; the record only ever
-               // turns a STRIP into a KEEP, and only for a key a hook assigned.
-               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, roWhenParent, { supplied: suppliedValues, hookWrittenKeys }) as any;
+               hookContext.input.data = stripReadonlyWhenFields(updateSchema as any, preRoWhen, priorRecord, this.logger, roWhenParent, { supplied: suppliedValues }) as any;
                reportDroppedFields(preRoWhen, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                // [#2948] Enforce STATIC `readonly` on the write path for
                // non-system callers (system writes legitimately set read-only
@@ -11234,10 +11223,7 @@ export class ObjectQL implements IObjectQLEngine {
                    // by-id branch above — "both call sites" is the #3106 /
                    // #4441 shape that gets missed, and a bulk write must not
                    // reach a different verdict about who wrote a key.
-                   // [#14259] Which is why `hookWrittenKeys` is the SAME sealed
-                   // set the by-id branch gets, from the one seal at the shared
-                   // confluence — not a second recording armed on this branch.
-                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, parentForRow, { supplied: suppliedValues, hookWrittenKeys }) as any;
+                   hookContext.input.data = stripReadonlyWhenFieldsMulti(updateSchema as any, preRoWhenMulti, priorRows, this.logger, parentForRow, { supplied: suppliedValues }) as any;
                    reportDroppedFields(preRoWhenMulti, hookContext.input.data as Record<string, unknown>, 'readonly_when');
                }
                // [#2948] Same static-`readonly` write guard on the bulk path —
