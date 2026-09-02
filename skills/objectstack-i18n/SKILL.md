@@ -48,58 +48,6 @@ export default defineStack({
 
 ---
 
-## File Organization Strategies
-
-### 1. Bundled (Single File)
-
-All locales in one file. Best for small projects with few objects.
-
-```
-src/translations/
-  crm.translation.ts        # { en: {...}, "zh-CN": {...} }
-```
-
-**When to use:** Fewer than 5 objects, 2-3 locales, < 200 translation keys total.
-
-### 2. Per-Locale (Recommended)
-
-One file per locale containing all namespaces. Recommended when a single locale file stays under ~500 lines.
-
-```
-src/translations/
-  en.ts                     # TranslationData for English
-  zh-CN.ts                  # TranslationData for Chinese
-  ja-JP.ts                  # TranslationData for Japanese
-```
-
-**When to use:** Medium projects (5-20 objects), 3-5 locales, organized by language.
-
-### 3. Per-Namespace (Enterprise)
-
-One file per namespace (object) per locale. Aligns with Salesforce DX and ServiceNow conventions.
-
-```
-i18n/
-  en/
-    account.json            # ObjectTranslationData
-    contact.json
-    common.json             # messages + app labels
-  zh-CN/
-    account.json
-    contact.json
-    common.json
-```
-
-**When to use:** Large projects (20+ objects), 5+ locales, team collaboration, CI/CD pipelines.
-
-> These are **authoring conventions**: your import graph assembles whichever layout you
-> choose into the `TranslationBundle` values you register on the stack.
-> `FileI18nAdapter`'s `localesDir` loads only flat top-level `{locale}.json` files
-> (subdirectories are skipped) — a per-namespace tree must be assembled by your own
-> imports or build step.
-
----
-
 ## Authoring Translation Bundles (`objects.*`)
 
 The canonical authoring path: one `TranslationData` per locale, assembled with
@@ -254,6 +202,20 @@ naming an object, field, view, action, param, section, app, nav item, dashboard,
 widget or flow screen that does not exist is listed alongside the names that do.
 A bundle keyed to something since renamed still parses — the label just renders
 silently in its source locale while every neighbouring one resolves.
+
+---
+
+## File Organization Strategies
+
+Layout is an **authoring convention**: whichever one you pick, your own import graph
+assembles it into the `TranslationBundle` you register on the stack — nothing loads a
+directory tree for you.
+
+| Layout | Files | Use when |
+|:--|:--|:--|
+| Bundled | one `crm.translation.ts` holding every locale | under 5 objects, 2-3 locales |
+| Per-locale (recommended) | `src/translations/{en,zh-CN,ja-JP}.ts` + `index.ts` | 5-20 objects, 3-5 locales |
+| Per-namespace | `i18n/{locale}/{object}.json`, assembled by your own imports | 20+ objects, 5+ locales |
 
 ---
 
