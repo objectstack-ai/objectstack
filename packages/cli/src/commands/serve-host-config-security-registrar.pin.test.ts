@@ -156,8 +156,10 @@ describe('#14397 — `os dev` over a HOST config composes ONE registrar for stac
         expect(source).toContain(
             "devArtifactDoor ? { securityMetadataRegistrar: 'artifact-door' } : {},",
         );
-        // ⛔ The unconditional shape is the defect: it is what put a second,
-        // unparsed writer on every `os dev` boot of a host config.
+        // ⛔ The unconditional shape is the defect: it is what put a SECOND
+        // writer on every `os dev` boot of a host config — a copy that lacks
+        // the ADR-0010 provenance stamp and never refreshes, alongside the
+        // door's, which reloads on every recompile.
         expect(
             source,
             'the wrap must never be constructed without the registrar decision',
