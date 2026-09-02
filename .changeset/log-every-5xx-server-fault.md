@@ -1,10 +1,9 @@
 ---
-"@objectstack/observability": patch
+"@objectstack/types": patch
 "@objectstack/runtime": patch
-"@objectstack/rest": patch
 ---
 
-fix(observability,runtime,rest): log every 5xx at `error` level instead of answering it silently (#14310)
+fix(types,runtime): log every 5xx at `error` level instead of answering it silently (#14310)
 
 A 500 that leaves no server-side line is diagnosed from the browser or not at
 all. Measured on `main`, through the real plugin and the real route handlers: a
@@ -27,21 +26,24 @@ reasons:
   so even a wired reporter never saw those.
 
 **The rule now has one definition.** `logServerFault` (new, in
-`@objectstack/observability`, which owns the operator-facing `Logger` /
-`ErrorReporter` channel and is already a dependency of both consumers) emits
-exactly one `error`-level record carrying method, path, request id, the
-message and — where the door still holds the throw — the stack. It could not
-live in either consumer: `@objectstack/runtime` depends on `@objectstack/rest`,
-so an import could only ever point one way — the same argument that put
-`resolveThrownHttpError` in `@objectstack/types` rather than in one of its two
-doors.
+`@objectstack/types`) emits exactly one `error`-level record carrying method,
+path, request id, the message and — where the door still holds the throw — the
+stack. It shares a home with `resolveThrownHttpError` for the same reason that
+rule was moved there in #8016: a rule two doors must agree on cannot live
+inside one of them, because `@objectstack/runtime` depends on
+`@objectstack/rest` and an import could only ever point one way.
 
-Wired at each transport's own single exit, so a fault costs one line and never
-two: the dispatcher's thrown exit (`errorResponseBase`) and returned exit
-(`sendResultBase`), the AI-route mount that writes its own result, and the REST
-direct-mount package registrar's `sendThrownError` plus its two reported
-driver faults. `packages/rest`'s `/data` doors were already loud
-(`logUnexpectedRouteError`) and are untouched.
+Wired at each transport's single exit, so a fault costs one line and never two:
+
+- `sendError` — the one writer for every nested-envelope error in the repo. The
+  REST direct-mount registrars (the `/api/v1/packages` door that mounts first
+  in production) become loud through it with no per-door call, so a door added
+  later cannot forget one.
+- The dispatcher's thrown exit (`errorResponseBase`), its returned exit
+  (`sendResultBase`) and the AI-route mount that writes its own result.
+
+`packages/rest`'s `/data` doors were already loud via `logUnexpectedRouteError`
+and are untouched.
 
 `error` level is load-bearing: the CLI's default is `warn` and `error` (40)
 outranks `warn` (30), so the record clears `--log-level`'s default without
@@ -51,7 +53,8 @@ deliberate instruction rather than the default this fixes.
 **4xx stays quiet**, decided once inside the helper rather than at each call
 site — client mistakes are already explained by the response, and logging them
 is how a `?state=draft` probe once printed 45 stack traces in one browsing
-session.
+session. The wire body is byte-identical at every door: this adds a side
+effect, never a field.
 
 ⚠️ Behaviour change worth knowing before upgrading: a deployment that answers
 a *declared* 5xx on a polled route — `501 NOT_IMPLEMENTED` from an uninstalled

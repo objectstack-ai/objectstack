@@ -7,7 +7,6 @@ import { IHttpServer, shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY
 // gate's cohort was ruled separately (#7033 / #7023) and pins write-only callers
 // OUT. Same value it read before — no re-ruling by side effect.
 import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
-import { logServerFault } from '@objectstack/observability';
 import type { PackageService } from '@objectstack/service-package';
 // The declared envelope is written in ONE place for the whole platform (#3973),
 // and so (#8016) is the rule that reads an HTTP answer off a THROWN error.
@@ -266,16 +265,6 @@ function sendThrownError(res: any, error: unknown): void {
     ...(declaredCode !== undefined ? { declaredCode } : {}),
     ...(thrown.userMessage !== undefined ? { userMessage: thrown.userMessage } : {}),
   };
-  // [#14310] This registrar's 5xx were silent, and it is the door that mounts
-  // FIRST in the production stack — so for `/api/v1/packages` the silent
-  // answer was the live one, which is how the fault this card was filed on
-  // stayed invisible for a week. `logServerFault` owns the 5xx test, so the
-  // coded 4xx refusals this exit exists to carry (#8016's `409
-  // DESTRUCTIVE_CHANGE`, the `[tenant_scope_required]` 400) still cost no
-  // line. It logs the UNSANITISED `error`: the withhold above is scoped to
-  // what the CLIENT reads, and an operator losing the driver text to the same
-  // rule would trade a leak for the blind spot #5437 already refused.
-  logServerFault({ status: thrown.status, error, code: thrown.code });
   sendError(
     res,
     thrown.status,
@@ -647,14 +636,6 @@ export function registerPackageRoutes(
       // for a `PackageService` implementation that reports failure without
       // saying why, which is the one thing the old `error?: string` could not
       // distinguish from a driver dump.
-      // [#14310] A REPORTED driver fault never passes through
-      // {@link sendThrownError} — nothing was thrown — so it owes its own
-      // line, or this 5xx stays as silent as the thrown ones were.
-      logServerFault({
-        status: 500,
-        code: 'PACKAGE_PUBLISH_FAILED',
-        message: result.driverFault?.message ?? `Failed to publish ${manifest.id}.`,
-      });
       sendError(
         res,
         500,
@@ -1014,12 +995,6 @@ export function registerPackageRoutes(
       // producer returns a bare flag with no message channel at all
       // (`PackageDeleteResult`), which is what keeps that true — this route is
       // a status-classification defect only, never a disclosure.
-      // [#14310] Same shape as the publish fault above: reported, not thrown.
-      logServerFault({
-        status: 500,
-        code: 'PACKAGE_DELETE_FAILED',
-        message: `Failed to delete ${packageId}${version ? `@${version}` : ''}.`,
-      });
       sendError(
         res,
         500,

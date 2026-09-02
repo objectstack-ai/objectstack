@@ -28,15 +28,18 @@
  *
  * ## Why it lives here
  *
- * `@objectstack/rest` and `@objectstack/runtime` both emit 5xx envelopes and
- * both already depend on this package, which owns the operator-facing channel
- * (`Logger`, `LOG_LEVELS`, `ErrorReporter`). The rule cannot live in either
- * consumer: `runtime` depends on `rest`, so an import could only ever point
- * one way — the same argument that put `resolveThrownHttpError` in
- * `@objectstack/types` rather than in one of its two doors. Centralising it
- * is also what keeps the two doors serving `/api/v1/packages` from printing
- * two lines for one fault: each door logs at its own single exit, and the
- * predicate that decides "is this worth a line" has one definition.
+ * Same argument, and the same package, as `resolveThrownHttpError` one file
+ * over: a rule two doors must agree on cannot live inside one of them.
+ * `@objectstack/runtime` depends on `@objectstack/rest`, so an import between
+ * the two doors could only ever point one way — which is exactly why the
+ * "what status does this throw mean" rule was moved here in #8016. "Is this
+ * answer worth an operator's attention" is the same kind of rule, read by the
+ * same two doors, so it gets the same home rather than a second one.
+ *
+ * Living beside {@link sendError} is what makes the REST side automatic: that
+ * writer is the single exit for every nested-envelope 5xx, so the direct-mount
+ * registrars need no per-door call and cannot forget one. Each transport logs
+ * at its own single exit, so a fault costs one line and never two.
  *
  * ## `error` level, and why that clears the default
  *
@@ -56,7 +59,7 @@
  * whole rule: at or above 500.
  */
 
-import type { Logger } from './contracts.js';
+import type { Logger } from '@objectstack/spec/contracts';
 
 /** The request coordinates an operator needs to find the failing call. */
 export interface ServerFaultRequest {

@@ -1,9 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext, IHttpServer, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
-import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, serverFaultProvenance, demotedDeclaredCode } from '@objectstack/types';
+import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, serverFaultProvenance, demotedDeclaredCode, logServerFault, describeFaultRequest } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
-import type { IAuthService, IMetadataService } from '@objectstack/spec/contracts';
+import type { IAuthService, IMetadataService, Logger } from '@objectstack/spec/contracts';
 import type { CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
 import { HttpDispatcher, HttpDispatcherResult, type HttpProtocolContext } from './http-dispatcher.js';
 import { isServiceServeable } from './service-serveable.js';
@@ -20,11 +20,6 @@ import {
 } from './security/index.js';
 import { resolveSessionData, resolveSessionPrincipalId } from './security/resolve-session-principal.js';
 import { buildActorUser } from './security/actor-user.js';
-import {
-    logServerFault,
-    describeFaultRequest,
-    type Logger,
-} from '@objectstack/observability';
 import {
     NoopMetricsRegistry,
     NoopErrorReporter,

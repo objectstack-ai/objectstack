@@ -22,7 +22,8 @@ import {
     serverFaultLogMeta,
     describeFaultRequest,
     SERVER_FAULT_LOG_PREFIX,
-} from '../server-fault-log.js';
+} from './server-fault-log.js';
+import { sendError } from './response-envelope.js';
 
 const spyLogger = () => ({
     debug: vi.fn(),
@@ -116,6 +117,70 @@ describe('serverFaultLogMessage / serverFaultLogMeta', () => {
     it('degrade to status alone when the door knows nothing else', () => {
         expect(serverFaultLogMessage({ status: 500 })).toBe(`${SERVER_FAULT_LOG_PREFIX} 500 — Unhandled server fault`);
         expect(serverFaultLogMeta({ status: 500 })).toEqual({ status: 500 });
+    });
+});
+
+describe('sendError — the funnel every nested-envelope 5xx exits through', () => {
+    /**
+     * This is the half that makes the REST direct-mount registrars loud
+     * without any per-door call: `packages/rest`'s package routes end every
+     * catch in `sendError`, so wiring the rule HERE covers them (and any door
+     * added later) by construction rather than by remembering.
+     *
+     * The sink is `console.error` because `sendError` takes no logger — it is
+     * a pure envelope writer reached from ~50 sites that have no logger to
+     * pass. Spying it is the only way to observe this seam, and it is done
+     * ONLY here: the behavioural pins that matter (level, exact count, the
+     * message and stack) assert against an INJECTED logger above and in
+     * `packages/runtime/src/dispatcher-5xx-always-logged.test.ts`, where a
+     * console spy would have been the weaker instrument.
+     */
+    const makeRes = () => {
+        const res: any = {
+            statusCode: undefined as number | undefined,
+            body: undefined as any,
+            status(c: number) { res.statusCode = c; return res; },
+            json(b: any) { res.body = b; return res; },
+        };
+        return res;
+    };
+
+    it('logs a 5xx', () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
+        try {
+            sendError(makeRes(), 500, 'INTERNAL_ERROR', 'the driver fell over');
+            const lines = spy.mock.calls.filter((c) => String(c[0]).startsWith(SERVER_FAULT_LOG_PREFIX));
+            expect(lines).toHaveLength(1);
+            expect(String(lines[0][0])).toContain('the driver fell over');
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('stays quiet on a 4xx — the coded refusals this door exists to carry', () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
+        try {
+            sendError(makeRes(), 409, 'DESTRUCTIVE_CHANGE', 'that change drops a column');
+            sendError(makeRes(), 403, 'FORBIDDEN', 'Managing packages requires `manage_metadata`.');
+            expect(spy.mock.calls.filter((c) => String(c[0]).startsWith(SERVER_FAULT_LOG_PREFIX))).toHaveLength(0);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
+    it('leaves the wire body byte-identical — this change adds a side effect, not a field', () => {
+        const spy = vi.spyOn(console, 'error').mockImplementation(() => { });
+        try {
+            const res = makeRes();
+            sendError(res, 500, 'INTERNAL_ERROR', 'boom', { details: { a: 1 } });
+            expect(res.statusCode).toBe(500);
+            expect(res.body).toEqual({
+                success: false,
+                error: { code: 'INTERNAL_ERROR', message: 'boom', details: { a: 1 } },
+            });
+        } finally {
+            spy.mockRestore();
+        }
     });
 });
 
