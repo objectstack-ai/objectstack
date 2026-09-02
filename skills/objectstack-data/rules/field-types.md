@@ -2,6 +2,24 @@
 
 Quick reference for choosing the right field type from 49 available options.
 
+## Two spellings: `Field.*` factory or object literal
+
+The tables below give the **object-literal** spelling. Real apps overwhelmingly
+use the equivalent **`Field.*` factory** (`@objectstack/spec`) — same schema, plus
+per-helper JSDoc and inference (`Field.lookup`'s const generic is what lets
+`defineSeed()` type its reference values). A helper exists for every type below
+except a few authored as literals (`tags`, `progress`, `repeater`, `vector`).
+
+```typescript
+import { Field } from '@objectstack/spec';
+
+fields: {
+  name:       Field.text({ required: true, maxLength: 255 }),
+  stage:      Field.select(['new', 'won'], { required: true }),  // options 1st
+  account_id: Field.lookup('account', { required: true }),       // reference 1st
+}
+```
+
 > **Config columns list only real `FieldSchema` keys.** Per-type display knobs
 > beyond these do **not** exist — an unknown field key is REFUSED at parse
 > (`unrecognized_keys`), so don't invent `theme`, `rows`, or
@@ -298,11 +316,11 @@ grouped number (never a hardcoded `$`). The same chain backs analytics measures
 ```typescript
 import { F } from '@objectstack/spec';
 
-{
+const total = {
   type: 'formula',
   expression: F`record.amount * record.tax_rate`,  // CEL — `record.` prefixes required
   returnType: 'number',   // 'number' | 'text' | 'boolean' | 'date' (no 'currency')
-}
+};
 ```
 
 ### Summary (Roll-up)
@@ -358,56 +376,6 @@ There is **no** `vectorConfig` block — an authored `vectorConfig` is refused a
 parse. `dimensions` is the flat field-level key.
 
 ## Incorrect vs Correct
-
-### ❌ Incorrect — Wrong Type for Email
-
-```typescript
-{
-  type: 'text',  // ❌ No built-in email validation
-  maxLength: 255,
-}
-```
-
-### ✅ Correct — Use email Type
-
-```typescript
-{
-  type: 'email',  // ✅ Built-in validation + UI affordances
-}
-```
-
-### ❌ Incorrect — Uppercase Option Value
-
-```typescript
-options: [
-  { label: 'Done', value: 'Done' },  // ❌ Uppercase
-]
-```
-
-### ✅ Correct — Lowercase Option Value
-
-```typescript
-options: [
-  { label: 'Done', value: 'done' },  // ✅ Lowercase
-]
-```
-
-### ❌ Incorrect — Missing Reference
-
-```typescript
-{
-  type: 'lookup',  // ❌ No reference specified
-}
-```
-
-### ✅ Correct — Specify Reference
-
-```typescript
-{
-  type: 'lookup',
-  reference: 'account',  // ✅ Target object specified
-}
-```
 
 ### ❌ Incorrect — Autonumber interpolating an optional / adjacent field
 
