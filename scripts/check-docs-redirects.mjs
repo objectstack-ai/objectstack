@@ -448,6 +448,13 @@ function report(findings, stats, label) {
  * every red fixture below. The dirty one is asserted by its EXACT finding set,
  * so an over-eager checker fails just as loudly as a blind one.
  */
+
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-docs-redirects self-test reached its verdict';
+
 async function selfTest() {
   const failures = [];
   let checked = 0;
@@ -675,6 +682,8 @@ async function selfTest() {
     `✓ check-docs-redirects --self-test: ${checked} assertions over a temp fixture (real loadTable + checkTable path); `
     + 'every limb -- dead page, wildcard directory, chain -- observed FAILING and observed silent.',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 // ---------------------------------------------------------------------------
@@ -692,7 +701,14 @@ async function main() {
  * table (and calling `process.exit` out from under its caller). */
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    await selfTest();
+    if ((await selfTest()) !== SELF_TEST_VERDICT) {
+        console.error(
+            '\n✗ check-docs-redirects self-test: selfTest() returned without reaching its verdict,\n'
+                + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+    }
   } else {
     await main();
   }

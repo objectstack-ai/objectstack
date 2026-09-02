@@ -904,6 +904,13 @@ async function main() {
  * The dominance experiment, in the shape #3668 set for `cancelled` — run as
  * fixtures because a dev cannot fabricate a real runner-starved CI run.
  */
+
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-shard-attestation self-test reached its verdict';
+
 async function selfTest() {
   const failures = [];
   let checked = 0;
@@ -1375,6 +1382,8 @@ async function selfTest() {
   console.log(
     `✓ check-shard-attestation --self-test: ${checked} assertions (dominance experiment + both #6082 counter-examples + the #4928 guard + the #6589 classifier pins + the #10889 quoting pins + the #11998 attempt-scoping sequence).`,
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 // Exports bindings, so an import for those exports alone must run nothing (#10667).
@@ -1383,7 +1392,14 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 if (!invokedDirectly) {
   // imported as a module — expose the exports and do nothing else
 } else if (process.argv.includes('--self-test')) {
-  await selfTest();
+  if ((await selfTest()) !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ check-shard-attestation self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
 } else if (process.argv.includes('--emit')) {
   emit();
 } else if (process.argv.includes('--verify')) {

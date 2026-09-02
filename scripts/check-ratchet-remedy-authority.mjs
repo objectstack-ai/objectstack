@@ -1011,6 +1011,13 @@ function main() {
 // approved everything, or a sweep that read nothing, would keep the corpus run
 // green with the convention entirely gone.
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const failures = [];
   const expect = (label, cond) => { if (!cond) failures.push(label); };
@@ -1269,6 +1276,7 @@ function selfTest() {
     + 'itself, refusal is told apart from discouragement, and the sweep still reaches every known '
     + 'instance.',
   );
+  selfTestReachedVerdict = true;
   process.exit(0);
 }
 
@@ -1277,6 +1285,16 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 
 if (!invokedDirectly) {
   // imported as a module — expose the exports and do nothing else
-} else if (process.argv.includes('--self-test')) selfTest();
+} else if (process.argv.includes('--self-test')) {
+  selfTest();
+  if (!selfTestReachedVerdict) {
+    console.error(
+      '\n✗ check-ratchet-remedy-authority self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
+}
 else if (process.argv.includes('--list')) list();
 else main();

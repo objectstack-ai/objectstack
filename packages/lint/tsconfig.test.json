@@ -1,0 +1,87 @@
+// The TEST-layer type-check program (issue #14173 — wired per the triage ruling on
+// that card, comment 5502888897, 2026-09-02: "onboard by *wiring* to whichever of
+// the two in-repo routes #14062 lands on"). #14062 landed in PR #14420 on the
+// `scripts/check-test-typecheck.mts` instrument, so that is the route this file
+// follows. `tsconfig.json` beside this one stays exactly as it is: it is the BUILD
+// config. This sibling puts the test layer in front of tsc under the module
+// semantics vitest really executes it with, and `package.json`'s `typecheck`
+// script NAMES it (via `check:test-typecheck --project`), because a config no
+// script invokes is exactly the phantom this whole change is about.
+//
+// This is a CONVERSION, not a new debt-opening decision: the coverage gate
+// already carried a `@objectstack/lint` TEST_DEBT entry (`scripts/check-type-check-
+// coverage.mjs`, `errors: 16`) recording this package's untyped test layer at the
+// per-PACKAGE approximation. That entry's own authority is what this file converts
+// to per-file/per-signature form — exactly as PR #14420's graduation docblock
+// describes for the plugin family ("None of them was PAID DOWN … the same errors
+// are now held one level finer").
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - MODULE SEMANTICS ONLY, plus `lib`. The tests are written and executed as
+//     ESM by vitest (esbuild/vite). Matching that is FIDELITY, not laxity: it is
+//     the same subtraction `packages/spec`, `packages/rest` and the `packages/
+//     plugins/**` family each made, and it removes a config-tier error pile that
+//     says nothing about the tests.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`, `noUnusedParameters`,
+//     `noImplicitReturns`, `noFallthroughCasesInSwitch`, `rootDir`, `paths` and
+//     `types` (this package's `types: ["node"]` included) are all INHERITED from
+//     `tsconfig.json` (and through it the root config), and none of them is
+//     re-declared here. ⚠️ A child that declared its own `paths` would REPLACE the
+//     parent map rather than merge into it, silently sending a source-resolved
+//     specifier back to `dist/` — a BUILD ARTIFACT — so this file declares none.
+//     Nothing here may loosen a type rule; if a test does not compile, that is the
+//     finding.
+//   - `lib: ["ES2022"]`, for the same reason `packages/rest` and `plugin-auth`
+//     state: the root config's `lib` is ES2020 and vitest runs on a Node that has
+//     ES2022 builtins, so the gap is reported as TS2550 about the CHECK. No `DOM`:
+//     nothing in this layer touches a browser global.
+//
+// MEASURED at 6aea1f559, workspace closure built first (`tsc --noEmit --pretty
+// false --listFiles -p tsconfig.test.json`, and the same command without
+// `--listFiles`):
+//
+//   files in this program        627
+//   own `src/**/*.test.ts` in it 93
+//   errors under BUILD semantics 22
+//   errors under THIS config     6
+//
+// The two readings DISAGREE by exactly the recorded coverage-gate debt this
+// change converts: under BUILD semantics (NodeNext, tests included, no other
+// change) the total is 11 TS7006 + 5 TS2835 + 6 TS6059 = 22. The TS7006 and
+// TS2835 — 16 in all, the coverage gate's whole recorded `@objectstack/lint`
+// TEST_DEBT entry — dissolve under `bundler` resolution: TS2835 is "relative
+// import missing `.js`", which `bundler` does not require, and the TS7006s are
+// downstream implicit-`any` parameters whose callback types resolve once the
+// import does. Config tier, not the tests, same as `packages/spec` measured.
+// The 6 TS6059 that remain are `rootDir` violations from two test files
+// importing example-app fixtures (`examples/app-showcase`) outside this
+// package's `rootDir`, which this config inherits untouched (see above) — real,
+// pre-existing, and explicitly NOT part of the original 16 by that entry's own
+// prior note ("never this package's debt ... reporting on its own inherited
+// rootDir").
+//
+// BEFORE THIS FILE: the build config's `exclude` NAMED `**/*.test.ts` and
+// `**/*.spec.ts`, so none of the test files here reached any tsc program the
+// `typecheck` script runs (#14173).
+//
+// The residual error(s), if any, are PRE-EXISTING — this change edits no test
+// file, and every one of them would have been reported on `origin/main` had this
+// program always existed. They are ledgered per file in `test-typecheck-debt.json`
+// beside this config, EXACT and shrink-only: a file that gains an error is red,
+// one that loses an error is red until re-recorded, one that reaches zero is red
+// until its entry is deleted, a signature that ARRIVES or VANISHES is red even at
+// an unchanged file total, and a file NOT listed there may have no errors at all.
+// ⛔ The ruling is explicit that this PR does not REPAIR them — it makes the
+// ratchet able to see them; paydown follows the ratchet's own shrink-only
+// discipline, on its own cards.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
