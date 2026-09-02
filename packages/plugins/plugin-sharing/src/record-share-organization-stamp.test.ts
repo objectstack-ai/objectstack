@@ -86,6 +86,11 @@ const RULE_FIELDS: Record<string, Record<string, unknown>> = {
   updated_at: { type: 'text', name: 'updated_at', label: 'Updated' },
 };
 
+const ORG_FIELDS: Record<string, Record<string, unknown>> = {
+  id: { type: 'text', name: 'id', label: 'Id', primary: true },
+  name: { type: 'text', name: 'name', label: 'Name' },
+};
+
 const ORG_A = 'org_a';
 const ORG_B = 'org_b';
 
@@ -124,7 +129,7 @@ const open: SqlDriver[] = [];
  *   deal_b2  ORG_B   stage=won
  *   deal_p1  (null)  stage=won   <- organization-less; the discriminating record
  */
-async function boot(posture?: 'single' | 'isolated' | 'group'): Promise<Booted> {
+async function boot(posture?: 'single' | 'isolated' | 'group', organizations: readonly string[] = []): Promise<Booted> {
   const driver = new SqlDriver({
     client: 'better-sqlite3',
     connection: { filename: ':memory:' },
@@ -139,11 +144,21 @@ async function boot(posture?: 'single' | 'isolated' | 'group'): Promise<Booted> 
   ql.registerObject({ name: OBJECT, label: 'Deal', sharingModel: 'private', fields: DEAL_FIELDS } as never);
   ql.registerObject({ name: 'sys_record_share', label: 'Record Share', isSystem: true, fields: SHARE_FIELDS } as never);
   ql.registerObject({ name: 'sys_sharing_rule', label: 'Sharing Rule', isSystem: true, fields: RULE_FIELDS } as never);
+  // `sys_organization` is what the engine's #8844 rule COUNTS on a `single`
+  // install (`probeInstallOrganizations`: 0 ⇒ nothing to stamp, 1 ⇒ derived,
+  // several ⇒ refused as ambiguous). Absent by default — the fixture's
+  // `no-organization-yet` reading the earlier blocks rely on — and provisioned
+  // only for the cases that need the install to hold several.
+  if (organizations.length > 0) {
+    ql.registerObject({ name: 'sys_organization', label: 'Organization', isSystem: true, fields: ORG_FIELDS } as never);
+  }
   await driver.initObjects([
     { name: OBJECT, fields: DEAL_FIELDS } as never,
     { name: 'sys_record_share', fields: SHARE_FIELDS } as never,
     { name: 'sys_sharing_rule', fields: RULE_FIELDS } as never,
+    ...(organizations.length > 0 ? [{ name: 'sys_organization', fields: ORG_FIELDS } as never] : []),
   ]);
+  for (const id of organizations) await driver.create('sys_organization', { id, name: id } as never);
 
   // Seeded through the driver: the fixture is the DATA at rest.
   await driver.create(OBJECT, { id: 'deal_a1', stage: 'won', owner_id: 'u_a', organization_id: ORG_A } as never);
@@ -332,5 +347,177 @@ describe('[#14484] the ledger flip alone would REFUSE walled-posture grants — 
       { userId: 'u_a', tenantId: ORG_A } as never,
     );
     expect(byRecord(await shares())).toEqual({ deal_a1: ORG_A });
+  });
+});
+
+describe("[#14484] a record read that FAILS never stamps the acting session's organization (2026-09-02 review, BLOCKING 1)", () => {
+  /**
+   * Fail ONLY the organization read — the one `SharingService.recordOrganization`
+   * projects to the tenant column. `canManageShares`' owner read (`['id',
+   * 'owner_id']`) keeps working, so the grant reaches the stamp instead of
+   * being refused at the pre-flight, and every other engine call — the
+   * `sys_record_share` upsert lookup, the engine's own `sys_organization`
+   * probe — is real.
+   */
+  function failOrganizationRead(ql: ObjectQL): () => number {
+    let failed = 0;
+    const original = ql.find.bind(ql);
+    vi.spyOn(ql, 'find').mockImplementation((async (object: string, options?: any) => {
+      if (object === OBJECT && Array.isArray(options?.fields) && options.fields.includes('organization_id')) {
+        failed += 1;
+        throw new Error('simulated driver outage');
+      }
+      return original(object, options);
+    }) as never);
+    return () => failed;
+  }
+
+  // The scenario the review names: the record lives in ORG_A, the caller acts
+  // from ORG_B — a `single` install holding several organizations, or a
+  // `group` member active in a sibling — and the read that would say ORG_A
+  // failed. The session's ORG_B is the wrong answer on every posture; what
+  // differs per posture is what the engine's #8844 rule does with the `null`.
+
+  it("single posture, no organization yet: the row carries NULL — repairable by the backfill, which a stamped ORG_B never would be", async () => {
+    const { ql, sharing, shares } = await boot('single');
+    const failures = failOrganizationRead(ql);
+    await sharing.grant(
+      { object: OBJECT, recordId: 'deal_a1', recipientId: 'u_x' },
+      { userId: 'u_a', tenantId: ORG_B } as never,
+    );
+    expect(failures()).toBe(1);
+    expect(byRecord(await shares())).toEqual({ deal_a1: null });
+  });
+
+  it('single posture holding ORG_A and ORG_B: refused as ambiguous rather than written into the session\'s ORG_B', async () => {
+    const { ql, sharing, shares } = await boot('single', [ORG_A, ORG_B]);
+    const failures = failOrganizationRead(ql);
+    await expect(
+      sharing.grant(
+        { object: OBJECT, recordId: 'deal_a1', recipientId: 'u_x' },
+        { userId: 'u_a', tenantId: ORG_B } as never,
+      ),
+    ).rejects.toMatchObject({ code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED', status: 500 });
+    expect(failures()).toBe(1);
+    expect(await shares()).toEqual([]);
+  });
+
+  it.each(['isolated', 'group'] as const)(
+    "%s posture: refused loudly rather than written into the session's organization",
+    async (posture) => {
+      const { ql, sharing, shares } = await boot(posture);
+      const failures = failOrganizationRead(ql);
+      await expect(
+        sharing.grant(
+          { object: OBJECT, recordId: 'deal_a1', recipientId: 'u_x' },
+          { userId: 'u_a', tenantId: ORG_B } as never,
+        ),
+      ).rejects.toMatchObject({ code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED', status: 500 });
+      expect(failures()).toBe(1);
+      expect(await shares()).toEqual([]);
+    },
+  );
+
+  it("CONTROL: the same session grant with the read WORKING carries the record's ORG_A — on a walled posture and with two organizations alike", async () => {
+    // The refusals above are the failed read's, not the posture's or the
+    // session's: with the read intact the identical call lands, in ORG_A.
+    const walled = await boot('group');
+    await walled.sharing.grant({ object: OBJECT, recordId: 'deal_a1', recipientId: 'u_x' }, { userId: 'u_a', tenantId: ORG_B } as never);
+    expect(byRecord(await walled.shares())).toEqual({ deal_a1: ORG_A });
+
+    const several = await boot('single', [ORG_A, ORG_B]);
+    await several.sharing.grant({ object: OBJECT, recordId: 'deal_a1', recipientId: 'u_x' }, { userId: 'u_a', tenantId: ORG_B } as never);
+    expect(byRecord(await several.shares())).toEqual({ deal_a1: ORG_A });
+  });
+});
+
+describe('[#14484] the scoped UPDATE half cannot reach a row stamped with a DIFFERENT organization — a silent no-op, pinned as such (2026-09-02 review, §5 note 3)', () => {
+  // `SqlDriver.applyTenantScope` scopes the update half to
+  // `organization_id = ? OR organization_id IS NULL`: a legacy NULL row is
+  // reachable (pinned above), a row carrying ANOTHER organization is not —
+  // the wall, not a defect. What this block pins is the SHAPE of that no-op
+  // as the callers see it: `grant` returns `{ ...row, ...patch }` and the
+  // evaluator counts the call, while the stored row is untouched. Reachable
+  // through an organization-less record that two organizations' rules both
+  // match (the upsert key excludes `source_id`), or a record re-homed after a
+  // platform-global rule granted it; it self-heals only through the other
+  // rule's next revoke. The behaviour stands; the pin is so a reader of the
+  // counters does not mistake them for rows.
+
+  const allShares = async (driver: SqlDriver) => (await driver.find('sys_record_share', {} as never)) as any[];
+
+  it("grant: the return value reports the patch; the stored row keeps the other organization's stamp and access level", async () => {
+    const { driver, sharing } = await boot();
+    await driver.create('sys_record_share', {
+      id: 'shr_org_a', object_name: OBJECT, record_id: 'deal_p1', recipient_type: 'user', recipient_id: 'u_x',
+      access_level: 'read', source: 'rule', source_id: 'rule_org_a', organization_id: ORG_A, created_at: '2026-01-01T00:00:00Z',
+    } as never);
+
+    const r = await sharing.grant(
+      { object: OBJECT, recordId: 'deal_p1', recipientId: 'u_x', accessLevel: 'edit', source: 'rule', sourceId: 'rule_org_b' },
+      { ...SYSTEM, tenantId: ORG_B } as never,
+    );
+    // What the caller is told…
+    expect(r).toMatchObject({ id: 'shr_org_a', access_level: 'edit', organization_id: ORG_B, source_id: 'rule_org_b' });
+    // …and what is on disk: one row, ORG_A's, byte for byte as seeded.
+    const rows = await allShares(driver);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: 'shr_org_a', access_level: 'read', organization_id: ORG_A, source_id: 'rule_org_a' });
+  });
+
+  it("reconcile: two organizations' rules on one organization-less record — the second's grant is COUNTED, the row stays the first's", async () => {
+    const { driver, rules, shares } = await boot();
+    const ruleA = await rules.defineRule(
+      { name: 'os14484_note3_a', label: 'ORG_A won', object: OBJECT, criteria: WON, recipientType: 'user', recipientId: 'u_x', accessLevel: 'read' } as never,
+      ORG_A_ADMIN,
+    );
+    await rules.evaluateRule(ruleA.id, ORG_A_ADMIN);
+    expect(byRecord(await shares())).toEqual({ deal_a1: ORG_A, deal_p1: ORG_A });
+
+    const ORG_B_ADMIN = { ...ORG_A_ADMIN, tenantId: ORG_B } as unknown as ExecutionContext;
+    const ruleB = await rules.defineRule(
+      { name: 'os14484_note3_b', label: 'ORG_B won', object: OBJECT, criteria: WON, recipientType: 'user', recipientId: 'u_x', accessLevel: 'edit' } as never,
+      ORG_B_ADMIN,
+    );
+    const result = await rules.evaluateRule(ruleB.id, ORG_B_ADMIN);
+    // The ORG_B sweep matches deal_b1, deal_b2 and — through the driver's
+    // compatibility arm — deal_p1. The evaluator keys its existing set by its
+    // OWN rule id, so all three are "created" to it; inside `grant`, deal_p1's
+    // upsert lookup (no `source_id` in the key) finds rule A's row and takes
+    // the update half, which the ORG_B scope cannot reach.
+    expect(result).toMatchObject({ matchedRecords: 3, grantsCreated: 3, grantsUpdated: 0 });
+    const rows = await allShares(driver);
+    expect(rows).toHaveLength(4); // deal_a1, deal_b1, deal_b2, deal_p1 — no second row for deal_p1 either
+    expect(rows.find((r) => r.record_id === 'deal_p1')).toMatchObject({ organization_id: ORG_A, access_level: 'read', source_id: ruleA.id });
+  });
+
+  it("reconcile: a record re-homed after a platform-global rule granted it — the rule's next pass COUNTS an update its scoped write never lands", async () => {
+    const { driver, rules } = await boot();
+    const define = (accessLevel: 'read' | 'edit') => rules.defineRule(
+      { name: 'os14484_note3_rehome', label: 'Platform won', object: OBJECT, criteria: WON, recipientType: 'user', recipientId: 'u_x', accessLevel } as never,
+      SYSTEM,
+    );
+    const rule = await define('read');
+    await rules.evaluateRule(rule.id, SYSTEM);
+    expect((await allShares(driver)).find((r) => r.record_id === 'deal_a1')).toMatchObject({ organization_id: ORG_A, access_level: 'read' });
+
+    // The record moves to ORG_B; its grant row still says ORG_A (the
+    // organization the record was in when the platform-global rule stamped it).
+    await driver.update(OBJECT, 'deal_a1', { organization_id: ORG_B });
+    // The rule's level changes, so the next pass takes the update half for
+    // every matched record. deal_a1's resolves ORG_B from the re-homed record,
+    // and the ORG_B-scoped update cannot see the ORG_A row.
+    await define('edit');
+    const result = await rules.evaluateRule(rule.id, SYSTEM);
+    expect(result).toMatchObject({ matchedRecords: 4, grantsCreated: 0, grantsUpdated: 4 });
+
+    const rows = await allShares(driver);
+    const byId = Object.fromEntries(rows.map((r) => [r.record_id, { organization_id: r.organization_id ?? null, access_level: r.access_level }]));
+    expect(byId).toEqual({
+      deal_a1: { organization_id: ORG_A, access_level: 'read' }, // counted, not landed
+      deal_b1: { organization_id: ORG_B, access_level: 'edit' },
+      deal_b2: { organization_id: ORG_B, access_level: 'edit' },
+      deal_p1: { organization_id: null, access_level: 'edit' },
+    });
   });
 });

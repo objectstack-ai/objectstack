@@ -1907,21 +1907,89 @@ describe('[#14484] grant stamps organization_id on both halves of the upsert', (
     expect(engine._tables.sys_record_share[0].organization_id).toBe('org_backfilled');
   });
 
-  it('a record read that FAILS is logged and leaves the grant to the engine — never a stamped guess', async () => {
-    const warn = vi.fn();
-    svc = new SharingService({ engine, logger: { warn } });
+  /**
+   * Fail ONLY the organization read (the one projected to the tenant column);
+   * the management pre-flight's owner read (`['id', 'owner_id']`) keeps
+   * working, so the grant reaches the stamp instead of being refused before it.
+   */
+  function failOrganizationRead(): void {
     const originalFind = engine.find.bind(engine);
     vi.spyOn(engine, 'find').mockImplementation(async (object: string, options?: any) => {
-      // Only the organization read (projected to the tenant column) fails;
-      // the management pre-flight's reads keep working so the grant reaches it.
       if (object === 'deal' && Array.isArray(options?.fields) && options.fields.includes('organization_id')) {
         throw new Error('simulated driver outage');
       }
       return originalFind(object, options);
     });
+  }
+
+  it('a record read that FAILS is logged and leaves the grant to the engine — never a stamped guess', async () => {
+    const warn = vi.fn();
+    svc = new SharingService({ engine, logger: { warn } });
+    failOrganizationRead();
     await svc.grant({ object: 'deal', recordId: 'd1', recipientId: 'bob' }, { userId: 'admin' } as any);
     expect(engine._tables.sys_record_share[0]).toHaveProperty('organization_id', null);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(String(warn.mock.calls[0]![0])).toMatch(/could not read the shared record's organization/);
+  });
+
+  // ── The with-session-organization variant (2026-09-02 contract review, BLOCKING 1) ──
+  //
+  // The record lives in ORG_RECORD; the caller acts from ORG_CALLER — a
+  // `single` install holding several organizations, or a `group` member
+  // active in a sibling — and the read that would say ORG_RECORD failed.
+  // Before the fix a failed read and "no organization" were the same `null`,
+  // so the direct path fell through to the session's organization and the
+  // row was written into ORG_CALLER: invisible to ORG_RECORD under a
+  // tenant-scoped read, visible to the sibling, and not NULL, so the backfill
+  // (`WHERE organization_id IS NULL`) could never repair it.
+
+  it("a record read that FAILS with a session organization present does NOT stamp the session's — unknown is not absent", async () => {
+    const warn = vi.fn();
+    svc = new SharingService({ engine, logger: { warn } });
+    const insert = vi.spyOn(engine, 'insert');
+    failOrganizationRead();
+    await svc.grant(
+      { object: 'deal', recordId: 'd1', recipientId: 'bob' },
+      { userId: 'admin', tenantId: ORG_CALLER } as any,
+    );
+    const row = engine._tables.sys_record_share[0];
+    expect(row).toHaveProperty('organization_id', null);
+    expect(row.organization_id).not.toBe(ORG_CALLER);
+    // …and nothing is threaded on the write context either: the engine's
+    // ruled derive-or-refuse decides the row, not the session.
+    expect(((insert.mock.calls[0] as unknown[])[2] as any).context.tenantId).toBeUndefined();
+    expect(warn).toHaveBeenCalledTimes(1);
+    // The warn says what was NOT done, which is the one thing its reader needs.
+    expect(String(warn.mock.calls[0]![0])).toMatch(/acting session's organization is NOT substituted/);
+  });
+
+  it("the UPDATE half on a failed read leaves the stored organization alone — never overwritten with the session's", async () => {
+    engine._tables.sys_record_share = [{
+      id: 'shr_stamped', object_name: 'deal', record_id: 'd1', recipient_type: 'user', recipient_id: 'bob',
+      access_level: 'read', source: 'manual', organization_id: ORG_RECORD, created_at: '2026-01-01T00:00:00Z',
+    }];
+    svc = new SharingService({ engine, logger: { warn: vi.fn() } });
+    const update = vi.spyOn(engine, 'update');
+    failOrganizationRead();
+    await svc.grant(
+      { object: 'deal', recordId: 'd1', recipientId: 'bob', accessLevel: 'edit' },
+      { userId: 'admin', tenantId: ORG_CALLER } as any,
+    );
+    const patch = update.mock.calls[0]![1] as any;
+    expect(patch).not.toHaveProperty('organization_id');
+    expect((update.mock.calls[0]![2] as any).context.tenantId).toBeUndefined();
+    expect(engine._tables.sys_record_share[0]).toMatchObject({ organization_id: ORG_RECORD, access_level: 'edit' });
+  });
+
+  it("CONTROL: a record that carries NO organization (a real row, empty column — not a failed read) still falls back to the session's", async () => {
+    // `none` and `read-failed` are the two facts the fix keeps apart; this is
+    // the half that must NOT move. `d_orgless` is a live row on the walled
+    // object whose organization column is simply empty.
+    engine._tables.deal.push({ id: 'd_orgless', name: 'Orgless', owner_id: 'admin', organization_id: null });
+    await svc.grant(
+      { object: 'deal', recordId: 'd_orgless', recipientId: 'bob' },
+      { userId: 'admin', tenantId: ORG_CALLER } as any,
+    );
+    expect(engine._tables.sys_record_share[0].organization_id).toBe(ORG_CALLER);
   });
 });

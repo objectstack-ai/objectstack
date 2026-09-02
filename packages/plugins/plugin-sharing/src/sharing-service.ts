@@ -143,6 +143,25 @@ function activeOrganizationId(context: ExecutionContext): string | null {
   return typeof org === 'string' && org.trim() !== '' ? org : null;
 }
 
+/**
+ * [#14484] What `SharingService.recordOrganization` found — three answers the
+ * direct-grant path treats differently, so they are typed apart rather than
+ * collapsed into one `null`. `none` (no tenant column, record gone, or an
+ * organization-less row) earns the acting session's organization as the
+ * fallback; `read-failed` earns nothing: the record's organization is
+ * UNKNOWN, not absent, and the session's may not be it — the BLOCKING finding
+ * of this change's 2026-09-02 contract review, where the two collapsed into
+ * one `null` and a transient read failure stamped the session's organization
+ * on a permission-boundary column.
+ */
+type RecordOrganizationReading =
+  | { readonly kind: 'organization'; readonly organizationId: string }
+  | { readonly kind: 'none' }
+  | { readonly kind: 'read-failed' };
+
+const NO_RECORD_ORGANIZATION: RecordOrganizationReading = { kind: 'none' };
+const RECORD_ORGANIZATION_READ_FAILED: RecordOrganizationReading = { kind: 'read-failed' };
+
 function hasOwnerField(schema: any): boolean {
   return Boolean(schema?.fields && OWNER_FIELD in schema.fields);
 }
@@ -1319,8 +1338,12 @@ export class SharingService implements ISharingService {
     input: GrantShareInput,
     context: ExecutionContext,
   ): Promise<string | null> {
-    return activeOrganizationId(context)
-      ?? (await this.recordOrganization(input.object, input.recordId));
+    const threaded = activeOrganizationId(context);
+    if (threaded) return threaded;
+    const reading = await this.recordOrganization(input.object, input.recordId);
+    // `none` and `read-failed` both end here: this path has no session
+    // organization to substitute, so both are the engine's to decide.
+    return reading.kind === 'organization' ? reading.organizationId : null;
   }
 
   /**
@@ -1330,18 +1353,38 @@ export class SharingService implements ISharingService {
    * `single` posture holding several organizations may not be the record's.
    *
    * The acting session's organization is the FALLBACK for a record that
-   * carries none — an object with no tenant column, or an organization-less
+   * carries NONE — an object with no tenant column, or an organization-less
    * row — the `sys_approval_request` writer's ruled shape (subject first, the
    * acting context second). It is a fact of the write, not a guess: a
    * principal is sharing a record from inside an organization. When neither
    * exists the grant carries `null` and the engine's #8844 rule decides.
+   *
+   * It is NOT the fallback for a record whose organization could not be READ.
+   * Those are different facts and {@link recordOrganization} keeps them
+   * apart: a record with no organization has nothing the session's could
+   * contradict, while a record whose read failed may well carry one — and a
+   * `single` install holding several organizations, or a `group` member
+   * active in a sibling organization, puts the session in a different one.
+   * Stamping the session's there writes the grant into an organization the
+   * record is not in: invisible to the record's organization under a
+   * tenant-scoped read, visible to the sibling's, and not NULL, so the
+   * backfill could never repair it. #8844's rule is that guessing a tenant is
+   * strictly worse than refusing, so a failed read yields `null` and the
+   * engine's ruled derive-or-refuse decides the row — derived on a
+   * single-organization install (where it can only be the record's), refused
+   * loudly (`ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`) everywhere else.
+   * (The BLOCKING finding of this change's 2026-09-02 contract review.)
    */
   private async resolveDirectGrantOrganization(
     input: GrantShareInput,
     context: ExecutionContext,
   ): Promise<string | null> {
-    return (await this.recordOrganization(input.object, input.recordId))
-      ?? activeOrganizationId(context);
+    const reading = await this.recordOrganization(input.object, input.recordId);
+    if (reading.kind === 'organization') return reading.organizationId;
+    if (reading.kind === 'none') return activeOrganizationId(context);
+    // `read-failed`: nothing is known about the record's organization, and
+    // the acting session's is not a stand-in for it — see above.
+    return null;
   }
 
   /**
@@ -1352,15 +1395,19 @@ export class SharingService implements ISharingService {
    * hide the column from the decision — the same reading
    * {@link canManageShares} takes of the owner column.
    *
-   * `null` for an object with no tenant column, a record that is gone, an
-   * organization-less row, and a read that failed. The last is logged: a read
-   * that did not happen must not pass for a record with no organization, and
-   * the write it feeds still ends in the engine's ruled derive-or-refuse rather
-   * than in a silently stamped guess.
+   * Three readings, kept apart by {@link RecordOrganizationReading}:
+   * `organization` when the record carries one; `none` for an object with no
+   * tenant column, a record that is gone, or an organization-less row; and
+   * `read-failed` when the read threw. The last is logged and is NOT a `none`:
+   * a read that did not happen must not pass for a record with no
+   * organization — the direct path substitutes the acting session's
+   * organization for `none` and must never do so here — and the write it
+   * feeds ends in the engine's ruled derive-or-refuse rather than in a
+   * silently stamped guess.
    */
-  private async recordOrganization(object: string, recordId: string): Promise<string | null> {
+  private async recordOrganization(object: string, recordId: string): Promise<RecordOrganizationReading> {
     const tenantField = this.tenantFieldOf(object);
-    if (!tenantField) return null;
+    if (!tenantField) return NO_RECORD_ORGANIZATION;
     try {
       const rows = await this.engine.find(object, {
         where: { id: recordId },
@@ -1370,15 +1417,22 @@ export class SharingService implements ISharingService {
       });
       const row: any = Array.isArray(rows) ? rows[0] : undefined;
       const value = row?.[tenantField];
-      return typeof value === 'string' && value.trim() !== '' ? value : null;
+      return typeof value === 'string' && value.trim() !== ''
+        ? { kind: 'organization', organizationId: value }
+        : NO_RECORD_ORGANIZATION;
     } catch (err: any) {
-      // [#14484] The id stays out of the string: it reaches operators.
+      // [#14484] The id stays out of the string: it reaches operators. The
+      // text says what the failed read does NOT do — substitute the acting
+      // session's organization — because that is the one thing a reader of
+      // this line needs to know the row was spared.
       this.logger?.warn?.(
         '[sharing] could not read the shared record\'s organization — the grant carries none from it, '
-          + 'and the engine\'s system-write organization rule decides the row',
+          + 'the acting session\'s organization is NOT substituted for the record\'s, '
+          + 'and the engine\'s system-write organization rule decides the row '
+          + '(derived on a single-organization install, refused on a walled one)',
         { object, recordId, error: err?.message },
       );
-      return null;
+      return RECORD_ORGANIZATION_READ_FAILED;
     }
   }
 
