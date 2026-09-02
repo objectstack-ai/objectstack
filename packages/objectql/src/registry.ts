@@ -1117,6 +1117,125 @@ function isShareableNamespace(ns: string): boolean {
 }
 
 /**
+ * Sentinel for "this value is not data and does not belong in the record".
+ * A distinct symbol rather than `undefined`, so a manifest that genuinely
+ * carries `undefined` is not confused with a value that was dropped.
+ */
+const NOT_RECORD_DATA = Symbol('objectstack.registry.notRecordData');
+
+/** Whether `value` is a bare `{}`-shaped object (or a null-prototype bag). */
+function isPlainDataObject(value: object): boolean {
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * One step of {@link toRecordManifest} — project a value, or report that it is
+ * not data. `seen` carries the ancestors of the current value, so a CYCLE is
+ * detected at the second visit and the back-reference is dropped rather than
+ * followed. Siblings are re-projected independently (the ancestor is deleted on
+ * the way out), so a manifest that legitimately mentions the same sub-object
+ * twice keeps both copies.
+ */
+function projectRecordValue(value: unknown, seen: Set<object>): unknown {
+  if (value === null) return null;
+  const kind = typeof value;
+  if (kind === 'string' || kind === 'number' || kind === 'boolean') return value;
+  // `undefined`, `function`, `symbol`, `bigint` — none of which survive
+  // `JSON.stringify` as themselves (`bigint` is the one that THROWS).
+  if (kind !== 'object') return NOT_RECORD_DATA;
+
+  const obj = value as object;
+  // A `Date` is exotic but has a declared JSON form, so it is data. Copied
+  // rather than shared: the record must not alias a mutable runtime value.
+  if (obj instanceof Date) return new Date(obj.getTime());
+  if (seen.has(obj)) return NOT_RECORD_DATA;
+
+  if (Array.isArray(obj)) {
+    seen.add(obj);
+    const out: unknown[] = [];
+    for (const entry of obj) {
+      const projected = projectRecordValue(entry, seen);
+      // Non-data entries are OMITTED, not held as `null` holes: nothing reads a
+      // manifest collection by index (every one of them is name-keyed), and a
+      // `plugins: [null, null, …]` on the wire says less than `plugins: []`.
+      if (projected !== NOT_RECORD_DATA) out.push(projected);
+    }
+    seen.delete(obj);
+    return out;
+  }
+
+  if (!isPlainDataObject(obj)) return NOT_RECORD_DATA;
+
+  seen.add(obj);
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(obj)) {
+    const projected = projectRecordValue(entry, seen);
+    if (projected !== NOT_RECORD_DATA) out[key] = projected;
+  }
+  seen.delete(obj);
+  return out;
+}
+
+/**
+ * Project an authored manifest into the SERIALIZABLE RECORD the registry keeps.
+ *
+ * {@link SchemaRegistry.installPackage} used to store the caller's object
+ * verbatim. For a code-defined stack (`objectstack.config.ts`) that object is
+ * the LIVE runtime one — `plugins: [new ConnectorRestPlugin(), …]` — and a
+ * plugin instance holds the engine once it initialises. Since the engine grew
+ * `actionActivation -> store -> engine` that reference closes a CYCLE, so
+ * `JSON.stringify` of the registry item THREW and every read door that
+ * serialises a package answered `500 INTERNAL_ERROR` on a stock showcase boot:
+ * `GET /packages`, `GET /packages/:id`, `GET /meta/package/:id`. Before that
+ * cycle existed the same doors serialised the whole engine graph into the
+ * payload instead, which is the same defect with a quieter symptom.
+ *
+ * Measured on that boot: of the 26 installed packages exactly ONE manifest key
+ * was unserializable — `plugins`, on `com.example.showcase` — and only AFTER
+ * plugin init; the same manifest serialised cleanly during boot. So an
+ * install-time `JSON.stringify` probe would have called the record healthy. The
+ * projection therefore drops by SHAPE, at install, and never depends on when it
+ * is asked.
+ *
+ * The registry item is a RECORD, not the runtime. The kernel keeps the live
+ * object (`ObjectQL.manifests`), and the one reader of `manifest.plugins[]` —
+ * `ObjectQL.registerApp`'s nested-plugin seam — reads its OWN parameter, never
+ * the record, so nothing downstream loses a member it was using.
+ *
+ * The rule is STRUCTURAL rather than a key denylist, because the fault is not
+ * "the key is called `plugins`" — it is "a live object reached the record".
+ * JSON data survives; everything else is dropped:
+ *
+ *   - primitives, plain objects, arrays and `Date` are data;
+ *   - functions / symbols / bigints are dropped (a function was already
+ *     invisible to `JSON.stringify`; dropping it only makes the record honest,
+ *     and a bigint would have thrown);
+ *   - class instances, `Map`, `Set` and every other exotic object are dropped —
+ *     a declarative manifest has none, and a code-defined stack's are host
+ *     wiring;
+ *   - a reference cycle among plain data is dropped at the back-edge, so a
+ *     self-referencing manifest degrades to a missing field instead of throwing.
+ *
+ * ⛔ This is the PRODUCER's repair, not a consumer-side tolerance: no reader is
+ * taught to survive an unserializable record, because the record is never
+ * unserializable to begin with (AGENTS.md Prime Directive #12).
+ */
+function toRecordManifest(manifest: ObjectStackManifest): ObjectStackManifest {
+  // The ROOT is projected key-by-key unconditionally: a host whose
+  // `defineStack()` returns a class instance must still yield a record, and
+  // `projectRecordValue` would drop the whole thing.
+  if (manifest === null || typeof manifest !== 'object') return manifest;
+  const seen = new Set<object>([manifest as object]);
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(manifest as Record<string, unknown>)) {
+    const projected = projectRecordValue(value, seen);
+    if (projected !== NOT_RECORD_DATA) out[key] = projected;
+  }
+  return out as ObjectStackManifest;
+}
+
+/**
  * Raised when a package is installed whose `manifest.namespace` is already owned
  * by a **different** installed package in this installation (ADR-0048 Phase 1).
  *
@@ -3600,7 +3719,11 @@ export class SchemaRegistry {
     const now = new Date().toISOString();
     const disabled = this.initialDisabledPackageIds.has(manifest.id);
     const pkg: InstalledPackage = {
-      manifest,
+      // The RECORD's manifest, not the caller's live object — see
+      // {@link toRecordManifest}. Every other read below (`manifest.id`,
+      // `manifest.namespace`) deliberately keeps reading the ARGUMENT: the
+      // projection is what the registry hands out, never what it decides with.
+      manifest: toRecordManifest(manifest),
       status: disabled ? 'disabled' : 'installed',
       enabled: !disabled,
       installedAt: now,
