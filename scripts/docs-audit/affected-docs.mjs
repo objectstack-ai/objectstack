@@ -374,10 +374,131 @@ function memberFormOn(line, name) {
  * legible, move no row. The container name is what separates the two cases above, and it
  * is the field no row printed before.
  */
-function declarationProvenance(winner, container, line) {
+function declarationProvenance(winner, container, line, note = null) {
   const noun = winner.kind === 'member' ? memberFormOn(line, winner.name) : declNoun(winner);
   if (!container) return `a top-level ${noun}`;
-  return `${article(noun)} ${noun} of ${declNoun(container)} ${container.name}`;
+  const clause = `${article(noun)} ${noun} of ${declNoun(container)} ${container.name}`;
+  return note ? `${clause}, ${note}` : clause;
+}
+
+/**
+ * ---- CONTAINER-QUALIFIED DATA-PROPERTY ANCHORS (option D, #13713) ------------
+ *
+ * The two generated `packages/spec` artifacts this qualification reads. Both are
+ * GENERATED (`pnpm --filter @objectstack/spec gen:declaration-map`, `gen:schema`) and
+ * covered by `check:generated`; ⛔ never hand-edit them from this side, and ⛔ never
+ * grow a local container->spec-type table here when one is missing — a missing mapping
+ * is a spec-lane card, and a container this cannot resolve is handled below by KEEPING
+ * today's behaviour.
+ */
+const DECLARATION_MAP_DIR = 'packages/spec/declaration-map';
+const AUTHORABLE_SURFACE_FILE = 'packages/spec/authorable-surface.base.json';
+
+/**
+ * The container qualifier, built from those two artifacts. PURE, so `--self-test` pins
+ * every branch of the rule with no repo state (the live loader below is the only part
+ * that touches the disk).
+ *
+ * `shards` — the parsed `declaration-map/*.json` documents, each
+ *            `{ category, entries: { TSDeclarationName: 'cat/SpecType' }, collisions: [] }`.
+ * `keys`   — `authorable-surface.base.json`'s `keys`, each `'cat/SpecType:property'`.
+ *
+ * `resolve(name)` answers with THREE distinguishable states, and the distinction is the
+ * whole safety property: a string is a resolved spec type, `null` is AMBIGUOUS (the name
+ * is listed in a shard's `collisions`, or two shards map it to different types), and
+ * `undefined` is UNMAPPED. Only the resolved state may ever suppress an anchor.
+ */
+function buildContainerSurface(shards, keys) {
+  const byName = new Map();
+  for (const shard of shards) {
+    for (const name of (shard && shard.collisions) || []) byName.set(name, null);
+  }
+  for (const shard of shards) {
+    for (const [name, target] of Object.entries((shard && shard.entries) || {})) {
+      if (byName.has(name)) {
+        if (byName.get(name) !== target) byName.set(name, null); // two answers is no answer
+      } else byName.set(name, target);
+    }
+  }
+  const authorable = new Set(keys || []);
+  return {
+    available: true,
+    resolve: (name) => byName.get(name),
+    isAuthorable: (specType, prop) => authorable.has(`${specType}:${prop}`),
+  };
+}
+
+/**
+ * The qualifier used when the artifacts cannot be read. Every container resolves to
+ * UNMAPPED, so case (c) below fires for all of them and the run behaves exactly as it did
+ * before this qualification existed. That is the deliberate degradation: this script runs
+ * in contexts where `packages/spec` may be absent, and an unreadable artifact must cost
+ * noise, never silence.
+ */
+const UNAVAILABLE_CONTAINER_SURFACE = { available: false, resolve: () => undefined, isAuthorable: () => false };
+
+let containerSurfaceCache;
+
+/**
+ * What the qualification REMOVED, published rather than left silent — the discipline both
+ * existing anchor guards already follow (`overbroadAnchors`, `weakAnchorsDropped`). A
+ * suppressed anchor that no field names is a false negative nobody can audit, and a false
+ * negative is the exact cost this card is allowed to spend and must therefore account for.
+ */
+const containerQualifiedDrops = new Set();
+
+/** The live qualifier — read once per run, from the repo root, dependency-free. */
+function liveContainerSurface() {
+  if (containerSurfaceCache !== undefined) return containerSurfaceCache;
+  try {
+    const dir = join(repoRoot, DECLARATION_MAP_DIR);
+    const shards = readdirSync(dir)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')));
+    const surface = JSON.parse(readFileSync(join(repoRoot, AUTHORABLE_SURFACE_FILE), 'utf8'));
+    if (!shards.length || !Array.isArray(surface.keys) || !surface.keys.length) throw new Error('empty artifacts');
+    containerSurfaceCache = buildContainerSurface(shards, surface.keys);
+  } catch (e) {
+    // ONE note, on stderr, so the degradation is visible without changing any output the
+    // consumers parse. Anchors are unaffected — see UNAVAILABLE_CONTAINER_SURFACE.
+    process.stderr.write(`affected-docs: container qualification disabled (${DECLARATION_MAP_DIR} / ${AUTHORABLE_SURFACE_FILE} unreadable: ${e && e.message}); data-property anchors keep their pre-#13713 behaviour\n`);
+    containerSurfaceCache = UNAVAILABLE_CONTAINER_SURFACE;
+  }
+  return containerSurfaceCache;
+}
+
+/**
+ * ⭐ THE RULE #13713 IMPLEMENTS, and the one place option B could creep back in.
+ *
+ * For a DATA PROPERTY `prop` whose declaring container is `C` (#12824's construct — the
+ * same `name:` form mints the best anchor the tool has and the worst):
+ *
+ *   (a) `C` resolves to `cat/T` and `cat/T:prop` IS an authorable key  ⇒ MINT.
+ *       Today's behaviour, now justified rather than accidental — `userActions` on
+ *       `ObjectSchemaBase` -> `data/Object:userActions`.
+ *   (b) `C` resolves to `cat/T` and `cat/T:prop` is NOT authorable     ⇒ DROP the
+ *       property anchor and fall through to the container branch that already exists.
+ *       No new fallback is invented: the caller's second `return` decides, exactly as it
+ *       does for every other line that reaches it.
+ *   (c) `C` is UNMAPPED or AMBIGUOUS                                   ⇒ MINT (unchanged).
+ *
+ * ⛔ (c) MUST NEVER BECOME "DROP". That is option B (blanket prefer-container) by another
+ * name, and it is vetoed on two rounds of measurement: its "zero recall loss" was measured
+ * on the wrong population (#13306 re-derived the real recall at 48.8%) and the rows it
+ * drops are the most valuable ones the tool mints. A false positive costs a reader a
+ * minute; a false negative ships a falsified page. Fail toward noise, never toward silence.
+ *
+ * Only `name:` / `name?:` / `name =` MEMBERS are qualified. A method, a nested interface,
+ * a namespaced type — anything whose winning declaration is not a data property — is not
+ * the construct the ruling is about and is left alone.
+ */
+function qualifyDataProperty(inner, outer, surface) {
+  if (!inner || inner.kind !== 'member') return { mint: true, note: null };
+  if (memberFormOn(inner.line, inner.name) !== 'field') return { mint: true, note: null };
+  const target = surface.resolve(outer.name);
+  if (target === undefined || target === null) return { mint: true, note: null }; // (c) unmapped / ambiguous
+  if (surface.isAuthorable(target, inner.name)) return { mint: true, note: `an authorable key of ${target}` }; // (a)
+  return { mint: false, note: null, dropped: `${target}:${inner.name}` }; // (b)
 }
 
 /**
@@ -1168,16 +1289,30 @@ function declarationChainAt(lines, idx) {
  * declaration that minted this anchor, so an emitted row reads "via `organizationId`, a
  * field of interface `MetaOverlayCacheKey`" instead of leaving the reader to guess whether
  * that is an authorable key or an internal cache struct. ⛔ It is not consulted here, in
- * `symbolAnchorsFromSource`, in `admitAnchor` or in the bridge — the two returns below
- * select exactly the names they selected before it existed.
+ * `symbolAnchorsFromSource`, in `admitAnchor` or in the bridge — the returns below
+ * select their names without reading it, exactly as they did before it existed.
+ *
+ * `surface` is the container qualifier (#13713, option D of #12824's ruling) and it is the
+ * ONE input here that can move a name. Injected rather than reached for, so `--self-test`
+ * pins all three branches of `qualifyDataProperty` with no repo state; live, it is read
+ * once per run off the two generated `packages/spec` artifacts. A data property of a
+ * container that resolves to a spec type whose `:prop` is not authorable drops to the
+ * container branch below — and an UNMAPPED or AMBIGUOUS container keeps minting, which is
+ * the ruled safety direction and ⛔ not a gap to tidy up. See `qualifyDataProperty`.
  */
-function documentableDeclarationsAt(lines, idx) {
+function documentableDeclarationsAt(lines, idx, surface = liveContainerSurface()) {
   const chain = declarationChainAt(lines, idx);
   if (!chain.length) return [];
   const outer = chain[chain.length - 1];
   const inner = chain.length > 1 ? chain[chain.length - 2] : null;
   const usable = (d) => d && !GENERIC_ANCHOR_NAMES.has(d.name) && !GENERIC_ANCHOR_NAMES.has(d.name.toLowerCase()) && d.name.length >= 3;
-  if (inner && outer.container && usable(inner)) return [{ name: inner.name, container: !!inner.container, from: declarationProvenance(inner, outer, inner.line) }];
+  if (inner && outer.container && usable(inner)) {
+    const q = qualifyDataProperty(inner, outer, surface);
+    if (q.mint) return [{ name: inner.name, container: !!inner.container, from: declarationProvenance(inner, outer, inner.line, q.note) }];
+    if (q.dropped) containerQualifiedDrops.add(`${inner.name} (${declNoun(outer)} ${outer.name} \u2192 ${q.dropped} is not an authorable key)`);
+    // ⛔ NO new fallback here: fall through to the container branch, which decides on
+    // exactly the terms it already decides on for every other line that reaches it.
+  }
   if (usable(outer) && outer.kind !== 'member') return [{ name: outer.name, container: !!outer.container, from: declarationProvenance(outer, null, outer.line) }];
   return [];
 }
@@ -1311,7 +1446,7 @@ function isLiteralAnchorShape(lit) {
 }
 
 /** Route tails and identifier-shaped string literals appearing on the changed lines. */
-function literalAnchorsFromLines(lines, changed) {
+function literalAnchorsFromLines(lines, changed, surface = liveContainerSurface()) {
   const routes = new Set();
   const literals = new Set();
   // WHERE each one sat, for the emitted row (#12824). Derived lazily — the enclosing
@@ -1324,7 +1459,7 @@ function literalAnchorsFromLines(lines, changed) {
     if (line === undefined) continue;
     let enclosing;
     const enclosingName = () => {
-      if (enclosing === undefined) enclosing = documentableDeclarationsAt(lines, n - 1)[0] || null;
+      if (enclosing === undefined) enclosing = documentableDeclarationsAt(lines, n - 1, surface)[0] || null;
       return enclosing ? enclosing.name : null;
     };
     for (const m of line.replace(/\$\{[^}]*\}/g, '').matchAll(/(?:\/[A-Za-z0-9_:.$*{}-]+){2,}/g)) {
@@ -1356,7 +1491,7 @@ function literalAnchorsFromLines(lines, changed) {
  * derivation anywhere stays bridgeable even if some other line derived it as a
  * container. `bridgeable ⊆ names` always.
  */
-function symbolAnchorsFromSource(text, changed) {
+function symbolAnchorsFromSource(text, changed, surface = liveContainerSurface()) {
   const lines = text.split('\n');
   const names = new Set();
   const bridgeable = new Set();
@@ -1366,7 +1501,7 @@ function symbolAnchorsFromSource(text, changed) {
   const from = new Map();
   for (const n of changed) {
     if (n - 1 < 0 || n - 1 >= lines.length) continue;
-    for (const d of documentableDeclarationsAt(lines, n - 1)) {
+    for (const d of documentableDeclarationsAt(lines, n - 1, surface)) {
       names.add(d.name);
       noteFrom(from, d.name, d.from);
       if (!d.container) bridgeable.add(d.name);
@@ -2748,8 +2883,23 @@ function selfTest() {
     '    }',
     '}',
   ].join('\n');
-  const anchorsAt = (src, lineNo) => symbolAnchorsFromSource(src, [lineNo]).names;
-  const bridgeableAt = (src, lineNo) => symbolAnchorsFromSource(src, [lineNo]).bridgeable;
+  // ---- the container qualifier every anchor case below runs under (#13713) ----
+  // A FIXTURE surface, not the live artifacts, so `--self-test` keeps its no-repo-state
+  // contract and every case states its own preconditions. Its four entries are copied
+  // from the real generated map rather than invented — `ObjectSchemaBase`/`ObjectSchema`
+  // and `DatasourceSchema` are `data.json` entries, `ListViewShapeSchema` is a real
+  // `ui.json` collision — and the containers deliberately LEFT OUT (`MetaOverlayCacheKey`,
+  // `DatasourceDef`, `SysScimConnectionBinding`, `RestServer`, …) are exactly the ones the
+  // real map does not carry either. That absence is what the case-(c) pins below exercise.
+  const selfTestSurface = buildContainerSurface(
+    [
+      { entries: { ObjectSchemaBase: 'data/Object', DatasourceSchema: 'data/Datasource' }, collisions: [] },
+      { entries: { ListViewShapeSchema: 'ui/ListView' }, collisions: ['ListViewShapeSchema'] },
+    ],
+    ['data/Object:userActions', 'data/Object:managedBy', 'data/Datasource:schemaMode', 'ui/ListView:userActions'],
+  );
+  const anchorsAt = (src, lineNo, surface = selfTestSurface) => symbolAnchorsFromSource(src, [lineNo], surface).names;
+  const bridgeableAt = (src, lineNo, surface = selfTestSurface) => symbolAnchorsFromSource(src, [lineNo], surface).bridgeable;
   const symbolCases = [
     // [1-based line, expected anchor set, label]
     [9, ['auditMetaItem'], 'a changed METHOD BODY anchors on the method, not on its 20k-line class'],
@@ -2811,15 +2961,15 @@ function selfTest() {
     '    }),',
     '});',
   ].join('\n');
-  const fromAt = (src, lineNo) => {
-    const d = documentableDeclarationsAt(src.split('\n'), lineNo - 1)[0];
+  const fromAt = (src, lineNo, surface = selfTestSurface) => {
+    const d = documentableDeclarationsAt(src.split('\n'), lineNo - 1, surface)[0];
     return d ? `${d.name} — ${d.from}` : null;
   };
   const provenanceCases = [
     [cacheStructSource, 5, 'organizationId — a field of interface MetaOverlayCacheKey',
       'the NOISY face: a data property of an internal cache struct, and the row now says so'],
-    [authorableSource, 2, 'userActions — a field of const object ObjectSchemaBase',
-      'the VALUABLE face: the same `name:` form on an authorable spec object — option B dropped this row, C prints it'],
+    [authorableSource, 2, 'userActions — a field of const object ObjectSchemaBase, an authorable key of data/Object',
+      'the VALUABLE face: the same `name:` form on an authorable spec object — option B dropped this row, C prints it and D says WHY it is kept'],
     [protocolSource, 9, 'auditMetaItem — a method of class ObjectStackProtocolImplementation',
       'a changed method body names its method AND the class it lives in'],
     [protocolSource, 1, 'ObjectStackProtocolImplementation — a top-level class',
@@ -2859,7 +3009,7 @@ function selfTest() {
     [authorableSource, 2, 'a data property of an authorable schema'],
     [schemaSource, 6, 'a function-local line'],
   ]) {
-    const got = symbolAnchorsFromSource(src, [line]);
+    const got = symbolAnchorsFromSource(src, [line], selfTestSurface);
     check('symbolAnchorsFromSource.from', `the provenance key set IS the anchor set — ${label}`, `line ${line}`,
       JSON.stringify([...got.names].sort()), JSON.stringify([...got.from.keys()].sort()));
   }
@@ -5195,6 +5345,13 @@ const unanchoredRuleNote = unanchoredRuleBlocks.length
 const overbroadNote = overbroadAnchors.length
   ? `; ${overbroadAnchors.length} over-broad anchor(s) dropped (${overbroadAnchors.join(', ')})`
   : '';
+// The third narrowing (#13713), reported on the same terms as the two guards above: a
+// data-property anchor this run suppressed BECAUSE its declaring container resolved to a
+// spec type that does not declare the property as authorable. Every other data property
+// still mints, including every one whose container this could not resolve.
+const containerQualifiedNote = containerQualifiedDrops.size
+  ? `; ${containerQualifiedDrops.size} data-property anchor(s) container-qualified away (${[...containerQualifiedDrops].sort().join(', ')})`
+  : '';
 const crossCuttingNote = crossCuttingSymbols.length
   ? `; ${crossCuttingSymbols.length} cross-cutting symbol(s) contributed no route anchor (${crossCuttingSymbols.join(', ')})`
   : '';
@@ -5210,7 +5367,7 @@ const bridgeCoverageNote = bridgeCoverage.measured
 emit(
   affected.map((a) => a.doc),
   changedPackages,
-  `${affected.length} docs name something this change touched (${anchorSummary}) across ${changedPackages.length} changed package(s) since ${sinceRef}${skipNote}${anchorlessNote}${unmappedCommandNote}${unanchoredRuleNote}${crossCuttingNote}${bridgeCoverageNote}${overbroadNote}`,
+  `${affected.length} docs name something this change touched (${anchorSummary}) across ${changedPackages.length} changed package(s) since ${sinceRef}${skipNote}${anchorlessNote}${unmappedCommandNote}${unanchoredRuleNote}${crossCuttingNote}${bridgeCoverageNote}${overbroadNote}${containerQualifiedNote}`,
   affected,
   { testFilesSkipped, scriptFilesSkipped, devOnlyManifestsSkipped },
   {
@@ -5224,6 +5381,7 @@ emit(
     bridgeCoverage,
     weakAnchorsDropped,
     overbroadAnchors,
+    containerQualifiedDrops: [...containerQualifiedDrops].sort(),
     packageMentionDocs,
   },
 );
@@ -5302,6 +5460,7 @@ function emit(docList, changedPackages, summary, detail, skipped = {}, anchorInf
   const {
     anchors: anchorList = [], anchorlessChanges: anchorless = [], crossCuttingSymbols: crossCutting = [],
     weakAnchorsDropped: weak = [], overbroadAnchors: overbroad = [], packageMentionDocs: coarse = [],
+    containerQualifiedDrops: containerDrops = [],
     unmappedCommandFiles: unmappedCommands = [], unanchoredRuleBlocks: unanchoredRules = [],
     // `null` for the `--all` arm, which derives no anchors and runs no bridge. Distinct
     // from `{ measured: false }`, which means the bridge was available and stood down.
@@ -5360,6 +5519,11 @@ function emit(docList, changedPackages, summary, detail, skipped = {}, anchorInf
           // one level down, and these two fields are what keep it reviewable.
           weakAnchorsDropped: weak,
           overbroadAnchors: overbroad,
+          // The same accounting for the THIRD narrowing (#13713 / option D of #12824's
+          // ruling). A container-qualified drop is a deliberate false negative, and a
+          // false negative that no field names is one nobody can audit — so it is named,
+          // with the spec key that failed to be authorable.
+          containerQualifiedDrops: containerDrops,
           // The superseded COARSE set: docs merely MENTIONING a changed package. Kept for
           // the deliberately-wide backstop, and labelled so it is never mistaken for the
           // work list again (it was measured wrong in both directions — see the header).
