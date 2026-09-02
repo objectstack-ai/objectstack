@@ -23,6 +23,7 @@
 // the tolerant-fallback direction, not the loud one.
 
 import { describe, it, expect } from 'vitest';
+import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 import { ObjectQL } from './engine.js';
 import {
   VALUE_BEARING_TEMPLATES,
@@ -863,6 +864,11 @@ describe('#8682 half B — the write-path loggers', () => {
   };
 
   it('MySQL duplicate entry — the entry survives and still names the index', async () => {
+    // [#14095] Load-bearing after the envelope: the caller's error changed, the
+    // OPERATOR's line did not. The engine logs the driver's own error (the
+    // envelope's `cause`) precisely because the platform logger serializes only
+    // `message` and `stack` — logging the envelope instead would drop the index
+    // name below, which is the operator's answer to "which constraint?".
     const { line } = await insertAgainstADriftedColumn(MYSQL_DUPLICATE_ENTRY);
 
     expect(line).toBeDefined();
@@ -883,15 +889,34 @@ describe('#8682 half B — the write-path loggers', () => {
     }
   });
 
-  it('MySQL duplicate entry — the RETHROWN error is still untouched', async () => {
-    // Same boundary as above: the log narrows, the caller's answer does not
-    // move. `isUniqueViolationError` and `uniqueViolationColumn` read this
-    // message downstream and must keep seeing the driver's own text.
+  it('MySQL duplicate entry — the driver error reaches the caller UNTOUCHED, on `cause`', async () => {
+    // Same boundary as above: the log narrows, and what the driver said is not
+    // rewritten anywhere. `isUniqueViolationError` and `uniqueViolationColumn`
+    // read this text downstream and must keep seeing it.
+    //
+    // ⚠️ [#14095] WHERE the caller finds it moved by one step, and only for a
+    // recognised unique violation: the insert door now answers the
+    // `DUPLICATE_RECORD` envelope so an application can name the condition
+    // without knowing `ER_DUP_ENTRY` from `23505`, and attaches the driver's
+    // error whole as `cause`. Both predicates walk a `cause` chain, so every
+    // downstream reading this pin protects is unchanged — asserted here rather
+    // than assumed. The non-unique fault one test up is the control: it is not
+    // enveloped at all and still arrives as the driver threw it.
     const { thrown } = await insertAgainstADriftedColumn(MYSQL_DUPLICATE_ENTRY);
 
-    expect(String(thrown?.message)).toContain('insert into');
-    expect(String(thrown?.message)).toContain(SECRET);
-    expect(String(thrown?.message)).toContain('Duplicate entry');
-    expect((thrown as any)?.code).toBe('ER_DUP_ENTRY');
+    expect((thrown as any)?.code).toBe('DUPLICATE_RECORD');
+    expect((thrown as any)?.status).toBe(409);
+
+    const cause = (thrown as any)?.cause;
+    expect(String(cause?.message)).toContain('insert into');
+    expect(String(cause?.message)).toContain(SECRET);
+    expect(String(cause?.message)).toContain('Duplicate entry');
+    expect(cause?.code).toBe('ER_DUP_ENTRY');
+
+    // The verdicts the downstream consumers ask of it, asked of the envelope.
+    expect(isUniqueViolationError(thrown)).toBe(true);
+    // MySQL names an INDEX, so the column answer is `undefined` — before and
+    // after, for the same reason (#6544).
+    expect(uniqueViolationColumn(thrown)).toBeUndefined();
   });
 });

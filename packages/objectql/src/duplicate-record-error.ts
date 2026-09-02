@@ -68,23 +68,29 @@ const DUPLICATE_RECORD_STATUS = 409 as const;
 export class DuplicateRecordError extends Error {
   readonly code = DUPLICATE_RECORD_CODE;
   readonly status = DUPLICATE_RECORD_STATUS;
+  /**
+   * The driver's own error, whole.
+   *
+   * DECLARED on the class rather than merely assigned, because this repo
+   * compiles against `lib: ES2020`, where `Error` has no `cause` member and no
+   * `ErrorOptions` to pass one through the constructor — so an undeclared
+   * assignment would be invisible to every TypeScript consumer of the very
+   * field this envelope's contract rests on.
+   */
+  readonly cause: unknown;
   /** The remedy half — see the module header on why it is not in `message`. */
   readonly developerMessage: string;
 
   constructor(
     /** The object the refused insert targeted. */
     public readonly object: string,
-    /** The driver's own error, whole. */
     cause: unknown,
     /** The conflicting column, when the dialect determinably named one. */
     public readonly field?: string,
   ) {
     super(buildDuplicateMessage(object, field));
     this.name = 'DuplicateRecordError';
-    // Assigned rather than passed as `new Error(msg, { cause })`: this repo
-    // compiles against `lib: ES2020`, where `ErrorOptions` does not exist —
-    // the same reason `ERR_AUTONUMBER_COLLISION` one file over assigns it.
-    (this as { cause?: unknown }).cause = cause;
+    this.cause = cause;
     this.developerMessage =
       `The driver refused this insert as a unique-constraint violation. Its own error is attached ` +
       `as \`cause\` — branch on \`code === '${DUPLICATE_RECORD_CODE}'\` (ADR-0112) rather than on a ` +

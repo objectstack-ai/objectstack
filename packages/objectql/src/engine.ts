@@ -119,7 +119,7 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 // engine is the consumer-side tolerant parsing PD #12 forbids and precedent
 // #5841 retired.
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
-import { envelopeUniqueViolation } from './duplicate-record-error.js';
+import { DuplicateRecordError, envelopeUniqueViolation } from './duplicate-record-error.js';
 // [#8682] The write-path loggers' redaction — bound values never reach the log.
 import { redactBoundStatement } from './driver-fault-redaction.js';
 // [#8844] The runtime half of #8686's ruling: a system-context write on a
@@ -10102,7 +10102,17 @@ export class ObjectQL implements IObjectQLEngine {
         // database itself said, including the failing column, is kept; the
         // error rethrown below is untouched, so the caller's answer does not
         // move. See `redactBoundStatement`.
-        this.logger.error('Insert operation failed', redactBoundStatement(e) as Error, { object });
+        //
+        // [#14095] …and the line still carries what the DATABASE said, even now
+        // that the door hands the CALLER an envelope instead. The platform
+        // logger serializes an error's `message` and `stack` and nothing else,
+        // so logging the envelope in the driver error's place would silently
+        // drop exactly the diagnosis this line exists to carry — the failing
+        // column, MySQL's index name, the driver's own frames. So the log takes
+        // the `cause`; the caller's answer does not move, because `e` is what
+        // is rethrown one line down, with that same error still on it.
+        const logged = e instanceof DuplicateRecordError ? e.cause : e;
+        this.logger.error('Insert operation failed', redactBoundStatement(logged) as Error, { object });
         throw e;
       }
     });
