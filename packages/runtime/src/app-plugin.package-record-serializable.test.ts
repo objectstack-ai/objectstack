@@ -63,17 +63,32 @@ import { HttpDispatcher } from './http-dispatcher.js';
 const PACKAGE_ID = 'com.example.instances';
 
 /**
- * A kernel plugin that does at boot what every real connector plugin does:
- * resolve the engine and keep it. That reference IS the cycle — the engine
- * refers back to itself (`_ObjectQL.actionActivation.store.engine`, the
- * constructor chain the production envelope named).
+ * A kernel plugin doing at boot what every real connector plugin does: resolve
+ * the engine, keep it, and materialize the instances it owns — each of which
+ * holds its owner back.
+ *
+ * ⚠️ Where the cycle comes from, measured rather than assumed. In production
+ * the circle the 500 named runs through the ENGINE
+ * (`_ObjectQL.actionActivation.store.engine`), but that store only attaches on
+ * a composition where `sys_action_activation` is registered and probeable
+ * (`ObjectQLPlugin`), which a bare engine kernel is not: measured here, a
+ * booted engine on this composition serializes clean, so a fixture that only
+ * held the engine would make every pin below VACUOUS. So the fixture closes
+ * the circle the other ordinary way a plugin does — an owned instance holding
+ * its owner — and the first assertion of the first test is the guard that the
+ * fixture really is cyclic. What is under test either way is the same and does
+ * not depend on which edge closes it: a booted plugin instance carries an
+ * arbitrary runtime object graph, and a package record must not carry one.
  */
 class EngineHoldingPlugin implements Plugin {
     name = 'com.example.engine-holding';
     /** Set at init — the reference the record must not end up carrying. */
     engine?: unknown;
+    /** Materialized at boot, each holding the plugin back. */
+    readonly connectors: Array<{ owner: EngineHoldingPlugin }> = [];
     init(ctx: PluginContext): void {
         this.engine = ctx.getService('objectql');
+        this.connectors.push({ owner: this });
     }
 }
 
@@ -147,6 +162,28 @@ const dispatcherOver = (ql: QlService): HttpDispatcher =>
         context: { getService: (name: string) => (name === 'objectql' ? ql : null) },
     } as never);
 
+/**
+ * A read-only data-plane stub, registered AFTER boot so `getMetaItems` can make
+ * its `sys_metadata` overlay read.
+ *
+ * The SchemaRegistry — the thing under test, and the thing that stores the
+ * record — stays entirely real; this answers only the DB half `getMetaItems`
+ * consults after the registry, which a driver-less kernel cannot answer at all
+ * (it throws "The metadata store could not be read"). Hand-written rather than
+ * `vi.fn`: nothing here is asserted on, and no code-authored package has an
+ * overlay row anyway, so an empty answer IS the production answer for this
+ * type.
+ */
+const emptyOverlayDriver = {
+    name: 'pin_empty_overlay',
+    supports: {},
+    async connect() { /* nothing to open */ },
+    async disconnect() { /* nothing to close */ },
+    async find() { return []; },
+    async findOne() { return null; },
+    async count() { return 0; },
+};
+
 /** Engine self-invocation — passes the domain's anonymous floor and read gate. */
 const systemCaller = () => ({ request: {}, environmentId: 'platform', executionContext: { isSystem: true } }) as never;
 
@@ -181,6 +218,8 @@ describe('#14442 — the package record of an instance-bearing stack is serializ
             expect(() => JSON.stringify(detail.response)).not.toThrow();
 
             // Pin 2b — the REST `/meta/package` door's primitive.
+            (ql as unknown as { registerDriver(d: unknown, isDefault?: boolean): void })
+                .registerDriver(emptyOverlayDriver, true);
             const protocol = new ObjectStackProtocolImplementation(ql as never);
             const meta = await protocol.getMetaItems({ type: 'package' });
             expect(() => JSON.stringify(meta)).not.toThrow();
