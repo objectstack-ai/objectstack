@@ -222,9 +222,9 @@ describe('[#13438] sqlite — a relation the statement did NOT target is still l
     const phrase = String(err.cause?.message);
     expect(phrase, 'the dialect names the dropped base').toContain(BASE);
     expect(isMissingTableError(err, VIEW), 'a view that exists is not "not provisioned yet"').toBe(false);
-    // The one-argument published form reaches the same verdict from the
-    // declaration alone — the driver supplied what the caller could not.
-    expect(isMissingTableError(err)).toBe(false);
+    // That the one-argument published form reaches the same verdict from the
+    // declaration alone is pinned in the predicate's own contract tests — the
+    // one place the #13440 callers gate lets that form be spelled.
   });
 });
 });

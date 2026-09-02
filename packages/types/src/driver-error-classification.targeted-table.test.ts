@@ -163,7 +163,7 @@ describe('isMissingTableError — a declared targeted table beats the caller-sup
         it('is found below an undeclared wrapper', () => {
             // The engine wraps the driver's envelope; the driver's declaration
             // is still the one compared.
-            const wrapped = new Error('engine: read failed', {
+            const wrapped = Object.assign(new Error('engine: read failed'), {
                 cause: envelope(new Error(`no such table: ${REMOTE}`), REMOTE),
             });
             expect(isMissingTableError(wrapped, OBJECT)).toBe(true);
@@ -173,7 +173,10 @@ describe('isMissingTableError — a declared targeted table beats the caller-sup
             // An outer actor re-declaring a different target is farther from
             // the statement than the driver that compiled it.
             const inner = envelope(new Error(`no such table: ${REMOTE}`), REMOTE);
-            const outer = declareTargetedTable(new Error('outer wrapper', { cause: inner }), 'not_the_target');
+            const outer = declareTargetedTable(
+                Object.assign(new Error('outer wrapper'), { cause: inner }),
+                'not_the_target',
+            );
             expect(isMissingTableError(outer, OBJECT)).toBe(true);
         });
 
