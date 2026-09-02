@@ -535,7 +535,7 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
     + 'rule-name-only keying could not tell two objects\' rules apart. Author the '
     + 'message on the rule itself (`object.validations[].message`), which the engine '
     + 'evaluates and returns on every rejected write, and translate it under the object-scoped '
-    + "group 'objects.<object_name>._validations.<rule_name>.message' (#14253), which the write "
+    + "group 'objects.<object_name>._validations.<rule_name>.message', which the write "
     + 'path resolves. Delete this key. Run '
     + '`os migrate meta --from 16` to list the mechanical edits for existing sources; apply them by hand.',
   o: "`o` is the retired object-first dialect, which no resolver reads — use 'objects.<object_name>'",
@@ -551,7 +551,7 @@ const TRANSLATION_KEY_GUIDANCE: Record<LegacyObjectFirstKey | 'validationMessage
   errors:
     '`errors` is the retired object-first dialect and has no replacement under that name. Author '
     + 'the message on the rule itself (`object.validations[].message`) and translate it under '
-    + "'objects.<object_name>._validations.<rule_name>.message' (#14253); omit `errors`.",
+    + "'objects.<object_name>._validations.<rule_name>.message'; omit `errors`.",
   _globalOptions: "`_globalOptions` is the retired object-first dialect — use 'objects.<object_name>.fields.<field_name>.options'",
   _meta: "`_meta` is the retired object-first dialect — use the top-level 'locale' field (on a bundle, the locale is the map key)",
   namespace: '`namespace` is not part of the translation contract — omit it (ADR-0129 D3 retired the separate namespace declaration platform-wide)',
