@@ -382,7 +382,12 @@ export const CEILINGS = new Map([
   // default in the very PR that demotes it. Both now reference a declared group,
   // which is shorter — -13 tokens, real, and the fix the ruling asks for rather
   // than a payment invented to fund it. +315 gross, -13, ceiling +302.
-  ['skills/objectstack-ui/SKILL.md', 25445],
+  // 25445 -> 3815: the #14296 item 1 split (ruled A). The entry file's body
+  // moved into the five `rules/*.md` rows below; this row is RE-LOCKED to the
+  // entry's landed count in the same PR, so the split banks its own shrink
+  // instead of leaving 21,630 tokens of headroom behind for the next author.
+  // Lowering is always legitimate (see the shrink-only section in the header).
+  ['skills/objectstack-ui/SKILL.md', 3815],
   ['skills/objectstack-upgrade/SKILL.md', 8333], //      -2 (was 8335)
 
   // ── the #12392 extension: the rest of the AUTHORED bundle ────────────────
@@ -435,6 +440,20 @@ export const CEILINGS = new Map([
   // row here on purpose (see the boundary section).
   ['skills/objectstack-ui/evals/README.md', 289],
   ['skills/objectstack-ui/evals/analytics-inline-vs-dataset.json', 1102],
+
+  // objectstack-ui `rules/` — the five files the #14296 item 1 split created.
+  // Each row is an INITIAL measurement AT its landed count, so every one starts
+  // with exactly zero headroom, on the same terms as the #12392 rows above: the
+  // next token added to any of them is paid for by deleting one from the same
+  // file. The split moves text only — it deleted the 234 tokens of restatement
+  // the reassembly exposed (plus three cross-references the move killed) and
+  // added nothing but five titles and five pointers,
+  // so the package nets -58 (33,957 -> 33,899).
+  ['skills/objectstack-ui/rules/actions.md', 2108],
+  ['skills/objectstack-ui/rules/dashboards.md', 6090],
+  ['skills/objectstack-ui/rules/list-views.md', 3011],
+  ['skills/objectstack-ui/rules/navigation.md', 2273],
+  ['skills/objectstack-ui/rules/pages.md', 5501],
 
   // the remaining skills' eval notes
   ['skills/objectstack-ai/evals/README.md', 315],
