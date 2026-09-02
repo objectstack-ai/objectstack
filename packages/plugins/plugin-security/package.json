@@ -2,7 +2,7 @@
   "name": "@objectstack/plugin-security",
   "version": "17.2.0",
   "license": "Apache-2.0",
-  "description": "Security Plugin for ObjectStack \u2014 RBAC, RLS, and Field-Level Security Runtime",
+  "description": "Security Plugin for ObjectStack — RBAC, RLS, and Field-Level Security Runtime",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
@@ -15,7 +15,8 @@
   "scripts": {
     "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json && tsc --noEmit -p tsconfig.test.json"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.scripts.json && pnpm check:test-typecheck",
+    "check:test-typecheck": "tsx ../../../scripts/check-test-typecheck.mts --self-test && tsx ../../../scripts/check-test-typecheck.mts --package packages/plugins/plugin-security --project tsconfig.test.json"
   },
   "dependencies": {
     "@objectstack/core": "workspace:*",
@@ -32,6 +33,7 @@
     "@objectstack/plugin-sharing": "workspace:*",
     "@objectstack/service-i18n": "workspace:*",
     "@types/node": "^26.2.0",
+    "tsx": "^4.23.12",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
   },
