@@ -197,12 +197,131 @@ describe('validateReadonlyFlowWrites', () => {
   });
 
   // ── clean: runAs:system is the intended maintenance channel ───────────
-  it('does NOT flag a runAs:system flow (elevated writer bypasses the strip)', () => {
+  // …for the STATIC strip, and only for it. The engine skips
+  // `stripReadonlyFields` under `if (!opCtx.context?.isSystem)`, so an elevated
+  // flow maintaining a `readonly:true` column is the intended channel and stays
+  // silent. Paired with the `readonlyWhen` case below, which is the OTHER half
+  // of the same run identity — the two must not move together (#14201).
+  it('does NOT flag a runAs:system flow writing a STATIC readonly field (elevated writer bypasses that strip)', () => {
     const findings = validateReadonlyFlowWrites({
       objects: [opportunityObject],
       flows: [flowWith({ approval_status: 'approved' }, { runAs: 'system' })],
     });
     expect(findings).toEqual([]);
+  });
+
+  // ── runAs:system + readonlyWhen → still a WARNING (#14201) ────────────
+  // `stripReadonlyWhenFields` is called on the update path with NO `isSystem`
+  // guard at all (engine.ts, the #9107 note: "`isSystem` is still NOT an
+  // exemption here, unlike the static strip below"), pinned from both sides as
+  // "LOCK 2 — isSystem does NOT exempt a caller-supplied value"
+  // (`engine-readonly-when-derived-writes.test.ts`) and "covers readonlyWhen
+  // too — the arm a trusted (isSystem) caller can still hit"
+  // (`engine-readonly-strict-writes.test.ts`). So the elevated flow's write
+  // vanishes on a locked record exactly as a user run's does, and the rule that
+  // exists to surface that silent no-op has to say so on the very flow class
+  // its own hint tells the author elevation cannot save.
+  it('warns when a runAs:system flow writes a readonlyWhen field (elevation does NOT waive the conditional strip)', () => {
+    const findings = validateReadonlyFlowWrites({
+      objects: [opportunityObject],
+      flows: [flowWith({ amount: 5000 }, { runAs: 'system' })],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].rule).toBe(FLOW_UPDATE_READONLY_WHEN_FIELD);
+    expect(findings[0].path).toBe('flows[0].nodes[1].config.fields.amount');
+    // The message states the run identity it was judged under, so a reader of
+    // the finding cannot mistake it for the user-run case.
+    expect(findings[0].message).toContain("runAs:'system'");
+    expect(findings[0].message).toContain('#3042');
+    expect(findings[0].hint).toContain('NOT waived by a system context');
+  });
+
+  it('reports ONLY the conditional half for a runAs:system node writing both kinds in one payload', () => {
+    const findings = validateReadonlyFlowWrites({
+      objects: [opportunityObject],
+      flows: [flowWith({ approval_status: 'approved', amount: 5000, notes: 'hi' }, { runAs: 'system' })],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].path).toBe('flows[0].nodes[1].config.fields.amount');
+    expect(findings.some((f) => f.rule === FLOW_UPDATE_READONLY_FIELD)).toBe(false);
+  });
+
+  // A field declaring BOTH flags: under `runAs:'system'` the static strip is
+  // skipped and the conditional one is not, so the truthful finding is the
+  // warning — not silence (the old flow-level skip) and not the error (which
+  // would state something false about an elevated write).
+  it('falls through to the conditional branch for a field declaring readonly AND readonlyWhen under runAs:system', () => {
+    const bothFlags = {
+      name: 'crm_opportunity',
+      fields: {
+        approval_status: { type: 'text', readonly: true, readonlyWhen: "record.stage == 'closed_won'" },
+      },
+    };
+    const systemFindings = validateReadonlyFlowWrites({
+      objects: [bothFlags],
+      flows: [flowWith({ approval_status: 'approved' }, { runAs: 'system' })],
+    });
+    expect(systemFindings).toHaveLength(1);
+    expect(systemFindings[0].severity).toBe('warning');
+    expect(systemFindings[0].rule).toBe(FLOW_UPDATE_READONLY_WHEN_FIELD);
+
+    // Unchanged for a user run: the static strip applies there, and the certain
+    // no-op outranks the conditional one.
+    const userFindings = validateReadonlyFlowWrites({
+      objects: [bothFlags],
+      flows: [flowWith({ approval_status: 'approved' }, { runAs: 'user' })],
+    });
+    expect(userFindings).toHaveLength(1);
+    expect(userFindings[0].severity).toBe('error');
+    expect(userFindings[0].rule).toBe(FLOW_UPDATE_READONLY_FIELD);
+  });
+
+  // Nesting is orthogonal to run identity: the walk reaches an elevated flow's
+  // nested regions on the conditional branch too.
+  it('reaches a readonlyWhen write nested in a loop body under runAs:system', () => {
+    const flow = {
+      name: 'sweep_system',
+      runAs: 'system',
+      nodes: [
+        {
+          id: 'each',
+          type: 'loop',
+          label: 'Each',
+          config: {
+            collection: '{items}',
+            body: {
+              nodes: [
+                { id: 'u', type: 'update_record', label: 'U', config: { objectName: 'crm_opportunity', fields: { amount: 1 } } },
+              ],
+              edges: [],
+            },
+          },
+        },
+      ],
+      edges: [],
+    };
+    const findings = validateReadonlyFlowWrites({ objects: [opportunityObject], flows: [flow] });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].path).toBe('flows[0].nodes[0].config.body.nodes[0].config.fields.amount');
+  });
+
+  // create_record stays exempt on BOTH branches under elevation: a
+  // `readonlyWhen` predicate has no prior record to evaluate on an insert.
+  it('does NOT flag create_record writing a readonlyWhen field under runAs:system', () => {
+    const flow = {
+      name: 'seed_opp_system',
+      type: 'record_change',
+      runAs: 'system',
+      nodes: [
+        { id: 'start', type: 'start', config: {} },
+        { id: 'c', type: 'create_record', label: 'Create', config: { objectName: 'crm_opportunity', fields: { amount: 10 } } },
+      ],
+      edges: [],
+    };
+    expect(validateReadonlyFlowWrites({ objects: [opportunityObject], flows: [flow] })).toEqual([]);
   });
 
   // ── clean: create_record is engine-exempt from the readonly strip ─────
