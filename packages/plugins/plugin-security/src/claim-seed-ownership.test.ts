@@ -3,7 +3,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { claimSeedOwnership } from './claim-seed-ownership.js';
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
-import { MAX_BULK_PER_ROW_HOOK_ROWS } from '@objectstack/spec/data';
+import {
+  BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE,
+  MAX_BULK_PER_ROW_HOOK_ROWS,
+} from '@objectstack/spec/data';
 
 const SYSTEM = 'usr_system';
 const ADMIN = 'usr_admin_human';
@@ -111,7 +114,10 @@ function makeQL(
               `(ADR-0058, bulk-write addendum), which is over the ${ceiling}-row ceiling for one ` +
               'write. Nothing was written.',
           ),
-          { code: 'ERR_BULK_PER_ROW_HOOK_LIMIT' },
+          // The code comes from the contract that defines it, never a literal:
+          // the fallback is keyed on this exact value, so a double that spelled
+          // its own would stop proving the fallback fires (#5480's rule).
+          { code: BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE },
         );
       }
       for (const row of matched) Object.assign(row, data);
@@ -258,6 +264,11 @@ describe('claimSeedOwnership', () => {
     expect(result).toEqual([{ object: 'crm_lead', count: 500 }]);
     expect(writes).toHaveLength(2);
     expect(writes.every((w) => w.multi)).toBe(true);
+    // The set fits in one write per predicate, so the paged fallback never
+    // engages and this pass issues NO read at all — the predicate write IS the
+    // scan. Paging unconditionally was measured 13x slower on these sizes.
+    expect(ql.find).not.toHaveBeenCalled();
+    expect(writes.map((w) => w.where)).toEqual([{ owner_id: null }, { owner_id: SYSTEM }]);
     // Every write carries the payload only — no `id` in `data`, which is what
     // routes the engine down `updateMany` instead of the single-id door.
     expect(writes.every((w) => Object.keys(w.data).join() === 'owner_id')).toBe(true);
@@ -345,7 +356,7 @@ describe('claimSeedOwnership', () => {
     expect(await claimSeedOwnership(ql, ADMIN, { logger: { info: vi.fn(), warn } })).toEqual([]);
     expect(warn).toHaveBeenCalledTimes(2); // once per predicate
     expect(warn.mock.calls[0][0]).toContain('could not read an affected-row count');
-    expect(ql.update).toHaveBeenCalledTimes(2); // stopped paging, did not spin
+    expect(ql.update).toHaveBeenCalledTimes(2); // one attempt each, no spin
   });
 
   it('a refused predicate write costs that predicate only — never the object or the run', async () => {
@@ -362,9 +373,8 @@ describe('claimSeedOwnership', () => {
       },
       {
         onUpdate: (object, where) => {
-          if (object === 'crm_lead' && where?.id) {
-            const rows = (where.id as any).$in as string[];
-            if (rows.includes('l1')) throw new Error('driver refused this page');
+          if (object === 'crm_lead' && (where as any)?.owner_id === null) {
+            throw new Error('driver refused this write');
           }
         },
       },
@@ -376,13 +386,13 @@ describe('claimSeedOwnership', () => {
       { object: 'crm_lead', count: 1 }, // the usr_system predicate still landed
       { object: 'crm_case', count: 1 },
     ]);
-    // crm_lead's NULL page was refused; its usr_system page landed. crm_case's
-    // NULL page landed and its usr_system predicate matched nothing, so it
-    // issued no write at all — an empty page is not a write.
-    expect(writes.map((w) => w.object)).toEqual(['crm_lead', 'crm_case']);
+    expect(writes.map((w) => w.object)).toEqual(['crm_lead', 'crm_case', 'crm_case']);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain('those rows stay unowned');
-    expect(warn.mock.calls[0][1].error).toContain('driver refused this page');
+    expect(warn.mock.calls[0][1].error).toContain('driver refused this write');
+    // A failure that is NOT the per-row hook budget is never paged around: no
+    // read was issued for it, it simply propagated.
+    expect(ql.find).not.toHaveBeenCalled();
   });
 
   // ── [#14530 patch 1] paging: coverage past the engine's per-row ceiling ───
@@ -421,19 +431,24 @@ describe('claimSeedOwnership', () => {
     expect(legacyClaimedIds(seed())).toHaveLength(13_000);
     expect(everyUnowned.length).toBeGreaterThan(legacyClaimedIds(seed()).length);
 
-    // Still batched, not per row: writes are O(pages), and every page is sized
-    // so the engine's ceiling can never refuse it.
-    expect(writes.length).toBeLessThan(20);
+    // The paged fallback DID engage — a read was issued, which the under-ceiling
+    // path never does — and it converged back onto whole-set writes rather than
+    // paging to the end.
+    expect(reads.length).toBeGreaterThan(0);
+    // Still batched, not per row: a handful of writes, none of them over the
+    // ceiling that refused the unpaged attempt.
+    expect(writes.length).toBeLessThan(10);
     expect(writes.every((w) => w.matched.length <= MAX_BULK_PER_ROW_HOOK_ROWS)).toBe(true);
     // A page is big enough that plugin-sharing's 1000-row recompute cap still
     // sees these writes as batches rather than recomputing them row by row.
     expect(reads.every((r) => r.limit > 1_000 && r.limit <= MAX_BULK_PER_ROW_HOOK_ROWS)).toBe(true);
   });
 
-  it('count is the SUM over pages, not the last page', async () => {
-    // With paging the reported count is an accumulation, and the easy bug is to
-    // let the final page's return value overwrite it. 12 000 unowned rows do not
-    // fit in one page, so a count equal to any single page's size is the bug.
+  it('count is the SUM over every write of the pass, not just the last one', async () => {
+    // Once a predicate needs the fallback the reported count is an accumulation,
+    // and the easy bug is to let the final whole-set write's return value
+    // overwrite it. 12 000 unowned rows cannot land in one write, so a count
+    // equal to any single write's size is the bug.
     const schemas = [{ name: 'crm_lead', fields: [{ name: 'owner_id' }] }];
     const rows = Array.from({ length: 12_000 }, (_, i) => ({ id: `l${i}`, owner_id: null }));
     const { ql, writes } = makeQL(schemas, { crm_lead: rows });
@@ -441,18 +456,19 @@ describe('claimSeedOwnership', () => {
     const result = await claimSeedOwnership(ql, ADMIN);
 
     expect(writes.length).toBeGreaterThan(1);
-    const perPage = writes.map((w) => w.matched.length);
+    const perWrite = writes.map((w) => w.matched.length);
     expect(result).toEqual([
-      { object: 'crm_lead', count: perPage.reduce((s, n) => s + n, 0) },
+      { object: 'crm_lead', count: perWrite.reduce((s, n) => s + n, 0) },
     ]);
     expect(result[0].count).toBe(12_000);
-    expect(result[0].count).not.toBe(perPage[perPage.length - 1]);
+    for (const n of perWrite) expect(result[0].count).not.toBe(n);
   });
 
-  it('stops rather than spinning when a page matches rows but re-owns none', async () => {
+  it('stops rather than spinning when a fallback page matches rows but re-owns none', async () => {
     // A write-scoping middleware can narrow a page to nothing. Re-reading the
-    // same predicate would then return the same page forever, so paging stops
-    // and says so — "we could not claim these" is not "there was nothing here".
+    // same predicate would then hand back the same page forever, so the fallback
+    // stops and says so — "we could not claim these" is not "there was nothing
+    // here". Without that break this is an unbounded loop at boot.
     const schemas = [{ name: 'crm_lead', fields: [{ name: 'owner_id' }] }];
     const warn = vi.fn();
     const ql: any = {
@@ -460,11 +476,40 @@ describe('claimSeedOwnership', () => {
       find: vi.fn(async () => [{ id: 'l1' }, { id: 'l2' }]),
       update: vi.fn(async (_o: string, data: any, options: any) => {
         assertEngineUpdateDispatch(data, options);
-        return 0; // matched by the read, moved by nothing
+        if ((options.where as any)?.id) return 0; // the page moved nothing
+        throw Object.assign(new Error('over the ceiling'), {
+          code: BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE,
+        });
       }),
     };
     expect(await claimSeedOwnership(ql, ADMIN, { logger: { info: vi.fn(), warn } })).toEqual([]);
-    expect(ql.update).toHaveBeenCalledTimes(2); // one attempt per predicate, no spin
+    // 2 predicates x (1 refused whole-set attempt + 1 page that moved nothing).
+    expect(ql.update).toHaveBeenCalledTimes(4);
     expect(warn.mock.calls[0][0]).toContain('but re-owned none of them');
+  });
+
+  it('pages ONLY on the declared per-row-hook refusal — any other failure propagates', async () => {
+    // The fallback is keyed on `BULK_PER_ROW_HOOK_LIMIT_ERROR_CODE`. A refusal
+    // that merely LOOKS like it (same words, no code, or another code) must not
+    // send this pass reading and re-writing: that would page around a fault
+    // nobody diagnosed. It is warned per predicate and left alone.
+    const schemas = [{ name: 'crm_lead', fields: [{ name: 'owner_id' }] }];
+    const warn = vi.fn();
+    const ql: any = {
+      registry: { getAllObjects: () => schemas },
+      find: vi.fn(async () => [{ id: 'l1' }]),
+      update: vi.fn(async (_o: string, data: any, options: any) => {
+        assertEngineUpdateDispatch(data, options);
+        throw Object.assign(
+          new Error("Refusing the bulk write on 'crm_lead': it matches 10500 rows"),
+          { code: 'ERR_SOMETHING_ELSE' },
+        );
+      }),
+    };
+    expect(await claimSeedOwnership(ql, ADMIN, { logger: { info: vi.fn(), warn } })).toEqual([]);
+    expect(ql.find).not.toHaveBeenCalled();
+    expect(ql.update).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn.mock.calls[0][0]).toContain('those rows stay unowned');
   });
 });
