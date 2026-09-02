@@ -12156,20 +12156,34 @@ function selfTest() {
       JSON.stringify({ verdict: verdict?.verdict, hints: entry?.hints }),
     );
     // The ablation, run in-place: strip the declared SUBTREE from the live hint
-    // set and the verdict must fall back to what it was before this landed.
+    // set and the verdict must fall back to NOT MATCHED — that is the whole
+    // claim, since a brand-new file is nameable only through the subtree half.
     // Without it the case above could pass through any hint that happened to
     // cover the probe, and the reader could not tell which half was load-bearing.
+    //
+    // WHICH not-matched verdict it lands on is not fixed, and pinning one
+    // spelling was a latent trap: for `check:entry-guard` the residual depends
+    // on whether its KNOWN_IMPORT_UNSAFE roster still contributes path literals
+    // as hints — `silent` while it held entries, `undetermined` once it emptied
+    // and the stripped hint set is bare. That ledger is ⛔ SHRINK-ONLY and
+    // reaching zero is its GOAL, so the day it emptied this case went red over
+    // a gate that had not changed at all. Either verdict proves the subtree
+    // hint is the load-bearing half, so both are accepted — spelled as an
+    // explicit pair rather than `!== 'matched'`, so a NEW verdict value added
+    // later cannot slip through here as a pass.
     const undeclared = entry ? { ...entry, hints: entry.hints.filter((h) => !h.includes('/*')) } : null;
+    const residual = undeclared ? classifyEntry(undeclared, [unwrittenScript]).verdict : null;
     t(
-      `…and it is the subtree declaration doing it: strip it and ${gate} goes back to silent`,
+      `…and it is the subtree declaration doing it: strip it and ${gate} goes back to NOT MATCHED`,
       // The length check is what stops this passing VACUOUSLY. With no subtree
-      // hint to remove, `undeclared` is the entry itself and `silent === silent`
-      // reads as a pass — measured, on the ablation run that removed both
-      // declarations: this case stayed green while the two above went red.
+      // hint to remove, `undeclared` is the entry itself and a not-matched
+      // verdict compared against itself reads as a pass — measured, on the
+      // ablation run that removed both declarations: this case stayed green
+      // while the two above went red.
       Boolean(undeclared) &&
         undeclared.hints.length < entry.hints.length &&
-        classifyEntry(undeclared, [unwrittenScript]).verdict === 'silent',
-      JSON.stringify({ before: entry?.hints?.length, after: undeclared?.hints?.length }),
+        ['silent', 'undetermined'].includes(residual),
+      JSON.stringify({ before: entry?.hints?.length, after: undeclared?.hints?.length, residual }),
     );
   }
 
