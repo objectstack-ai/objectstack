@@ -411,9 +411,11 @@ function main({ prePush = false } = {}) {
     console.error(
       `\nRegenerate ${owed}, \`git add\` them, and ${prePush ? 'commit the result before pushing' : 'commit again'}.\n`
         + '  This check clears itself the moment they are current — nothing to reset by hand.\n'
-        + '  Landing a merge? `bash scripts/pm/os-regen-merge.sh` runs the sanctioned sequence — it commits\n'
-        + '  the merge first (this hook records that as a deferral) and regeneration follows as its own\n'
-        + '  commit. Every artifact above also has a required gate on the PR.\n',
+        + '  Landing a merge? `bash scripts/pm/os-regen-merge.sh` runs the sanctioned sequence — its merge\n'
+        + '  auto-commits first with no hook run at all (git skips pre-commit for a merge it completes\n'
+        + '  itself), so THIS refusal, on the ordinary commit right after, is that sequence\'s designed\n'
+        + '  collection point — not a deferral. Regeneration follows as its own commit; every artifact\n'
+        + '  above also has a required gate on the PR.\n',
     );
     return 1;
   }
