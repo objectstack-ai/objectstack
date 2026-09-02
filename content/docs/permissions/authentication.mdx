@@ -247,8 +247,9 @@ console.log('Current user:', session.data.user);
 
 ### First-run bootstrap status
 
-`GET /api/v1/auth/bootstrap-status` answers one question — does this environment
-have any user yet?
+`GET /api/v1/auth/bootstrap-status` answers one question — is the admission gate's
+bootstrap window open, i.e. does this environment have no **human** user yet? Service
+rows (such as the legacy `usr_system` row) do not count.
 
 ```typescript
 const res = await fetch('http://localhost:3000/api/v1/auth/bootstrap-status');
@@ -1072,7 +1073,7 @@ All endpoints are available under `/api/v1/auth/*`:
 #### Session
 
 - `GET /api/v1/auth/get-session` - Get current user session
-- `GET /api/v1/auth/bootstrap-status` - Public, unauthenticated first-run probe: `{ "hasOwner": boolean }`, telling a client whether this environment has any user yet ([details](#first-run-bootstrap-status))
+- `GET /api/v1/auth/bootstrap-status` - Public, unauthenticated first-run probe: `{ "hasOwner": boolean }`, telling a client whether the admission gate's bootstrap window is still open — i.e. whether this environment has no human user yet ([details](#first-run-bootstrap-status))
 
 #### Password Management
 

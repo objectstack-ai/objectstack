@@ -153,10 +153,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "fields.options.color": {
         label: "Color"
       },
-      "fields.options.icon": {
-        label: "Icon",
-        helpText: "Lucide icon name"
-      },
       "fields.options.description": {
         label: "Description"
       },

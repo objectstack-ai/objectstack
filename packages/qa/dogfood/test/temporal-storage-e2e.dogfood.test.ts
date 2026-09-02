@@ -74,10 +74,46 @@ const DATE_SHAPES: Array<[string, string, string]> = [
 describe('dogfood: temporal storage is one shape end-to-end (#3912/#3994/#4033)', () => {
   let stack: VerifyStack;
   let token: string;
+  /** The master every zoo row below hangs off — see the note in `beforeAll`. */
+  let masterId: string;
 
   beforeAll(async () => {
     stack = await bootStack(showcaseStack);
     token = await stack.signIn();
+
+    // `showcase_field_zoo.f_master_detail` is a REQUIRED master_detail, so
+    // every zoo row below needs a real `showcase_project` to hang off.
+    //
+    // It is CREATED here rather than resolved out of the showcase seed, to keep
+    // the property this file's assertions rest on: it owns every row it reads,
+    // so it cannot be perturbed by what another suite's seed data happens to
+    // contain. `showcase_project` in turn declares a REQUIRED lookup to
+    // `showcase_account`, so the account has to exist first — seeding them in
+    // the wrong order is refused rather than silently writing a project that
+    // points at nothing (#4441).
+    const newId = async (object: string, body: Record<string, unknown>): Promise<string> => {
+      const res = await stack.apiAs(token, 'POST', `/data/${object}`, body);
+      expect(
+        res.status,
+        `seed ${object}: ${res.status} ${await res.clone().text()}`,
+      ).toBeLessThan(300);
+      const json = (await res.json()) as { id?: string; record?: { id?: string } };
+      const id = json.id ?? json.record?.id;
+      expect(id, `no id returned seeding ${object}`).toBeTruthy();
+      return id as string;
+    };
+
+    const accountId = await newId('showcase_account', {
+      name: `${P}_ref_account`,
+      status: 'active',
+    });
+    masterId = await newId('showcase_project', {
+      name: `${P}_ref_project`,
+      // `planned` is the state machine's declared initial state — anything else
+      // is refused with `invalid_initial_state`.
+      status: 'planned',
+      account: accountId,
+    });
 
     // `Field.time` fixtures — written through the REAL REST write path, which
     // is the half #3994 fixed. Writing them via the engine would bypass
@@ -86,6 +122,7 @@ describe('dogfood: temporal storage is one shape end-to-end (#3912/#3994/#4033)'
       const res = await stack.apiAs(token, 'POST', '/data/showcase_field_zoo', {
         name: `${P}_time_${key}`,
         f_time: value,
+        f_master_detail: masterId,
       });
       expect(res.status, `write f_time ${key}`).toBe(201);
     }
@@ -94,16 +131,19 @@ describe('dogfood: temporal storage is one shape end-to-end (#3912/#3994/#4033)'
       (await stack.apiAs(token, 'POST', '/data/showcase_field_zoo', {
         name: `${P}_time_early`,
         f_time: '08:00:00',
+        f_master_detail: masterId,
       })).status,
     ).toBe(201);
 
     // `Field.date` fixtures on the same object — field-zoo carries all three
-    // temporal types and requires only `name`, so the fixture needs no lookup
-    // targets and cannot be perturbed by another suite's seed data.
+    // temporal types, so one object covers them and the rows cannot be
+    // perturbed by another suite's seed data. Its required master is the one
+    // seeded above; nothing else here needs a lookup target.
     for (const [key, written] of DATE_SHAPES) {
       const res = await stack.apiAs(token, 'POST', '/data/showcase_field_zoo', {
         name: `${P}_date_${key}`,
         f_date: written,
+        f_master_detail: masterId,
       });
       expect(res.status, `write f_date ${key}`).toBe(201);
     }
@@ -198,6 +238,9 @@ describe('dogfood: temporal storage is one shape end-to-end (#3912/#3994/#4033)'
     const res = await stack.apiAs(token, 'POST', '/data/showcase_field_zoo', {
       name: `${P}_time_epoch_rejected`,
       f_time: Date.UTC(2026, 0, 15, 14, 30, 0, 500),
+      // A valid master, so the 400 asserted below is about `f_time` and not
+      // about the required master_detail.
+      f_master_detail: masterId,
     });
     expect(res.status).toBe(400);
     // Asserted via the standard envelope code + the offending field, rather

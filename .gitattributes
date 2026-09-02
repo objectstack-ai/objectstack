@@ -86,12 +86,28 @@
 # would defer the prose to OURS. See NOT_DRIVER_MANAGED for that entry.
 #
 # This is also the row where the header's own warning is answered rather than
-# accepted: deferring is safe here because `scripts/check-system-context-census.mjs`
-# still reddens on every PR from the required `Lint & Repo Gates` job — it
-# RE-DERIVES the census from the tree, so it catches the stale anchors a merge
-# leaves behind even when nothing conflicted, which is the majority case (#13625:
-# 18 anchors stale, 5 marked). The driver removes hand-merge rounds; it is never
-# the only signal.
+# accepted: `scripts/check-system-context-census.mjs` still reddens on every PR from
+# the required `Lint & Repo Gates` job — it RE-DERIVES the census from the tree, so
+# it catches the stale anchors a merge leaves behind even when nothing conflicted,
+# which is the majority case (#13625: 18 anchors stale, 5 marked). The driver removes
+# hand-merge rounds; it is never the only signal.
+#
+# ⚠️ #14064 CORRECTED the sentence that used to open that paragraph — "deferring is
+# safe here BECAUSE the census gate re-derives". The gate re-derives the census and
+# the anchors. It re-derives no PROSE, because prose is derived from nothing, and
+# this page is the one routed path that carries both. So the argument was true and
+# its domain was half the risk surface: the driver drops a side WHOLE, and on this
+# page that side can carry hand-written paragraphs the gate is constitutionally
+# unable to miss. Measured, not reasoned — deleting a 3-line anchor-free paragraph
+# and running ten doc-family gates returned ten exit 0 over deleted documentation.
+#
+# Routing this file is still RIGHT (the correct anchors are on neither side; nothing
+# above changes). What #14064 added is the missing half: the row now declares
+# `mixed: 'line-anchors'` in scripts/regen-artifacts.mjs, and the driver refuses to
+# defer SILENTLY when the incoming side carries anything but anchor numbers — it
+# text-merges instead, and conflicts loudly if that cannot be done. The cheap case
+# stays cheap: of the last 25 main commits to this page, 24 changed nothing but
+# anchor numbers.
 
 #
 # #13731 enumerated this file's blind spot and closed it: `check:merge-driver` now
@@ -105,7 +121,10 @@
 # reference indexes (#13335) and both halves of the react-blocks contract. Their
 # neighbours got the other answer for reasons recorded per path — the skill docs and
 # the AI skills guide are MIXED (a spliced block in hand-written prose, so a deferral
-# would launder the prose), the two per-package test-typecheck ledgers are shrink-only
+# would launder the prose; #14064 added a THIRD answer for the mixed file whose
+# generated half no hand merge can reach — see `mixed` in scripts/regen-artifacts.mjs
+# — but "not routed" remains the first answer to reach for), the two per-package
+# test-typecheck ledgers are shrink-only
 # ratchets, the sdui lockstep record cannot be regenerated without an objectui
 # checkout, and the openapi/sbom outputs are gitignored so git never merges them.
 #

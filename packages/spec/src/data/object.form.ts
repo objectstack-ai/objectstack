@@ -147,6 +147,33 @@ export const objectForm = defineForm({
             { field: 'scale', type: 'number', helpText: 'Decimal places', visibleWhen: "data.type in ['number','currency','percent']" },
 
             // Selection options
+            //
+            // The offered inputs are exactly `SelectOptionSchema`'s authorable
+            // keys, minus `visibleWhen` (a CEL predicate, not a repeater text
+            // input). An `icon` input used to sit between `color` and
+            // `description` and was withdrawn under ADR-0049 enforce-or-remove:
+            // the option shape is strict and has never declared `icon`, so a
+            // Lucide name typed there was an `unrecognized_keys` refusal at
+            // publish — the author found out at the 422, the same
+            // offer-vs-door class #11410 and #12868 retired elsewhere.
+            //
+            // Remove rather than declare, on a premise measured for THIS
+            // surface rather than inherited from #5016's action-param reading:
+            // objectui declares `icon` on `SelectOptionMetadata`, but no
+            // field-option render path READS it. Measured at the
+            // `.objectui-sha` pin `d8ec8d6d4f011b11c8eb1e6dbd364ef206711391`
+            // (the console this repo ships) and again on that repo's
+            // `origin/main`, same answer both times, with a live positive
+            // control: the select/multiselect cell renderer
+            // (`packages/fields/src/index.tsx`, the `renderOne` badge/dot
+            // branch) reads `option?.label` and `option?.color` off that very
+            // `SelectOptionMetadata[]` and never `option?.icon`. The only
+            // `opt.icon` read in that tree belongs to the config-panel
+            // `ConfigField` vocabulary, whose `icon` is a `React.ReactNode` an
+            // authored field option cannot reach. Declaring it instead would
+            // be an accepted-set expansion, which needs a maintainer ruling.
+            // `field-rows-option-description.test.ts` pins both halves — the
+            // schema still refuses `icon`, and this list no longer offers it.
             {
               field: 'options',
               type: 'repeater',
@@ -156,7 +183,6 @@ export const objectForm = defineForm({
                 { field: 'label', type: 'text', required: true },
                 { field: 'value', type: 'text', required: true },
                 { field: 'color', type: 'color' },
-                { field: 'icon', type: 'text', helpText: 'Lucide icon name' },
                 { field: 'description', type: 'text' },
               ],
             },

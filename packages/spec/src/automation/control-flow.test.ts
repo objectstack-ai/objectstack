@@ -7,6 +7,7 @@ import {
   ParallelConfigSchema,
   ParallelBranchSchema,
   TryCatchConfigSchema,
+  TryCatchErrorValueSchema,
   FlowRegionSchema,
   analyzeRegion,
   findRegionEntry,
@@ -373,6 +374,42 @@ describe('[#4001] control-flow strictness — per shape', () => {
       try: { nodes: [node('t')] }, catch: { nodes: [node('c')] },
       errorVariable: '$error', retry: { maxRetries: 3, backoffMs: 500 },
     })).not.toThrow();
+  });
+});
+
+describe('TryCatchErrorValueSchema', () => {
+  // The value a `try_catch` binds to `errorVariable` (default `$error`). Two
+  // shapes, and the difference between them is a FACT the catch region reads:
+  // row identity is present exactly when the failure happened inside a loop
+  // body, so absent means "not in a loop", never "row unknown".
+  it('accepts the loop-free binding — `nodeId` + `message`, no row identity', () => {
+    const value = TryCatchErrorValueSchema.parse({ nodeId: 'guard', message: 'card declined' });
+    expect(value.nodeId).toBe('guard');
+    expect(value.message).toBe('card declined');
+    expect(value.iteration).toBeUndefined();
+    expect(value.item).toBeUndefined();
+    expect(Object.keys(value)).not.toContain('iteration');
+    expect(Object.keys(value)).not.toContain('item');
+  });
+
+  it('accepts the loop-bound binding — the enclosing iteration and the item being processed', () => {
+    // `loop { body: [ try_catch { try, catch } ] }`: the fourth row failed,
+    // and the catch region can now record WHICH row without re-deriving it.
+    const item = { id: 'rec_4', amount: 120 };
+    const value = TryCatchErrorValueSchema.parse({ nodeId: 'guard', message: 'card declined', iteration: 3, item });
+    expect(value.iteration).toBe(3);
+    expect(value.item).toEqual(item);
+    // `item` is whatever the loop iterated over — a primitive is as legal as a
+    // record, and `null` is a value, not an absence.
+    expect(TryCatchErrorValueSchema.parse({ nodeId: 'guard', message: 'x', iteration: 0, item: 'a@example.com' }).item).toBe('a@example.com');
+    expect(TryCatchErrorValueSchema.parse({ nodeId: 'guard', message: 'x', iteration: 0, item: null }).item).toBeNull();
+  });
+
+  it('requires both core keys and a zero-based integer iteration', () => {
+    expect(TryCatchErrorValueSchema.safeParse({ nodeId: 'guard' }).success).toBe(false);
+    expect(TryCatchErrorValueSchema.safeParse({ message: 'card declined' }).success).toBe(false);
+    expect(TryCatchErrorValueSchema.safeParse({ nodeId: 'guard', message: 'x', iteration: -1 }).success).toBe(false);
+    expect(TryCatchErrorValueSchema.safeParse({ nodeId: 'guard', message: 'x', iteration: 1.5 }).success).toBe(false);
   });
 });
 

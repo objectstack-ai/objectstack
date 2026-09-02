@@ -17,21 +17,26 @@
 //     by calling the data engine directly), so a create writing a readonly
 //     field is NOT a no-op and is never flagged.
 //
-//   • Only `runAs !== 'system'`. A `runAs:'system'` run is elevated and the
-//     engine skips the STATIC `readonly` strip, so a system flow legitimately
-//     MAINTAINS readonly fields ("users can't edit this, but automation does").
-//     That is the intended channel, so it is never flagged.
+//   • `runAs:'system'` exempts the STATIC branch ONLY - it is not a flow-level
+//     skip. An elevated run bypasses the static `readonly` strip, so a system
+//     flow legitimately MAINTAINS readonly fields ("users can't edit this, but
+//     automation does"). That is the intended channel, so it is never flagged.
 //
-//     ⚠️ That exemption is the STATIC strip's alone. `stripReadonlyWhenFields`
-//     runs with no `isSystem` guard at all (engine.ts, the #9107 note: "`isSystem`
-//     is still NOT an exemption here, unlike the static strip below"), pinned as
-//     "LOCK 2 - isSystem does NOT exempt a caller-supplied value" in
-//     `engine-readonly-when-derived-writes.test.ts`. So elevation is NOT a
-//     `readonlyWhen` remedy, and this rule's hint must never offer it. The skip
-//     above is therefore WIDER than the conditional lock warrants - a
-//     `runAs:'system'` flow writing a `readonlyWhen` field is still stripped on a
-//     locked record and goes unflagged. Left as-is deliberately: the match set is
-//     out of scope for the message-text correction that fixed the hint.
+//     ⚠️ The exemption stops there. `stripReadonlyWhenFields` runs with no
+//     `isSystem` guard at all (engine.ts, the #9107 note: "`isSystem` is still
+//     NOT an exemption here, unlike the static strip below"), pinned as "LOCK 2
+//     - isSystem does NOT exempt a caller-supplied value" in
+//     `engine-readonly-when-derived-writes.test.ts` and from the other side in
+//     `engine-readonly-strict-writes.test.ts` ("covers readonlyWhen too - the
+//     arm a trusted (isSystem) caller can still hit"). So a `runAs:'system'`
+//     flow writing a `readonlyWhen` field IS still stripped on a locked record,
+//     and the conditional branch inspects an elevated flow exactly like any
+//     other, at its usual `warning` severity. Narrowing this exemption to the
+//     branch it belongs to (#14201) is what stops the rule from going silent on
+//     the one flow class its own hint tells the author elevation cannot save -
+//     the same split the action sibling was born with
+//     (`validate-readonly-action-writes.ts`: an action body is system-elevated
+//     BY DESIGN, so it carries the conditional half and only that half).
 //
 //   • Static `readonly:true` + a LITERAL field name is a 100%-certain no-op →
 //     ERROR (gates the build). `readonlyWhen` is per-record-state — it strips
@@ -150,10 +155,13 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
 
   flows.forEach((flow, flowIndex) => {
     // `runAs` defaults to 'user' (schema default). Only an explicit 'system'
-    // run bypasses the strip, so treat anything else — including an unauthored
-    // (undefined) runAs — as strip-subject.
-    if (flow.runAs === 'system') return;
+    // run bypasses the STATIC strip, so treat anything else — including an
+    // unauthored (undefined) runAs — as subject to both strips. ⛔ Not a
+    // flow-level skip: the conditional strip has no `isSystem` guard, so an
+    // elevated flow stays in the walk and is judged on the `readonlyWhen`
+    // branch below (#14201).
     const runAs = flow.runAs === 'user' || flow.runAs === 'system' ? flow.runAs : 'user';
+    const isSystemRun = runAs === 'system';
 
     const flowName = typeof flow.name === 'string' ? flow.name : `#${flowIndex}`;
     // Every node, INCLUDING those nested in try_catch / loop / parallel regions.
@@ -189,7 +197,12 @@ export function validateReadonlyFlowWrites(stack: AnyRec): ReadonlyFlowWriteFind
         // the two never double-report the same key.
         if (!meta) continue;
 
-        if (meta.readonly) {
+        // The static branch is the one an elevated run really does bypass, so
+        // `isSystem` gates it HERE rather than at flow level. A field declaring
+        // BOTH flags therefore still falls through to the conditional branch
+        // under `runAs:'system'` — which is the truth about that write: the
+        // static strip is skipped, the conditional one is not.
+        if (meta.readonly && !isSystemRun) {
           findings.push({
             severity: 'error',
             rule: FLOW_UPDATE_READONLY_FIELD,
