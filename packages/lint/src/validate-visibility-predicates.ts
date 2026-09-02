@@ -961,14 +961,19 @@ function checkElement(
       rule: VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
       where,
       path,
+      // The prose carries no tracker id: a runtime string reaches authors and
+      // operators who cannot resolve one (`check:doc-authoring`). The anchors —
+      // #5149 for the fail-open half, objectui#4421 for the fail-closed half —
+      // are in the comment above and in the module note, where the reader who
+      // CAN resolve them is.
       message:
         `visibility predicate calls \`${unknownCall.name}\`, which the platform's CEL environment ` +
         `does not register — ${unknownCall.detail} (predicate: \`${quoteSource(source)}\`). The ` +
         `predicate parses, so nothing else reports it, and it faults the moment it is evaluated: on ` +
-        `a view/page surface the console falls OPEN and the element renders unconditionally (#5149), ` +
-        `and on an action surface — evaluated with \`throwOnError: true\` — it falls CLOSED and the ` +
-        `action disappears for EVERY user, including one who holds the grant, leaving one deduped ` +
-        '`console.warn` as the only signal (objectui#4421).',
+        `a view/page surface the console falls OPEN and the element renders unconditionally, exactly ` +
+        `like one carrying no predicate at all; on an action surface — evaluated with ` +
+        `\`throwOnError: true\` — it falls CLOSED and the action disappears for EVERY user, ` +
+        'including one who holds the grant, leaving one deduped `console.warn` as the only signal.',
       hint:
         `\`${unknownCall.name}\` is not a function this platform registers — a NAME fault, not a ` +
         `dialect mistake, so re-spelling the predicate will not fix it. The callable names ` +
