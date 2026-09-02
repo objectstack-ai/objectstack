@@ -33,14 +33,28 @@ schema** (a construction-time refusal, not an HTTP envelope):
 - A declared key of any of the four written with the wrong type:
   `crud.dataPrefix: 42`, `metadata.enableCache: 'yes'`,
   `routes.includeObjects: 'account'`, `batch.defaultAtomic: 'yes'`, ...
+- An explicit **`null`** at any declared key of the four —
+  `batch: { maxBatchSize: null }`, `metadata: { cacheTtl: null }`,
+  `crud: { dataPrefix: null }`. The cast-era `??` chain read `null` as absent
+  and applied the default; the parse refuses it (`batch.maxBatchSize: Invalid
+  input: expected number, received null`), because zod's `.default()` fills
+  `undefined` only.
+- A sub-object that is not an object at all — `batch: 'x'`, `routes: []` —
+  refused at the sub-object root (`batch.(root): Invalid input: expected
+  object, received string`), where the cast admitted it unchanged and every key
+  read came back `undefined`, so every key silently took its default.
 - `crud.patterns` keyed by an operation outside the CRUD vocabulary
   (`patterns: { bogus: {...} }`), or a pattern whose `method` is not an HTTP
-  method — `patterns` is an enum-keyed `z.record`, which zod validates key by key.
+  method, or a pattern missing its required `path` — `patterns` is an
+  enum-keyed `z.record`, which zod validates key by key, and
+  `CrudEndpointPatternSchema.path` is a plain `z.string()`.
 - A **partial** `routes.overrides.<object>.operations`. That record is
   `z.record(CrudOperation, z.boolean())` with a non-optional value, which zod 4
   reads as exhaustive: all five operations must be present. The input TYPE
   already demanded all five at typed authoring sites; this is the day the
-  runtime agrees with `tsc`.
+  runtime agrees with `tsc`. #14365 proposes `z.partialRecord` for this record;
+  when that lands the refusal reverses, and the §A pin for it in
+  `rest-sub-config-parse-not-cast.test.ts` is deleted with it.
 
 **Deliberately NOT refused** — the narrowing is exactly what the schemas
 declare, and no more:
@@ -80,7 +94,7 @@ sub-object, the key, the declared rule and the schema that declares it. A
 deployment that meant "no batch cap" wants `enableBatchEndpoint: false` or
 `api.enableBatch: false` (the cap's range is the declared policy), and a
 partial `routes.overrides.<object>.operations` wants all five operations
-spelled out.
+spelled out (until #14365 lands).
 
 **In-repo blast radius, measured per sub-object on `origin/main` @ `08e49496f`.**
 140 files construct a REST server (`new RestServer(` or
