@@ -2439,7 +2439,7 @@
     {
       "file": "packages/plugins/plugin-security/src/claim-seed-ownership.test.ts",
       "verb": "update",
-      "pinned": 1
+      "pinned": 5
     },
     {
       "file": "packages/plugins/plugin-security/src/controlled-by-parent-chain.test.ts",
