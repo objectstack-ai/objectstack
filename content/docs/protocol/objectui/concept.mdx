@@ -305,6 +305,7 @@ Authorization: Bearer <token>
   "layout": {
     "sections": [
       {
+        "name": "contact_information",
         "label": "Contact Information",
         "columns": 2,
         "fields": [
@@ -389,8 +390,7 @@ ObjectUI merges **3 layers** of configuration to produce the final layout:
                  ↓ Merge
 ┌─────────────────────────────────────────────────────┐
 │  Layer 2: Admin Configuration                       │
-│  - Custom sections: Added "Billing Info" section   │
-│  - Field overrides: Made 'phone' required          │
+│  - Org overlay: a full FormView write, not a diff  │
 │  - Branding: Logo, colors, theme                   │
 └────────────────┬────────────────────────────────────┘
                  ↓ Merge
@@ -415,17 +415,34 @@ fields:
 ```
 
 **Layer 2: Admin Customization (Acme Corp tenant)**
-```yaml
-customizations:
-  - field: phone
-    required: true  # Override: Make phone required
-  - field: vip_status
-    type: boolean
-    label: VIP Customer  # Add custom field
-  - section:
-      label: Billing Info
-      fields: [payment_terms, credit_limit]
-```
+
+<Callout type="warn">
+  Earlier revisions of this page taught a `customizations:` overlay-diff list
+  here — `{ field: ... }` and `{ section: ... }` entries meant to patch Layer
+  1's fields and add a section. **That list is not a declared shape.** The
+  only `customizations` key `packages/spec` declares at all is
+  `tenant.zod.ts`'s free-form `z.record(z.string(), z.unknown())`; there is no
+  `{ field | section }` overlay schema for it to validate against, and
+  `FormViewSchema` is `.strict()` — authoring this fence as a real form view
+  would be refused by name.
+
+  It is not merely undeclared: the three-layer *merge engine* this example
+  narrates is the paper `metadata-customization` protocol retired in
+  `@objectstack/spec` 17 (#13135, ADR-0049 enforce-or-remove). Its
+  `customizationPolicies` and `mergeStrategy` keys are tombstoned rather than
+  deleted (`MetadataPluginConfig`) — read by nothing, because no 3-way merge
+  engine ever ran and package upgrades never merge customizations
+  (ADR-0126 §6 wall 3: an upgrade rewrites the packaged BASE; a tenant's
+  choices live separately and are never merged into it).
+
+  What Acme Corp actually customizes at runtime is a real, declared shape: a
+  per-org **overlay write on the `view` metadata type**
+  (`allowOrgOverride: true` on its `DEFAULT_METADATA_TYPE_REGISTRY` entry,
+  ADR-0005) — the org's own `FormView` document, authored with the same shape
+  Layer 1 and the Server Response above already use, not a diff against the
+  base. The merged layout below reflects only what Layers 1 and 3 (both real,
+  declared shapes) actually produce.
+</Callout>
 
 **Layer 3: User Preferences (John Doe)**
 ```json
@@ -441,18 +458,12 @@ customizations:
 {
   "sections": [
     {
+      "name": "contact_information",
       "label": "Contact Information",
       "fields": [
         { "name": "name", "required": true, "width": 250 },
         { "name": "email", "required": true, "width": 200 },
-        { "name": "phone", "required": true }  // ← Admin override
-      ]
-    },
-    {
-      "label": "Billing Info",  // ← Admin customization
-      "fields": [
-        { "name": "payment_terms" },
-        { "name": "credit_limit" }
+        { "name": "phone", "required": false }
       ]
     }
   ],
