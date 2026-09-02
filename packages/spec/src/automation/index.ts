@@ -40,6 +40,7 @@ export * from './approval.zod';
 // DeclarativeConnectorEntrySchema. One capability, one contract
 // (Prime Directive #12); the #4480 template cluster fell the same way.
 export * from './time-relative-trigger.zod';
+export * from './flow-trigger-kind';
 // `sync.zod.ts` (L1 "Simple Sync": DataSyncConfig, its ConflictResolution enum
 // and the Sync factory) was removed here (#4738, ledger #4535 C13+C15). The L1
 // layer was narrative-only — zero importers across objectstack / cloud /
