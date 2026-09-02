@@ -714,6 +714,54 @@ describe('the strip reads hook-write PROVENANCE, not value equality (#14088)', (
     expect(task('t_18').completed_at).toBeNull();
   });
 
+  // ── The measured consequence of "an assignment ran", stated out loud ───────
+
+  it('MEASURED: a lone self-assigning hook leaves the CALLER value on the key', async () => {
+    // ⚠️ RECORDING BEHAVIOUR, NOT BLESSING IT. The direct consequence of the
+    // mechanism #14088 chose: the record says an ASSIGNMENT RAN and is
+    // deliberately blind to the VALUE (that blindness is the whole repair — it
+    // is what separates "the hook wrote the null the caller also sent" from
+    // "the hook never touched the key"). So `ctx.input.data.completed_at =
+    // ctx.input.data.completed_at`, which computes nothing, is a `set`, the
+    // caller's forged timestamp becomes hook-owned, and it survives the strip.
+    //
+    // Pinned so the consequence is VISIBLE rather than discovered later. The
+    // transition hook is deliberately NOT registered here, so the self-assign
+    // is the only write to `completed_at` — which is what makes the surviving
+    // value the caller's rather than a platform stamp.
+    //
+    // ⚠️ READ THIS BESIDE `LOCK 3b` (#9107,
+    // `engine-readonly-when-derived-writes.test.ts`), which pins the OPPOSITE
+    // verdict for the SAME hook spelling: there the caller's value is stripped
+    // to `null`. The two are not in conflict and neither is stale — they are
+    // the two faces of one recorded asymmetry (#14259, maintainer ruling B):
+    //
+    //  - HERE the strip guards an author-declared `readonly` COLUMN, where hook
+    //    authorship IS the exemption on offer, so "an assignment ran" is the
+    //    right evidence and being blind to the value is correct;
+    //  - THERE it guards a `readonlyWhen` STATE LOCK, whose entire guarantee is
+    //    that no caller write survives a TRUE predicate (#4889's frozen
+    //    paid-invoice lines). The same blindness would let this exact line
+    //    launder the caller's own value past the lock, so that seam keeps value
+    //    equality on purpose. Measured: threading the record in there turns
+    //    `LOCK 3b` red.
+    //
+    // A future ruling that reverses this INVERTS both pins together; it never
+    // deletes either. `isCallerSuppliedValue`'s docblock carries the argument.
+    const FORGED = '1999-01-01T00:00:00.000Z';
+    engine.registerHook('beforeUpdate', async (ctx: any) => {
+      ctx.input.data.completed_at = ctx.input.data.completed_at;
+    }, { object: 'duly_task', priority: 50 });
+    seedDone('t_20');
+
+    await engine.update('duly_task', {
+      id: 't_20', status: 'in_progress', completed_at: FORGED,
+    });
+
+    expect(task('t_20').completed_at).toBe(FORGED);
+    expect(warns).toEqual([]);
+  });
+
   it('the recording is transparent to a hook reading its own payload', async () => {
     // Hooks read `ctx.input.data` for diagnostics (plugin-auth's identity write
     // guard NAMES the keys it found). The recording view must be indistinguishable

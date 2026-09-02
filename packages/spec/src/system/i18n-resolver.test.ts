@@ -464,6 +464,173 @@ describe('resolveActionResultDialog + translateAction', () => {
   });
 });
 
+describe('translateAction — description + params (the declared-and-linted keys)', () => {
+  // The card's own zh-CN fixture: `TranslationItemSchema` declares every key
+  // below and the translation linter validates them, so this bundle is what an
+  // author writes today and expects to render.
+  const bundle: TranslationBundle = {
+    'zh-CN': {
+      objects: {
+        duly_task: {
+          _actions: {
+            duly_task_skip: {
+              label: '跳过',
+              description: '动作描述',
+              confirmText: '确认',
+              successMessage: '已跳过',
+              params: {
+                skip_reason: {
+                  label: '原因',
+                  helpText: '帮助',
+                  placeholder: '占位',
+                  options: { too_late: '太晚了' },
+                },
+                // A key the action does NOT declare — the linter reports it
+                // (`checkActionParams`); the resolver must ignore it.
+                nonexistent_param: { label: '幽灵' },
+              },
+            },
+          },
+        },
+      },
+      globalActions: {
+        export_secrets: {
+          description: '导出所有密钥',
+          params: { format: { label: '格式', helpText: '导出格式' } },
+        },
+      },
+    },
+  };
+
+  const skip = {
+    name: 'duly_task_skip',
+    label: 'Skip',
+    description: 'D',
+    objectName: 'duly_task',
+    confirmText: 'Sure?',
+    successMessage: 'Skipped',
+    params: [
+      {
+        name: 'skip_reason',
+        label: 'Why skipped',
+        helpText: 'H',
+        placeholder: 'P',
+        options: [
+          { value: 'too_late', label: 'Too late' },
+          { value: 'duplicate', label: 'Duplicate' },
+        ],
+      },
+    ],
+  };
+
+  it('overlays the action description', () => {
+    expect(translateAction(skip, bundle, { locale: 'zh-CN' }).description).toBe('动作描述');
+  });
+
+  it('keeps the authored description when the bundle carries none', () => {
+    const out = translateAction(skip, bundle, { locale: 'ja-JP', fallbackChain: [] });
+    expect(out.description).toBe('D');
+    // Source document is not mutated.
+    expect(skip.description).toBe('D');
+  });
+
+  it('overlays a param label', () => {
+    expect(translateAction(skip, bundle, { locale: 'zh-CN' }).params?.[0].label).toBe('原因');
+  });
+
+  it('overlays a param helpText — the ACTION spelling, not the bulk `help`', () => {
+    const out = translateAction(skip, bundle, { locale: 'zh-CN' });
+    expect(out.params?.[0].helpText).toBe('帮助');
+    // The bulk-action spelling must not appear on an action param.
+    expect(out.params?.[0]).not.toHaveProperty('help');
+  });
+
+  it('overlays a param placeholder', () => {
+    expect(translateAction(skip, bundle, { locale: 'zh-CN' }).params?.[0].placeholder).toBe('占位');
+  });
+
+  it('overlays param options by stored value, leaving untranslated entries alone', () => {
+    const out = translateAction(skip, bundle, { locale: 'zh-CN' });
+    expect(out.params?.[0].options).toEqual([
+      { value: 'too_late', label: '太晚了' },
+      { value: 'duplicate', label: 'Duplicate' },
+    ]);
+    // Source options are not mutated.
+    expect(skip.params[0].options[0].label).toBe('Too late');
+  });
+
+  it('keeps the authored param copy when the bundle carries none', () => {
+    const out = translateAction(skip, bundle, { locale: 'ja-JP', fallbackChain: [] });
+    expect(out.params?.[0]).toEqual(skip.params[0]);
+    // Nothing changed, so the array itself is the authored one (same reference).
+    expect(out.params).toBe(skip.params);
+  });
+
+  it('matches a field-backed param by `field` when it declares no `name`', () => {
+    const fieldBacked = {
+      name: 'duly_task_skip',
+      objectName: 'duly_task',
+      params: [{ field: 'skip_reason', label: 'Why skipped' }],
+    };
+    const out = translateAction(fieldBacked, bundle, { locale: 'zh-CN' });
+    expect(out.params?.[0].label).toBe('原因');
+  });
+
+  it('prefers `name` over `field` when both are present', () => {
+    const both = {
+      name: 'duly_task_skip',
+      objectName: 'duly_task',
+      // `field` names the translated param; `name` is the key the linter
+      // collects, so the untranslated `name` must win and nothing overlays.
+      params: [{ name: 'other_key', field: 'skip_reason', label: 'Why skipped' }],
+    };
+    const out = translateAction(both, bundle, { locale: 'zh-CN' });
+    expect(out.params?.[0].label).toBe('Why skipped');
+  });
+
+  it('ignores a bundle param the action does not declare', () => {
+    const out = translateAction(skip, bundle, { locale: 'zh-CN' });
+    expect(out.params).toHaveLength(1);
+    expect(JSON.stringify(out.params)).not.toContain('幽灵');
+  });
+
+  it('resolves description and params through globalActions for object-less actions', () => {
+    const out = translateAction(
+      {
+        name: 'export_secrets',
+        label: 'Export secrets',
+        description: 'Export every secret',
+        params: [{ name: 'format', label: 'Format', helpText: 'File format' }],
+      },
+      bundle,
+      { locale: 'zh-CN' },
+    );
+    expect(out.description).toBe('导出所有密钥');
+    expect(out.params?.[0].label).toBe('格式');
+    expect(out.params?.[0].helpText).toBe('导出格式');
+  });
+
+  it('leaves an action with no params untouched', () => {
+    const out = translateAction(
+      { name: 'duly_task_skip', objectName: 'duly_task', label: 'Skip' },
+      bundle,
+      { locale: 'zh-CN' },
+    );
+    expect(out).not.toHaveProperty('params');
+  });
+
+  it('reaches an inline action through translateObject', () => {
+    const out = translateMetadataDocument(
+      'object',
+      { name: 'duly_task', actions: [skip] },
+      bundle,
+      { locale: 'zh-CN' },
+    );
+    expect(out.actions[0].description).toBe('动作描述');
+    expect(out.actions[0].params[0].placeholder).toBe('占位');
+  });
+});
+
 describe('translateMetadataDocument', () => {
   it('translates a view document', () => {
     const view = {
