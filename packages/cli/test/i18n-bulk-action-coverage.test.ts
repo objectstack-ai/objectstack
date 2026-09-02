@@ -74,7 +74,13 @@ const objectConfig = (overrides: Record<string, unknown> = {}) => ({
 
 describe('the extractor scaffolds a key for every string the selection bar draws', () => {
   it('emits `objects.<o>._views.<v>.bulkActions.<def>.*`', () => {
+    // `confirmText` / `confirmLabel` are recorded for BOTH defs even though
+    // only one authors them: `pushOptional` records an optional key with no
+    // seed and no `inline`, exactly as `_views.<v>.description` does one level
+    // up, so the coverage gate can still notice a bundle that authors it.
     expect(bulkKeys(objectConfig()).sort()).toEqual([
+      'objects.showcase_project._views.all.bulkActions.archive_selected.confirmLabel',
+      'objects.showcase_project._views.all.bulkActions.archive_selected.confirmText',
       'objects.showcase_project._views.all.bulkActions.archive_selected.label',
       'objects.showcase_project._views.all.bulkActions.set_labels.confirmLabel',
       'objects.showcase_project._views.all.bulkActions.set_labels.confirmText',
@@ -94,6 +100,17 @@ describe('the extractor scaffolds a key for every string the selection bar draws
 
     const confirm = entries.find((e) => e.path.at(-1) === 'confirmText');
     expect(confirm?.inline).toBe('Set these labels on every selected project?');
+  });
+
+  it('records an unauthored optional key without seeding it', () => {
+    // The other half of the contract above: the key exists so a bundle that
+    // authors it is recognised, but nothing is scaffolded and coverage demands
+    // nothing — there is no source string to translate.
+    const confirm = bulkEntries(objectConfig())
+      .find((e) => e.path.join('.').endsWith('archive_selected.confirmText'));
+    expect(confirm).toBeDefined();
+    expect(confirm?.sourceValue).toBeUndefined();
+    expect(confirm?.inline).toBeUndefined();
   });
 
   it('falls back to the humanized def name, and leaves `inline` unset', () => {
