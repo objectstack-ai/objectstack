@@ -1283,7 +1283,11 @@ export class SharingService implements ISharingService {
       // what satisfies the driver's tenant audit. On this verb the driver's
       // scope keeps a NULL row in reach (`organization_id = ? OR IS NULL`) and,
       // exactly as on `sys_upload_session`, a row stamped with a DIFFERENT
-      // organization stays out of it — the wall, not a defect.
+      // organization stays out of it — the wall, not a defect. Out of reach
+      // is LOUD, not silent (measured 2026-09-02): the engine reports the
+      // unreachable row as `RECORD_NOT_FOUND` (404) and this call throws it,
+      // so a reconcile pass that meets one aborts there instead of counting
+      // an update it never landed (pinned in record-share-organization-stamp).
       await this.engine.update('sys_record_share', patch, {
         context: { ...SYSTEM_CTX, tenantId: organizationId ?? undefined },
       });
