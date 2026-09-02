@@ -425,7 +425,6 @@ export const CEILINGS = new Map([
   ['skills/objectstack-platform/rules/service-registry.md', 2331],
 
   // objectstack-query
-  ['skills/objectstack-query/evals/README.md', 567],
   ['skills/objectstack-query/rules/aggregation.md', 2357],
   ['skills/objectstack-query/rules/filters.md', 2149],
   ['skills/objectstack-query/rules/pagination.md', 1382],
