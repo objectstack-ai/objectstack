@@ -7,14 +7,27 @@
 //   node scripts/measure-durability-swallow-family.mjs --sites     # every site
 //   node scripts/measure-durability-swallow-family.mjs --json      # machine
 //   node scripts/measure-durability-swallow-family.mjs --file <p>  # one file
-//   node scripts/measure-durability-swallow-family.mjs --self-test # controls
+//   node scripts/measure-durability-swallow-family.mjs --self-test # all 4 control families
+//   node scripts/measure-durability-swallow-family.mjs --self-test=gated
+//                                                      # the 3 families CI runs
 //
-// It is NOT a gate: it is not wired into any workflow, it exits 0 on any
-// membership count, and it is deliberately not named `check:*` or `gen:*` so
-// the #4203 script ledger has nothing to classify (the shape
-// `measure-partial-retirement-annotation.mjs` established). The only non-zero
-// exit is `--self-test` failing its declared controls, and `ts-parse`'s
-// EXIT_UNPARSEABLE.
+// THE CENSUS is NOT a gate: it exits 0 on any membership count, it prints "a
+// MEASUREMENT, not a gate" on every run of it, and the file is deliberately not
+// named `check:*` or `gen:*` so the #4203 script ledger has nothing to classify
+// (the shape `measure-partial-retirement-annotation.mjs` established). The only
+// non-zero exits are a `--self-test` failing its declared controls, an unknown
+// `--self-test=` mode (REFUSED, exit 2), and `ts-parse`'s EXIT_UNPARSEABLE.
+//
+// WHAT CI RUNS, since #13919 (maintainer ruling of 2026-09-01, verbatim 「同意」):
+// the root alias `check:swallow-census-controls` runs `--self-test=gated` from
+// `lint.yml` -- the same shape as the sanctioned precedent
+// `check:stall-guard-headroom` -> `measure-stall-guard-headroom.mjs --self-test`,
+// and the same asymmetry: the SELF-TEST leg only, never a bare invocation. What
+// is gated is THIS INSTRUMENT'S OWN CONTROLS; no membership count can redden it,
+// so the census stays a measurement. That ruling also amends #12981's sanctioned
+// single-entry-point shape to "single entry point + a family flag" -- read
+// SELF_TEST_MODES for the split's whole rationale and for why POSITIVE_CONTROLS
+// is excluded permanently rather than pending.
 //
 // ## Why it exists
 //
@@ -535,6 +548,70 @@ const RESOLUTION_CONTROLS = [
       + 'and this goes red, forcing the census delta to be re-measured instead of narrowed in silence.',
   },
 ];
+
+/**
+ * Which control families a `--self-test` run asserts (#13919).
+ *
+ * ## Why there is a subset at all
+ *
+ * All four families were green only while somebody remembered to run them by
+ * hand: measured on `origin/main`, nothing in `package.json` or `.github/**`
+ * named this script. The same resolver was then repaired three times (#13459,
+ * #13474, PR #13915) with no gate holding any of the previous repairs, and the
+ * census's numbers feed #12981's repair worklist, so a wrong denominator
+ * propagates into that programme unwatched.
+ *
+ * ## Why the subset is not simply "all of them"
+ *
+ * Wiring `all` into CI would redden the farm WHEN THE REPAIR PROGRAMME
+ * SUCCEEDS. `POSITIVE_CONTROLS` pins members, and its tier-1 DARK entry pins a
+ * member of the #12981 worklist -- precisely what that programme exists to
+ * remove. That is not a forecast: the `dark` control's own `why` above records
+ * it already happening once, when batch 2 repaired the file the control then
+ * named and turned this self-test red for doing exactly what the ruling asked.
+ * Repointing at another dark member only moves the breakage to the batch that
+ * repairs THAT file. ⛔ A gate that reddens on success is not a gate, and worse,
+ * it teaches the fleet to route around gates.
+ *
+ * So `gated` is the three families the repair programme CANNOT destroy, and the
+ * exclusion is PERMANENT rather than pending (#13919 ruling of 2026-09-01,
+ * boundary 1): repairs move a member from tier `dark` to tier `channelled` and
+ * it stays a member, so neither the negative controls, the regression controls,
+ * the resolution controls, nor the zero-member floor can be destroyed by a
+ * successful repair.
+ *
+ * ⛔ `gated` is NOT a lighter self-test to reach for by default. Anything that
+ * asserts membership at a declared TIER lives in `all`, and `all` is what a
+ * human or an agent touching this instrument runs.
+ *
+ * ⛔ This subset is also not, and must not be used to bring forward, the
+ * ruling's reserved handover step (`tryInsert`/`tryUpdate` into the real gate's
+ * `DURABILITY_CRITICAL_CALLEES`, still gated on `outstanding == 0`) -- see "The
+ * handover" above.
+ */
+const SELF_TEST_MODES = new Set(['all', 'gated']);
+
+/** The banner the instrument prints on every run that is not a bare `--file`/`--json` dump. */
+const MEASUREMENT_BANNER = 'durability swallow-family census (#12981) — a MEASUREMENT, not a gate';
+
+/**
+ * Read the self-test mode out of argv.
+ *
+ * @returns `null` (not a self-test run), a member of `SELF_TEST_MODES`, or
+ *          `{ unknown }` -- REFUSED rather than silently falling through to the
+ *          census, because a typo'd mode reaching `report()` would exit 0 and
+ *          read in a CI log exactly like a self-test that passed.
+ */
+function selfTestMode(argv) {
+  for (const arg of argv) {
+    if (arg === '--self-test') return 'all';
+    if (arg.startsWith('--self-test=')) {
+      const mode = arg.slice('--self-test='.length);
+      return SELF_TEST_MODES.has(mode) ? mode : { unknown: mode };
+    }
+  }
+  return null;
+}
 
 /* ------------------------------------------------------------------------- *
  *  AST helpers
@@ -1186,7 +1263,7 @@ function report({ sites = false } = {}) {
   const carries = members.filter((m) => m.tier === 'carries-error');
   const channelled = members.filter((m) => m.tier === 'channelled');
   const out = [];
-  out.push('durability swallow-family census (#12981) — a MEASUREMENT, not a gate\n');
+  out.push(`${MEASUREMENT_BANNER}\n`);
   out.push(`  scanned                    ${stats.files} non-test source file(s) under packages/`);
   out.push(`  try/catch statements       ${stats.tryStatements}`);
   out.push(`  ...guarding an awaited write ${stats.guardedWrites}`);
@@ -1296,7 +1373,8 @@ function checkResolutionControl(control) {
   return { matched, wrong };
 }
 
-function selfTest() {
+function selfTest(mode = 'all') {
+  const gated = mode === 'gated';
   const problems = [];
   const { members } = census();
   const byFile = new Map();
@@ -1304,7 +1382,7 @@ function selfTest() {
     if (!byFile.has(m.file)) byFile.set(m.file, []);
     byFile.get(m.file).push(m);
   }
-  for (const control of POSITIVE_CONTROLS) {
+  for (const control of gated ? [] : POSITIVE_CONTROLS) {
     const hits = byFile.get(control.file) ?? [];
     if (hits.length === 0) {
       problems.push(`positive control found NO member: ${control.file}\n    ${control.why}`);
@@ -1351,9 +1429,24 @@ function selfTest() {
     problems.push('census found ZERO members — on this tree that is a broken matcher, not a clean repo.');
   }
   if (problems.length > 0) {
-    process.stderr.write(`x  measure-durability-swallow-family self-test FAILED\n\n${
+    process.stderr.write(`x  measure-durability-swallow-family self-test${gated ? ' (gated families)' : ''} FAILED\n\n${
       problems.map((p) => `  - ${p}`).join('\n\n')}\n\n`);
     return 1;
+  }
+  if (gated) {
+    process.stdout.write(
+      `${MEASUREMENT_BANNER}\n`
+      + '✓ measure-durability-swallow-family self-test, gated families (#13919): '
+      + `${NEGATIVE_CONTROLS.length} negative control(s) yield none, `
+      + `${REGRESSION_CONTROLS.length} regression control(s) stay clear, `
+      + `${RESOLUTION_CONTROLS.length} resolution control(s) resolve as declared, `
+      + `${members.length} member site(s) total\n`
+      + `   ${POSITIVE_CONTROLS.length} positive control(s) are NOT asserted here, permanently: they pin `
+      + 'members of the #12981 worklist, which\n   that programme exists to remove — a control the repair '
+      + 'is designed to destroy cannot hold a CI gate.\n   Run `--self-test` for all four families; see '
+      + '`SELF_TEST_MODES` for the whole rationale.\n',
+    );
+    return 0;
   }
   process.stdout.write(
     `✓ measure-durability-swallow-family self-test: ${POSITIVE_CONTROLS.length} positive control(s) `
@@ -1366,7 +1459,19 @@ function selfTest() {
 }
 
 function main(argv) {
-  if (argv.includes('--self-test')) return selfTest();
+  const mode = selfTestMode(argv);
+  if (mode !== null) {
+    if (typeof mode === 'object') {
+      process.stderr.write(
+        `x  REFUSED: unknown self-test mode \`${mode.unknown}\`. Known modes: `
+        + `${[...SELF_TEST_MODES].map((m) => `--self-test=${m}`).join(', ')} (bare \`--self-test\` means `
+        + '`=all`).\n   Refused rather than run, because falling through to the census would exit 0 and '
+        + 'read in a CI log\n   exactly like a self-test that passed.\n',
+      );
+      return 2;
+    }
+    return selfTest(mode);
+  }
   const fileIdx = argv.indexOf('--file');
   if (fileIdx !== -1) {
     const { members, quiet } = census({ only: argv[fileIdx + 1] });

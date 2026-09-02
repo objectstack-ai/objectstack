@@ -3887,6 +3887,39 @@ jobs:
       - name: Stall-guard headroom self-test (self-test half only, never the measurement)
         run: pnpm check:stall-guard-headroom
 
+      # The #12981 swallow census's own controls (#13919, maintainer ruling of
+      # 2026-09-01). Same shape as the step above and for the same reason: a
+      # `measure-*` instrument whose SELF-TEST is the only thing CI runs, never a
+      # bare invocation. `measure-durability-swallow-family.mjs` declares four
+      # control families and, measured on `origin/main` when #13919 was filed,
+      # NOTHING ran any of them -- zero references to the script anywhere in
+      # `package.json` or `.github/**`, against a control that must return
+      # non-zero (`measure-stall-guard-headroom`, 2 hits) so the zero was a
+      # reading and not a broken query. Meanwhile the resolver those controls pin
+      # was repaired three times (#13459, #13474, PR #13915), each time with no
+      # gate holding the previous repair, and the census's numbers feed #12981's
+      # repair worklist -- so a wrong denominator propagates into that programme
+      # with nobody watching.
+      #
+      # ONLY THE `gated` FAMILIES, and that asymmetry is the ruling's boundary 1
+      # rather than a convenience. `--self-test=gated` runs RESOLUTION + NEGATIVE
+      # + REGRESSION; it omits POSITIVE_CONTROLS, which pin members of the
+      # #12981 worklist that the repair programme exists to REMOVE. That is
+      # recorded, not forecast: batch 2 repaired the file the dark control then
+      # named and turned the self-test red for doing exactly what the ruling
+      # asked. ⛔ A gate that reddens when the programme succeeds is not a gate,
+      # and it trains the fleet to route around gates -- so ⛔ never "tidy" this
+      # step into a bare `--self-test`. The three wired families cannot be
+      # destroyed by a successful repair: a repair moves a member from tier
+      # `dark` to tier `channelled` and it stays a member.
+      #
+      # The census itself stays a MEASUREMENT: no membership count can redden
+      # this step, and the gated run prints the instrument's own "a MEASUREMENT,
+      # not a gate" banner. It reads `packages/**` source text through ts-parse;
+      # no network, no token, no build.
+      - name: Swallow-census control families (gated families only, never POSITIVE)
+        run: pnpm check:swallow-census-controls
+
       # The dev-preflight gate's self-test — and deliberately only HALF of that
       # gate (#8170, the second and only other member of #8110's split-gate
       # family). Same neighbour as the step above for the same reason: both are
