@@ -153,4 +153,18 @@ describe('platform-object predicates', () => {
     expect(hasPlatformObjectPrefix('crm_lead')).toBe(false);
     expect(isPlatformProvidedObjectName('user')).toBe(false);
   });
+
+  it('resolves a cloud-provided object this repo never declares', () => {
+    // `sys_license` is declared by `@objectstack/service-tenant` in the cloud
+    // repo (`packages/service-tenant/src/objects/sys-license.object.ts`), and
+    // this repo cites it repo-wide as the canonical `tenancy.enabled: false`
+    // example — the driver tenant-scope suites, `object.zod.ts`'s
+    // platform-global note, ADR-0066's worked example. While it was absent
+    // from the registry those references read as fictional, so a
+    // cloud-targeted stack naming a real object was warned about a typo.
+    // Pinned by name rather than left to the loop above, so dropping it fails
+    // one readable assertion instead of nothing.
+    expect(isPlatformProvidedObjectName('sys_license')).toBe(true);
+    expect(CLOUD_PROVIDED_OBJECT_NAMES).toContain('sys_license');
+  });
 });

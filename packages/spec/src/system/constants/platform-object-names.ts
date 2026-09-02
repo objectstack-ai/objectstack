@@ -150,6 +150,7 @@ export const CLOUD_PROVIDED_OBJECT_NAMES: readonly string[] = [
   'sys_app',
   'sys_environment',
   'sys_environment_member',
+  'sys_license',
   'sys_package',
   'sys_package_installation',
 ];

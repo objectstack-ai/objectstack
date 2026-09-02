@@ -539,6 +539,12 @@ function writeFixture(
   };
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-docs-locale-catch-all self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   let checked = 0;
@@ -710,6 +716,8 @@ function selfTest() {
     + "catch-all requirement off WITHOUT taking the run green, the OG marker's NAME observed free while "
     + 'its dot is not, and a widening that still excludes /og/ observed staying green.',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 function main() {
@@ -724,6 +732,15 @@ function main() {
 }
 
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) selfTest();
+  if (process.argv.includes('--self-test')) {
+      if (selfTest() !== SELF_TEST_VERDICT) {
+          console.error(
+              '\n✗ check-docs-locale-catch-all self-test: selfTest() returned without reaching its verdict,\n'
+                  + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                  + 'that never finished as a self-test that passed.\n',
+          );
+          process.exit(1);
+      }
+  }
   else main();
 }

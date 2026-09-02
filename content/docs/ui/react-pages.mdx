@@ -131,8 +131,12 @@ One collision is worth knowing. `type` is the SDUI envelope's component discrimi
 **and** a legitimate prop name on some blocks — a chart's family, for instance. The
 discriminator wins the `type` slot and your value is preserved beside it as `specType`
 for the block to read, so `<ObjectChart type="bar">` works as written. That rescue is the
-react runtime's. On an `html` page the tag name *is* the node's `type`, a `type` attribute
-overwrites it, and `<object-chart>` declares no `type` input to write in the first place.
+react runtime's, and it stays there. On an `html` page the tag name *is* the node's
+`type`, so a `type` attribute is a name collision, and the parser **refuses** it rather
+than resolving it either way: `<flex type="grid" />` fails to compile with *Attribute
+"type" is not allowed on `<flex>`* — one diagnostic naming both the tag and the attribute.
+Write the tag of the component you mean; `<object-chart>` declares no `type` input to
+write in the first place.
 
 ### `Block` — the escape hatch
 

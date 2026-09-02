@@ -413,6 +413,13 @@ function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
 // dispatch-gates.mjs, so only the joined value is pathy and it exists at runtime
 // alone.
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 export async function selfTest() {
   /** A ci.yml source carrying the two scheduling lists, in the real shape. */
   const REAL_TEST_IF =
@@ -663,6 +670,7 @@ export async function selfTest() {
       `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one, ` +
       `and the CI wiring read out of lint.yml.`,
   );
+  selfTestReachedVerdict = true;
   return 0;
 }
 
@@ -672,7 +680,18 @@ export async function selfTest() {
 // into an importer's stdout and hand it this gate's exit status
 // (`check:entry-guard`; the sibling gate's header records what that cost).
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) process.exit(await selfTest());
+  if (process.argv.includes('--self-test')) {
+    const selfTestCode = await selfTest();
+      if (!selfTestReachedVerdict) {
+        console.error(
+          '\n✗ check-ci-filter-parity self-test: selfTest() returned without reaching its verdict,\n'
+            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+            + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+      }
+      process.exit(selfTestCode);
+  }
   if (process.argv.includes('--list')) process.exit(list());
   process.exit(main());
 }

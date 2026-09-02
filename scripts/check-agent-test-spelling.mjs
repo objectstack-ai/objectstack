@@ -811,6 +811,13 @@ function baseFixtureFiles(extra = {}) {
   };
 }
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const failures = [];
   const t = (name, actual, expected) => {
@@ -1014,12 +1021,24 @@ function selfTest() {
     return 1;
   }
   console.log('\n✓ check-agent-test-spelling --self-test: all cases pass');
+  selfTestReachedVerdict = true;
   return 0;
 }
 
 if (isEntrypoint(import.meta.url)) {
   const argv = process.argv.slice(2);
-  if (argv.includes('--self-test')) process.exit(selfTest());
+  if (argv.includes('--self-test')) {
+    const selfTestCode = selfTest();
+      if (!selfTestReachedVerdict) {
+        console.error(
+          '\n✗ check-agent-test-spelling self-test: selfTest() returned without reaching its verdict,\n'
+            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+            + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+      }
+      process.exit(selfTestCode);
+  }
   else if (argv.includes('--list')) list();
   else process.exit(run());
 }

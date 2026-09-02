@@ -334,6 +334,12 @@ function report({ list = false, scanRoots = DEFAULT_SCAN_ROOTS } = {}) {
 // both sides of every decision it makes, so a refactor that neuters it fails
 // here rather than turning every future PR green.
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-resume-authority-declared self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   const expect = (label, cond) => { if (!cond) failures.push(label); };
@@ -448,11 +454,22 @@ const b = defineActionDescriptor({ type: 'b', version: '1.0.0', name: 'B', suppo
       + 'independently, treats a non-literal argument as opaque rather than as a violation, and proves '
       + 'discovery reaches the four pausing built-ins.',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 const argv = process.argv.slice(2);
 const dirFlag = argv.indexOf('--packages-dir');
 const scanRoots = dirFlag === -1 ? DEFAULT_SCAN_ROOTS : [argv[dirFlag + 1]];
 
-if (argv.includes('--self-test')) selfTest();
+if (argv.includes('--self-test')) {
+  if (selfTest() !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ check-resume-authority-declared self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
+}
 else report({ list: argv.includes('--list'), scanRoots });

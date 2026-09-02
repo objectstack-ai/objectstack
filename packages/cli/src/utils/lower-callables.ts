@@ -112,123 +112,182 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
     }
   }
 
-  // Shallow clone the top level — we only mutate the slots we touch.
-  const lowered: Record<string, unknown> = { ...input };
+  /**
+   * ref → the callable it names, keyed by function IDENTITY.
+   *
+   * [ADR-0130 D4] A multi-package artifact carries the SAME callable twice —
+   * once in the composed stack's flattened collections and once in the package
+   * body that owns it (`composeStacks(…, { manifest: 'preserve' })` assembles
+   * from the same authored objects, so the two copies are the same function
+   * OBJECT, not two functions that look alike). Registering it twice would
+   * bundle one implementation under two refs and leave the artifact's two
+   * copies pointing at different names for one handler. Identity dedup gives
+   * both copies the ref the first pass minted.
+   *
+   * ⛔ Single-package artifacts are untouched by this: with no `packages` key
+   * nothing is walked twice, so no callable is ever looked up here more than
+   * once and the ref names are exactly the ones this function minted before.
+   */
+  const refByFn = new Map<AnyFn, string>();
 
-  // 1. Lower `bundle.hooks[*].handler`
-  if (Array.isArray(lowered.hooks)) {
-    lowered.hooks = (lowered.hooks as unknown[]).map((raw) => {
-      if (!isPlainObject(raw)) return raw;
-      const hook = { ...raw };
-      if (typeof hook.handler === 'function') {
-        const name = typeof hook.name === 'string' && hook.name.length > 0
-          ? hook.name
-          : 'anon_hook';
-        const ref = uniqueName(name, taken);
-        taken.add(ref);
-        functions[ref] = hook.handler as AnyFn;
+  /** Register one callable and answer its ref, reusing the ref if it has one. */
+  function register(fn: AnyFn, base: string): string {
+    const seen = refByFn.get(fn);
+    if (seen !== undefined) return seen;
+    const ref = uniqueName(base, taken);
+    taken.add(ref);
+    functions[ref] = fn;
+    refByFn.set(fn, ref);
+    return ref;
+  }
 
-        // Extract metadata body unless the user already provided one.
-        if (!hook.body) {
-          const body = tryExtractBody(hook.handler as AnyFn, `hook '${name}'`);
-          if (body) hook.body = body;
+  /**
+   * Lower ONE stack-shaped body: the composed stack itself, or one assembled
+   * package body inside an ADR-0130 D4 artifact.
+   *
+   * The per-package walk is this same function called again — not a copy of it
+   * — so a lowering rule added for the stack applies to package bodies on the
+   * day it lands. Copying the walk is how the two would come to disagree, and
+   * the disagreement would be silent in the worst way: an un-lowered handler is
+   * a `function` value, and `JSON.stringify` drops it, shipping an artifact
+   * whose package hooks simply never fire.
+   */
+  function lowerBody(input: Record<string, unknown>): Record<string, unknown> {
+    // Shallow clone the top level — we only mutate the slots we touch.
+    const lowered: Record<string, unknown> = { ...input };
+
+    // 1. Lower `bundle.hooks[*].handler`
+    if (Array.isArray(lowered.hooks)) {
+      lowered.hooks = (lowered.hooks as unknown[]).map((raw) => {
+        if (!isPlainObject(raw)) return raw;
+        const hook = { ...raw };
+        if (typeof hook.handler === 'function') {
+          const name = typeof hook.name === 'string' && hook.name.length > 0
+            ? hook.name
+            : 'anon_hook';
+          const ref = register(hook.handler as AnyFn, name);
+
+          // Extract metadata body unless the user already provided one.
+          if (!hook.body) {
+            const body = tryExtractBody(hook.handler as AnyFn, `hook '${name}'`);
+            if (body) hook.body = body;
+          }
+          hook.handler = ref;
         }
-        hook.handler = ref;
-      }
-      return hook;
-    });
-  }
-
-  // 1b. Lower inline action handlers found inside `objects[*].actions[*]`
-  //     and `actions[*]`. Only `target: fn` — the `execute` alias was removed
-  //     in protocol 17 (#3855) and is left for the parse to reject by name.
-  if (Array.isArray(lowered.objects)) {
-    lowered.objects = (lowered.objects as unknown[]).map((rawObj) => {
-      if (!isPlainObject(rawObj)) return rawObj;
-      const obj = { ...rawObj };
-      if (Array.isArray(obj.actions)) {
-        obj.actions = (obj.actions as unknown[]).map((rawAct) =>
-          lowerActionCallable(rawAct, taken, functions, tryExtractBody, `${String(obj.name ?? 'object')}`),
-        );
-      }
-      return obj;
-    });
-  }
-  if (Array.isArray((lowered as any).actions)) {
-    (lowered as any).actions = ((lowered as any).actions as unknown[]).map((rawAct) =>
-      lowerActionCallable(rawAct, taken, functions, tryExtractBody, 'global'),
-    );
-  }
-
-  // 2. Lower top-level `functions` (map or array of records).
-  //    The runtime already merges this map into the engine's resolver, so
-  //    we keep the same shape after lowering — just replace fn refs with
-  //    serialisable handler-name strings + register the originals.
-  const fnsField = (lowered as { functions?: unknown }).functions;
-  if (Array.isArray(fnsField)) {
-    const arr = fnsField.map((entry) => {
-      if (!isPlainObject(entry)) return entry;
-      const next = { ...entry };
-      if (typeof next.handler === 'function') {
-        const name = typeof next.name === 'string' && next.name.length > 0
-          ? next.name
-          : 'anon_fn';
-        const ref = uniqueName(name, taken);
-        taken.add(ref);
-        functions[ref] = next.handler as AnyFn;
-        next.name = ref;
-        next.handler = ref;
-      }
-      return next;
-    });
-    (lowered as Record<string, unknown>).functions = arr;
-  } else if (isPlainObject(fnsField)) {
-    const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(fnsField)) {
-      if (typeof value === 'function') {
-        const ref = uniqueName(key, taken);
-        taken.add(ref);
-        functions[ref] = value as AnyFn;
-        out[ref] = ref;
-      } else if (isPlainObject(value) && typeof value.handler === 'function') {
-        // A DECLARED entry (`{ handler, effect: 'writes' }`, #4396). Lower the
-        // callable exactly like the bare form and keep the declaration beside
-        // it, so what the function said about itself survives into the
-        // artifact — dropping it here would silently un-declare the function
-        // on every built deployment while it kept working from source.
-        const ref = uniqueName(key, taken);
-        taken.add(ref);
-        functions[ref] = value.handler as AnyFn;
-        out[ref] = { ...value, handler: ref };
-      } else {
-        // NOTHING ELSE IS THIS STEP'S TO JUDGE (#7318). Everything that is not
-        // a callable to lower rides through under its own key, untouched, and
-        // `FlowFunctionEntrySchema` decides whether it is legal.
-        //
-        // Two kinds of value arrive here, and passing both through is the same
-        // decision, not a compromise between two:
-        //
-        //   ALREADY LOWERED — a bare ref (`'scoreLead'`, #4343) or a lowered
-        //   declaration (`{ handler: 'scoreLead', effect: 'writes' }`, #4976).
-        //   Both are shapes the schema accepts, so lowering a lowered stack
-        //   must be a no-op: same key set, same declarations. Rebuilding the
-        //   map around a fixed list of recognised shapes made that false — the
-        //   lowered declaration matched none of them and was deleted, so a
-        //   second pass (a re-lowered artifact, a fixture that lowers what it
-        //   read back) silently un-declared the writer the FIRST pass had
-        //   carefully kept.
-        //
-        //   MALFORMED — the headless husk `{ effect: 'writes' }` that a plain
-        //   `JSON.stringify(stack)` leaves where a declaration was (#6293).
-        //   Deleting it here erased the evidence BEFORE the parse: the artifact
-        //   came out `functions: {}` and validated green, so the build shipped
-        //   an app missing the function instead of refusing. Handed on, it
-        //   reaches `FlowFunctionEntrySchema`, which names it — `invalid_union`
-        //   on this key — and `objectstack build` fails where it should.
-        out[key] = value;
-      }
+        return hook;
+      });
     }
-    (lowered as Record<string, unknown>).functions = out;
+
+    // 1b. Lower inline action handlers found inside `objects[*].actions[*]`
+    //     and `actions[*]`. Only `target: fn` — the `execute` alias was removed
+    //     in protocol 17 (#3855) and is left for the parse to reject by name.
+    if (Array.isArray(lowered.objects)) {
+      lowered.objects = (lowered.objects as unknown[]).map((rawObj) => {
+        if (!isPlainObject(rawObj)) return rawObj;
+        const obj = { ...rawObj };
+        if (Array.isArray(obj.actions)) {
+          obj.actions = (obj.actions as unknown[]).map((rawAct) =>
+            lowerActionCallable(rawAct, register, tryExtractBody, `${String(obj.name ?? 'object')}`),
+          );
+        }
+        return obj;
+      });
+    }
+    if (Array.isArray((lowered as any).actions)) {
+      (lowered as any).actions = ((lowered as any).actions as unknown[]).map((rawAct) =>
+        lowerActionCallable(rawAct, register, tryExtractBody, 'global'),
+      );
+    }
+
+    // 2. Lower top-level `functions` (map or array of records).
+    //    The runtime already merges this map into the engine's resolver, so
+    //    we keep the same shape after lowering — just replace fn refs with
+    //    serialisable handler-name strings + register the originals.
+    const fnsField = (lowered as { functions?: unknown }).functions;
+    if (Array.isArray(fnsField)) {
+      const arr = fnsField.map((entry) => {
+        if (!isPlainObject(entry)) return entry;
+        const next = { ...entry };
+        if (typeof next.handler === 'function') {
+          const name = typeof next.name === 'string' && next.name.length > 0
+            ? next.name
+            : 'anon_fn';
+          const ref = register(next.handler as AnyFn, name);
+          next.name = ref;
+          next.handler = ref;
+        }
+        return next;
+      });
+      (lowered as Record<string, unknown>).functions = arr;
+    } else if (isPlainObject(fnsField)) {
+      const out: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(fnsField)) {
+        if (typeof value === 'function') {
+          const ref = register(value as AnyFn, key);
+          out[ref] = ref;
+        } else if (isPlainObject(value) && typeof value.handler === 'function') {
+          // A DECLARED entry (`{ handler, effect: 'writes' }`, #4396). Lower the
+          // callable exactly like the bare form and keep the declaration beside
+          // it, so what the function said about itself survives into the
+          // artifact — dropping it here would silently un-declare the function
+          // on every built deployment while it kept working from source.
+          const ref = register(value.handler as AnyFn, key);
+          out[ref] = { ...value, handler: ref };
+        } else {
+          // NOTHING ELSE IS THIS STEP'S TO JUDGE (#7318). Everything that is not
+          // a callable to lower rides through under its own key, untouched, and
+          // `FlowFunctionEntrySchema` decides whether it is legal.
+          //
+          // Two kinds of value arrive here, and passing both through is the same
+          // decision, not a compromise between two:
+          //
+          //   ALREADY LOWERED — a bare ref (`'scoreLead'`, #4343) or a lowered
+          //   declaration (`{ handler: 'scoreLead', effect: 'writes' }`, #4976).
+          //   Both are shapes the schema accepts, so lowering a lowered stack
+          //   must be a no-op: same key set, same declarations. Rebuilding the
+          //   map around a fixed list of recognised shapes made that false — the
+          //   lowered declaration matched none of them and was deleted, so a
+          //   second pass (a re-lowered artifact, a fixture that lowers what it
+          //   read back) silently un-declared the writer the FIRST pass had
+          //   carefully kept.
+          //
+          //   MALFORMED — the headless husk `{ effect: 'writes' }` that a plain
+          //   `JSON.stringify(stack)` leaves where a declaration was (#6293).
+          //   Deleting it here erased the evidence BEFORE the parse: the artifact
+          //   came out `functions: {}` and validated green, so the build shipped
+          //   an app missing the function instead of refusing. Handed on, it
+          //   reaches `FlowFunctionEntrySchema`, which names it — `invalid_union`
+          //   on this key — and `objectstack build` fails where it should.
+          out[key] = value;
+        }
+      }
+      (lowered as Record<string, unknown>).functions = out;
+    }
+
+    return lowered;
+  }
+
+  const lowered = lowerBody(input);
+
+  // 3. [ADR-0130 D4] The artifact's own package bodies.
+  //
+  //    A `packages`-carrying artifact is registered THROUGH that list — the
+  //    load path reads `packages` when present and the top level only when it
+  //    is absent — so a callable that is lowered at the top level and left raw
+  //    inside `packages[i].manifest` is a callable the runtime never gets. The
+  //    failure is silent end to end: `JSON.stringify` drops a `function` value
+  //    without a word, the artifact validates, the build exits 0, and the hook
+  //    is simply not there at boot.
+  //
+  //    Entries that are not `{ manifest: <object> }` ride through untouched:
+  //    the shape is `ArtifactPackageSchema`'s to judge, at the parse that runs
+  //    after this step, and swallowing a malformed entry here would consume the
+  //    evidence before the refusal that names it.
+  if (Array.isArray(lowered.packages)) {
+    lowered.packages = (lowered.packages as unknown[]).map((entry) => {
+      if (!isPlainObject(entry) || !isPlainObject(entry.manifest)) return entry;
+      return { ...entry, manifest: lowerBody(entry.manifest as Record<string, unknown>) };
+    });
   }
 
   return {
@@ -255,8 +314,7 @@ export function lowerCallables(input: Record<string, unknown>): LoweringResult {
  */
 function lowerActionCallable(
   raw: unknown,
-  taken: Set<string>,
-  functions: Record<string, AnyFn>,
+  register: (fn: AnyFn, base: string) => string,
   tryExtract: (fn: AnyFn, label: string) => { language: 'js'; source: string; capabilities: string[] } | null,
   ownerLabel: string,
 ): unknown {
@@ -269,9 +327,7 @@ function lowerActionCallable(
   // alias is deliberately left in place so the parse rejects it by name.
   if (typeof action.target !== 'function') return action;
   const fn = action.target as AnyFn;
-  const ref = uniqueName(baseName, taken);
-  taken.add(ref);
-  functions[ref] = fn;
+  const ref = register(fn, baseName);
   if (!action.body) {
     const body = tryExtract(fn, `action '${baseName}'`);
     if (body) action.body = body;
