@@ -429,6 +429,12 @@ const FIXTURE_LOCKFILE = [
   '',
 ].join('\n');
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-override-consistency self-test reached its verdict';
+
 function selfTest() {
   const index = buildConsumerIndex(FIXTURE_LOCKFILE);
   const idleKeys = (keys) =>
@@ -562,11 +568,20 @@ function selfTest() {
       '\n  zero-consumer and self-expiring overrides are, and the manifest rule still' +
       '\n  separates reachable declarations from unreachable ones.',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 function main() {
   if (process.argv.includes('--self-test')) {
-    selfTest();
+    if (selfTest() !== SELF_TEST_VERDICT) {
+        console.error(
+            '\n✗ check-override-consistency self-test: selfTest() returned without reaching its verdict,\n'
+                + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+    }
     return;
   }
   const overrides = readOverrides();

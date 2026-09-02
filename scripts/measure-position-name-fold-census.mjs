@@ -686,6 +686,13 @@ const AUDIT_CONTROLS = [
   },
 ];
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest({ quiet = false } = {}) {
   const problems = [];
   const c = census();
@@ -785,6 +792,7 @@ function selfTest({ quiet = false } = {}) {
       + ` ${AUDIT_CONTROLS.length} audit-generator controls pass\n`,
     );
   }
+  selfTestReachedVerdict = true;
   return 0;
 }
 
@@ -905,7 +913,18 @@ function main(argv) {
     process.stdout.write(`${AUDIT_SCHEMA}\n`);
     return 0;
   }
-  if (argv.includes('--self-test')) return selfTest();
+  if (argv.includes('--self-test')) {
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ measure-position-name-fold-census self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    return selfTestCode;
+  }
 
   // ⚠️ Every reading is gated on the controls. The ruling asked for a census
   // WITH positive controls, and a number printed by an instrument that has not

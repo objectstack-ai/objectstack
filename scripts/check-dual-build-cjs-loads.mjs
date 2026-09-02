@@ -1074,6 +1074,13 @@ function writePkg(root, name, manifest, files) {
   return dir;
 }
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 export async function selfTest() {
   const cases = [];
   const t = (name, ok, detail) => cases.push({ name, ok: Boolean(ok), detail });
@@ -1434,11 +1441,25 @@ export async function selfTest() {
   }
   console.log(`✓ check-dual-build-cjs-loads self-test: ${cases.length} cases pass (real emitted bytes, real spawns; both stale-ledger directions including the orphan one, every vacuity floor driven to zero with its green control, the parse failure the ledger may never silence, the record's ref reproducible, quoted from the record and printed on the pass path, and TYPED in both directions — the #13112 shape red, the identically-spelled CJS-first package green).`);
 
+  selfTestReachedVerdict = true;
   return EXIT_OK;
 }
 
 if (isEntrypoint(import.meta.url)) {
   const argv = process.argv.slice(2);
-  const code = argv.includes('--self-test') ? await selfTest() : await main(argv);
+  let code;
+  if (argv.includes('--self-test')) {
+      code = await selfTest();
+      if (!selfTestReachedVerdict) {
+          console.error(
+              '\n✗ check-dual-build-cjs-loads self-test: selfTest() returned without reaching its verdict,\n'
+                  + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                  + 'that never finished as a self-test that passed.\n',
+          );
+          process.exit(1);
+      }
+  } else {
+      code = await main(argv);
+  }
   process.exit(code);
 }

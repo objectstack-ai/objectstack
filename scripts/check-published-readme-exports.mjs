@@ -2067,6 +2067,12 @@ function run({ unreadReport: wantsUnreadReport = false } = {}) {
 // to exclude must produce none.
 // ---------------------------------------------------------------------------
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-published-readme-exports self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   const eq = (label, actual, expected) => {
@@ -3493,6 +3499,8 @@ function selfTest() {
       '  population as resolved/total, so a recogniser that stops matching shows up as a\n' +
       '  denominator that fell rather than as a defect count that never moved.',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 /* Run only when invoked as a program — `publishedDocs` and the extractors are
@@ -3500,7 +3508,14 @@ function selfTest() {
  * import itself building a TypeScript program and sweeping the workspace. */
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    selfTest();
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-published-readme-exports self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
     process.exit(0);
   }
   try {

@@ -138,6 +138,12 @@ export function checkTree(root) {
   return problems;
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-sdui-manifest self-test reached its verdict';
+
 function selfTest() {
   const mk = (mutate) => {
     const root = mkdtempSync(join(tmpdir(), 'sdui-manifest-check-'));
@@ -196,11 +202,20 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`✓ check-sdui-manifest self-test: ${cases.length} cases behave (green passes; absence, tamper, moved pin, emptiness are RED).`);
+
+  return SELF_TEST_VERDICT;
 }
 
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    selfTest();
+    if (selfTest() !== SELF_TEST_VERDICT) {
+        console.error(
+            '\n✗ check-sdui-manifest self-test: selfTest() returned without reaching its verdict,\n'
+                + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+    }
   } else {
     const problems = checkTree(DEFAULT_ROOT);
     if (problems.length) {

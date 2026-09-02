@@ -573,6 +573,12 @@ function reportVerdict(verdict) {
   process.exit(verdict.exit);
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-test-completeness self-test reached its verdict';
+
 function selfTest({ quiet = false } = {}) {
   const eq = (actual, expected, what) => {
     const a = JSON.stringify(actual);
@@ -901,12 +907,21 @@ function selfTest({ quiet = false } = {}) {
   );
 
   if (!quiet) console.log('check-test-completeness: self-test OK');
+
+  return SELF_TEST_VERDICT;
 }
 
 function main() {
   const argv = process.argv.slice(2);
   if (argv.includes('--self-test')) {
-    selfTest();
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-test-completeness self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
     return;
   }
   // Every invocation, not a lint step -- see the header note on why.

@@ -617,6 +617,14 @@ function exitCodeFor(flagCount, advisory) {
 // walker, judged against fixture LEDGER FILES parsed by the real parser —
 // never against the regexes alone (#4913: a gate can run, stay green, and be
 // structurally unable to reach the thing it claims to check).
+
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const failures = [];
   const expect = (label, got, want) => {
@@ -855,12 +863,24 @@ function selfTest() {
     + 'surface mentions, the allow marker, optional and empty segments), and every hard-error direction '
     + '(dead root, empty root, evaporated extraction, missing and unreadable ledger — each red naming its '
     + 'subject, green again on restore) all hold.');
+  selfTestReachedVerdict = true;
 }
 
 // ── Main ────────────────────────────────────────────────────────────────────
 
 function main() {
-  if (process.argv.includes('--self-test')) return selfTest();
+  if (process.argv.includes('--self-test')) {
+      const selfTestCode = selfTest();
+      if (!selfTestReachedVerdict) {
+          console.error(
+              '\n✗ check-doc-route-spelling self-test: selfTest() returned without reaching its verdict,\n'
+                  + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                  + 'that never finished as a self-test that passed.\n',
+          );
+          process.exit(1);
+      }
+      return selfTestCode;
+  }
   const advisory = process.argv.includes('--advisory');
 
   let result;
