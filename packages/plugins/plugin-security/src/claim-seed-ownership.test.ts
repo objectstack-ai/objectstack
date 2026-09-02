@@ -17,9 +17,23 @@ interface RecordedWrite {
   matched: string[];
 }
 
-/** `where` as the two `UNOWNED_PREDICATES` spell it: one equality per key. */
+/**
+ * `where` as the two `UNOWNED_PREDICATES` spell it: one equality per key.
+ *
+ * A combinator (`$and`/`$or`/`$not`) is REFUSED rather than read as a field
+ * name (`check:where-matcher`): this double implements plain equality only, and
+ * a double that answers a query it does not implement is silently wrong on the
+ * exact shape the pin exists to judge. `claimSeedOwnership` issues no
+ * combinator, so the throw is unreachable today and turns the suite red the
+ * moment one arrives.
+ */
 function rowMatches(row: any, where: Record<string, unknown>): boolean {
-  return Object.entries(where).every(([k, v]) => (row?.[k] ?? null) === (v ?? null));
+  return Object.entries(where).every(([k, v]) => {
+    if (k.startsWith('$')) {
+      throw new Error(`this double implements plain equality only; it cannot answer '${k}'`);
+    }
+    return (row?.[k] ?? null) === (v ?? null);
+  });
 }
 
 /**
