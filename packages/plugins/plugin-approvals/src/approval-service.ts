@@ -2876,6 +2876,13 @@ export class ApprovalService implements IApprovalService {
    * is then paused at the revise-window node (no reject edge), so it is
    * terminally cancelled via {@link ApprovalResumeSurface.cancelRun} rather
    * than resumed.
+   *
+   * The #3424 privileged override reaches a PENDING request only (#12775,
+   * maintainer ruling 2026-09-02). On `returned` an override actor is refused
+   * exactly as any other non-submitter: the gate is spelled as `attachViewers`
+   * computes `viewer.can_override`, so the gate, the
+   * {@link ApprovalService.isOverrideActor} doc block and the viewer flag agree
+   * at one point.
    */
   async recall(
     requestId: string,
@@ -2894,21 +2901,34 @@ export class ApprovalService implements IApprovalService {
     if (raw.status !== 'pending' && !inReviseWindow) {
       throw new Error(`INVALID_STATE: request is ${raw.status}`);
     }
-    // The submitter withdraws their own request; a privileged admin may recall
-    // any pending request to release a stuck record (#3424).
+    // The submitter withdraws their own request — while it is `pending`, or
+    // while it is `returned` (ADR-0044: abandoning the revision instead of
+    // resubmitting). A privileged admin may recall a PENDING request to
+    // release a stuck record (#3424) — and only a pending one. This
+    // short-circuit used to sit above ADR-0044's widened state check with no
+    // status test of its own, so it also admitted the override caller on
+    // `returned`: a reach no UI ever offered (`viewer.can_override` is ANDed
+    // with `status === 'pending'` where it is computed, in `attachViewers`)
+    // and no pin ever held. #12775 (maintainer ruling 2026-09-02) re-scoped it
+    // to `pending`, spelled exactly as the viewer flag, so the gate, the
+    // `isOverrideActor` doc block and the flag agree at one point. On
+    // `returned` the override caller is judged exactly as any other
+    // non-submitter: the branch below, its catalog sentence, its `FORBIDDEN`
+    // wire code.
     //
-    // [#11993] The GATE is untouched — who may recall an approval is exactly
-    // what it was. Only the refusal's user-facing half changed: it used to be
+    // [#11993] Only the refusal's user-facing half changed there: it used to be
     // one hardcoded English sentence that Console rendered verbatim in a
     // toast. See {@link ApprovalService.userFacingRefusal}.
-    if (!this.isOverrideActor(context, raw.organization_id ?? null)
-      && raw.submitter_id && String(raw.submitter_id) !== String(actorId)) {
+    const overrideAdmits = raw.status === 'pending'
+      && this.isOverrideActor(context, raw.organization_id ?? null);
+    if (!overrideAdmits && raw.submitter_id && String(raw.submitter_id) !== String(actorId)) {
       // The developer's half: the ids the catalog sentence deliberately does
       // not name (the throw site knows the submitter only as an opaque user
       // id), kept where a developer reads them and a user never does.
       const developerMessage =
         `[approvals] recall refused: actor '${actorId}' is not the submitter of request `
-        + `'${requestId}' (submitter '${String(raw.submitter_id)}') and holds no #3424 override`;
+        + `'${requestId}' (submitter '${String(raw.submitter_id)}') and holds no #3424 override `
+        + `for a '${raw.status}' request (the override reaches pending requests only, #12775)`;
       this.logger?.warn?.(developerMessage, {
         request: requestId,
         actor: actorId,
