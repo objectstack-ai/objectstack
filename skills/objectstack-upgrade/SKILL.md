@@ -10,17 +10,10 @@ description: >
   across a major and metadata or code stopped parsing, when a parse or `tsc`
   error quotes a `[REMOVED]` prescription, or when asked to "upgrade to v17" /
   "升级到 v17" / "一键升级元数据项目". Do not use to author new metadata (the
-  domain skills cover that), to design a retirement in the ObjectStack platform
-  repo itself (that is the platform's own internal playbook), or to hand-write
-  a rewrite the conversion chain already applies — running the chain is always
-  the first step, never a fallback.
+  domain skills cover that), or to reconcile physical database drift (that is
+  objectstack-platform's `os migrate plan` / `os migrate apply`).
 license: Apache-2.0
-compatibility: >
-  Needs `@objectstack/spec` and `@objectstack/cli` at the TARGET major
-  (`os migrate meta` replays the chain from `MIGRATION_SUPPORT_FLOOR`, protocol
-  10 at the time of writing). No network access required — every instruction
-  source this skill harvests ships inside the installed `@objectstack/spec`
-  package.
+compatibility: Requires `@objectstack/spec` and `@objectstack/cli` at the TARGET major; the chain replays from the spec's `MIGRATION_SUPPORT_FLOOR`. No network access required.
 metadata:
   author: objectstack-ai
   version: "1.0"
@@ -30,21 +23,7 @@ metadata:
 
 # Upgrading an ObjectStack metadata project across a protocol major
 
-This skill turns one session into an **upgrade agent** working on somebody
-else's metadata project. It has one job: take a project authored against
-protocol `N` and leave it authored against the current major, with the change
-**proved** rather than asserted.
-
 > **preflight → mechanical chain → semantic residue → acceptance report**
-
-The upgrade is deliberately split into three layers, and the split is the whole
-design. Two of them are not yours.
-
-| Layer | Who owns it | What it is |
-|:--|:--|:--|
-| **1 · Mechanical** | The CLI. **You invoke it, you never re-implement it.** | `os migrate meta` replays the ADR-0087 conversion chain: deterministic, idempotent, fixture-tested, per-hop attributable. |
-| **2 · Semantic residue** | **You, with the project's owner.** | Everything a conversion cannot express: intent choices, custom code calling retired APIs, prose that still teaches the old shape. |
-| **3 · Acceptance** | The gates. | Typed + parse-gated metadata, a green `validate`, and a report a human can read. |
 
 ## ⛔ The boundary — read this before the first command
 
@@ -68,6 +47,9 @@ important paragraph in this skill.
 plus the report is the machine criterion. Absent either, the status is
 *in progress*, whatever the diff looks like.
 
+**One `conversionId` per commit**, where the project's review culture allows it.
+The id is the commit's subject line and its justification.
+
 ---
 
 ## Quickstart
@@ -85,7 +67,6 @@ os migrate meta --from 16 --out .upgrade/migrated.stack.json
 
 # 2 · semantic residue — harvest the prescriptions, then work each item
 node -e "console.log(require('fs').readFileSync(require.resolve('@objectstack/spec/package.json').replace('package.json','spec-changes.json'),'utf8'))" > .upgrade/spec-changes.json
-grep -rho '\[REMOVED\][^"]*' node_modules/@objectstack/spec/json-schema/ | sort -u > .upgrade/tombstones.txt
 
 # 3 · acceptance — all four, not three
 os validate                      # green (compare against validate-before.txt)
@@ -105,8 +86,12 @@ Everything below is the long form of those four steps.
 `--from` is the protocol major the metadata was **authored** against, not the
 one installed. Three sources, in order of authority:
 
-1. **`manifest.engines.protocol`** in the stack config (`'16.0.0'` → `--from
-   16`). The declared answer, checked by the boot handshake.
+1. **`manifest.engines.protocol`** in the stack config — the declared answer,
+   checked by the boot handshake. It is a **range**, not a version: every
+   scaffold and example writes the caret form (`engines: { protocol: '^17' }`),
+   and an exact `'16.0.0'` is only a range of one. Take the major it *targets* —
+   the floor: `'^17'` → `--from 17`, `'>=15 <18'` → `--from 15`, never the
+   upper bound.
 2. **The last `@objectstack/spec` major the project ever installed** — read the
    lockfile history (`git log -p pnpm-lock.yaml | grep -m5 '@objectstack/spec'`)
    when the manifest is absent or stale.
@@ -127,7 +112,7 @@ mkdir -p .upgrade         # every artifact this skill produces lands here
 ```
 
 The `.upgrade/` directory is the deliverable's workspace: the machine outputs
-(`migrate.json`, `migrated.stack.json`, `spec-changes.json`, `tombstones.txt`)
+(`migrate.json`, `migrated.stack.json`, `spec-changes.json`, `retired-names.txt`)
 and the human output (`REPORT.md`). Keeping them in the repo for the review, and
 deleting them on merge, is the usual arrangement — decide it with the owner.
 
@@ -143,6 +128,7 @@ os migrate meta --from 16 --step                # per-hop checkpoint (bisect a f
 os migrate meta --from 16 --to 17               # stop at a specific major
 os migrate meta --from 16 --json                # machine-readable result
 os migrate meta --from 16 --out migrated.json   # write the canonicalized stack
+os migrate meta --from 16 apps/crm/objectstack.config.ts   # pick the stack explicitly
 ```
 
 It loads the stack config, normalizes it **without** applying the load-time
@@ -166,21 +152,15 @@ it prints:
 loaded stack *in memory* and reports the diff. The only file it writes is
 `--out`, a JSON snapshot.
 
-This is deliberate: rewriting a TypeScript config through an AST is lossy — it
-drops comments, reorders keys, and cannot see values that come from imports or
-expressions. So the mechanical layer gives you a **provably valid target** and
-the **attributed list of edits**, and porting those edits into the project's own
-sources is yours. Work from the printed list, one `conversionId` at a time; use
-`--out` as the oracle you diff against, never as the file you ship.
+Porting the printed edits into the project's own sources is yours. Work from
+that list, one `conversionId` at a time; use `--out` as the oracle you diff
+against, never as the file you ship.
 
 ```bash
 os migrate meta --from 16 --out .upgrade/migrated.stack.json
 # then, after porting the edits into the real sources:
 os migrate meta --from 17 --out .upgrade/recheck.json   # should apply 0 changes
 ```
-
-That last line is the cheapest possible proof that the port is complete: replay
-the chain from the *target* major and it must find nothing to do.
 
 ### Stored rows: rehydration replays the same conversions
 
@@ -191,19 +171,19 @@ chain over a single item **including entries retired from the load path**. A row
 written under protocol 16 therefore rehydrates in its protocol-17 shape without
 anybody editing it.
 
-What that does and does not mean:
-
-- **You do not hand-edit `sys_metadata`.** Ever. A row at rest has no author to
-  ask, so the replay is unconditional and complete by design.
-- **The rows on disk stay in their old shape** until something rewrites them.
-  Rehydration is a read-time projection.
-- To make it durable, run the stored pass — read-only by default:
+Rehydration is a read-time projection: the rows on disk keep their old shape,
+and you never hand-edit `sys_metadata`. To make it durable, run the stored pass
+— read-only by default:
 
   ```bash
   os migrate meta --stored                     # preview, writes nothing
   os migrate meta --stored --type view --type object   # narrow the pass
-  os migrate meta --stored --apply             # rewrite the rows (prompts)
+  os migrate meta --stored --apply --yes       # rewrite the rows
   ```
+
+  ⛔ **`--yes` is not optional for you.** Without it `--apply` asks for
+  confirmation, and in any non-TTY — every agent session — it refuses instead,
+  exiting 1 with `confirmation_required`.
 
   `--stored` takes no `--from`: a stored row carries its own history, so the
   pass replays the whole chain. The authored-source flags and the stored-only
@@ -211,20 +191,14 @@ What that does and does not mean:
 
 ### Data migrations are not metadata migrations
 
-When the chain crosses into a major carrying per-deployment data gates, the
-command ends by naming them — for the 16 → 17 crossing, and only when the
-project's own metadata declares the field classes each gate is about:
+When the chain crosses into a major carrying per-deployment data gates, the run
+ends by naming each one, what staying un-run costs, and that `--apply` is the
+only writing mode. Read that output rather than re-deriving it. What it cannot
+tell you is whether they have *run*: that happens against each deployment's own
+database, and nothing in the metadata upgrade observes it.
 
-| Command | What staying un-run costs |
-|:--|:--|
-| `os migrate files-to-references` | Media values only warn instead of being enforced, and released files are never collected. |
-| `os migrate value-shapes` | Stored reference and structured-JSON values are not checked against their field contracts; a malformed value only warns. |
-
-Both are dry-run by default; `--apply` is the only writing mode. They run
-**against each deployment's database**, once per deployment, and nothing in the
-metadata upgrade can run them or tell whether they have run. Not running them is
-safe — enforcement simply stays off. Carry them into the report as *pending*, by
-name, so a gate nobody was told about is not served by nobody.
+⛔ **Carry every gate the run printed into the report as `pending`, by name.** A
+gate nobody was told about is served by nobody.
 
 ---
 
@@ -248,12 +222,26 @@ inside the installed package. **Measured** against the published
 | **The error itself** | Your parse / `tsc` output | The same prescription string, delivered at the moment you hit it. |
 
 ```bash
-# every tombstone prescription the installed spec carries, deduped
+# every tombstone prescription the installed spec carries, deduped (`| wc -l` sizes it)
 grep -rho '\[REMOVED\][^"]*' node_modules/@objectstack/spec/json-schema/ | sort -u
+
+# protocol version, support floor, and this crossing's conversion / semantic counts
+node -e "
+  const p = require.resolve('@objectstack/spec/package.json');
+  const j = require(p.replace('package.json','spec-changes.json'));
+  const to = parseInt(j.protocolVersion, 10);
+  const e = j.perMajor.find(x => x.to === to);
+  console.log(j.protocolVersion, 'floor', j.supportFloor, '| →', to + ':',
+              e.converted.length, 'converted,', e.migrated.length, 'semantic');
+"
 
 # the FROM → TO table for one retired key
 grep -n -B4 -A20 'transform' node_modules/@objectstack/spec/CHANGELOG.md | less
 ```
+
+⛔ **Never carry a remembered count or a pinned table into the report.** Every
+number here is a reading of *this* install; measure it at the start of the
+upgrade and again in the report.
 
 > **Not reachable from a consumer project**, so do not send anyone there: the
 > conversion and migration registries (`src/conversions/registry.ts`,
@@ -502,117 +490,45 @@ _N sites, M conversions. Ported into sources from `os migrate meta --out`._
 - <retired surface the project never used>  — no occurrences.
 ```
 
-Section 5 earns its place: "we looked and it was not there" is a finding, and
-without it the next reader cannot tell a surface that was checked from one that
-was missed.
-
 <a id="reverse-check"></a>
 
 ### 3.5 Prove the gate is real, do not assume it
 
-Before you report the parse gate as acceptance evidence, make it fire once.
-Take a value the chain *would* have converted, put it back after migrating, and
-parse:
+Make the parse gate fire once before you report it as evidence: take a value the
+chain *would* have converted, put it back after migrating, and parse it.
 
 ```bash
 # a stack that still carries a retired key, fed straight to the schema
 os validate .upgrade/residue-probe.config.mjs
 ```
 
-Predict the direction **before** you run it. There are three real outcomes and
-you must say which you expect:
+Write the probe as a **plain data literal** — ⛔ no `define*` call. `os validate`
+loads the config without authored-source mode, and every `define*` helper is a
+`Schema.parse()`, so a probe written the way a real config is written throws
+*inside the load* and never reaches the gate you are trying to prove.
 
-1. **Rejected with the prescription** — a tombstoned key. This is what a
-   tombstone looks like when it works:
+Predict the outcome **before** you run it, then record which one you actually
+got — "it passed" is a different fact in every row:
 
-   ```
-   ✗ connectors.0.fieldMappings.0.transform
-     invalid_type: `FieldMapping.transform` … was removed in @objectstack/spec
-     17.0.0 (ADR-0049) … Delete the key. The transform pipeline that IS
-     enforced is the import mapping's … Run `os migrate meta --from 16` to
-     list the mechanical edits for existing sources; apply them by hand.
-     expected: never
-   ```
+| Outcome | What it means | Your acceptance evidence |
+|:--|:--|:--|
+| Rejected, error carries the fix-it text | A tombstoned key. Not "unrecognized key", not a deprecation label — the prescription *is* the error. | The refusal itself, quoted. |
+| Accepted, and the chain rewrites it | A conversion with a live load-path acceptance window. | The chain's diff — not the parse gate. |
+| Accepted, and `validate` stays green | A migration-chain-only conversion ([3.3](#33-validate)). | Only the replay from the target major sees this class. |
 
-   Note what the error is not: not "unrecognized key", not a deprecation label.
-   The fix-it text *is* the error.
+### 3.6 Stored rows: assert them, do not believe them
 
-2. **Accepted, and the chain rewrites it** — a conversion with a live load-path
-   acceptance window. Your evidence for that key is the chain's diff, not the
-   parse gate.
-
-3. **Accepted, and the chain still rewrites it** — a migration-chain-only
-   conversion (§3.3). `validate` cannot see this class at all; only the replay
-   can.
-
-Record which one you actually got. A check whose expected direction you did not
-state in advance proves nothing, and "it passed" is a different fact in each of
-the three cases.
-
----
-
-## The v17 prescription set, as of `17.0.0-rc.5`
-
-This section is a **pinned reading**, not a live list. It was measured from the
-spec sources at the `17.0.0-rc.5` publish and is deliberately bounded so that
-entries registered after that publish are a visible *delta* rather than a silent
-contradiction.
-
-| Reading | Value at `17.0.0-rc.5` |
-|:--|:--|
-| `@objectstack/spec` version | `17.0.0-rc.5` (protocol `17.0.0`) |
-| Chain support floor | protocol 10 |
-| D2 conversions for major 17 | **45** |
-| D3 semantic entries for major 17 | **29** |
-| `retiredKey()` tombstones in shipped `*.zod.ts` | **113**, across 32 files |
-| Distinct `[REMOVED]` prescriptions in shipped `json-schema/` | **96** |
-
-`RETIRED_KEYS_BY_MAJOR[17]` — every authorable key formally tombstoned under the
-exact-key registry at this publish (3 entries, one retirement: the property is
-declared once and inherited by two extending schemas, so it is registered three
-times):
-
-- `data/ExternalFieldMapping:transform`
-- `integration/ConnectorFieldMapping:transform`
-- `shared/FieldMapping:transform`
-
-`RETIRED_DEFS_BY_MAJOR[17]` — every whole schema def unpublished at this publish
-(1 entry):
-
-- `shared/FieldMappingTransform`
-
-> **Why these two tables are short and the counts above are not.** They record
-> retirements registered under the exact-key gates that created them, which are
-> newer than most of protocol 17's work; they are explicitly *not* a backfill of
-> every retirement ever. The 45 conversions and 113 tombstones are the real size
-> of the v17 surface. Use the tables to answer "was this retirement formally
-> registered", and the conversions/tombstones to answer "what do I have to
-> change" — the second question is the upgrade's question.
-
-### How this table is refreshed
-
-**Never hand-edit the numbers above from memory.** Re-measure against whatever
-spec the project has installed — one command per row:
+The four artifacts above cover the authored sources. For a **deployment**, the
+stored pass is itself the assertion — run it read-only and branch on the exit
+code:
 
 ```bash
-# protocol version, support floor, and the per-major conversion / semantic counts
-node -e "
-  const p = require.resolve('@objectstack/spec/package.json');
-  const j = require(p.replace('package.json','spec-changes.json'));
-  const e = j.perMajor.find(x => x.to === 17);
-  console.log(j.protocolVersion, 'floor', j.supportFloor, '| 16→17:',
-              e.converted.length, 'converted,', e.migrated.length, 'semantic');
-"
-
-# tombstone prescriptions actually present in this install
-grep -rho '\[REMOVED\][^"]*' node_modules/@objectstack/spec/json-schema/ | sort -u | wc -l
+os migrate meta --stored --json    # 0 = every row canonical, 1 = work left
 ```
 
-If a reading disagrees with the table, **the install wins** — the table is a
-snapshot of one publish, and post-`rc.5` registrations are expected to add
-entries. Record the delta in the upgrade report rather than editing this
-section's pinned numbers; the pin is what makes a later disagreement legible
-instead of invisible.
+That is what makes "this deployment is on protocol N" a CI check rather than a
+belief. Nothing gates on it having run; the read-time rehydration is still the
+guarantee.
 
 ---
 
@@ -666,28 +582,14 @@ export const SupportBot = defineAgent({
 | `--apply` refused / stored-only flag rejected | `--apply`, `--yes`, `--force`, `--type`, `--database-url` mean something only with `--stored`. | Add `--stored`, or drop the flag; the authored-source chain has nothing to write to. |
 | `MigrationFloorError` | `--from` is older than the chain's support floor. | Upgrade to the floor by an older route first; the floor is a release-policy boundary, not an oversight. |
 
-## Guardrails (binding)
-
-1. **Run the chain first, always.** It is the only source of an attributed,
-   schema-proved diff.
-2. **One conversion id per commit**, where the project's review culture allows
-   it. The `conversionId` is the commit's subject line and its justification.
-3. **No tolerant reads, ever** — not in the metadata, not in the project's code.
-   A retirement that gets re-admitted at the consumer is a defect that moved
-   into a repo with no gate over it.
-4. **Ask about intent, decide about mechanics.** The split in
-   [2.4](#decide-alone-or-ask) is the contract with the project's owner.
-5. **The report is a deliverable, not a summary.** No report, not done.
-6. **Never leave a pending per-deployment data migration unnamed.** A gate
-   nobody was told about is served by nobody.
+Scripting the run instead of reading it? Every `--json` failure above carries a
+stable `error` code to branch on — `stored_only_flag`, `missing_from_major`,
+`unsupported_from_major`, `confirmation_required`, `database_busy` — and the
+prose row is the same fact for a human.
 
 ## Cross-skill routing
 
 - Authoring the corrected metadata — load the domain skill for the shape you are
-  fixing (**data**, **ui**, **automation**, **ai**, **api**, **i18n**).
-- Any CEL predicate you rewrite while resolving a residue item — load
-  **formula**.
+  fixing (**data**, **ui**, **automation**, **ai**, **api**, **i18n**); each one
+  routes on to **formula** for any CEL you rewrite.
 - Runtime, plugin, and CLI questions the upgrade turns up — load **platform**.
-- This skill covers the **consumption** side of a retirement. Designing one
-  inside the ObjectStack platform repo is a different job with its own internal
-  playbook, and it is not this one.

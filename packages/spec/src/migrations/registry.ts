@@ -7442,6 +7442,87 @@ const step18: MigrationStep = {
         + 'not collapse.',
     },
     {
+      id: 'rest-api-endpoint-handler-status-retired',
+      // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
+      // code span AND a table cell.
+      surface:
+        'RestApiEndpoint.handlerStatus (the implemented / stub / planned marker an '
+        + 'endpoint in a REST API plugin route registration could carry), the '
+        + 'HandlerStatusSchema / HandlerStatus value def it was typed with, and the '
+        + 'RouteCoverageEntrySchema / RouteCoverageReportSchema report shapes (with '
+        + 'their RouteCoverageEntry / RouteCoverageReport types) that re-declared it',
+      replacement:
+        'nothing declarative — the key never changed what the platform served, so '
+        + 'there is no working configuration to migrate to. Delete the key; an '
+        + 'endpoint that has no handler yet is simply not registered. Route '
+        + 'readiness that IS measured is unchanged and lives elsewhere: the '
+        + "discovery payload reports each service's status and handlerReady "
+        + '(api/discovery.zod.ts), and packages/runtime/src/route-ledger.ts asserts '
+        + 'per-route coverage in CI. A declared-but-unbuilt route answering 501 '
+        + 'instead of 404 is a new capability the ruling explicitly excluded (zero '
+        + 'pull); if it is ever wanted it re-declares fresh under its own ruling, '
+        + 'executor first',
+      reason:
+        'ADR-0049 enforce-or-remove; maintainer ruling 2026-09-01 on #13823 '
+        + '(director decision batch #27, verbatim 「同意」: remove; enforce '
+        + 'excluded). The key was DOCUMENTED to cause a specific runtime behaviour '
+        + '— its docstring said a stub handler "returns 501 Not Implemented" — and '
+        + 'that behaviour has a different cause: every '
+        + 'DispatcherErrorCode.enum.NOT_IMPLEMENTED site (runtime/src/'
+        + 'endpoint-executor.ts ×3, runtime/src/api-mapping.ts, '
+        + 'runtime/src/api-endpoint-step.ts) is the declarative-endpoint executor '
+        + 'refusing a target or mapping it cannot serve, and none of them consults '
+        + 'handlerStatus. Measured at the retirement base (origin/main a9b2be0b0, '
+        + '2026-09-02, skills/** and tests excluded): the only identifier hits were '
+        + 'the declaration on RestApiEndpointSchema, the re-declaration on '
+        + 'RouteCoverageEntrySchema and a docblock saying adapters SHOULD warn on '
+        + 'it; RouteCoverageReportSchema — the one shape that would have carried '
+        + 'the status outward — had zero constructors in objectstack, objectui '
+        + '(pinned sha) and cloud. So an author who wrote handlerStatus: \'stub\' '
+        + 'expecting the dispatcher to answer 501 got an ordinarily served route, '
+        + 'and the declaration reported progress to nobody — a declared ≠ enforced '
+        + 'gap on the same endpoint vocabulary ApiEndpointSchema closed strictly in '
+        + '#5384, and the surface a published skill had been teaching as working '
+        + 'machinery (the sentence corrected in #13808 is where this card came '
+        + 'from). Bookkeeping: the KEY is tombstoned with retiredKey() on the '
+        + 'non-strict RestApiEndpointSchema (api/RestApiEndpoint:handlerStatus in '
+        + 'RETIRED_KEYS_BY_MAJOR[18]); the DEFS leave whole — api/HandlerStatus '
+        + '(orphan value enum once both carriers are gone, the #3950 rule), '
+        + 'api/RouteCoverageEntry and api/RouteCoverageReport (route 3: nobody '
+        + 'ever parsed or constructed one) — all three in RETIRED_DEFS_BY_MAJOR[18]. '
+        + 'It is a SEMANTIC entry rather than a D2 conversion because there is no '
+        + 'source to rewrite: nothing in the tree parses RestApiEndpointSchema '
+        + 'outside its own unit tests — a REST API plugin route registration is not '
+        + 'a stack collection member and never a sys_metadata row — so the '
+        + 'conversion chain has no seam that would ever see one (the '
+        + 'kernel/Manifest:loading disposition). ENFORCE was excluded by the ruling: '
+        + 'mounting a 501 stub for stub / planned endpoints is a zero-pull new '
+        + 'capability, not a repair. The same ruling records the class direction '
+        + 'for the two sibling ADR-0049 cards (#13612 / #13613, not ruled by it): '
+        + 'a declared-but-unenforced key with no pull retires; enforce/bind only on '
+        + 'a named consumer or measured pull. ADR-0049 / ADR-0087, #13823.',
+      acceptanceCriteria:
+        'No source writes handlerStatus on a RestApiEndpoint: authoring it is now a '
+        + 'tsc error at the site (the tombstone types the key never) and a parse '
+        + 'error carrying the prescription at path handlerStatus, for every former '
+        + "value including the documented default 'implemented' (which was prose "
+        + 'only — the key never carried a Zod .default(), so no built artifact '
+        + 'materialised it and there is no residue window). Pinned in '
+        + 'api/plugin-rest-api.handler-status-retirement.test.ts. Concretely, check '
+        + 'two places. (1) Every RestApiEndpoint literal — in a route registration '
+        + 'passed to the REST API plugin, or standalone: delete the handlerStatus '
+        + 'line; nothing served changes, because nothing ever read it. (2) Code '
+        + 'importing HandlerStatusSchema, HandlerStatus, RouteCoverageEntrySchema, '
+        + 'RouteCoverageEntry, RouteCoverageReportSchema or RouteCoverageReport from '
+        + '@objectstack/spec or @objectstack/spec/api: every one is TS2305 after '
+        + 'upgrade; no replacement exists to point at, because no producer ever '
+        + 'emitted the report. Everything else on RestApiEndpointSchema — method, '
+        + 'path, handler, category, public, permissions, the OpenAPI and '
+        + 'performance keys — parses exactly as before, and the shipped default '
+        + 'route registrations (getDefaultRouteRegistrations) never carried the '
+        + 'key and still parse.',
+    },
+    {
       id: 'scim-provider-object-retired',
       surface:
         'the `sys_scim_provider` platform object (`SysScimProvider` in '
@@ -8276,6 +8357,42 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-key:18>
+    // #13823 — ADR-0049 enforce-or-remove on `RestApiEndpointSchema.handlerStatus`
+    // (maintainer ruling 2026-09-01, director decision batch #27, verbatim
+    // 「同意」: remove). The key (`implemented` / `stub` / `planned`) was declared
+    // as a handler-readiness marker whose docstring promised that a `stub` handler
+    // "returns 501 Not Implemented", and NOTHING read it: the only identifier hits
+    // outside `skills/**` and tests were the declaration, its re-declaration on
+    // `RouteCoverageEntrySchema` and a docblock saying adapters SHOULD warn on it.
+    // The 501 it described has a different cause — every
+    // `DispatcherErrorCode.enum.NOT_IMPLEMENTED` site (`runtime/src/
+    // endpoint-executor.ts` ×3, `runtime/src/api-mapping.ts`,
+    // `runtime/src/api-endpoint-step.ts`) is the declarative-endpoint executor
+    // refusing a target or mapping it cannot serve, none consulting the key — so
+    // `handlerStatus: 'stub'` got an ordinarily served route and reported its
+    // progress to nobody. Tombstoned with `retiredKey()`: `RestApiEndpointSchema`
+    // is a non-strict `z.object`, so a bare deletion would be a silent strip
+    // (#3733, ADR-0104). The value enum it was typed with and the two report
+    // shapes that re-declared it leave whole — `api/HandlerStatus`,
+    // `api/RouteCoverageEntry`, `api/RouteCoverageReport` in
+    // `RETIRED_DEFS_BY_MAJOR[18]`.
+    //
+    // Registered here but NOT in `src/conversions/registry.ts`, the
+    // `kernel/Manifest:loading` reasoning: nothing in the tree parses
+    // `RestApiEndpointSchema` outside its own unit tests — a REST API plugin's
+    // route registration is not a stack collection member (`PLURAL_TO_SINGULAR`
+    // has no entry for it) and nothing stores one as a `sys_metadata` row — so a
+    // MetadataConversion would be a transform with no seam that ever runs. The
+    // prescription reaches authors through the tombstone plus the D3 semantic
+    // entry `rest-api-endpoint-handler-status-retired`. ENFORCE (mounting a 501
+    // stub for `stub` / `planned`) was excluded by the same ruling as a zero-pull
+    // new capability, not a repair.
+    //
+    // Registered under 18, not 17: v17.0.0 was cut before this landed, so the
+    // removal ships on the 17.x line (launch-window convention: accept-set
+    // narrowings ride minor releases) and the prescription lives at the major
+    // boundary where `migrate meta` users look (the #11846 / #12428 grading).
+    'api/RestApiEndpoint:handlerStatus',
     // #10414 — ADR-0049 enforce-or-remove (triage routed REMOVE; the #10298 shape
     // one level up). `filters` was a declared, authorable per-metric raw-SQL
     // filter (`filters: [{ sql: string }]`) with ZERO consumers, measured with a
@@ -9591,6 +9708,16 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-def:18>
+    // #13823 — `api/HandlerStatus` (the `implemented` / `stub` / `planned` enum)
+    // left with its two carriers: `RestApiEndpoint.handlerStatus` is tombstoned
+    // in this same major (`RETIRED_KEYS_BY_MAJOR[18]`) and
+    // `RouteCoverageEntry.handlerStatus` left with that def (`api/RouteCoverageEntry`
+    // below), so the enum had no remaining consumer — and an exported value
+    // schema with no consumer reads as a capability (#3950, the `ui/ThemeMode`
+    // rule). Measured before removal: zero readers of the enum or the key in
+    // objectstack, objectui (pinned sha) or cloud. See
+    // `18.api__RestApiEndpoint__handlerStatus.ts` for the retirement record.
+    'api/HandlerStatus',
     // #13135 — ADR-0049 enforce-or-remove (maintainer ruling 2026-08-29 on
     // #12057: retirement adopted, re-scope rejected; re-charter #13135 executes
     // the widened surface). Part of the whole-module removal of
@@ -9682,6 +9809,28 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #8586 / #8715 precedent).
     'api/PackageRollbackResponse',
+    // #13823 — `api/RouteCoverageEntry` (one declared endpoint's coverage row:
+    // `path` / `method` / `category` / `handlerStatus` / `service` /
+    // `healthCheckPassed`) left whole with `api/RouteCoverageReport`, the only
+    // shape that embedded it. Nothing ever constructed or parsed one — zero
+    // constructors in objectstack, objectui (pinned sha) or cloud — so the
+    // `handlerStatus` it re-declared was carried outward by nobody. Route 3
+    // (whole-def removal, no carrier key, no D2 conversion); see
+    // `18.api__RestApiEndpoint__handlerStatus.ts` for the retirement record.
+    'api/RouteCoverageEntry',
+    // #13823 — `api/RouteCoverageReport` (the aggregated startup report — `timestamp`
+    // / `adapter` / `summary { total, implemented, stub, planned }` / `entries[]`)
+    // whose docblock said adapters SHOULD emit it as startup health diagnostics and
+    // warn on every endpoint with `handlerStatus !== 'implemented'`. No adapter,
+    // dispatcher or registrar ever constructed one — zero constructors in
+    // objectstack, objectui (pinned sha) or cloud — so it was a shape with no
+    // producer, and the status it aggregated had no reader. Route 3 (whole-def
+    // removal, no carrier key, no D2 conversion). Route readiness that IS measured
+    // is unchanged: the discovery payload's per-service `status` / `handlerReady`
+    // (`api/discovery.zod.ts`) and the CI-asserted route ledger
+    // (`packages/runtime/src/route-ledger.ts`). See
+    // `18.api__RestApiEndpoint__handlerStatus.ts` for the retirement record.
+    'api/RouteCoverageReport',
     // #8715 — identity/identity.zod.ts `ApiKeySchema`, retired whole (ADR-0049
     // enforce-or-remove; maintainer ruling 2026-08-15, disposition B: delete).
     // The schema documented better-auth's `apiKey` PLUGIN shape — a plugin this
