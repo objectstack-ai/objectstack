@@ -122,8 +122,48 @@ a long time with no function of that name anywhere in the app was skipped at
 every boot, and the sweep never ran. If a job appears to do nothing, read the
 boot log for its name before reading its schedule.
 
-At run time the handler is invoked with `{ jobId, data }`. What it returns
-decides how the run is recorded:
+## What the handler is given
+
+At run time the handler is invoked with a `JobHandlerContext`
+(`@objectstack/runtime`):
+
+| Member | What it is |
+|:---|:---|
+| `jobId` | the job's `name` — its identity everywhere |
+| `data` | the payload of a manual `trigger(name, data)` run; absent on a scheduled run |
+| `bundle` | the application's metadata bundle — declarations, not a data handle |
+| `ql` | the live ObjectQL engine — the same handle `defineStack({ onEnable })` receives |
+| `logger` | the platform logger, so a job's diagnostics are not `console` output |
+
+```typescript
+import type { JobHandlerContext } from '@objectstack/runtime';
+
+export async function sweepProjectHealth({ ql, jobId, logger }: JobHandlerContext) {
+  const stale = await ql.find('project', { where: { status: 'active' } });
+  for (const p of stale) await ql.update('project', { id: p.id, health: 'green' });
+  logger.info('sweep complete', { job: jobId, scanned: stale.length });
+}
+```
+
+`ql` is why a job does **not** follow the pure-function rule a flow `script`
+node follows. A `script` node returns a value and the flow graph does the I/O
+around it — a `get_record` before, a `create_record` after — so its context
+deliberately carries no engine. A job has no graph: no node before it, none
+after. Writing records on a timer is the thing scheduled work exists for, so
+the handler is handed the engine directly. A job's writes are still not counted
+by any caller, so declare its `functions` entry `effect: 'writes'` — that makes
+the run report "cannot say" rather than silently claiming it wrote nothing.
+
+<Callout type="warn">
+  Do **not** reach the engine by having `onEnable` assign a module-scope global
+  the handler reads later. That binding does not survive a built artifact:
+  `objectstack build` emits your `functions` into a sibling runtime module, the
+  artifact JSON carries no `onEnable`, and only `functions` is merged back on
+  load — so on an artifact-served boot the global is never assigned and the job
+  runs against nothing, silently. Take `ql` from the context.
+</Callout>
+
+What the handler returns decides how the run is recorded:
 
 | The handler… | Recorded as | Retried? |
 |:---|:---|:---|
