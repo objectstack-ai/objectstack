@@ -716,6 +716,34 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'repo\'s rejection tests assert on, not evidence of a door. If an install door ever answers with ' +
             'this code itself, the verdict becomes pending-registration and it belongs in the ledger batch.'
     },
+    {
+        code: 'DUPLICATE_ARTIFACT_OBJECT_NAME',
+        file: 'packages/objectql/src/registry.ts',
+        shape: 'classfield',
+        door: 'none',
+        verdict: 'boot-refusal',
+        why:
+            'ADR-0130 D3 — the refusal for two packages delivered by ONE release artifact both claiming ' +
+            'the same object name, raised by `SchemaRegistry.installPackage` ahead of every mutation it ' +
+            'makes (and therefore ahead of all DDL). Its reachability is narrower than the method it lives ' +
+            'in: it can only fire when `installPackage` is handed an artifact install scope naming a SECOND ' +
+            'package, and measured on this tree exactly one caller builds one — the `manifest` service\'s ' +
+            '`register()` in `packages/objectql/src/plugin.ts`, the ADR-0130 D4/D5 load path. The two ' +
+            'HTTP-facing install sites pass no scope at all and so cannot raise it: ' +
+            '`packages/metadata-protocol/src/protocol.ts` `installPackage(manifest, request.settings)` and ' +
+            '`packages/runtime/src/domains/packages.ts` `installPackage(manifest, body.settings)`. Through ' +
+            'the load path the reading is the one the three sibling ADR-0130 codes above already record, ' +
+            're-measured here: boot-time `manifest.register()` callers (`packages/runtime/src/app-plugin.ts`, ' +
+            'the platform app plugins) register inside plugin init, where a throw aborts boot before any ' +
+            'HTTP boundary exists; the rehydrate loop in ' +
+            '`packages/cloud-connection/src/marketplace-install-local-plugin.ts` catches per entry and logs; ' +
+            'and the import route in that same file catches and answers with its OWN registered ' +
+            '`PLUGIN_REGISTER_FAILED` at 422, interpolating this refusal\'s MESSAGE into that envelope. So ' +
+            'the code reaches a reader only inside a message string, never as `error.code`. Its ' +
+            '`status: 422` is the ADR-0112 envelope shape this repo\'s rejection tests assert on, not ' +
+            'evidence of a door. If an install door ever answers with this code itself, the verdict becomes ' +
+            'pending-registration and it belongs in the ledger batch.'
+    },
     // ── [#13233] field-level catalogs, reached by the OBJECT-LITERAL helper ──
     //
     // The 29 rows below are the whole verdict cost of widening `codehelper` to

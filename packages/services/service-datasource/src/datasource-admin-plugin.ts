@@ -17,6 +17,7 @@ import {
   DatasourceConnectionService,
   type ConnectionEngineLike,
 } from './datasource-connection-service.js';
+import { datasourceConnectivityChanged } from './datasource-connectivity-change.js';
 import type { DatasourceConnectPolicy } from './contracts/connect-policy.js';
 import type { Logger } from './logger.js';
 import type { IDataEngine } from '@objectstack/spec/contracts';
@@ -146,6 +147,39 @@ async function loadDatasourceRows(engine: DataEngineLike | undefined): Promise<A
 }
 
 /**
+ * [#13805] The SHARED read behind cluster convergence: one runtime
+ * datasource's durable row, by name — the same store {@link loadDatasourceRows}
+ * reads at boot, narrowed to the address a peer's signal names. `undefined`
+ * when no active row exists (deleted, or never persisted).
+ *
+ * A row that exists but cannot be parsed THROWS rather than answering
+ * `undefined`: "gone" is a verdict the caller evicts a live pool on, and a
+ * read that did not complete must not be spent as one (the read-seam
+ * invention rule). Boot skips such a row silently because it has nothing to
+ * evict; convergence does.
+ */
+async function loadDatasourceRow(
+  engine: DataEngineLike | undefined,
+  name: string,
+): Promise<StoredDatasource | undefined> {
+  if (!engine?.findOne) return undefined;
+  const row = await engine.findOne(SYS_METADATA, { where: { type: DS_META_TYPE, name, state: 'active' } });
+  const raw = (row as { metadata?: unknown } | null | undefined)?.metadata;
+  if (raw == null) return undefined;
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
+  } catch (err) {
+    throw new Error(
+      `datasource '${name}': the stored record could not be read (${err instanceof Error ? err.message : String(err)})`,
+    );
+  }
+  // The same ADR-0087 rehydration pass `loadDatasourceRows` performs — this
+  // read bypasses the metadata service's converting loaders just as that one does.
+  return applyConversionsToStoredItem(DS_META_TYPE, parsed) as unknown as StoredDatasource;
+}
+
+/**
  * Host-provided secret binding. Encrypts a cleartext credential into the secret
  * store and returns an opaque `credentialsRef`; `unbind` deletes it. Wired by
  * the stack that owns the `ICryptoProvider` + `sys_secret` store. When absent,
@@ -217,6 +251,18 @@ export class DatasourceAdminServicePlugin implements Plugin {
   private config?: DatasourceAdminServiceConfig;
   /** Shared "definition → live driver" path (ADR-0062 D1); also exposed as the `'datasource-connection'` service. */
   private connection?: DatasourceConnectionService;
+  /**
+   * [#13805] The record each live runtime pool was last built from, by
+   * datasource name. Cluster convergence reads it twice: compared against the
+   * shared row it tells "unchanged" (a duplicate delivery, a label-only edit —
+   * the idempotent register, no churn) from "changed" (the in-place rebuild),
+   * and it rides along as `previous` so a failed rebuild restores the def the
+   * old pool was serving under — exactly what the serving replica's own
+   * update door does with the record it read. Written by the pool seams
+   * themselves, so boot rehydration and every admin door keep it current
+   * without knowing it exists; only pools THIS plugin built are ever in it.
+   */
+  private readonly livePoolRecords = new Map<string, StoredDatasource>();
   private readonly options: DatasourceAdminServicePluginOptions;
 
   constructor(options: DatasourceAdminServicePluginOptions = {}) {
@@ -403,12 +449,14 @@ export class DatasourceAdminServicePlugin implements Plugin {
       // Runtime-admin connects always degrade-with-warning on failure (never
       // fail-fast), preserving the pre-ADR-0062 admin behavior.
       registerPool: async (record) => {
+        this.livePoolRecords.set(record.name, record);
         await this.connection?.connect(record, {
           context: { origin: record.origin ?? 'runtime', trigger: 'runtime-admin' },
         });
       },
 
       unregisterPool: async (name) => {
+        this.livePoolRecords.delete(name);
         await this.connection?.disconnect(name);
       },
 
@@ -419,11 +467,17 @@ export class DatasourceAdminServicePlugin implements Plugin {
       // datasource def with the driver, and the keep-old-pool path must put
       // back the def the old pool was serving under.
       reregisterPool: async (previous, next) => {
+        this.livePoolRecords.set(next.name, next);
         await this.connection?.reconnect(next, {
           previous,
           context: { origin: next.origin ?? 'runtime', trigger: 'runtime-admin' },
         });
       },
+
+      // [#13805] The receive half of the datasource cluster bridge — see
+      // `convergePool` below for the decision table. The engine is resolved
+      // per call for the same reason every other seam here resolves lazily.
+      convergePool: (name) => this.convergePool(name, engineOf),
 
       // The admin list's `status` reads the connection service's retained
       // verdicts (framework#3827). Resolved lazily per call: the service exists
@@ -552,6 +606,65 @@ export class DatasourceAdminServicePlugin implements Plugin {
     this.options.logger?.info?.(
       `Rehydrated ${registered}/${runtime.length} runtime datasource pool(s) on boot`,
     );
+  }
+
+  /**
+   * [#13805] Converge this replica's live pool for `name` from the SHARED
+   * record — the receive half of the datasource cluster bridge, run after a
+   * PEER's create, update or delete. It is boot's `restoreRuntimeDatasources`
+   * + `rehydratePools` reading, narrowed to one address and re-run on demand,
+   * against the durable `sys_metadata` row rather than this replica's
+   * metadata registry (which, on the host-config boot, is per-replica state
+   * with no cluster seam — the read a peer must not converge from):
+   *
+   *  - **no active runtime row** (deleted, disabled, or a name this plugin
+   *    never pooled) → evict the pool THIS plugin built, if any — through
+   *    `unregisterPool` → `disconnect`, the #13578 eviction door. A name it
+   *    never pooled is left alone, so a stray signal can never reach a
+   *    code-defined pool the host stack owns.
+   *  - **a row this replica has no pool for** → build it (the create case, and
+   *    re-enabling after `active: false`).
+   *  - **a row whose connectivity-bearing fields differ from what the live
+   *    pool was built from** → rebuild in place, keeping the old pool on
+   *    failure — `reregisterPool`, the same primitive and the same
+   *    `datasourceConnectivityChanged` reading the serving replica's
+   *    `updateDatasource` applies.
+   *  - **a row that matches** → the idempotent register, a no-op while a
+   *    driver holds the name (a duplicate delivery, a label-only edit) and a
+   *    retry of a pool that failed to build (the serving replica's no-op-edit
+   *    behaviour).
+   *
+   * ⛔ Deliberately does NOT write the metadata service's per-replica
+   * registry: which seam keeps `/api/v1/meta/datasource` coherent across
+   * replicas is a separate sink and a separate open measurement (#13609).
+   * This method converges the DRIVER registry only.
+   */
+  private async convergePool(
+    name: string,
+    engineOf: () => DataEngineLike | undefined,
+  ): Promise<void> {
+    const cfg = this.config;
+    if (!cfg?.registerPool || !cfg.unregisterPool) return;
+
+    const row = await loadDatasourceRow(engineOf(), name);
+    const live = this.livePoolRecords.get(name);
+
+    if (!row || row.origin !== 'runtime' || row.active === false) {
+      if (live) await cfg.unregisterPool(name);
+      return;
+    }
+    if (!live) {
+      await cfg.registerPool(row);
+      return;
+    }
+    if (datasourceConnectivityChanged(live, row)) {
+      // `reregisterPool` is always wired by this plugin; the fallback is the
+      // pre-#13804 idempotent register the admin service itself falls back to.
+      if (cfg.reregisterPool) await cfg.reregisterPool(live, row);
+      else await cfg.registerPool(row);
+      return;
+    }
+    await cfg.registerPool(row);
   }
 
   async destroy(): Promise<void> {
