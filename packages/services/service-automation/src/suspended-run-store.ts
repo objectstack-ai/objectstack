@@ -9,7 +9,13 @@ import type { Logger } from '@objectstack/spec/contracts';
 // recorder-local re-derivation here was rejected by name (Option B): it would
 // be a third answer to a question the codebase already answered two ways.
 import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
-import type { RunRecord, SuspendedRun, SuspendedRunStore } from './engine.js';
+import type {
+  RunRecord,
+  SuspendedRun,
+  SuspendedRunStore,
+  SuspensionClaimOutcome,
+  SuspensionParkedAt,
+} from './engine.js';
 
 /**
  * Durable persistence for suspended flow runs (ADR-0019).
@@ -125,6 +131,25 @@ export class InMemorySuspendedRunStore implements SuspendedRunStore {
 
   async delete(runId: string): Promise<void> {
     this.runs.delete(runId);
+  }
+
+  /**
+   * [#14333] Conditional consume. The test and the removal sit between the
+   * same two `await` points — there is none between them — so on a single
+   * JavaScript thread they ARE one atomic operation against `this.runs`, which
+   * is what lets two engines sharing one instance of this store produce
+   * exactly one winner. Spelling it as `load()` then `delete()` would put a
+   * microtask boundary in the middle and reopen the window.
+   */
+  async claimSuspension(runId: string, parkedAt: SuspensionParkedAt): Promise<SuspensionClaimOutcome> {
+    const run = this.runs.get(runId);
+    if (!run) return 'lost';
+    if (run.nodeId !== parkedAt.nodeId) return 'lost';
+    // Compared only when the caller has one, per the contract: a row persisted
+    // without a correlation has nothing to compare and the node test stands.
+    if (parkedAt.correlation !== undefined && run.correlation !== parkedAt.correlation) return 'lost';
+    this.runs.delete(runId);
+    return 'claimed';
   }
 
   async list(): Promise<SuspendedRun[]> {
@@ -278,6 +303,52 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       return;
     }
     await this.engine.delete(TABLE, { where: { id: runId }, context: SYSTEM_CTX });
+  }
+
+  /**
+   * [#14333] Conditional consume against `sys_automation_run`, as ONE
+   * statement: `DELETE ... WHERE id = ? AND node_id = ?` (plus `correlation`
+   * when the caller has one), whose affected-row count names the winner.
+   *
+   * ⛔ No schema change, and none is needed: `node_id` and `correlation` are
+   * columns {@link serialize} has always written, so the condition is
+   * expressible against the row exactly as it stands. (A version column on
+   * `sys_automation_run` was the other candidate remedy and is deliberately
+   * NOT taken — a platform-object schema change is the maintainer's floor.)
+   *
+   * The spelling is `multi: true` with a full `where`: `ObjectQL.delete`
+   * dispatches a `where` carrying keys BESIDES `id` to `driver.deleteMany`
+   * with the composed AST — the engine's own compare-and-set route, documented
+   * as such in `engine-delete-dispatch.ts` — and `IDataDriver.deleteMany` is
+   * contracted to resolve an affected COUNT. A pure-`id` `where` would take
+   * the by-id route instead and silently discard the condition, which is the
+   * one shape that must never happen here.
+   *
+   * Two ways this store cannot express the guarantee, and it says so rather
+   * than offering none: an engine with no `delete()` at all (the same
+   * composition {@link delete} already degrades on), and a driver whose
+   * multi-row result is not a count, where "did I win?" has no answer to read.
+   */
+  async claimSuspension(runId: string, parkedAt: SuspensionParkedAt): Promise<SuspensionClaimOutcome> {
+    if (typeof this.engine.delete !== 'function') {
+      this.logger?.warn?.(
+        `[automation] ObjectStoreSuspendedRunStore: engine has no delete(); the conditional advance for ` +
+          `suspended run '${runId}' cannot be expressed and no cross-replica guarantee is offered`,
+      );
+      return 'unsupported';
+    }
+    const where: Record<string, unknown> = { id: runId, node_id: parkedAt.nodeId };
+    if (parkedAt.correlation !== undefined) where.correlation = parkedAt.correlation;
+    const affected = await this.engine.delete(TABLE, { where, multi: true, context: SYSTEM_CTX });
+    if (typeof affected !== 'number') {
+      this.logger?.warn?.(
+        `[automation] ObjectStoreSuspendedRunStore: the data engine's multi-row delete resolved ` +
+          `${typeof affected}, not an affected-row count, so the conditional advance for suspended run ` +
+          `'${runId}' cannot be decided and no cross-replica guarantee is offered`,
+      );
+      return 'unsupported';
+    }
+    return affected > 0 ? 'claimed' : 'lost';
   }
 
   async list(): Promise<SuspendedRun[]> {

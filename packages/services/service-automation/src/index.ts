@@ -18,6 +18,13 @@ export type {
     RegisteredConnector,
     SuspendedRun,
     SuspendedRunStore,
+    // [#14333] The conditional-advance vocabulary. `claimSuspension` is the
+    // cross-replica half of the resume idempotency guard, so a host supplying
+    // its own store has to be able to NAME its parameter and its three-valued
+    // answer — including the `'unsupported'` a store uses to say out loud that
+    // it cannot express the condition.
+    SuspensionParkedAt,
+    SuspensionClaimOutcome,
     FlowDispatchStore,
     // [ADR-0126 §7.2] The packaged-flow activation ledger port and its row —
     // the durable off-switch that REPLACES the retired process-local
