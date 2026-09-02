@@ -42,6 +42,20 @@ export {
     ConsoleErrorReporter,
 } from './error-exporters.js';
 
+// [#14310] The shared "a 5xx is never silent" rule, read by every transport
+// that turns a fault into an HTTP envelope (REST's direct-mount doors and the
+// runtime dispatcher's two exits).
+export {
+    logServerFault,
+    isServerFault,
+    serverFaultLogMessage,
+    serverFaultLogMeta,
+    describeFaultRequest,
+    SERVER_FAULT_LOG_PREFIX,
+    type ServerFaultLogInput,
+    type ServerFaultRequest,
+} from './server-fault-log.js';
+
 // Loggers
 export {
     NoopLogger,
