@@ -43,9 +43,13 @@
  * C4 exercises the real accessor on both sides.
  */
 
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import { ObjectKernel, ServiceLifecycle } from '@objectstack/core';
 import { MetadataManager, DatabaseLoader } from '@objectstack/metadata';
+import { NodeMetadataManager } from '@objectstack/metadata/node';
 import type { MetadataLoader } from '@objectstack/metadata';
 import { runActionGovernanceInventory, collectEngineActionDeclarations } from '@objectstack/objectql';
 import { resolveRouteActionDeclaration, type ActionExecutionDeps } from './action-execution.js';
@@ -211,6 +215,12 @@ describe('#14423 (a) — can `loadMany` omit a name `load` serves?', () => {
         const declarations = await collectEngineActionDeclarations([], () => meta.loadMany<any>('action'));
         expect(declarations).toHaveLength(0);
 
+        // The plane KNOWS the name — the keyed enumeration serves it. It is
+        // `loadMany`, the UNKEYED plural read the audit was wired to, that
+        // cannot carry it. (⛔ Naming the remedy is not shipping it: rewiring
+        // `loadStandaloneActions` is a behaviour change and out of scope here.)
+        expect(await meta.listNames('action')).toContain(ACTION);
+
         const audit = await runAudit(meta);
         const router = await runRouter(meta);
 
@@ -323,5 +333,53 @@ describe('#14423 (a) — can `loadMany` omit a name `load` serves?', () => {
 
         expect(router.action?.name).toBe(ACTION);
         expect(audit.accused).toBe(false);        // both sources agree
+    });
+
+    /**
+     * C6 — the SHIPPED single-plane composition, no failure injection and no
+     * scoping: a real `NodeMetadataManager` over a real `FilesystemLoader`,
+     * which is what the in-process `os dev` boot runs.
+     *
+     * `FilesystemLoader.load` resolves a name by COMPOSING a path
+     * (`findFile` -> `ROOT/action/<name>.json`), so identity is path-derived;
+     * `loadMany` globs the directory and returns BODIES. A flat file whose body
+     * carries no `name` is therefore served by `load` and comes back unnamed
+     * from `loadMany` — and `collectEngineActionDeclarations` requires
+     * `typeof action.name === 'string'`, so the audit never sees it.
+     *
+     * This is C2's mechanism in the OTHER shipped loader, which is what makes it
+     * a rule rather than a `DatabaseLoader` quirk: #14205's finding (identity is
+     * the key the store holds an item under, not `body.name`) reaches both.
+     */
+    it('C6 — real filesystem plane, body carries no `name`: `load` serves it, `loadMany` returns it unnamed, the audit cannot name it', async () => {
+        const root = await mkdtemp(join(tmpdir(), 'os-14423-'));
+        try {
+            await mkdir(join(root, 'action'), { recursive: true });
+            // Identity lives in the FILE NAME; the body deliberately has none.
+            await writeFile(join(root, 'action', `${ACTION}.json`),
+                JSON.stringify({ type: 'script', target: ACTION }), 'utf8');
+
+            const meta = new NodeMetadataManager({ rootDir: root } as any);
+
+            const enumerated = await meta.loadMany<any>('action');
+            const byName = await meta.loadDiagnosed<any>('action', ACTION);
+
+            expect(byName.data).toBeTruthy();                                // load SERVES the name
+            expect(byName.degraded).toBe(false);                             // and reports nothing wrong
+            expect(enumerated).toHaveLength(1);
+            expect(enumerated.map((a: any) => a?.name)).toEqual([undefined]); // ...unnamed
+            expect(await meta.listNames('action')).toContain(ACTION);        // the KEYED read has it
+
+            const declarations = await collectEngineActionDeclarations([], () => meta.loadMany<any>('action'));
+            expect(declarations).toHaveLength(0);
+
+            const audit = await runAudit(meta);
+            const router = await runRouter(meta);
+
+            expect(router.action).toBeTruthy();  // router: the declaration EXISTS
+            expect(audit.accused).toBe(true);    // audit: "registered handler with NO declaration"
+        } finally {
+            await rm(root, { recursive: true, force: true });
+        }
     });
 });
