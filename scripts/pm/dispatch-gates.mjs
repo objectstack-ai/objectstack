@@ -17,6 +17,26 @@
  *   node scripts/pm/dispatch-gates.mjs --repo <owner>/<name> ...  # refuse unless this checkout IS that repo
  *   node scripts/pm/dispatch-gates.mjs --self-test
  *
+ * ## Run --self-test DETACHED on an agent container (#14281)
+ *
+ * The battery re-spawns this tool's own CLI as a child process many times —
+ * deliberate (see `check-dispatch-gates.mjs`'s header for why a self-test this
+ * size is not fixture-only) — and on an agent container that makes the full
+ * run longer than the container's foreground command cap, which SIGTERMs a
+ * run past it. Do not run `--self-test` (or `pnpm check:pm-dispatch-gates`,
+ * which is exactly that flag) in the foreground there. Detach it and poll the
+ * log instead:
+ *
+ *   nohup pnpm check:pm-dispatch-gates > /tmp/pm-dispatch-gates.log 2>&1 &
+ *
+ * then tail the log file until it stops growing. Each case's `✓`/`✗` line
+ * prints the moment that case is decided, so a run killed mid-battery — by
+ * this cap, or by anything else — still leaves every case decided before the
+ * kill in the log, readable as a partial result rather than a silent zero. The
+ * measured runtime and case count are not repeated here — they move with the
+ * tree and belong to a named commit, not to this header (see #14281 for the
+ * reading that motivated this section).
+ *
  * ## Harvest the machine-readable modes, never this prose (#13462)
  *
  * The matched block renders in TWO spellings — `pnpm check:NAME` and
@@ -10033,7 +10053,19 @@ export function bannerLines({ identity, paths = [], drift = null }) {
 
 function selfTest() {
   const cases = [];
-  const t = (name, cond) => cases.push([name, cond]);
+  // Stream the verdict the moment it is decided (#14281) rather than only at
+  // the tail: every `t()` call evaluates `cond` eagerly at the call site, so
+  // the line below is not a preview of the tail loop's output — it prints the
+  // SAME verdict, just however many calls earlier than a buffered run did. A
+  // run that dies mid-battery (the container's foreground cap SIGTERMs a run
+  // past ~10 minutes; see check-dispatch-gates.mjs's header for the detached
+  // workaround) used to leave zero case lines; now the log already carries
+  // every case decided before the kill. `cases` still collects every entry —
+  // the tail's `failed`/`length` summary reads it unchanged.
+  const t = (name, cond) => {
+    cases.push([name, cond]);
+    console.log(`  ${cond ? '✓' : '✗'} ${name}`);
+  };
 
   const wf = [
     'jobs:',
@@ -16830,10 +16862,12 @@ function selfTest() {
     }
   }
 
+  // The per-case line already printed inside `t()`, streamed as each verdict
+  // was decided (#14281) — this tail is the summary only, unchanged in shape
+  // and wording from the pre-streaming version.
   let failed = 0;
-  for (const [name, cond] of cases) {
+  for (const [, cond] of cases) {
     if (!cond) failed++;
-    console.log(`  ${cond ? '✓' : '✗'} ${name}`);
   }
   if (failed) {
     console.error(`✗ dispatch-gates self-test: ${failed} of ${cases.length} case(s) failed.`);

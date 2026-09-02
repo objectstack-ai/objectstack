@@ -611,8 +611,22 @@ function rulePatternFor(span) {
 }
 
 // Short-circuit before any git or filesystem work — the self-test needs no repo state.
+
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'affected-docs self-test reached its verdict';
+
 if (args.includes('--self-test')) {
-  selfTest();
+  if (selfTest() !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ affected-docs self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
   process.exit(0);
 }
 
@@ -4806,6 +4820,8 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`✓ affected-docs self-test: ${total} cases pass.`);
+
+  return SELF_TEST_VERDICT;
 }
 
 

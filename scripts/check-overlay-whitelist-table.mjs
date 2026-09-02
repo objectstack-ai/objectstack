@@ -839,6 +839,13 @@ function run(registryText, tableText) {
   return { structure: [], leg1, leg2, entries: reg.entries, rows: tab.rows };
 }
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 export function selfTest() {
   const failures = [];
   const check = (name, ok, detail = '') => {
@@ -1125,6 +1132,7 @@ export function selfTest() {
       'table is green on all three legs, leg 3 goes red on a stale total and on a stale ' +
       `true-set independently, and ${refusals} structural/parser cases are refused.`,
   );
+  selfTestReachedVerdict = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1132,7 +1140,18 @@ export function selfTest() {
 // ---------------------------------------------------------------------------
 
 function main() {
-  if (process.argv.includes('--self-test')) return selfTest();
+  if (process.argv.includes('--self-test')) {
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-overlay-whitelist-table self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    return selfTestCode;
+  }
 
   const registryText = readFileSync(join(ROOT, REGISTRY_FILE), 'utf8');
   const docText = readFileSync(join(ROOT, DOC_FILE), 'utf8');

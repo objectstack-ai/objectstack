@@ -14,6 +14,7 @@ import {
   EmailService,
   LogTransport,
   EMAIL_SEND_QUEUE,
+  isSendableAddress,
   type EmailPersistence,
   type EmailQueueDelivery,
   type TemplateLoader,
@@ -245,6 +246,48 @@ export function resolveDurableQueue(getService: (name: string) => unknown): IQue
   return queue as IQueueService;
 }
 
+/** How the settings page and the deployment channel name the same address. */
+const DEFAULT_FROM_FIX =
+  'Fix: set a sender with a dotted domain — OS_EMAIL_FROM="Name <no-reply@example.com>" or '
+  + 'config.email.defaultFrom (Settings → Mail → From address on the settings channel). '
+  + 'Bare hostnames such as "noreply@localhost" are not deliverable addresses.';
+
+/**
+ * Refuse a **declared** default sender no message could ever be sent from
+ * (#14318).
+ *
+ * This is the constructor / CLI channel, so it THROWS, exactly as an
+ * unbuildable transport does in {@link EmailServicePlugin.resolveTransport}: a
+ * deployment that names a sender is declaring one, and a boot that cannot
+ * honour the declaration must fail loudly rather than start half-configured.
+ * The alternative was measured — `OS_EMAIL_FROM="ObjectOS Local
+ * <noreply@localhost>"` booted clean, and the address was first judged inside
+ * `normalizeMessage` on the first real send, which for a fresh deployment is
+ * the first user's sign-up: better-auth ran that send through
+ * `runInBackgroundOrAwait`, logged the throw and swallowed it, so the account
+ * was created, the UI reported "verification email sent", and nothing had
+ * been.
+ *
+ * `undefined` is NOT rejected: a service with no default sender is a
+ * complete, working configuration for callers that always pass `input.from`,
+ * and `normalizeMessage` already refuses a send that has neither.
+ *
+ * The settings channel takes the opposite trade — see
+ * {@link EmailServicePlugin.applyMailSettings}: one bad save must not stop a
+ * running server, so there the value is refused, the previous sender kept,
+ * and the consequence stated at `error`.
+ */
+function assertSendableDefaultFrom(from: EmailAddress | undefined): void {
+  if (from === undefined || isSendableAddress(from)) return;
+  const shown = typeof from === 'string' ? from : (from?.address ?? '');
+  throw new Error(
+    `EmailServicePlugin: the configured default sender '${String(shown) || '(empty)'}' is not a valid email `
+    + 'address, so EVERY message this deployment sends would be rejected before it reached the transport — '
+    + 'including the sign-up verification mail, which is discarded in a background task and would leave users '
+    + `told their mail was sent. ${DEFAULT_FROM_FIX}`,
+  );
+}
+
 /**
  * EmailServicePlugin — registers the `email` service.
  *
@@ -363,6 +406,10 @@ export class EmailServicePlugin implements Plugin {
   }
 
   async init(ctx: PluginContext): Promise<void> {
+    // The declared sender has to be sendable, and this is where that is
+    // knowable — before a single message depends on it (#14318).
+    assertSendableDefaultFrom(this.options.defaultFrom);
+
     // Register sys_email + sys_email_template via manifest service.
     ctx.getService<{ register(m: any): void }>('manifest').register({
       id: 'com.objectstack.service.email',
@@ -1404,7 +1451,23 @@ export class EmailServicePlugin implements Plugin {
 
     const fromEmail = typeof values.from_email === 'string' ? values.from_email : undefined;
     const fromName = typeof values.from_name === 'string' ? values.from_name : undefined;
-    if (fromEmail) this.service.setDefaultFrom({ address: fromEmail, name: fromName });
+    let appliedFrom: string | undefined;
+    if (fromEmail && !isSendableAddress({ address: fromEmail, name: fromName })) {
+      // #14318 — the settings twin of the constructor assertion, taking this
+      // method's stated trade: refuse the value, KEEP the previous sender,
+      // never throw. `error` and not `warn` because nothing looks broken
+      // afterwards — the save succeeds, the page shows the address the
+      // operator typed — while every send made with it would be rejected
+      // before it reached the transport.
+      ctx.logger.error(
+        `EmailServicePlugin: the saved From address '${fromEmail}' is not a valid email address — it is `
+        + 'NOT applied (the previous sender is kept) because every message sent from it would be rejected '
+        + `before reaching the transport, silently on the sign-up path. ${DEFAULT_FROM_FIX}`,
+      );
+    } else if (fromEmail) {
+      this.service.setDefaultFrom({ address: fromEmail, name: fromName });
+      appliedFrom = fromEmail;
+    }
 
     const provider = String(values.provider ?? 'smtp');
 
@@ -1449,7 +1512,7 @@ export class EmailServicePlugin implements Plugin {
 
     if (provider === 'log') {
       ctx.logger.info(
-        `EmailServicePlugin: mail settings applied (provider=log, from=${fromEmail ?? '∅'}); `
+        `EmailServicePlugin: mail settings applied (provider=log, from=${appliedFrom ?? '∅'}); `
         + 'transport unchanged — messages are logged and recorded in sys_email, never delivered.',
       );
       return;

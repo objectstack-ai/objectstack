@@ -312,6 +312,12 @@ export function readPackageItems(parsed, listPath) {
   return items;
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'partition-test-shards self-test reached its verdict';
+
 function selfTest() {
   const mk = (name, weight) => ({ name, weight });
   // Coverage + determinism: every package lands in exactly one bin, and two
@@ -543,12 +549,21 @@ function selfTest() {
       `max/mean ${balance.ratio.toFixed(2)}x <= ${MAX_SHARD_OVER_MEAN}x, floor ${balance.floor.toFixed(0)}s, ` +
       `bins ${balance.totals.map((t) => t.toFixed(0)).join('/')}s)`
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 function main() {
   const argv = process.argv.slice(2);
   if (argv.includes('--self-test')) {
-    selfTest();
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ partition-test-shards self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
     return;
   }
 
