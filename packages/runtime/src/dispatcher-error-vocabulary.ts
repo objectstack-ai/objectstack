@@ -752,8 +752,8 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         verdict: 'boot-refusal',
         why:
             'ADR-0029 D3 — the refusal for a package claiming `own` on an object name a DIFFERENT package ' +
-            'already owns, raised by `SchemaRegistry.registerObject` (#14367; the ONE spelling of this ' +
-            'refusal — the ADR-0029 D9 §6.1 late-install branch beside it re-classifies a tenant-authored ' +
+            'already owns, raised by `SchemaRegistry.registerObject` (the ONE spelling of this refusal — ' +
+            'the ADR-0029 D9 §6.1 late-install branch beside it re-classifies a tenant-authored ' +
             'sitting owner and refuses nothing). Measured on this tree, every path to it either aborts boot ' +
             'or catches below any door. `ObjectQL.registerApp` (`packages/objectql/src/engine.ts`) lets it ' +
             'propagate to `ManifestService.register()` (`packages/objectql/src/plugin.ts`), whose callers ' +
