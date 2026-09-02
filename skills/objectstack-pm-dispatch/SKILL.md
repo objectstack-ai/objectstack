@@ -178,7 +178,7 @@ classify each:
 
 1. **No `pm:*` / `needs-user-decision` label, and no classification label**
    either — none of the labels your project reads as "already routed" (area,
-   component, owning team, lane). The plain rule.
+   component, owning team). The plain rule.
 2. **`pm:queue` present, classification label absent** — scoped to the
    repositories that actually use classification labels (see the caution).
 3. **A classification label present, but no queue state** (`pm:queue`,
@@ -188,41 +188,20 @@ classify each:
 Disjuncts 2 and 3 take only cards whose `updated_at` is more than a minute or
 two old; disjunct 1 needs no such floor.
 
-**Why the sweep is a disjunction and not one "unlabeled" filter.** Routing and
-queue state are two independent axes, and a card carrying exactly one of them
-is invisible on **both** views at once: the queue lists by queue state, while
-claimants filter by classification — and a predicate that skips anything
-already carrying a `pm:*` label shuts the last door. Neither half is one
-filer's bad habit; both have standing producers:
+**Why a disjunction and not one "unlabeled" filter.** Routing and queue state
+are independent axes, and a card carrying exactly one of them is invisible on
+**both** views at once — whoever produced it, the predicate itself has to
+absorb that shape.
 
-- A card can arrive **pre-queued by the protocol itself**. Cross-seat transfer
-  tickets (the handing-off side applies the queue label as part of the
-  transfer) and tickets filed mechanically by a steward automation both carry
-  `pm:queue` on arrival, while a single-producer discipline for classification
-  labels forbids those same producers from applying one. The card then reads as
-  dispatchable on the board and is claimable by nobody.
-- The mirror shape — classified but stateless — comes from anyone who files
-  with an area label out of habit. Writing the discipline down elsewhere does
-  not fix it: a project that had published exactly that rule hours earlier
-  still produced such a card the same day. **The predicate itself has to
-  absorb it.**
+⚠️ **Scope any disjunct keyed on a label's absence to the repositories where
+that label exists** — elsewhere its absence is universal and the sweep becomes
+its own noise source. Whatever your project already excludes from the sweep
+(parked work, tracking issues) stays excluded; a parked card's normal shape is
+precisely "classified, no queue state".
 
-⚠️ **Any disjunct keyed on a label's absence must be scoped to the
-repositories where that label exists.** Where it does not exist, its absence is
-universal, so the disjunct matches every open queue card in that repository and
-the sweep becomes its own noise source — the check is whether the label exists
-there at all, not whether some card happens to carry it. Whatever your project
-already excludes from the sweep (parked work, tracking issues, protocol posts)
-stays excluded, and disjunct 3 makes that exclusion list load-bearing: a parked
-card's normal shape is precisely "classified, no queue state".
-
-⏳ **Give the partial-labeling disjuncts an age floor keyed on `updated_at`,
-not `created_at`.** A half-labeled card has two sources: one just filed, and an
-older one that a **label write** has just put into that state — and since
-labels are applied one write at a time, the sweep's own labeling passes through
-the half-labeled shape for a few seconds. `created_at` misses the second
-source; `updated_at` covers both, at the cost of a freshly commented card
-waiting one more round.
+⏳ Key the age floor on `updated_at`, not `created_at`: the sweep's own
+one-label-at-a-time writes pass through the half-labeled shape for a few
+seconds, and only `updated_at` covers that source.
 
 - **Auto-queue (`pm:queue`)** — a concrete defect with a named location or
   repro; a scoped tooling or gate fix; a restore-invariant finding; a test-only
@@ -449,15 +428,8 @@ has reported, or a dispatch has been silent for over ~2 h (count it as
 
 **Write every check-in as criteria, never as a conclusion — scheduled text
 arrives in a future you cannot see.** A check-in armed now is read by a session
-that has lost your context, against a world that has moved on. Measured three
-times in one day on this loop: a scheduled message **still delivered after its
-timer had been cancelled**, carrying text two rounds out of date. One of them
-read "no branch and no report ⇒ judge the agent unreliable and dispatch a fresh
-one"; by delivery time that agent had opened a PR which was already reviewed and
-accepted, so executing the text verbatim would have pushed a duplicate agent
-into a live, finished worktree — the exact collision the claim protocol exists to
-prevent, arriving through the automation instead of through a racing PM. Two
-rules make stale text harmless:
+that has lost your context, against a world that has moved on — and a
+cancelled timer can still deliver. Two rules make stale text harmless:
 
 - **Open every check-in with "idempotent — re-read the state before acting"**,
   and include no imperative that can be executed without that re-read. Once a
@@ -472,24 +444,13 @@ rules make stale text harmless:
   of non-delivery.
 
 **A silence threshold is a collection boundary, not a verdict of death.** The
-~2 h above means "stop waiting this round"; it does not mean the agent is gone,
-and the two must not be swapped, because their costs differ by an order of
-magnitude — waiting one more round costs a round, while concluding death costs a
-**duplicate dispatch into a worktree that may still be live**. Before concluding
-that a dispatched agent is dead, require one of: a direct status query answered
-in a way that shows it is dead, the host reporting the session stopped, or
-**silence past a completion-time baseline you have actually measured**.
-
-Measure that baseline for your own project — dispatch to first pushed branch or
-PR, over a handful of comparable cards — and treat it as local. Two same-day
-samples from this repo's loop show why no single number can be inherited: four
-text-only documentation cards landed at 93 / 96 / ~95 / ~110 min, while four
-mixed cards from the same day spanned ~64 min to ~2 h 50 min (the two long ones
-waiting on CI). Eight cards, one day, one toolchain, a spread from about an hour
-to nearly three. **Silence inside the baseline is not evidence**, and a check-in
-threshold having passed twice is evidence only that time passed. This is the
-same failure as inferring an abort from symptoms: until you know the baseline,
-"working normally, slowly" and "dead" produce identical readings.
+~2 h above means "stop waiting this round", not "the agent is gone": waiting one
+more round costs a round, while concluding death costs a **duplicate dispatch
+into a worktree that may still be live**. Before concluding that a dispatched
+agent is dead, require one of: a direct status query showing it dead, the host
+reporting the session stopped, or **silence past a completion-time baseline you
+measured in your own project** (dispatch to first pushed branch or PR, over a
+handful of comparable cards). Silence inside the baseline is not evidence.
 
 ### 7. Review each report
 
@@ -712,23 +673,12 @@ most often get missed:
 Resource discipline — parallel agents share ONE container; unbounded build and
 test runs exhaust it. Binding:
 
-1. Serialize the heavy phase. Editing parallelizes; build and test runs must
-   not — every one of them is wrapped in a lock the whole container shares, so
-   memory peaks never stack. The MECHANISM is the host project's (its wrapper,
-   its lock path, its budget — put it in the conventions file); the properties
-   that make any such wrapper correct are not negotiable:
-   - ONE shared heavy-verify lock per container, so every agent contends on
-     the same file. A path only one agent uses serializes nothing, and it
-     reports exactly like a lock that works.
-   - The acquisition budget fits inside a SINGLE foreground tool call: waiting
-     must never outlive the call carrying it, and backgrounding a wait to
-     escape that ceiling produces the stall the lock exists to avoid.
-   - A queue timeout is distinguishable from the wrapped command's own
-     failure — "I never got the lock" must not read as "the tests failed".
-   - Hold duration is observable, so a stuck holder names itself instead of
-     being inferred from everyone else's queueing.
-   Queueing is normal, not a hang. Queueing with no end in sight is a finding:
-   report it, naming the holder.
+1. Serialize the heavy phase. Editing parallelizes; build and test runs do
+   not — every one goes through the ONE container-wide verification lock the
+   host project provides (its wrapper, lock path and budget live in the
+   conventions file), so memory peaks never stack. Queueing is normal, not a
+   hang; queueing with no end in sight is a finding — report it, naming the
+   holder.
 2. Cap the heap: prefix heavy commands with
    NODE_OPTIONS=--max-old-space-size=4096 (raise only with a reason).
 3. Scope, don't sweep. Build and test the AFFECTED packages, not the whole
@@ -853,22 +803,20 @@ null or scoped to what survives — re-triage the card instead of reviewing a PR
 ## Upstream reporting — platform defects found while building an app
 
 The doctrine lives in `objectstack-platform` under **"The App / Platform
-Boundary"**: capability belongs in the platform, a platform defect means
-waiting for the platform fix, never a workaround in the app. What this loop
+Boundary"** — the fix is upstream, never a workaround in the app. This loop
 adds:
 
 - **Derive the upstream repository** from the failing dependency's
-  `package.json` `repository` field (`objectstack-ai/objectstack` for
-  `@objectstack/*`), and confirm the defect still exists on its current default
-  branch — if it is already fixed, the app-side task is an upgrade.
-- **Report so it can be acted on without your app**: a standalone minimal
-  repro, exact pinned versions, expected vs actual, and the contract you cite.
-- **File as a guest, not as a scheduler**: open it upstream with a backlink
-  `Part of <app-owner>/<app-repo>#<n>`; never apply the upstream's queue
-  labels, never assign, never add it to their board.
-- **Park the app-side issue honestly**: `Blocked-by: <upstream>#<n>` in the
-  body, or a version pin with its unblock condition written down. It stays
-  open — "we worked around it" is never a resolution.
+  `package.json` `repository` field, and confirm the defect still exists on its
+  current default branch — already fixed means the app-side task is an upgrade.
+- **Report so it can be acted on without your app**: standalone minimal repro,
+  exact pinned versions, expected vs actual, the contract you cite.
+- **File as a guest, not as a scheduler**: backlink `Part of
+  <app-owner>/<app-repo>#<n>`; never apply the upstream's queue labels, never
+  assign, never add it to their board.
+- **Park the app-side issue honestly**: `Blocked-by: <upstream>#<n>`, or a
+  version pin with its unblock condition written down. It stays open — "we
+  worked around it" is never a resolution.
 
 ---
 
