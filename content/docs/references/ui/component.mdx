@@ -175,11 +175,21 @@ const result = AIChatWindowProps.parse(data);
 | **object** | `string` | ✅ | Source object |
 | **field** | `string` | optional | Field to aggregate |
 | **aggregate** | `Enum<'count' \| 'sum' \| 'avg' \| 'min' \| 'max'>` | ✅ | Aggregation function |
-| **filter** | `any` | optional | Filter criteria |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter rules narrowing the aggregate — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` input in this map shares. The MongoDB-style record form is refused — see migration `element-number-filter-rule-array` |
 | **format** | `Enum<'number' \| 'currency' \| 'percent'>` | optional | Number display format |
 | **prefix** | `string` | optional | Prefix text (e.g. "$") |
 | **suffix** | `string` | optional | Suffix text (e.g. "%") |
 | **aria** | `{ ariaLabel?: string \| Record<string, string>; ariaDescribedBy?: string; role?: string }` | optional | ARIA accessibility attributes |
+
+### Nested Shape: `ElementNumberProps.filter[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. |
 
 ### Nested Shape: `ElementNumberProps.aria`
 

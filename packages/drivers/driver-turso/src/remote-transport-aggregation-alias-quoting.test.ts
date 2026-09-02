@@ -216,6 +216,21 @@ describe('[#14113] RemoteTransport — the aggregation alias is escaped, not gat
   });
 
   describe('regression controls — the positions this card did NOT touch', () => {
+    /**
+     * [#14287] Every control below asserts the ADR-0112 envelope beside the
+     * sentence, because "still refuses" was the half that was true all along
+     * and the half that was WRONG was invisible to it: these positions threw a
+     * bare `Error`, which `mapDataError` served as an opaque 500. #14287 gave
+     * the one producer `code: 'INVALID_REQUEST'` / `status: 400`. Asserting
+     * `message` alone here would let a regression to the bare `Error` land
+     * green through the very controls written to hold this shape.
+     */
+    const envelopeOf = (err: unknown) => ({
+      code: (err as { code?: unknown }).code,
+      status: (err as { status?: unknown }).status,
+    });
+    const ENVELOPE = { code: 'INVALID_REQUEST', status: 400 };
+
     it('the `field` position still refuses an unsafe identifier, and sends nothing', async () => {
       // `SAFE_IDENTIFIER` is doing real work here: `field` becomes a column
       // REFERENCE, which is grammar. Escaping is the answer for a NAME only.
@@ -233,6 +248,8 @@ describe('[#14113] RemoteTransport — the aggregation alias is escaped, not gat
       // itself safe is what makes this case reach the `field` check at all.
       expect(err.message).toContain('unsafe identifier rejected');
       expect(err.message).toContain('amount"; DROP TABLE showcase_delivery; --');
+      // [#14287] …and it is a 400 the caller can act on, not an opaque 500.
+      expect(envelopeOf(err)).toEqual(ENVELOPE);
       expect(seen).toEqual([]);
     });
 
@@ -248,36 +265,48 @@ describe('[#14113] RemoteTransport — the aggregation alias is escaped, not gat
           (e) => e as Error,
         );
       expect(err.message).toContain('unsafe identifier rejected');
+      expect(envelopeOf(err)).toEqual(ENVELOPE);
       expect(seen).toEqual([]);
     });
 
-    it('the groupBy alias position is UNCHANGED — still refused, and that is a separate card', async () => {
-      // ⚠️ Deliberate scope line, pinned so it cannot drift silently. The
-      // groupBy `alias` is the same class of thing (an output NAME) and
-      // `driver-sql` escapes it post-#13714 (`aliasIdentifierSql` at its
-      // groupBy select site), so this face diverges there too — but that
-      // position carries a LANDED pin (#6401, `remote-transport-groupby-node`)
-      // asserting the refusal, so reversing it is a judgement this card was not
-      // dispatched to make. Filed separately rather than patched inline; this
-      // control records the state it was left in.
+    it('[#14235] the groupBy alias position is now ESCAPED TOO — the scope line this card left is closed', async () => {
+      // ⚠️ This case REPLACES the deliberate scope line #14113 left here, which
+      // asserted this same input is REFUSED and said of itself: "Filed
+      // separately rather than patched inline; this control records the state
+      // it was left in." #14235 is the card it was waiting for. It reached the
+      // same reference-versus-name line by the same reasoning — an output NAME
+      // is quoted and escaped, a column REFERENCE is validated — so BOTH
+      // output-name positions of `aggregate` now route through
+      // `aliasIdentifierSql`, and this face agrees with `driver-sql` (which has
+      // routed both since #13714) on the whole method rather than one loop.
       //
-      // It is also NOT on the reproducing path: `ObjectQLStrategy` resolves a
-      // dimension to a bare column name, so no analytics query sends a dotted
-      // groupBy alias.
+      // What is pinned here is what the two positions do TOGETHER in one
+      // statement: a dotted dimension alias beside a dotted measure alias, both
+      // quoted, neither refused. That is the assertion #14113's control could
+      // not make while it was holding the scope line.
       const { t, seen } = await capturing();
-      const err = await t
-        .aggregate(DELIVERY_OBJECT.name, {
-          object: DELIVERY_OBJECT.name,
-          groupBy: [{ field: 'region', alias: 'showcase_delivery.region' }],
-          aggregations: [{ function: 'count', alias: 'showcase_delivery.count' }],
-        } as never)
-        .then(
-          () => { throw new Error('expected the groupBy alias to still be refused') },
-          (e) => e as Error,
-        );
-      expect(err.message).toContain('unsafe identifier rejected');
-      expect(err.message).toContain('showcase_delivery.region');
-      expect(seen).toEqual([]);
+      const rows = await t.aggregate(DELIVERY_OBJECT.name, {
+        object: DELIVERY_OBJECT.name,
+        groupBy: [{ field: 'region', alias: 'showcase_delivery.region' }],
+        aggregations: [{ function: 'count', alias: 'showcase_delivery.count' }],
+      } as never);
+      expect(seen).toEqual([
+        'SELECT "region" AS "showcase_delivery.region", count(*) AS "showcase_delivery.count" ' +
+          'FROM "showcase_delivery" GROUP BY "region"',
+      ]);
+      // ⛔ Neither dot may become a qualified reference: both stay INSIDE their
+      // own quotes.
+      expect(seen[0]).not.toContain('"showcase_delivery"."region"');
+      expect(seen[0]).not.toContain('"showcase_delivery"."count"');
+      // Executed, not merely emitted — the values come back under the caller's
+      // own keys, and GROUP BY still keys on the FIELD.
+      const byRegion = Object.fromEntries(
+        (rows as Array<Record<string, unknown>>).map((r) => [
+          r['showcase_delivery.region'],
+          r['showcase_delivery.count'],
+        ]),
+      );
+      expect(byRegion).toEqual({ west: 2, east: 1 });
     });
 
     it('the default alias is byte-identical to what it was before', async () => {

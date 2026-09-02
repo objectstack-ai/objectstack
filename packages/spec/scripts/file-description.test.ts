@@ -580,6 +580,106 @@ describe('renderFileDescription — #10924: the os:check marker is machinery, no
 });
 
 /**
+ * #13796 — the `@module` marker is machinery, not content.
+ *
+ * `@module <path>` is what tells `findModuleDocBlock` that a block documents
+ * the module (#13334). It is a prose line, and prose is emitted verbatim, so
+ * the marker became the OPENING LINE of every published page whose source
+ * carries it: fourteen on `main`, `content/docs/references/ui/sharing.mdx`
+ * opening on the literal text `@module ui/sharing` instead of on `Sharing &
+ * Embedding Protocol`. `check:docs` could not see it — that gate compares the
+ * artifact against the source, and the artifact reproduced the marker
+ * faithfully, exactly as it did for #5059 and #10924.
+ *
+ * The sibling surface never had it: `build-skill-references.ts` drops
+ * `@`-opening lines before taking a module's one-line description, so the skill
+ * index reads `Sharing & Embedding Protocol` for the same file. That is what
+ * makes this a filter missing on ONE surface rather than an open question about
+ * the tag.
+ *
+ * Both halves are pinned together on purpose. The drop belongs in the RENDERER
+ * and nowhere else: moved into `findModuleDocBlock` it would blank the eight
+ * modules #13334 selects by the marker alone, so "selection still reads it" is
+ * as much a part of this fix as "the page never shows it".
+ */
+describe('renderFileDescription — #13796: the `@module` marker is machinery, not content', () => {
+  const ctx = { fromCategory: 'ui', sourcePathToDocsRoute: () => null, sectionLevel: PAGE_SECTION_LEVEL };
+
+  const moduleBlock = (...body: string[]): string =>
+    ['/**', ...body.map(l => (l === '' ? ' *' : ` * ${l}`)), ' */', '', "import { z } from 'zod';", ''].join('\n');
+
+  it('drops the marker and opens the page on the prose beneath it', () => {
+    // `ui/sharing.zod.ts`, reduced — the page the issue opened with.
+    const source = moduleBlock(
+      '@module ui/sharing',
+      '',
+      'Sharing & Embedding Protocol',
+      '',
+      'Public-link sharing of a form view.',
+    );
+    const out = renderFileDescription(source, ctx);
+    expect(out.split('\n')[0]).toBe('Sharing & Embedding Protocol');
+    expect(out).not.toContain('@module');
+    // The drop takes the marker and nothing else — no page loses prose to it.
+    expect(out).toContain('Public-link sharing of a form view.');
+    // …and the SELECTOR still reads the marker, which is the whole reason this
+    // block is the module's inside an import list (#13334).
+    expect(opening(findModuleDocBlock(source))).toBe('@module ui/sharing');
+  });
+
+  it('drops a bare `@module` with no path, wherever in the block it sits', () => {
+    // `shared/metadata-collection.zod.ts` writes it last and without a path,
+    // so neither "first line" nor "has an argument" identifies the marker.
+    expect(renderFileDescription(moduleBlock('Metadata collections.', '', '@module'), ctx)).toBe(
+      'Metadata collections.',
+    );
+  });
+
+  it('keeps a marker shown INSIDE a fence — there it is an author illustrating the convention', () => {
+    // The prose-level condition, same as #10924's: stripping by text alone
+    // would silently edit a header that documents the convention itself.
+    const out = renderFileDescription(
+      moduleBlock('How a module header opens:', '', '```md', '@module ui/sharing', '```'),
+      ctx,
+    );
+    expect(out).toContain('@module ui/sharing');
+  });
+
+  it('keeps a mid-sentence mention — only a line that OPENS with the tag is the marker', () => {
+    // Judged with the same UNTRIMMED `^@module` test `hasModuleMarker` selects
+    // on, so the renderer drops exactly what the selector recognised.
+    const out = renderFileDescription(moduleBlock('Write the `@module` tag to mark this block.'), ctx);
+    expect(out).toContain('@module');
+  });
+
+  it('leaves every other block tag alone — the filter is `@module`, not `^@\\w+`', () => {
+    // Scope, pinned. `@example Basic field mapping` is the caption of the fence
+    // beneath it and `@category Security` is a classification: a blanket
+    // tag-line drop would take that prose off the page, which is the one thing
+    // this fix may not do. How a tag WITH content should render is a different
+    // question and not this one.
+    const out = renderFileDescription(
+      moduleBlock(
+        '@module shared/mapping',
+        '',
+        'Field mapping.',
+        '',
+        '@category Security',
+        '',
+        '@example Basic field mapping',
+        '```ts',
+        'const m = 1;',
+        '```',
+      ),
+      ctx,
+    );
+    expect(out).not.toContain('@module');
+    expect(out).toContain('@category Security');
+    expect(out).toContain('@example Basic field mapping');
+  });
+});
+
+/**
  * #5553 — the block is rendered as the markdown it was written as.
  *
  * The renderer used to drop blank lines and join what was left with `\n\n`,
@@ -1827,6 +1927,25 @@ describe('corpus — every rendered description is well-formed markdown', () => 
     expect(shifted.length).toBe(37);
     // …and every one of them was shifted because it opened at level 1.
     expect(shifted.filter(d => /^ {0,3}#(?:[ \t]|$)/m.test(withoutFences(d.untouched)))).toHaveLength(37);
+  });
+
+  it('never opens a page on the `@module` marker (#13796)', () => {
+    // The half that cannot rot: re-derived from the real `packages/spec/src`
+    // tree, so a source that acquires the marker tomorrow cannot re-acquire the
+    // defect with it. Deliberately an invariant (zero) rather than a count —
+    // the fourteen pages that carried it are the symptom, and a fifteenth
+    // marked module is a good thing, not a regression.
+    //
+    // Read on the rendered fragment, not on the emitted `.mdx`, for the reason
+    // the rest of this file is: `check:docs` reproduced the marker faithfully
+    // and stayed green through all fourteen.
+    const offenders: string[] = [];
+    for (const { rel, out } of described) {
+      for (const line of withoutFences(out).split('\n')) {
+        if (/^@module\b/.test(line)) offenders.push(`${rel}: ${line.trim()}`);
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 
   it('keeps a description for every source that had one — #6134 selection is untouched', () => {

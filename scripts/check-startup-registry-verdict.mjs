@@ -1051,6 +1051,14 @@ function run({ list = false, packagesDir } = {}) {
 // gate must flag the three recording shapes and must NOT flag the read-only
 // probe, the deferred probe, or the sealed verdict — which are precisely what
 // #4771 and #4772 were fixed INTO.
+
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
     // Every fixture is analysed on its own, so the provider index is built from
     // the fixture itself — which means each one must declare the provider it is
@@ -1434,6 +1442,7 @@ function selfTest() {
         return 1;
     }
     console.log(`\n✓ self-test: ${cases.length} analysis case(s) + the dead-root hard error (red when the scan root is renamed, green when restored) all passed\n`);
+    selfTestReachedVerdict = true;
     return 0;
 }
 
@@ -1444,7 +1453,16 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 if (!invokedDirectly) {
   // imported as a module — expose the exports and do nothing else
 } else if (args.includes('--self-test')) {
-    process.exit(selfTest());
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+        console.error(
+            '\n✗ check-startup-registry-verdict self-test: selfTest() returned without reaching its verdict,\n'
+                + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+    }
+    process.exit(selfTestCode);
 } else {
     const dirFlag = args.indexOf('--packages-dir');
     process.exit(

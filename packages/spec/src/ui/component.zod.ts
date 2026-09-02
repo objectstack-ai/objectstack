@@ -1799,7 +1799,25 @@ export const ElementNumberPropsSchema = lazySchema(() => strictObject({
   field: z.string().optional().describe('Field to aggregate'),
   aggregate: z.enum(['count', 'sum', 'avg', 'min', 'max'])
     .describe('Aggregation function'),
-  filter: FilterConditionSchema.optional().describe('Filter criteria'),
+  /**
+   * Filter rules narrowing the aggregate — the `ViewFilterRule` ARRAY form,
+   * `[{ field, operator, value }, ...]`, the one filter orthography every
+   * other `filter` input in this map already declares (`record:related_list`
+   * and its Add-affordance picker). Until the ui#6206 ruling (2026-08-25,
+   * Option B, verbatim 「同意」: one filter orthography platform-wide) this
+   * entry alone said `FilterConditionSchema`, the MongoDB-style record form —
+   * so the filter a list view stores and renders was refused by the KPI
+   * element beside it. Sequenced consumer-first (the 2026-08-25 Option-A
+   * ordering ruling): objectui#6828 made `ObjectStackAdapter.aggregate()`
+   * lower a rule array through the same `translateFilterArray` its `find()`
+   * path runs, and the pin carrying it (`d8ec8d6d`) was re-measured before
+   * this declaration moved — authored array → adapter lowering → filter AST →
+   * accepted at the analytics door (which still refuses a RAW rule-object
+   * array, by design). The record form is refused at `filter`; the migration
+   * prescription is the `element-number-filter-rule-array` semantic entry.
+   */
+  filter: z.array(ViewFilterRuleSchema).optional()
+    .describe('Filter rules narrowing the aggregate — the ViewFilterRule array form `[{ field, operator, value }, ...]`, the one filter orthography every `filter` input in this map shares. The MongoDB-style record form is refused — see migration `element-number-filter-rule-array`'),
   format: z.enum(['number', 'currency', 'percent']).optional().describe('Number display format'),
   prefix: z.string().optional().describe('Prefix text (e.g. "$")'),
   suffix: z.string().optional().describe('Suffix text (e.g. "%")'),
@@ -1807,6 +1825,15 @@ export const ElementNumberPropsSchema = lazySchema(() => strictObject({
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 }));
 export type ElementNumberProps = z.input<typeof ElementNumberPropsSchema>;
+/**
+ * ADR-0122: the parsed state differs from the authored state on exactly one
+ * key — `filter` carries `ViewFilterRuleSchema` (the ui#6206 convergence),
+ * whose own input ≠ infer (`operator` is normalized on parse, which is why
+ * `ViewFilterRuleParsed` exists). So `element:number` leaves the type-alias
+ * convention pin's isomorphic family (the Iso818 line deleted with this
+ * alias), taking the `ObjectGridPropsParsed` route its comment prescribes.
+ */
+export type ElementNumberPropsParsed = z.infer<typeof ElementNumberPropsSchema>;
 
 export const ElementImagePropsSchema = lazySchema(() => strictObject({
   surface: 'this `element:image`',

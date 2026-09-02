@@ -270,19 +270,41 @@ describe('#6504 — list() and listDiagnosed() are one read seen at two widths',
         expect((await working.listDiagnosed('permission')).items).toBe(workingItems);
     });
 
+
+/**
+ * [#14205] Counts loader WALKS, not calls to one method name.
+ *
+ * `list()` reads a loader through `loadManyKeyed()` when the loader has one — a
+ * loader-held item's identity is the key its store holds it under, not
+ * `body.name` — and falls back to `loadMany()` when it does not. The invariant
+ * these cases pin is "the manager walked this loader once", which is the SUM of
+ * the two. Spying only `loadMany` counted 0 walks after the read moved, which
+ * reads exactly like a cache hit: green for the wrong reason in one direction,
+ * red for the wrong reason in the other.
+ */
+function loaderWalks(loader: MemoryLoader): { readonly count: number } {
+    const many = vi.spyOn(loader, 'loadMany');
+    const keyed = vi.spyOn(loader, 'loadManyKeyed');
+    return {
+        get count() {
+            return many.mock.calls.length + keyed.mock.calls.length;
+        },
+    };
+}
+
     it('asking for the verdict costs no extra loader walk — one cache entry serves both', async () => {
         const memory = new MemoryLoader();
         await memory.save('permission', 'stored', { name: 'stored' });
         const manager = new MetadataManager({ formats: ['json'], loaders: [memory] });
-        const loadMany = vi.spyOn(memory, 'loadMany');
+        const walks = loaderWalks(memory);
 
         await manager.list('permission');
-        expect(loadMany).toHaveBeenCalledTimes(1);
+        expect(walks.count).toBe(1);
 
         // Served from the entry the `list()` above filled — `listDiagnosed` is
         // the same read, not a second one.
         const diagnosed = await manager.listDiagnosed('permission');
-        expect(loadMany).toHaveBeenCalledTimes(1);
+        expect(walks.count).toBe(1);
         expect(names(diagnosed.items)).toEqual(['stored']);
         expect(diagnosed.degraded).toBe(false);
     });

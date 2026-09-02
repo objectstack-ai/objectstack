@@ -11,10 +11,31 @@
  *   node scripts/pm/dispatch-gates.mjs --tier <path> ...     # the tier verdict alone, for the claim comment
  *   node scripts/pm/dispatch-gates.mjs --commands <path> ... # MACHINE-READABLE: one runnable command per line on stdout, nothing else
  *   node scripts/pm/dispatch-gates.mjs --json <path> ...     # MACHINE-READABLE: the whole derivation as one JSON document
+ *   node scripts/pm/dispatch-gates.mjs --ran <file> ...      # VERDICT: reconcile what you RAN against what this derives; exit 1 if any family is unrun
  *   node scripts/pm/dispatch-gates.mjs                       # NO paths: derive them from git, off the merge base
  *   node scripts/pm/dispatch-gates.mjs --changed             # the same, said out loud
  *   node scripts/pm/dispatch-gates.mjs --repo <owner>/<name> ...  # refuse unless this checkout IS that repo
  *   node scripts/pm/dispatch-gates.mjs --self-test
+ *
+ * ## Run --self-test DETACHED on an agent container (#14281)
+ *
+ * The battery re-spawns this tool's own CLI as a child process many times —
+ * deliberate (see `check-dispatch-gates.mjs`'s header for why a self-test this
+ * size is not fixture-only) — and on an agent container that makes the full
+ * run longer than the container's foreground command cap, which SIGTERMs a
+ * run past it. Do not run `--self-test` (or `pnpm check:pm-dispatch-gates`,
+ * which is exactly that flag) in the foreground there. Detach it and poll the
+ * log instead:
+ *
+ *   nohup pnpm check:pm-dispatch-gates > /tmp/pm-dispatch-gates.log 2>&1 &
+ *
+ * then tail the log file until it stops growing. Each case's `✓`/`✗` line
+ * prints the moment that case is decided, so a run killed mid-battery — by
+ * this cap, or by anything else — still leaves every case decided before the
+ * kill in the log, readable as a partial result rather than a silent zero. The
+ * measured runtime and case count are not repeated here — they move with the
+ * tree and belong to a named commit, not to this header (see #14281 for the
+ * reading that motivated this section).
  *
  * ## Harvest the machine-readable modes, never this prose (#13462)
  *
@@ -48,6 +69,47 @@
  * rendering with the arithmetic tying it to both sections, and
  * `spellingFooterLines` no longer spells its matched-block subtotal in the
  * vocabulary of a total. See those two for the measurements.
+ *
+ * ## The THIRD link, and the one no better list can close: EXECUTED (#13774)
+ *
+ * The two sections above are about a harvest that comes out SHORT. `--ran`
+ * answers the next link in the same chain — harvested ⟶ executed — and it is a
+ * different defect, not a stronger version of the same one. Measured: a dev
+ * harvested this tool's list correctly, twice, with `--commands`; the gate that
+ * later reddened CI was named explicitly in both harvests; and the list was
+ * then used only to diff the two derivations against each other, never as a
+ * checklist. Of the 62 families its union named, 19 had been run. ⭐ A better
+ * list does not make anyone run it, so #13642's remedy — a perfect flat list —
+ * leaves this hole exactly as wide as it was.
+ *
+ * Getting one CI red out of 43 unrun families was luck, and the report that
+ * preceded it was honest, named real green families, and claimed a coverage it
+ * did not have. That is the shape: a partial run is INVISIBLE unless something
+ * compares the two lists, and the comparison has to be an exact set difference
+ * against this tool's own output taken as an external artefact — never a count,
+ * never a running total, never a matcher written per dev per card. Three
+ * independent devs produced three confident, well-formed, false claims of
+ * complete coverage: one made no comparison at all, one wrote a prefix matcher
+ * that reported 0 where the raw comparison scored 36, and one did arithmetic
+ * over its own loop counter that balanced perfectly because the missing family
+ * had left the numerator and the denominator in the same operation.
+ * `runReconciliation` carries all three measurements and what defeats each.
+ *
+ * The capture idiom is the load-bearing half, and it is one line: RECORD THE
+ * COMMAND THIS TOOL PRINTED, as it runs, byte for byte.
+ *
+ *     node scripts/pm/dispatch-gates.mjs --commands > gates.list
+ *     while IFS= read -r cmd; do
+ *       eval "$cmd" > "logs/$n" 2>&1
+ *       printf '%s\n' "$cmd" >> ran.list      # what RAN — pass or fail
+ *     done < gates.list
+ *     node scripts/pm/dispatch-gates.mjs --ran ran.list      # exit 1 if any family is unrun
+ *
+ * Both sides of that comparison are then strings this file emitted from one
+ * expression, so there is nothing to normalise and no shape for a matcher to
+ * be lenient about. ⛔ Do not build the record from log FILE NAMES: that is the
+ * step that needs a slug, and the slug is where the first hand-built
+ * reconciliation went wrong.
  *
  * ## This tool answers about the tree it RUNS IN, and says so on every run
  *
@@ -2270,10 +2332,12 @@ const COMPOUND_ANCHOR_LEDGER = [
   ['scripts/check-regen-pending.mjs', 'prePushIsArmedSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'decisionTableSelfTest', false],
   ['scripts/check-turbo-task-graph.mjs', 'runSelfTest', false],
+  ['scripts/check-workspace-manifest-cycles.mjs', 'runSelfTest', false],
   ['scripts/check-self-test-wired.mjs', 'carriesSelfTest', true],
   ['scripts/check-self-test-workflow-commands.mjs', 'runSelfTest', true],
   ['scripts/check-step-collectors.mjs', 'selfTestTargets', true],
   ['scripts/check-step-collectors.mjs', 'selfTestDiscoveries', true],
+  ['scripts/measure-durability-swallow-family.mjs', 'selfTestMode', true],
   ['scripts/measure-self-test-floor.mjs', 'selfTestDefs', true],
   ['scripts/pm/dispatch-gates.mjs', 'selfTestOnlyCallables', true],
   ['scripts/pm/dispatch-gates.mjs', 'maskSelfTests', true],
@@ -2621,6 +2685,194 @@ export function moduleRelativeDirectoryHint(literal, scriptPath, tree, { root = 
   return resolved;
 }
 
+/** A binding worth resolving is seeded from the running module's own location. */
+const MODULE_ANCHOR_SEED = /import\.meta\.(?:url|dirname|filename)/;
+
+/**
+ * ── The THIRD anchor: the PACKAGE ROOT a gate binds from its own module URL
+ *    (#14208) ──────────────────────────────────────────────────────────────────
+ *
+ * The repo root is one anchor and the writer's own directory
+ * (`resolveModuleRelativeHint`) is the second. A gate that lives INSIDE a
+ * package writes against a third, bound once at module top and used everywhere
+ * after:
+ *
+ *   const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+ *   const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
+ *
+ * This function answers WHERE that binding points, and answers nothing else.
+ * Whether any literal should be read against it is the caller's question
+ * (`packageRootAnchoredHint`), which is what keeps this one a fact of the tree
+ * rather than a reading of intent.
+ *
+ * ## Why it routes through `resolvePathExpression` and builds no walker
+ *
+ * `anchoredReadTargets` already resolves exactly these expressions, from the
+ * same three-part context, for the read follow. A second regex over
+ * `fileURLToPath` spellings would be a copy of that resolver, and a copy that
+ * drifts is the defect this file exists to refuse — so the ctx is built the
+ * way that scan builds it and the resolution is the resolver's.
+ *
+ * ## Narrowings, and why each one is structural
+ *
+ * SEEDED FROM `import.meta` ONLY. A binding computed from the repo root
+ * (`join(ROOT, 'packages/spec')`) is already spelled from the root and needs no
+ * anchor; admitting it would make every join base in the file a candidate
+ * anchor, which is a widening nothing here measured.
+ *
+ * A TRACKED DIRECTORY, read off `tree.prefixes`/`tree.files` — the same two
+ * sets `moduleRelativeDirectoryHint` reads, so this cannot disagree with what
+ * the reachability half of the tool believes the tree holds.
+ *
+ * THAT CARRIES A TRACKED `package.json`. This is the narrowing that makes the
+ * anchor a PACKAGE root rather than "any directory above the writer": the
+ * manifest is the tree's own declaration that this directory is a root things
+ * are addressed from, and it is the same declaration the manifest follow
+ * (`packageManifestTargets`) reads one edge over. Without it the rule would
+ * re-anchor at every intermediate directory a script happens to climb to.
+ *
+ * NEVER THE REPO ROOT: a binding that resolves to zero segments is the anchor
+ * the extractor already applies, so admitting it would be a no-op wearing a
+ * rule's clothes. `dispatch-gates.mjs`' own `ROOT` is that shape.
+ *
+ * The FIRST such binding in source order wins. Measured on this tree the
+ * question does not arise — every script in the population binds exactly one —
+ * and a file that bound two package roots would be describing two packages,
+ * which is a card to file rather than a guess to make here.
+ */
+export function packageRootBinding(scriptPath, moduleBody, tree) {
+  if (!scriptPath || !tree) return null;
+  const ctx = {
+    fileSegs: scriptPath.split('/'),
+    names: nameInitialisers(moduleBody),
+    returns: singleReturnExpressions(moduleBody),
+    params: singleCallSiteParameters(moduleBody),
+    seen: new Set(),
+  };
+  for (const inits of ctx.names.values()) {
+    for (const init of inits) {
+      if (!MODULE_ANCHOR_SEED.test(init)) continue;
+      ctx.seen.clear();
+      const at = resolvePathExpression(init, ctx);
+      if (at.kind !== 'in-tree' || at.segs.length === 0) continue;
+      const dir = at.segs.join('/');
+      if (!tree.prefixes.has(dir) || tree.files.has(dir)) continue;
+      if (!tree.files.has(`${dir}/package.json`)) continue;
+      return dir;
+    }
+  }
+  return null;
+}
+
+/**
+ * One hint, re-read against the package root its writer binds — or `null` when
+ * that reading is not available or does not reach the tree (#14208).
+ *
+ * ## The defect, and the one class it is allowed to touch
+ *
+ * `extractWatchHints` takes a literal with no `./` prefix as spelled FROM THE
+ * REPO ROOT. For a gate inside a package that is the wrong base and the tree
+ * says so out loud: `check:generated` declares `api-surface/`,
+ * `export-origins/`, `declaration-map/`, `liveness/state-counts.md` and
+ * `src/meta-spelling/meta-url-data.generated.ts`, all five alive under
+ * `packages/spec/` and all five printed by the residue as dead leads.
+ *
+ * The admitted class is exactly the one whose residue sentence was FALSE, and
+ * that coupling is deliberate rather than convenient: a hint is re-anchored
+ * only when `deepestTrackedPrefix` is empty — no tracked path begins with even
+ * its first segment — which is the branch `unreachableReason` renders as "never
+ * was a repo path". A hint that stops at a SHORTER prefix is the "layout moved"
+ * class and is left alone: its first segment is a real repo directory, so the
+ * root is the base the author most plausibly meant and re-anchoring it would
+ * replace a triage lead with a fabricated one.
+ *
+ * ## Why this is not the widening the two priced refusals refuse
+ *
+ * `moduleRelativeDirectoryHint`'s docblock prices a naive widening of the
+ * RESOLVED form at +53 hints of which 1 was a true lead, and `hintCovers`'
+ * bare-top-level-word admission at +139084 pairs. Neither is relaxed here, and
+ * neither can be reached from here:
+ *
+ *   - ADMISSION is untouched. A literal that is not already a hint — a bare
+ *     single-segment word, a sibling specifier, a package name — never arrives
+ *     at this function. What is re-anchored is a literal the scan already
+ *     admitted and the tree already refused;
+ *   - the candidate must REACH THE TREE, through `hintReachesTree`, which is
+ *     `hintCovers` applied to the corpus. A re-anchoring that names nothing is
+ *     dropped and the hint keeps the spelling it had, so the rule cannot invent
+ *     a path — measured live on `check:browser-reachable-entries`' `'zod'`,
+ *     which stays dead because `packages/spec/zod` is not there;
+ *   - it REPLACES rather than adds. The re-anchored form is the same claim
+ *     about the same literal under the base its writer actually bound, so the
+ *     family's declared-literal count does not move and no second hint is
+ *     manufactured beside a dead one.
+ *
+ * ## The POPULATION, swept before the rule was written (ad54eb342)
+ *
+ * The card that filed this asked for the sweep first and the repair only if it
+ * survived. Over the 201 discovered families' 195 scannable gate scripts:
+ *
+ *   scripts binding a package root this way              8   (all `packages/spec`)
+ *   ...of which carry a hint dead at the repo root       2
+ *   dead-at-root hints in that population                6
+ *   ...that re-anchor onto something the tree HAS        5
+ *   ...refused because the re-anchoring reaches nothing  1   (`'zod'`, a package
+ *                                                            specifier, in
+ *                                                            check:browser-reachable-entries)
+ *
+ * ⚠️ The card described the class as literals passed to `resolve(PKG_DIR, …)`.
+ * That shape is real — 6 such literals across 6 of the 8 scripts — but it is
+ * NOT where the confirmed instance comes from, and a rule restricted to it
+ * would have repaired none of the three dead leads the card names: all five of
+ * check:generated's are `artifact:` values in its GATED ledger, describing what
+ * each gate verifies, resolved by nothing. The syntactic restriction was
+ * measured and dropped for that reason; the reachability test above is what
+ * keeps the wider reading honest.
+ *
+ * ## Blast radius, measured before the change and after it (ad54eb342)
+ *
+ * A rule that moves rows moves them for EVERY family, so the price is the
+ * deliverable and not a footnote. Over 201 discovered families and 7900 tracked
+ * files:
+ *
+ *   watch-hint (gate, file) pairs   142089 -> 142139   (+50, and ZERO lost)
+ *   families whose hint set moves        1  — check:generated, and no other
+ *   pairs RE-ATTRIBUTED (same pair, new via)            0 — every replaced
+ *                                   spelling was DEAD, so it covered nothing
+ *                                   that could be re-attributed
+ *   (check, hint) live / inert      1108/152 -> 1113/147
+ *   distinct hints in the fleet          725 -> 722, because three of the five
+ *                                   re-anchored forms are already spelled from
+ *                                   the root by other gates
+ *   families carrying dead literals       46 -> 45
+ *   dead literals                        152 -> 147
+ *   ...of them in the empty-`deepest` class          128 -> 123
+ *
+ * PROVENANCE, which is the criterion this file prices and never volume: 5 of 5
+ * admitted hints are TRUE leads and 50 of 50 pairs with them, each verified at
+ * its declaration site — they are `check:generated`'s own artifact ledger, and
+ * the gate's whole job is to verify those artifacts against their sources:
+ *
+ *   packages/spec/api-surface        17 files    packages/spec/export-origins  17
+ *   packages/spec/declaration-map    14          .../meta-url-data.generated.ts  1
+ *   packages/spec/liveness/state-counts.md        1
+ *
+ * 0 fabricated. For scale, `hintCovers`' docblock prices the bare-top-level-word
+ * admission it refuses at +139084 pairs on this corpus; this is 0.04% of it.
+ *
+ * @param {string} hint  a hint `extractWatchHints` has already admitted
+ * @param {string} base  the package root, from `packageRootBinding`
+ * @param {{files: Set<string>, prefixes: Set<string>}} tree
+ * @param {string[]} files  the same corpus, as the array `hintReachesTree` walks
+ * @returns {string|null} the re-anchored hint, or null
+ */
+export function packageRootAnchoredHint(hint, base, tree, files) {
+  if (!base || !tree || !files) return null;
+  if (deepestTrackedPrefix(hint, tree.prefixes) !== '') return null;
+  const candidate = `${base}/${hint}`;
+  return hintReachesTree(candidate, files) ? candidate : null;
+}
+
 /**
  * Scan a check script's MODULE BODY for the path-ish string literals it
  * operates on. A hint is a quoted string that contains a `/` (or names a
@@ -2664,7 +2916,9 @@ export function moduleRelativeDirectoryHint(literal, scriptPath, tree, { root = 
  * the hint `lib/dist-freshness`, a string that never was a repo path while the
  * file it names exists. That is a hint set stating something FALSE about the
  * source, and the residue said so out loud: `unreachableReason` printed "never
- * was a repo path" about targets that are on disk.
+ * was a repo path" about targets that are on disk. ⚠️ That sentence is retired
+ * — `unreachableReason` no longer claims a base it did not test (#14208) — so
+ * it is quoted here as history and will not be found in today's output.
  *
  * So the prefix is resolved against `scriptPath`'s own directory instead
  * (`resolveModuleRelativeHint`). For a literal already spelled from the root by
@@ -2774,7 +3028,52 @@ export function extractWatchHints(scriptSource, scriptPath = null, { tree = null
     }
     hints.add(trimmed);
   }
-  return [...hints];
+  return anchorAtPackageRoot(hints, scriptPath, moduleBody, tree);
+}
+
+/**
+ * The THIRD anchor, applied to a finished hint set (#14208).
+ *
+ * It runs LAST and over the assembled set rather than inside the admission
+ * loop, because it is a re-reading of hints and not a second admission rule:
+ * everything it can touch is already a hint, so the loop above keeps being the
+ * one place that decides what a hint IS.
+ *
+ * The order of the returned list is preserved to the byte for every hint it
+ * does not touch, and a re-anchored hint keeps its ORIGINAL POSITION rather
+ * than moving to the end. `discoverFamilies` puts a gate's own hints at the
+ * front so an already-matched path keeps the exact key and via label it had,
+ * and `residueNames` prints the first three — a rule that reshuffled the list
+ * would move rows in output that nothing in this change is entitled to move.
+ *
+ * The two cheap refusals come first, so the corpus is materialised and the
+ * source is parsed for bindings ONLY for a script that has both a dead-at-root
+ * hint and something to re-anchor it to. Over the live fleet that is 2 scripts
+ * of 201 families' worth of files.
+ */
+function anchorAtPackageRoot(hints, scriptPath, moduleBody, tree) {
+  const spelled = [...hints];
+  if (!scriptPath || !tree) return spelled;
+  const orphans = spelled.filter((h) => deepestTrackedPrefix(h, tree.prefixes) === '');
+  if (orphans.length === 0) return spelled;
+  const base = packageRootBinding(scriptPath, moduleBody, tree);
+  if (!base) return spelled;
+  const files = [...tree.files];
+  const anchored = new Map();
+  for (const h of orphans) {
+    const at = packageRootAnchoredHint(h, base, tree, files);
+    if (at) anchored.set(h, at);
+  }
+  if (anchored.size === 0) return spelled;
+  const out = [];
+  const seen = new Set();
+  for (const h of spelled) {
+    const v = anchored.get(h) ?? h;
+    if (seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
 }
 
 /**
@@ -3623,7 +3922,8 @@ export function judgedAsPattern(hint) {
  * With the form corrected the three branches mean what they say for BOTH
  * comparison modes: `deepest === form` is "the population's root is right
  * there", a strictly shorter `deepest` is a genuine move under a surviving
- * parent, and an empty one is a literal that never was a repo path.
+ * parent, and an empty one is a literal no tracked path begins with — a
+ * specifier, or a path anchored at a base this scan did not resolve (#14208).
  */
 export function comparedForm(hint) {
   if (!judgedAsPattern(hint)) return collapseHint(hint);
@@ -5270,9 +5570,27 @@ export function spawnedProgramTargets(rel, source, isTracked) {
  * ── The PACKAGE a gate re-derives from: the fourth edge, and the one that is
  *    not a program (#13518) ────────────────────────────────────────────────────
  *
- * The three follows above all end at a PROGRAM — a module the gate imports, a
- * file whose program text it opens, a program it spawns — and inherit that
- * program's declared population. This one ends at DATA: a workspace package's
+ * The three scans above all end at a PROGRAM — a module the gate imports, a
+ * file whose program text it opens, a program it spawns — but only TWO of them
+ * inherit that program's declared population. The import and spawn scans feed
+ * `hintsOfModule` in `discoverFamilies`; the READ scan does not, and nothing
+ * feeds `entry.reads` into it. It reaches a card through the LAST key in
+ * `coveringKey`, which is an identity claim about a single FILE (#13000) and
+ * never a population. Measured on this tree: the read edge is 12 families, 16
+ * (family, target) pairs over 15 distinct targets, and it carries 0 inherited
+ * hints — against 373 for the import edge, 7 for the manifest edge and 1 for
+ * the run edge (#14289). Reading a program's TEXT is not performing its work,
+ * and identity-only is the correct behaviour, so the claim was the defect
+ * rather than the code.
+ *
+ * ⚠️ TWO numberings live in this file and they count different things. Here the
+ * edges are numbered in SOURCE ORDER, all four of them, which makes this one
+ * the fourth. `discoverFamilies` numbers only the POPULATION FOLLOWS — import,
+ * spawn, manifest — which makes the same edge its third. Neither is wrong; the
+ * sentence claiming three population follows all ending at a program was, and
+ * that is what is repaired above.
+ *
+ * This one ends at DATA: a workspace package's
  * `package.json`, whose `exports` map is the tree's own declaration of what a
  * package's public entry points ARE.
  *
@@ -5317,8 +5635,9 @@ export function spawnedProgramTargets(rel, source, isTracked) {
  * `hintsOfManifest` (in `discoverFamilies`) answers with the package's tracked
  * SOURCE subtree, and it answers only for a manifest that declares an
  * `exports` map. That test is a fact of the tree, read from the followed file's
- * own declaration — the `declaredInheritedPopulation` discipline the other
- * three follows take, one file kind over — and never a regex over the gate's
+ * own declaration — the `declaredInheritedPopulation` discipline the other TWO
+ * follows take, one file kind over (the read scan takes none of it: it
+ * inherits no population to narrow, #14289) — and never a regex over the gate's
  * prose about what it thinks it reads.
  *
  * It is also what makes the edge precise rather than merely broad. Measured on
@@ -5563,9 +5882,11 @@ export function watchHintTree(files = trackedFiles()) {
  * tree can actually answer (#9883 H2). It separates three populations that
  * would otherwise print identically as "matched nothing":
  *
- *   ''                  the literal was never a repo path — a MIME type, a
- *                       remote ref, a package or repo specifier that survived
- *                       the extractor. Nothing moved; it was never live;
+ *   ''                  no tracked path begins with the literal — a MIME type,
+ *                       a remote ref, a package or repo specifier that survived
+ *                       the extractor, or a path anchored at a base this scan
+ *                       did not resolve (#14208). Nothing moved under it; as
+ *                       spelled it was never live;
  *   a shorter prefix    the tree HAS the parent and stops there — the layout
  *                       moved under a gate that still names the old spelling.
  *                       This is the class that is usually a real miss;
@@ -5652,7 +5973,9 @@ export const MODULE_SPECIFIER_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js'
  *
  * These nine families used to print "never was a repo path" — false, but filed
  * BY CONSTRUCTION, i.e. under the heading that tells a reader there is nothing
- * to chase. Resolving the literal against its writing script (the producer-side
+ * to chase. (That sentence is retired; the branch now names what the sweep
+ * established without claiming a base it did not test — #14208.)
+ * Resolving the literal against its writing script (the producer-side
  * repair in `resolveModuleRelativeHint`) was right and stays; what it also did
  * was move the falsehood from an inert bucket into the actionable one:
  *
@@ -5931,10 +6254,11 @@ export function unreachableFamilies(entries, files, sweep = null) {
  * The three cases `deepestTrackedPrefix` distinguishes split two-to-one on the
  * question a reader actually has, which is "is this a miss I should chase?":
  *
- *   by construction   the literal was never a repo path (no tracked path under
+ *   by construction   no tracked path begins with the literal (nothing under
  *                     even its first segment — a package specifier, a cross-repo
- *                     slug), or the tree HAS the population and the covering
- *                     rule refuses the literal as too generic. Neither is a
+ *                     slug, or a base this scan did not resolve), or the tree
+ *                     HAS the population and the covering rule refuses the
+ *                     literal as too generic. Neither is a
  *                     defect in the gate or in the tree, and NO change to either
  *                     makes the derivation reach it. This is the class that is
  *                     merely a standing fact.
@@ -6013,7 +6337,17 @@ export function unreachableReason(dead, cap = 3) {
       if (target) {
         return `'${hint}' — the tree HAS ${target}; the literal is that file's extensionless module spelling, which no whole-segment comparison reaches`;
       }
-      if (!deepest) return `'${hint}' — no tracked path under its first segment; never was a repo path`;
+      // ⚠️ This sentence used to end "never was a repo path" — a claim about
+      // EVERY base, made from evidence about ONE (#14208). check:generated's
+      // `api-surface`, `export-origins` and `src/meta-spelling/…` all printed
+      // under it while sitting on disk under `packages/spec/`, which is a
+      // dead-lead label on a live path: the reader is told there is nothing to
+      // chase, about three files they could open. What the sweep actually
+      // established is the first clause, and the second now names the two ways
+      // that happens instead of asserting the literal never existed.
+      if (!deepest) {
+        return `'${hint}' — no tracked path under its first segment; a specifier, or a path anchored at a base this scan did not resolve`;
+      }
       // Every branch below reasons about the form the COMPARISON used, so the
       // pattern-judged shapes get their own sentence instead of borrowing the
       // collapse's. Borrowing it is what made the residue assert a directory
@@ -8040,8 +8374,12 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
         if (gateFiles.has(mod) || entry.imports.includes(mod)) continue;
         entry.imports.push(mod);
       }
-      // The SECOND edge to another program, under the same two refusals as the
-      // first and for the same reasons (#13511). It sits BELOW the self-test
+      // The SECOND POPULATION FOLLOW, under the same two refusals as the first
+      // and for the same reasons (#13511). ⚠️ "Second" counts FOLLOWS, not
+      // edges: the read scan a few lines up is an edge too, and it is the
+      // second of those in source order, but it inherits no population and so
+      // is not one of these (#14289 — `packageManifestTargets`' docblock holds
+      // both numberings side by side). It sits BELOW the self-test
       // guard deliberately: the narrowing above is invocation-shaped — an
       // inherited population describes the gate's WORK — and that argument does
       // not change with the edge it arrives over. One rule, not two. Cost of
@@ -8051,8 +8389,11 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
         if (gateFiles.has(ran) || entry.runs.includes(ran)) continue;
         entry.runs.push(ran);
       }
-      // The THIRD edge under the same self-test guard, for the same
-      // invocation-shaped reason the spawn follow states (#13518). The
+      // The THIRD AND LAST POPULATION FOLLOW, under the same self-test guard
+      // and for the same invocation-shaped reason the spawn follow states
+      // (#13518). Its own docblock calls it the FOURTH EDGE, numbering all four
+      // scans in source order; here the count is of follows, and there are
+      // three (#14289). The
       // gate-file refusal the other two make does not apply and is not spelled:
       // a `package.json` is never a discovered gate file, so there is nothing
       // to refuse.
@@ -8361,6 +8702,335 @@ export function familyReconciliationLines(recon) {
   return lines;
 }
 
+// ── The RUN reconciliation: harvested ⟶ EXECUTED (#13774) ────────────────────
+
+/**
+ * The marker a run record puts in front of a family the runner is claiming it
+ * could not measure, and the separator between that claim and its reason.
+ *
+ * Both are compared BYTE-EXACTLY and case-sensitively, and neither carries a
+ * slash, so this file's own watch-hint extraction cannot read them as paths.
+ */
+export const RUN_RECORD_UNMEASURED_MARKER = 'NOT-MEASURED';
+export const RUN_RECORD_REASON_SEPARATOR = ' :: ';
+
+/**
+ * A run record, parsed. One entry per line that claims something.
+ *
+ * ## The format is the tool's, and it is the exact strings `--commands` emits
+ *
+ * That sentence is the whole design, and it is what makes the comparison below
+ * an EXACT set difference rather than a normalisation problem. The triage
+ * ruling that selected this producer-side shape attached a condition to it:
+ * if the run record's names cannot be reliably normalised tool-side — "各 dev
+ * 的日志名形状不受控" — report back rather than shipping a fuzzy matcher. The
+ * answer here is not a better normaliser. It is that there is NOTHING to
+ * normalise: the record's lines are the tool's own output lines, copied by the
+ * runner as it goes, so both sides of the comparison were produced by one
+ * expression in this file and are identical in shape by construction.
+ *
+ * The measured alternative is the reason. A dev built the first hand-made
+ * reconciliation by slugging LOG FILE NAMES back into family names, and the
+ * bash that wrote those names used `tr -c` on `echo` output, so every log name
+ * carried a trailing underscore the dev's Python slug did not reproduce. Its
+ * prefix matcher paired names that did not correspond and reported a confident
+ * `unreconciled 0` over a set on which the raw `comm` reported 36. ⭐ A fuzzy
+ * reconciliation reproduces exactly the failure a reconciliation exists to
+ * catch, one level up. So no matcher in this file is allowed to be clever:
+ * every comparison below is `Set.has` on the untouched string.
+ *
+ * ## What is decoded, and why that is not normalisation
+ *
+ * A line is split on `\n` and one trailing `\r` is removed, because a CRLF file
+ * ends its lines with two bytes and the second is a line TERMINATOR, not
+ * content. Nothing else is touched: leading and trailing spaces INSIDE a line
+ * are content, and stripping them would be a normalisation applied to one side
+ * of the comparison only — which is the fuzzy shape wearing a smaller hat. A
+ * line whose content is only whitespace carries no command (no command is
+ * whitespace) and is skipped with the blank lines; a line opening with `#`
+ * is a comment for the same reason, since no runnable invocation starts there.
+ *
+ * ## The NOT-MEASURED claim, and why it costs a reason
+ *
+ * A family a gate REFUSES to judge — it states its own unmet prerequisite — is
+ * genuinely not the same as one that never ran, and a record has to be able to
+ * say so. But the category is also where a family you simply did not FINISH
+ * running goes to hide: measured on a real card, a gate cap-killed at the
+ * container's foreground ceiling (exit 143) was written off as NOT MEASURED,
+ * and on re-running to completion it was green. So the claim parses only with
+ * a stated reason after `RUN_RECORD_REASON_SEPARATOR`; a marked line without
+ * one leaves its family UNRUN, which is the direction that costs a rerun
+ * instead of a false green.
+ */
+export function parseRunRecord(text) {
+  const entries = [];
+  const lines = String(text ?? '').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i].endsWith('\r') ? lines[i].slice(0, -1) : lines[i];
+    const line = i + 1;
+    if (raw.trim() === '' || raw.startsWith('#')) continue;
+    if (raw.startsWith(`${RUN_RECORD_UNMEASURED_MARKER} `)) {
+      const rest = raw.slice(RUN_RECORD_UNMEASURED_MARKER.length + 1);
+      const at = rest.indexOf(RUN_RECORD_REASON_SEPARATOR);
+      if (at < 0) {
+        entries.push({ command: rest, claim: 'not-measured', reason: null, line, raw, malformed: `no '${RUN_RECORD_REASON_SEPARATOR.trim()}' and no reason after it` });
+        continue;
+      }
+      const reason = rest.slice(at + RUN_RECORD_REASON_SEPARATOR.length).trim();
+      entries.push({
+        command: rest.slice(0, at),
+        claim: 'not-measured',
+        reason: reason || null,
+        line,
+        raw,
+        malformed: reason ? null : 'an empty reason',
+      });
+      continue;
+    }
+    entries.push({ command: raw, claim: 'ran', reason: null, line, raw, malformed: null });
+  }
+  return entries;
+}
+
+/**
+ * What this card's derivation names, against what the record says was run.
+ *
+ * ## The link this closes, and why the count line above does not close it
+ *
+ * `familyReconciliation` answers PRINTED ⟶ HARVESTED: it states the union's
+ * total so a consumer that harvested one section of the human rendering can
+ * detect that its list is short. This answers the NEXT link, HARVESTED ⟶
+ * EXECUTED, and the two are not the same defect. Measured: a dev harvested the
+ * family list correctly — the gate that later reddened CI was in both of its
+ * `--commands` harvests, named explicitly, twice — and then used the list only
+ * to diff its two derivations against each other, never as a checklist. Of the
+ * 62 families its merged-head union named, 19 had been run. ⭐ A better list
+ * does not make anyone run it, so a perfect answer to the first link leaves
+ * this one wide open.
+ *
+ * ## Why the denominator is recomputed here and never read from the record
+ *
+ * `derived` is `commandsFor`'s union, recomputed in THIS process from this
+ * tree, and it is the same expression `--commands` prints. That is what makes
+ * this a set difference against an external artefact rather than arithmetic
+ * over the runner's own bookkeeping, and the distinction is measured, not
+ * aesthetic. A dev recovering from a cap kill by counting a loop counter
+ * reported "58 families, 57 exit 0, 1 accounted for" — and the books balanced
+ * PERFECTLY, because the dropped family had left the numerator and the
+ * denominator in the same operation. ⭐ An arithmetic reconciliation over a
+ * list you maintain yourself cannot detect an item you never added to it: it
+ * is self-consistent by construction, and self-consistency is precisely what
+ * it is being offered as evidence of. The reviewing PM accepted the number for
+ * the same reason — checking the arithmetic runs the same broken instrument.
+ *
+ * Here the record can only ever SUBTRACT from a total it did not produce. A
+ * family the runner never wrote down is a family that stays in `unrun`, and an
+ * empty record over a non-empty derivation reports every family unrun rather
+ * than a balanced nothing.
+ *
+ * ## The classes, and why the tool owns the remainder rather than the prose
+ *
+ * A reconciliation whose output is routinely non-empty trains its readers to
+ * wave it through, and that has already been measured here: one card's
+ * remainder of 18 was accepted because the dev named every entry in prose — 16
+ * of them CI-owned job steps, 2 of them spelling duplicates of gates already
+ * run. Neither can appear in this remainder, and neither is classified away by
+ * a rule: `derived` is `commandsFor`'s union, which never contained the
+ * always-runs tail (it is a listing about the REPO, printed under its own
+ * heading) and which deduplicates the two spellings of one family into one
+ * command before this function ever sees them. What the tool CAN still meet in
+ * a record it classifies itself — a CI-measured-only family, which `commandsFor`
+ * subtracts by design, and a pending-changeset family, derived against a path
+ * that did not exist at derivation time. Both are matched byte-exactly against
+ * sets this same derivation produced.
+ *
+ * What is left for the runner to explain is therefore only what the tool
+ * genuinely cannot know: a gate that refused with its own prerequisite. That is
+ * the `not-measured` class, it costs a stated reason, and it is reported apart
+ * from `ran` because this tool did not measure it and must not imply it did.
+ *
+ * ## Near misses are a DIAGNOSTIC and can never move a verdict
+ *
+ * A record entry that differs from a derived command only by surrounding
+ * whitespace is reported as such — and the derived command stays UNRUN. That
+ * asymmetry is deliberate: the trailing-underscore incident above is exactly
+ * this shape, and the failure was not that the mismatch went unnoticed but that
+ * a matcher RESOLVED it. Naming it while refusing to pair it gives the runner
+ * the repair without giving the instrument a blind spot.
+ */
+export function runReconciliation({
+  derived = [],
+  ciOnlyCommands = new Set(),
+  pendingCommands = new Set(),
+  record = [],
+} = {}) {
+  const derivedSet = new Set(derived);
+  const ranClaims = new Set();
+  const unmeasuredClaims = new Map();
+  const malformed = [];
+  for (const entry of record) {
+    if (entry.claim === 'ran') {
+      ranClaims.add(entry.command);
+      continue;
+    }
+    if (entry.malformed) malformed.push({ line: entry.line, raw: entry.raw, why: entry.malformed });
+    if (!unmeasuredClaims.has(entry.command)) unmeasuredClaims.set(entry.command, entry);
+  }
+  // A command claimed BOTH ways is read as run — running it is the stronger
+  // fact — and the contradiction is reported rather than resolved silently.
+  const conflicts = [...unmeasuredClaims.keys()].filter((command) => ranClaims.has(command)).sort();
+
+  const ran = [];
+  const unrun = [];
+  const notMeasured = [];
+  for (const command of [...derivedSet].sort()) {
+    if (ranClaims.has(command)) {
+      ran.push(command);
+      continue;
+    }
+    const claim = unmeasuredClaims.get(command);
+    if (claim && claim.reason) {
+      notMeasured.push({ command, reason: claim.reason, line: claim.line });
+      continue;
+    }
+    unrun.push({
+      command,
+      why: claim
+        ? `recorded as ${RUN_RECORD_UNMEASURED_MARKER} on line ${claim.line} with ${claim.malformed} — an unexplained refusal is the shape a cap-killed run wears, so it is read as unrun`
+        : 'absent from the run record',
+    });
+  }
+
+  const explainedCiOnly = [];
+  const explainedPending = [];
+  const extra = [];
+  const nearMiss = [];
+  const seen = new Set();
+  for (const entry of record) {
+    if (seen.has(entry.command)) continue;
+    seen.add(entry.command);
+    if (derivedSet.has(entry.command)) continue;
+    if (ciOnlyCommands.has(entry.command)) {
+      explainedCiOnly.push(entry.command);
+      continue;
+    }
+    if (pendingCommands.has(entry.command)) {
+      explainedPending.push(entry.command);
+      continue;
+    }
+    // Diagnostic only — see the header. The entry stays in `extra` and its
+    // near neighbour stays in `unrun`, whatever this reports.
+    const trimmed = entry.command.trim();
+    if (trimmed !== entry.command && derivedSet.has(trimmed)) {
+      nearMiss.push({ recorded: entry.command, derived: trimmed, line: entry.line });
+    }
+    extra.push(entry.command);
+  }
+
+  const recon = {
+    derivedTotal: derivedSet.size,
+    ran,
+    unrun,
+    notMeasured,
+    explainedCiOnly: explainedCiOnly.sort(),
+    explainedPending: explainedPending.sort(),
+    extra: extra.sort(),
+    nearMiss,
+    malformed,
+    conflicts,
+    recordEntries: record.length,
+    ok: unrun.length === 0,
+  };
+  // Every derived family lands in exactly one of three places, and the parts
+  // are built from the SAME set the total is taken from — so this closes by
+  // construction, and it is asserted anyway for the reason the count
+  // reconciliation above asserts its own: a total that cannot fail toward its
+  // target is the defect this file keeps finding one level up, and #4690's rule
+  // is that a broken instrument refuses rather than printing a verdict.
+  if (recon.ran.length + recon.unrun.length + recon.notMeasured.length !== recon.derivedTotal) {
+    throw new Error(
+      'dispatch-gates: the run reconciliation does not close — ' +
+        `${recon.ran.length} run + ${recon.unrun.length} unrun + ${recon.notMeasured.length} not-measured ≠ ${recon.derivedTotal} derived. ` +
+        'The classes and the derivation came from different structures. Refusing rather than printing a verdict that cannot be trusted (#4690).',
+    );
+  }
+  return recon;
+}
+
+/**
+ * The run reconciliation, rendered — and the ONE bit at the end of it.
+ *
+ * The verdict is a single line and a single exit code, for the reason the
+ * remainder is classified by the tool: a verdict a reader has to assemble from
+ * several counts is a verdict that gets waved through once the counts are
+ * routinely non-empty.
+ */
+export function runReconciliationLines(recon) {
+  const lines = [];
+  const marker = RUN_RECORD_UNMEASURED_MARKER;
+  lines.push(
+    `Run reconciliation — ${recon.derivedTotal} derived, ${recon.ran.length} run, ${recon.notMeasured.length} ${marker}, ${recon.unrun.length} UNRUN.`,
+  );
+  lines.push(
+    `  The ${recon.derivedTotal} is THIS tree's derivation, recomputed in this process from the same expression --commands prints —` +
+      ' never read back from your record. A family you never wrote down is still counted, which is what an arithmetic over your own list cannot do.',
+  );
+  if (recon.unrun.length > 0) {
+    lines.push(`  ⛔ UNRUN (${recon.unrun.length}) — derived for these paths, and the record does not account for them:`);
+    for (const { command, why } of recon.unrun) lines.push(`    - ${command}   [${why}]`);
+  }
+  if (recon.notMeasured.length > 0) {
+    lines.push(
+      `  ${marker} (${recon.notMeasured.length}) — the RUNNER's claim, recorded with a reason. ⛔ This tool did not measure them and cannot verify the reason:`,
+    );
+    for (const { command, reason } of recon.notMeasured) lines.push(`    - ${command}   [${reason}]`);
+    lines.push(
+      `    ⚠️ ${marker} is for a gate that REFUSES with its own stated prerequisite. A run the OS killed is not that —` +
+        ' a cap kill (exit 143) leaves no verdict and the family is simply unrun. The two are easy to conflate under time pressure, and one of them was.',
+    );
+  }
+  if (recon.explainedCiOnly.length > 0) {
+    lines.push(
+      `  Classified by this tool, no explanation owed (${recon.explainedCiOnly.length}) — CI-MEASURED ONLY, and outside the derived total by design:`,
+    );
+    for (const command of recon.explainedCiOnly) lines.push(`    - ${command}`);
+  }
+  if (recon.explainedPending.length > 0) {
+    lines.push(
+      `  Classified by this tool, no explanation owed (${recon.explainedPending.length}) — pending-changeset famil(ies), derived against a path that did not exist at derivation time:`,
+    );
+    for (const command of recon.explainedPending) lines.push(`    - ${command}`);
+  }
+  if (recon.extra.length > 0) {
+    lines.push(
+      `  Outside this card's derivation (${recon.extra.length}) — recorded, and named by nothing this run derived. Not an error: a run beyond the union costs nothing.`,
+    );
+    for (const command of recon.extra) lines.push(`    - ${command}`);
+  }
+  for (const { recorded, derived, line } of recon.nearMiss) {
+    lines.push(
+      `  ⚠️ line ${line} '${recorded}' differs from the derived '${derived}' by surrounding whitespace ONLY — and is NOT paired with it.` +
+        ' Record the command as --commands emits it, byte for byte. ⛔ A matcher that resolved this difference is how a reconciliation reported 0 over a set the raw comparison scored 36.',
+    );
+  }
+  for (const { line, raw, why } of recon.malformed) {
+    lines.push(`  ⚠️ line ${line} claims ${marker} with ${why}: '${raw}'. Spelling: ${marker} <command>${RUN_RECORD_REASON_SEPARATOR}<reason>.`);
+  }
+  for (const command of recon.conflicts) {
+    lines.push(`  ⚠️ '${command}' is recorded BOTH as run and as ${marker}. Read as run; fix the record so it states one thing.`);
+  }
+  lines.push(
+    '  ⛔ This answers ONE link: what this card DERIVES against what you RAN. It is not a complete account of what CI runs on the PR —' +
+      ' the always-runs tail, the unreachable listing and the pending-changeset families are each outside the derived total, each printed under its own heading by a run without --ran.',
+  );
+  lines.push(
+    recon.ok
+      ? `✓ dispatch-gates --ran: ${recon.derivedTotal} derived famil(ies) accounted for — ${recon.ran.length} run, ${recon.notMeasured.length} ${marker}.`
+      : `✗ dispatch-gates --ran: ${recon.unrun.length} of ${recon.derivedTotal} derived famil(ies) UNRUN.`,
+  );
+  return lines;
+}
+
 /**
  * `--json`, as one document. Everything the human rendering places, placed the
  * same way, so a consumer never has to choose between a machine-readable answer
@@ -8452,7 +9122,7 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
   );
 }
 
-function derive(paths, { showResidue = false, mode = 'human' } = {}) {
+function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } = {}) {
   // The reachability sweep runs BEFORE a line is printed, so its refusals
   // (#4690: an empty corpus, or an all-unreachable answer) come out as a
   // failed derivation rather than as a footnote under an answer that already
@@ -8515,6 +9185,23 @@ function derive(paths, { showResidue = false, mode = 'human' } = {}) {
   // and this comes back empty. See pendingChangesetFamilies for the round of
   // five dispatches that measured the gap.
   const pending = pendingChangesetFamilies([...byCheck], new Set(matched.keys()));
+
+  if (mode === 'ran') {
+    // Built from the SAME three expressions the other renderings read, in this
+    // process, on this tree: the union `--commands` prints, the CI-measured set
+    // that union subtracts, and the pending families it holds back. A second
+    // traversal here would be a second answer to a question this file already
+    // answers once — and it would be the answer the reconciliation is judged
+    // against, which is the worst possible place to keep a duplicate.
+    const recon = runReconciliation({
+      derived: commandsFor({ matchedRows, kindGroups }),
+      ciOnlyCommands: ciOnlyCommandSet(matchedRows),
+      pendingCommands: new Set(pending.map(({ entry }) => runnableInvocation(entry))),
+      record: runRecord,
+    });
+    for (const line of runReconciliationLines(recon)) console.log(line);
+    return recon.ok ? 0 : 1;
+  }
 
   if (mode !== 'human') {
     machineReadableOutput(mode, {
@@ -8895,6 +9582,13 @@ function derivationProvenance({ paths, base, mergeBase, counts }) {
 const REPO_FLAG = '--repo';
 
 /**
+ * The run-record flag (#13774). Same spelling rule as the assertion above: the
+ * leading dashes keep it out of this file's own hint set, and its VALUE is a
+ * path this tool reads at runtime rather than a literal it declares.
+ */
+const RAN_FLAG = '--ran';
+
+/**
  * `<owner>/<name>` out of a git remote URL, or null when it is not recoverable.
  *
  * Both spellings git writes end in the same two segments — the URL form and the
@@ -9204,41 +9898,63 @@ export function driftLines(drift) {
 }
 
 /**
- * Split argv into paths, flags and the repo assertion.
+ * Every flag that takes a VALUE, and what that value is — the one table the
+ * split below consults, so a flag added to it cannot be added to the parse
+ * incorrectly.
  *
- * The assertion's VALUE must not fall through into the path list. The previous
- * parse took every non-`--` argument as a path, so a two-token flag added
- * without touching it would have quietly derived gates for a repo NAME read as
- * a file — a new silent wrong answer inside the fix for a silent wrong answer.
+ * The hint is carried here rather than at the refusal site because the refusal
+ * used to name the repo flag's value unconditionally. With one value-taking
+ * flag that was merely redundant; with two it is a message that LIES about
+ * which argument is wrong — the failure shape this file spends itself refusing,
+ * in the sentence a caller reads when it is already confused.
+ */
+const VALUE_FLAGS = new Map([
+  [REPO_FLAG, 'the repo this answer must be about, as an owner and a name'],
+  [RAN_FLAG, 'the run record to reconcile against, as a readable file path'],
+]);
+
+/**
+ * Split argv into paths, flags and the value-taking flags' values.
+ *
+ * A value must not fall through into the path list. The original parse took
+ * every non-`--` argument as a path, so a two-token flag added without touching
+ * it would have quietly derived gates for a repo NAME read as a file — a new
+ * silent wrong answer inside the fix for a silent wrong answer. That prediction
+ * came true the moment a SECOND value-taking flag was added, which is why the
+ * table above exists and the loop below reads it rather than naming flags.
  * Both spellings are accepted because both get typed.
  */
 export function splitArgv(argv) {
   const paths = [];
   const flags = [];
-  let assertion = null;
+  const values = new Map([...VALUE_FLAGS.keys()].map((flag) => [flag, null]));
   let malformed = null;
+  const needsValue = (flag) => {
+    malformed = `${flag} needs a value — ${VALUE_FLAGS.get(flag)}`;
+  };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
-    if (arg === REPO_FLAG) {
+    if (values.has(arg)) {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith('-')) {
-        malformed = `${REPO_FLAG} needs a value`;
+        needsValue(arg);
       } else {
-        assertion = value;
+        values.set(arg, value);
         i++;
       }
       continue;
     }
-    if (arg.startsWith(`${REPO_FLAG}=`)) {
-      const value = arg.slice(REPO_FLAG.length + 1);
-      if (!value) malformed = `${REPO_FLAG} needs a value`;
-      else assertion = value;
+    const joined = [...values.keys()].find((flag) => arg.startsWith(`${flag}=`));
+    if (joined) {
+      const value = arg.slice(joined.length + 1);
+      if (!value) needsValue(joined);
+      else values.set(joined, value);
       continue;
     }
     if (arg.startsWith('-')) flags.push(arg);
     else paths.push(arg);
   }
-  return { paths, flags, assertion, malformed };
+  return { paths, flags, assertion: values.get(REPO_FLAG), runRecord: values.get(RAN_FLAG), malformed };
 }
 
 /**
@@ -9337,7 +10053,19 @@ export function bannerLines({ identity, paths = [], drift = null }) {
 
 function selfTest() {
   const cases = [];
-  const t = (name, cond) => cases.push([name, cond]);
+  // Stream the verdict the moment it is decided (#14281) rather than only at
+  // the tail: every `t()` call evaluates `cond` eagerly at the call site, so
+  // the line below is not a preview of the tail loop's output — it prints the
+  // SAME verdict, just however many calls earlier than a buffered run did. A
+  // run that dies mid-battery (the container's foreground cap SIGTERMs a run
+  // past ~10 minutes; see check-dispatch-gates.mjs's header for the detached
+  // workaround) used to leave zero case lines; now the log already carries
+  // every case decided before the kill. `cases` still collects every entry —
+  // the tail's `failed`/`length` summary reads it unchanged.
+  const t = (name, cond) => {
+    cases.push([name, cond]);
+    console.log(`  ${cond ? '✓' : '✗'} ${name}`);
+  };
 
   const wf = [
     'jobs:',
@@ -10334,15 +11062,112 @@ function selfTest() {
     for (const h of entry.hints ?? []) if (!before.has(h)) dirGained.push(`${check} +${h}`);
     for (const h of before) if (!(entry.hints ?? []).includes(h)) dirLost.push(`${check} -${h}`);
   }
+  // ⚠️ WITH-tree against WITHOUT-tree measures every TREE-COUPLED rule at once,
+  // and there are TWO of them now: this one, and the package-root anchor
+  // (#14208), which refuses without a tree for the same reason. The rows are
+  // PARTITIONED rather than filtered — a filter would let a third rule's rows
+  // disappear from the one pin whose job is to notice them.
+  const dirRuleGained = dirGained.filter((r) => r.endsWith('+packages/spec/src'));
+  const parseRow = (row, sign) => {
+    const at = row.indexOf(` ${sign}`);
+    return { check: row.slice(0, at), hint: row.slice(at + 2) };
+  };
+  const anchorGained = dirGained.filter((r) => !dirRuleGained.includes(r)).map((r) => parseRow(r, '+'));
+  const anchorLost = dirLost.map((r) => parseRow(r, '-'));
   t(
     'the rule changes exactly the two gates that walk packages/spec/src, and adds exactly the directory they walk',
-    dirGained.join(' · ') === 'check:docs +packages/spec/src · check:skill-refs +packages/spec/src',
+    dirRuleGained.join(' · ') === 'check:docs +packages/spec/src · check:skill-refs +packages/spec/src',
     dirGained.join(' · '),
   );
+  // It takes nothing away, and every remaining tree-coupled row belongs to the
+  // anchor — asserted as a PAIRING rather than as a list of names, so the pin
+  // survives packages/spec's artifact ledger moving and still reds the day the
+  // anchor starts ADDING a hint beside a dead one instead of replacing it.
   t(
     'and it takes NOTHING away — a widening that also subtracted would read exactly like this one',
-    dirLost.length === 0,
-    dirLost.join(' · '),
+    anchorLost.length === anchorGained.length &&
+      anchorGained.every((g) =>
+        anchorLost.some(
+          (l) =>
+            l.check === g.check &&
+            g.hint.endsWith(`/${l.hint}`) &&
+            hintTree.files.has(`${g.hint.slice(0, g.hint.length - l.hint.length - 1)}/package.json`),
+        ),
+      ),
+    `${anchorGained.map((g) => `${g.check} +${g.hint}`).join(' · ')} || ${dirLost.join(' · ')}`,
+  );
+
+  // ── The THIRD anchor: a literal bound to the writer's PACKAGE ROOT (#14208)
+  //
+  // `packageRootAnchoredHint` carries the population sweep, the pricing against
+  // the two refusals it must not become, and the provenance split. Pinned here
+  // as the four things a reader has to be able to break: that it FIRES, that it
+  // is REFUSED without a tree, that it cannot invent a path, and that it leaves
+  // the layout-moved class alone.
+  const pkgAnchorSrc =
+    "const PKG_DIR = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');\n" +
+    "const GATED = [{ check: 'check:api-surface', artifact: 'api-surface/' }];\n";
+  t(
+    'a literal dead at the repo root is re-read against the package root its writer binds',
+    extractWatchHints(pkgAnchorSrc, 'packages/spec/scripts/check-x.ts', { tree: hintTree }).join() ===
+      'packages/spec/api-surface',
+    extractWatchHints(pkgAnchorSrc, 'packages/spec/scripts/check-x.ts', { tree: hintTree }).join(),
+  );
+  t(
+    '…and without a tree the same call keeps the root spelling — a missing lead, never a fabricated one',
+    extractWatchHints(pkgAnchorSrc, 'packages/spec/scripts/check-x.ts').join() === 'api-surface',
+  );
+  t(
+    'a re-anchoring that reaches nothing is REFUSED, so the rule cannot invent a path',
+    extractWatchHints(
+      `${pkgAnchorSrc}const P = 'no-such-dir/no-such-file.ts';`,
+      'packages/spec/scripts/check-x.ts',
+      { tree: hintTree },
+    ).includes('no-such-dir/no-such-file.ts'),
+  );
+  // The layout-moved class is NOT this rule's: its first segment is a real repo
+  // directory, so the root is the base its author most plausibly meant, and
+  // re-anchoring it would replace a triage lead with a fabricated one.
+  t(
+    'a hint the tree stops short of keeps the ROOT spelling — the layout-moved class is left to triage',
+    extractWatchHints(
+      `${pkgAnchorSrc}const P = 'scripts/gone-from-here.mjs';`,
+      'packages/spec/scripts/check-x.ts',
+      { tree: hintTree },
+    ).includes('scripts/gone-from-here.mjs'),
+  );
+  t(
+    'a module-anchored binding that carries no package.json is no anchor',
+    packageRootBinding(
+      'scripts/pm/x.mjs',
+      "const D = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');",
+      hintTree,
+    ) === null,
+  );
+  t(
+    '…and the repo root is never the anchor — that base is the one already applied',
+    packageRootBinding('scripts/pm/x.mjs', "const R = new URL('../..', import.meta.url).pathname;", hintTree) === null,
+  );
+  // LIVE, on this tree: the specimen the card was filed for. ARRIVAL, not
+  // departure — the family is named, and the re-anchored hint is shown to reach
+  // a real file that NO other hint of that family reaches, so the pair is this
+  // rule's rather than a coincidence of some other hint already covering it.
+  t(
+    'the live spec gate binds the package root the card names',
+    packageRootBinding(
+      'packages/spec/scripts/check-generated.ts',
+      readFileSync(join(ROOT, 'packages/spec/scripts/check-generated.ts'), 'utf8'),
+      hintTree,
+    ) === 'packages/spec',
+  );
+  const generatedEntry = dirLanding.get('check:generated');
+  const apiSurfaceFile = trackedFiles().find((f) => f.startsWith('packages/spec/api-surface/'));
+  t(
+    'check:generated carries its artifact ledger re-anchored, and that hint is what reaches it',
+    Boolean(apiSurfaceFile) &&
+      (generatedEntry?.hints ?? []).filter((h) => hintCovers(h, apiSurfaceFile)).join() ===
+        'packages/spec/api-surface',
+    (generatedEntry?.hints ?? []).filter((h) => hintCovers(h, apiSurfaceFile)).join(),
   );
 
   // REFUSAL 1 — module-relative ONLY. `resolve` treats a bare word exactly like
@@ -10428,8 +11253,13 @@ function selfTest() {
       !hintCovers('src/data', 'packages/spec/src/data/field.zod.ts'),
   );
   // The residue's claim stops being false: a resolved literal HAS a tracked
-  // prefix, so `unreachableReason` no longer files it as "never was a repo path"
-  // about a file that exists.
+  // prefix, so `unreachableReason` no longer files it under the by-construction
+  // sentence about a file that exists.
+  //
+  // ⚠️ The assertion is written against the sentence that branch prints TODAY,
+  // not against a phrase it used to print. Pinned to a retired phrase this pin
+  // would pass on any tree at all — the branch cannot emit a string nothing
+  // renders — which is a green over the exact regression it exists to catch.
   //
   // ⚠️ This case asserted ONLY `Boolean(deepest)` — that the hint had LEFT the
   // "never" branch — and leaving that branch is precisely what puts a hint into
@@ -10449,8 +11279,9 @@ function selfTest() {
     },
   ];
   t(
-    'a resolved dead hint has a tracked prefix, so the residue stops calling it "never a repo path"',
-    Boolean(distFreshnessDead[0].deepest) && !/never was a repo path/.test(unreachableReason(distFreshnessDead)),
+    'a resolved dead hint has a tracked prefix, so the residue stops filing it by construction',
+    Boolean(distFreshnessDead[0].deepest) &&
+      !/no tracked path under its first segment/.test(unreachableReason(distFreshnessDead)),
   );
   t(
     '...and it does NOT arrive at "the layout moved" instead — the tree HAS the file, named',
@@ -13950,7 +14781,11 @@ function selfTest() {
   t('...and leaves the real hint beside it unmarked', plantedNames.startsWith('packages/spec/src,') && !plantedNames.includes('packages/spec/src ✗'));
   const plantedNote = deadNamesNote(plantedRow);
   t('the note counts the dead against the declared total', plantedNote.includes('1 of 2 declared literal(s)'));
-  t("...and names WHY in the unreachable listing's own voice", /never was a repo path/.test(plantedNote));
+  t(
+    "...and names WHY in the unreachable listing's own voice",
+    /a base this scan did not resolve/.test(plantedNote),
+    plantedNote,
+  );
   t(
     'the note is capped like the listing it sits under, never an inventory',
     /…$/.test(deadNamesNote({ declared: 9, dead: [1, 2, 3, 4].map((n) => ({ hint: `no/such/p-${n}`, deepest: '' })) })),
@@ -13960,7 +14795,18 @@ function selfTest() {
     'a family that declares NO population is NOT unreachable — that is the undetermined verdict, a different fact',
     !sweptNames.includes('check:declares-nothing'),
   );
-  t('the sweep names WHY: a literal no tracked path begins with was never a repo path', /never was a repo path/.test(reasonOf('check:never-was')));
+  // ⚠️ The claim asserted here is the FIRST clause — no tracked path begins
+  // with the literal. The second used to read "never was a repo path", which
+  // is a claim about every base made from evidence about one, and it printed
+  // over three live files (#14208). Both halves are pinned so a regression to
+  // the universal reds rather than passing on the surviving prefix.
+  t(
+    'the sweep names WHY: no tracked path begins with the literal, without claiming it never was one',
+    /no tracked path under its first segment/.test(reasonOf('check:never-was')) &&
+      /a base this scan did not resolve/.test(reasonOf('check:never-was')) &&
+      !/never was a repo path/.test(reasonOf('check:never-was')),
+    reasonOf('check:never-was'),
+  );
   t('the sweep names WHY: the tree stops at a shorter prefix, so the layout moved under it', /stops at packages\/spec\/src/.test(reasonOf('check:moved')));
   // The third cause is the one a bare "matched nothing" would send a reader
   // hunting a directory that is sitting in front of them: the population is
@@ -14188,7 +15034,7 @@ function selfTest() {
   t('and the by-construction families under theirs', /unreachable BY CONSTRUCTION/.test(listedText));
   t('the real miss sorts BEFORE the standing facts, never buried among them', listedText.indexOf('THE LAYOUT MOVED') < listedText.indexOf('BY CONSTRUCTION'));
   t('every swept family is named in the listing, runnably', sweep.every((u) => listedText.includes(runnableInvocation(u.entry))));
-  t('each entry still carries the reason it could not reach', /never was a repo path/.test(listedText) && /the tree HAS it/.test(listedText));
+  t('each entry still carries the reason it could not reach', /a base this scan did not resolve/.test(listedText) && /the tree HAS it/.test(listedText));
   // The empty case must not print as a missing section, and the corpus size is
   // required for the #4690 reason one level down.
   const emptyListing = unreachableLines([], 4).join('\n');
@@ -15569,7 +16415,18 @@ function selfTest() {
   // anyone to pass — which is the whole defect. Only a real run can tell them
   // apart, and only a real run can measure the two REMEDIES against each other.
   {
-    const seamCard = 'scripts/measure-durability-swallow-family.mjs';
+    // The card has to be one NO convention KIND hits, so the only difference
+    // between the snippet's block harvest and `--commands` is the SPELLING
+    // split this pair measures; the strictly-better direction is driven
+    // separately, on `testCard` below, and conflating the two would leave
+    // neither measured. This was `measure-durability-swallow-family.mjs` until
+    // #13919 wired that instrument's controls as `check:swallow-census-controls`
+    // — which made it a GATE SCRIPT, so the "adds or edits a GATE SCRIPT"
+    // convention started hitting it and the two counts stopped agreeing for a
+    // reason that is not about spelling at all. ⛔ Do not repair a future
+    // recurrence by loosening the equality: repoint the card, and pick one that
+    // no check family runs.
+    const seamCard = 'scripts/measure-partial-retirement-annotation.mjs';
     const humanRun = runCli([seamCard]);
     const humanOut = humanRun.stdout ?? '';
     t('the seam card still derives at all', humanRun.status === 0 && humanOut.trim().length > 0);
@@ -15772,10 +16629,245 @@ function selfTest() {
     t('and keeps it out of the runnable list, which is the same list --commands prints', Boolean(guardDoc) && !guardDoc.commands.includes(guardCommand));
   }
 
+
+  // ── The RUN reconciliation: harvested ⟶ EXECUTED (#13774) ─────────────────
+  //
+  // Three measured mechanisms produced three confident, well-formed, FALSE
+  // claims of complete coverage, and each one has cases here: no comparison at
+  // all, a fuzzy comparison, and an arithmetic over the runner's own counter.
+  // The unit half below drives the pure functions; the end-to-end half at the
+  // bottom builds the record BY CONSTRUCTION from a real `--commands` run,
+  // which is the property the whole design rests on.
+  {
+    const marker = RUN_RECORD_UNMEASURED_MARKER;
+    const sep = RUN_RECORD_REASON_SEPARATOR;
+
+    // ── The record format: what is decoded, and what is content ─────────────
+    const parsed = parseRunRecord(
+      [
+        'pnpm check:a',
+        '',
+        '   ',
+        '# a comment the runner left for itself',
+        'node scripts/check-b.mjs\r',
+        `${marker} pnpm check:c${sep}refuses without a built dist — its own stated prerequisite`,
+      ].join('\n'),
+    );
+    t('a plain line is a ran claim, byte for byte', parsed[0].command === 'pnpm check:a' && parsed[0].claim === 'ran');
+    t('blank and whitespace-only lines carry no command and are skipped', parsed.length === 3);
+    t('a comment line is skipped — no runnable invocation starts with a hash', !parsed.some((e) => e.raw.startsWith('#')));
+    t(
+      'a CRLF line loses its terminator and NOTHING else',
+      parsed[1].command === 'node scripts/check-b.mjs' && !parsed[1].command.includes('\r'),
+    );
+    t(
+      `a ${marker} claim parses into its command and its reason`,
+      parsed[2].claim === 'not-measured' && parsed[2].command === 'pnpm check:c' && parsed[2].reason.startsWith('refuses without'),
+    );
+    // ⭐ The exactness rule, in the parser: whitespace INSIDE a line is content,
+    // and trimming it would be a normalisation applied to one side of the
+    // comparison only — the fuzzy shape wearing a smaller hat.
+    t('leading whitespace is NOT trimmed away into a match', parseRunRecord('  pnpm check:a')[0].command === '  pnpm check:a');
+    t(
+      `the ${marker} marker is exact and case-sensitive — a command merely containing the word is a ran claim`,
+      parseRunRecord('pnpm check:not-measured-things')[0].claim === 'ran'
+        && parseRunRecord(`not-measured pnpm check:a${sep}x`)[0].claim === 'ran',
+    );
+    const unreasoned = parseRunRecord([`${marker} pnpm check:a`, `${marker} pnpm check:b${sep}   `].join('\n'));
+    t(
+      `a ${marker} claim with no reason, and one with an empty reason, are both MALFORMED and still name their command`,
+      unreasoned.every((e) => e.malformed && e.reason === null) && unreasoned[0].command === 'pnpm check:a' && unreasoned[1].command === 'pnpm check:b',
+    );
+
+    // ── The classes ────────────────────────────────────────────────────────
+    const derived = ['node scripts/check-b.mjs', 'pnpm check:a', 'pnpm check:c'];
+    const full = runReconciliation({ derived, record: parseRunRecord(derived.join('\n')) });
+    t('a complete record reconciles green, with every derived family run', full.ok && full.ran.length === 3 && full.unrun.length === 0);
+    const short = runReconciliation({ derived, record: parseRunRecord(['pnpm check:a', 'node scripts/check-b.mjs'].join('\n')) });
+    t('a record missing one family NAMES it rather than counting it', !short.ok && short.unrun.length === 1 && short.unrun[0].command === 'pnpm check:c');
+    t('and the reason it gives is the absence itself', short.unrun[0].why.includes('absent from the run record'));
+
+    // ⭐ MECHANISM 3, at its limit: the denominator is this tree's derivation,
+    // so an EMPTY record cannot balance against it. An arithmetic over the
+    // runner's own list would have reported 0 of 0 and closed.
+    const nothingRan = runReconciliation({ derived, record: parseRunRecord('') });
+    t(
+      'an EMPTY record over a non-empty derivation reports EVERY family unrun, never a balanced nothing',
+      !nothingRan.ok && nothingRan.unrun.length === 3 && nothingRan.derivedTotal === 3,
+    );
+    const junkOnly = runReconciliation({ derived, record: parseRunRecord(['pnpm check:something-else', '# note'].join('\n')) });
+    t(
+      'and a record of entries that name nothing derived does the same — the total cannot be lowered from the record side',
+      junkOnly.derivedTotal === 3 && junkOnly.unrun.length === 3 && junkOnly.extra.length === 1,
+    );
+    t('an entry outside the derivation is reported and is NOT an error on its own', junkOnly.extra[0] === 'pnpm check:something-else');
+
+    // ⭐ MECHANISM 2, structurally: no prefix, substring or whitespace
+    // relation is ever a pairing.
+    const prefixish = runReconciliation({
+      derived: ['pnpm check:foo'],
+      record: parseRunRecord(['pnpm check:foo-extra', 'check:foo', 'pnpm check:fo'].join('\n')),
+    });
+    t(
+      'a prefix, a substring and a truncation of a derived command pair with NOTHING',
+      !prefixish.ok && prefixish.unrun.length === 1 && prefixish.extra.length === 3,
+    );
+    const nearMiss = runReconciliation({ derived: ['pnpm check:foo'], record: parseRunRecord('pnpm check:foo  ') });
+    t(
+      'a whitespace-only difference is REPORTED and still leaves the family unrun — the diagnostic can never move a verdict',
+      !nearMiss.ok && nearMiss.unrun[0].command === 'pnpm check:foo' && nearMiss.nearMiss.length === 1,
+    );
+    t('and the near-miss names both spellings, so the repair is mechanical', nearMiss.nearMiss[0].recorded === 'pnpm check:foo  ' && nearMiss.nearMiss[0].derived === 'pnpm check:foo');
+
+    // ── NOT-MEASURED is its own class, and it costs a reason ────────────────
+    const claimed = runReconciliation({
+      derived: ['pnpm check:a', 'pnpm check:b'],
+      record: parseRunRecord(['pnpm check:a', `${marker} pnpm check:b${sep}refuses without a built dist`].join('\n')),
+    });
+    t(
+      `a reasoned ${marker} family is neither run nor unrun — it is its own class, and the verdict stays green`,
+      claimed.ok && claimed.ran.length === 1 && claimed.unrun.length === 0 && claimed.notMeasured.length === 1,
+    );
+    t('and the reason travels with it, because the report is what it is for', claimed.notMeasured[0].reason === 'refuses without a built dist');
+    // ⭐ The cap-kill conflation, mechanically refused: the category exists for
+    // a gate that refuses with its own prerequisite, and it is exactly where a
+    // family you merely did not FINISH running goes to hide.
+    const unexplained = runReconciliation({ derived: ['pnpm check:a'], record: parseRunRecord(`${marker} pnpm check:a`) });
+    t(
+      `an unexplained ${marker} claim is read as UNRUN, not as a refusal`,
+      !unexplained.ok && unexplained.unrun.length === 1 && unexplained.notMeasured.length === 0,
+    );
+    t('and the run says why, naming the cap kill it would otherwise absorb', unexplained.unrun[0].why.includes('cap-killed'));
+    t('the malformed line is reported against its line number too', unexplained.malformed.length === 1 && unexplained.malformed[0].line === 1);
+
+    // ── What the TOOL classifies, so no prose has to ────────────────────────
+    const explained = runReconciliation({
+      derived: ['pnpm check:a'],
+      ciOnlyCommands: new Set(['node scripts/check-payload-guard.mjs']),
+      pendingCommands: new Set(['pnpm check:changeset-shape']),
+      record: parseRunRecord(['pnpm check:a', 'node scripts/check-payload-guard.mjs', 'pnpm check:changeset-shape'].join('\n')),
+    });
+    t(
+      'a CI-measured-only entry and a pending-changeset entry are classified by the tool, not dumped into the remainder',
+      explained.ok && explained.explainedCiOnly.length === 1 && explained.explainedPending.length === 1 && explained.extra.length === 0,
+    );
+
+    // ── Bookkeeping the classes cannot lose ─────────────────────────────────
+    const dupes = runReconciliation({ derived: ['pnpm check:a'], record: parseRunRecord(['pnpm check:a', 'pnpm check:a'].join('\n')) });
+    t('a duplicated record line cannot double-count a family', dupes.ok && dupes.ran.length === 1 && dupes.derivedTotal === 1);
+    const contradicted = runReconciliation({
+      derived: ['pnpm check:a'],
+      record: parseRunRecord(['pnpm check:a', `${marker} pnpm check:a${sep}also claimed`].join('\n')),
+    });
+    t('a family claimed BOTH ways reads as run and the contradiction is reported, not resolved silently', contradicted.ok && contradicted.conflicts.length === 1);
+    const zero = runReconciliation({ derived: [], record: parseRunRecord('') });
+    t('an empty derivation and an empty record is a green EMPTY answer, not a missing one', zero.ok && zero.derivedTotal === 0);
+
+    // ⭐ The closure assertion, driven: the three classes partition the derived
+    // set, and an instrument that could not fail toward its own target is the
+    // defect this file keeps finding one level up.
+    for (const n of [0, 1, 5]) {
+      const many = Array.from({ length: n }, (_, i) => `pnpm check:g${i}`);
+      const half = many.filter((_, i) => i % 2 === 0);
+      const r = runReconciliation({ derived: many, record: parseRunRecord(half.join('\n')) });
+      t(
+        `the classes partition the derived set exactly (${n} derived, ${half.length} recorded)`,
+        r.ran.length + r.unrun.length + r.notMeasured.length === r.derivedTotal && r.derivedTotal === n,
+      );
+    }
+
+    // ── The rendering, and the ONE bit at the end of it ─────────────────────
+    const redLines = runReconciliationLines(short);
+    const redText = redLines.join('\n');
+    t('the rendering leads with the four counts in an assertable shape', /^Run reconciliation — 3 derived, 2 run, 0 NOT-MEASURED, 1 UNRUN\.$/.test(redLines[0]));
+    t('it states where the denominator came from — the claim an arithmetic cannot make', redText.includes('recomputed in this process'));
+    t('every unrun family is NAMED, never just counted', short.unrun.every(({ command }) => redText.includes(command)));
+    t('the verdict is one line and it is the LAST one', redLines[redLines.length - 1].startsWith('✗ dispatch-gates --ran:'));
+    const greenText = runReconciliationLines(full).join('\n');
+    t('and the green verdict is the same line in the same place', greenText.trim().endsWith('3 derived famil(ies) accounted for — 3 run, 0 NOT-MEASURED.'));
+    t('the rendering discloses what this number does NOT cover', greenText.includes('always-runs tail'));
+    t(
+      `the ${marker} block warns about the cap kill the category absorbs`,
+      runReconciliationLines(claimed).join('\n').includes('exit 143'),
+    );
+    t(
+      'the near-miss line refuses the pairing out loud rather than quietly',
+      runReconciliationLines(nearMiss).join('\n').includes('is NOT paired with it'),
+    );
+
+    // ── argv: a two-token flag's value must not become a path ───────────────
+    const ranSplit = splitArgv([RAN_FLAG, 'ran.list', 'packages/spec/src/index.ts', '--residue']);
+    t('the run record value never falls through into the path list', ranSplit.paths.length === 1 && ranSplit.runRecord === 'ran.list');
+    t('and the two value-taking flags coexist', splitArgv([RAN_FLAG, 'ran.list', REPO_FLAG, 'an-owner/a-repo']).assertion === 'an-owner/a-repo');
+    t('the joined spelling parses to the same thing', splitArgv([`${RAN_FLAG}=ran.list`]).runRecord === 'ran.list');
+    t('no run record passed stays null, so every other run is untouched', splitArgv(['packages/spec/src/index.ts']).runRecord === null);
+    // ⭐ The message that would LIE: with one value-taking flag the hint was a
+    // constant, and a second flag turned that constant into a sentence naming
+    // the wrong argument.
+    const ranMalformed = splitArgv([RAN_FLAG]).malformed ?? '';
+    t('a valueless run record is malformed, and the message names THIS flag', ranMalformed.includes(RAN_FLAG) && !ranMalformed.includes('repo'));
+    t('and the assertion keeps its own hint', (splitArgv([REPO_FLAG]).malformed ?? '').includes('owner'));
+  }
+
+  // ── END TO END: the record built BY CONSTRUCTION from --commands (#13774) ──
+  //
+  // Everything above stays green if `--ran` is never wired into the CLI, or if
+  // the mode reads a derivation of its own rather than the one `--commands`
+  // prints. Only a real run can tell those apart — and only a real run can
+  // demonstrate the property the whole design rests on: the two sides of the
+  // comparison are the SAME strings, because the record is this tool's own
+  // output copied line for line. That is what makes the comparison exact
+  // without a normaliser, which is the condition triage attached to this shape.
+  {
+    const ranCard = 'scripts/measure-durability-swallow-family.mjs';
+    const ranTmp = mkdtempSync(join(tmpdir(), 'dg-ran-'));
+    try {
+      const cmdRun = runCli(['--commands', ranCard]);
+      const rows = (cmdRun.stdout ?? '').split('\n').filter(Boolean);
+      t('CONTROL: the card derives a runnable union at all', cmdRun.status === 0 && rows.length >= 2);
+
+      const completePath = join(ranTmp, 'ran-complete.list');
+      writeFileSync(completePath, `${rows.join('\n')}\n`);
+      const green = runCli([RAN_FLAG, completePath, ranCard]);
+      const greenOut = green.stdout ?? '';
+      t(
+        '⭐ a record that is --commands output copied verbatim reconciles GREEN and exits 0',
+        green.status === 0 && greenOut.includes(`${rows.length} derived famil(ies) accounted for`),
+      );
+      t('and it needed no normalisation to do it — the two lists are the same strings', greenOut.includes(`${rows.length} derived, ${rows.length} run`));
+
+      const dropped = rows[rows.length - 1];
+      const shortPath = join(ranTmp, 'ran-short.list');
+      writeFileSync(shortPath, `${rows.slice(0, -1).join('\n')}\n`);
+      const red = runCli([RAN_FLAG, shortPath, ranCard]);
+      const redOut = red.stdout ?? '';
+      t('⭐ dropping ONE line from that record exits 1 — a verdict a report cannot paraphrase', red.status === 1);
+      t('and the run names exactly the family that was dropped', redOut.includes('UNRUN (1)') && redOut.includes(dropped));
+
+      // The refusals, and the unreadable input. All three exit before the tree
+      // walk, so they cost nothing to assert.
+      t(
+        'combining the verdict mode with a derivation mode is REFUSED, not blended',
+        runCli([RAN_FLAG, completePath, '--commands', ranCard]).status === 2
+          && runCli([RAN_FLAG, completePath, '--json', ranCard]).status === 2,
+      );
+      t('and so is asking for a tier verdict there is nothing to reconcile against', runCli([RAN_FLAG, completePath, '--tier', ranCard]).status === 2);
+      const missing = runCli([RAN_FLAG, join(ranTmp, 'no-such-record.list'), ranCard]);
+      t('an unreadable record REFUSES rather than reconciling against nothing (#4690)', missing.status === 2 && (missing.stdout ?? '').trim() === '');
+      t('and the refusal names the file it could not read', (missing.stderr ?? '').includes('no-such-record.list'));
+      const valueless = runCli([RAN_FLAG]);
+      t('a valueless run record refuses, and its message does not name the OTHER flag', valueless.status === 2 && !(valueless.stderr ?? '').includes('as an owner and a name'));
+    } finally {
+      rmSync(ranTmp, { recursive: true, force: true });
+    }
+  }
+
+  // The per-case line already printed inside `t()`, streamed as each verdict
+  // was decided (#14281) — this tail is the summary only, unchanged in shape
+  // and wording from the pre-streaming version.
   let failed = 0;
-  for (const [name, cond] of cases) {
+  for (const [, cond] of cases) {
     if (!cond) failed++;
-    console.log(`  ${cond ? '✓' : '✗'} ${name}`);
   }
   if (failed) {
     console.error(`✗ dispatch-gates self-test: ${failed} of ${cases.length} case(s) failed.`);
@@ -15838,7 +16930,19 @@ if (invokedDirectly) {
   if (process.argv.includes('--self-test')) {
     selfTest();
   } else if (argv.malformed) {
-    console.error(`dispatch-gates: ${argv.malformed} — the repo this answer must be about, as an owner and a name.`);
+    console.error(`dispatch-gates: ${argv.malformed}.`);
+    process.exit(2);
+  } else if (argv.runRecord !== null && (process.argv.includes('--commands') || process.argv.includes('--json'))) {
+    // The same rule as the pair below, and it is not a courtesy: `--ran` renders
+    // a VERDICT on stdout and those two render the derivation, so blending them
+    // would put prose in a stream whose caption promises commands.
+    console.error(`dispatch-gates: ${RAN_FLAG} renders a verdict on stdout; --commands and --json render the derivation. Pass one.`);
+    process.exit(2);
+  } else if (argv.runRecord !== null && process.argv.includes('--tier')) {
+    // `--tier` reads no workflow and no check script, so it derives no family —
+    // there is nothing for a run record to be reconciled against, and answering
+    // with the tier alone would silently drop the flag the caller passed.
+    console.error(`dispatch-gates: --tier derives no gate family, so ${RAN_FLAG} would have nothing to reconcile against. Pass one.`);
     process.exit(2);
   } else if (process.argv.includes('--commands') && process.argv.includes('--json')) {
     // Two answers to "what shape is stdout" is no answer. Blending them — or
@@ -15865,7 +16969,9 @@ if (invokedDirectly) {
       ? 'json'
       : process.argv.includes('--commands')
         ? 'commands'
-        : 'human';
+        : argv.runRecord !== null
+          ? 'ran'
+          : 'human';
     const declaredPaths = argvPaths.map((p) => p.replace(/^\.\//, ''));
     for (const line of bannerLines({ identity, paths: declaredPaths, drift: baseDrift() })) console.error(line);
     if (argv.assertion !== null) {
@@ -15880,6 +16986,25 @@ if (invokedDirectly) {
       console.error(`  ${REPO_FLAG} '${argv.assertion}' checked against this checkout's '${DEFAULT_BASE_REMOTE}' remote — it holds.`);
     }
     console.error('');
+    // Read BEFORE the derivation, not inside it. A record that cannot be read
+    // is an input problem, and #4690's rule is that an unreadable input must
+    // never look like an empty answer — reading it after the derivation would
+    // also spend a full tree walk to reach a message about a filename. An
+    // EMPTY but readable record is NOT an error: it means nothing ran, and
+    // saying so is the whole point of the mode.
+    let runRecord = [];
+    if (argv.runRecord !== null) {
+      try {
+        runRecord = parseRunRecord(readFileSync(resolve(argv.runRecord), 'utf8'));
+      } catch (err) {
+        console.error(`dispatch-gates: could not read the run record '${argv.runRecord}' — ${err.message}`);
+        console.error(
+          `  ${RAN_FLAG} takes a file of the commands you ran, one per line, exactly as --commands emits them.` +
+            ' Capture them as you run, never by slugging log file names back into family names.',
+        );
+        process.exit(2);
+      }
+    }
     let paths;
     if (argvPaths.length > 0) {
       paths = declaredPaths;
@@ -15893,7 +17018,7 @@ if (invokedDirectly) {
         derived = changedPathsFromGit();
       } catch (err) {
         console.error(`dispatch-gates: could not derive the change set — ${err.message}`);
-        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [--commands | --json] [--repo owner/name] [<path> ...] | --changed | --self-test');
+        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [--commands | --json | --ran <file>] [--repo owner/name] [<path> ...] | --changed | --self-test');
         process.exit(2);
       }
       if (derived.paths.length === 0) {
@@ -15917,7 +17042,13 @@ if (invokedDirectly) {
       if (process.argv.includes('--tier')) {
         for (const line of tierLines(deriveTier(paths))) console.log(line);
       } else {
-        derive(paths, { showResidue: process.argv.includes('--residue'), mode });
+        // The only mode with a VERDICT in it, so the only one whose exit code
+        // carries an answer rather than "the derivation completed". A run that
+        // names unrun families must not exit 0: this mode exists because a
+        // report claiming coverage it did not have read exactly like one that
+        // did, and an exit code is the half of that a caller cannot paraphrase.
+        const status = derive(paths, { showResidue: process.argv.includes('--residue'), mode, runRecord });
+        if (status) process.exit(status);
       }
     } catch (err) {
       console.error(`dispatch-gates: derivation failed — ${err.message}`);

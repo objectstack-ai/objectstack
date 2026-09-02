@@ -136,9 +136,22 @@ export function isTestPath(relPath) {
   return /\.(test|spec)\./.test(relPath) || /(^|\/)(tests|__tests__|qa)\//.test(relPath);
 }
 
+/**
+ * The subtrees this census walks -- the REAL population of every number it
+ * reports and of the gate that holds the page to them.
+ *
+ * Named rather than spelled inline because a second reader needs it: the gate
+ * declares this population to the dispatch derivation, and a declaration that
+ * can drift from the walk is worse than none. `check-system-context-census.mjs`
+ * derives its `ROOT_DIR_WATCH_HINTS` from this constant in both directions, so
+ * a root added or removed here reddens that gate's self-test instead of quietly
+ * widening the census past what any card is told about.
+ */
+export const CORPUS_ROOTS = ['packages', 'examples'];
+
 /** Every tracked, non-dist TypeScript file of the corpus -- tests included. */
 export function collectCorpus(root = ROOT) {
-  return execFileSync('git', ['-C', root, 'ls-files', 'packages', 'examples'], {
+  return execFileSync('git', ['-C', root, 'ls-files', ...CORPUS_ROOTS], {
     encoding: 'utf8',
     maxBuffer: 1 << 28,
   })

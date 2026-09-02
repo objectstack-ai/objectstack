@@ -243,6 +243,18 @@ const POPULATION_CONSTANT = /^(?:[A-Z0-9_]*_ROOTS?|[A-Z0-9_]*_DIRS?|POPULATION|[
  * this file's own hint set and hand a reporting tool a population it does not
  * read, which the self-test refuses in as many words.
  *
+ * An entry's `segments` records either ONE hint (a flat array of path
+ * segments, as above) or SEVERAL (a LIST of segment arrays) — #14233's
+ * addition, for a gate whose declared population is spelled as more than one
+ * glob (one hint per extension, or one per file kind at the same root). A
+ * multi-hint entry's `hintCovers` reach is the UNION of its members, asked of
+ * every hint in turn; its `holds` is written to accept whatever any member
+ * covers, since the two-sided pin below (LIVE/PRECISE/COMPLETE/NARROWING)
+ * still runs over that union. Every hint of a multi-hint entry is required to
+ * share one root — the sweep below has exactly one denominator per entry, not
+ * one per hint — and that is verified per entry when the row is written, not
+ * pinned mechanically here (see the five rows #14233 added).
+ *
  * `holds` is the spelling's claim written INDEPENDENTLY of `hintCovers` — a
  * plain segment test a reader can check by eye. It is not a copy of the matcher:
  * `hintCovers` reaches its answer through `globInNonFinalSegment`,
@@ -305,12 +317,66 @@ const SPELLINGS = new Map([
     claim: "every file inside a skill's references folder, at any depth",
     holds: (s) => s[0] === 'skills' && s.length >= 4 && s[2] === 'references',
   }],
+  // ── Multi-hint entries (#14233) — a gate whose declared population is more
+  // than one glob at the same root. `holds` accepts whatever any member hint
+  // covers; see `hintsOf` and the pin loop below for how the union is asked.
+  ['packages TypeScript source', {
+    segments: [
+      ['packages', '**', '*.ts'],
+      ['packages', '**', '*.tsx'],
+      ['packages', '**', '*.mts'],
+    ],
+    claim: 'every `.ts`, `.tsx` or `.mts` file at any depth under the packages root',
+    holds: (s) => s[0] === 'packages' && s.length >= 2
+      && ['.ts', '.tsx', '.mts'].some((ext) => s[s.length - 1].endsWith(ext)),
+  }],
+  ['examples TypeScript source', {
+    segments: ['examples', '**', '*.ts'],
+    claim: 'every `.ts` file at any depth under the examples root',
+    holds: (s) => s[0] === 'examples' && s.length >= 2 && s[s.length - 1].endsWith('.ts'),
+  }],
+  ['apps TypeScript source', {
+    segments: [
+      ['apps', '**', '*.ts'],
+      ['apps', '**', '*.tsx'],
+    ],
+    claim: 'every `.ts` or `.tsx` file at any depth under the apps root',
+    holds: (s) => s[0] === 'apps' && s.length >= 2
+      && ['.ts', '.tsx'].some((ext) => s[s.length - 1].endsWith(ext)),
+  }],
+  ['dual-build manifests and configs', {
+    segments: [
+      ['packages', '**', 'package.json'],
+      ['packages', '**', 'tsup.config.ts'],
+    ],
+    claim: 'every workspace manifest or tsup config at any depth under the packages root',
+    holds: (s) => s[0] === 'packages' && s.length >= 2
+      && (s[s.length - 1] === 'package.json' || s[s.length - 1] === 'tsup.config.ts'),
+  }],
+  ['scripts top-level script files', {
+    segments: [
+      ['scripts', '*.mjs'],
+      ['scripts', '*.mts'],
+    ],
+    claim: 'every `.mjs` or `.mts` file directly under the scripts root (non-recursive)',
+    holds: (s) => s.length === 2 && s[0] === 'scripts'
+      && (s[1].endsWith('.mjs') || s[1].endsWith('.mts')),
+  }],
 ]);
 
-/** The recorded spelling, assembled. Never a literal — see `SPELLINGS`. */
+/**
+ * Normalises a `SPELLINGS` entry's `segments` to a LIST of segment arrays,
+ * whether it records one hint (a flat array) or several (already a list) —
+ * distinguished by whether the first element is itself an array. #14233.
+ */
+function hintsOf(segments) {
+  return Array.isArray(segments[0]) ? segments : [segments];
+}
+
+/** The recorded spelling(s), assembled. Never a literal — see `SPELLINGS`. */
 export function spellingOf(name) {
   const s = SPELLINGS.get(name);
-  return s ? s.segments.join('/') : null;
+  return s ? hintsOf(s.segments).map((seg) => seg.join('/')).join(' | ') : null;
 }
 
 const TRIAGE = new Map([
@@ -322,22 +388,36 @@ const TRIAGE = new Map([
   }],
   ['check:logger-receiver-detach SCAN_ROOTS packages', {
     verdict: 'DECLARED-NARROWER',
+    spelling: 'packages TypeScript source',
     why: 'the population is the non-test TypeScript source under the root, declared beside the '
       + 'constant at the three live extensions (4968 of 5485 tracked files, 90.6%) instead of '
       + 'the bare root. The remainder is manifests, JSON, markdown and fixtures the gate never '
-      + 'opens, and the test files it deliberately does not read',
+      + 'opens, and the test files it deliberately does not read. #14233: the declared population '
+      + 'needs three hints (`.ts`/`.tsx`/`.mts`), which the SPELLINGS harness could not hold before '
+      + 'it grew a multi-hint entry — the union now pins the three declared hints LIVE, PRECISE and '
+      + 'COMPLETE against a plain "ends with one of these extensions" claim (5240 of 5796 tracked '
+      + 'files under the bare root, re-measured 2026-09-01 — a different, wider count than the '
+      + "gate's own non-test figure above, since the pin holds the raw hints' literal reach and "
+      + "the gate's own test-file exclusion is not something a hint can spell)",
   }],
   ['check:logger-receiver-detach SCAN_ROOTS examples', {
     verdict: 'DECLARED-NARROWER',
+    spelling: 'examples TypeScript source',
     why: 'same declaration, same gate: the TypeScript source under the examples root, 204 of 241 '
       + 'tracked files (84.6%), rather than the bare word. The uncovered remainder carries no '
-      + 'TypeScript for this gate to read',
+      + 'TypeScript for this gate to read. #14233: this root needs only the one hint the gate '
+      + 'declares (`.ts`), now pinned LIVE, PRECISE and COMPLETE (206 of 243 tracked files under '
+      + 'the bare root, re-measured 2026-09-01)',
   }],
   ['check:logger-receiver-detach SCAN_ROOTS apps', {
     verdict: 'DECLARED-NARROWER',
+    spelling: 'apps TypeScript source',
     why: 'same declaration, same gate: 28 of 40 tracked files (70.0%) under the apps root, at the '
       + 'two extensions that exist there. The lowest ratio of the three and still a real '
-      + 'narrowing — the uncovered dozen are config and content files, none of them TypeScript',
+      + 'narrowing — the uncovered dozen are config and content files, none of them TypeScript. '
+      + '#14233: the two declared hints (`.ts`/`.tsx`) are now pinned as one multi-hint spelling, '
+      + 'LIVE, PRECISE and COMPLETE (29 of 41 tracked files under the bare root, re-measured '
+      + '2026-09-01)',
   }],
   ['check:objectql-double-limit SCAN_ROOT packages', {
     verdict: 'DECLARED-NARROWER',
@@ -395,6 +475,7 @@ const TRIAGE = new Map([
   }],
   ['check:dual-build-cjs-loads SCAN_ROOT packages', {
     verdict: 'DECLARED-NARROWER',
+    spelling: 'dual-build manifests and configs',
     why: 'the gate walks every publishable manifest under the root to find published `require` '
       + 'conditions, then reads only the dist/ those manifests point at — so the two literals it '
       + 'declares beside SCAN_ROOT under the ROOT_DIR_WATCH_HINTS idiom are the files whose '
@@ -407,10 +488,14 @@ const TRIAGE = new Map([
       + 'error this map names. The recall is not lost: the gate is a step in Build Core, a '
       + 'required context on every PR, so the omission costs one CI round trip rather than a '
       + 'missed defect. The row STAYS in the sweep because the bare root is still not covered — '
-      + 'no arbitrary file at the top of packages/ is reached — which is what this verdict says',
+      + 'no arbitrary file at the top of packages/ is reached — which is what this verdict says. '
+      + "#14233: the two declared hints could not be pinned before SPELLINGS held only one per "
+      + 'entry; they are now one multi-hint spelling, LIVE, PRECISE and COMPLETE against the same '
+      + '74/20 split, re-measured 2026-09-01 (94 of 5796 tracked files under the bare root)',
   }],
   ['check:ratchet-remedy-authority SCRIPTS_DIR scripts', {
     verdict: 'DECLARED-NARROWER',
+    spelling: 'scripts top-level script files',
     why: 'RE-DECIDED 2026-09-01 (#13813) from REFUSE-UNSPELLABLE, whose stated reason — "the idiom '
       + 'has no non-recursive spelling" — was TRUE when written and is FALSE of this tree. It '
       + 'rested on the deletion-collapse: a glob carrying a literal SUFFIX in the final segment '
@@ -424,17 +509,22 @@ const TRIAGE = new Map([
       + 'The gate now declares ONE hint per admitted extension beside SCRIPTS_DIR under the '
       + 'ROOT_DIR_WATCH_HINTS idiom, and the pair is SET-EQUAL to that walk in both directions — '
       + '183 of 183, nothing read left uncovered, nothing covered left unread — so 100% precise '
-      + 'and complete. ⛔ NO `spelling` is recorded and that is deliberate, not an omission: '
-      + 'SPELLINGS holds ONE hint per entry and this population needs one per extension, the same '
-      + 'shape as the check:logger-receiver-detach and check:dual-build-cjs-loads rows above, so '
-      + 'the liveness-and-precision coupling is held in the gate own --self-test, which pins the '
-      + 'hints against SCRIPTS_DIR and CORPUS_EXTENSIONS and refuses both the subtree spelling and '
-      + 'the brace form its own messages print. The consumer is MEASURED, not argued: before this, '
-      + 'the derivation placed this family in the residue undetermined bucket, absent from the '
-      + 'matched list a brief prints, and a PR that ran its whole derived family green locally '
-      + 'lost a CI round to this gate. The row STAYS in the sweep because the bare root is still '
-      + 'not covered — no arbitrary file at the top of the root is reached, and no nested script '
-      + 'at any depth — which is what this verdict says and is correct, not outstanding debt',
+      + 'and complete. The coupling described above was, at the time this row was decided, held '
+      + "only in the gate's own --self-test (which pins the hints against SCRIPTS_DIR and "
+      + 'CORPUS_EXTENSIONS and refuses both the subtree spelling and the brace form its own '
+      + 'messages print), because SPELLINGS held ONE hint per entry and this population needs one '
+      + 'per extension — the same shape as the check:logger-receiver-detach and '
+      + 'check:dual-build-cjs-loads rows above, and the gap #14233 measured and closed: SPELLINGS '
+      + 'now holds a LIST of segment arrays, so the pair is pinned HERE too, LIVE, PRECISE and '
+      + 'COMPLETE (183 of 310 tracked files under the bare root, matching the gate own walk exactly, '
+      + "re-measured 2026-09-01) — the gate's own pin and this one now independently corroborate "
+      + 'the same declaration rather than only one of them re-measuring it. The consumer is '
+      + 'MEASURED, not argued: before this, the derivation placed this family in the residue '
+      + 'undetermined bucket, absent from the matched list a brief prints, and a PR that ran its '
+      + 'whole derived family green locally lost a CI round to this gate. The row STAYS in the '
+      + 'sweep because the bare root is still not covered — no arbitrary file at the top of the '
+      + 'root is reached, and no nested script at any depth — which is what this verdict says and '
+      + 'is correct, not outstanding debt',
   }],
   // ── Refused: the population is the whole root, and the root is saturated ──
   ['check:skill-identifier-liveness IMPL_ROOTS packages', {
@@ -484,6 +574,23 @@ const TRIAGE = new Map([
   ['check:dispatcher-error-vocabulary SCAN_ROOT packages', {
     verdict: 'REFUSE-WIDE',
     why: 'non-test sources plus manifests, 1898 of 4903 (39%) — same trade',
+  }],
+  ['check:swallow-census-controls SCAN_ROOT packages', {
+    verdict: 'REFUSE-WIDE',
+    why: 'FRESH on 2026-09-02, when #13919 wired the #12981 census own controls into CI for the '
+      + 'first time; the constant is as old as the instrument and only the family is new. The '
+      + 'census walk admits every non-test, non-declaration TypeScript source under the root at '
+      + 'four extensions — 2193 of 5755 (38%), numerator from the instrument own printed scan '
+      + 'count and denominator from git ls-files, both measured on this tree and NOT carried from '
+      + 'the row above. Same class and nearly the same ratio as check:authz-resolver: the '
+      + 'population is not a part of the root, it IS every source file in it, so a bare-root '
+      + 'declaration would be TRUE and is refused for width alone — it would name this gate for '
+      + 'every card in the repo that touches a package, and the coupling it would buy is already '
+      + 'carried by CI, whose lint.yml job has no paths filter. ⚠️ What actually reddens the '
+      + 'gated leg is narrower than the walk and is NOT a subtree either: ten named control files '
+      + 'plus this instrument own source, and — through the zero-member floor alone — the corpus '
+      + 'entire. A declaration naming the ten would be a hint the sweep judges FALSE of the walk, '
+      + 'which is the costlier error this file prices by name',
   }],
   ['check:engine-double-contract SCAN_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
@@ -1098,12 +1205,15 @@ function selfTest() {
 
   for (const name of [...usedSpellings].sort()) {
     const { segments, claim, holds } = SPELLINGS.get(name);
-    const hint = segments.join('/');
-    const covered = files.filter((f) => hintCovers(hint, f));
+    // A multi-hint entry's `hintCovers` reach is the UNION of its members —
+    // asked of every hint in turn, never collapsed into one string first
+    // (there is no glob idiom that would spell "either of these two globs").
+    const hints = hintsOf(segments).map((s) => s.join('/'));
+    const covered = files.filter((f) => hints.some((hint) => hintCovers(hint, f)));
     const over = covered.filter((f) => !holds(seg(f)));
     const claimed = files.filter((f) => holds(seg(f)));
-    const under = claimed.filter((f) => !hintCovers(hint, f));
-    const rootFiles = files.filter((f) => seg(f)[0] === segments[0]);
+    const under = claimed.filter((f) => !hints.some((hint) => hintCovers(hint, f)));
+    const rootFiles = files.filter((f) => seg(f)[0] === hintsOf(segments)[0][0]);
     t(`the spelling recorded as "${name}" is LIVE — hintCovers reaches ${covered.length} tracked `
       + `file(s) with it, so no record below names a hint that covers nothing`, covered.length > 0);
     t(`…and it is PRECISE: every file hintCovers admits for "${name}" (${claim}) satisfies that `

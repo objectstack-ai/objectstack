@@ -773,6 +773,44 @@ export const ERROR_CODE_LEDGER = {
     // Producer: `packages/drivers/driver-sql/src/dialect-emission-refusal.ts`.
     'SQL_DIALECT_EMISSION_UNSUPPORTED',
   ],
+  '@objectstack/driver-turso': [
+    // [#14287] Provenance for the Turso REMOTE transport's unsafe-identifier
+    // refusal. Identifiers are INLINED into that transport's SQL (SQLite
+    // cannot bind one), so `object`, `field`, the `groupBy` output key, DDL
+    // table/column names and index names are all held to `SAFE_IDENTIFIER` —
+    // and every one of those positions threw a BARE `Error`, which
+    // `mapDataError` served as a sanitised 500. The caller was told the server
+    // faulted when their own identifier was refused. Stamped in ONE place for
+    // all of them — `unsafeIdentifierError`
+    // (`packages/drivers/driver-turso/src/remote-transport.ts`), `code:
+    // 'INVALID_REQUEST'` / `status: 400` via the exported
+    // `UNSAFE_IDENTIFIER_CODE` / `UNSAFE_IDENTIFIER_STATUS`, and read by the
+    // free `assertSafeIdentifier` in `remote-canonical-backfill.ts` too.
+    //
+    // Provenance ONLY — the eighth EMITTER of a code seven packages already
+    // register, so the union, its casing and every other package's rows are
+    // byte-unchanged. Per this file's header, a code emitted by several
+    // packages is listed once per emitting package.
+    //
+    // `INVALID_REQUEST` rather than a new "unsafe identifier" code by triage
+    // ruling (2026-09-02, #14287): the identifier arrived well-formed and is
+    // refused on its SHAPE, which is what this code already names for seven
+    // other emitters — and a code minted for one driver's guard would be a
+    // permanent vocabulary entry. ⛔ Not `INVALID_QUERY`: the DDL and
+    // index-sync positions reach the refusal with no query in sight.
+    //
+    // Wire-reachable by the test the "Retiring a code" section applies
+    // (#8035), on two independent paths on a server already serving HTTP:
+    // publishing an object calls `engine.syncObjectSchema` →
+    // `TursoDriver.syncSchema` → `RemoteTransport.syncSchema`'s table/column
+    // gate (the same argument `SQL_DIALECT_EMISSION_UNSUPPORTED` above makes),
+    // and an aggregate query reaches the `object` / `field` gate in
+    // `RemoteTransport.aggregate`. `resolveThrownHttpError` then puts the
+    // `code`/`status` on the envelope. The backfill module's twin producer is
+    // NOT the evidence — its callers flatten the throw into a report by
+    // design (ADR-0053 D-B3), which its own docblock records.
+    'INVALID_REQUEST',
+  ],
   '@objectstack/spec': [
     'CONNECTOR_UPSTREAM_UNAVAILABLE',
     'EXTERNAL_SCHEMA_MISMATCH',

@@ -16,10 +16,35 @@
  *
  * Dependency direction forces the same conclusion: runtime → objectql, never
  * the reverse, so shared logic that the engine plugin needs must live here.
- * Runtime re-exports these under their old names — dispatch and the MCP
- * bridge keep reading the SAME functions, which is the load-bearing property:
- * the inventory can never disagree with the router about what a declaration
- * can address.
+ * Runtime re-exports these under their old names, so dispatch and the MCP
+ * bridge keep reading the SAME functions.
+ *
+ * That sharing bought LESS than this docblock used to claim, and the claim is
+ * corrected here rather than merely repaired below. It read: "the inventory
+ * can never disagree with the router about what a declaration can address."
+ * True of ADDRESSING — which handler keys a declaration reaches, derived by
+ * {@link resolveActionHandlerKeys} / {@link actionHandlerObjectKeys} on both
+ * sides. Never true of EXISTENCE, which the two sides answered from different
+ * sources: `resolveRouteActionDeclaration` resolves a declaration in three
+ * rungs — the object's embedded `actions[]`, then the engine registry's
+ * standalone `action` items (`registry.getItem('action', name)`, accepted
+ * when the item owns the route), then the metadata service's `action` rows —
+ * while this inventory built its declaration set from the first and the last
+ * only. Measured consequence: on the in-process boot, where the metadata
+ * plane carries no `action` rows, an object-LESS `defineAction` living in the
+ * registry alone was reported as a "registered handler with NO declaration …
+ * REFUSED at dispatch" in the same boot in which the router resolved it at
+ * rung 2 and dispatched it.
+ *
+ * Both halves are shared now. The addressing vocabulary lives here, and so
+ * does the ownership test that decides whether a registry item covers a route
+ * ({@link standaloneActionOwnerKey}, in lockstep with the runtime's
+ * `standaloneActionObjectName` and `ObjectQLPlugin.actionObjectKey`). The
+ * registry rung itself arrives as the caller-injected `lookupRegistryAction`,
+ * because objectql cannot import the router — the one caller that holds `ql`
+ * hands the rung over. The invariant this file may claim, and no more: the
+ * inventory reports a handler as undeclared only when EVERY source the router
+ * resolves through answered nothing for it.
  */
 
 /**
@@ -41,6 +66,40 @@ export const GLOBAL_ACTION_OBJECT_KEY = 'global';
  */
 export function isObjectLessActionKey(objectName: string | undefined | null): boolean {
     return !objectName || objectName === GLOBAL_ACTION_OBJECT_KEY || objectName === '*';
+}
+
+/**
+ * The engine object key a STANDALONE action declaration owns.
+ *
+ * Standalone `action` metadata declares `objectName` (spec `ActionSchema`);
+ * bundle collectors attach `object`; an object-less action owns the canonical
+ * `'global'` key. Three writers had this same three-line ladder — the
+ * runtime's `standaloneActionObjectName`, `ObjectQLPlugin.actionObjectKey`,
+ * and an inline copy inside {@link collectEngineActionDeclarations}. It is
+ * spelled once here because the router's rung-2 ownership test and this
+ * inventory now have to agree on it exactly; the other two stay in lockstep
+ * by their own docblocks (the runtime cannot import backwards, and the
+ * plugin's copy is a private method).
+ */
+export function standaloneActionOwnerKey(action: any): string {
+    if (typeof action?.objectName === 'string' && action.objectName.length > 0) return action.objectName;
+    if (typeof action?.object === 'string' && action.object.length > 0) return action.object;
+    return GLOBAL_ACTION_OBJECT_KEY;
+}
+
+/**
+ * The router's rung-2 acceptance test: does this standalone declaration own
+ * the route a handler is registered on?
+ *
+ * Byte-for-byte the `ownsRoute` predicate inside
+ * `resolveRouteActionDeclaration` — `owner === objectName ||
+ * isObjectLessActionKey(owner)`. Note the asymmetry, which is deliberate and
+ * must be mirrored rather than tidied: an object-LESS declaration owns ANY
+ * route, while an object-bound one owns only its own object.
+ */
+export function standaloneActionOwnsRoute(action: any, objectName: string): boolean {
+    const owner = standaloneActionOwnerKey(action);
+    return owner === objectName || isObjectLessActionKey(owner);
 }
 
 /**
@@ -93,9 +152,14 @@ export function resolveActionHandlerKeys(action: any, fallbackKey?: string): str
  *
  * Two findings:
  *  - `undeclaredHandlers` — a registered key that reconciles to no
- *    declaration. Since D3 those are REFUSED at dispatch, so this list is the
- *    upgrade checklist: everything on it is an endpoint that stopped working
- *    and the exact `defineAction` that fixes it.
+ *    declaration IN THE SET IT WAS GIVEN. Read the scope literally: this
+ *    function is pure set reconciliation and knows nothing about the sources
+ *    that set came from, so its answer is the upgrade checklist only once the
+ *    caller has consulted every source the router resolves through.
+ *    {@link runActionGovernanceInventory} is what does that, and it passes
+ *    this list through the router's registry rung before reporting a word of
+ *    it. A caller that skips that step is asserting a dispatch outcome from
+ *    two of the router's three sources.
  *  - `unboundDeclarations` — a declared `script` action with no `body` and no
  *    handler under any candidate key: a button wired to nothing.
  */
@@ -180,16 +244,57 @@ export async function collectEngineActionDeclarations(
     }
     for (const action of standalone) {
         if (!action || typeof action.name !== 'string') continue;
-        const objectName =
-            (typeof action.objectName === 'string' && action.objectName) ||
-            (typeof action.object === 'string' && action.object) ||
-            GLOBAL_ACTION_OBJECT_KEY;
+        const objectName = standaloneActionOwnerKey(action);
         const key = `${objectName}:${action.name}`;
         if (seen.has(key)) continue; // object-embedded declaration wins
         seen.add(key);
         out.push({ action, objectName });
     }
     return out;
+}
+
+/**
+ * The router's SECOND rung, applied to the handlers the declaration set did
+ * not cover: `registry.getItem('action', <the key it is registered under>)`,
+ * accepted on the router's own ownership test.
+ *
+ * Why a by-NAME probe rather than folding the registry into the declaration
+ * set: the router never enumerates the registry, it asks it for one name, so
+ * mirroring it means asking for one name. That also keeps the other finding
+ * — `unboundDeclarations`, declared script actions with no handler — reading
+ * exactly the population it read before; whether a registry-only declaration
+ * with no handler should join it is a different question from this one, and
+ * folding would have answered it silently.
+ *
+ * A handler registered under key `K` on object `O` is dispatchable at
+ * `/actions/O/K` precisely when the router resolves a declaration for the
+ * name `K` that owns `O` (its `fallbackKey` then addresses `K` back). So this
+ * probe is not an approximation of dispatch — for the direct route it is the
+ * same question, asked of the same source.
+ *
+ * Conservative in exactly one direction, on purpose: a lookup that throws, or
+ * answers something that is not an object, leaves the handler ON the list.
+ * The audit can therefore over-report a broken registry; it cannot clear a
+ * handler on the strength of an answer it could not read.
+ */
+async function dropHandlersDeclaredInRegistry(
+    handlers: Array<{ objectName: string; actionName: string; package?: string }>,
+    lookupRegistryAction: ((actionName: string) => unknown) | undefined,
+): Promise<Array<{ objectName: string; actionName: string; package?: string }>> {
+    if (!lookupRegistryAction || handlers.length === 0) return handlers;
+    const kept: Array<{ objectName: string; actionName: string; package?: string }> = [];
+    for (const handler of handlers) {
+        let item: unknown;
+        try {
+            item = await lookupRegistryAction(handler.actionName);
+        } catch {
+            kept.push(handler); // registry could not answer — see above
+            continue;
+        }
+        if (item && typeof item === 'object' && standaloneActionOwnsRoute(item, handler.objectName)) continue;
+        kept.push(handler);
+    }
+    return kept;
 }
 
 /** Stable fingerprint of a finding set, for duplicate-report suppression. */
@@ -213,20 +318,38 @@ export async function runActionGovernanceInventory(args: {
     registered: Array<{ objectName: string; actionName: string; package?: string }>;
     objects: any[];
     loadStandaloneActions?: () => Promise<any[]>;
+    /**
+     * The router's rung 2, injected: `registry.getItem('action', name)` from
+     * the caller that holds the engine. Omitting it is not a neutral default
+     * — the inventory then reads two of the three sources the router reads,
+     * which is the state that reported a live object-less action as refused
+     * at dispatch. Callers with an engine in hand pass it.
+     */
+    lookupRegistryAction?: (actionName: string) => unknown;
     logger: GovernanceLogger;
     /** Fingerprint returned by the previous run — identical findings are not re-logged. */
     lastFingerprint?: string;
 }): Promise<string> {
     try {
         const declarations = await collectEngineActionDeclarations(args.objects, args.loadStandaloneActions);
-        const findings = reconcileActionRegistrations(args.registered, declarations);
+        const reconciled = reconcileActionRegistrations(args.registered, declarations);
+        const findings = {
+            ...reconciled,
+            undeclaredHandlers: await dropHandlersDeclaredInRegistry(
+                reconciled.undeclaredHandlers, args.lookupRegistryAction),
+        };
         const fp = fingerprint(findings);
         if (fp === (args.lastFingerprint ?? '')) return fp;
         if (findings.undeclaredHandlers.length > 0) {
             args.logger.warn(
-                '[action-governance] registered handlers with NO declaration — these are REFUSED ' +
-                'at dispatch (ADR-0110 D3) and there is no opt-out; declare each one with ' +
-                '`defineAction`, or drop the registration if nothing should invoke it over HTTP',
+                '[action-governance] registered handlers with NO declaration in any source the ' +
+                'router resolves through (object-embedded `actions[]`, the engine registry ' +
+                'standalone `action` items, the metadata service `action` rows). ADR-0110 D3 ' +
+                'refuses a handler whose declaration the router cannot resolve, so each of these ' +
+                'is expected to answer 404 — expected, not measured: this audit read the sources, ' +
+                'it did not dispatch. Declare each one with `defineAction`; if you believe it IS ' +
+                'declared, then its declaration is not reaching this engine, and that is the bug ' +
+                'to report rather than dropping a registration that may still be serving traffic',
                 {
                     count: findings.undeclaredHandlers.length,
                     handlers: findings.undeclaredHandlers.map((h) => `${h.objectName}:${h.actionName}`),

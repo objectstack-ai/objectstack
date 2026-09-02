@@ -310,6 +310,13 @@ import {
  * cannot tell net polarity (see #13571's verdict). Separately, the ObjectQL
  * ENGINE execution path never reaches this compiler at all (#13640): this
  * refusal guards the NativeSQL path and the `/analytics/sql` echo only.
+ * [#13926] Both of those routes now ALSO call
+ * {@link assertReadScopeCannotVacate} at their own merge sites, after this
+ * compiler returns — so the residue's constant-TRUE predicate no longer
+ * reaches an engine or an echo from inside this package. The lowering above
+ * stays exactly as the verdict left it: a direct consumer of this public
+ * export still receives the compiled constant, and the ruled-first
+ * polarity-aware compiler design remains open.
  *
  * ## The ObjectQL ENGINE path gets the SAME disposition, at a different door (#13640)
  *
@@ -364,10 +371,15 @@ import {
  * structural, not a change of mind: this guard is a WALK over the scope tree
  * that never reduces anything, so effective polarity is simply readable and
  * there is no interaction with the #5322 `$not`-over-identity reductions to
- * rule on first. The consequence is declared rather than hidden: for that one
- * spelling the ObjectQL echo (which compiles) and the ObjectQL execution
- * (which now refuses) disagree, and closing the echo's half is #13571's
- * follow-up, not this guard's business.
+ * rule on first. The consequence that left — the ObjectQL echo (which
+ * compiled) and the ObjectQL execution (which refused) answering one scope
+ * two ways — was declared here, tracked as #13926, and is now closed the
+ * same structural way: the echo's scope merge and
+ * `NativeSQLStrategy.applyReadScope` call this guard too, AFTER this
+ * compiler returns, so all three faces answer one verdict while this
+ * lowering stays as ruled (`read-scope-vacancy-three-faces.test.ts` pins
+ * the agreement, and pins this compiler's own answers as immobility
+ * controls).
  *
  * ⚠️ It is a SECOND line of defence, not a replacement for #13570's
  * producer-side guard, and deliberately not shared code with it: that guard
@@ -527,15 +539,23 @@ function findEmptyMembership(node: unknown, negated: boolean, path: string): Emp
  * [#13640] Refuse a read scope that does not BIND, before it is handed to an
  * engine that would lower it to a boolean constant.
  *
- * The door `ObjectQLStrategy` uses. See the module header's #13640 section for
- * the measured table, for why the `$nin` arm is polarity-independent while the
- * `$in` arm is not, and for the bound this deliberately keeps (an emptied
- * POSITIVE membership at even polarity is a ruled reduction and a live RLS
- * composite depends on it).
+ * The door every strategy merge uses: `ObjectQLStrategy.withReadScope` and
+ * `resolveFkAttr` (#13640), and — since #13926 — the `/analytics/sql` echo
+ * merge in `ObjectQLStrategy.generateSql` and
+ * `NativeSQLStrategy.applyReadScope`, where it runs AFTER
+ * {@link compileScopedFilterToSql} so the shapes that compiler already
+ * refuses keep their own #13571 messages. See the module header's #13640
+ * section for the measured table, for why the `$nin` arm is
+ * polarity-independent while the `$in` arm is not, and for the bound this
+ * deliberately keeps (an emptied POSITIVE membership at even polarity is a
+ * ruled reduction and a live RLS composite depends on it).
  *
- * ⛔ Not called by {@link compileScopedFilterToSql}. Calling it there would move
- * the NativeSQL path and the `/analytics/sql` echo, whose disposition #13571
- * settled and #13640 was ruled not to re-open.
+ * ⛔ Still not called by {@link compileScopedFilterToSql} itself. Folding it
+ * into the compiler would move the disposition of every direct consumer of
+ * that public export and pre-empt the polarity-aware compiler design the
+ * #13571 verdict ruled must come first; the guard stands at the MERGE SITES
+ * instead, so the compiler's own answers — the declared residue included —
+ * stay exactly where that verdict left them.
  *
  * @param scope the `StrategyContext.getReadScope` output, exactly as returned
  * @param objectName the object the scope was requested for — for the operator's

@@ -3224,6 +3224,12 @@ function auditStock(cwd, head) {
 // real commits would be testing an imitation of the code path that ships.
 // ---------------------------------------------------------------------------
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-adr-0087-registration self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   let checked = 0;
@@ -4898,6 +4904,8 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`✓ check-adr-0087-registration --self-test: ${checked} assertions over real temp git repos (real scan()/assertInputs() path)`);
+
+  return SELF_TEST_VERDICT;
 }
 
 // ---------------------------------------------------------------------------
@@ -4922,7 +4930,14 @@ if (isEntrypoint(import.meta.url)) {
   };
 
   if (argv.includes('--self-test')) {
-    selfTest();
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-adr-0087-registration self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
   } else if (argv.includes('--list')) {
     list(REPO_ROOT, 'HEAD');
   } else if (argv.includes('--audit-stock')) {

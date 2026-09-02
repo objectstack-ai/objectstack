@@ -101,6 +101,14 @@ export type { SummaryRecomputeFailure } from './summary-errors.js';
 // caller (a cron / server-side plugin) can narrow on the class; the `code` is
 // the boundary-crossing identity.
 export { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
+// [#14095] Thrown by `engine.insert` when a driver refuses a row as a unique
+// violation. Exported so an application implementing the platform's own
+// "declare a unique index, attempt the insert, swallow the violation" idiom can
+// name the condition WITHOUT reaching for a dialect's code or
+// `@objectstack/types` (which an app cannot resolve); `code ===
+// 'DUPLICATE_RECORD'` is the boundary-crossing identity, the class is the
+// in-process convenience.
+export { DuplicateRecordError, DUPLICATE_RECORD_CODE } from './duplicate-record-error.js';
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Hosts that boot the engine themselves can catch it to
 // render their own "database unreachable" message.
@@ -409,3 +417,11 @@ export type {
 } from './write-epoch.js';
 export { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
 export type { AuthzInvalidationBridgeOptions } from './authz-invalidation-bridge.js';
+
+// [ADR-0130 D4/D5] Reading a release artifact's package list, and ordering it.
+// The load path in `plugin.ts` consumes this; it is exported so every other
+// door that grows an artifact-loading seam (the CLI, the marketplace install
+// path, the metadata dev-artifact loader) adopts the SAME read of both shapes
+// and the SAME single sorter, instead of each re-deriving one.
+export { resolveArtifactPackageOrder } from './artifact-packages.js';
+export type { ArtifactPackageError } from './artifact-packages.js';

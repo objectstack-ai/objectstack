@@ -744,6 +744,7 @@ run in `listRuns` / `getRun`, and in the log:
 | `acted` | Records **created / updated / deleted**, plus effects dispatched (notifications delivered) |
 | `skipped` | Node executions a **closed gate** prevented — one per loop iteration whose conditional edge evaluated false |
 | `unmeasured` | Executions that reached something the platform **cannot count** — see below |
+| `failed` | Node executions that **failed and were contained** — caught by a `try_catch` or routed down a `fault` edge — so the run went on; the sum of `nodes[].failures`. Absent on a run that did not track it, which is not zero |
 | `nodes[]` | Per-node terminal status with `runs` / `failures` / `skipped` and its own selected/acted |
 | `gates[]` | Which gates closed and how often, most-skipped first |
 
@@ -1314,10 +1315,22 @@ import { approvalFlow } from './flows/approval';
 
 export default defineStack({
   manifest: { id: 'com.example.crm', version: '1.0.0', type: 'app', name: 'CRM' },
+  requires: ['automation', 'triggers'],   // ← the engine, and the triggers that FIRE flows
   objects: [...],
   flows: [approvalFlow],   // ← registered with the engine on boot
 });
 ```
+
+Registration is not arming. A `record_change`, `schedule`, `time_relative` or
+`api` flow fires only when its trigger is mounted, and the triggers ship
+separately (`@objectstack/trigger-*`) behind **one** capability token on the
+same stack: `requires: ['triggers']` (`automation` mounts the engine itself;
+neither is in the always-on slate an absent `requires` falls back to).
+`defineStack` refuses a stack that declares such a flow without the token,
+naming the flow, the trigger kind it resolved and the fix — because the
+alternative was measured: the flow registers, `os validate` and `os build`
+pass, and it never runs. A `screen` flow, or an `autolaunched` one you start
+by hand, owes nothing.
 
 The plugin is a **soft dependency** on `metadata` — it tolerates running
 without `MetadataPlugin` and it logs (not throws) on per-flow registration

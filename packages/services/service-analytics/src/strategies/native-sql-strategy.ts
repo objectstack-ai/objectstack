@@ -12,7 +12,7 @@ import {
   type NormalizedFilterNode,
 } from './filter-normalizer.js';
 import { findCrossFieldComparand, findUninterpretableTemporalMember } from '../comparand-shape.js';
-import { compileScopedFilterToSql } from '../read-scope-sql.js';
+import { assertReadScopeCannotVacate, compileScopedFilterToSql } from '../read-scope-sql.js';
 import { datasetInvalidError, invalidMemberError } from '../dataset-refusal.js';
 import { likePattern, LIKE_ESCAPE_CHAR, asciiLowerSqlExpr, type LikeShape } from '../like-pattern.js';
 import { nextUtcCalendarDay } from '@objectstack/core';
@@ -617,6 +617,19 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
     const filter = ctx.getReadScope(objectName);
     if (filter === undefined || filter === null) return;
     const { sql, params: scopeParams } = compileScopedFilterToSql(filter, alias);
+    // [#13926] The #13640 door guard, at THIS strategy's merge site. This is
+    // not an echo: `execute()` runs this method's output through
+    // `ctx.executeRawSql`, so a scope the compiler lowers to a boolean
+    // constant (`$not` over `$in: []` and its measured siblings — the #13571
+    // verdict's declared residue) used to become a real whole-table read for
+    // any producer the `getReadScope` spec contract admits (measured
+    // end-to-end in `read-scope-vacancy-three-faces.test.ts`; in-repo the
+    // RLS compiler's #13570 producer guard was the only protection). Runs
+    // per OBJECT — the base table and every joined hop — and AFTER the
+    // compiler on purpose: shapes the compiler already refuses keep their
+    // #13571 messages (door-distinguishable logs), and the guard closes
+    // exactly the shapes that compile-but-vacate.
+    assertReadScopeCannotVacate(filter, objectName);
     if (!sql) return;
     let i = 0;
     const rendered = sql.replace(/\?/g, () => {

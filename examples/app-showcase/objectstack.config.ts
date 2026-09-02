@@ -30,7 +30,7 @@ import { CapabilityMapPage, StartHerePage, ComponentGalleryPage, ProjectWorkspac
 import { allFlows } from './src/automation/flows/index.js';
 import { allWebhooks } from './src/automation/webhooks/index.js';
 import { allHooks } from './src/data/hooks/index.js';
-import { allJobs, sweepProjectHealth, bindShowcaseJobRuntime } from './src/automation/jobs/index.js';
+import { allJobs, sweepProjectHealth } from './src/automation/jobs/index.js';
 import { allEmails } from './src/system/emails/index.js';
 import { allBooks } from './src/system/books/index.js';
 import { allApis } from './src/system/apis/index.js';
@@ -220,10 +220,19 @@ export default defineStack({
   // A JOB handler resolves through this same map (`collectBundleFunctions`), so
   // `sweepProjectHealth` — the handler `HealthSweepJob` names — lives here too.
   // It is the case the pure contract does not cover: a nightly sweep has no
-  // downstream declarative node to persist for it, so it writes over an engine
-  // handle captured at `onEnable`. That is why it is spelled the DECLARED way
-  // (#4396) — an undeclared writer is counted as having written nothing, which
-  // is indistinguishable from the broken sweep #4354 exists to detect.
+  // downstream declarative node to persist for it, so it writes over the `ql`
+  // handle on its own `JobHandlerContext` argument (#14094). That is why it is
+  // spelled the DECLARED way (#4396) — an undeclared writer is counted as
+  // having written nothing, which is indistinguishable from the broken sweep
+  // #4354 exists to detect. The declaration is about who counts the writes, not
+  // about where the handle comes from, so it stands unchanged now that the
+  // handle arrives in the argument.
+  //
+  // ⛔ It is NOT reached through an `onEnable` binding any more (#14257). This
+  // map is the ONLY thing `objectstack build` emits into the runtime module and
+  // the only thing `mergeRuntimeModule` merges back, so a handler that needed
+  // `onEnable` to have run first was inert on every artifact-served boot — on
+  // schedule, silently, reported as a clean run.
   //
   // This entry authored the bare form until #4976, not because the bare form was
   // right but because the declared one could not survive `objectstack build`:
@@ -292,9 +301,8 @@ export const onEnable = async (ctx: unknown): Promise<void> => {
   // real pending requests land in the inbox (cannot be a seed — see
   // seed-approval-demo.ts).
   registerShowcaseApprovalDemo(ctx as Parameters<typeof registerShowcaseApprovalDemo>[0]);
-  // Hand the nightly health-sweep job its data handle. A job handler is invoked
-  // by the job service with `{ jobId, data }` and no engine (flow functions are
-  // pure by default, #4396), so `onEnable` — the one place the app is handed a
-  // live engine — is where the sweep gets one.
-  bindShowcaseJobRuntime(ctx as Parameters<typeof bindShowcaseJobRuntime>[0]);
+  // ⛔ Nothing here hands the nightly health-sweep job a data handle any more
+  // (#14257). It takes `ql` and `logger` off its own `JobHandlerContext`
+  // argument (#14094) — the only route that survives an artifact-served boot,
+  // which carries no `onEnable` at all. See `src/automation/jobs/`.
 };

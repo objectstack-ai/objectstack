@@ -268,7 +268,7 @@ describe('#9653 the card’s assertion: on an SSO-ENABLED fixture a real plain m
   // started refusing non-admins itself — the ObjectStack gate then stands as
   // pure ADR-0068 D4 defense-in-depth; re-measure and update the posture notes
   // rather than deleting the gate.
-  it('measured vendor posture (installed 1.7.1): an org-less /sso/register admits any authenticated user', async () => {
+  it('measured vendor posture (then-installed 1.7.1): an org-less /sso/register admits any authenticated user', async () => {
     const registerBody = {
       providerId: 'credential', // always in the vendor's reserved set
       issuer: 'https://idp.example.com',

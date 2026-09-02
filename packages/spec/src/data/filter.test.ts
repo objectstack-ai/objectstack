@@ -148,6 +148,71 @@ describe('ComparisonOperatorSchema', () => {
       })).not.toThrow();
     });
   });
+
+  // ==========================================================================
+  // #14080 — a null comparand is refused with the POINTED message, on both
+  // copies. Ruled 2026-09-01 (option A). `null` never passed these unions (it
+  // is none of number | Date | string | { $field }); what the ruling adds at
+  // the SCHEMA door is the message, the same replace-only mechanism as the
+  // `$between` endpoint's (#13357). The RUNTIME door — `parseFilterAST`, which
+  // does not run this schema — gains the refusal itself, pinned in
+  // `filter-comparand-shape.test.ts`.
+  // ==========================================================================
+
+  describe('null comparand (#14080)', () => {
+    const OPS = ['$gt', '$gte', '$lt', '$lte'] as const;
+    const messagesOf = (result: { error?: { issues: Array<{ message: string }> } }): string =>
+      (result.error?.issues ?? []).map((i) => i.message).join('\n');
+
+    it('refuses null with the pointed message, not zod\'s generic union text', () => {
+      for (const op of OPS) {
+        const result = ComparisonOperatorSchema.safeParse({ [op]: null });
+        expect(result.success, op).toBe(false);
+        const messages = messagesOf(result);
+        expect(messages, op).toContain(`null is not a valid ${op} comparand`);
+        expect(messages, op).toContain('{"$eq": null} is "has no value"');
+        expect(messages, op).toContain('{"$ne": null} is "has a value"');
+        expect(messages, op).not.toContain('Invalid input');
+      }
+    });
+
+    it('is matched by the enforced copy — FieldOperatorsSchema, and through the normalized AST', () => {
+      for (const op of OPS) {
+        const result = FieldOperatorsSchema.safeParse({ [op]: null });
+        expect(result.success, op).toBe(false);
+        expect(messagesOf(result), op).toContain(`null is not a valid ${op} comparand`);
+      }
+      // Through the normalized AST the `$and` member union reports its own
+      // member-shape sentence rather than the slot's, so the verdict is what is
+      // pinned here; the pointed message is pinned one assertion up, on the
+      // copy the AST validates against.
+      const nested = NormalizedFilterSchema.safeParse({ $and: [{ close_date: { $gte: null } }] });
+      expect(nested.success).toBe(false);
+    });
+
+    it('the null PREDICATES are untouched — $eq: null / $ne: null keep parsing (#5332)', () => {
+      expect(FieldOperatorsSchema.safeParse({ $eq: null }).success).toBe(true);
+      expect(FieldOperatorsSchema.safeParse({ $ne: null }).success).toBe(true);
+      // The normalized AST is a logical group at its root (a bare field
+      // condition is an unrecognised key there), so the control is nested.
+      expect(NormalizedFilterSchema.safeParse({ $and: [{ close_date: { $eq: null } }] }).success).toBe(true);
+      expect(NormalizedFilterSchema.safeParse({ $and: [{ close_date: { $gte: 1 } }] }).success).toBe(true);
+    });
+
+    it('refuses ONLY null — the falsy VALUES the slots declare keep parsing', () => {
+      for (const op of OPS) {
+        expect(ComparisonOperatorSchema.safeParse({ [op]: 0 }).success, op).toBe(true);
+        expect(ComparisonOperatorSchema.safeParse({ [op]: '' }).success, op).toBe(true);
+        expect(FieldOperatorsSchema.safeParse({ [op]: 0 }).success, op).toBe(true);
+        expect(FieldOperatorsSchema.safeParse({ [op]: '' }).success, op).toBe(true);
+      }
+      // A comparand orderable at no backend keeps zod's own union verdict —
+      // the pointed message is for null and nothing else.
+      const other = ComparisonOperatorSchema.safeParse({ $gt: true });
+      expect(other.success).toBe(false);
+      expect(messagesOf(other)).not.toContain('null is not a valid');
+    });
+  });
 });
 
 // ============================================================================

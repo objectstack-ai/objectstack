@@ -673,6 +673,12 @@ function report(findings, stats, expected, proseStats) {
 // Self-test -- every limb has a positive control, each paired with its green.
 // ---------------------------------------------------------------------------
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-docs-image-tag self-test reached its verdict';
+
 async function selfTest() {
   const failures = [];
   let checked = 0;
@@ -1183,6 +1189,8 @@ async function selfTest() {
     + 'anchor -- observed FAILING, and the X.Y.Z metavariable, the historical "removed in 17.0.0" sentences, '
     + "the upgrade-checklist rows and the reader's own app version observed EXCLUDED.",
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 // ---------------------------------------------------------------------------
@@ -1208,7 +1216,14 @@ function main() {
 // file and the branch is taken exactly as before.
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    await selfTest();
+    if ((await selfTest()) !== SELF_TEST_VERDICT) {
+        console.error(
+            '\n✗ check-docs-image-tag self-test: selfTest() returned without reaching its verdict,\n'
+                + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+    }
   } else {
     main();
   }

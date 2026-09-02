@@ -187,6 +187,13 @@ function findViolations(file) {
  * the pattern quoted inside a comment. A guard nobody tests is a guard that
  * silently stops matching.
  */
+
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-meta-type-normalized self-test reached its verdict';
+
 function selfTest() {
     const fixture = `
         // if (req.params.type === 'doc') {} -- quoted in a line comment
@@ -228,11 +235,20 @@ function selfTest() {
         process.exit(1);
     }
     console.log('check:meta-type-normalized --self-test passed (5 shapes caught, pass-through and comments untouched)');
+
+    return SELF_TEST_VERDICT;
 }
 
 function main() {
     if (process.argv.includes('--self-test')) {
-        selfTest();
+        if (selfTest() !== SELF_TEST_VERDICT) {
+            console.error(
+                '\n✗ check-meta-type-normalized self-test: selfTest() returned without reaching its verdict,\n'
+                    + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                    + 'that never finished as a self-test that passed.\n',
+            );
+            process.exit(1);
+        }
         return;
     }
     selfTest();

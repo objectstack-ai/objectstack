@@ -66,12 +66,25 @@ function toKeyedDefinition(type: string, name: string, data: unknown): any {
 /**
  * MetadataFacade
  *
- * Provides a clean, injectable interface over SchemaRegistry.
- * Registered as the 'metadata' kernel service to eliminate
- * downstream packages needing to manually wrap SchemaRegistry.
+ * A clean, injectable `IMetadataService` over a `SchemaRegistry`, so a host
+ * does not have to wrap `SchemaRegistry` by hand. Implements the async
+ * `IMetadataService` interface (`@objectstack/spec/contracts`) by delegating
+ * to `SchemaRegistry` (in-memory) with Promise wrappers.
  *
- * Implements the async IMetadataService interface.
- * Internally delegates to SchemaRegistry (in-memory) with Promise wrappers.
+ * ⛔ **Nothing in this repository installs a `MetadataFacade` into the
+ * `'metadata'` kernel slot — this class is not that service.** In-tree the
+ * slot is filled by `MetadataPlugin`'s own manager
+ * (`ctx.registerService('metadata', this.manager)`, `@objectstack/metadata`)
+ * or, when no plugin provides one, by the kernel's core fallback
+ * `createMemoryMetadata` (`CORE_FALLBACK_FACTORIES.metadata`,
+ * `@objectstack/core`). This class exists for DOWNSTREAM hosts: it is
+ * exported from this package's root and `core` entrypoints, and a host that
+ * wants a `SchemaRegistry`-backed metadata service installs it itself. An
+ * earlier revision of this docblock asserted the opposite; that sentence, not
+ * any code, is the likely source of #13331's premise.
+ * {@link registerObjectBothPlaces}'s header states the same fact with the
+ * fuller account of what being uninstalled in-tree costs — the two are meant
+ * to be read as one voice, so change both or neither.
  *
  * Each facade is bound to a specific SchemaRegistry instance — passed in the
  * constructor — so that multi-kernel servers can give every kernel its own

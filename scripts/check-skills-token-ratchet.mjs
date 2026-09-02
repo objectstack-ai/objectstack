@@ -404,7 +404,6 @@ export const CEILINGS = new Map([
   ['skills/objectstack-data/references/data-hooks.md', 12611],
   ['skills/objectstack-data/rules/datasources.md', 911],
   ['skills/objectstack-data/rules/field-types.md', 3584],
-  ['skills/objectstack-data/rules/hooks.md', 2195],
   ['skills/objectstack-data/rules/indexing.md', 3241],
   ['skills/objectstack-data/rules/lifecycle.md', 1590],
   ['skills/objectstack-data/rules/naming.md', 773],
@@ -441,7 +440,6 @@ export const CEILINGS = new Map([
 
   // the remaining skills' eval notes
   ['skills/objectstack-ai/evals/README.md', 315],
-  ['skills/objectstack-api/evals/README.md', 546],
   ['skills/objectstack-i18n/evals/README.md', 411],
 ]);
 

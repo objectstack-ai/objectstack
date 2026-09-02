@@ -373,6 +373,12 @@ async function main() {
 
 // ── Self-test ───────────────────────────────────────────────────────────────
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-aggregator-roster self-test reached its verdict';
+
 async function selfTest() {
   const failures = [];
   let checked = 0;
@@ -594,6 +600,8 @@ async function selfTest() {
       `(baseline + a dropped member and a phantom needs: entry for each of the ${REQUIRED_AGGREGATORS.length} required aggregators + ` +
       `six refusals + the --leg cross-check + the malformed-roster and laundered-non-member pins + the CI wiring).`,
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 // The CLI dispatch is guarded so that IMPORTING this module is inert: `judge`
@@ -601,6 +609,15 @@ async function selfTest() {
 // that ran its gate on import would silently judge THIS repo instead and print
 // a verdict about the wrong subject (`check:entry-guard`).
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) await selfTest();
+  if (process.argv.includes('--self-test')) {
+    if ((await selfTest()) !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-aggregator-roster self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  }
   else await main();
 }

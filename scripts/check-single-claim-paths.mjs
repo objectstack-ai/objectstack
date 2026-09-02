@@ -377,6 +377,13 @@ const githubApi = (token) => async (path) => {
 // own invariants, the short-circuit that makes this affordable, and the wiring.
 // ---------------------------------------------------------------------------
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const cases = [];
   const t = (name, actual, expected) => cases.push([name, actual, expected]);
@@ -479,6 +486,7 @@ function selfTest() {
   };
 
   const ctxOf = (number) => ({ number: String(number), repo: 'o/r', token: 't' });
+  selfTestReachedVerdict = true;
   return (async () => {
     calls.length = 0;
     const quiet = await collect(ctxOf(200), fakeApi({ 200: ['fixture/tree/alpha.ts', 'fixture/tree/beta.ts'] }));
@@ -551,6 +559,14 @@ const isMain = isEntrypoint(import.meta.url);
 if (isMain) {
   if (process.argv.includes('--self-test')) {
     await selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-single-claim-paths self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
   } else {
     const ctx = readPrContext(process.env);
     const resolved = ctx === null ? null : await collect(ctx, githubApi(ctx.token));

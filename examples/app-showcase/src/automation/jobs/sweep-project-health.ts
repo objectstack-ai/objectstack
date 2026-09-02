@@ -20,22 +20,41 @@
  * "never advertise a capability the runtime doesn't deliver" (AGENTS.md Prime
  * Directive #10) cuts both ways.
  *
- * ## Why the engine handle is captured rather than passed in
+ * ## Where the engine comes from — the ARGUMENT, never a module-scope handle
  *
  * A job handler is resolved through the SAME `defineStack({ functions })`
  * registry as a `script` flow node (`collectBundleFunctions` in
- * `@objectstack/runtime`), and the job service invokes it with
- * `{ jobId, data }` — `IJobService`'s `JobHandler` context — plus the `bundle`
- * the AppPlugin adds. There is deliberately no data engine in that context: a
- * flow function is PURE by default, returning a value a later declarative node
- * persists (#4343 / #4396).
+ * `@objectstack/runtime`), and a `script` node's context deliberately carries
+ * no data engine: a flow function is PURE, returning a value a later
+ * declarative node persists (#4343 / #4396).
  *
- * A background job is the case that contract does not cover — nothing
- * downstream is going to persist for it — so it does its own I/O over a handle
- * captured at `onEnable`, and DECLARES that in the `functions` map with
- * `effect: 'writes'` (#4396). That declaration grants nothing; it tells the
- * platform this callable's writes are not counted by the caller, so a run
- * reports "cannot say" instead of silently claiming it wrote nothing.
+ * A JOB is the case that contract does not cover — it has no graph, so no node
+ * before it reads and none after it persists. Since #14094 the AppPlugin
+ * therefore invokes a job's `functions` entry with a `JobHandlerContext`:
+ * `{ jobId, data, bundle }` widened with `ql` (the same engine handle
+ * `defineStack({ onEnable })` receives) and `logger`. This handler takes both
+ * from that argument, which is the only route that survives the shipped
+ * deployment path.
+ *
+ * ⛔ The shape this file used to have — `onEnable` filling a module-scope
+ * `let host` the handler read later — does NOT survive a built artifact, and
+ * fails silently rather than loudly. `objectstack build` emits `functions` into
+ * a sibling runtime module exporting only `{ functions, meta }`; the artifact
+ * JSON carries no `onEnable`, and `mergeRuntimeModule`
+ * (`packages/runtime/src/load-artifact-bundle.ts`) merges only `functions`. So
+ * on an artifact-served boot the binding was never made, the handle stayed
+ * `undefined`, and `showcase_health_sweep` fired on schedule, recomputed
+ * nothing, and reported a clean run (#14257). The pin against a return is in
+ * `test/inert-wirings.test.ts`, which reaches this handler through its
+ * `functions` entry — the one thing an artifact carries — with no `onEnable`
+ * anywhere in the test.
+ *
+ * The entry still DECLARES `effect: 'writes'` in the `functions` map (#4396),
+ * and taking `ql` from the argument does not change that: the declaration was
+ * never about where the handle came from. A job's writes are counted by no
+ * caller — there is no downstream declarative node to count them — so
+ * undeclared, a run reports having written nothing instead of "cannot say",
+ * which is indistinguishable from the broken sweep #4354 exists to detect.
  *
  * ## What it computes
  *
@@ -56,6 +75,8 @@
  * so a steady-state sweep performs zero updates.
  */
 
+import type { JobHandlerContext } from '@objectstack/runtime';
+
 /** Statuses whose health is still in play. */
 const SWEPT_STATUSES = ['active', 'on_hold'] as const;
 
@@ -70,36 +91,6 @@ const READ_LIMIT = 1000;
 const SYS = { isSystem: true } as const;
 
 type Health = 'green' | 'yellow' | 'red';
-
-interface JobHostEngine {
-  find: (object: string, query: unknown, options?: unknown) => Promise<unknown>;
-  update: (object: string, data: Record<string, unknown>, options?: unknown) => Promise<unknown>;
-}
-
-interface JobHostContext {
-  ql: JobHostEngine;
-  logger?: {
-    info?: (...a: unknown[]) => void;
-    warn?: (...a: unknown[]) => void;
-  };
-}
-
-/**
- * The engine handle the job runs over, captured from the host context at
- * `onEnable`. Module scope is what makes it reachable from a `functions` entry,
- * which the job service calls with no context of its own — the "closed over a
- * client at module scope" shape `effect: 'writes'` exists to declare.
- */
-let host: JobHostContext | undefined;
-
-/**
- * Give `sweepProjectHealth` its data handle. Called from `onEnable` in
- * `objectstack.config.ts`, which is the one place the app is handed a live
- * engine. Idempotent — a re-enable simply rebinds.
- */
-export function bindShowcaseJobRuntime(ctx: JobHostContext): void {
-  host = ctx;
-}
 
 /** Normalize the engine's list shape (array, or `{ records }`). */
 function rowsOf(result: unknown): Array<Record<string, unknown>> {
@@ -120,7 +111,7 @@ function num(value: unknown): number | undefined {
 
 /**
  * The health verdict for one project — exported so the rule is unit-testable
- * without an engine (see `test/job-health-sweep.test.ts`).
+ * without an engine (see `test/inert-wirings.test.ts`).
  */
 export function healthFor(input: {
   budget?: unknown;
@@ -148,20 +139,12 @@ export function healthFor(input: {
  *
  * Registered as `functions.sweepProjectHealth` with `effect: 'writes'` and
  * scheduled by `HealthSweepJob` (`0 1 * * *` UTC).
+ *
+ * `jobId`, `ql` and `logger` all come off the `JobHandlerContext` the AppPlugin
+ * builds per run — there is no binding step, so there is no boot path on which
+ * this handler can be reached without them.
  */
-export async function sweepProjectHealth(ctx?: { jobId?: string }): Promise<void> {
-  const jobId = ctx?.jobId ?? 'showcase_health_sweep';
-  if (!host) {
-    // Reached only if the job somehow fires before `onEnable` bound the
-    // handle. Functional degradation, not a durability one: nothing claimed to
-    // be persisted has been lost, and the next scheduled run recomputes
-    // everything from scratch (AGENTS.md "Degradation log levels").
-    // eslint-disable-next-line no-console
-    console.warn(`[showcase] ${jobId}: no engine handle bound yet — skipping this run`);
-    return;
-  }
-  const { ql, logger } = host;
-
+export async function sweepProjectHealth({ jobId, ql, logger }: JobHandlerContext): Promise<void> {
   const projects = rowsOf(
     await ql.find('showcase_project', {
       where: { status: { $in: [...SWEPT_STATUSES] } },
@@ -171,7 +154,7 @@ export async function sweepProjectHealth(ctx?: { jobId?: string }): Promise<void
     }),
   );
   if (projects.length === 0) {
-    logger?.info?.('[showcase] project health sweep: no in-play projects', { job: jobId });
+    logger.info('[showcase] project health sweep: no in-play projects', { job: jobId });
     return;
   }
 
@@ -208,7 +191,7 @@ export async function sweepProjectHealth(ctx?: { jobId?: string }): Promise<void
       await ql.update('showcase_project', { id, health: next }, { context: SYS });
       updated += 1;
     } catch (err) {
-      logger?.warn?.('[showcase] project health update failed', {
+      logger.warn('[showcase] project health update failed', {
         job: jobId,
         project: id,
         error: err instanceof Error ? err.message : String(err),
@@ -216,7 +199,7 @@ export async function sweepProjectHealth(ctx?: { jobId?: string }): Promise<void
     }
   }
 
-  logger?.info?.('[showcase] project health sweep complete', {
+  logger.info('[showcase] project health sweep complete', {
     job: jobId,
     scanned: projects.length,
     updated,

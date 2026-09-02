@@ -59,7 +59,10 @@ describe('EXPRESSION_BINDABLE_TEXT_KEYS_BY_COMPONENT — measured carriage', () 
   it('matches the renderer read points measured at the objectui pin', () => {
     // data-display/statistic.tsx reads schema.label / .value / .description;
     // layout/card.tsx reads schema.title / .description;
-    // form/button.tsx (and action/action-button.tsx) read schema.label.
+    // form/button.tsx reads schema.label — and the row covers that BARE
+    // `button` spelling alone: action/action-button.tsx registers as
+    // `action:button`, a different key this map deliberately does not
+    // carry (objectstack#13672; see the module docblock).
     expect(EXPRESSION_BINDABLE_TEXT_KEYS_BY_COMPONENT).toEqual({
       statistic: ['label', 'value', 'description'],
       card: ['title', 'description'],
@@ -110,9 +113,21 @@ describe('expressionBindableTextKeysFor — the mechanical per-type answer', () 
 
   it('answers the empty set for every unlisted type — closed, never inferred', () => {
     // `text` binds through its own `content` leg; `element:*` / `page:*`
-    // config rides the evaluated `properties` bag — none of them get rows
-    // inferred from what their renderers happen to read.
-    for (const type of ['text', 'element:text', 'page:card', 'alert', '']) {
+    // config rides the evaluated `properties` bag; and a namespace-prefixed
+    // spelling is a DIFFERENT key from the bare name, so `action:button` and
+    // `ui:button` answer empty by construction — the pair the objectstack#13672
+    // ruling recorded as deliberately out, pinned here so a later prefix-
+    // stripping "fix" cannot move the machine face in silence. None of them get
+    // rows inferred from what their renderers happen to read.
+    for (const type of [
+      'text',
+      'element:text',
+      'page:card',
+      'action:button',
+      'ui:button',
+      'alert',
+      '',
+    ]) {
       const keys = expressionBindableTextKeysFor(type);
       expect(keys).toEqual([]);
       expect(Object.isFrozen(keys)).toBe(true);

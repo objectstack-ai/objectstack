@@ -532,6 +532,13 @@ function auditRoot(root) {
 // Self-test -- fixture trees, and one REAL revision
 // ---------------------------------------------------------------------------
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 export function selfTest() {
   const cases = [];
   const t = (name, ok, detail) => cases.push({ name, ok: Boolean(ok), detail });
@@ -757,12 +764,24 @@ export function selfTest() {
     + `(real pre-#10375 fixture reds, the repaired file and both delegating-alias directions stay green, `
     + `every roster name reds, every excluded name stays green, and all five refusals are paired with a tree that still returns a verdict).`,
   );
+  selfTestReachedVerdict = true;
   return 0;
 }
 
 if (isEntrypoint(import.meta.url)) {
   const argv = process.argv.slice(2);
-  if (argv.includes('--self-test')) process.exit(selfTest());
+  if (argv.includes('--self-test')) {
+      const selfTestCode = selfTest();
+        if (!selfTestReachedVerdict) {
+            console.error(
+                '\n✗ check-plugin-teardown-shape self-test: selfTest() returned without reaching its verdict,\n'
+                    + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                    + 'that never finished as a self-test that passed.\n',
+            );
+            process.exit(1);
+        }
+        process.exit(selfTestCode);
+  }
   else if (argv.includes('--list')) process.exit(list());
   else if (argv.includes('--audit-root')) process.exit(auditRoot(argv[argv.indexOf('--audit-root') + 1]));
   else process.exit(main());

@@ -299,6 +299,13 @@ export function findViolations(src, file, stats = null) {
   return hits;
 }
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const cases = [
     // [source, expectedHitCount, label]
@@ -437,10 +444,22 @@ function selfTest() {
   console.log(
     `✓ check-error-code-casing self-test: ${cases.length} recognizer case(s) + ${partitionCases.length + 1} registry case(s) pass.`,
   );
+  selfTestReachedVerdict = true;
 }
 
 function main() {
-  if (process.argv.includes('--self-test')) return selfTest();
+  if (process.argv.includes('--self-test')) {
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-error-code-casing self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    return selfTestCode;
+  }
 
   const files = SCAN_ROOTS.flatMap((r) => walk(join(ROOT, r)));
   const stats = { optOuts: 0, exempt: 0 };

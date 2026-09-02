@@ -207,13 +207,41 @@ function assertInsertConfirmedRowId(res: { id: string } | string | undefined, ro
 // backtracking (ReDoS) of the naive `[^\s@]+\.[^\s@]+` shape.
 const EMAIL_REGEX = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
 
+/** The bare `addr-spec` half of an {@link EmailAddress}, trimmed. */
+function addressPart(addr: EmailAddress): string {
+  const obj = typeof addr === 'string' ? { address: addr } : (addr ?? { address: undefined });
+  return String(obj.address ?? '').trim();
+}
+
+/**
+ * Would {@link formatAddress} accept this address — i.e. can a message ever
+ * be sent with it?
+ *
+ * The predicate exists so a CONFIGURED sender can be judged where it is
+ * configured (`EmailServicePlugin.init`, the `mail` settings apply) instead of
+ * on the first send. `OS_EMAIL_FROM="ObjectOS Local <noreply@localhost>"` is
+ * the measured shape: `EMAIL_REGEX` requires a dotted domain, so every send
+ * threw `Invalid email address` deep inside `normalizeMessage` — and on the
+ * sign-up path that throw landed in better-auth's `runInBackgroundOrAwait`,
+ * which logs and swallows, so the account was created, the UI said "we sent
+ * you a verification email", and nothing had been sent.
+ *
+ * It shares {@link EMAIL_REGEX} with `formatAddress` on purpose: a second
+ * spelling of "valid enough to send" would let a boot pass a check the send
+ * path then fails.
+ */
+export function isSendableAddress(addr: EmailAddress | undefined | null): boolean {
+  if (addr == null) return false;
+  return EMAIL_REGEX.test(addressPart(addr));
+}
+
 /**
  * Format an EmailAddress (string or {name,address}) into the canonical
  * `"Display" <addr>` form. Throws if address is malformed.
  */
 export function formatAddress(addr: EmailAddress): string {
   const obj = typeof addr === 'string' ? { address: addr } : addr;
-  const address = String(obj.address ?? '').trim();
+  const address = addressPart(addr);
   if (!EMAIL_REGEX.test(address)) {
     throw new Error(`Invalid email address: ${address || '(empty)'}`);
   }
@@ -272,6 +300,35 @@ export function normalizeMessage(
   if (input.attachments && input.attachments.length > 0) msg.attachments = input.attachments;
   if (input.headers && Object.keys(input.headers).length > 0) msg.headers = input.headers;
   return msg;
+}
+
+/**
+ * What a `sys_email` envelope column says when the rejected input carried
+ * nothing usable for it. Non-empty on purpose: `from_address`, `to_addresses`
+ * and `subject` are `required: true` on the object, so an empty string would
+ * make the rejection record itself unwritable — and "the caller supplied no
+ * recipient" is exactly the fact the row exists to preserve.
+ */
+const UNSTATED_COLUMN = '(none)';
+
+/**
+ * Render an address for the REJECTION record — never for delivery.
+ *
+ * Deliberately not {@link formatAddress}: the message is here precisely
+ * because canonicalization threw, so the row records what the caller actually
+ * passed, verbatim, rather than throwing a second time while trying to
+ * describe the first throw.
+ */
+function rawAddressText(v: EmailAddress | EmailAddress[] | undefined): string {
+  if (v == null) return '';
+  const one = (a: EmailAddress): string => {
+    if (a == null) return '';
+    if (typeof a === 'string') return a.trim();
+    const address = String(a.address ?? '').trim();
+    const name = a.name?.trim();
+    return name ? `${name} <${address}>` : address;
+  };
+  return (Array.isArray(v) ? v : [v]).map(one).filter(Boolean).join(', ');
 }
 
 /** Split a persisted comma-separated address column back into a list. */
@@ -607,7 +664,17 @@ export class EmailService implements IEmailService {
     try {
       normalized = normalizeMessage(input, this.options.defaultFrom);
     } catch (err: any) {
-      // Validation failures must surface to the caller.
+      // Validation failures must surface to the caller — AND leave a record.
+      //
+      // This is the ONE window in which a send could fail without producing a
+      // `sys_email` row at all: everything below persists first and finalizes
+      // the same row, so a transport failure is already an audit row at
+      // `status:'failed'`. A message rejected HERE used to vanish, and the
+      // caller's own error handling is not a substitute — better-auth runs
+      // `sendVerificationEmail` through `runInBackgroundOrAwait`, which logs
+      // the throw and swallows it, so the only durable evidence a deployment
+      // has that its verification mail never left is the row written here.
+      await this.recordRejectedMessage(input, err);
       throw err;
     }
 
@@ -754,6 +821,67 @@ export class EmailService implements IEmailService {
       // the worker's — with the row committed at `queued`, re-checkable, which
       // is what makes the boot sweep a backstop rather than a double-send.
       this.managedRowIds.delete(id);
+    }
+  }
+
+  /**
+   * Write the `sys_email` record for a message REJECTED before delivery —
+   * a `normalizeMessage` throw (bad/absent `from`, no recipient, no subject,
+   * no body).
+   *
+   * ## Why a row for something that was never sent
+   * `sys_email` is documented as the log of "every email the platform has
+   * tried to deliver", and until this existed the one class it did NOT record
+   * was the class nobody can otherwise see: the caller's error handling may be
+   * a `catch` that logs (better-auth's background-task runner is exactly
+   * that), so the attempt left no trace an operator could query. `status` and
+   * `error` say what happened; the envelope columns say which message it was.
+   *
+   * ## Why the row is safe to insert
+   * It lands at `status:'failed'`, and BOTH re-delivery paths gate on
+   * `status === 'queued'` — the `afterInsert` outbox drain hook and the boot
+   * `sweepStrandedOutbox`. So a rejection record can never be picked up and
+   * "re-delivered": the message was never acceptable in the first place.
+   *
+   * ## Why it never throws
+   * It runs on a path that is already failing and whose error belongs to the
+   * caller. A persistence failure here is reported at `warn` and swallowed —
+   * the same non-fatal treatment the happy path gives a failed insert — so
+   * this can never replace the caller's real error with a storage one.
+   */
+  private async recordRejectedMessage(input: SendEmailInput, err: unknown): Promise<void> {
+    const persistence = this.options.persistence;
+    if (!persistence) return;
+    const reason = String((err as any)?.message ?? err ?? 'rejected').slice(0, 900);
+    const raw = (input ?? {}) as Partial<SendEmailInput>;
+    const row: Record<string, any> = {
+      id: newId(),
+      from_address: rawAddressText(raw.from ?? this.options.defaultFrom) || UNSTATED_COLUMN,
+      to_addresses: rawAddressText(raw.to) || UNSTATED_COLUMN,
+      ...(rawAddressText(raw.cc) ? { cc_addresses: rawAddressText(raw.cc) } : {}),
+      ...(rawAddressText(raw.bcc) ? { bcc_addresses: rawAddressText(raw.bcc) } : {}),
+      ...(rawAddressText(raw.replyTo) ? { reply_to: rawAddressText(raw.replyTo) } : {}),
+      subject: String(raw.subject ?? '').trim() || UNSTATED_COLUMN,
+      ...(typeof raw.text === 'string' ? { body_text: raw.text } : {}),
+      ...(typeof raw.html === 'string' ? { body_html: raw.html } : {}),
+      ...(raw.relatedObject ? { related_object: raw.relatedObject } : {}),
+      ...(raw.relatedId ? { related_id: raw.relatedId } : {}),
+      ...(raw.sentBy ? { sent_by: raw.sentBy } : {}),
+      ...(raw.organizationId ? { organization_id: raw.organizationId } : {}),
+      status: 'failed',
+      // Prefixed so the column distinguishes the two ways a send fails: this
+      // message never reached a transport, so reading it as "the SMTP host
+      // rejected us" would send an operator to the wrong system.
+      error: `rejected before delivery: ${reason}`,
+      attempt_count: 0,
+    };
+    try {
+      await persistence.insert(row);
+    } catch (persistErr: any) {
+      this.options.logger?.warn(
+        'EmailService: sys_email rejection record could not be persisted (non-fatal)',
+        { error: persistErr?.message, rejection: reason },
+      );
     }
   }
 

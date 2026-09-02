@@ -139,7 +139,9 @@ const ORDERING_COMPARAND_DESCRIPTION =
   + 'becomes the half-open next-day boundary). Ordering NON-temporal text is '
   + 'permitted but NOT promised: the order is the backend collation\'s '
   + '(byte-wise on SQLite, the database locale on Postgres, UTF-16 code units '
-  + 'in the JS matchers), and those coincide only for ASCII.';
+  + 'in the JS matchers), and those coincide only for ASCII. null is NOT a '
+  + 'comparand: null is not ordered — state absence with the null predicate '
+  + 'instead ($eq: null is "has no value", $ne: null is "has a value").';
 
 /**
  * Ordering-comparison operators.
@@ -226,22 +228,53 @@ const ORDERING_COMPARAND_DESCRIPTION =
  * backend agrees. Ordering arbitrary natural-language text is permitted, not
  * promised: it is the collation's answer, and it may differ per backend.
  */
+/**
+ * [#14080] The author-facing refusal for a `null` comparand of `$gt` / `$gte`
+ * / `$lt` / `$lte`. Ruled 2026-09-01 (option A), the sibling of the 2026-08-31
+ * list-position ruling and the same replace-only mechanism as
+ * `rangeEndpointSchema`'s null endpoint: `null` never passed these unions (it
+ * is none of number | Date | string | { $field }), so what the ruling adds at
+ * the SCHEMA door is the POINTED message in place of zod's generic union text.
+ * The RUNTIME door — `parseFilterAST`, which does not run this schema — gains
+ * the refusal itself: `nullOrderingComparandError`
+ * (`./filter-comparand-shape.ts`), reconciled by pin.
+ */
+function nullOrderingComparandMessage(op: string): string {
+  return (
+    `null is not a valid ${op} comparand. null is not ordered, and no two evaluation faces `
+    + 'agree on what an ordering against it matches (driver-memory\'s live path reads two '
+    + 'absences as equal; its reference matcher compares through JS coercion). State absence '
+    + 'with the null predicate instead: {"$eq": null} is "has no value", {"$ne": null} is '
+    + '"has a value". Ruled 2026-09-01: a null ordering comparand is refused at the validation '
+    + 'entrance.'
+  );
+}
+
+/**
+ * One ordering slot, shared by the documentation copy
+ * ({@link ComparisonOperatorSchema}) and the enforced copy
+ * (`FieldOperatorsSchema`) — the two share the CODE rather than a description
+ * of it, the pairing `setMembershipSchema` gives the set slots, so they cannot
+ * drift (#5685 landed the string widening in one copy first and left the
+ * reachable surface still refusing the platform's own output).
+ */
+const orderingComparandSchema = (op: '$gt' | '$gte' | '$lt' | '$lte', label: string) =>
+  z.union([z.number(), z.date(), z.string(), FieldReferenceSchema], {
+    error: (issue) => (issue.input === null ? nullOrderingComparandMessage(op) : undefined),
+  }).optional().describe(`${label}. ${ORDERING_COMPARAND_DESCRIPTION}`);
+
 export const ComparisonOperatorSchema = lazySchema(() => z.object({
   /** Greater than - SQL: > | MongoDB: $gt */
-  $gt: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional()
-    .describe(`Greater than. ${ORDERING_COMPARAND_DESCRIPTION}`),
+  $gt: orderingComparandSchema('$gt', 'Greater than'),
 
   /** Greater than or equal to - SQL: >= | MongoDB: $gte */
-  $gte: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional()
-    .describe(`Greater than or equal to. ${ORDERING_COMPARAND_DESCRIPTION}`),
+  $gte: orderingComparandSchema('$gte', 'Greater than or equal to'),
 
   /** Less than - SQL: < | MongoDB: $lt */
-  $lt: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional()
-    .describe(`Less than. ${ORDERING_COMPARAND_DESCRIPTION}`),
+  $lt: orderingComparandSchema('$lt', 'Less than'),
 
   /** Less than or equal to - SQL: <= | MongoDB: $lte */
-  $lte: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional()
-    .describe(`Less than or equal to. ${ORDERING_COMPARAND_DESCRIPTION}`),
+  $lte: orderingComparandSchema('$lte', 'Less than or equal to'),
 }));
 
 // ============================================================================
@@ -1019,12 +1052,13 @@ export const FieldOperatorsSchema = lazySchema(() => z.object({
   // gives at length (#5685): the date-macro resolver and all three first-party
   // callers produce ISO/clock STRINGS in these slots and nothing else. This copy
   // is the ENFORCED one — `NormalizedFilterSchema` validates against it and the
-  // exported `FieldOperators` is inferred from it — so it must not drift from the
-  // documentation copy above.
-  $gt: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional(),
-  $gte: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional(),
-  $lt: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional(),
-  $lte: z.union([z.number(), z.date(), z.string(), FieldReferenceSchema]).optional(),
+  // exported `FieldOperators` is inferred from it — so it is built from the same
+  // `orderingComparandSchema` factory the documentation copy uses (#14080): one
+  // union, one null-comparand message, no drift by construction.
+  $gt: orderingComparandSchema('$gt', 'Greater than'),
+  $gte: orderingComparandSchema('$gte', 'Greater than or equal to'),
+  $lt: orderingComparandSchema('$lt', 'Less than'),
+  $lte: orderingComparandSchema('$lte', 'Less than or equal to'),
   
   // Set. Members are open (`z.any()`) EXCEPT the one shape no backend resolves:
   // a `{ $field }` reference, ruled out by name in #7596. Built from the same

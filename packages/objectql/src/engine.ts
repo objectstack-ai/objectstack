@@ -119,6 +119,7 @@ import { isMissingTableError } from '@objectstack/metadata/errors';
 // engine is the consumer-side tolerant parsing PD #12 forbids and precedent
 // #5841 retired.
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
+import { DuplicateRecordError, envelopeUniqueViolation } from './duplicate-record-error.js';
 // [#8682] The write-path loggers' redaction — bound values never reach the log.
 import { redactBoundStatement } from './driver-fault-redaction.js';
 // [#8844] The runtime half of #8686's ruling: a system-context write on a
@@ -169,7 +170,7 @@ import {
   SECRET_MASK,
 } from './secret-fields.js';
 import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
-import { SchemaRegistry, computeFQN } from './registry.js';
+import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
 import { ExpressionEngine } from '@objectstack/formula';
@@ -188,6 +189,12 @@ import { bindHooksToEngine } from './hook-binder.js';
 import { validateRecord, normalizeMultiValueFields, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import { evaluateValidationRules, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields } from './validation/rule-validator.js';
+// [#14088] The before-phase write recorder — the provenance channel the static
+// `readonly` strip needs to tell a hook's write from a caller's echo of the
+// SAME value. Armed and sealed in `update()`; the module owns the argument for
+// why neither end may move.
+import { recordHookPayloadWrites } from './hook-write-provenance.js';
+import type { HookWriteRecording } from './hook-write-provenance.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
 // total over the MASTER's declared fields before it leaves this engine — the
@@ -4467,8 +4474,12 @@ export class ObjectQL implements IObjectQLEngine {
    *     (#6250) — never a word-list of this method's own.
    *   - When the dialect names the conflicting COLUMN (`uniqueViolationColumn`,
    *     #6544), it must be one of the fields the engine issued. A conflict on
-   *     some other unique field is the caller's business error and is rethrown
-   *     untouched, exactly as #5495's disposition ruled («非本字段的冲突原样上抛»).
+   *     some other unique field is the caller's business error and is NOT
+   *     re-issued, exactly as #5495's disposition ruled («非本字段的冲突原样上抛»);
+   *     since #14095 it leaves the door as the `DUPLICATE_RECORD` envelope
+   *     (`DuplicateRecordError`) carrying that same driver error as `cause` —
+   *     the disposition is about not RE-ISSUING, and the envelope changes
+   *     nothing about which failures qualify.
    *     When the dialect names no determinable column the attribution falls back
    *     to "the engine issued a number on this row, and the row was refused as a
    *     duplicate" — deliberately, because `uniqueViolationColumn` answers
@@ -4560,7 +4571,14 @@ export class ObjectQL implements IObjectQLEngine {
       try {
         return await driver.create(object, row, driverOptions);
       } catch (error) {
-        if (!this.isIssuedAutonumberCollision(error, issued)) throw error;
+        // [#14095] Not OUR collision to re-issue — so this is where a driver's
+        // refusal leaves the single-row door, and where it stops being the
+        // driver's error. `envelopeUniqueViolation` returns everything that is
+        // not a unique violation untouched (a deadlock, a NOT NULL, an
+        // unreachable store), so only the recognised conflict changes shape.
+        if (!this.isIssuedAutonumberCollision(error, issued)) {
+          throw envelopeUniqueViolation(error, object);
+        }
         // Whatever happens next, the stale counter must not survive this call:
         // leaving it in place is what turned one collision into a storm.
         for (const one of issued) this.autonumberCounters.delete(one.counterKey);
@@ -4585,8 +4603,17 @@ export class ObjectQL implements IObjectQLEngine {
         for (const one of issued) delete row[one.field];
         issued = await this.applyAutonumbers(object, row, execCtx, driverOwnsAutonumber);
         // Nothing left to re-issue (the field vanished from the schema
-        // mid-flight) — the next failure is the caller's to see.
-        if (issued.length === 0) return await driver.create(object, row, driverOptions);
+        // mid-flight) — the next failure is the caller's to see, enveloped on
+        // the same terms as the exit above (#14095): this call is OUTSIDE the
+        // loop's own `try`, so its rejection is a second driver-error exit and
+        // not a path the branch above covers.
+        if (issued.length === 0) {
+          try {
+            return await driver.create(object, row, driverOptions);
+          } catch (retryError) {
+            throw envelopeUniqueViolation(retryError, object);
+          }
+        }
       }
     }
   }
@@ -4768,7 +4795,7 @@ export class ObjectQL implements IObjectQLEngine {
    * Key: Package ≠ App. The manifest is the package. The apps[] array inside
    * the manifest contains UI navigation definitions (AppSchema).
    */
-  registerApp(manifest: any) {
+  registerApp(manifest: any, scope?: ArtifactInstallScope) {
       const id = manifest.id || manifest.name;
       const namespace = manifest.namespace as string | undefined;
       this.invalidateSummaryIndex(); // new objects may add/change summary fields
@@ -4791,8 +4818,13 @@ export class ObjectQL implements IObjectQLEngine {
         }
       }
 
-      // 1. Register the Package (manifest + lifecycle state)
-      this._registry.installPackage(manifest);
+      // 1. Register the Package (manifest + lifecycle state).
+      // [ADR-0130 D1/D3] `scope` is the artifact's own package list, passed by
+      // the load path that read the artifact. It is what lets the install gate
+      // tell a CO-OWNER (another package from this same artifact) from a
+      // stranger — the question D1 corrected the gate to ask. Absent for every
+      // single-package caller, where the gate behaves exactly as before (D7).
+      this._registry.installPackage(manifest, undefined, scope);
       this.logger.debug('Installed Package', { id: manifest.id, name: manifest.name, namespace });
 
       // 2. Register owned objects
@@ -9454,6 +9486,30 @@ export class ObjectQL implements IObjectQLEngine {
     };
   }
 
+  /**
+   * Create one record, or a batch of them.
+   *
+   * # The error contract on a unique violation (#14095)
+   *
+   * A driver's unique-constraint refusal leaves this door as the ADR-0112
+   * envelope `DuplicateRecordError` — `code: 'DUPLICATE_RECORD'`, `status: 409`,
+   * the driver's own error whole on `cause`, and `field` when the dialect
+   * determinably named the conflicting COLUMN. Identically on every driver, in
+   * the single-row and batch paths alike, so the platform's own recommended
+   * idiom ("declare a unique index, attempt the insert, swallow the violation")
+   * is expressible by an application that knows nothing about SQLite's
+   * `SQLITE_CONSTRAINT_UNIQUE`, Postgres' `23505` or MySQL's `ER_DUP_ENTRY`.
+   *
+   * ⛔ Every other driver failure is rethrown UNCHANGED — a NOT NULL violation,
+   * a deadlock, a missing table, an unreachable store. The verdict is
+   * `isUniqueViolationError` (`@objectstack/types`), the one predicate the repo
+   * has for the question; this door adds no dialect knowledge of its own.
+   *
+   * One conflict keeps a narrower identity: an autonumber the engine ITSELF
+   * issued and re-issued to exhaustion is `ERR_AUTONUMBER_COLLISION`, which
+   * says something `DUPLICATE_RECORD` cannot ("re-seeded, re-issued, still
+   * refused"). It carries the driver error as `cause` exactly as before.
+   */
   async insert(object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
     object = this.resolveObjectName(object);
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
@@ -9566,19 +9622,62 @@ export class ObjectQL implements IObjectQLEngine {
       // is created once per CALL and shared by every row's context, before and
       // after — see `HookContext.dispatch`.
       const insertScope: Record<string, unknown> = {};
+      // ── [#14259] ARM the hook-write recording, one PER ROW ───────────────
+      //
+      // The insert-side twin of the update path's single recording (#14088),
+      // and the reason it has to exist here at all: `stripRuntimeOwnedFields`
+      // below judges hook-vs-caller by `Object.is`, which cannot separate "the
+      // hook re-issued the record number the caller also submitted" from "the
+      // hook never touched the key". #6339 moved that judgement from a key SET
+      // to values on the argument that the key set made the contract true "only
+      // BY ACCIDENT" — and values are accidental in the identical way.
+      //
+      // PER ROW, not per call: a batch runs `beforeInsert` once per row against
+      // its own payload object, so one shared record would let a hook that
+      // stamps row 3 exempt row 4's caller-seeded value. One recording per row
+      // is what makes the answer mean "a hook assigned THIS key on THIS row".
+      //
+      // The two ends of the window are load-bearing, exactly as on the update
+      // path (the recorder module's own header carries the full argument):
+      //
+      //  - ARMED HERE, over `defaultedData` — after the caller's payload has
+      //    arrived, after `suppliedPerRow` snapshotted it, and after the
+      //    engine's own defaulting (`applyFieldDefaults` /
+      //    `initializeSummaryFields`) has run, so no engine default and no
+      //    caller key can enter the record. A caller cannot execute an
+      //    assignment; echoing a key, a value, a `null` or a `Proxy` back is
+      //    not a `set` on this object.
+      //  - SEALED immediately below, before the post-hook declared-field door
+      //    reads the payload and long before `encryptSecretFields` writes to
+      //    it. A recorder still armed for an engine-owned pass would report
+      //    ENGINE writes as HOOK writes, which on a caller-forged secret column
+      //    is precisely the escalation this is built to make impossible.
+      //
+      // Between those two points the only code that runs is the `beforeInsert`
+      // dispatch — server code, by definition. Writes through the recording
+      // land on the SAME row object, so a hook mutating `ctx.input.data.x` in
+      // place is mutating the engine's row exactly as it always has.
+      const rowHookWrites: Array<HookWriteRecording | undefined> = [];
       const rowHookContexts: HookContext[] = (isBatch ? (defaultedData as any[]) : [defaultedData]).map(
-        (row, rowIndex) => ({
-          object,
-          event: 'beforeInsert',
-          input: { data: row, options: opCtx.options },
-          dispatch: { mode: isBatch ? 'per-row' : 'record', index: rowIndex, scope: insertScope },
-          session: this.buildSession(opCtx.context),
-          provenance: this.buildProvenance(opCtx.context),
-          user: this.buildUser(opCtx.context),
-          api: this.buildHookApi(opCtx.context),
-          transaction: opCtx.context?.transaction,
-          ql: this,
-        }),
+        (row, rowIndex) => {
+          const recording =
+            row !== null && typeof row === 'object'
+              ? recordHookPayloadWrites(row as Record<string, unknown>)
+              : undefined;
+          rowHookWrites[rowIndex] = recording;
+          return {
+            object,
+            event: 'beforeInsert',
+            input: { data: recording?.payload ?? row, options: opCtx.options },
+            dispatch: { mode: isBatch ? 'per-row' : 'record', index: rowIndex, scope: insertScope },
+            session: this.buildSession(opCtx.context),
+            provenance: this.buildProvenance(opCtx.context),
+            user: this.buildUser(opCtx.context),
+            api: this.buildHookApi(opCtx.context),
+            transaction: opCtx.context?.transaction,
+            ql: this,
+          };
+        },
       );
       // [#8682] A row the declared-field door refused runs NO hook. In
       // non-partial mode the throw above already returned, so this skip only
@@ -9588,6 +9687,30 @@ export class ObjectQL implements IObjectQLEngine {
       for (let i = 0; i < rowHookContexts.length; i++) {
         if (undeclaredPerRow[i] !== undefined) continue;
         await this.triggerHooks('beforeInsert', rowHookContexts[i]);
+      }
+      // ── [#14259] SEAL, before anything engine-owned reads or writes a row ──
+      //
+      // Sealing does two things and the write is wrong without either: it
+      // freezes each record before the engine's own passes can be mis-recorded
+      // as hook writes, and it puts the RAW row back in `input.data` so no
+      // recording view reaches a driver.
+      //
+      // Every row is sealed, including one the declared-field door culled: that
+      // row ran no hook, so its record is legitimately EMPTY, and restoring its
+      // raw payload keeps `rows[i]` a plain object on every branch rather than
+      // only on the live ones.
+      //
+      // `hookWrittenKeys` is `undefined` — not empty — for a row whose hook
+      // REPLACED the payload object (`ctx.input.data = { …ctx.input.data }`).
+      // `stripRuntimeOwnedFields` must read that as "fall back to the #6339
+      // value test", never as "no hook wrote anything": a replacement's keys
+      // are mostly the CALLER's, so treating them as hook-owned would launder a
+      // caller-seeded record number into a platform write.
+      const rowHookWrittenKeys: Array<ReadonlySet<string> | undefined> = [];
+      for (let i = 0; i < rowHookContexts.length; i++) {
+        const sealed = rowHookWrites[i]?.seal(rowHookContexts[i]!.input.data);
+        if (sealed) rowHookContexts[i]!.input.data = sealed.data as any;
+        rowHookWrittenKeys[i] = sealed?.hookWrittenKeys;
       }
 
       // ── [#13657] The POST-hook half of the declared-field door ───────────
@@ -9779,9 +9902,20 @@ export class ObjectQL implements IObjectQLEngine {
             // `origin/main`: `driverCreates 0` while the line said the write
             // was "COMMITTED WITHOUT IT". The card marked this half UNVERIFIED;
             // it reproduces, so the flag is threaded here too.
+            // [#14259] `hookWrittenKeys` — THIS row's sealed record, the other
+            // half of the same question `suppliedPerRow[i]` answers. #6339
+            // handed values over instead of a key set because "the caller named
+            // this key" and "this key still holds the caller's value" are
+            // different facts; the record closes the case values cannot reach,
+            // where the hook wrote the value the caller also sent. The value
+            // test stays as the fallback for any row with no record.
             const stripped = stripRuntimeOwnedFields(
               schemaForValidation as any, rows[i], suppliedPerRow[i] ?? {}, this.logger,
-              { preserveAudit, strictReadonlyWrites: options?.strictReadonlyWrites === true },
+              {
+                preserveAudit,
+                strictReadonlyWrites: options?.strictReadonlyWrites === true,
+                hookWrittenKeys: rowHookWrittenKeys[i],
+              },
             ) as Record<string, unknown>;
             if (stripped === rows[i]) continue;
             for (const k of Object.keys(rows[i])) {
@@ -9886,20 +10020,28 @@ export class ObjectQL implements IObjectQLEngine {
             // strictly worse than the collision. What must not survive is the
             // stale counter: leaving it is what makes the very next insert
             // collide too, one number at a time, which is the storm. So the
-            // counters this batch drew on are dropped and the driver's error is
-            // rethrown UNCHANGED (a batch caller — bulkWrite's per-row
-            // degradation — reads these errors, and this is not the place to
-            // change what it reads).
+            // counters this batch drew on are dropped and the batch is NOT
+            // re-issued.
+            //
+            // [#14095] What is rethrown is no longer the driver's raw error.
+            // The batch door answers the same contract as the single-row one:
+            // a recognised unique violation leaves as the `DUPLICATE_RECORD`
+            // envelope carrying the driver's error as `cause`, and everything
+            // else leaves untouched. A batch caller reading these errors —
+            // bulkWrite's per-row degradation, the import runner — reads a
+            // BETTER answer than before, because the row report's `code` was
+            // previously whatever dialect token the driver happened to use
+            // (`SQLITE_CONSTRAINT_UNIQUE`, `11000`), which is precisely the
+            // coupling this card exists to remove.
             //
             // What an author gets, stated plainly: `insert(object, rows[])` and
-            // `insertMany` both REJECT with the driver's own duplicate-key
-            // error — never `ERR_AUTONUMBER_COLLISION`, which is the
-            // single-row path's identity for "re-issued and still refused".
-            // Whether any row was written is the driver's answer, not this
-            // method's. The one thing the engine guarantees is that the NEXT
-            // write re-seeds instead of walking into the same collision, so a
-            // retry by the caller converges. Pinned in
-            // engine-autonumber-resync.test.ts.
+            // `insertMany` both REJECT with `DUPLICATE_RECORD` — never
+            // `ERR_AUTONUMBER_COLLISION`, which remains the single-row path's
+            // identity for "re-issued and still refused". Whether any row was
+            // written is the driver's answer, not this method's. The one thing
+            // the engine guarantees is that the NEXT write re-seeds instead of
+            // walking into the same collision, so a retry by the caller
+            // converges. Pinned in engine-autonumber-resync.test.ts.
             try {
               if (driver.bulkCreate) {
                 result = await driver.bulkCreate(object, liveRows, driverOptions);
@@ -9915,7 +10057,7 @@ export class ObjectQL implements IObjectQLEngine {
                   object, fields: [...new Set(batchIssued.map((one) => one.field))],
                 });
               }
-              throw error;
+              throw envelopeUniqueViolation(error, object);
             }
           }
         } else {
@@ -10044,7 +10186,17 @@ export class ObjectQL implements IObjectQLEngine {
         // database itself said, including the failing column, is kept; the
         // error rethrown below is untouched, so the caller's answer does not
         // move. See `redactBoundStatement`.
-        this.logger.error('Insert operation failed', redactBoundStatement(e) as Error, { object });
+        //
+        // [#14095] …and the line still carries what the DATABASE said, even now
+        // that the door hands the CALLER an envelope instead. The platform
+        // logger serializes an error's `message` and `stack` and nothing else,
+        // so logging the envelope in the driver error's place would silently
+        // drop exactly the diagnosis this line exists to carry — the failing
+        // column, MySQL's index name, the driver's own frames. So the log takes
+        // the `cause`; the caller's answer does not move, because `e` is what
+        // is rethrown one line down, with that same error still on it.
+        const logged = e instanceof DuplicateRecordError ? e.cause : e;
+        this.logger.error('Insert operation failed', redactBoundStatement(logged) as Error, { object });
         throw e;
       }
     });
@@ -10346,10 +10498,46 @@ export class ObjectQL implements IObjectQLEngine {
        )[0];
        if (undeclared) throw undeclared;
 
+       // ── [#14088] ARM the hook-write recording ────────────────────────────
+       //
+       // `suppliedValues` above answers "what did the caller send". This
+       // answers the other half — "which keys did a HOOK assign" — and it must
+       // be RECORDED, because it cannot be recovered from the values
+       // afterwards: `Object.is(payload[k], supplied[k])` reads a hook that
+       // deliberately wrote the value the caller also sent as a hook that never
+       // touched the key, and the static `readonly` strip below then deletes
+       // the hook's write. Measured: a `readonly` `completed_at` CLEARED by a
+       // reopen hook against a caller that round-tripped the whole record and
+       // so also sent `completed_at: null` — the row committed `in_progress`
+       // with its old completion timestamp and no error.
+       //
+       // The two ends of this window are load-bearing, not stylistic (the
+       // module's own header carries the full argument):
+       //
+       //  - ARMED HERE, after the entry snapshot and after the caller's payload
+       //    has stopped being written by anything the caller controls. A
+       //    caller cannot execute an assignment on this object; echoing a key,
+       //    a value, a `null` or a `Proxy` back is not a `set`. So no key a
+       //    caller supplied can enter the record, and a hook-owned key is a key
+       //    the strip stops defending.
+       //  - SEALED at the confluence below, BEFORE `encryptSecretFields` /
+       //    `normalizeMultiValueFields` / the strips write to the payload. A
+       //    recorder still armed for those would report ENGINE writes as HOOK
+       //    writes, which on a caller-forged secret column is precisely the
+       //    escalation this is built to make impossible.
+       //
+       // Writes through the recording land on the SAME object, so a hook
+       // mutating `ctx.input.data.x` in place is mutating the engine's payload
+       // exactly as it always has, and `opCtx.data` stays in step.
+       const hookWrites =
+         opCtx.data !== null && typeof opCtx.data === 'object'
+           ? recordHookPayloadWrites(opCtx.data as Record<string, unknown>)
+           : undefined;
+
        const hookContext: HookContext = {
           object,
           event: 'beforeUpdate',
-          input: { id, data: opCtx.data, options: opCtx.options },
+          input: { id, data: hookWrites?.payload ?? opCtx.data, options: opCtx.options },
           session: this.buildSession(opCtx.context),
           provenance: this.buildProvenance(opCtx.context),
           // [#13644] The declared referential-cleanup marker. Conditional
@@ -10641,6 +10829,32 @@ export class ObjectQL implements IObjectQLEngine {
            }
        }
 
+       // ── [#14088] SEAL the hook-write recording ───────────────────────────
+       //
+       // The same CONFLUENCE #13657 uses one comment down, and for the same
+       // reason: on either branch this is the line at which
+       // `hookContext.input.data` is the final POST-hook payload and nothing
+       // engine-owned has written to it yet. One seal covers both branches, so
+       // the by-id and predicate paths can never end up with different notions
+       // of who wrote a key — the divergence "both call sites" (#3106 / #4441)
+       // is the standing shape for.
+       //
+       // Sealing does two things, and the write is wrong without either: it
+       // freezes the record before the engine's own passes can be mis-recorded
+       // as hook writes, and it puts the RAW payload back in `input.data` so no
+       // recording view reaches a driver.
+       //
+       // `hookWrittenKeys` is `undefined` — not empty — when the recording
+       // cannot speak for this call, which happens when a hook REPLACED the
+       // payload object (`ctx.input.data = { …ctx.input.data }`) rather than
+       // mutating it. Consumers must read that as "fall back to the #5591 value
+       // test", never as "no hook wrote anything": treating a replacement's
+       // keys as hook-owned would launder a caller's forgery, so the fallback
+       // deliberately keeps the pre-#14088 over-strip instead.
+       const sealedHookWrites = hookWrites?.seal(hookContext.input.data);
+       if (sealedHookWrites) hookContext.input.data = sealedHookWrites.data as any;
+       const hookWrittenKeys = sealedHookWrites?.hookWrittenKeys;
+
        // ── [#13657] The POST-hook half of the declared-field door ──────────
        //
        // The insert path's twin, applied to the second write verb — same
@@ -10921,7 +11135,13 @@ export class ObjectQL implements IObjectQLEngine {
                    // WITHOUT IT" while `driverWrites` was 0. The seam that
                    // composes the sentence has to know the mode the sentence
                    // describes; nothing else here can tell it.
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites }) as any;
+                   // [#14088] `hookWrittenKeys` — the other half of the same
+                   // question `suppliedValues` answers, and the half no
+                   // comparison of values can reach. Without it a hook CLEARING
+                   // a read-only column loses its write to any caller that
+                   // echoed the same value back, which on `null` is every
+                   // whole-record form round-trip.
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRo, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, addressKey: idAddressesThisRow ? 'id' : undefined, strictReadonlyWrites, hookWrittenKeys }) as any;
                    reportDroppedFields(preRo, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Both strip passes are done; refuse now if the caller
@@ -11079,7 +11299,14 @@ export class ObjectQL implements IObjectQLEngine {
                    // branch still passes no `addressKey` (nothing addresses a
                    // row by key here), which is what keeps it byte-identical
                    // to #8141 in every other respect.
-                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites }) as any;
+                   // [#14088] The SAME record the by-id branch consumes,
+                   // sealed once at the shared confluence. Not a second
+                   // derivation: two notions of "a hook wrote this key" that
+                   // disagree in one edge case would be a worse defect than the
+                   // one they were each added to close, and a bulk write that
+                   // reached a different verdict about authorship than a by-id
+                   // write is the #3106 / #4441 divergence verbatim.
+                   hookContext.input.data = stripReadonlyFields(updateSchema as any, preRoMulti, suppliedValues, this.logger, { preserveAudit: opCtx.context?.preserveAudit === true, strictReadonlyWrites, hookWrittenKeys }) as any;
                    reportDroppedFields(preRoMulti, hookContext.input.data as Record<string, unknown>, 'readonly');
                }
                // [#5126] Same refusal on the predicate path. A bulk strip is
