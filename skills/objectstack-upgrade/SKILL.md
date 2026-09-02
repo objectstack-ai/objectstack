@@ -10,17 +10,10 @@ description: >
   across a major and metadata or code stopped parsing, when a parse or `tsc`
   error quotes a `[REMOVED]` prescription, or when asked to "upgrade to v17" /
   "升级到 v17" / "一键升级元数据项目". Do not use to author new metadata (the
-  domain skills cover that), to design a retirement in the ObjectStack platform
-  repo itself (that is the platform's own internal playbook), or to hand-write
-  a rewrite the conversion chain already applies — running the chain is always
-  the first step, never a fallback.
+  domain skills cover that), or to reconcile physical database drift (that is
+  objectstack-platform's `os migrate plan` / `os migrate apply`).
 license: Apache-2.0
-compatibility: >
-  Needs `@objectstack/spec` and `@objectstack/cli` at the TARGET major
-  (`os migrate meta` replays the chain from `MIGRATION_SUPPORT_FLOOR`, protocol
-  10 at the time of writing). No network access required — every instruction
-  source this skill harvests ships inside the installed `@objectstack/spec`
-  package.
+compatibility: Requires `@objectstack/spec` and `@objectstack/cli` at the TARGET major; the chain replays from the spec's `MIGRATION_SUPPORT_FLOOR`. No network access required.
 metadata:
   author: objectstack-ai
   version: "1.0"
@@ -93,8 +86,12 @@ Everything below is the long form of those four steps.
 `--from` is the protocol major the metadata was **authored** against, not the
 one installed. Three sources, in order of authority:
 
-1. **`manifest.engines.protocol`** in the stack config (`'16.0.0'` → `--from
-   16`). The declared answer, checked by the boot handshake.
+1. **`manifest.engines.protocol`** in the stack config — the declared answer,
+   checked by the boot handshake. It is a **range**, not a version: every
+   scaffold and example writes the caret form (`engines: { protocol: '^17' }`),
+   and an exact `'16.0.0'` is only a range of one. Take the major it *targets* —
+   the floor: `'^17'` → `--from 17`, `'>=15 <18'` → `--from 15`, never the
+   upper bound.
 2. **The last `@objectstack/spec` major the project ever installed** — read the
    lockfile history (`git log -p pnpm-lock.yaml | grep -m5 '@objectstack/spec'`)
    when the manifest is absent or stale.
@@ -131,6 +128,7 @@ os migrate meta --from 16 --step                # per-hop checkpoint (bisect a f
 os migrate meta --from 16 --to 17               # stop at a specific major
 os migrate meta --from 16 --json                # machine-readable result
 os migrate meta --from 16 --out migrated.json   # write the canonicalized stack
+os migrate meta --from 16 apps/crm/objectstack.config.ts   # pick the stack explicitly
 ```
 
 It loads the stack config, normalizes it **without** applying the load-time
@@ -180,8 +178,12 @@ and you never hand-edit `sys_metadata`. To make it durable, run the stored pass
   ```bash
   os migrate meta --stored                     # preview, writes nothing
   os migrate meta --stored --type view --type object   # narrow the pass
-  os migrate meta --stored --apply             # rewrite the rows (prompts)
+  os migrate meta --stored --apply --yes       # rewrite the rows
   ```
+
+  ⛔ **`--yes` is not optional for you.** Without it `--apply` asks for
+  confirmation, and in any non-TTY — every agent session — it refuses instead,
+  exiting 1 with `confirmation_required`.
 
   `--stored` takes no `--from`: a stored row carries its own history, so the
   pass replays the whole chain. The authored-source flags and the stored-only
@@ -514,6 +516,20 @@ got — "it passed" is a different fact in every row:
 | Accepted, and the chain rewrites it | A conversion with a live load-path acceptance window. | The chain's diff — not the parse gate. |
 | Accepted, and `validate` stays green | A migration-chain-only conversion ([3.3](#33-validate)). | Only the replay from the target major sees this class. |
 
+### 3.6 Stored rows: assert them, do not believe them
+
+The four artifacts above cover the authored sources. For a **deployment**, the
+stored pass is itself the assertion — run it read-only and branch on the exit
+code:
+
+```bash
+os migrate meta --stored --json    # 0 = every row canonical, 1 = work left
+```
+
+That is what makes "this deployment is on protocol N" a CI check rather than a
+belief. Nothing gates on it having run; the read-time rehydration is still the
+guarantee.
+
 ---
 
 ## The v17-canonical shapes, compiled
@@ -565,6 +581,11 @@ export const SupportBot = defineAgent({
 | A retired key round-trips without error | The schema carrying it is not strict and the key is being stripped, or the key still has a live load-path window. | Determine which — the two need different acceptance evidence. See [the reverse check](#reverse-check). |
 | `--apply` refused / stored-only flag rejected | `--apply`, `--yes`, `--force`, `--type`, `--database-url` mean something only with `--stored`. | Add `--stored`, or drop the flag; the authored-source chain has nothing to write to. |
 | `MigrationFloorError` | `--from` is older than the chain's support floor. | Upgrade to the floor by an older route first; the floor is a release-policy boundary, not an oversight. |
+
+Scripting the run instead of reading it? Every `--json` failure above carries a
+stable `error` code to branch on — `stored_only_flag`, `missing_from_major`,
+`unsupported_from_major`, `confirmation_required`, `database_busy` — and the
+prose row is the same fact for a human.
 
 ## Cross-skill routing
 
