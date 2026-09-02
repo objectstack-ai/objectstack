@@ -130,6 +130,49 @@ const sink = readClientErrorReporting(payload);
 if (sink) initErrorReporting(sink);
 ```
 
+## The control plane's upgrade entry is published, not derived
+
+`GET /api/v1/runtime/config` can carry an optional top-level `upgradeUrl` —
+the **absolute** URL of the control plane's upgrade / billing page — beside the
+`cloudUrl` the Console already reads:
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `upgradeUrl` | absolute `http(s)` URL | **absent** | Where the Console sends a user who chooses "upgrade" (AI quota exhausted, plan limit hit). Declared by the host that owns the page and served verbatim; no key means "render no link". |
+
+```json
+{
+  "cloudUrl": "https://cloud.example.com",
+  "upgradeUrl": "https://cloud.example.com/_console/apps/cloud_control/page/pricing"
+}
+```
+
+It is declared by the host that composes the plugin — there is no env var,
+because the value belongs to the distribution whose control plane serves the
+page:
+
+```ts
+new RuntimeConfigPlugin({ upgradeUrl: 'https://cloud.example.com/_console/apps/cloud_control/page/pricing' })
+```
+
+Why it is published rather than composed by the Console: the destination
+depends on the console mount, the app slug and the page route — three facts
+owned by whoever deploys the control plane — and a consumer in another repo
+that guessed them landed on the control plane's API 404. Three properties,
+pinned by `runtime-config-upgrade-url.test.ts`:
+
+- **Absent by default.** A vanilla `objectstack dev`, a self-hosted box and an
+  air-gapped deployment have no billing page. They serve no `upgradeUrl` key at
+  all — never `""` or a guessed default — and the Console reads "no key" as "no
+  link".
+- **Verbatim when declared.** No trailing-slash trimming, no re-serialisation:
+  what the host declared is what the Console opens.
+- **Absolute, or refused at mount.** The Console opens this URL from the
+  *tenant* origin, so a relative path (`/settings/billing`) would resolve
+  against the tenant runtime and recreate the guessed-path 404 this key
+  removes. A relative path or a non-`http(s)` scheme is refused and named in
+  the boot log, and no key is served.
+
 ## Boundary (open mechanism, closed intelligence)
 
 This package is **mechanism**: proxying a catalog, installing into the local

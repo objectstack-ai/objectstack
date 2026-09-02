@@ -3,8 +3,8 @@
 import { isUniqueViolationError, uniqueViolationColumn } from '@objectstack/types';
 
 /**
- * The ADR-0112 envelope `engine.insert` raises when a driver refuses a row as a
- * unique-constraint violation (#14095).
+ * The ADR-0112 envelope `engine.insert` (#14095) and `engine.update` (#14390)
+ * raise when a driver refuses a row as a unique-constraint violation.
  *
  * ## The defect this retires
  *
@@ -82,7 +82,7 @@ export class DuplicateRecordError extends Error {
   readonly developerMessage: string;
 
   constructor(
-    /** The object the refused insert targeted. */
+    /** The object the refused write targeted. */
     public readonly object: string,
     cause: unknown,
     /** The conflicting column, when the dialect determinably named one. */
@@ -92,7 +92,7 @@ export class DuplicateRecordError extends Error {
     this.name = 'DuplicateRecordError';
     this.cause = cause;
     this.developerMessage =
-      `The driver refused this insert as a unique-constraint violation. Its own error is attached ` +
+      `The driver refused this write as a unique-constraint violation. Its own error is attached ` +
       `as \`cause\` — branch on \`code === '${DUPLICATE_RECORD_CODE}'\` (ADR-0112) rather than on a ` +
       `dialect's code or message, so the handling survives a change of store. To make the write ` +
       `idempotent, catch this code and treat the row as already present.`;
@@ -119,8 +119,9 @@ function buildDuplicateMessage(object: string, field?: string): string {
 }
 
 /**
- * The insert door's driver-error exit: the platform envelope for a unique
- * violation, or the caller's own error unchanged for anything else.
+ * A write door's driver-error exit — `insert` (#14095) and `update` (#14390),
+ * by-id and predicate alike: the platform envelope for a unique violation, or
+ * the caller's own error unchanged for anything else.
  *
  * **Unrecognised is passed through untouched**, which is the whole of the
  * negative contract: a NOT NULL violation, a deadlock, a missing table and an

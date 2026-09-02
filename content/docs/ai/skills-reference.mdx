@@ -43,14 +43,14 @@ ObjectStack ships **11 skills** — one per authoring domain, plus process skill
 
 | # | Skill | Domain | Path | What it covers |
 | :--- | :--- | :--- | :--- | :--- |
-| 1 | [Platform](#platform) | `platform` | `skills/objectstack-platform/` | Bootstrap, configure, extend, and operate ObjectStack runtimes. Covers project setup (`defineStack`, drivers, adapters, scaffolding), plugin and service development (PluginContext, DI, kernel hooks like `kernel:ready`), and operations (CLI commands, migrations, deployment, test harnesses via LiteKernel). |
+| 1 | [Platform](#platform) | `platform` | `skills/objectstack-platform/` | Bootstrap, configure, extend, and operate ObjectStack runtimes. Covers project setup (`defineStack`, drivers, scaffolding), declaring platform capabilities (`requires:` — which service plugins boot), plugin and service development (PluginContext, DI, kernel hooks like `kernel:ready`), and operations (CLI commands, migrations, deployment, test harnesses via LiteKernel). |
 | 2 | [Data](#data) | `data` | `skills/objectstack-data/` | Design ObjectStack data schemas — objects, fields, field conditional rules, relationships, validations, indexes, lifecycle hooks, permissions, row-level security, data `lifecycle` retention/TTL/rotation, metadata `protection` locks, and external / federated datasources (`defineDatasource`) — and the seeds (`defineSeed()`) that load fixtures and reference data alongside them. |
 | 3 | [Query](#query) | `query` | `skills/objectstack-query/` | Construct ObjectQL queries — filters, sorting, pagination, aggregation, relation expansion, and full-text search. |
 | 4 | [UI](#ui) | `ui` | `skills/objectstack-ui/` | Author ObjectStack UI metadata — Views (list/form/kanban/calendar/gantt), Apps (navigation), Pages (structured plus the HTML and React source-authoring tiers, ADR-0080/0081), Dashboards, Reports, Charts, Actions, and package Docs (`src/docs/*.md`). |
 | 5 | [Automation](#automation) | `automation` | `skills/objectstack-automation/` | Design ObjectStack automation — Flows (visual logic), Triggers, Approvals, state machines, and the `jobs` (`defineJob`) / `webhooks` (`defineWebhook`) stack collections. |
 | 6 | [AI](#ai) | `ai` | `skills/objectstack-ai/` | Design ObjectStack AI skills, tools, knowledge sources, conversations, model registry entries, and MCP integrations. |
 | 7 | [API](#api) | `api` | `skills/objectstack-api/` | Design the server-side API surface that an ObjectStack runtime exposes — REST endpoints, auth providers, realtime channels, error envelopes, batch contracts. |
-| 8 | [i18n](#i18n) | `i18n` | `skills/objectstack-i18n/` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the per-locale source layout. |
+| 8 | [i18n](#i18n) | `i18n` | `skills/objectstack-i18n/` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the source layout. |
 | 9 | [Formula](#formula) | `expression` | `skills/objectstack-formula/` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. This is the companion skill that objectstack-data, -ui, -api and -automation each tell you to load alongside them. |
 | 10 | [PM Dispatch](#pm-dispatch) | `process` | `skills/objectstack-pm-dispatch/` | Run a project-manager dispatch loop over a GitHub backlog: triage and queue ready issues, claim each one, dispatch it to a parallel developer agent that returns a structured JSON report, review the results against GitHub, and drive accepted pull requests to landing — escalating to the maintainer only what genuinely needs a human decision. Ships the developer-agent operating template the loop injects into every dispatch (no custom agent types required). |
 | 11 | [Upgrade](#upgrade) | `process` | `skills/objectstack-upgrade/` | Upgrade an ObjectStack metadata project across a protocol major — run the deterministic conversion chain, then work the semantic residue the chain cannot express (intent choices, custom code on retired APIs, stale prose) to a decision with the project's owner, and finish with a green `validate` plus a human-readable upgrade report. |
@@ -61,13 +61,13 @@ ObjectStack ships **11 skills** — one per authoring domain, plus process skill
 
 **Domain** `platform` · **Path** `skills/objectstack-platform/`
 
-Bootstrap, configure, extend, and operate ObjectStack runtimes. Covers project setup (`defineStack`, drivers, adapters, scaffolding), plugin and service development (PluginContext, DI, kernel hooks like `kernel:ready`), and operations (CLI commands, migrations, deployment, test harnesses via LiteKernel).
+Bootstrap, configure, extend, and operate ObjectStack runtimes. Covers project setup (`defineStack`, drivers, scaffolding), declaring platform capabilities (`requires:` — which service plugins boot), plugin and service development (PluginContext, DI, kernel hooks like `kernel:ready`), and operations (CLI commands, migrations, deployment, test harnesses via LiteKernel).
 
-Use when the user is writing `objectstack.config.ts`, building a plugin or driver, wiring a framework adapter, running `os` CLI commands, or planning deployment.
+Use when the user is writing `objectstack.config.ts`, building a plugin or driver, turning a platform capability on, mounting the Hono HTTP layer, running `os` CLI commands, or planning deployment.
 
 Do not use for data schema design (see objectstack-data) or query patterns (see objectstack-query); data lifecycle hooks (beforeInsert / afterUpdate) belong in objectstack-data — only kernel / service-level events live here.
 
-**Tags:** `project`, `defineStack`, `driver`, `adapter`, `plugin`, `kernel`, `service`, `DI`, `lifecycle`, `cli`, `deploy`, `ops`
+**Tags:** `project`, `defineStack`, `driver`, `hono`, `plugin`, `kernel`, `service`, `requires`, `capability`, `DI`, `lifecycle`, `cli`, `deploy`, `ops`
 
 ---
 
@@ -159,9 +159,9 @@ Do not use for: consuming an ObjectStack API from a client (that is just standar
 
 **Domain** `i18n` · **Path** `skills/objectstack-i18n/`
 
-Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the per-locale source layout.
+Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the source layout.
 
-Use when the user is adding `*.translation.ts` files, wiring a new locale, or resolving missing-translation warnings.
+Use when the user is adding `*.translation.ts` files, authoring a `translation` metadata item in the Studio or through the metadata API, shipping a generated bundle from a package or plugin, wiring a new locale, or resolving missing-translation warnings.
 
 Do not use for general i18n library questions unrelated to ObjectStack bundles.
 

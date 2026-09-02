@@ -45,7 +45,7 @@ export interface ReportsPluginOptions {
 export class ReportsServicePlugin implements Plugin {
   name = 'com.objectstack.service.reports';
   version = '1.0.0';
-  type = 'standard';
+  type = 'standard' as const;
   dependencies = ['com.objectstack.engine.objectql'];
 
   private readonly options: ReportsPluginOptions;

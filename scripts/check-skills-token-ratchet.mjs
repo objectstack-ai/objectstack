@@ -419,19 +419,15 @@ export const CEILINGS = new Map([
   // objectstack-platform
   ['skills/objectstack-platform/evals/README.md', 514],
   ['skills/objectstack-platform/references/plugin-hooks.md', 2628],
-  ['skills/objectstack-platform/rules/bootstrap-patterns.md', 1093],
-  ['skills/objectstack-platform/rules/plugin-hooks-events.md', 985],
   ['skills/objectstack-platform/rules/plugin-lifecycle.md', 2408],
   ['skills/objectstack-platform/rules/service-registry.md', 2331],
 
   // objectstack-query
-  ['skills/objectstack-query/evals/README.md', 567],
   ['skills/objectstack-query/rules/aggregation.md', 2357],
   ['skills/objectstack-query/rules/filters.md', 2149],
   ['skills/objectstack-query/rules/pagination.md', 1382],
 
   // objectstack-automation
-  ['skills/objectstack-automation/evals/README.md', 414],
   ['skills/objectstack-automation/evals/approvals/test-revise-loop.md', 1329],
 
   // objectstack-ui — the two authored eval files; its `references/react-blocks.md`
@@ -442,7 +438,6 @@ export const CEILINGS = new Map([
 
   // the remaining skills' eval notes
   ['skills/objectstack-ai/evals/README.md', 315],
-  ['skills/objectstack-i18n/evals/README.md', 411],
 ]);
 
 /**

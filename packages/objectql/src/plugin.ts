@@ -203,7 +203,7 @@ export interface ObjectQLPluginOptions {
 
 export class ObjectQLPlugin implements Plugin {
   name = 'com.objectstack.engine.objectql';
-  type = 'objectql';
+  type = 'objectql' as const;
   version = '1.0.0';
   /**
    * Services init() UNCONDITIONALLY registers (ADR-0116, #4131) — lets the

@@ -75,8 +75,9 @@ node scripts/checklist-select.mjs <selector> --json
 区没跑。**默认复用**已配好的树;每轮开一个冷容器,只在这一轮必须**活得比派发会话
 久**时才值(长时间浏览器运行、dogfood)。
 
-**按 tier 排序,钉住的先跑、按区批量。** 解析器给出的 `automated.ref` 是最便宜的切
-分:
+**按 tier 排序,钉住的先跑、按区批量。** 最便宜的切分是 `automated.ref` —— 但
+`--json` **不投影它**(它只给 id · priority · surface · since · revision),按 id 到
+区文件 `areas/<area>.json` 里读:
 
 - **Tier 1 —— 带 `automated.ref` 的项**:**按区批量**,一次 vitest 覆盖该区全部钉住
   的文件,一条命令为多项取证(RUNNER 规则 6:不重证自动化已钉住的东西)。
@@ -93,16 +94,14 @@ Tier 1 批量清掉,剩下的预算才对得起 Tier 2。
   `shared-browser-tab` 陷阱。
 - **并行度**:API 面测试项放开并行扇出(各自端口,便宜)。浏览器项**少量并行**
   (2–3 个),各自端口 + 浏览器上下文 —— 超过这个数,单机 CPU 与共享显示开始互相争
-  抢。派发 runner 子代理时,**必须用 `opus`**,每个给:该项 JSON、RUNNER.md、
-  dogfood 技能、自己的端口/DB、结果不进仓规则(§4)。
-- **没有子代理工具时,顺序跑 —— 并在运行记录里声明这一轮是顺序执行的。** 会话里不
-  存在 Task/子代理工具是允许的退化路径,不是阻塞。但并行的全部价值在于**读者彼此独
-  立**:悄无声息地塌缩成一个读者,findings 依然成立,**「没有别的遗漏」这个结论不再
-  成立**,而输出上看不出任何区别 —— 所以声明是强制的,不靠自觉。
-- 忠实执行每项的 `steps`;对照各自声明的 `oracle` 判定每条 `acceptance` 与每条
-  `negative`,采集条款点名的 `evidence`。**服务端真相压过像素;截图确认渲染之后才查
-  DOM;一个 `fail` 需要 ×2 复现 + 自动化自查 + 运行 issue 里的复现规则**
-  (RUNNER §rules)。
+  抢。派发 runner 子代理时,档位引当次
+  `node scripts/pm/dispatch-gates.mjs --tier <paths>` 的输出、⛔ 不凭记忆(floor
+  sonnet · default opus · ceiling fable);每个给:该项 JSON、RUNNER.md、dogfood 技
+  能、自己的端口/DB、结果不进仓规则(§4)。
+- **没有子代理工具时,顺序跑 —— 并在运行记录里声明这一轮是顺序执行的。** 规则与它
+  的论证住在 `checklist-author` 技能(维护者所定,一处成文);⛔ 不留第二份拷贝。
+- 忠实执行每项的 `steps`,按各自声明的 `oracle` 判定每条 `acceptance` 与 `negative`
+  并采证 —— oracle 层级、证据要求与防误报自查是 RUNNER 规则 1–2,⛔ 这里不复述。
 
 ## 3. 当这一轮教你的是关于测试项本身的东西
 
@@ -227,12 +226,9 @@ QA-source: #运行记录号 · area.item · 条款
   或记 `blocked(environment)`;证到一半的项是 `partial`,不是 `pass`。带证据的
   blocked 判定是一次成功运行;伪造的 pass 不是。
 - **认证 / 授权漏洞的复现,永不发布到 GitHub 的任何地方** —— 不进运行 issue,不进跟
-  踪卡,不进评论。**本条压过 §4 的「每个 `fail` 一条复现规则」与 RUNNER 规则 2 的同
-  款要求**:记下项 id、条款,以及 `detail withheld pending maintainer`;复现留在会话
-  里,停下等维护者。「换个公开的地方贴」不是缓解 —— 跟踪卡同样是公开仓库里的公开
-  issue,一次照办就把一个未认证读写洞的可用配方发布了出去。存在性公开、配方不公开的
-  发现,依然是一份完整、可行动的报告;让缺陷得到修复,从不需要把可用的 exploit 交到
-  任何人手上。
+  踪卡,不进评论。记下项 id、条款与 `detail withheld pending maintainer`,复现留在会
+  话里,停下等维护者。⚠ 这与 RUNNER 规则 2 是**同一条规则写在两处**,⛔ 两边都不是
+  对另一边的优先级主张;完整论证与它的维护者裁定在 RUNNER。
 - **不把 blocked 项当可运行的跑** —— 解析器隐藏它们正为此。
 - **一个选择器、一次运行、一张 issue。** release sweep 把 `since:vN` 与
   `priority:P0` 作为分开的两轮跑 → 两张 issue,不要糊在一起。

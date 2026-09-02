@@ -48,10 +48,10 @@
  * either, so a generator added tomorrow is measured by this file on the day it
  * lands rather than the day someone remembers to extend a hand-kept list.
  *
- * ## The ledger, and why this card did not empty it
+ * ## The ledger, and why it is now EMPTY
  *
- * Running the roster is how it emerged that `flow` is not the only scaffold
- * `os validate` refuses. Measured on the same commit, same harness:
+ * Running the roster is how it emerged that `flow` was not the only scaffold
+ * `os validate` refuses. Measured by this harness when #14087 landed:
  *
  *   object     parses, then FAILS the author-time rules — `security-owd-unset`
  *   view       `views[0].list.pageSize`, and `type` / `objectName` on the container
@@ -60,20 +60,27 @@
  *   dashboard  clean
  *   skill      clean
  *
- * Those four are a separate card by triage's own fence — a census of the other
- * artifacts is explicitly NOT folded into #14087 — and are filed as #14336, so
- * this file RECORDS them instead of fixing them, in the shrink-only shape this
- * repo uses elsewhere
- * (`KNOWN_UNALIASED_TEST_IMPORTS`, the type-check debt ledger). Two properties
- * follow, and both are asserted below:
+ * Those four were a separate card by triage's own fence — a census of the
+ * other artifacts was explicitly NOT folded into #14087 — so this file first
+ * RECORDED them, in the shrink-only shape this repo uses elsewhere
+ * (`KNOWN_UNALIASED_TEST_IMPORTS`, the type-check debt ledger). #14336 then
+ * repaired all four templates and deleted all four entries, which is the whole
+ * lifecycle the ledger was built to have. Two properties held throughout, and
+ * both are still asserted below:
  *
  *   - a kind NOT in the ledger must validate clean. That is the pin.
- *   - a kind IN the ledger must still FAIL. So whoever repairs one of them
- *     turns this file red and deletes its entry in the same PR; the ledger
- *     cannot quietly outlive the defect it records, and it can never grow to
- *     cover a regression (a newly-broken kind is not in it, so it just fails).
+ *   - a kind IN the ledger must still FAIL. So whoever repairs one turns this
+ *     file red and deletes its entry in the same PR; the ledger cannot quietly
+ *     outlive the defect it records, and it can never grow to cover a
+ *     regression (a newly-broken kind is not in it, so it just fails).
  *
- * `flow` is additionally asserted to be absent from the ledger, so this card's
+ * With the table empty, the second property has nothing to range over and the
+ * first covers the WHOLE roster: every generator this repo ships must write a
+ * stack `os validate` accepts, and a new one that does not is red on the day
+ * it lands. ⛔ The table is not the place to make that red go away — it is
+ * shrink-only, and it has already shrunk to nothing.
+ *
+ * `flow` is additionally asserted to be absent from the ledger, so #14087's
  * own defect cannot be re-admitted by adding a line to a table.
  */
 
@@ -98,18 +105,11 @@ import { BUNDLE_REQUIRE_EXTERNALS } from '../src/utils/config.js';
  * — see the header. Adding an entry to silence a failure is the one edit this
  * table must never receive; the assertions below make a stale entry fail too.
  *
- * All four are #14336. Repair the template, delete the line, same PR.
+ * EMPTY since #14336 repaired the last four (`object` / `view` / `action` /
+ * `app`), which means every generator on the roster is held to the clean pin.
+ * Keep it that way: a red here is a template to fix, never a line to add.
  */
-const KNOWN_UNVALIDATED_SCAFFOLDS: Record<string, string> = {
-  object:
-    'parses, then fails the author-time rules: `security-owd-unset` (no sharingModel authored).',
-  view:
-    'unrecognized `pageSize` on the list view, and `type` / `objectName` on the view container.',
-  action:
-    "`type: 'custom'` is not an Action type, and `handler` is not an Action key.",
-  app:
-    '`navigation` takes an array of nav items; the scaffold writes a `{ type, items }` object.',
-};
+const KNOWN_UNVALIDATED_SCAFFOLDS: Record<string, string> = {};
 
 /** The name `os g <type> <name>` is invoked with throughout this file. */
 const STEM = 'probe_thing';
