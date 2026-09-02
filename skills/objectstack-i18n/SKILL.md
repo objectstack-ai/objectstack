@@ -379,12 +379,18 @@ This writes `<locale>.objects.generated.ts` TypeScript modules (not JSON), plus 
 `<locale>.metadata-forms.generated.ts` companion unless `--no-metadata-forms` —
 the default locale is filled from schema labels, other locales follow `--fill`
 (`empty | default | todo`). `os i18n extract --help` lists the rest: `--filter`,
-`--default-locale`, `--no-merge`, `--source-hashes`, `--dry-run`, `--json`, …
+`--default-locale`, `--no-merge`, `--objects-only`, `--source-hashes`, `--dry-run`,
+`--json`, …
+
+⚠️ **`--objects-only` is on by DEFAULT**, so extract writes only the `objects` /
+`globalActions` subtree — while `os i18n check` also demands `app`, `navigation`,
+`dashboard`, `widget`, `page` and `flow` keys. Run the workflow as written and coverage
+reports gaps the extract never scaffolded. Pass `--no-objects-only` to include those
+groups, or author them by hand.
 
 ### 2. Translate
 
-Fill in the values manually. (AI suggestion is a contract-only concept —
-`suggestTranslations()` has no CLI and no shipped implementation.)
+Fill in the values manually.
 
 ### 3. Verify Coverage
 
@@ -394,10 +400,37 @@ os i18n check --locales=zh-CN
 
 Add `--strict` / `--threshold=95` in CI to fail on locale gaps.
 
-### 4. Commit & Register
+### 4. Register
 
-Commit the translation files, import them into your bundle, and register it via
-`defineStack({ translations: [...] })`.
+A stack registers its bundles with `defineStack({ translations: [...] })`. A **package or
+plugin shipping its own generated bundle** — the most common shape in this repo — has one
+more step: a generated module exports an objects *subtree*
+(`NonNullable<TranslationData['objects']>`), not a `TranslationData`, so it must be
+wrapped before it is a bundle at all.
+
+```typescript
+// src/translations/index.ts
+import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
+import { withSourceFallback } from '@objectstack/platform-objects/apps';
+import { enObjects } from './en.objects.generated.js';
+import { zhCNObjects } from './zh-CN.objects.generated.js';
+import { zhCNGeneratedSourceHashes } from './zh-CN.source-hashes.generated.js';
+
+const enSource: TranslationData = { objects: enObjects };
+
+export const StorageTranslations: TranslationBundle = {
+  en: enSource,
+  // 4th argument = the `--source-hashes` companion. Without it a leaf whose SOURCE has
+  // moved goes on serving the superseded fill under a green `os i18n check` forever.
+  // The 3rd stays undefined: it judges hand-authored `apps` / `dashboards` / `pages`,
+  // which a fully generated set does not have.
+  'zh-CN': withSourceFallback({ objects: zhCNObjects }, enSource, undefined, zhCNGeneratedSourceHashes),
+};
+```
+
+A plugin that owns its objects loads that bundle from its own `kernel:ready` hook rather
+than registering it on the stack: `i18n.loadTranslations(locale, data)` deep-merges, so
+every plugin contributes its own `objects.*` slice.
 
 ---
 
