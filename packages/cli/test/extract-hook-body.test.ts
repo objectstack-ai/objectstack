@@ -193,6 +193,98 @@ describe('extractHookBody', () => {
     expect(() => extractHookBody(fn, 'hook free')).toThrow(/not in scope at runtime|moduleScopeHelper/);
   });
 
+  // ── #14301 — a global the NODE HOST has and the sandbox does not ────────
+  //
+  // The reported shape. `Intl` was allowlisted beside `JSON`, so this handler
+  // had no free identifier at all: it lowered, `validate`/`typecheck`/`test`/
+  // `build` were all green (the in-process test runs the RAW function in Node),
+  // and the body threw `ReferenceError: Intl is not defined` in production —
+  // under a hook's default `onError: 'abort'`, refusing every write to the
+  // object. Refusing here routes it through the SAME path as #1876: the
+  // callable is still bundled and still runs in-process, only the unrunnable
+  // body is declined.
+  it('refuses a handler referencing Intl, with the reason named (#14301)', () => {
+    const fn = (ctx: any) => {
+      const f = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC' });
+      ctx.input.due_label = f.format(new Date(ctx.input.due_at));
+    };
+    let err: any;
+    try {
+      extractHookBody(fn as any, "hook 'stamp_due_label'");
+    } catch (e) {
+      err = e;
+    }
+    expect(err, 'the handler must be REFUSED, not lowered').toBeDefined();
+    expect(err.kind).toBe('free-identifiers');
+    expect(err.freeIdentifiers).toEqual(['Intl']);
+    // The classification the refusing rule already had, carried beside the
+    // prose rather than buried in it — `os lint` reads this, not the sentence.
+    expect(err.nodeOnlyIdentifiers).toEqual(['Intl']);
+    // The reason NAMES the identifier and the remedy, and the remedy is not
+    // the module-scope one: there is nothing to inline `Intl` from.
+    expect(err.message).toContain('Intl');
+    expect(err.message).toContain('not available in the hook sandbox');
+    expect(err.message).toContain('string handler ref');
+    expect(err.message).toContain('validation rule');
+    expect(err.message).not.toContain('Module-scope helpers/imports');
+  });
+
+  // The reverse leg: the sibling globals the sandbox DOES provide must still
+  // lower, or the fix would have traded a silent production failure for a
+  // repo-wide fallback to bundling.
+  it('still extracts a handler using sandbox-provided globals only (#14301)', () => {
+    const fn = (ctx: any) => {
+      ctx.input.at = new Date(ctx.input.raw).toISOString();
+      ctx.input.tags = JSON.stringify(ctx.input.list ?? []);
+      ctx.input.n = Math.round(Number(ctx.input.n));
+    };
+    const ext = extractHookBody(fn as any, 'hook plain globals');
+    expect(ext.source).toContain('toISOString');
+  });
+
+  // ⛔ The module-scope sentence is quoted verbatim by
+  // `content/docs/automation/hook-bodies.mdx`, by `os build`'s warn-and-bundle
+  // line and by `--strict-body`'s per-callable diagnostic. #14301 added a
+  // second branch beside it; this pin is what keeps the branch from rewriting
+  // the original.
+  it('leaves the module-scope refusal sentence byte-identical (#14301)', () => {
+    const fn = (ctx: any) => {
+      ctx.record.slug = moduleScopeHelper(ctx.record.name);
+    };
+    let err: any;
+    try {
+      extractHookBody(fn as any, 'hook free');
+    } catch (e) {
+      err = e;
+    }
+    expect(err.nodeOnlyIdentifiers).toEqual([]);
+    expect(err.message).toBe(
+      "[hook-body-extract] hook free: handler references identifier(s) not in scope at runtime: " +
+        "moduleScopeHelper. Module-scope helpers/imports aren't shipped with a metadata-only body, " +
+        "so this handler will be BUNDLED instead (no behavior change). To make it body-only, inline " +
+        "the helper(s) into the handler or move the logic behind `ctx` (e.g. `ctx.api`).",
+    );
+  });
+
+  it('names both halves when a handler has each kind of free name (#14301)', () => {
+    const fn = (ctx: any) => {
+      ctx.record.slug = moduleScopeHelper(ctx.record.name);
+      ctx.record.fmt = Intl.NumberFormat;
+    };
+    let err: any;
+    try {
+      extractHookBody(fn as any, 'hook mixed');
+    } catch (e) {
+      err = e;
+    }
+    expect(err.freeIdentifiers).toEqual(['Intl', 'moduleScopeHelper']);
+    expect(err.nodeOnlyIdentifiers).toEqual(['Intl']);
+    // Each half gets ITS remedy; neither is printed for the other.
+    expect(err.message).toContain('not available in the hook sandbox');
+    expect(err.message).toContain('module-scope helpers/imports');
+    expect(err.message).toContain('moduleScopeHelper');
+  });
+
   // ── `sudo()` is not a body-reachable member (#14010) ────────────────────
   //
   // `ScopedContext.sudo()` is REAL in-process and absent from the VM's

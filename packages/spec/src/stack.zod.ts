@@ -365,7 +365,34 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
   dashboards: z.array(DashboardSchema).optional().describe('Dashboards'),
   reports: z.array(ReportSchema).optional().describe('Analytics Reports'),
   datasets: z.array(DatasetSchema).optional().describe('Analytics semantic-layer datasets (ADR-0021)'),
-  actions: z.array(ActionSchema).optional().describe('Global and Object Actions'),
+  /**
+   * Registered actions — global (no `objectName`) and object-bound (`objectName`
+   * set; `defineStack` merges those into the named object's `actions`).
+   *
+   * Uniqueness is per SCOPE, not per stack. The runtime registers and dispatches
+   * every action under one exact-string key — the owning object's name (or
+   * `'global'` for an object-less action), a colon, then the action name — with
+   * no wildcard semantics, so `defineStack` refuses two declarations that
+   * resolve to the same key: both written here, both on one object's `actions`,
+   * or one in each position, byte-identical twins included (that case is a
+   * delete, not a rename). An embedded action is keyed by the object it is
+   * written ON — the declaration-resolution key `collectActionDeclarations` /
+   * `resolveRouteActionDeclaration` use — not by its own `objectName` (the
+   * registration key `collectBundleActions` / `actionObjectKey` read). One
+   * global and one object-bound action MAY share a `name`: they occupy two
+   * keys, and a by-name reader on the object's route resolves the object's own
+   * `actions` (embedded, or merged in from here) before a standalone global
+   * declaration.
+   */
+  actions: z.array(ActionSchema).optional().describe(
+    'Global and Object Actions. Unique per scope, not per stack: the runtime keys every action by '
+    + "its owning object's name (or 'global' when object-less), a colon, then the action name, and "
+    + 'defineStack refuses two declarations that resolve to one key — both here, both on one '
+    + "object's actions, or one in each position, identical twins included (an embedded action is keyed "
+    + 'by the object it is written on, not by its own objectName). '
+    + "One global and one object-bound action may share "
+    + "a name; on that object's route the object's own actions take precedence for by-name readers.",
+  ),
   // `themes` was REMOVED in 17.1 (#10485, ADR-0049 enforce-or-remove — ruled
   // 退役授权面, 2026-08-21). The pipeline was live from authoring gate through
   // artifact ingest and stopped there: no framework package ever read the
@@ -1500,12 +1527,117 @@ function collectInlinePageActions(page: unknown): InlineActionSite[] {
 }
 
 /**
+ * Scope segment of the runtime's action key for an object-less action.
+ *
+ * Must stay in lockstep with `GLOBAL_ACTION_OBJECT_KEY` in
+ * `@objectstack/objectql` (`action-governance.ts`) — the literal `executeAction`
+ * registers and looks up an object-less action under. Spelled here rather than
+ * imported because the spec sits below every runtime package.
+ */
+const GLOBAL_ACTION_SCOPE = 'global';
+
+/**
+ * Join origins for a refusal line: `a`, `a and b`, `a, b and c`.
+ */
+function joinDeclarationOrigins(origins: readonly string[]): string {
+  if (origins.length <= 1) return origins.join('');
+  return `${origins.slice(0, -1).join(', ')} and ${origins[origins.length - 1]}`;
+}
+
+/**
+ * Same-scope duplicate action keys — one refusal line per colliding key.
+ *
+ * The runtime registers and dispatches every action under one exact-string
+ * key, `<scope>:<name>`, where the scope is the owning object's name or
+ * {@link GLOBAL_ACTION_SCOPE} for an object-less action (`packages/objectql`'s
+ * `executeAction`; the runtime's `collectActionDeclarations` and
+ * `standaloneActionObjectName` build the same key), with no wildcard
+ * semantics. Two declarations that resolve to one key collapse to one handler
+ * registration: whichever registers second wins (`registerAction` is a plain
+ * `Map.set`), and the other stays a live, declared, permission-gated button
+ * whose handler is unreachable — nothing at author, build or boot time says
+ * so, and the loser fails only when a user clicks it (the ADR-0078 shape
+ * arriving at collection level). Measured on main before this check: two
+ * standalone globals sharing a name, two standalone actions bound to the same
+ * object, a bound standalone beside an embedded twin on the same object
+ * (`mergeActionsIntoObjects` APPENDS, so both survived into `object.actions`)
+ * and two embedded twins all built clean.
+ *
+ * Scope resolution follows the runtime's DECLARATION-RESOLUTION key: a
+ * standalone action is scoped by its `objectName` (post-parse — the legacy
+ * `object` alias is already canonicalized) or global; an embedded action is
+ * scoped by the object it is written on, whatever its own `objectName` says —
+ * that is how `collectActionDeclarations` and `resolveRouteActionDeclaration`
+ * key it. (The runtime's REGISTRATION key — `collectBundleActions` /
+ * `actionObjectKey` — reads the action's own `objectName` instead; the walk
+ * deliberately follows the resolution side, where the by-name collision the
+ * card describes happens.)
+ *
+ * Every site counts, byte-identical twins included: the merge appends, so a
+ * pair that is one declaration to the eye is two entries under one key in the
+ * shipped artifact — `collectActionDeclarations` pushes every embedded entry,
+ * MCP `listActions` lists both, and bare-name `resolveActionByName` refuses
+ * the ambiguity. The identical case is therefore a delete, not a rename, and
+ * the message says so. A consequence worth knowing: a stack BUILT by
+ * `defineStack` carries each bound action in both positions, so feeding a
+ * built stack back in is refused too — author the source shape, not the
+ * artifact.
+ *
+ * Deliberately NOT refused: the cross-scope pair — one global and one
+ * object-bound declaration sharing a `name`. They occupy two distinct keys, and
+ * the precedence the runtime already implements for by-name readers
+ * (`resolveRouteActionDeclaration` reads the object's own `actions` before a
+ * standalone declaration) is documented on the `actions` collection, not
+ * changed here.
+ */
+function collectDuplicateActionKeyErrors(config: ObjectStackDefinition): string[] {
+  const originsByKey = new Map<string, string[]>();
+  const note = (scope: string, name: string, origin: string): void => {
+    const key = `${scope}:${name}`;
+    const list = originsByKey.get(key) ?? [];
+    list.push(origin);
+    originsByKey.set(key, list);
+  };
+
+  for (const [i, action] of (config.actions ?? []).entries()) {
+    if (action.objectName) {
+      note(action.objectName, action.name, `stack.actions[${i}] (objectName '${action.objectName}')`);
+    } else {
+      note(GLOBAL_ACTION_SCOPE, action.name, `stack.actions[${i}] (no objectName, so scope '${GLOBAL_ACTION_SCOPE}')`);
+    }
+  }
+  for (const obj of config.objects ?? []) {
+    for (const [j, action] of (obj.actions ?? []).entries()) {
+      note(obj.name, action.name, `objects['${obj.name}'].actions[${j}] (embedded on the object)`);
+    }
+  }
+
+  const errors: string[] = [];
+  for (const [key, origins] of originsByKey) {
+    if (origins.length < 2) continue;
+    errors.push(
+      `Action key '${key}' is declared ${origins.length === 2 ? 'twice' : `${origins.length} times`}: ` +
+        `${joinDeclarationOrigins(origins)}. The runtime registers and dispatches every action under ` +
+        `this one exact-string key, so only one of these handlers is reachable and the other ` +
+        `declaration is a dead button. Rename one of them within this scope, bind one to a ` +
+        `different object, or remove the duplicate.`,
+    );
+  }
+  return errors;
+}
+
+/**
  * Perform strict cross-reference validation on a parsed stack definition.
  * Returns an array of error messages (empty if valid).
  */
 function validateCrossReferences(config: ObjectStackDefinition): string[] {
   const errors: string[] = [];
   const objectNames = collectObjectNames(config);
+
+  // Runs BEFORE the object-count early return on purpose: an object-less
+  // stack that declares two globals under one name collides on exactly the
+  // same runtime key, and this check needs no object to resolve against.
+  errors.push(...collectDuplicateActionKeyErrors(config));
 
   if (objectNames.size === 0) return errors;
 

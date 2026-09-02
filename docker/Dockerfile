@@ -1,8 +1,8 @@
 # ObjectStack official runtime image — ghcr.io/objectstack-ai/objectstack
 #
-# A generic, app-agnostic production runtime: Node + @objectstack/cli +
-# `os start`. It contains NO app — bring your compiled artifact
-# (dist/objectstack.json, built by `os build` in CI):
+# A generic, app-agnostic production runtime: Node + @objectstack/cli + the
+# `pg` / `mysql2` SQL drivers + `os start`. It contains NO app — bring your
+# compiled artifact (dist/objectstack.json, built by `os build` in CI):
 #
 #   FROM ghcr.io/objectstack-ai/objectstack:<version>
 #   COPY --chown=node:node dist/objectstack.json /srv/app/objectstack.json
@@ -40,7 +40,36 @@ FROM node:22-slim
 # Pinned by CI to the @objectstack/cli release that triggered the publish.
 # `latest` is only the fallback for ad-hoc local builds of this file.
 ARG OS_CLI_VERSION=latest
-RUN npm install -g @objectstack/cli@${OS_CLI_VERSION} \
+
+# The SQL drivers ship WITH the image, not with the app (#14510).
+#
+# `@objectstack/driver-sql` declares `pg`, `mysql2` and `tedious` as OPTIONAL
+# peer dependencies. npm 7+ installs peer dependencies automatically but SKIPS
+# the optional ones, so `npm install -g @objectstack/cli` on its own produced a
+# tree with no `pg` in it -- while the header of this very file, README.md, and
+# the `docker-compose.yml` that `npm create objectstack` generates (whose `db`
+# service is `postgres:17`) all hand this image a `postgres://` URL. Every one
+# of those paths died at boot on `Cannot find module 'pg'`, with the loud
+# fail-fast ADR-0062 D5 requires but nothing documented to act on. Installing
+# the drivers here is the "whoever makes the promise installs it" half of the
+# fix; the other half is that README.md publishes the list.
+#
+# The ranges are copied VERBATIM from driver-sql's `peerDependencies`, so the
+# image satisfies the driver's own contract rather than a second one invented
+# here. Both packages are pure JavaScript with no native build step, which is
+# why they are affordable for every user of the image. `tedious` (SQL Server)
+# and `@objectstack/driver-turso` are deliberately NOT installed -- extend the
+# image when you need one, as README.md shows.
+#
+# This install line is a PUBLIC PROMISE, published as the driver table in
+# ./README.md. Adding or removing a package here changes which databases a
+# deployment can reach, so the two files must move in the same commit:
+# `pnpm check:docs-image-tag` fails when the install line and that table
+# disagree on the package set or on a version range.
+RUN npm install -g \
+      @objectstack/cli@${OS_CLI_VERSION} \
+      "pg@^8.0.0" \
+      "mysql2@^3.0.0" \
  && npm cache clean --force
 
 LABEL org.opencontainers.image.source="https://github.com/objectstack-ai/objectstack" \
