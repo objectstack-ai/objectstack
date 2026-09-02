@@ -58,22 +58,9 @@ import { DbJobAdapter } from '@objectstack/service-job';
 import { SysJob, SysJobRun } from '@objectstack/platform-objects/audit';
 import { AppPlugin } from './app-plugin.js';
 import type { JobHandlerContext } from './job-handler-context.js';
-import {
-    captureExpectedReadRefusals,
-    type ExpectedReadRefusalCapture,
-} from './expected-read-refusal-noise.js';
 
 /** The reason a #5529-shaped handler reports when its store is unreachable. */
 const REASON = 'STORE_UNAVAILABLE';
-
-/**
- * [#10629] This fixture provisions the two job tables and nothing else, so the
- * engine's own single-tenant probe (`ObjectQL.probeInstallOrganizations`) reads
- * a `sys_organization` that was never created. The probe is fail-soft by
- * construction, but the driver and the engine each log the fault on the way
- * out. Withheld and ASSERTED rather than muted.
- */
-const ABSENT_TENANCY_TABLE = 'sys_organization';
 
 interface Harness {
     engine: ObjectQL;
@@ -90,9 +77,6 @@ const live: Array<{
     engine?: ObjectQL;
     adapter?: DbJobAdapter;
     driver?: SqlDriver;
-    noise?: ExpectedReadRefusalCapture;
-    /** The channels this test's path MUST have provoked — see `harness()`. */
-    requiredChannels?: readonly string[];
 }> = [];
 
 afterEach(async () => {
@@ -100,51 +84,39 @@ afterEach(async () => {
         try { await entry.adapter?.destroy(); } catch { /* noop */ }
         try { await entry.engine?.destroy(); } catch { /* noop */ }
         try { await entry.driver?.disconnect(); } catch { /* noop */ }
-        // A capture nobody asserts is a mute. The probe is memoised behind the
-        // FIRST data operation, so only the paths that actually touch the store
-        // provoke it — `silentChannels(required)` is the API's own answer to a
-        // table read on some of a file's paths and not others. The withholding
-        // is unconditional either way; only the must-have-fired set narrows.
-        if (entry.noise) {
-            expect(entry.noise.silentChannels(entry.requiredChannels ?? [ABSENT_TENANCY_TABLE])).toEqual([]);
-        }
     }
 });
 
-/** A real engine over the migrated test backend, carrying the REAL `sys_job*`. */
-async function bootEngine(): Promise<{ engine: ObjectQL; driver: SqlDriver; noise: ExpectedReadRefusalCapture }> {
+/**
+ * A real engine over the migrated test backend, carrying the REAL `sys_job*`.
+ *
+ * ⚠️ [#10629] No expected-read-refusal capture here, deliberately and by
+ * MEASUREMENT: every read this file performs carries `isSystem`, so the
+ * engine's single-tenant probe over the unprovisioned `sys_organization` never
+ * fires and neither refusal channel emits a frame (checked on the red run: zero
+ * `refused a read on` and zero `Find operation failed` lines for the whole
+ * file). Installing a capture that nothing provokes would assert a mute.
+ */
+async function bootEngine(): Promise<{ engine: ObjectQL; driver: SqlDriver }> {
     const driver = new SqlDriver({
         client: 'better-sqlite3',
         connection: { filename: ':memory:' },
         useNullAsDefault: true,
     });
-    const noise = captureExpectedReadRefusals([ABSENT_TENANCY_TABLE]);
-    noise.captureDriver(driver);
     await driver.initObjects([SysJob as never, SysJobRun as never]);
     const engine = new ObjectQL();
-    noise.captureEngine(engine);
     engine.registerDriver(driver as never, true);
     await engine.init();
     engine.registry.registerObject(SysJob as never);
     engine.registry.registerObject(SysJobRun as never);
-    return { engine, driver, noise };
+    return { engine, driver };
 }
 
-/**
- * @param opts.touchesStore whether this test's path performs a data operation.
- *   `true` (the default) requires the tenancy probe to have fired and been
- *   withheld; the one case that swaps `DbJobAdapter` out for a recording
- *   `IJobService` never reads or writes and passes `false`, which keeps the
- *   withholding and drops only the must-have-fired requirement.
- */
-async function harness(opts: { touchesStore?: boolean } = {}): Promise<Harness> {
-    const { engine, driver, noise } = await bootEngine();
+async function harness(): Promise<Harness> {
+    const { engine, driver } = await bootEngine();
     // The adapter that RECORDS the outcome — the coordinate the card names.
     const adapter = new DbJobAdapter({ engine: engine as never });
-    live.push({
-        engine, adapter, driver, noise,
-        requiredChannels: opts.touchesStore === false ? [] : [ABSENT_TENANCY_TABLE],
-    });
+    live.push({ engine, adapter, driver });
 
     const readyHooks: Array<() => Promise<void>> = [];
     const ctx = {
@@ -306,7 +278,7 @@ describe('#14256 — the controls that keep the assertion honest', () => {
         // The reporter's probe, kept as corroboration and NOT as the deliverable:
         // it re-states the repair, while the cases above pin its consequence.
         // Typed only at the contract, exactly as a third-party `IJobService` is.
-        const h = await harness({ touchesStore: false });
+        const h = await harness();
         const scheduled: Array<{ name: string; handler: JobHandler }> = [];
         const recording: IJobService = {
             async schedule(name: string, _schedule: JobSchedule, handler: JobHandler) {
