@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { HttpMethod } from '../shared/http.zod';
 import { MiddlewareConfigSchema } from '../system/http-server.zod';
+import { retiredKey } from '../shared/retired-key';
 
 /**
  * REST API Plugin Protocol
@@ -87,17 +88,55 @@ export type RestApiRouteCategory = z.input<typeof RestApiRouteCategory>;
 // Route Registration Schema
 // ==========================================
 
-/**
- * Handler Implementation Status
- * Shared enum for tracking whether an endpoint has a real handler.
- * Used by both `RestApiEndpointSchema` and `RouteCoverageEntrySchema`.
- *
- * - `implemented` – A real handler is coded and registered.
- * - `stub`        – A placeholder handler exists that returns 501 Not Implemented.
- * - `planned`     – Declared in the protocol spec but not yet implemented.
- */
-export const HandlerStatusSchema = lazySchema(() => z.enum(['implemented', 'stub', 'planned']));
-export type HandlerStatus = z.input<typeof HandlerStatusSchema>;
+// ─── [#13823] `handlerStatus` and the Route Coverage Report are RETIRED ──────
+//
+// ADR-0049 enforce-or-remove; maintainer ruling 2026-09-01 (director decision
+// batch #27, verbatim 「同意」): remove. `handlerStatus` (`implemented` / `stub`
+// / `planned`) was authorable on `RestApiEndpointSchema` and re-declared on
+// `RouteCoverageEntrySchema`, and NOTHING read it: a repo-wide identifier
+// search at this retirement's base (a9b2be0b0; `skills/**` and tests
+// excluded) returned only the three sites that used to sit in this file. Its
+// documented effect had a different cause — `DispatcherErrorCode.enum
+// .NOT_IMPLEMENTED` is raised by the declarative-endpoint executor
+// (`runtime/src/endpoint-executor.ts` ×3, `runtime/src/api-mapping.ts`,
+// `runtime/src/api-endpoint-step.ts`) for a target or mapping it cannot
+// serve, and none of those sites consults the key — so `handlerStatus:
+// 'stub'` got an ordinarily served route, and `RouteCoverageReportSchema`,
+// the only shape that would have carried the status outward, had zero
+// constructors in objectstack, objectui (pinned sha) and cloud.
+//
+// Three bookkeeping shapes, one retirement:
+//   1. `RestApiEndpoint.handlerStatus` — `retiredKey()` tombstone below (this
+//      shape is a non-strict `z.object`, so a bare deletion would be a silent
+//      strip, #3733 / ADR-0104); `api/RestApiEndpoint:handlerStatus` in
+//      `RETIRED_KEYS_BY_MAJOR[18]`.
+//   2. `RouteCoverageEntrySchema` / `RouteCoverageReportSchema` — whole-def
+//      removal (route 3: nobody ever parsed or constructed one);
+//      `api/RouteCoverageEntry` + `api/RouteCoverageReport` in
+//      `RETIRED_DEFS_BY_MAJOR[18]`. The section that declared them is
+//      recorded at the end of this file.
+//   3. `HandlerStatusSchema` / `HandlerStatus` (the enum this comment
+//      replaces) — orphan value schema once both carriers are gone (#3950:
+//      an exported value schema with no consumer reads as a capability);
+//      `api/HandlerStatus` in `RETIRED_DEFS_BY_MAJOR[18]`.
+//
+// No D2 conversion, deliberately: nothing in the tree parses
+// `RestApiEndpointSchema` outside its own unit tests — it is not a stack
+// collection member (`PLURAL_TO_SINGULAR` has no entry for it) and never a
+// `sys_metadata` row — so a MetadataConversion would be a transform with no
+// seam that ever runs (the `kernel/Manifest:loading` disposition). The D3
+// semantic entry `rest-api-endpoint-handler-status-retired` carries the
+// prescription outward. ENFORCE — mounting a 501 stub for `stub` / `planned`
+// — was ruled out as a zero-pull new capability, not a repair.
+const HANDLER_STATUS_RETIRED =
+  '`RestApiEndpoint.handlerStatus` was removed in @objectstack/spec 17 (#13823, ADR-0049 '
+  + 'enforce-or-remove) — nothing ever read it: no registrar, dispatcher or adapter consulted '
+  + "the key, so an endpoint declared `stub` or `planned` was served exactly like an "
+  + '`implemented` one, and the `501 NOT_IMPLEMENTED` its docstring promised is raised by the '
+  + 'declarative-endpoint executor for a target it cannot serve, never from this field. Delete '
+  + 'the key. An endpoint that has no handler yet is simply not registered; a '
+  + 'declared-but-unbuilt route answering 501 is not a platform capability (ruling record, '
+  + '2026-09-01).';
 
 /**
  * REST API Endpoint Schema
@@ -166,16 +205,16 @@ export const RestApiEndpointSchema = lazySchema(() => z.object({
   cacheTtl: z.number().int().optional().describe('Cache TTL in seconds'),
 
   /**
-   * Handler implementation status.
-   * Tracks whether this endpoint has a real handler or is only declared.
-   *
-   * - `implemented` – A real handler is coded and registered.
-   * - `stub`        – A placeholder handler exists that returns 501 Not Implemented.
-   * - `planned`     – Declared in the protocol spec but not yet implemented.
-   * @default 'implemented'
+   * RETIRED (#13823, ADR-0049): `handlerStatus` (`implemented` / `stub` /
+   * `planned`) had no reader — the retirement record sits above
+   * `HANDLER_STATUS_RETIRED`. Tombstoned rather than deleted: this shape is
+   * not `.strict()`, so authoring it must fail loudly (tsc `never` + the
+   * parse-time prescription), never strip in silence. The old docblock's
+   * `@default 'implemented'` was prose only — the key never carried a Zod
+   * `.default()`, so no built artifact materialised it and there is no
+   * residue window to tolerate (#12840 does not apply).
    */
-  handlerStatus: HandlerStatusSchema.optional()
-    .describe('Handler implementation status: implemented (default if omitted), stub, or planned'),
+  handlerStatus: retiredKey(HANDLER_STATUS_RETIRED),
 }));
 
 export type RestApiEndpoint = z.input<typeof RestApiEndpointSchema>;
@@ -1397,54 +1436,18 @@ export function getDefaultRouteRegistrations(): RestApiRouteRegistration[] {
 }
 
 // ==========================================
-// Route Coverage Report
+// Route Coverage Report — RETIRED (#13823)
 // ==========================================
-
-/**
- * Route Coverage Entry Schema
- * Reports the coverage status of a single declared endpoint.
- */
-export const RouteCoverageEntrySchema = z.object({
-  /** Full URL path of the endpoint */
-  path: z.string().describe('Full URL path (e.g. /api/v1/analytics/query)'),
-  /** HTTP method */
-  method: HttpMethod.describe('HTTP method (GET, POST, etc.)'),
-  /** Route category */
-  category: RestApiRouteCategory.describe('Route category'),
-  /** Handler implementation status */
-  handlerStatus: HandlerStatusSchema.describe('Handler status'),
-  /** Target service */
-  service: z.string().describe('Target service name'),
-  /** Whether the handler was successfully called during health check */
-  healthCheckPassed: z.boolean().optional().describe('Whether the health check probe succeeded'),
-});
-
-export type RouteCoverageEntry = z.input<typeof RouteCoverageEntrySchema>;
-
-/**
- * Route Coverage Report Schema
- *
- * Aggregated report generated by the adapter/dispatcher at startup.
- * Lists every declared endpoint and whether a handler is confirmed.
- *
- * Adapters SHOULD log a warning for every endpoint where
- * `handlerStatus !== 'implemented'` and emit this report as part
- * of the startup health diagnostics.
- */
-export const RouteCoverageReportSchema = z.object({
-  /** ISO 8601 timestamp of report generation */
-  timestamp: z.string().describe('ISO 8601 timestamp'),
-  /** Adapter that generated the report */
-  adapter: z.string().describe('Adapter name (e.g. "hono", "express", "nextjs")'),
-  /** Summary counters */
-  summary: z.object({
-    total: z.number().int().describe('Total declared endpoints'),
-    implemented: z.number().int().describe('Endpoints with real handlers'),
-    stub: z.number().int().describe('Endpoints with stub handlers (501)'),
-    planned: z.number().int().describe('Endpoints not yet implemented'),
-  }),
-  /** Per-endpoint entries */
-  entries: z.array(RouteCoverageEntrySchema).describe('Per-endpoint coverage entries'),
-});
-
-export type RouteCoverageReport = z.input<typeof RouteCoverageReportSchema>;
+//
+// `RouteCoverageEntrySchema` / `RouteCoverageReportSchema` (and their
+// `RouteCoverageEntry` / `RouteCoverageReport` types) left the published set
+// whole in this retirement — the record is above `HANDLER_STATUS_RETIRED`.
+// The docblock that stood here said adapters SHOULD warn on every endpoint
+// with `handlerStatus !== 'implemented'` and emit the report as startup
+// health diagnostics; no adapter, dispatcher or registrar ever constructed
+// one, so the report was a shape with no producer and the status it
+// aggregated had no reader. Registered as `api/RouteCoverageEntry` and
+// `api/RouteCoverageReport` in `RETIRED_DEFS_BY_MAJOR[18]`. Route readiness
+// that IS measured is unchanged and lives elsewhere: the discovery payload's
+// per-service `status` / `handlerReady` (`api/discovery.zod.ts`) and the
+// CI-asserted route ledger (`packages/runtime/src/route-ledger.ts`).

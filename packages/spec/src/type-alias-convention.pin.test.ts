@@ -461,10 +461,7 @@ export type Iso121 = Assert<Eq< z.input< typeof M26.PackageApiErrorCode >, z.inf
 
 // api/plugin-rest-api.zod.ts
 export type Iso122 = Assert<Eq< z.input< typeof M27.RestApiRouteCategory >, z.infer< typeof M27.RestApiRouteCategory > >>;
-export type Iso123 = Assert<Eq< z.input< typeof M27.HandlerStatusSchema >, z.infer< typeof M27.HandlerStatusSchema > >>;
 export type Iso124 = Assert<Eq< z.input< typeof M27.ValidationMode >, z.infer< typeof M27.ValidationMode > >>;
-export type Iso125 = Assert<Eq< z.input< typeof M27.RouteCoverageEntrySchema >, z.infer< typeof M27.RouteCoverageEntrySchema > >>;
-export type Iso126 = Assert<Eq< z.input< typeof M27.RouteCoverageReportSchema >, z.infer< typeof M27.RouteCoverageReportSchema > >>;
 
 // api/protocol.zod.ts
 export type Iso127 = Assert<Eq< z.input< typeof M28.GetDiscoveryRequestSchema >, z.infer< typeof M28.GetDiscoveryRequestSchema > >>;
