@@ -55,6 +55,7 @@ export interface CoverageIssue {
     | 'navigation'
     | 'dashboard'
     | 'widget'
+    | 'dataset'
     | 'page'
     | 'flow'
     | 'metadataForm';
@@ -205,6 +206,15 @@ const COVERAGE_SOURCE: Record<ExpectedEntry['source'], CoverageIssue['source']> 
   navigation: 'navigation',
   dashboard: 'dashboard',
   widget: 'widget',
+  // Analytics dataset copy (`datasets.<d>.label`, `.description`, and each
+  // dimension's / measure's `label`) — the author's own semantic layer, drawn
+  // under every metric tile and on every chart axis, so it keeps its own
+  // bucket and reports as `i18n/missing-dataset` rather than folding away with
+  // `--include-platform`. A dataset is bound BY REFERENCE from N widgets
+  // across M dashboards (ADR-0021 D1), which is also why it is not folded into
+  // the `dashboard` bucket: the string is defined once, not once per
+  // presentation.
+  dataset: 'dataset',
   page: 'page',
   // Screen-flow copy (`flows.<f>.label`, `flows.<f>.screens.<n>.title`, and
   // the per-field `label` / `placeholder`) — the author's own wizard text, so
@@ -231,6 +241,7 @@ const SOURCE_NOUN: Record<CoverageIssue['source'], string> = {
   navigation: 'Navigation item',
   dashboard: 'Dashboard',
   widget: 'Widget',
+  dataset: 'Dataset',
   page: 'Page',
   flow: 'Flow',
   metadataForm: 'Metadata form',
