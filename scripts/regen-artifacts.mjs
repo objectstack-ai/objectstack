@@ -522,6 +522,26 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
       + 'it.',
   },
+  // ── #14173: `packages/lint`'s starting ledger, wired to the same instrument ──
+  //
+  // Onboarded by wiring per the triage ruling on #14173 (comment 5502888897,
+  // 2026-09-02: "onboard by wiring to whichever of the two in-repo routes #14062
+  // lands on"), which landed on `check:test-typecheck`. This is the fifth row
+  // this manifest adds for the mechanism — `reconcileGenerators`'s population is
+  // the manifest SCRIPTS, so a package that defines a generator needs a row and
+  // one that measures zero needs none, same as the plugin family above.
+  {
+    path: 'packages/lint/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/lint',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it: the half-merged tree is not the tree whose type errors this file records, so a file '
+      + 'that GAINED errors would enter the ledger as merge noise instead of as red. Its residue is '
+      + 'only 6 errors over 2 files, which makes it MORE exposed to the failure this row prevents '
+      + 'rather than less.',
+  },
   {
     path: 'packages/sdui-parser/objectui-lockstep.json',
     gen: 'gen:sdui-lockstep',

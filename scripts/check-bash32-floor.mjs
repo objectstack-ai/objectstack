@@ -697,6 +697,13 @@ function fixtureRepo(files) {
   return dir;
 }
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const SELF = fileURLToPath(import.meta.url);
   let failed = 0;
@@ -1097,12 +1104,24 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`\n✓ check-bash32-floor self-test: ${cases} cases pass.`);
+  selfTestReachedVerdict = true;
 }
 
 // ---------------------------------------------------------------------------
 
 function main() {
-  if (process.argv.includes('--self-test')) return selfTest();
+  if (process.argv.includes('--self-test')) {
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-bash32-floor self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    return selfTestCode;
+  }
 
   const rootFlag = process.argv.indexOf('--root');
   const root = rootFlag === -1 ? REPO_ROOT : process.argv[rootFlag + 1];

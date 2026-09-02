@@ -1089,6 +1089,12 @@ async function judgeFixture(src) {
   return { found, results };
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-objectql-double-limit self-test reached its verdict';
+
 async function selfTest() {
   const failures = [];
   const expect = (label, cond) => { if (!cond) failures.push(label); };
@@ -1252,6 +1258,8 @@ async function selfTest() {
     '    table map and through a module-scope fixture are both driven; the ledger\n' +
     '    reconciles in both directions.',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 // ---------------------------------------------------------------------------
@@ -1281,7 +1289,14 @@ if (!isEntrypoint(import.meta.url)) {
   // corpus scan as an import side effect would make this file impossible to
   // reuse without also failing someone else's process.
 } else if (process.argv.includes('--self-test')) {
-  await selfTest();
+  if ((await selfTest()) !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ check-objectql-double-limit self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
 } else if (process.argv.includes('--census')) {
   const { measured, census } = await measure();
   reportCensus(census, '');

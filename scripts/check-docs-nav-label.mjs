@@ -509,6 +509,14 @@ export async function main(argv = []) {
  * pages their sidebar label, and asserting it against a hand-written stub would
  * be asserting against this file's own idea of the module.
  */
+
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 export async function selfTest() {
   const failures = [];
   let checked = 0;
@@ -687,10 +695,22 @@ export async function selfTest() {
       'the real apps/docs population asserted non-empty and node_modules-free, and the CI wiring read out of ' +
       'lint.yml.',
   );
+  selfTestReachedVerdict = true;
   return 0;
 }
 
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) process.exit(await selfTest());
+  if (process.argv.includes('--self-test')) {
+    const selfTestCode = await selfTest();
+      if (!selfTestReachedVerdict) {
+        console.error(
+          '\n✗ check-docs-nav-label self-test: selfTest() returned without reaching its verdict,\n'
+            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+            + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+      }
+      process.exit(selfTestCode);
+  }
   process.exit(await main(process.argv.slice(2)));
 }

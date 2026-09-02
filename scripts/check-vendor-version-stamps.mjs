@@ -900,6 +900,13 @@ function collectFiles() {
   return files;
 }
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const failures = [];
   let ran = 0;
@@ -1219,6 +1226,7 @@ function selfTest() {
   // value is the exact defect this gate exists to stop, and a self-test summary
   // that carries one would be the gate committing it in its own voice.
   console.log(`check-vendor-version-stamps --self-test: ${ran} checks pass.`);
+  selfTestReachedVerdict = true;
   process.exit(0);
 }
 
@@ -1232,7 +1240,17 @@ function selfTest() {
 // "was I run, or imported?"; a hand-typed argv comparison gets it wrong through
 // a symlink, silently.
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) selfTest();
+  if (process.argv.includes('--self-test')) {
+    selfTest();
+      if (!selfTestReachedVerdict) {
+        console.error(
+          '\n✗ check-vendor-version-stamps self-test: selfTest() returned without reaching its verdict,\n'
+            + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+            + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+      }
+  }
 
   // ── Main ────────────────────────────────────────────────────────────────────
 

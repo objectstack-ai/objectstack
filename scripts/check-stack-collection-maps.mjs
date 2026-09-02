@@ -910,6 +910,13 @@ function run({ list = false } = {}) {
 // its own output), so a green run proves nothing about whether it CAN fire. The
 // assertions below drive both failure directions on synthetic input.
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const failures = [];
   // COUNTED, not transcribed. The pass line used to carry a hand-written
@@ -1068,6 +1075,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
     return 1;
   }
   console.log(`✓ check-stack-collection-maps --self-test: ${asserted} assertions over synthetic sources`);
+  selfTestReachedVerdict = true;
   return 0;
 }
 
@@ -1075,6 +1083,17 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
 // self-test and by anything else that wants to ask what a site enumerates.
 if (isEntrypoint(import.meta.url)) {
   const argv = process.argv.slice(2);
-  if (argv.includes('--self-test')) process.exit(selfTest());
+  if (argv.includes('--self-test')) {
+      const selfTestCode = selfTest();
+        if (!selfTestReachedVerdict) {
+            console.error(
+                '\n✗ check-stack-collection-maps self-test: selfTest() returned without reaching its verdict,\n'
+                    + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                    + 'that never finished as a self-test that passed.\n',
+            );
+            process.exit(1);
+        }
+        process.exit(selfTestCode);
+  }
   process.exit(run({ list: argv.includes('--list') }));
 }

@@ -953,7 +953,24 @@ function ambiguousAnchorRefs(anchorList, allowlist) {
   return hits;
 }
 
-if (process.argv.includes('--self-test')) selfTest();
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
+if (process.argv.includes('--self-test')) {
+    selfTest();
+    if (!selfTestReachedVerdict) {
+        console.error(
+            '\n✗ check-adr-anchors self-test: selfTest() returned without reaching its verdict,\n'
+                + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+    }
+}
 
 let adrFiles;
 try {
@@ -1909,5 +1926,6 @@ function selfTest() {
     `✓ check-adr-anchors --self-test: ${checked} assertions over the real auditAdrDirectory() / ` +
       'auditCitedNumbers() / assembleAnchors() paths.',
   );
+  selfTestReachedVerdict = true;
   process.exit(0);
 }

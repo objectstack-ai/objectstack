@@ -597,6 +597,14 @@ export function checkPage(census, pageText, countsText) {
  * rules are driven here against pages a clean tree does not contain -- and the
  * REAL census, so a rule that stops reading the tree fails here too.
  */
+
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 export function selfTest() {
   const cases = [];
   const t = (name, ok, detail) => cases.push({ name, ok: Boolean(ok), detail });
@@ -753,11 +761,23 @@ export function selfTest() {
     + 'stale measurement date pass, while the population figure beside them, a deleted '
     + 'unenforced row, an undated block and a reworded unenforced claim all fail).',
   );
+  selfTestReachedVerdict = true;
   return 0;
 }
 
 function main(argv) {
-  if (argv.includes('--self-test')) return selfTest();
+  if (argv.includes('--self-test')) {
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-tenant-audit-census self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    return selfTestCode;
+  }
 
   let page;
   let counts;

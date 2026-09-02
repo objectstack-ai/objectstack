@@ -200,9 +200,16 @@ describe('MetadataFacade object write/read round-trip', () => {
 
         // ADR-0029 — one owner per object. The contributor write runs first
         // precisely so the refusal leaves the generic map untouched too.
+        // ADR-0112 envelope — `code` + `status`, never a bare `toThrow()`
+        // (#14367); the message assertion stays beside it, since the text is
+        // the contract the forwarders interpolate.
         await expect(
             facade.register('object', 'task', { ...taskDefinition(), _packageId: 'com.example.other' }),
-        ).rejects.toThrow(/already owned by package "com.example.owner"/);
+        ).rejects.toMatchObject({
+            code: 'OBJECT_OWNERSHIP_CONFLICT',
+            status: 422,
+            message: expect.stringMatching(/already owned by package "com.example.owner"/),
+        });
 
         expect((registry as any).metadata.get('object')?.size ?? 0).toBe(0);
         expect(((await facade.getObject('task')) as any).label).toBe('Owned');

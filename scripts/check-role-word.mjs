@@ -1026,6 +1026,13 @@ function missingRootsMessage(missing) {
   );
 }
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const failures = [];
   const expect = (label, cond) => {
@@ -1850,10 +1857,21 @@ function selfTest() {
     + 'exemptions are disjoint, proven against a fixture the vendor-wire scan DOES claim once '
     + 'the region mask is withheld, and both volumes are published separately on every run.',
   );
+  selfTestReachedVerdict = true;
   process.exit(0);
 }
 
-if (process.argv.includes('--self-test')) selfTest();
+if (process.argv.includes('--self-test')) {
+  selfTest();
+  if (!selfTestReachedVerdict) {
+    console.error(
+      '\n✗ check-role-word self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
+}
 
 /* Probed for ALL roots first, so one message names every missing one rather
  * than the run dying at whichever comes first — and probed here, ahead of both
