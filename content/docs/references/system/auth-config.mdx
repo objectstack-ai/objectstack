@@ -102,9 +102,9 @@ Advanced / low-level Better-Auth options
 | **oidcProvider** | `boolean` | optional (default: `false`) | Enable the OpenID Connect provider plugin (acts as an OIDC IdP) |
 | **dynamicClientRegistration** | `boolean` | optional | Allow unauthenticated RFC 7591 Dynamic Client Registration (default: follows OS_MCP_SERVER_ENABLED) |
 | **deviceAuthorization** | `boolean` | optional (default: `false`) | Enable RFC 8628 Device Authorization Grant (CLI / TV-style login) |
-| **admin** | `boolean` | optional (default: `false`) | Enable platform admin operations (ban/unban, set-password, impersonate, set-role) |
+| **admin** | `boolean` | optional | Enable platform admin operations (ban/unban, set-password, impersonate, set-role). Unset: forced on by effective SCIM (ADR-0071), otherwise off. An explicit false beside effective SCIM is a conflict refused at construction time. |
 | **phoneNumber** | `boolean` | optional (default: `false`) | Enable phone-number sign-in (phone + password; OTP sign-in/reset when an SMS service is configured) |
-| **scim** | `boolean` | optional | Enable the SCIM 2.0 provisioning surface. Unset: OS_SCIM_ENABLED decides (absent = off); an explicit value wins over the env var. Effective SCIM forces the admin plugin on unless admin is set. |
+| **scim** | `boolean` | optional | Enable the SCIM 2.0 provisioning surface. Unset: OS_SCIM_ENABLED decides (absent = off); an explicit value wins over the env var. Effective SCIM forces the admin plugin on when admin is unset; an explicit admin: false beside effective SCIM is refused at construction time. |
 | **sso** | `boolean` | optional | Enable enterprise SSO (domain-routed OIDC/SAML sign-in). Unset: OS_SSO_ENABLED decides (absent = off); an explicit value wins over the env var. |
 | **ssoDomainVerification** | `boolean` | optional | Enable DNS domain-verification for SSO providers (requires sso). Unset: OS_SSO_DOMAIN_VERIFICATION decides (absent = off); an explicit value wins over the env var. |
 
@@ -212,9 +212,9 @@ OIDC / Generic OAuth2 provider configuration for enterprise SSO
 | **oidcProvider** | `boolean` | optional (default: `false`) | Enable the OpenID Connect provider plugin (acts as an OIDC IdP) |
 | **dynamicClientRegistration** | `boolean` | optional | Allow unauthenticated RFC 7591 Dynamic Client Registration (default: follows OS_MCP_SERVER_ENABLED) |
 | **deviceAuthorization** | `boolean` | optional (default: `false`) | Enable RFC 8628 Device Authorization Grant (CLI / TV-style login) |
-| **admin** | `boolean` | optional (default: `false`) | Enable platform admin operations (ban/unban, set-password, impersonate, set-role) |
+| **admin** | `boolean` | optional | Enable platform admin operations (ban/unban, set-password, impersonate, set-role). Unset: forced on by effective SCIM (ADR-0071), otherwise off. An explicit false beside effective SCIM is a conflict refused at construction time. |
 | **phoneNumber** | `boolean` | optional (default: `false`) | Enable phone-number sign-in (phone + password; OTP sign-in/reset when an SMS service is configured) |
-| **scim** | `boolean` | optional | Enable the SCIM 2.0 provisioning surface. Unset: OS_SCIM_ENABLED decides (absent = off); an explicit value wins over the env var. Effective SCIM forces the admin plugin on unless admin is set. |
+| **scim** | `boolean` | optional | Enable the SCIM 2.0 provisioning surface. Unset: OS_SCIM_ENABLED decides (absent = off); an explicit value wins over the env var. Effective SCIM forces the admin plugin on when admin is unset; an explicit admin: false beside effective SCIM is refused at construction time. |
 | **sso** | `boolean` | optional | Enable enterprise SSO (domain-routed OIDC/SAML sign-in). Unset: OS_SSO_ENABLED decides (absent = off); an explicit value wins over the env var. |
 | **ssoDomainVerification** | `boolean` | optional | Enable DNS domain-verification for SSO providers (requires sso). Unset: OS_SSO_DOMAIN_VERIFICATION decides (absent = off); an explicit value wins over the env var. |
 

@@ -246,6 +246,43 @@ describe('validateHookBodyWrites — ctx.api writes', () => {
     expect(findings[0].hint).toContain("'email'");
   });
 
+  // [#13858] The message is the whole product of an advisory rule, so the
+  // sentence IS the deliverable. It used to promise a driver-dependent outcome
+  // ("on a SQL driver … a driver-level error; on a schemaless driver … the
+  // stray key is persisted"), which has not been true for this path since
+  // #8682/#8738: `ctx.api` is a ScopedContext over the running engine, so the
+  // payload is CALLER-supplied and the declared-field door refuses it first.
+  //
+  // Measured before this text was written — real QuickJS sandbox, real hook
+  // body, real ObjectQL, real driver-sql (better-sqlite3) AND real
+  // driver-memory: both families answered `INVALID_FIELD` / 400, "Unknown field
+  // 'stagee' on object 'deal'", the target row was untouched, and the memory
+  // family stored no shadow column. Same door the caller-payload half of
+  // `undeclared-field-write-driver-split.integration.test.ts` pins.
+  it('states the measured refusal — INVALID_FIELD / 400 on every driver — and no driver split', () => {
+    const [finding] = validateHookBodyWrites(
+      stackWith("await ctx.api.object('crm_deal').update({ id, stag: 'won' });"),
+    );
+
+    // What the author actually gets, in the vocabulary #13657 landed for the
+    // `ctx.input` sibling one branch over — one door, one phrasing.
+    expect(finding.message).toContain('INVALID_FIELD / 400');
+    expect(finding.message).toContain('identically on every driver');
+    expect(finding.message).toContain('before any statement is built');
+    // Why it is refused there rather than by a driver: the payload is a
+    // CALLER's, which is the fact the whole rewrite turns on.
+    expect(finding.message).toContain('ordinary CALLER write');
+    // ...and the blast radius that makes an author-time rule worth having.
+    expect(finding.message).toContain('fails the operation that triggered the hook');
+
+    // The retired claim, in both halves. Neither may come back without a
+    // measurement saying it should.
+    expect(finding.message).not.toMatch(/driver-level error/);
+    expect(finding.message).not.toMatch(/schemaless/);
+    expect(finding.message).not.toMatch(/is persisted/);
+    expect(finding.message).not.toMatch(/write-path validator skips/);
+  });
+
   it('checks updateById payloads at argument 1, not 0', () => {
     const findings = validateHookBodyWrites(
       stackWith("await ctx.api.object('crm_deal').updateById(ctx.input.id, { stag: 'won' });"),

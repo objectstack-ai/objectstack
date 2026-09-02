@@ -412,6 +412,19 @@ export class DatasourceAdminServicePlugin implements Plugin {
         await this.connection?.disconnect(name);
       },
 
+      // [#13804] The update path's in-place rebuild: evict the pool built from
+      // the OLD record, rebuild from the NEW one through the same shared
+      // connect path, and on failure restore the old pool (never pool-less).
+      // `previous` rides along because the engine's eviction door removes the
+      // datasource def with the driver, and the keep-old-pool path must put
+      // back the def the old pool was serving under.
+      reregisterPool: async (previous, next) => {
+        await this.connection?.reconnect(next, {
+          previous,
+          context: { origin: next.origin ?? 'runtime', trigger: 'runtime-admin' },
+        });
+      },
+
       // The admin list's `status` reads the connection service's retained
       // verdicts (framework#3827). Resolved lazily per call: the service exists
       // by the end of this init(), but the verdicts only appear once boot

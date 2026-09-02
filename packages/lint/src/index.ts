@@ -24,6 +24,13 @@ export {
   WIDGET_LEGACY_ANALYTICS_UNRENDERABLE,
   DASHBOARD_FILTER_FIELD_UNKNOWN,
   DASHBOARD_FILTER_FIELD_UNPROVISIONED,
+  // [#14148] The widget's OWN two references, at the same site: the keys of its
+  // presentation-scope `filter` (resolved on the #14105 object-graph seam, with
+  // the ADR-0021 `include` clause its `runtimeFilter` really is subject to) and
+  // `options.sortBy` against what the widget selects.
+  WIDGET_FILTER_FIELD_UNKNOWN,
+  WIDGET_FILTER_FIELD_NOT_INCLUDED,
+  WIDGET_SORTBY_UNSELECTED,
 } from './validate-widget-bindings.js';
 export type { WidgetBindingFinding, WidgetBindingSeverity } from './validate-widget-bindings.js';
 
@@ -420,6 +427,22 @@ export type {
   SortableFieldSeverity,
 } from './validate-sortable-fields.js';
 
+// [#14107] The rest of the list view's field surface — the two rules above own
+// `sort` and `searchableFields`; this one owns every OTHER position that names
+// a field on the bound object (columns, filter keys, grouping, row colour,
+// user filters, and every binding inside the kanban / calendar / gantt /
+// timeline / gallery / map / tree blocks). Resolution goes through the shared
+// `object-graph.ts` seam (#14105/#14148), on the HEAD segment — see that
+// module's dotted-path note.
+export {
+  validateListViewFieldRefs,
+  LIST_VIEW_FIELD_UNKNOWN,
+} from './validate-list-view-field-refs.js';
+export type {
+  ListViewFieldRefFinding,
+  ListViewFieldRefSeverity,
+} from './validate-list-view-field-refs.js';
+
 export { validateActionNameRefs, ACTION_NAME_UNDEFINED } from './validate-action-name-refs.js';
 export type { ActionNameRefFinding, ActionNameRefSeverity } from './validate-action-name-refs.js';
 
@@ -466,6 +489,47 @@ export {
   CHART_AXIS_NOT_SELECTED,
 } from './validate-chart-bindings.js';
 export type { ChartBindingFinding, ChartBindingSeverity } from './validate-chart-bindings.js';
+
+// [#14105] The layer BELOW the chart/widget binding rules above: a dataset's
+// own `include[]`, `dimensions[].field`, `measures[].field` and filter KEYS,
+// resolved against the object graph. Its base-object half is
+// `validateObjectReferences`' `datasets[].object` site.
+export {
+  validateDatasetReferences,
+  DATASET_INCLUDE_UNKNOWN,
+  DATASET_FIELD_UNKNOWN,
+  DATASET_FIELD_NOT_INCLUDED,
+  DATASET_FILTER_FIELD_UNKNOWN,
+} from './validate-dataset-references.js';
+export type { DatasetRefFinding, DatasetRefSeverity } from './validate-dataset-references.js';
+
+// The two reusable seams the rule above is written on, exported because the
+// queued siblings (#14148 widget filter keys + sortBy, #14107 list-view field
+// positions) must reuse ONE mechanism rather than growing a second hop-walker
+// and a second filter-key reader. Both hold mechanism only — no rule ids, no
+// severities, no findings; the judgement stays with the rule that asks.
+// [#14148] `joinablePrefixes` and `describeFieldPathVerdict` joined them when
+// the widget limb landed: both were local to the dataset rule, and both are
+// answers to questions the widget position asks identically — how ADR-0021
+// expands an `include` into joinable prefixes, and how one verdict reads in
+// prose. Copying either would have been the second implementation this seam
+// exists to prevent, one release after it was written to prevent it.
+export {
+  indexObjectGraph,
+  resolveFieldPath,
+  isUnjudgeable,
+  joinablePrefixes,
+  describeFieldPathVerdict,
+  nearestName,
+  suggestName,
+  listNames,
+  RELATIONSHIP_FIELD_TYPES,
+} from './object-graph.js';
+export type {
+  ObjectGraph, GraphObject, GraphField, FieldPathVerdict, FieldPathAccount,
+} from './object-graph.js';
+export { walkFilterFieldKeys } from './filter-walk.js';
+export type { FilterFieldKey } from './filter-walk.js';
 
 // #4762 — the two STATIC artifacts an object validation rule carries (a
 // `format` rule's `regex`, a `json_schema` rule's `schema`) are fail-OPEN at
@@ -691,6 +755,7 @@ export {
   VIEW_KEY_COLLISION,
   VIEW_REF_FORM_TARGET_MISSING,
   VIEW_REF_FORM_TARGET_KIND,
+  VIEW_REF_NAV_VIEW_MISSING,
 } from './lint-view-refs.js';
 
 export {

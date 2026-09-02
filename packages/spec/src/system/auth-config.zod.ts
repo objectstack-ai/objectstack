@@ -96,9 +96,22 @@ export const AuthPluginConfigSchema = lazySchema(() => z.object({
    *
    * Only callers whose user has a platform admin role (default: `admin`)
    * can hit these endpoints; better-auth enforces this internally.
+   *
+   * Tri-state on purpose (#13816, maintainer ruling 2026-09-01): when left
+   * UNSET, effective SCIM decides — SCIM provisioning forces the admin
+   * plugin on, because SCIM's `active:false` deprovisioning path runs
+   * through the admin plugin's ban/unban (ADR-0071); without effective
+   * SCIM, unset means off. An EXPLICIT `true` mounts the plugin
+   * unconditionally. An EXPLICIT `false` declines the admin surface — and
+   * because of the ADR-0071 coupling, `false` beside effective SCIM is a
+   * contradiction plugin-auth REFUSES loudly at construction time (a
+   * documented conflict instead of silently forcing admin on): accept the
+   * admin plugin, or disable SCIM.
    */
-  admin: z.boolean().default(false).describe(
-    'Enable platform admin operations (ban/unban, set-password, impersonate, set-role)',
+  admin: z.boolean().optional().describe(
+    'Enable platform admin operations (ban/unban, set-password, impersonate, set-role). ' +
+    'Unset: forced on by effective SCIM (ADR-0071), otherwise off. An explicit false beside ' +
+    'effective SCIM is a conflict refused at construction time.',
   ),
   /**
    * Enable better-auth's `phone-number` plugin so a phone number is a
@@ -135,11 +148,14 @@ export const AuthPluginConfigSchema = lazySchema(() => z.object({
    *
    * Enabling SCIM (from either source) also forces the better-auth `admin`
    * plugin on when `admin` is left unset — SCIM's `active:false` →
-   * ban/unban runs through it (ADR-0071).
+   * ban/unban runs through it (ADR-0071). An explicit `admin: false` beside
+   * effective SCIM is a contradiction refused at construction time (#13816
+   * — see `admin`).
    */
   scim: z.boolean().optional().describe(
     'Enable the SCIM 2.0 provisioning surface. Unset: OS_SCIM_ENABLED decides (absent = off); ' +
-    'an explicit value wins over the env var. Effective SCIM forces the admin plugin on unless admin is set.',
+    'an explicit value wins over the env var. Effective SCIM forces the admin plugin on when admin ' +
+    'is unset; an explicit admin: false beside effective SCIM is refused at construction time.',
   ),
   /**
    * Enable enterprise SSO (`@better-auth/sso`): domain-routed sign-in against

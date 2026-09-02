@@ -3,6 +3,15 @@
 import { isIncoherentAggregate } from '@objectstack/spec/data';
 import { ChartTypeSchema } from '@objectstack/spec/ui';
 
+import { walkFilterFieldKeys } from './filter-walk.js';
+import {
+  describeFieldPathVerdict,
+  indexObjectGraph,
+  isUnjudgeable,
+  joinablePrefixes,
+  resolveFieldPath,
+  type ObjectGraph,
+} from './object-graph.js';
 import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
@@ -84,6 +93,65 @@ import {
  *   of the same invariant, warned rather than errored because this pass cannot
  *   see the remote schema (#8116's severity reasoning).
  *
+ * ── The widget's OWN two references (#14148) ─────────────────────────────────
+ *
+ * - `widget-filter-field-unknown` — a KEY of the widget's own `filter` resolves
+ *   to no column on the bound dataset's object graph.
+ * - `widget-filter-field-not-included` — that key RESOLVES, but its relationship
+ *   prefix is not declared in the dataset's `include`, so ADR-0021 compiles no
+ *   join for it and the column is out of the query's reach.
+ * - `widget-sortby-unselected` — `options.sortBy` names neither a `dimensions[]`
+ *   nor a `values[]` entry of this widget, so the ordering the author wrote
+ *   cannot be applied to a result that will not contain that column.
+ *
+ * All three are `error`, and the reason is the reporting card's, quoted because
+ * it is the sharpest statement of it in the family: the dashboard it was
+ * measured on leads with a "not moving" tile — open work untouched >14 days —
+ * and *"an empty tile is indistinguishable from a healthy team: a missing
+ * number reads as zero, and zero is the answer the manager is hoping for."*
+ * The failure is not merely silent, it is silent in the direction the reader
+ * WANTS to believe, which is why it gates rather than advises.
+ *
+ * ### Why these two were the surviving holes
+ *
+ * On the very same node, the TOKEN was checked and the COLUMN was not:
+ * `filter-token-unknown` (#3574) fires path-precise at
+ * `…widgets[4].filter.due_date.$lte`, so the traversal already walked the
+ * filter tree and already knew the widget's dataset. And the identical
+ * resolution already existed one key over — `dashboard-filter-field-unknown`
+ * resolves a DASHBOARD-level filter's field against each widget's dataset base
+ * object. `widgets[].filter` is the same field-existence invariant on the
+ * filter an author is MORE likely to write by hand, and it was simply never fed
+ * through it. `options.sortBy` is the declared-≠-enforced half:
+ * `DashboardWidgetOptionsSchema.sortBy` states its own contract in prose —
+ * *"must be one this widget actually selects"* — and nothing enforced it.
+ *
+ * ### The `include` clause, and why a dotted path is RESOLVED here
+ *
+ * A widget's `filter` is ANDed into the dataset query as `runtimeFilter`
+ * (`DashboardWidgetSchema.filter`; `dataset-executor.ts` `combineFilters(
+ * compiled.filter, selection.runtimeFilter)`), and that compiled query carries
+ * ONLY the joins the dataset's `include` declared (`dataset-compiler.ts`: joins
+ * are derived from `include`, and `assertDeclared` refuses an undeclared
+ * relationship path). So a dotted key here is judged on the same two clauses
+ * `validate-dataset-references.ts` applies one level down — existence, then
+ * joinability — rather than skipped. That decision is deliberate and recorded
+ * rather than implicit: `dashboard-filter-field-unknown` above SKIPS a dotted
+ * field (`field.includes('.')`), which was correct when nothing in this package
+ * could walk hops, and a third silent pass-through would have reproduced the
+ * very card this rule closes. The runtime is NOT a backstop for it either —
+ * `assertDeclared` runs over `dimensions` and `measures` only, never over
+ * `runtimeFilter` — so nothing between the author and the empty tile asks this
+ * question.
+ *
+ * Resolution is {@link resolveFieldPath}'s and its `unknowable` verdicts are
+ * never reported (ADR-0072 D1), so the three skips every field-existence rule
+ * in this package takes apply unchanged: an object this stack does not define,
+ * an object with no readable field map (ADR-0015 `external`), and a
+ * registry-injected system column — the last resolved PER OBJECT rather than
+ * through the flat `SYSTEM_FIELDS` union, which is what lets a reference to
+ * `owner_id` on an `ownership: 'none'` object stay a real finding.
+ *
  * Warnings can be deliberately suppressed per widget via
  * `suppressWarnings: ['<rule-id>']`; errors cannot — they describe a
  * binding the analytics service cannot satisfy.
@@ -100,6 +168,12 @@ export const WIDGET_LEGACY_ANALYTICS_SHAPE = 'widget-legacy-analytics-shape';
 export const WIDGET_LEGACY_ANALYTICS_UNRENDERABLE = 'widget-legacy-analytics-unrenderable';
 export const DASHBOARD_FILTER_FIELD_UNKNOWN = 'dashboard-filter-field-unknown';
 export const DASHBOARD_FILTER_FIELD_UNPROVISIONED = 'dashboard-filter-field-unprovisioned';
+/** [#14148] A key of the widget's OWN `filter` that resolves to no column. */
+export const WIDGET_FILTER_FIELD_UNKNOWN = 'widget-filter-field-unknown';
+/** [#14148] A widget filter key whose relationship prefix is not in `include`. */
+export const WIDGET_FILTER_FIELD_NOT_INCLUDED = 'widget-filter-field-not-included';
+/** [#14148] `options.sortBy` names nothing this widget selects. */
+export const WIDGET_SORTBY_UNSELECTED = 'widget-sortby-unselected';
 
 /**
  * Pre-ADR-0021 inline-analytics keys. The single-form cutover replaced them
@@ -337,6 +411,11 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
   // behind them. Built once for the whole stack; empty for every object that is
   // not ADR-0015 `external`, so the filter check below pays one map lookup.
   const unprovisionedAnchors = indexUnprovisionedAnchors(stack);
+  // [#14148] The resolution universe for a widget's OWN filter keys. Indexed
+  // once for the whole stack and shared by every widget, exactly as
+  // `validate-dataset-references.ts` does one level down — the same seam, so
+  // the two positions cannot drift into two accounts of one object graph.
+  const graph: ObjectGraph = indexObjectGraph(stack);
   const datasetList = asArray(stack.datasets);
   for (let i = 0; i < datasetList.length; i++) {
     const ds = datasetList[i];
@@ -383,9 +462,16 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
       const path = `dashboards[${i}].widgets[${j}]`;
       const suppressed = (rule: string): boolean =>
         Array.isArray(w.suppressWarnings) && w.suppressWarnings.includes(rule);
-      const push = (f: Omit<WidgetBindingFinding, 'where' | 'path'>): void => {
+      // [#14148] `path` defaults to the WIDGET, and a caller may override it
+      // with a position inside the widget. The two #14148 limbs do: a filter
+      // key is reported at `…widgets[j].filter.<key>` and `sortBy` at
+      // `…widgets[j].options.sortBy`, matching the precision `filter-token-unknown`
+      // already offers in this exact subtree (`…widgets[4].filter.due_date.$lte`).
+      // Reporting a five-key filter's one bad key at the widget is a location the
+      // author still has to search.
+      const push = (f: Omit<WidgetBindingFinding, 'where' | 'path'> & { path?: string }): void => {
         if (f.severity === 'warning' && suppressed(f.rule)) return;
-        findings.push({ ...f, where, path });
+        findings.push({ ...f, where, path: f.path ?? path });
       };
 
       // ── (a0) legacy pre-ADR-0021 analytics shape ──
@@ -547,6 +633,69 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
         }
       }
 
+      // ── (a2) the widget's OWN filter keys resolve (#14148) ──
+      // `filter-token-unknown` already stands inside this exact subtree and
+      // judges the VALUES; this asks the question that was missing about the
+      // KEYS. The condition is ANDed into the dataset query as `runtimeFilter`,
+      // so a key naming no column either widens the scope (the condition is
+      // dropped) or empties it — and the widget renders successfully either way.
+      if (w.filter !== undefined && w.filter !== null) {
+        const filterObject = typeof dataset.object === 'string' ? dataset.object : undefined;
+        // Skips 1 and 2, taken once for the whole widget: an object this stack
+        // does not define, or one with no readable field map. Resolving against
+        // it would turn an unknowable base binding into a finding per filter key.
+        const base = filterObject ? graph.get(filterObject) : undefined;
+        if (filterObject && base) {
+          const included = joinablePrefixes(dataset.include);
+          walkFilterFieldKeys(w.filter, `${path}.filter`, ({ field, path: at }) => {
+            const verdict = resolveFieldPath(graph, filterObject, field);
+            if (isUnjudgeable(verdict) || !verdict) return;
+
+            const account = describeFieldPathVerdict(verdict, field, 'filter key');
+            if (account) {
+              push({
+                severity: 'error',
+                rule: WIDGET_FILTER_FIELD_UNKNOWN,
+                path: at,
+                message:
+                  `${account.message} The widget's own \`filter\` is ANDed into the ` +
+                  `dataset query as \`runtimeFilter\`, so the condition addresses a column ` +
+                  `that does not exist: the widget renders successfully and empty, and ` +
+                  `nothing reports the miss.`,
+                hint:
+                  `Filter on a field that exists on "${filterObject}" (dataset "${dsName}"), ` +
+                  `or on a \`relationship[.relationship].field\` path whose prefix is declared ` +
+                  `in that dataset's \`include\`. ${account.detail}`,
+              });
+              return;
+            }
+
+            // The key RESOLVES. Second clause: ADR-0021 joins ONLY declared
+            // paths, and the compiler's `assertDeclared` never sees a
+            // `runtimeFilter` — so an undeclared prefix is a real defect with
+            // no runtime door in front of it.
+            const cut = field.lastIndexOf('.');
+            if (cut < 0) return; // a base column needs no join
+            const prefix = field.slice(0, cut);
+            if (included.has(prefix)) return;
+            push({
+              severity: 'error',
+              rule: WIDGET_FILTER_FIELD_NOT_INCLUDED,
+              path: at,
+              message:
+                `filter key "${field}" resolves on the object graph, but its relationship ` +
+                `prefix "${prefix}" is not declared in dataset "${dsName}"'s \`include\` — ` +
+                `and ADR-0021 joins ONLY declared paths, so no join is compiled and the ` +
+                `column is out of this query's reach. The widget renders empty.`,
+              hint:
+                `Add "${prefix}" to dataset "${dsName}"'s include (declaring "a.b" implicitly ` +
+                `includes "a"), or filter on a field of "${filterObject}" itself. Declared ` +
+                `include paths: ${included.size > 0 ? [...included].sort().join(', ') : '(none)'}.`,
+            });
+          });
+        }
+      }
+
       const dimensionNames = new Set<string>();
       for (const d of asArray(dataset.dimensions)) {
         if (typeof d.name === 'string') dimensionNames.add(d.name);
@@ -586,6 +735,54 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             `Widgets select dataset measures BY NAME, not by base column.` +
             `${suggest(values[k], measures.keys())} ` +
             `Add the measure to the dataset or fix the reference.`,
+        });
+      }
+
+      // ── (c1) `options.sortBy` names something this widget selects (#14148) ──
+      // `DashboardWidgetOptionsSchema.sortBy` states its own contract in prose
+      // — "must be one this widget actually selects (a `dimensions` entry or a
+      // `values` entry)" — and nothing enforced it. It is lowered into a
+      // `DatasetSelection.order`, whose key must name a selected dimension or
+      // measure; a key that does not is either dropped in favour of the
+      // implicit ordering or refused by the executor (`resolveOrdering`
+      // throws `DATASET_INVALID`). Both outcomes lose the order the author
+      // wrote, and the first loses it in silence — which is the whole defect
+      // where the authored order IS the product rule (ordering business units
+      // by a COUNT turns a workload chart into a league table).
+      //
+      // Resolved against the AUTHORED `dimensions`/`values` arrays, not the
+      // validated subset: an entry that does not resolve is rules (b)/(c)'s
+      // finding, and re-reporting it here would double-report one typo. Same
+      // call `measureField` below makes for `chartConfig`.
+      const widgetOptions = (w.options && typeof w.options === 'object' && !Array.isArray(w.options))
+        ? (w.options as AnyRec)
+        : undefined;
+      const sortBy = typeof widgetOptions?.sortBy === 'string' ? widgetOptions.sortBy : undefined;
+      if (sortBy && !dims.includes(sortBy) && !values.includes(sortBy)) {
+        // A name the DATASET declares but this widget did not select is the
+        // more helpful diagnosis — the fix is a `values`/`dimensions` entry,
+        // not a spelling correction — so it is named apart from a name the
+        // dataset does not declare at all.
+        const declaredButUnselected = dimensionNames.has(sortBy) || measures.has(sortBy);
+        const selected = [...dims, ...values];
+        push({
+          severity: 'error',
+          rule: WIDGET_SORTBY_UNSELECTED,
+          path: `${path}.options.sortBy`,
+          message: declaredButUnselected
+            ? `options.sortBy "${sortBy}" is declared by dataset "${dsName}" but is not ` +
+              `selected by this widget (selects: ${list(selected)}), so the query result ` +
+              `will not contain that column and the authored order cannot be applied.`
+            : `options.sortBy "${sortBy}" is neither a \`dimensions\` nor a \`values\` entry ` +
+              `of this widget (selects: ${list(selected)}) — \`sortBy\` must name one this ` +
+              `widget actually selects, so the authored order cannot be applied.`,
+          hint: declaredButUnselected
+            ? `Add "${sortBy}" to this widget's ${dimensionNames.has(sortBy) ? 'dimensions' : 'values'}, ` +
+              `or order by something it already selects.` +
+              `${suggest(sortBy, selected)}`
+            : `Point options.sortBy at one of this widget's selected names (${list(selected)}).` +
+              `${suggest(sortBy, selected)} Ordering is applied to the query RESULT, so it ` +
+              `can only name a column that result carries.`,
         });
       }
 

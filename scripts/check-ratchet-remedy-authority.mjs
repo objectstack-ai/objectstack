@@ -104,7 +104,7 @@
 //   node scripts/check-ratchet-remedy-authority.mjs --self-test  # the detector's own rules
 
 import { readFileSync, readdirSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { isEntrypoint } from './invoked-as.mjs';
@@ -114,6 +114,72 @@ const REPO_ROOT = resolve(HERE, '..');
 const SCRIPTS_DIR = join(REPO_ROOT, 'scripts');
 const SELF_FILE = 'check-ratchet-remedy-authority.mjs';
 const SELF = `scripts/${SELF_FILE}`;
+
+/**
+ * The two extensions the corpus walk admits, as ONE constant rather than two
+ * `endsWith` calls inline — so the declaration below can be held against the
+ * thing the sweep really filters on instead of against a second copy of it.
+ * The `.mts` half is the #8538 blind spot and is not decoration: see the header.
+ */
+const CORPUS_EXTENSIONS = ['.mjs', '.mts'];
+
+/**
+ * The population this gate READS, declared for `scripts/pm/dispatch-gates.mjs`
+ * -- the `ROOT_DIR_WATCH_HINTS` idiom, spelled as a literal array because the
+ * hint extractor reads SOURCE TEXT (`scripts/check-watch-hint-literal.mjs`
+ * holds that spelling for every declarer in the tree).
+ *
+ * ## Why this gate declared NOTHING, and what that cost (#13813)
+ *
+ * `extractWatchHints` scans the module body for path-shaped literals. This file
+ * builds its population at RUNTIME from `readdirSync(SCRIPTS_DIR)`, and the
+ * string naming that population appeared only in the failure text, in the
+ * `--list` banner and in the header comment -- never as a literal the scanner
+ * could read. So the derivation read no population here and made no claim, and
+ * the family landed in the residue's `undetermined` bucket: not matched, not
+ * known-irrelevant, and absent from the `matched` list a dispatch brief prints.
+ *
+ * That is not a theoretical gap. A PR touching three `scripts/**` files ran its
+ * whole derived family locally, green, and CI reddened on THIS gate -- both
+ * readings true, of the same tree. Eight families matched those same three
+ * paths, every one of them at `gate source 'scripts/**'`, because their
+ * populations are spelled where the derivation can read them.
+ *
+ * ## Why the spelling is the flat-directory glob and NOT `scripts/**`
+ *
+ * `corpusFiles()` is a NON-RECURSIVE `readdirSync` admitted by extension. It
+ * reads the top level of `scripts/` only -- never `scripts/pm/`,
+ * `scripts/docs-audit/` or any other nested directory -- and only the two
+ * extensions above. `scripts/**` would be the easy spelling and it would be
+ * FALSE: it pastes this gate onto every card touching any nested script, for
+ * files this gate never opens, which is the costlier error `hintCovers`' own
+ * docblock prices above a missing declaration.
+ *
+ * The two hints here are 100% precise AND complete against this tree, set-equal
+ * in both directions to what `corpusFiles()` walks -- 183 of 183, against 310
+ * tracked files under the bare root -- and the self-test below re-measures that
+ * rather than trusting this sentence.
+ *
+ * ⚠️ NOT `scripts/*.{mjs,mts}`, however natural it looks beside the header and
+ * the failure text, which both spell the corpus that way for a human reader.
+ * `hintCovers` has no brace expansion, so that one string reaches NOTHING --
+ * a dead declaration, printed as the same silence as declaring nothing at all.
+ * One hint per extension is the spelling that is live, and a self-test case
+ * pins the brace form as dead so the tidier spelling cannot quietly land.
+ *
+ * ## Why this spelling exists at all today
+ *
+ * `scripts/pm/bare-root-worklist.mjs` recorded this population as
+ * REFUSE-UNSPELLABLE on the grounds that "the idiom has no non-recursive
+ * spelling". That was TRUE when it was written: `collapseHint` deleted the glob
+ * and spliced the remainder inside the final segment, so this hint collapsed to
+ * `scripts/.mjs`, a string no tree can hold. #13448 retired that collapse for
+ * exactly this shape -- a glob carrying a literal SUFFIX in the final segment is
+ * MATCHED now, through `judgedAsPattern`/`triggerCovers`, not collapsed -- so
+ * the refusal became false of the tree without anything reddening. That row is
+ * re-decided alongside this declaration, in the file that owns it.
+ */
+const ROOT_DIR_WATCH_HINTS = ['scripts/*.mjs', 'scripts/*.mts'];
 
 /** The compliance token. Byte-identical to every instrumented gate's const. */
 const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
@@ -838,7 +904,7 @@ const CONTROL = {
 /** @returns {string[]} corpus filenames, sorted. `*.{mjs,mts}` — never `*.mjs`. */
 export function corpusFiles() {
   return readdirSync(SCRIPTS_DIR)
-    .filter((f) => f.endsWith('.mjs') || f.endsWith('.mts'))
+    .filter((f) => CORPUS_EXTENSIONS.some((ext) => f.endsWith(ext)))
     .sort();
 }
 
@@ -1118,6 +1184,79 @@ function selfTest() {
   expect('self-classification — this gate is NOT an instance of the convention it enforces (its '
     + 'control is a declaration registry, and its offer-shaped quotes live in comments)',
     results.get(SELF_FILE) !== undefined && results.get(SELF_FILE).verdict === 'excluded');
+
+  // ── (20) The declared population, held to the walk in BOTH directions (#13813)
+  //
+  // ⛔ Checked with a LOCAL matcher rather than by importing
+  // `scripts/pm/dispatch-gates.mjs`: the import specifier would itself be a path
+  // literal in this file's source, so the derivation would hand this gate that
+  // module's declared population as if it were this gate's own — a fabricated
+  // watch surface. (The same refusal `check-logger-receiver-detach.mjs` records.)
+  // The liveness of these hints in `hintCovers`' own terms is pinned where
+  // `hintCovers` is already in scope: `scripts/pm/bare-root-worklist.mjs`.
+  //
+  // Both directions, because either alone passes against the defect this closes.
+  // "The declaration is non-empty" was true of every gate that ever went silent;
+  // "it names the root" is true of `scripts/**`, which is the FALSE spelling
+  // here. What is asserted is that the hints are a function of the two constants
+  // the walk is a function of — move the read and this reds, in this file.
+  const CORPUS_ROOT = relative(REPO_ROOT, SCRIPTS_DIR).split('\\').join('/');
+  expect('declaration — one hint per admitted extension, each the flat-directory glob under the '
+    + `very root the walk reads from (declared: ${JSON.stringify(ROOT_DIR_WATCH_HINTS)}, root: `
+    + `${CORPUS_ROOT}, extensions: ${CORPUS_EXTENSIONS.join(' ')})`,
+    ROOT_DIR_WATCH_HINTS.length === CORPUS_EXTENSIONS.length
+    && CORPUS_EXTENSIONS.every((ext) => ROOT_DIR_WATCH_HINTS.includes(`${CORPUS_ROOT}/*${ext}`)));
+
+  // ⛔ The subtree spelling is the one this declaration must never take. The walk
+  // is a NON-RECURSIVE readdir; `scripts/**` would name this gate for every
+  // nested script it never opens, which is the costlier error the idiom prices
+  // above a missing declaration.
+  expect('declaration — the subtree spelling is refused: the walk is non-recursive, so no hint '
+    + 'ends in a subtree glob and none collapses back to the bare root',
+    !ROOT_DIR_WATCH_HINTS.some((h) => h.endsWith('/**') || h.replace(/\/\*+$/, '') === CORPUS_ROOT));
+
+  // The local matcher for `<root>/*<ext>`: one directory level, one extension.
+  const declaresPath = (p) => ROOT_DIR_WATCH_HINTS.some((h) => {
+    const m = /^([^/]+)\/\*(\.[a-z]+)$/.exec(h);
+    return Boolean(m) && p.startsWith(`${m[1]}/`)
+      && !p.slice(m[1].length + 1).includes('/') && p.endsWith(m[2]);
+  });
+  const corpusPaths = corpusFiles().map((f) => `${CORPUS_ROOT}/${f}`);
+  const unnamed = corpusPaths.filter((p) => !declaresPath(p));
+  expect('declaration — COMPLETE: every file the sweep opens is named by a declared hint '
+    + `(${corpusPaths.length} swept, ${unnamed.length} unnamed`
+    + `${unnamed.length ? `: ${unnamed.slice(0, 3).join(', ')}` : ''})`,
+    corpusPaths.length > 0 && unnamed.length === 0);
+  expect('declaration — no hint is DEAD: each one names at least one file this gate really reads',
+    ROOT_DIR_WATCH_HINTS.every((h) => corpusPaths.some((p) => declaresPath(p) && p.endsWith(h.slice(h.indexOf('*') + 1)))));
+
+  // PRECISE, against the two shapes `scripts/**` would wrongly sweep in, both
+  // taken from the tree rather than spelled: a nested script, and a top-level
+  // file at an extension the walk does not admit. Non-vacuous by construction —
+  // the assertion fails if the tree stops carrying an example of either.
+  const topLevel = readdirSync(SCRIPTS_DIR, { withFileTypes: true });
+  const nested = topLevel
+    .filter((e) => e.isDirectory())
+    .flatMap((d) => readdirSync(join(SCRIPTS_DIR, d.name))
+      .filter((f) => CORPUS_EXTENSIONS.some((ext) => f.endsWith(ext)))
+      .map((f) => `${CORPUS_ROOT}/${d.name}/${f}`));
+  expect('declaration — PRECISE against depth: the tree carries nested scripts at the admitted '
+    + `extensions (${nested.length}) and the declaration names NONE of them`,
+    nested.length > 0 && !nested.some(declaresPath));
+  const otherExt = topLevel
+    .filter((e) => e.isFile() && !CORPUS_EXTENSIONS.some((ext) => e.name.endsWith(ext)))
+    .map((e) => `${CORPUS_ROOT}/${e.name}`);
+  expect('declaration — PRECISE against extension: the root carries top-level files the walk does '
+    + `not admit (${otherExt.length}) and the declaration names NONE of them`,
+    otherExt.length > 0 && !otherExt.some(declaresPath));
+
+  // ⚠️ The brace form is what the header, the `--list` banner and the OK line all
+  // spell for a human reader, and it is DEAD as a hint — no brace expansion in
+  // the matcher, so it would reach nothing while reading like a declaration.
+  // Pinned so the tidier-looking spelling cannot quietly replace the live one.
+  expect('declaration — the brace form the messages spell is NOT what is declared (it reaches '
+    + 'nothing, and a dead declaration prints as the same silence as declaring nothing)',
+    !ROOT_DIR_WATCH_HINTS.some((h) => h.includes('{')));
 
   if (failures.length > 0) {
     for (const f of failures) console.error(`  x self-test: ${f}`);

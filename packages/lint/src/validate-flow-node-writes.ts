@@ -26,27 +26,31 @@
 //
 // And the runtime consequence is not the benign "consumer skips the unknown
 // name and does the rest" that keeps `page-field-unknown` / `form-field-unknown`
-// advisory. Nothing between the node and storage removes the key: the flow
-// executor calls the data engine directly (bypassing the metadata-protocol
-// ingress, which strips `readonly` — not unknown — keys anyway), the engine's
-// write paths strip only readonly/readonlyWhen, and the SQL driver's
-// `formatInput` / `applyWriteColumnMap` pass an unrecognized key straight
-// through (`m[k] ?? k`). Every branch below was measured, not inferred:
+// advisory. The flow executor calls the data engine directly (`data.insert` /
+// `data.update` in service-automation's `builtin/crud-nodes.ts`, bypassing the
+// metadata-protocol ingress), so the node's `fields` map arrives as an ordinary
+// CALLER payload — and [#13858] the declared-field door (#8682 insert, #8738
+// update) refuses a caller-named undeclared key from the object's field map
+// before any statement is built. Every branch below was measured through the
+// real AutomationEngine, the real builtin CRUD nodes, the real engine and BOTH
+// driver families (driver-sql on better-sqlite3, driver-memory), not inferred:
 //
-//   • Through the engine, an undeclared key reaches `driver.update` /
-//     `driver.create` verbatim, alongside the audit stamps.
-//   • On SQLite/knex an UPDATE becomes `update "deal" set "name" = 'n2',
-//     "stagee" = 'won' … → no such column: stagee`. The statement is rejected
-//     WHOLE: `name` — spelled correctly, in the same payload — does not land
-//     either, and the step fails with a driver error naming a column, far from
-//     the authoring mistake.
-//   • An INSERT fails the same way (`table deal has no column named stagee`),
-//     and one notch harder: the row is never created at all, so every later
-//     node that expected `{<node>.id}` is working from a record that does not
-//     exist.
-//   • On a schemaless datasource (memory, MongoDB) nothing rejects it, so the
-//     stray key is persisted into a column the object never declares — where no
-//     schema-driven read surface will return it.
+//   • Both families answer identically — `INVALID_FIELD` / 400, "Unknown field
+//     'stagee' on object 'deal'". No driver is reached, so there is no split to
+//     observe.
+//   • The write is refused WHOLE: `name` — spelled correctly, in the same
+//     payload — does not land either.
+//   • On `create_record` the row is never created at all, so every later node
+//     that expected `{<node>.id}` is working from a record that does not exist.
+//   • The node catches the refusal and folds it into a step failure
+//     (`create_record(deal) failed: Unknown field 'stagee' on object 'deal'`),
+//     so the RUN fails — far from the authoring mistake, which is exactly why
+//     an author-time rule is still worth having.
+//
+// ⚠️ Until #13858 this block described the pre-#8682 driver split (SQL rejected
+// the statement, a schemaless datasource persisted the stray key). That is
+// retired, not merely restated: the severity below is unchanged because neither
+// the old outcome nor the new one is ever "the rest still works".
 //
 // No outcome is "the rest still works". That is the same call
 // `validate-searchable-fields` makes for a stale entry and
@@ -290,12 +294,18 @@ export function validateFlowNodeWrites(stack: AnyRec): FlowNodeWriteFinding[] {
           where: `flow "${flowName}" › ${nodeWhere}`,
           path: `${nodePath}.config.fields.${fieldName}`,
           message:
-            `${node.type} writes '${fieldName}', but object '${objectName}' declares no such field. Nothing ` +
-            `between the node and storage removes the key: on a SQL datasource the driver rejects the whole ` +
-            `statement ('no such column'), so the correctly named fields in this same payload never land ` +
-            `either${
+            // [#13858] The node hands `fields` to the data engine directly
+            // (`data.insert` / `data.update` in service-automation's
+            // crud-nodes), so it is a CALLER payload and the #8682/#8738
+            // declared-field door refuses it before any datasource is reached.
+            // Measured on driver-sql and driver-memory alike.
+            `${node.type} writes '${fieldName}', but object '${objectName}' declares no such field. The ` +
+            `node hands its fields map to the engine as an ordinary caller payload, so the ` +
+            `declared-field door REFUSES the whole write — INVALID_FIELD / 400, identically on every ` +
+            `datasource, before any statement is built. The correctly named fields in this same payload ` +
+            `never land either${
               node.type === 'create_record' ? ' and the record is never created at all' : ''
-            }; on a schemaless one the stray key is persisted into a column no read surface returns.`,
+            }, and the step fails the run.`,
           hint: fixHint(fieldName, [...known]),
         });
       }

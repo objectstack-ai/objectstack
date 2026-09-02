@@ -41,7 +41,7 @@ import {
   isExitSignal,
   errorCodeFields,
 } from '../utils/format.js';
-import { checkSpecVersionGap } from '../utils/spec-version.js';
+import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
 
 export default class Compile extends Command {
   static override description = 'Compile ObjectStack configuration to JSON artifact';
@@ -599,9 +599,9 @@ export default class Compile extends Command {
       const sizeKB = (jsonContent.length / 1024).toFixed(1);
       const stats = collectMetadataStats(config);
 
-      // Spec-version drift advisory (non-blocking): installed platform newer
-      // than the app declares → point at the migration guide.
-      const specGap = checkSpecVersionGap((config as { manifest?: { specVersion?: unknown } }).manifest);
+      // Protocol drift advisory (non-blocking): installed platform outside the
+      // app's declared `engines.protocol` range → point at the migration guide.
+      const protocolGap = checkProtocolVersionGap((config as { manifest?: unknown }).manifest);
 
       if (flags.json) {
         await emitJson({
@@ -680,7 +680,9 @@ export default class Compile extends Command {
           // Same key `os validate --json` uses, so a CI consumer reads one shape
           // from either command rather than learning two.
           conversions: conversionNotices,
-          specVersionGap: specGap,
+          // Published key name kept; the axis behind it moved to
+          // `manifest.engines.protocol` (#13860). See validate.ts.
+          specVersionGap: protocolGap,
           stats,
           duration: timer.elapsed(),
         }, 0, { compact: true });
@@ -711,10 +713,10 @@ export default class Compile extends Command {
           `${path.join(path.dirname(output), runtimeBundle.outputFileName)} ${chalk.dim(`(${runtimeKB} KB, ${lowering.count} handler${lowering.count === 1 ? '' : 's'})`)}`,
         );
       }
-      if (specGap) {
+      if (protocolGap) {
         console.log('');
-        console.log(chalk.yellow(`  ⚠ ${specGap.message}`));
-        console.log(chalk.dim(`      → ${specGap.hint}`));
+        console.log(chalk.yellow(`  ⚠ ${protocolGap.message}`));
+        console.log(chalk.dim(`      → ${protocolGap.hint}`));
       }
       console.log('');
 

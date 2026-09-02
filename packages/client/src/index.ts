@@ -4761,9 +4761,10 @@ export class ObjectStackClient {
    *
    * [#11924] Bound to `SearchAllResponse` (`@objectstack/spec/api`), the
    * contract #8140 had to leave missing: the route answers the whole body
-   * BARE, relaying `searchAll`'s `{ query, hits, totalObjects, totalHits,
-   * truncated }` verbatim, and conformance coverage on both the producer and
-   * the mount is what entitles the declaration (#3877).
+   * BARE, relaying `searchAll`'s `{ query, hits, pages, totalObjects,
+   * totalHits, truncated }` verbatim (#13216 added `pages` — published-page
+   * hits on an unscoped sweep), and conformance coverage on both the producer
+   * and the mount is what entitles the declaration (#3877).
    * ⚠️ `SearchResult` (`@objectstack/spec/contracts`) is STILL the near-miss
    * trap: it types the per-object `ISearchService.search`, whose `hits` carry
    * `score`/`document`, not this route's `object`/`title`/`snippet`/`record`.

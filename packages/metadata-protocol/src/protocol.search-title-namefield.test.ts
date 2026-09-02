@@ -50,6 +50,9 @@ function makeProtocol(objects: ObjectMeta[], rowsByObject: Record<string, unknow
         registry: {
             getObject: (n: string) => objects.find(o => o.name === n),
             getAllObjects: () => objects,
+            // [#13216] The page sweep's registry read — no pages here; titles
+            // of RECORD hits are the only thing under test.
+            listItems: () => [],
         },
         find,
     };

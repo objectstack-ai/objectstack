@@ -34,7 +34,7 @@ import {
   isExitSignal,
   errorCodeFields,
 } from '../utils/format.js';
-import { checkSpecVersionGap } from '../utils/spec-version.js';
+import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
 
 export default class Validate extends Command {
   static override description =
@@ -344,9 +344,10 @@ export default class Validate extends Command {
       // 4. Collect and display stats
       const stats = collectMetadataStats(config);
 
-      // Spec-version drift advisory (non-blocking): if the installed platform
-      // is a newer major than the app declares, point at the migration guide.
-      const specGap = checkSpecVersionGap(config.manifest);
+      // Protocol drift advisory (non-blocking): if the installed platform is a
+      // newer major than the app's declared `engines.protocol` range admits,
+      // point at the migration guide.
+      const protocolGap = checkProtocolVersionGap(config.manifest);
 
       // 4b. Structural advisories (non-blocking) — computed HERE, above the
       //     `if (flags.json)` branch, for exactly the reason `unknownKeyWarnings`
@@ -443,7 +444,12 @@ export default class Validate extends Command {
             // this one.
             warnings: warningsSoFar(),
             conversions: conversionNotices,
-            specVersionGap: specGap,
+            // The payload key keeps its published name. The AXIS it reports
+            // moved from the undeclared `manifest.specVersion` to
+            // `manifest.engines.protocol` (#13860), but this is a machine face
+            // with pinned consumers, and renaming it is a break nobody asked
+            // for. Its value shape is unchanged.
+            specVersionGap: protocolGap,
             duration: timer.elapsed(),
           },
           // `--strict` means one thing — "treat warnings as errors" — and it now
@@ -507,10 +513,10 @@ export default class Validate extends Command {
       }
 
       // Non-blocking upgrade advisory — never gated by --strict.
-      if (specGap) {
+      if (protocolGap) {
         console.log('');
-        console.log(chalk.yellow(`  ⚠ ${specGap.message}`));
-        console.log(chalk.dim(`      → ${specGap.hint}`));
+        console.log(chalk.yellow(`  ⚠ ${protocolGap.message}`));
+        console.log(chalk.dim(`      → ${protocolGap.hint}`));
       }
 
       console.log('');

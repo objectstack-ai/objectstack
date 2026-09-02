@@ -122,6 +122,13 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
  * `positions` / `apps` — so those are NOT carried. Widening the snapshot is a
  * one-key edit here plus a `CONTEXT_STACK_KEYS` entry, made when a rule that
  * reads the collection actually crosses the wall, never in advance.
+ *
+ * [#13977] "Derived from this shape" is now the mechanism and not only the
+ * intent: the second half of that edit is DEMANDED by the compiler rather than
+ * remembered. Add a key here and this package stops building until the
+ * collection has its row below — see {@link CONTEXT_STACK_KEYS} for what the
+ * old `satisfies` clause could not ask, and what silently happened when the
+ * row was forgotten.
  */
 export interface RuntimeStackContext {
   /**
@@ -286,12 +293,104 @@ const PACKAGE_PROVENANCE_KEY = '_packageId';
 const OVERLAY_PROVENANCE_SENTINEL = 'sys_metadata';
 
 /**
+ * The context collections the snapshot carries, in stack-key order — DERIVED
+ * from {@link RuntimeStackContext}, not listed (#13977).
+ *
+ * ## What the spelling this replaces could not ask
+ *
+ * It was a hand-written literal carrying `as const satisfies readonly (keyof
+ * RuntimeStackContext)[]`. That clause asks that every entry it NAMES is a real
+ * context key — validity. It does not ask that every context key HAS an entry —
+ * completeness, which the docblock on {@link RuntimeStackContext} nevertheless
+ * claimed ("derived from this shape and keeps the two from drifting"). Declared,
+ * not enforced.
+ *
+ * The cost was not a missing member, it was a WRONG VERDICT.
+ * {@link buildRuntimeWriteSnapshots} fills the snapshot by iterating this set, so
+ * a collection declared on the interface and absent here is never carried: the
+ * host passes it in, the gate drops it, and every rule resolving references into
+ * that collection judges a universe that is empty — findings that look correct
+ * against something that is not there (the `shyx_customer_ds` shape). Measured
+ * before this card: adding `widgets?: readonly unknown[]` to the interface and
+ * rebuilding left `pnpm --filter @objectstack/lint build` at **exit 0** with
+ * nothing in this package red. The only red was second-order and one package
+ * over — `protocol.ts`'s `-?` accumulator in `@objectstack/metadata-protocol`,
+ * about a different constant, naming this one nowhere. The same asymmetry #13390
+ * removed from `NAME_KEYED_STACK_KEYS` and #13768 from
+ * `CLOSURE_CONTEXT_KEY_BY_TYPE`.
+ *
+ * ## Why a keyed record, and why that is a derivation rather than an assertion
+ *
+ * A type's keys cannot be materialised as values, so the derivation needs
+ * exactly one runtime spelling to derive FROM, and the job is to make that
+ * spelling impossible to leave incomplete. {@link CONTEXT_STACK_KEY_ORDER} is
+ * that spelling and the mapped type pins it in BOTH directions: `-?` over `keyof
+ * RuntimeStackContext` demands a row per collection (a missing one is a type
+ * error naming the collection, in this file, at `tsc --noEmit` and at the DTS
+ * build), and the object-literal excess-property check refuses a row for a
+ * collection the interface no longer has. The array is then computed, so it
+ * cannot disagree with the record.
+ *
+ * That is `protocol.ts`'s `-?` accumulator, the mechanism this repo already
+ * proves. #13768 had to settle for a completeness ASSERTION beside its constant
+ * only because the type lived one package away and the set was not readable
+ * there as a value; here both inputs are in this file, so the stronger shape is
+ * available and is what ships.
+ *
+ * ## Order is load-bearing, so the derivation preserves it (measured, #13977)
+ *
+ * The order this encodes reaches two places, and it was worth measuring before
+ * choosing a spelling — a mapped type does not guarantee declaration order:
+ *
+ * - **The snapshot's own key order.** The loop in
+ *   {@link buildRuntimeWriteSnapshots} inserts in this order, so it is what
+ *   `Object.keys(baseline)` yields — read as a VALUE by
+ *   `runtime-gate.derived-name-keys.test.ts`, which feeds it to
+ *   {@link deriveNameKeyedStackKeys} and asserts an ORDERED result.
+ * - **The derived alternation.** {@link deriveNameKeyedStackKeys} filters in
+ *   context order by contract ("Order follows `contextStackKeys`, deliberately"),
+ *   and {@link buildTopLevelIndexPattern} interpolates that order into
+ *   {@link TOP_LEVEL_INDEX}. Reordering does not change what the pattern MATCHES
+ *   — the `\[` anchor defeats prefix shadowing, pinned in both orders — but it
+ *   does change the pattern's `source`, which #13390 keeps byte-identical to the
+ *   literal it replaced on purpose.
+ *
+ * So the requirement is: preserve the author's order. This spelling does, and
+ * that is the reason it is a keyed record rather than any union-to-tuple trick:
+ * `Object.keys` returns own enumerable string keys in declaration order
+ * (ECMAScript `OrdinaryOwnPropertyKeys`), so the order below IS the stack-key
+ * order, chosen here and readable here. Integer-like keys would sort ahead of
+ * insertion order, which is why that rule is stated rather than assumed — a
+ * stack key is an interface property name and never one of those.
+ *
+ * Ordering is pinned by `runtime-gate.derived-context-keys.test.ts` end to end,
+ * because the pre-existing ordered pin could not see all of it: it filters
+ * `datasets` out (no write type maps into it), so swapping `datasets` with a
+ * neighbour left that assertion green.
+ */
+const CONTEXT_STACK_KEY_ORDER = {
+  objects: true,
+  permissions: true,
+  books: true,
+  datasets: true,
+  pages: true,
+} as const satisfies { [K in keyof RuntimeStackContext]-?: true };
+
+/**
  * The context collections the snapshot carries, in stack-key order. Derived
  * facts: every entry is a key of {@link RuntimeStackContext} AND a stack key
- * some runtime-wired rule reads (`runtime-gate.test.ts` pins membership).
+ * some runtime-wired rule reads (`runtime-gate.test.ts` pins membership);
+ * every key of {@link RuntimeStackContext} has an entry (#13977 — the record
+ * above, held by the compiler).
+ *
+ * `Object.keys` types as `string[]`, so the read-back is asserted. It is the one
+ * assertion in the derivation and it is sound by construction: the record is
+ * compiler-pinned to exactly `keyof RuntimeStackContext`, and `Object.keys`
+ * returns exactly that record's own enumerable string keys. ⛔ Do not widen this
+ * back into a literal — the list would stop being derived and the interface
+ * would stop being the single source it says it is.
  */
-const CONTEXT_STACK_KEYS = ['objects', 'permissions', 'books', 'datasets', 'pages'] as const satisfies
-  readonly (keyof RuntimeStackContext)[];
+const CONTEXT_STACK_KEYS = Object.keys(CONTEXT_STACK_KEY_ORDER) as readonly (keyof RuntimeStackContext)[];
 
 /** One rule's verdict at the runtime surface, carrying which rule produced it. */
 export interface RuntimeGateResult {
@@ -501,11 +600,16 @@ export const WRITTEN_STACK_KEYS: ReadonlySet<string> = new Set(Object.values(TYP
  * both are already written down: the context fills the collection
  * ({@link CONTEXT_STACK_KEYS}) and some write type maps into it
  * ({@link TYPE_TO_STACK_KEY}). Kept as a literal it was the one spelling of that
- * set with NO guard — `CONTEXT_STACK_KEYS` carries a `satisfies` clause, which
- * is validity, not completeness, and the compiler holds nothing else. Omitting a
- * member here did not fail to build, fail a test, or fail a gate; it emitted
- * findings that LOOK correct whose `path` the caller cannot resolve, which is
- * the #10064 defect re-created silently.
+ * set with NO guard — at the time, `CONTEXT_STACK_KEYS` carried a `satisfies`
+ * clause, which is validity, not completeness, and the compiler held nothing
+ * else. Omitting a member here did not fail to build, fail a test, or fail a
+ * gate; it emitted findings that LOOK correct whose `path` the caller cannot
+ * resolve, which is the #10064 defect re-created silently.
+ *
+ * [#13977] That reading of `CONTEXT_STACK_KEYS` is now history rather than
+ * description: it is derived from `RuntimeStackContext` and complete by
+ * construction. This derivation is unchanged — it always rested on the
+ * MEMBERSHIP of that set, and it now inherits a set the compiler keeps whole.
  *
  * [#13216] `pages` is the measurement that made the case: adding it touched
  * FIVE spellings of this one set and only the fifth announced itself — the one

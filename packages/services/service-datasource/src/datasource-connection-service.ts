@@ -735,6 +735,124 @@ export class DatasourceConnectionService {
   }
 
   /**
+   * Rebuild one datasource's live pool from a NEW record, keeping the OLD pool
+   * when the rebuild fails (#13804).
+   *
+   * The update path's problem is that {@link connect} alone cannot express a
+   * reconfigure: its idempotency guard answers `already-registered` while the
+   * old driver holds the name, and the engine's `registerDriver` keeps the
+   * incumbent on a collision — so a changed record was persisted while the
+   * pool built from the OLD record kept serving, with the retained `connected`
+   * verdict describing a configuration the record no longer declares.
+   *
+   * Sequence: evict the old registration (the #13578 door), rebuild via the
+   * one shared connect path, then settle by outcome —
+   *
+   *  - **rebuild succeeded** → the new pool is registered; the old pool's
+   *    connection is closed (unless the instance was ADOPTED — host-owned,
+   *    ADR-0062 D5 — in which case the host keeps it, exactly as
+   *    {@link disconnect} would).
+   *  - **rebuild failed or was refused** → the OLD driver instance is
+   *    re-registered so the datasource is never left pool-less (the ruled
+   *    "never brick a running server over a UI action" direction), and the
+   *    retained verdict stays the LOUD failed one — the admin list reports
+   *    `error`/`blocked` with a reason naming that the previous
+   *    configuration's pool is still the one serving. Routing consults the
+   *    registry before the unavailable mark, so the restored driver keeps
+   *    serving while the verdict tells the operator the truth.
+   *
+   * The eviction window is real but narrow: between the evict and the new
+   * registration, queries against this datasource fail with "not registered".
+   * That is the cost of an in-place rebuild; the caller only takes it when a
+   * connectivity-bearing field actually changed (a label edit never enters).
+   *
+   * `previous` is the record the LIVE pool was built from. It exists because
+   * `unregisterDriver` removes the datasource def together with the driver
+   * (the registry owns that invariant), so the keep-old-pool path must restore
+   * the def the old pool was serving under — otherwise the write gate would
+   * judge writes for a datasource whose def vanished mid-failure.
+   *
+   * Not for the DEFAULT datasource: runtime-admin records can never be named
+   * `default` (the name is host-reserved), and the default driver's natural-
+   * name registration (#3826) would make a name-keyed swap evict nothing.
+   */
+  async reconnect(
+    record: ConnectableDatasource,
+    opts: {
+      context?: DatasourceConnectContext;
+      previous?: Pick<ConnectableDatasource, 'schemaMode' | 'external'>;
+    } = {},
+  ): Promise<ConnectResult> {
+    const name = record.name;
+    const engine = this.cfg.engine();
+    const oldDriver = engine?.getDriverByName?.(name);
+    if (!oldDriver || !engine || typeof engine.unregisterDriver !== 'function') {
+      // Nothing to swap (no live driver — the datasource was inactive, or its
+      // last connect failed), or the engine has no eviction door. Either way a
+      // plain connect is the whole job: it builds when the name is free, and
+      // on a door-less engine it degrades to the pre-#13804 idempotent no-op —
+      // the safe direction for a host that cannot express a swap.
+      return this.connect(record, { context: opts.context });
+    }
+    const oldOwnership = this.states.get(name)?.ownership;
+
+    const restoreOldPool = (): void => {
+      engine.registerDriver?.(oldDriver, false);
+      engine.registerDatasourceDef?.({
+        name,
+        schemaMode: opts.previous?.schemaMode,
+        external: opts.previous?.external as { allowWrites?: boolean } | undefined,
+      });
+    };
+    const stillServingSuffix =
+      " — the previous configuration's pool was kept and is still the one serving; the new configuration is NOT in force";
+
+    engine.unregisterDriver(name);
+    let result: ConnectResult;
+    try {
+      result = await this.connect(record, { context: opts.context });
+    } catch (err) {
+      // `connect` re-throws authoring verdicts (an unhonourable `pool` block,
+      // #5714) after recording a failed state. Same settlement as a returned
+      // failure: the old pool comes back, the loud verdict stands.
+      restoreOldPool();
+      this.amendRetainedReason(name, stillServingSuffix);
+      throw err;
+    }
+
+    if (availabilityOf(result.status) === 'available') {
+      if (oldOwnership !== 'host' && typeof oldDriver.disconnect === 'function') {
+        try {
+          await oldDriver.disconnect();
+        } catch (err) {
+          this.logger?.warn?.(`datasource '${name}': closing the replaced pool failed: ${errMsg(err)}`);
+        }
+      }
+      return result;
+    }
+
+    restoreOldPool();
+    this.amendRetainedReason(name, stillServingSuffix);
+    this.logger?.warn?.(
+      `datasource '${name}': rebuild after reconfigure failed (${result.reason ?? result.status})` +
+        stillServingSuffix,
+    );
+    return result;
+  }
+
+  /**
+   * Append detail to the retained verdict's `reason` — used by
+   * {@link reconnect} so the loud degraded verdict also says the OLD pool is
+   * the one still serving (without it, `error` + a bare connect failure reads
+   * as "this datasource is down", which is precisely not the state).
+   */
+  private amendRetainedReason(name: string, suffix: string): void {
+    const st = this.states.get(name);
+    if (!st) return;
+    this.states.set(name, { ...st, reason: `${st.reason ?? 'reconnect failed'}${suffix}` });
+  }
+
+  /**
    * Kernel-teardown sweep (ADR-0062 D5, #3993): disconnect exactly the pools
    * THIS service opened — states with status `'connected'`, nothing else.
    * `'already-registered'` is deliberately excluded (someone else registered

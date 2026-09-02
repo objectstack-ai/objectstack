@@ -23,6 +23,13 @@
  *     id text input.
  *   - dashboard `globalFilters[].optionsFrom.object` — the object a filter
  *     dropdown fetches its options from. Dead → an always-empty dropdown.
+ *   - ADR-0021 `datasets[].object` (#14105) — the FROM of the semantic layer.
+ *     Dead → every report and dashboard widget bound to that dataset queries an
+ *     object that does not exist, and `validate`/`build` both exited 0 before
+ *     this site existed. Its field-level siblings (`include`,
+ *     `dimensions[].field`, `measures[].field`, filter keys) live in
+ *     `validate-dataset-references.ts`, which skips a dataset whose base object
+ *     lands here so one typo yields one finding.
  *   - navigation `requiresObject` / `requiresService` capability gates. This is
  *     the escape hatch `stack.zod.ts` honours to SKIP nav validation, so a typo
  *     here is doubly silent: the entry is hidden forever (the runtime never
@@ -292,6 +299,31 @@ export function validateObjectReferences(stack: AnyRec): ObjectRefFinding[] {
         'The dropdown fetches its options from this object; an unknown one renders an always-empty filter.',
       );
     }
+  }
+
+  // ── ADR-0021 datasets → the base object (#14105) ──
+  // `DatasetSchema.object` is `z.string()`, so nothing resolved it: a dataset
+  // over an object that does not exist passed `objectstack validate` at exit 0
+  // and `build` wrote it into `dist/objectstack.json` (measured on 17.2.0). It
+  // belongs on THIS rule rather than beside the dataset field checks
+  // (`validate-dataset-references.ts`) because the reference is an object NAME,
+  // and the severity ladder above is the whole reason: the platform's own
+  // `system.datasets.ts` declares five datasets over `sys_*` objects, three of
+  // which live in packages a stack compiling plugin-auth alone cannot see. All
+  // five resolve through `PLATFORM_PROVIDED_OBJECT_NAMES` (rung ③); a local
+  // "not in this stack ⇒ error" check would have reported every one of them.
+  const datasets = asArray(stack.datasets);
+  for (let dsi = 0; dsi < datasets.length; dsi++) {
+    const ds = datasets[dsi];
+    if (!ds || typeof ds !== 'object') continue;
+    check(
+      strName(ds.object),
+      `dataset "${strName(ds.name) ?? `#${dsi}`}"`,
+      `datasets[${dsi}].object`,
+      'dataset base object',
+      'A dataset is the FROM of every report and dashboard widget bound to it (ADR-0021), so ' +
+        'an unknown base object leaves every one of those surfaces querying nothing.',
+    );
   }
 
   // ── App navigation → requiresObject gates (and gated objectName) ──

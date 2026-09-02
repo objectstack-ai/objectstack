@@ -266,5 +266,27 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'materialized `false` are covered by a read-side legacy window in the sweep, so they '
         + 'keep escalating exactly as they do today.',
     },
+    {
+      key: 'system/AuthPluginConfig:admin',
+      from: 'false',
+      to: '(none)',
+      reason:
+        'The materialized `false` could not distinguish "the author said nothing" from "the '
+        + 'author declined the admin surface" — and the runtime needs that distinction (#13816, '
+        + 'maintainer ruling 2026-09-01). plugin-auth resolves the wired plugin set from the '
+        + 'RAW config (never a spec parse), where absence means "effective SCIM decides": SCIM '
+        + 'provisioning forces the better-auth admin plugin on because its active:false '
+        + 'deprovisioning path runs through admin ban/unban (ADR-0071). A parse-path that '
+        + 'materialized `admin: false` onto a silent document therefore said the opposite of '
+        + 'what the runtime does under SCIM. Deployed behaviour does not move on the omitted '
+        + 'path: silence meant "off, unless SCIM forces it on" before (the runtime reads raw '
+        + 'config) and means exactly that after. What changes is (a) the parsed key is now '
+        + 'absent when unauthored (`boolean | undefined`), and (b) an EXPLICIT `admin: false` '
+        + 'beside effective SCIM — previously honoured silently, mounting SCIM with its '
+        + 'deprovisioning path broken — is refused loudly at construction as a documented '
+        + 'ADR-0071 conflict: accept the admin plugin or disable SCIM. To keep the admin '
+        + 'surface off, keep `admin: false` (and leave SCIM off); to force it on regardless of '
+        + 'SCIM, write `admin: true`; silence keeps following SCIM.',
+    },
   ],
 };

@@ -289,7 +289,14 @@ describe('os doctor, end to end, against a config that reads .env at top level',
     // `.env` before bundling, boots this exact directory.
     expect(run.out).not.toContain('Could not load config for analysis');
     // The config checks did not merely stop failing — they RAN.
-    expect(run.out).toContain('Platform spec');
+    // Both strings below are ROW LABELS used as liveness evidence, not verdicts:
+    // the row is printed on either branch, so its presence proves the check
+    // executed whatever it concluded. That is why they must track `doctor.ts`'s
+    // labels through a rename rather than be relaxed — `Platform spec` became
+    // `Platform protocol` when the advisory moved onto `engines.protocol`
+    // (#13860), and this assertion is the one consumer that lived outside the
+    // suites that rename touched.
+    expect(run.out).toContain('Platform protocol');
     expect(run.out).toContain('No circular references detected');
     expect(run.exitCode).toBeUndefined();
 
