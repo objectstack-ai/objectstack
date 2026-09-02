@@ -169,7 +169,7 @@ import {
   SECRET_MASK,
 } from './secret-fields.js';
 import { pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
-import { SchemaRegistry, computeFQN } from './registry.js';
+import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
 import { ExpressionEngine } from '@objectstack/formula';
@@ -4768,7 +4768,7 @@ export class ObjectQL implements IObjectQLEngine {
    * Key: Package ≠ App. The manifest is the package. The apps[] array inside
    * the manifest contains UI navigation definitions (AppSchema).
    */
-  registerApp(manifest: any) {
+  registerApp(manifest: any, scope?: ArtifactInstallScope) {
       const id = manifest.id || manifest.name;
       const namespace = manifest.namespace as string | undefined;
       this.invalidateSummaryIndex(); // new objects may add/change summary fields
@@ -4791,8 +4791,13 @@ export class ObjectQL implements IObjectQLEngine {
         }
       }
 
-      // 1. Register the Package (manifest + lifecycle state)
-      this._registry.installPackage(manifest);
+      // 1. Register the Package (manifest + lifecycle state).
+      // [ADR-0130 D1/D3] `scope` is the artifact's own package list, passed by
+      // the load path that read the artifact. It is what lets the install gate
+      // tell a CO-OWNER (another package from this same artifact) from a
+      // stranger — the question D1 corrected the gate to ask. Absent for every
+      // single-package caller, where the gate behaves exactly as before (D7).
+      this._registry.installPackage(manifest, undefined, scope);
       this.logger.debug('Installed Package', { id: manifest.id, name: manifest.name, namespace });
 
       // 2. Register owned objects
