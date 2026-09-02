@@ -1764,6 +1764,58 @@ function toExpression(cond: string | Expression): Expression {
 }
 
 /**
+ * The CEL scope roots the acting user is mounted under, so a predicate that
+ * NEEDS a user can be told apart from one that does not.
+ *
+ * ADR-0068 D1's canonical root is `current_user`; `@objectstack/formula`'s
+ * `buildScope` mounts the SAME `EvalUser` object under `user`, `ctx.user` and
+ * `os.user` as aliases, and mounts none of them when the evaluation carries no
+ * user. `ctx` and `os` are listed at bare-root granularity because that is what
+ * {@link collectCelRootIdentifiers} reports — and that is exact at THIS call
+ * site rather than merely conservative: {@link evaluateOptionVisibility}
+ * evaluates with `{ record, previous, user }` and nothing else, so `buildScope`
+ * has no `org`/`env` to mount `os` from and no other source for `ctx`. Both
+ * roots are therefore bound here if and only if a user is.
+ */
+const USER_SCOPE_ROOTS: readonly string[] = ['current_user', 'user', 'ctx', 'os'];
+
+/** Parsed-root memo — the twin of {@link parentRootCache}, same fixed sources. */
+const userRootCache = new Map<string, boolean>();
+
+/**
+ * Does this predicate reference the acting user under any root
+ * {@link USER_SCOPE_ROOTS} names?
+ *
+ * Read off the parsed CEL AST ({@link collectCelRootIdentifiers}), the same
+ * reader {@link readsParentRoot} uses — **never** off the evaluation fault's
+ * text, which was measured on this tree to be an unreliable key for the same
+ * question: with no acting user, `'admin' in current_user.positions` reports
+ * `Unknown variable: current_user`, but `'admin' in current_user.positions &&
+ * record.typo == 1` reports `No such key: typo` instead. A message-matching key
+ * would file that second predicate as a live gate failure on every system
+ * write — the exact noise this branch exists to end.
+ *
+ * A non-CEL dialect, an AST-only expression, or source that does not parse
+ * answers `false`, i.e. the loud branch. That is the safe direction and it is
+ * not a lost case: `celEngine.evaluate` itself refuses an expression with no
+ * `source` (`AST-only evaluation not yet supported; persist \`source\``), so
+ * anything this reader cannot see is a predicate the evaluator could not have
+ * run either, on any write, and it should be said loudly.
+ */
+function readsUserRoot(cond: string | Expression): boolean {
+  const expr = toExpression(cond);
+  if (expr.dialect !== 'cel') return false;
+  const source = typeof expr.source === 'string' ? expr.source : '';
+  if (!source) return false;
+  const cached = userRootCache.get(source);
+  if (cached !== undefined) return cached;
+  const roots = collectCelRootIdentifiers(source);
+  const answer = roots.ok && roots.roots.some((r) => USER_SCOPE_ROOTS.includes(r));
+  userRootCache.set(source, answer);
+  return answer;
+}
+
+/**
  * Per-option authorization / cascade enforcement (objectui#2284).
  *
  * A `select` / `multiselect` / `radio` / `checkboxes` option may gate itself with
@@ -1781,6 +1833,20 @@ function toExpression(cond: string | Expression): Expression {
  * every other field rule here: a broken cascade predicate must never brick a
  * write. Authorization gating therefore depends on the engine binding
  * `current_user` on authenticated writes.
+ *
+ * The admission is deliberate and unchanged. What the fail-open branch does NOT
+ * do any more is describe two different facts with one sentence. A system write
+ * — a declarative seed, an in-process job, anything with no acting user — can
+ * never bind `current_user`, so every gated option it carries took that branch
+ * and logged `failed to evaluate — allowed through`: measured at 27 identical
+ * lines on one ordinary boot of a seeded app, one per seeded row, on the
+ * correct path. An authenticated caller whose predicate genuinely faults (a
+ * typo'd field, a missing root) produced the *identical* line, and that one is
+ * a gate that is not being enforced. A signal that fires this often on the
+ * expected path stops being read, and takes the real case with it. The branch
+ * below states which of the two happened, in the message and in structured
+ * `meta.reason`; both stay at `warn` — the authenticated fault must not get
+ * quieter, and the sink offers no other level.
  */
 function evaluateOptionVisibility(
   fields: Record<string, ConditionalFieldDef> | undefined,
@@ -1813,9 +1879,25 @@ function evaluateOptionVisibility(
         user,
       });
       if (!res.ok) {
-        logger?.warn?.(
-          `option visibleWhen for '${name}=${String(value)}' failed to evaluate — allowed through`,
-        );
+        // Which of the two fail-open cases is this? "No acting user to bind"
+        // needs BOTH facts — the write carries no user AND the predicate asks
+        // for one. Either alone misfiles: a system write whose predicate names
+        // no user root and faults on a typo'd field is a real broken gate, and
+        // an authenticated caller's fault is the case this log exists for.
+        const noActingUser = user === undefined;
+        if (noActingUser && readsUserRoot(opt.visibleWhen)) {
+          logger?.warn?.(
+            `option visibleWhen for '${name}=${String(value)}' not evaluated: no acting user to bind current_user (system write) — allowed through`,
+            { field: name, value: String(value), reason: 'no-acting-user', error: res.error },
+          );
+        } else {
+          logger?.warn?.(
+            `option visibleWhen for '${name}=${String(value)}' failed to evaluate `
+              + `(${noActingUser ? 'system write' : 'authenticated caller'}) — allowed through; `
+              + `the option's gate was NOT enforced on this write. Check the predicate.`,
+            { field: name, value: String(value), reason: 'predicate-fault', error: res.error },
+          );
+        }
         continue; // fail-open
       }
       if (res.value === false) {
