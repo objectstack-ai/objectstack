@@ -32,6 +32,15 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
+// A VALUE import into the `field.zod` ↔ `suggestions.zod` ↔ `strict-object`
+// evaluation cycle (this module → `strict-object` → `suggestions.zod` →
+// `field.zod` → this module). Safe in either entry order, including under
+// `OS_EAGER_SCHEMAS=1`: everything a `strictObject(…)` call touches at
+// construction is a hoisted `function` declaration (`strictObject`,
+// `strictObjectError`, `declarationStore`), and the error map builds its
+// suggester lazily on the first ISSUE, never at module scope. Measured with
+// this file as the entry module under eager evaluation (#13802).
+import { strictObject } from '../shared/strict-object';
 import { SystemObjectName } from '../system/constants/system-names';
 import type { FieldType } from './field.zod';
 
@@ -247,13 +256,37 @@ export const ClockTimeValueSchema = lazySchema(() =>
     'expected HH:MM or HH:MM:SS (wall-clock time of day)'));
 export type ClockTimeValue = z.input<typeof ClockTimeValueSchema>;
 
-/** GPS point — the shape field-zoo stores and renderers read. See header re: the retired `{latitude, longitude}` form. */
-export const LocationValueSchema = lazySchema(() => z.object({
-  lat: z.number().min(-90).max(90).describe('Latitude'),
-  lng: z.number().min(-180).max(180).describe('Longitude'),
-  altitude: z.number().optional().describe('Altitude in meters'),
-  accuracy: z.number().optional().describe('Accuracy in meters'),
-}));
+/**
+ * GPS point — the shape field-zoo stores and renderers read. See header re: the
+ * retired `{latitude, longitude}` form.
+ *
+ * **Strict as of #13802** (maintainer ruling 2026-09-01, option A). Every
+ * member is optional except the pair, so under zod's default `.strip` a value
+ * with a wrong key set still parsed GREEN and the wrong keys vanished from the
+ * parse output — a stored-value scan over this class could only ever report a
+ * clean count. An undeclared key is now refused, naming the key and the
+ * closest declared one (`latitude` → `lat`). Where that refusal bites is the
+ * ADR-0104 write path's own posture, not this schema's: record writes stay
+ * warn-first until the deployment's `adr-0104-value-shapes` gate opens, and
+ * no read path parses this shape (strictness-ledger `data/` row).
+ */
+export const LocationValueSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this location value',
+    history: 'Until #13802 an undeclared key on a location value was silently dropped — the value '
+      + 'parsed green with the key gone, so the mistake surfaced only as a blank on screen.',
+    // The retired spec-only spelling (see the module header). Edit distance
+    // cannot reach `latitude` → `lat`; the value contract has refused the pair
+    // since ADR-0104 D1, so the rename is the one an author actually needs.
+    aliases: { latitude: 'lat', longitude: 'lng' },
+  },
+  {
+    lat: z.number().min(-90).max(90).describe('Latitude'),
+    lng: z.number().min(-180).max(180).describe('Longitude'),
+    altitude: z.number().optional().describe('Altitude in meters'),
+    accuracy: z.number().optional().describe('Accuracy in meters'),
+  },
+));
 export type LocationValue = z.input<typeof LocationValueSchema>;
 
 /**
@@ -267,16 +300,40 @@ export type LocationValue = z.input<typeof LocationValueSchema>;
  * direction is an ESM evaluation cycle whose order-dependent TDZ crash this
  * move retires structurally (the remaining `FieldType` import above is
  * type-only and erased at runtime).
+ *
+ * **Strict as of #13802** (maintainer ruling 2026-09-01, option A). Every
+ * member is optional, so under `.strip` a value with a completely wrong key
+ * set parsed GREEN: the showcase seed wrote `postal_code`, the platform
+ * accepted it, dropped it, and rendered an empty ZIP box (#13388), while a
+ * stored-value scan over this class reported a clean count it could not earn.
+ * An undeclared key is now refused, naming the key and the closest declared
+ * one (`postal_code` → `postalCode`). Where that refusal bites is the ADR-0104
+ * write path's own posture, not this schema's: record writes stay warn-first
+ * until the deployment's `adr-0104-value-shapes` gate opens, and no read path
+ * parses this shape (strictness-ledger `data/` row). ⛔ No consumer-side
+ * alias follows from this — `postal_code` is refused, not read.
  */
-export const AddressSchema = lazySchema(() => z.object({
-  street: z.string().optional().describe('Street address'),
-  city: z.string().optional().describe('City name'),
-  state: z.string().optional().describe('State/Province'),
-  postalCode: z.string().optional().describe('Postal/ZIP code'),
-  country: z.string().optional().describe('Country name or code'),
-  countryCode: z.string().optional().describe('ISO country code (e.g., US, GB)'),
-  formatted: z.string().optional().describe('Formatted address string'),
-}));
+export const AddressSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this address value',
+    history: 'Until #13802 an undeclared key on an address value was silently dropped — the value '
+      + 'parsed green with the key gone, so a misspelled postal code surfaced only as an empty '
+      + 'box on screen (#13388).',
+    // `zipCode` is the spelling the address widget wrote for a release
+    // (objectstack#5143) — a different WORD for the declared key, which edit
+    // distance cannot reach. The rename names the key the contract lands on.
+    aliases: { zipCode: 'postalCode', zip: 'postalCode', postcode: 'postalCode' },
+  },
+  {
+    street: z.string().optional().describe('Street address'),
+    city: z.string().optional().describe('City name'),
+    state: z.string().optional().describe('State/Province'),
+    postalCode: z.string().optional().describe('Postal/ZIP code'),
+    country: z.string().optional().describe('Country name or code'),
+    countryCode: z.string().optional().describe('ISO country code (e.g., US, GB)'),
+    formatted: z.string().optional().describe('Formatted address string'),
+  },
+));
 
 /** Structured address value — adopts the (previously unconsumed) `AddressSchema` as the enforced contract. */
 export const AddressValueSchema = AddressSchema;

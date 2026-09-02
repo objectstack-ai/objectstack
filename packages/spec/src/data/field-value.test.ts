@@ -269,6 +269,60 @@ describe('valueSchemaFor — stored form (field-zoo reality)', () => {
     ok({ type: 'composite' }, { label: 'x', n: 1 });
   });
 
+  it('#13802: location/address values refuse an undeclared key BY NAME — the strip that hid the showcase seed typo', () => {
+    // Every member of both shapes is optional, so under zod's default `.strip`
+    // a value with a completely wrong key set parsed GREEN and the wrong keys
+    // vanished from the parse output — #13388's seed wrote `postal_code`, the
+    // platform accepted it, dropped it, and rendered an empty ZIP box, while a
+    // stored-value scan over the class could only ever report zero. Assert the
+    // ENVELOPE — issue code + the keys it names + the rename it prescribes —
+    // never a bare `success === false`, which cannot tell this refusal from
+    // the schema refusing the value for an unrelated reason.
+    const firstIssue = (def: Parameters<typeof valueSchemaFor>[0], v: unknown) => {
+      const r = valueSchemaFor(def, 'stored').safeParse(v);
+      if (r.success) throw new Error(`expected REJECTION, got a successful parse of ${JSON.stringify(v)}`);
+      return r.error.issues[0] as { code: string; keys?: readonly string[]; message: string };
+    };
+
+    // The measured shape (#13388 / #13802's own repro).
+    const seed = firstIssue({ type: 'address' }, {
+      street: '1 Main St', city: 'Seattle', state: 'WA', postal_code: '98101', country: 'US',
+    });
+    expect(seed.code).toBe('unrecognized_keys');
+    expect(seed.keys).toEqual(['postal_code']);
+    expect(seed.message).toContain('this address value');
+    expect(seed.message).toContain('Did you mean `postal_code` → `postalCode`?');
+
+    // The spelling the address widget wrote for a release (objectstack#5143):
+    // a different WORD, reachable only through the curated alias.
+    expect(firstIssue({ type: 'address' }, { street: '1', zipCode: '98101' }).message)
+      .toContain('`zipCode` → `postalCode`');
+
+    // Location: the extras batch D once called legitimate are named, all of them.
+    const geo = firstIssue({ type: 'location' }, { lat: 1, lng: 2, heading: 90, speed: 3 });
+    expect(geo.code).toBe('unrecognized_keys');
+    expect(geo.keys).toEqual(['heading', 'speed']);
+    expect(geo.message).toContain('this location value');
+
+    // The retired spec-only spelling carries its rename (an alias — edit
+    // distance cannot reach `latitude` → `lat`). It is ALSO a missing-pair
+    // rejection; the unrecognized-keys issue is the one that names the fix.
+    const retired = valueSchemaFor({ type: 'location' }, 'stored').safeParse({ latitude: 1, longitude: 2 });
+    expect(retired.success).toBe(false);
+    const unknown = (retired as { error: { issues: Array<{ code: string; message: string }> } }).error.issues
+      .find((i) => i.code === 'unrecognized_keys');
+    expect(unknown?.message).toContain('`latitude` → `lat`');
+    expect(unknown?.message).toContain('`longitude` → `lng`');
+
+    // Declared keys, byte-for-byte, still parse — including the optional ones.
+    ok({ type: 'address' }, { street: '1 Main St', city: 'SF', state: 'CA', postalCode: '94105', country: 'USA', countryCode: 'US', formatted: '1 Main St, SF' });
+    ok({ type: 'location' }, { lat: 37.77, lng: -122.42, altitude: 10, accuracy: 5 });
+
+    // The ruling's positive control: `FileValueSchema` is the ONE deliberate
+    // loose site and is untouched — an extra key still rides through it.
+    ok({ type: 'file' }, { url: 'https://cdn/x', extra: 1 }, 'expanded');
+  });
+
   it('json/code and computed types are explicitly open', () => {
     ok({ type: 'json' }, { a: 1, b: [2, 3] });
     ok({ type: 'formula' }, 31.5);
