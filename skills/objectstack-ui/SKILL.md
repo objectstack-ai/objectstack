@@ -77,15 +77,12 @@ lines, project + tasks) and save them **atomically**, you almost never need a
 custom page or form config. Prefer, in order:
 
 1. **Relationship `inlineEdit` (default, zero UI config).** Declare it in the
-   DATA MODEL — set `inlineEdit: true` on the child's `master_detail` field that
-   references the parent (see the objectstack-data skill → Relationships →
-   Inline Editing). Every standard New/Edit form for the parent (modal, drawer,
-   full-page) then auto-renders the children and saves parent + children in one
-   atomic `/api/v1/batch`. **No view metadata needed.** The value picks the
-   form factor: `'grid'` (editable line-item grid — thin children), `'form'`
-   (read-only list whose Add / per-row edit opens the child's FULL form — fat
-   children with rich types), or `true` (smart default: `form` when the child
-   has rich/form-only fields or >~8 fields, else `grid`).
+   DATA MODEL — set `inlineEdit` on the child's `master_detail` field that
+   references the parent. Every standard New/Edit form for the parent (modal,
+   drawer, full-page) then auto-renders the children and saves parent + children
+   in one atomic `/api/v1/batch`. **No view metadata needed.** The
+   `true` / `'grid'` / `'form'` ladder and what each value picks:
+   **objectstack-data → Relationships → Inline Editing**.
 
 2. **Form view `subforms` (override / tuning).** Add to a form view only when you
    need to override the derived columns/order, or expose a child the
@@ -113,37 +110,14 @@ metadata in every case; select options and lookups carry through. A parent
 `summary` field rolls child values up server-side (see objectstack-data).
 
 **Line-item grid behaviors (`grid` mode).** The editable grid is a real
-spreadsheet-style line editor (the QuickBooks / Stripe / NetSuite pattern). All
-of the following come from the DATA MODEL — no UI config — so they apply to any
-inline grid, not just invoices:
-
-- **Computed columns.** A child field with an arithmetic `expression`
-  (e.g. `amount: Field.currency({ expression: 'record.quantity * record.unit_price' })`)
-  renders **read-only** and is recomputed **live** client-side as its inputs
-  change, then persisted. Keep it a *stored* field (`currency`/`number`), NOT a
-  `formula` field, so a parent `summary` can still roll it up — the server only
-  treats `type: 'formula'` as computed, so a stored field's `expression` is a
-  client-side display/compute hint and the sent value is stored as-is. The
-  evaluator supports `+ - * / %`, parens and `record.<field>` refs only.
-- **Trailing "ghost" row.** The grid always shows one empty line at the bottom;
-  typing in it materialises a real row and a fresh ghost appears — users never
-  click "Add line", and an untouched ghost is never persisted.
-- **Item typeahead auto-fill.** When a `lookup` cell's record is picked, the grid
-  copies the chosen record's fields into any **same-named** sibling columns
-  (e.g. a product's `unit_price` / `description` drop into the line). Model it by
-  giving the line a `lookup` to the catalog plus columns whose names match the
-  catalog fields. Opt out per column with `autofill: false`.
-- **Persisted drag-reorder.** Add a numeric sort field to the child named
-  `position` (or `sort_order` / `sequence` / `line_no`). The grid auto-detects
-  it, hides it from the editable columns, and stamps `row[position] = index` on
-  reorder so line order survives a reload.
-- **Totals stack.** Give the PARENT a tax-rate field named `tax_rate` (percent
-  number). The master-detail form then renders a live **Subtotal → Tax → Total**
-  block under the lines (override the field name with the form's `taxRateField`).
-  The parent `summary` persists the line subtotal; the tax-inclusive grand total
-  is a live entry-time aid.
-- Per-cell **inline validation** (required-empty cells flag red in place) and a
-  hover **duplicate** action come for free.
+spreadsheet-style line editor (the QuickBooks / Stripe / NetSuite pattern), and
+every behaviour is derived from the DATA MODEL — computed columns, catalog
+typeahead auto-fill, persisted drag-reorder, and the live Subtotal → Tax → Total
+stack: **objectstack-data → Relationships → Inline Editing**. Three things are
+authored on this side: a trailing **ghost** row always exists, so never add an
+"Add line" button (typing in the ghost materialises a row; an untouched one is
+never persisted); `autofill: false` opts one column out of the typeahead copy;
+and the form's `taxRateField` overrides which parent field drives the totals.
 
 **Read side — detail-page related lists.** The mirror of `inlineEdit` is the
 related list on the parent's record DETAIL page. You don't author it: every
@@ -172,18 +146,15 @@ Page** and lay it out explicitly with `record:related_list` (or inline-editable
 
 ### Field Conditional Rules in Forms
 
-For conditions that belong to a field's lifecycle, declare the rule on the
-DATA MODEL field, not in the form view. ObjectUI forms consume:
+Conditions that belong to a field's lifecycle — `visibleWhen`, `readonlyWhen`,
+`requiredWhen` — are declared on the **DATA MODEL field**, not in the form view;
+ObjectUI forms consume them. Their semantics and server behaviour:
+**objectstack-data → Conditional Field Rules**.
 
-| Field property | UI behavior | Server behavior |
-|:--|:--|:--|
-| `visibleWhen` | Hide the field when the CEL predicate is false | UX-only visibility hint |
-| `readonlyWhen` | Render read-only when true | ObjectQL ignores incoming writes when true |
-| `requiredWhen` | Mark required when true | ObjectQL validates requiredness on submit |
-
-Inline master-detail grids evaluate these rules row-by-row against the child
-row. Use `requiredWhen` — the `conditionalRequired` alias was REMOVED in
-protocol 17 and is now a parse error. Load **objectstack-formula** when authoring non-trivial CEL.
+UI-side: inline master-detail grids evaluate these rules **row-by-row** against
+each child row. Use `requiredWhen` — the `conditionalRequired` alias was REMOVED
+in protocol 17 and is now a parse error. Load **objectstack-formula** when
+authoring non-trivial CEL.
 
 ---
 
@@ -377,16 +348,11 @@ export const CaseViews = defineView({
 | declares `searchableFields` | **that list, verbatim** — whatever the field types are |
 | declares nothing | the auto-default: the name field + the text-like columns (`text` / `email` / `phone` / `url` / `autonumber` / `textarea` / `markdown` / `select` / `status`) |
 
-So field **type** decides only in the second row. On an object that declares
-`searchableFields: ['subject', 'account_id']`, a view narrowing to
-`['account_id']` — a lookup — is **accepted** and scanned; on the same object,
-narrowing to a `text` column the object left out is **refused**. Judge every
-entry against the object's allowed set, never against the type list.
-
-Modelling side — the object's own set, and the stored-mirror prescription for
-searching by a related record's title: **objectstack-data → Search Fields
-(`searchableFields`)**. Query side (`search.fields` over the API):
-**objectstack-query → Full-Text Search**.
+Field **type** therefore decides only in the second row: where the object
+declares the set, a lookup in it is scanned and a `text` column outside it is
+refused. Judge every entry against the object's allowed set, never the type
+list. Modelling side: **objectstack-data → Search Fields**. Query side
+(`search.fields` over the API): **objectstack-query → Full-Text Search**.
 
 #### ⛔ One bad entry 400s EVERY search on that list
 
@@ -400,39 +366,15 @@ result, no result at all.
 |:---------------------------|:--------------|:--------------------------|
 | a subset of the allowed set | clean | scans exactly those columns |
 | key omitted | clean | scans the object's full allowed set |
-| `searchableFields: []` | clean | **identical to omitting it** — see below |
+| `searchableFields: []` | clean | **identical to omitting it** — empty is *absent* at all three layers, so it scans MORE than `["subject"]` would |
 | a renamed / mistyped column | `searchable-field-unknown` | `400 INVALID_FIELD` |
 | a dotted path (`account_id.name`) | `searchable-field-unknown` | `400 INVALID_FIELD` |
 | a real column outside the allowed set | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
 | a virtual `formula` column — nothing stored to scan | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
 
 Both diagnostics are **errors**, not warnings — `os validate` fails the build.
-The two you will actually hit, verbatim:
 
-```text
-list-view searchableFields entry "account_id.name" is not a field on object
-"support_case". The declaration is stale: searching it can never match, and the
-engine silently drops it — leaving a narrower search than declared, or the
-auto-default set once every entry is dropped.
-
-list-view searchableFields entry "status" is outside object "support_case"'s
-declared searchableFields (subject, case_number, description) — the set 'search'
-scans. Clients echo this declaration verbatim as the '$searchFields' override,
-and the runtime refuses an entry outside the allowed set: every toolbar search
-on this list returns 400 INVALID_FIELD.
-```
-
-#### `searchableFields: []` does NOT turn search off
-
-An empty array is **absent**, at all three layers: the client omits the
-`$searchFields` key entirely, the ingress gate treats a zero-length override as
-no override, and the engine falls through to the object's allowed set. A view
-written `searchableFields: []` searches **more** columns than one written
-`searchableFields: ['subject']`, which is the opposite of what the spelling
-suggests.
-
-To actually remove the search box from the toolbar, toggle the affordance —
-a different key, on the same view:
+To remove the search box, toggle the affordance — a different key, same view:
 
 <!-- os:check -->
 ```typescript
@@ -449,15 +391,11 @@ export const AuditViews = defineView({
 });
 ```
 
-#### Searching by a related record's title
-
-Never reach for a dotted path. `search` scans the queried object's **own**
-columns — unlike `columns` / `sort` / `filter`, the search axis resolves no
-traversal, so `account_id.name` is refused rather than silently dropped. Copy
-the parent's title into a **stored** field on this object and put that field in
-the object's `searchableFields`; the view then narrows to it like any other
-column. The full prescription — the mirror field, the two hooks that maintain
-it, and why a `formula` field cannot be the mirror — lives in
+**Searching by a related record's title:** never reach for a dotted path. The
+search axis resolves no traversal, so `account_id.name` is refused rather than
+silently dropped. Mirror the parent's title into a **stored** field on this
+object and narrow to that. The prescription — the mirror field, the two hooks
+that maintain it, and why a `formula` field cannot be the mirror — lives in
 **objectstack-data → Search Fields (`searchableFields`)**.
 
 ### Sorting
@@ -524,54 +462,6 @@ Timeline settings nest under `gantt:` (`GanttConfigSchema`);
 Rows with children (or `type: 'summary'`) render as **summary bars** — they
 move the whole group on drag and have **no resize handles**. Leaf tasks resize
 freely unless `locked: true`.
-
-### Shift segmentation — `timeSegments` (排班分段, ObjectUI extension)
-
-`timeSegments` splits each day column into ordered **bands** (e.g. 白班 / 夜班)
-for shift-based scheduling. It is an **ObjectUI display extension**, *not* part
-of the upstream `GanttConfigSchema` in `@objectstack/spec` — it lives inside
-the nested `gantt: {}` view config and is read by the ObjectUI gantt runtime.
-
-```typescript
-{
-  type: 'gantt',
-  data: { provider: 'object', object: 'work_order' },
-  columns: ['name', 'assignee'],
-  gantt: {
-    startDateField: 'start', endDateField: 'end', titleField: 'name',
-    timeSegments: {
-      dayStart: '08:00',               // clock time the 排班日 begins (default '00:00')
-      bands: [
-        { key: 'day',   label: '白班', start: '08:00', end: '20:00' },
-        { key: 'night', label: '夜班', start: '20:00', end: '08:00', color: '#6366f1' },
-      ],
-    },
-  },
-}
-```
-
-Field shapes:
-
-| Field | Required | Notes |
-| --- | --- | --- |
-| `dayStart` | no | `'HH:mm'` (24h). The "day" column starts here and runs a full 24h, so a cross-midnight band sits wholly inside one column. Default `'00:00'`. |
-| `bands[].key` | no | Stable id (`'day'`/`'night'`); defaults to `band{index}`. |
-| `bands[].label` | yes | Header text for the band (白班 / 夜班). |
-| `bands[].start` / `bands[].end` | yes | `'HH:mm'`. When `end <= start` the band crosses midnight. Bands must tile the 24h day from `dayStart`. |
-| `bands[].color` | no | Any CSS color. Tints that band's column; **omit for no tint**. |
-| `showMidnight` | no | Draw the dashed local-0:00 cue inside cross-midnight bands (the 排班日 cell itself stays unbroken). Default `true`; set `false` to hide it. |
-
-Behavior:
-
-- **Day scale only.** `timeSegments` applies when the gantt is in `day` mode; in
-  week/month/quarter scales it is ignored (no-op).
-- **Two-tier header.** Top tier = the 排班日 date (starting at `dayStart`),
-  bottom tier = one cell per band (each half-width for two equal bands).
-- **Attribution by `start`.** A task is placed in the 排班日 its `start` falls
-  in, so a 夜班 spanning 20:00→次日08:00 stays in a single column.
-- **Drag-snaps to band boundaries** (the band duration, e.g. 12h) instead of
-  whole days.
-- **Default off.** Omit `timeSegments` and the gantt renders unsegmented.
 
 ---
 
