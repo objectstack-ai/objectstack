@@ -43,7 +43,7 @@ ObjectStack ships **11 skills** — one per authoring domain, plus process skill
 
 | # | Skill | Domain | Path | What it covers |
 | :--- | :--- | :--- | :--- | :--- |
-| 1 | [Platform](#platform) | `platform` | `skills/objectstack-platform/` | Bootstrap, configure, extend, and operate ObjectStack runtimes. Covers project setup (`defineStack`, drivers, adapters, scaffolding), plugin and service development (PluginContext, DI, kernel hooks like `kernel:ready`), and operations (CLI commands, migrations, deployment, test harnesses via LiteKernel). |
+| 1 | [Platform](#platform) | `platform` | `skills/objectstack-platform/` | Bootstrap, configure, extend, and operate ObjectStack runtimes. Covers project setup (`defineStack`, drivers, scaffolding), declaring platform capabilities (`requires:` — which service plugins boot), plugin and service development (PluginContext, DI, kernel hooks like `kernel:ready`), and operations (CLI commands, migrations, deployment, test harnesses via LiteKernel). |
 | 2 | [Data](#data) | `data` | `skills/objectstack-data/` | Design ObjectStack data schemas — objects, fields, field conditional rules, relationships, validations, indexes, lifecycle hooks, permissions, row-level security — and the seeds (`defineSeed()`) that load fixtures and reference data alongside them. |
 | 3 | [Query](#query) | `query` | `skills/objectstack-query/` | Construct ObjectQL queries — filters, sorting, pagination, aggregation, relation expansion, and full-text search. |
 | 4 | [UI](#ui) | `ui` | `skills/objectstack-ui/` | Author ObjectStack UI metadata — Views (list/form/kanban/calendar/gantt), Apps (navigation), Pages (structured plus the HTML and React source-authoring tiers, ADR-0080/0081), Dashboards, Reports, Charts, Actions, and package Docs (`src/docs/*.md`). |
@@ -61,13 +61,13 @@ ObjectStack ships **11 skills** — one per authoring domain, plus process skill
 
 **Domain** `platform` · **Path** `skills/objectstack-platform/`
 
-Bootstrap, configure, extend, and operate ObjectStack runtimes. Covers project setup (`defineStack`, drivers, adapters, scaffolding), plugin and service development (PluginContext, DI, kernel hooks like `kernel:ready`), and operations (CLI commands, migrations, deployment, test harnesses via LiteKernel).
+Bootstrap, configure, extend, and operate ObjectStack runtimes. Covers project setup (`defineStack`, drivers, scaffolding), declaring platform capabilities (`requires:` — which service plugins boot), plugin and service development (PluginContext, DI, kernel hooks like `kernel:ready`), and operations (CLI commands, migrations, deployment, test harnesses via LiteKernel).
 
-Use when the user is writing `objectstack.config.ts`, building a plugin or driver, wiring a framework adapter, running `os` CLI commands, or planning deployment.
+Use when the user is writing `objectstack.config.ts`, building a plugin or driver, turning a platform capability on, mounting the Hono HTTP layer, running `os` CLI commands, or planning deployment.
 
 Do not use for data schema design (see objectstack-data) or query patterns (see objectstack-query); data lifecycle hooks (beforeInsert / afterUpdate) belong in objectstack-data — only kernel / service-level events live here.
 
-**Tags:** `project`, `defineStack`, `driver`, `adapter`, `plugin`, `kernel`, `service`, `DI`, `lifecycle`, `cli`, `deploy`, `ops`
+**Tags:** `project`, `defineStack`, `driver`, `hono`, `plugin`, `kernel`, `service`, `requires`, `capability`, `DI`, `lifecycle`, `cli`, `deploy`, `ops`
 
 ---
 

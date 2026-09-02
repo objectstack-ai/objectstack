@@ -2,12 +2,14 @@
 name: objectstack-platform
 description: >
   Bootstrap, configure, extend, and operate ObjectStack runtimes. Covers
-  project setup (`defineStack`, drivers, adapters, scaffolding), plugin and
+  project setup (`defineStack`, drivers, scaffolding), declaring platform
+  capabilities (`requires:` — which service plugins boot), plugin and
   service development (PluginContext, DI, kernel hooks like `kernel:ready`),
   and operations (CLI commands, migrations, deployment, test
   harnesses via LiteKernel). Use when the user is writing
-  `objectstack.config.ts`, building a plugin or driver, wiring a framework
-  adapter, running `os` CLI commands, or planning deployment. Do not use for
+  `objectstack.config.ts`, building a plugin or driver, turning a platform
+  capability on, mounting the Hono HTTP layer, running `os` CLI commands, or
+  planning deployment. Do not use for
   data schema design (see objectstack-data) or query patterns (see
   objectstack-query); data lifecycle hooks (beforeInsert / afterUpdate)
   belong in objectstack-data — only kernel / service-level events live here.
@@ -17,144 +19,15 @@ metadata:
   author: objectstack-ai
   version: "1.3"
   domain: platform
-  tags: project, defineStack, driver, adapter, plugin, kernel, service, DI, lifecycle, cli, deploy, ops
+  tags: project, defineStack, driver, hono, plugin, kernel, service, requires, capability, DI, lifecycle, cli, deploy, ops
 ---
 
 # Platform — ObjectStack Bootstrap & Plugin System
 
-Expert instructions for two related concerns:
-
-1. **Project setup** — scaffolding new projects, writing
-   `objectstack.config.ts`, picking drivers and adapters, the runtime boot
-   sequence (the original "quickstart" skill).
-2. **Plugin development** — building plugins, registering services,
-   wiring kernel hook / event handlers, working with `ObjectKernel` vs
-   `LiteKernel` (the original "plugin" skill).
-
-Both areas share the same `defineStack()` / kernel surface, which is why
-they live in one skill.
-
----
-
-## When to Use This Skill
-
-- Creating a **new ObjectStack project** from scratch.
-- Scaffolding a **new project** with the bundled `blank` template.
-- Writing or modifying **`objectstack.config.ts`** (`defineStack()` config).
-- Selecting a **database driver** (Memory, SQL, MongoDB).
-- Integrating with a **web framework** (Hono via `@objectstack/hono` / `@objectstack/plugin-hono-server`).
-- Understanding the **runtime boot sequence** and plugin loading order.
-- Setting up **multi-app composition** with `composeStacks()`.
-- Answering **"how do I get started?"** questions.
-
----
-
-## The App / Platform Boundary
-
-An ObjectStack app is a **simplified implementation of business features**:
-author metadata under the platform's spec, guided by these skills, and check it
-with the `os` commands ([Verify your work](#verify-your-work)). Never rebuild
-what the platform owns.
-
-- **Business features belong in the app; capability belongs in the platform.**
-  A missing default, a wrong diagnostic, a shape the spec refuses — the fix is
-  upstream. Raise it there; do not compensate for it here.
-- **A platform defect means waiting for the platform fix.** No defensive coding,
-  no shape tolerance, no hand-written predicate re-implementing a platform rule,
-  and never "land the half we can" — that spends the contract-first option and
-  leaves a decision half-executed. Record the block against the platform issue
-  so it is machine-visible; before resuming, confirm the version you **pin**
-  carries the fix (merged upstream ≠ present on your pin) and re-run the
-  defect's own reproduction.
-- **A bad platform default is a default to fix**, not something to work around
-  at every call site.
-
----
-
-## The Template
-
-`blank` is the only template `create-objectstack` offers, and it is the default:
-
-- Bundled with `create-objectstack` — works offline, no network fetch
-- One example object, in-memory driver, Hono server
-- A clean slate to extend with the metadata this skill describes
-
-The five remote content templates (`todo`, `compliance`, `content`,
-`contracts`, `procurement`) are **retired** — delisted from the marketplace and
-no longer maintained. Do not recommend them; asking for one by name is refused.
-Build domain metadata on top of `blank` instead.
-
-### Scaffolding Command
-
-```bash
-# Interactive — prompts for a name
-npx create-objectstack
-
-# Direct — skip prompts (blank is the default, and the only, template)
-npx create-objectstack my-app
-```
-
----
-
-## Project Structure Conventions
-
-Every ObjectStack project follows this directory structure:
-
-```
-my-app/
-├── objectstack.config.ts    # ← THE entry point — defineStack()
-├── package.json
-├── tsconfig.json
-└── src/
-    ├── objects/              # Business object definitions
-    │   ├── task.object.ts    # → exports a single object
-    │   └── index.ts          # → barrel: export * from './task.object'
-    ├── views/                # Optional: UI view definitions
-    │   ├── task.view.ts
-    │   └── index.ts
-    ├── apps/                 # Optional: app definitions (nav, pages)
-    │   ├── main.app.ts
-    │   └── index.ts
-    ├── flows/                # Optional: automation flows
-    │   ├── task.flow.ts
-    │   └── index.ts
-    ├── actions/              # Optional: action definitions
-    │   ├── task.action.ts
-    │   └── index.ts
-    ├── dashboards/           # Optional: dashboards
-    ├── reports/              # Optional: reports
-    ├── datasets/             # Optional: analytics datasets
-    ├── i18n/                 # Optional: translation bundles
-    └── handlers/             # Optional: runtime hook handlers
-```
-
-### Naming Conventions
-
-| Concept | Convention | Example |
-|:--------|:-----------|:--------|
-| File names | `{name}.{type}.ts` | `task.object.ts`, `main.app.ts` |
-| Machine names | `snake_case` | `project_task`, `first_name` |
-| Config keys | `camelCase` | `maxLength`, `defaultValue` |
-| Barrel exports | `Object.values(imported)` | `objects: Object.values(objects)` |
-
----
-
-## CRM Blueprint (Reference Implementation)
-
-When scaffolding a production-style metadata app, align with this
-CRM-style layout:
-
-| Blueprint Area | CRM Reference | What to Reuse |
-|:--|:--|:--|
-| Stack assembly | `objectstack.config.ts` | Single `defineStack()` root aggregating all metadata collections |
-| By-type directories | `src/{objects,views,pages,actions,flows,...}` | Domain-per-folder layout with barrel exports |
-| Typed aggregates | `src/*/index.ts` | Export `allFlows` / `allAgents` / `allSkills` typed arrays |
-| Runtime capabilities | `requires: ['ai','automation','analytics','auth','ui','approvals','sharing']` | Declare opt-in capabilities explicitly |
-| Security assembly | `src/profiles/*` + `src/sharing/*` | Compose `permissions` and `sharingRules` in stack root |
-| Localization assembly | `src/translations/*` + `i18n` | Keep per-locale files and central bundle registration |
-
-Use this as the default template for “metadata application” requests before
-simplifying to a blank-style minimal stack.
+Two concerns over one `defineStack()` / kernel surface: **project setup**
+(`objectstack.config.ts`, drivers, the boot sequence) and **plugin
+development** (plugins, services, kernel hook / event handlers,
+`ObjectKernel` vs `LiteKernel`).
 
 ---
 
@@ -294,16 +167,17 @@ export default defineStack({
 To disable (advanced — e.g., objects provided by another plugin):
 
 ```typescript
-export default defineStack({ ... }, { strict: false });
+export default defineStack(config, { strict: false });
 ```
 
 ### Compile Artifact and Runtime Metadata Boundary
 
 ObjectStack runtime metadata must come from source files during local development or
-from a compiled artifact. Do not configure a project runtime to read or write
+from a compiled artifact. Do not configure an environment runtime to read or write
 metadata through its business database.
 
 ```bash
+# the CLI ships an `os` binary; `objectstack` is an alias for it
 objectstack compile
 # -> dist/objectstack.json
 
@@ -316,11 +190,11 @@ Runtime rule of thumb:
 |:--------|:----------------|:--------------|
 | Local dev | TS files or `dist/objectstack.json` | Business rows only |
 | Production runtime | Artifact API response | Business rows only |
-| Control plane | Published JSON in metadata storage | Project revisions, history, overlays |
+| Control plane | Published JSON in metadata storage | Environment revisions, history, overlays |
 
 When generating `objectstack.config.ts`, keep object names short and
-`snake_case`; never set `tableName`, and do not add `sys_metadata` objects to a
-project runtime manifest.
+`snake_case`; never set `tableName`, and do not add `sys_metadata` objects to an
+environment runtime manifest.
 
 ---
 
@@ -335,12 +209,112 @@ manifest: {
   type: 'app',                  // app | plugin | driver | module | ...
   name: 'Acme CRM',             // Human-readable display name
   description: 'CRM system',    // Optional description
+  engines: { protocol: '^17' }, // Metadata-protocol major this app targets
 }
 ```
+
+**`manifest.engines.protocol`:** the metadata-protocol major the app is authored
+against. `create-objectstack` stamps it into every project it emits (and all
+three example apps carry it). The runtime checks it **before it loads
+anything**, so a runtime outside the range refuses the app at the boundary with
+the exact migration command instead of crashing later. Change it when you
+deliberately move to a new protocol major — never to silence a mismatch.
 
 **Object naming:** The object `name` is the canonical identifier and equals the physical table name. Embed any domain prefix directly in the name (e.g. `name: 'crm_account'`); the object-level `namespace` *field* is retired (ADR-0129 D3) and refused at load.
 
 **`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`). `os lint` additionally emits a non-fatal `naming/namespace-prefix` warning for bare-named UI/automation items (app, page, dashboard, flow, action, report, dataset) when a namespace is set.
+
+---
+
+## The App / Platform Boundary
+
+An ObjectStack app is a **simplified implementation of business features**:
+author metadata under the platform's spec, guided by these skills, and check it
+with the `os` commands ([Verify your work](#verify-your-work)). Never rebuild
+what the platform owns.
+
+- **Business features belong in the app; capability belongs in the platform.**
+  A missing default, a wrong diagnostic, a shape the spec refuses — the fix is
+  upstream. Raise it there; do not compensate for it here.
+- **A platform defect means waiting for the platform fix.** No defensive coding,
+  no shape tolerance, no hand-written predicate re-implementing a platform rule,
+  and never "land the half we can" — that spends the contract-first option and
+  leaves a decision half-executed. Record the block against the platform issue
+  so it is machine-visible; before resuming, confirm the version you **pin**
+  carries the fix (merged upstream ≠ present on your pin) and re-run the
+  defect's own reproduction.
+- **A bad platform default is a default to fix**, not something to work around
+  at every call site.
+
+---
+
+## The Template
+
+`blank` is the only template `create-objectstack` offers, and it is the default:
+
+- Bundled with `create-objectstack` — works offline, no network fetch
+- One example object, and `requires: ['automation']` plus the three generic
+  connector executors in `plugins:`. The memory driver and the Hono server are
+  NOT in the file — the CLI auto-registers both at boot
+- A clean slate to extend with the metadata this skill describes
+
+The five remote content templates (`todo`, `compliance`, `content`,
+`contracts`, `procurement`) are **retired** — delisted from the marketplace and
+no longer maintained. Do not recommend them; asking for one by name is refused.
+Build domain metadata on top of `blank` instead.
+
+### Scaffolding Command
+
+```bash
+# Interactive — prompts for a name
+npx create-objectstack
+
+# Direct — skip prompts (blank is the default, and the only, template)
+npx create-objectstack my-app
+```
+
+---
+
+## Project Structure Conventions
+
+Every ObjectStack project follows this directory structure:
+
+```
+my-app/
+├── objectstack.config.ts    # ← THE entry point — defineStack()
+├── package.json
+├── tsconfig.json
+└── src/
+    ├── objects/              # Business object definitions
+    │   ├── task.object.ts    # → exports a single object
+    │   └── index.ts          # → barrel: export * from './task.object'
+    ├── views/                # Optional: UI view definitions
+    │   ├── task.view.ts
+    │   └── index.ts
+    ├── apps/                 # Optional: app definitions (nav, pages)
+    │   ├── main.app.ts
+    │   └── index.ts
+    ├── flows/                # Optional: automation flows
+    │   ├── task.flow.ts
+    │   └── index.ts
+    ├── actions/              # Optional: action definitions
+    │   ├── task.action.ts
+    │   └── index.ts
+    ├── dashboards/           # Optional: dashboards
+    ├── reports/              # Optional: reports
+    ├── datasets/             # Optional: analytics datasets
+    ├── i18n/                 # Optional: translation bundles
+    └── handlers/             # Optional: runtime hook handlers
+```
+
+### Naming Conventions
+
+| Concept | Convention | Example |
+|:--------|:-----------|:--------|
+| File names | `{name}.{type}.ts` | `task.object.ts`, `main.app.ts` |
+| Machine names | `snake_case` | `project_task`, `first_name` |
+| Config keys | `camelCase` | `maxLength`, `defaultValue` |
+| Barrel exports | `Object.values(imported)` | `objects: Object.values(objects)` |
 
 ---
 
@@ -356,33 +330,28 @@ Drivers are the storage layer. Pick based on your environment:
 | **SQLite WASM** | `@objectstack/driver-sqlite-wasm` | Browser / WebContainer | `SqliteWasmDriver` — in-process, no server |
 | **Turso** | `@objectstack/driver-turso` | Edge, serverless, multi-tenant | **Cloud / EE only** — ships with the ObjectStack cloud / enterprise distribution, not the open framework. The open-core CLI recognizes `libsql://` URLs but **fails loudly** (`UnsupportedDriverError`) |
 
-### Usage Pattern
+### Wiring a driver — you usually do not
+
+Under `os dev` / `os serve` / `os start` the CLI **resolves the driver itself**
+from the database URL and registers `DriverPlugin` for you (memory in dev, SQL
+in prod). Do **not** put a driver in your config's `plugins:` array: no example
+app does, and the `plugins:` key is for plugins the CLI cannot infer (connector
+executors, your own plugins). Pick a driver by setting the DB URL, not by
+writing code.
+
+Construct `DriverPlugin` yourself only when **you** own the runtime — embedding
+via `Runtime` / `ObjectKernel`, or a test that boots a kernel directly:
 
 ```typescript
 import { DriverPlugin } from '@objectstack/runtime';
-
-// Development (in-memory, zero config)
-import { InMemoryDriver } from '@objectstack/driver-memory';
-new DriverPlugin(new InMemoryDriver())
-
-// Production (SQLite)
 import { SqlDriver } from '@objectstack/driver-sql';
-new DriverPlugin(new SqlDriver({
-  client: 'better-sqlite3',
-  connection: { filename: './data/app.db' },
-  useNullAsDefault: true,
-}))
 
-// Production (PostgreSQL)
-new DriverPlugin(new SqlDriver({
-  client: 'pg',
-  connection: process.env.DATABASE_URL,
-}))
+new DriverPlugin(new SqlDriver({ client: 'pg', connection: process.env.DATABASE_URL }));
 ```
 
 ---
 
-## Adapter Selection Guide
+## HTTP Layer (Hono)
 
 The HTTP layer is Hono-based. Two packages exist:
 
@@ -462,6 +431,57 @@ CLI: `os serve` / `os dev`
 mode-dependent — dev hops to the next free port, production fails loudly. See
 [Ports & networking](#ports--networking).
 
+### `requires:` — which service plugins boot
+
+Step 4's list is the fixed core. Every other service plugin is opt-in, and
+`requires: [...]` on the stack root is what turns it on — the CLI expands each
+token through its `CAPABILITY_PROVIDERS` registry
+(`packages/cli/src/commands/serve.ts`):
+
+| Token | Provider package |
+|:--|:--|
+| `automation` | `@objectstack/service-automation` (flows, and any declarative `connectors:` entry) |
+| `analytics` · `audit` · `cache` | `@objectstack/service-analytics` / `-audit` / `service-cache` |
+| `storage` · `queue` · `job` | `@objectstack/service-storage` / `-queue` / `-job` |
+| `messaging` · `email` · `sms` | `@objectstack/service-messaging` / `plugin-email` / `service-sms` |
+| `triggers` · `realtime` · `mcp` | `@objectstack/service-triggers` / `-realtime` / `mcp` |
+| `marketplace` | `@objectstack/service-package` |
+
+Tier-gated tokens (`ai`, `ai-studio`, `i18n`, `ui`, `auth`) and the remaining
+vocabulary (`sharing`, `approvals`, `reports`, `settings`, `webhooks`,
+`pinyin-search`, `hierarchy-security`, `ai-seat`, `governance`) resolve the same
+way. The authoritative list is `PLATFORM_CAPABILITY_TOKENS`
+(`@objectstack/spec`, `kernel/platform-capabilities.ts`) — an unknown token is
+**rejected by `defineStack` at authoring time**, not at boot.
+
+Four rules that change what you write:
+
+- **Precedence:** `requires` › `tiers` › `--preset` › built-in default. An
+  explicit instance in `plugins:` always shadows capability resolution.
+- **Declaring is a demand.** A capability YOU declared whose provider package is
+  absent is a hard boot error; one the platform auto-injects for you stays
+  best-effort (warn and continue).
+- **`auth` implies `email`.** Auth callbacks (password reset, email
+  verification, magic link, invitation) need the mail service, so the CLI
+  appends `email` whenever `auth` is required.
+- **Keep `automation` whenever `plugins:` lists a connector** — connector
+  executors register their provider factories with it, and without it they have
+  nowhere to register and boot fails.
+
+### `onEnable` — where an app binds runtime code
+
+`objectstack.config.ts` may export `onEnable` beside its default stack.
+`AppPlugin` invokes it during boot and hands the app live runtime handles: this
+is the one seam where declarative metadata reaches imperative code (registering
+action handlers, giving a job its data handle, provisioning a fixture
+datasource). All three example apps use it.
+
+```typescript
+export const onEnable = async (ctx: { ql: { registerAction: (...a: unknown[]) => void } }) => {
+  registerTaskActionHandlers(ctx.ql);
+};
+```
+
 ### Plugin Loading Order Matters
 
 Plugins initialize in registration order. Key dependencies:
@@ -497,74 +517,28 @@ const kernel = runtime.getKernel();
 
 ## Multi-App Composition
 
-Use `composeStacks()` to merge multiple apps into one runtime:
+Host several apps in one runtime by registering an `AppPlugin` per app — this is
+how real multi-app composition happens (`packages/cli/src/commands/serve.ts`).
+Each app contributes its objects under their canonical `name`; names are
+globally unique and equal the physical table name, so use them directly in
+queries, hooks, formulas, and REST URLs.
 
-```typescript
-import { composeStacks, defineStack } from '@objectstack/spec';
-import CrmApp from './apps/crm/objectstack.config';
-import TodoApp from './apps/todo/objectstack.config';
-
-const combined = composeStacks([CrmApp, TodoApp], {
-  objectConflict: 'error',   // Throw on duplicate object names
-  manifest: 'last',          // Use last stack's manifest
-});
-
-export default combined;
-```
-
-### Conflict Strategies
-
-| Strategy | Behavior |
-|:---------|:---------|
-| `'error'` (default) | Throw if two stacks define the same object name |
-| `'override'` | Last stack wins — later definition replaces earlier |
-| `'merge'` | Shallow-merge objects with same name (later fields win) |
-
-### Host Pattern (Plugins as AppPlugin)
-
-For a hosting environment where each app runs isolated:
-
-```typescript
-import { Runtime, DriverPlugin, AppPlugin } from '@objectstack/runtime';
-import { ObjectQLPlugin } from '@objectstack/objectql';
-import { AuthPlugin } from '@objectstack/plugin-auth';
-
-export default defineStack({
-  manifest: { id: 'platform-host', type: 'app', version: '1.0.0', name: 'Platform' },
-  plugins: [
-    new ObjectQLPlugin(),
-    new DriverPlugin(new SqlDriver({ ... })),
-    new AuthPlugin({ secret: process.env.AUTH_SECRET }),
-    new AppPlugin(CrmApp),     // contributes objects: crm_account, crm_lead, ...
-    new AppPlugin(TodoApp),    // contributes objects: task, ...
-  ],
-});
-```
-
-Each app registers its objects by their canonical `name`. Object names are globally unique and equal the physical table name — use them directly in queries, hooks, formulas, and REST URLs.
+A merge-at-authoring-time alternative, `composeStacks()`, exists in
+`@objectstack/spec` (`stack.zod.ts`) with `objectConflict` /
+`manifest` strategies. No app in this repo uses it — read the schema before
+reaching for it.
 
 ---
 
 ## Seed Data
 
-Declarative data loading for bootstrapping, demos, and testing:
+The stack's `data:` collection is authored with `defineSeed()`, which
+**objectstack-data** owns — go there for `externalId` matching, `env:` scoping,
+and which keys are derived. In particular `object` is derived from the object
+definition: never write it by hand, and never hand-write a raw
+`data: [{ object: … }]` literal.
 
-```typescript
-export default defineStack({
-  // ... objects, apps, etc.
-  data: [
-    {
-      object: 'task',
-      mode: 'upsert',              // 'upsert' | 'insert' | 'update' | 'ignore' | 'replace'
-      externalId: 'subject',       // Idempotency key for upsert matching
-      records: [
-        { subject: 'Learn ObjectStack', status: 'open', priority: 'high' },
-        { subject: 'Build first app', status: 'open', priority: 'medium' },
-      ],
-    },
-  ],
-});
-```
+`mode` decides what a seed run does to rows that already exist:
 
 | Mode | Behavior |
 |:-----|:---------|
@@ -572,7 +546,7 @@ export default defineStack({
 | `insert` | Always insert (fails on duplicate) |
 | `update` | Only update found records; ignore new ones |
 | `ignore` | Insert if not exists, skip otherwise |
-| `replace` | Drop and re-insert all records |
+| `replace` | ⚠️ **Data loss** — drops and re-inserts all records |
 
 ---
 
@@ -623,43 +597,9 @@ A minimal but complete project from scratch:
 }
 ```
 
-**`src/objects/task.object.ts`**:
-<!-- os:check -->
-```typescript
-import { Field } from '@objectstack/spec/data';
-
-export default {
-  name: 'task',
-  label: 'Task',
-  fields: {
-    title:       Field.text({ label: 'Title', required: true }),
-    description: Field.textarea({ label: 'Description' }),
-    status:      Field.select({
-      label: 'Status',
-      options: [
-        { label: 'Open', value: 'open' },
-        { label: 'In Progress', value: 'in_progress' },
-        { label: 'Done', value: 'done' },
-      ],
-      defaultValue: 'open',
-    }),
-    priority: Field.select({
-      label: 'Priority',
-      options: [
-        { label: 'Low', value: 'low' },
-        { label: 'Medium', value: 'medium' },
-        { label: 'High', value: 'high' },
-      ],
-      defaultValue: 'medium',
-    }),
-    due_date: Field.date({ label: 'Due Date' }),
-  },
-  indexes: [
-    { fields: ['status'] },
-    { fields: ['due_date'] },
-  ],
-};
-```
+**`src/objects/task.object.ts`** — one `ObjectSchema.create({ … })` call. Field
+types, `indexes:` and the rest of the object surface are **objectstack-data**'s;
+the scaffolder's own `note.object.ts` is the shape to copy.
 
 **`src/objects/index.ts`**:
 ```typescript
@@ -696,18 +636,6 @@ os dev --ui
 # Part 2 — Plugin Development & Kernel Extension
 
 
-## When to Use This Skill
-
-- You are creating a **new plugin** (driver, server, service, app feature)
-- You need to **register or consume services** via the DI container
-- You are using the **hook/event system** for inter-plugin communication
-- You need to choose between **ObjectKernel** and **LiteKernel**
-- You are debugging **plugin loading order** or dependency resolution
-- You need to configure **graceful shutdown**, timeouts, or health checks
-- You are implementing **service factories** with lifecycle management
-
----
-
 ## Quick Reference — Detailed Rules
 
 For comprehensive documentation with incorrect/correct examples:
@@ -732,30 +660,15 @@ For comprehensive documentation with incorrect/correct examples:
 | **Core fallbacks** | Auto-injects in-memory fallbacks | Not available |
 | **Config validation** | Zod schema validation per plugin | Not available |
 
-### Decision Guide
+### A third answer: no kernel at all
 
-```
-What environment are you targeting?
-│
-├── Production server / full application?
-│   └── ✅ ObjectKernel
-│       • Full DI with factories and scopes
-│       • Health monitoring and auto-recovery
-│       • Graceful shutdown with timeout
-│       • Startup failure rollback
-│
-├── Serverless / edge (Cloudflare Workers, Deno Deploy)?
-│   └── ✅ LiteKernel
-│       • Minimal memory footprint
-│       • Fast cold start
-│       • No background health checks
-│
-└── Unit tests (vitest)?
-    └── ✅ LiteKernel
-        • Simple setup, fast teardown
-        • No system requirement validation
-        • No shutdown signal handlers
-```
+If the host only needs the **data engine** — query / CRUD / hooks / validation —
+neither kernel is the answer. Import `ObjectQL` from
+`@objectstack/objectql/core` (ADR-0076): no kernel, no `ObjectQLPlugin`, no
+metadata-management layer, and the *same* `ObjectSchema.create({ … })`
+definitions a full backend ships. `examples/embed-objectql` is the worked
+example; it is the right shape for a thin, latency-sensitive host such as a
+gateway.
 
 ### ObjectKernel Configuration
 
@@ -941,12 +854,6 @@ const AuditPlugin: Plugin = {
 export default AuditPlugin;
 ```
 
-> To audit **record writes** (who inserted/updated which record), register
-> engine lifecycle hooks instead — e.g.
-> `ctx.getService('objectql').on('afterInsert', 'task', async (hookCtx) => …)`
-> in `start()`, or the declarative `hooks:` collection. See
-> **objectstack-data** for the engine hook contract.
-
 ---
 
 ## Using Plugins
@@ -965,7 +872,7 @@ await kernel.use(AuditPlugin);
 await kernel.bootstrap();
 
 // Services are now available
-const audit = kernel.getService<AuditService>('audit');
+const audit = kernel.getService('audit');
 ```
 
 ---
@@ -1031,7 +938,7 @@ metadata is read-only and artifact/file backed:
 
 - Do **not** register `sys_metadata` or `sys_metadata_history` from an ObjectStack
   runtime plugin. Those persistence tables belong to the control plane.
-  (Exception: an *isolated project kernel* may opt into `sys_metadata`
+  (Exception: an *isolated environment kernel* may opt into `sys_metadata`
   hydration from its own DB — the general boundary otherwise stands.)
 - Do **not** call `MetadataManager.setDataEngine()` automatically from
   `MetadataPlugin.start()`. Project databases must contain business rows only.
@@ -1055,30 +962,15 @@ await kernel.use(new MetadataPlugin({
 
 ## Health Monitoring (ObjectKernel Only)
 
+A plugin opts in by adding an `async healthCheck()` returning
+`{ healthy: boolean; message?: string; details?: Record<string, unknown> }`
+(`PluginHealthStatus`, importable from `@objectstack/core`). Return `healthy:
+false` rather than throwing. The kernel side is three calls:
+
 ```typescript
-const MyPlugin: Plugin & { healthCheck(): Promise<PluginHealthStatus> } = {
-  name: 'com.example.db',
-  version: '1.0.0',
-
-  async init(ctx) { /* ... */ },
-
-  async healthCheck() {
-    try {
-      await this.pool.query('SELECT 1');
-      return { healthy: true, message: 'Database connected' };
-    } catch (err) {
-      return { healthy: false, message: 'Database unreachable', details: { error: err.message } };
-    }
-  },
-};
-
-// Check health
 const health = await kernel.checkPluginHealth('com.example.db');
 const allHealth = await kernel.checkAllPluginsHealth();
-
-// Get startup metrics
-const metrics = kernel.getPluginMetrics();
-// Map<string, number> — plugin name → startup duration in ms
+const metrics = kernel.getPluginMetrics();  // Map<name, startup ms>
 ```
 
 ---
@@ -1106,9 +998,8 @@ The live toggle surfaces are runtime configuration, not authored metadata:
 
 # Part 3 — Operations: CLI, Testing, Deployment
 
-The `@objectstack/cli` package ships an `os` binary (alias: `objectstack`).
-Every project gets the same command surface — `npm install` does not need to
-be re-run when commands are added.
+Every project gets the same `os` command surface — `npm install` does not need
+to be re-run when commands are added.
 
 ## Daily-loop commands
 
@@ -1222,6 +1113,17 @@ Port resolution is the same for `os dev` and `os start` (both spawn `os serve`):
 > (a local desired-state ledger) plus runtime-identity bind v2 (environment-less
 > self-hosted binding).
 
+## Shipping a plugin
+
+Authoring stops at `kernel.use(plugin)`; these three make it distributable.
+`manifest.type: 'plugin'` is what marks the package as one.
+
+| Command | What it does |
+|:--|:--|
+| `os plugin build [--out dist/x.osplugin]` | Bundle from `objectstack.plugin.json` into a reproducible ustar+gzip `ID-VERSION.osplugin` with per-file `sha256-` integrity |
+| `os plugin sign` | Sign the built artifact |
+| `os plugin publish` | Upload it to the catalog |
+
 ## Testing pattern
 
 Use `LiteKernel` for unit / integration tests — it skips the cloud bits and
@@ -1275,8 +1177,7 @@ describe('stack boot', () => {
 ## Health & observability
 
 - **Health endpoints:** the HTTP dispatcher exposes `GET /health` and
-  `GET /ready` under the API prefix (see "Health Monitoring"
-  earlier in this skill).
+  `GET /ready` under the API prefix.
 - **Logs:** plugins log via `ctx.logger`. Logger config is a **kernel
   construction** option, not a `defineStack` key:
   `new ObjectKernel({ logger: { level: 'info', format: 'json' } })`.
@@ -1296,7 +1197,7 @@ describe('stack boot', () => {
 | LiteKernel test passes, ObjectKernel boot fails | Test missed a plugin the CLI auto-registers — compare your test's `use()` list against the `os dev` boot log |
 | Hot reload misses new objects | Barrel `src/objects/index.ts` not re-exporting — check the file |
 | Login works but **Setup / Studio missing** | The logged-in user isn't a platform admin. Setup/Studio are gated by `setup.access` / `studio.access` on `admin_full_access`, auto-granted only to the first registered **human** (`bootstrapPlatformAdmin`). The `usr_system` seed identity is skipped, so it can't steal the grant. Either sign up first (`--seed-admin`/`--fresh` does this) or check `sys_user_permission_set` for a cross-tenant (`organization_id = NULL`) `admin_full_access` link on your user. Don't edit nav code first. |
-| A permission set is declared but grants nobody anything | Declaring a set is not assigning it. Assignment is a `sys_user_permission_set` row whose `permission_set_id` is the `sys_permission_set` **record id**, never the set's `name` — see "Assigning a permission set to a user" in **objectstack-data**. |
+| A permission set is declared but grants nobody anything | Declaring a set is not assigning it — see "Assigning a permission set to a user" in **objectstack-data**. |
 
 ---
 
