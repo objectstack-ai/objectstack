@@ -538,19 +538,22 @@ function readonlyWhenBindings(
  * caller's — the identical two-part test `stripReadonlyFields` applies:
  *
  *  1. the key is an OWN property of `supplied` (a key a hook ADDED is not), and
- *  2. the payload still holds the caller's VALUE by `Object.is` (a key a hook
- *     OVERWROTE now carries a platform value, not a forgery).
+ *  2. a hook ASSIGNED the key (#14259 — by RECORD, see `hookWrittenKeys`), or
+ *     failing a record, the payload still holds the caller's VALUE by
+ *     `Object.is` (a key a hook OVERWROTE now carries a platform value, not a
+ *     forgery).
  *
  * ⚠️ **This does not weaken the lock at the API boundary, and the reason is
  * that a caller cannot reach the exempt side of either test.** To be treated as
- * hook-written, a value must differ from what arrived at engine entry — which
- * only server code can arrange. A client that echoes the locked key back does
- * not launder it: either no hook touched it (test 2 holds, it is stripped) or a
- * hook overwrote it (the value that persists is the HOOK's, and the client's is
- * gone regardless). What changed is who may write the column — the server's own
- * trusted hooks — not whether a caller may. `isSystem` is deliberately still NOT
- * an exemption here: a state lock that any system-context write could bypass
- * would not be a state lock (#4889's frozen paid-invoice lines are built on it).
+ * hook-written, a key must have been ASSIGNED by server code after the caller's
+ * payload arrived (or, under the fallback, carry a value that differs from what
+ * arrived at engine entry — which again only server code can arrange). A client
+ * that echoes the locked key back does not launder it: no hook touched it, so
+ * neither test exempts it and it is stripped. What changed is who may write the
+ * column — the server's own trusted hooks — not whether a caller may. `isSystem`
+ * is deliberately still NOT an exemption here: a state lock that any
+ * system-context write could bypass would not be a state lock (#4889's frozen
+ * paid-invoice lines are built on it).
  *
  * ABSENT `supplied` means "treat the whole payload as caller-supplied" — the
  * pre-#9107 behaviour, and the fail-SAFE default: a call site that has no entry
@@ -563,6 +566,28 @@ interface ReadonlyWhenStripOptions {
    * before the before-phase hooks. Omit to judge every key in the payload.
    */
   supplied?: Readonly<Record<string, unknown>>;
+  /**
+   * [#14259] The keys the before-phase hook chain ACTUALLY ASSIGNED on this
+   * payload, recorded while the writes happened — `recordHookPayloadWrites`,
+   * the instrument #14088 built for the static `readonly` strip, threaded to
+   * its `readonlyWhen` sibling so the two cannot disagree about what
+   * "caller-supplied" means (which, between #14088 and this, they did).
+   *
+   * OPTIONAL, and absent means "this call cannot say", never "no hook wrote
+   * anything": a direct caller with no recording, and any write whose hook
+   * REPLACED the payload object, fall back to the `Object.is` test below
+   * exactly as before this option existed.
+   *
+   * ⚠️ It may only ever turn a STRIP into a KEEP, and only for a key a hook
+   * assigned. A caller cannot put a key in here — echoing a key, a value, a
+   * `null` or a `Proxy` back is not a `set` on the recorded object — so the
+   * #4889 lock is untouched: a caller-supplied value that NO hook wrote is
+   * still stripped, still warns with the same text, and still reports through
+   * `onFieldsDropped` / `strictReadonlyWrites`. Any future producer of this set
+   * owes the same proof, because a key in it is a key this strip stops
+   * defending.
+   */
+  hookWrittenKeys?: ReadonlySet<string>;
 }
 
 /**
@@ -575,16 +600,36 @@ function isCallerSuppliedValue(
   data: Record<string, unknown>,
   supplied: Readonly<Record<string, unknown>>,
   name: string,
+  hookWrittenKeys?: ReadonlySet<string>,
 ): boolean {
   // Own-property, never `in`: a field name is `^[a-z_][a-z0-9_]*$`, which
   // admits `constructor` / `valueOf` — inherited from `Object.prototype` on any
   // plain snapshot, so `in` would call a hook stamp caller-supplied and strip
   // it (the trap #5591 names on the static strip, one function over).
   if (!Object.prototype.hasOwnProperty.call(supplied, name)) return false;
+  // [#14259] ...or a hook ASSIGNED it. Asked BEFORE the value comparison, in
+  // the same position and for the same reason as inside `stripReadonlyFields`:
+  // it answers by RECORD the question the comparison is only a proxy for.
+  // `Object.is` collapses "the hook deliberately wrote the value the caller
+  // also sent" into "the hook never touched the key", and those two demand
+  // opposite verdicts — the measured shape being a `beforeUpdate` hook that
+  // derives a `readonlyWhen`-locked field against a caller that round-tripped
+  // the whole record and echoed the same value back, whose derivation is then
+  // deleted. Not a `null` bug: `0`, `''`, `false` and a shared object reference
+  // collide identically, which is why the answer is provenance, not a sentinel.
+  if (hookWrittenKeys?.has(name)) return false;
   // ...and it must still BE the caller's value. `Object.is`, not `===`, on
   // purpose: `===` reports NaN !== NaN, which would read a caller-forged NaN as
   // "a hook rewrote it" and KEEP the forgery — the one input where the loose
   // operator inverts the verdict.
+  //
+  // [#14259] STAYS, and stays as the fallback for every key the record above
+  // has nothing to say about: a call site that passes no `hookWrittenKeys` gets
+  // byte-identical behaviour, and a hook that REPLACED the payload object
+  // leaves no record, so this test is what still separates its overwrite from a
+  // forgery. ⛔ Not "keep everything" — the fallback over-strips (the
+  // pre-existing defect), which is the only safe direction: reading a
+  // replacement's keys as hook-owned would launder a caller's forgery.
   return Object.is(data[name], supplied[name]);
 }
 
@@ -632,7 +677,7 @@ export function stripReadonlyWhenFields(
     // is not this strip's business at all, so there is nothing to evaluate and
     // nothing to warn about — including the unbound-root LOCKED branch, whose
     // fail-CLOSED verdict exists to protect against an unjudgeable CALLER write.
-    if (!isCallerSuppliedValue(data, supplied, name)) continue;
+    if (!isCallerSuppliedValue(data, supplied, name, options?.hookWrittenKeys)) continue;
     if (isReadonlyWhenLocked(def, view.merged, view.previous, name, logger, parent)) {
       if (result === data) result = { ...data };
       delete (result as Record<string, unknown>)[name];
@@ -866,7 +911,12 @@ export function stripReadonlyWhenFieldsMulti(
     if (!def?.readonlyWhen || !(name in data)) continue;
     // [#9107] Same authorship gate as the single-id strip, asked before any row
     // is judged — a hook-written key is exempt for the whole batch, not per row.
-    if (!isCallerSuppliedValue(data, supplied, name)) continue;
+    // [#14259] ...off the SAME sealed record, too: the engine seals once at the
+    // shared post-hook confluence and hands the identical set to both branches,
+    // so a bulk write cannot reach a different verdict about who wrote a key
+    // than a by-id write does (the #3106 / #4441 divergence, which two separate
+    // derivations of "a hook wrote this" would reproduce exactly).
+    if (!isCallerSuppliedValue(data, supplied, name, options?.hookWrittenKeys)) continue;
     const lockedInSomeRow = rowViews().some((view, i) =>
       isReadonlyWhenLocked(
         def,
@@ -1300,25 +1350,63 @@ export function stripReadonlyFields(
  * `onFieldsDropped` / `strictReadonlyWrites`. What changed is exclusively the
  * case where the value being deleted was never the caller's.
  *
+ * ### ...and why VALUES were not enough either (#14259)
+ *
+ * #6339's own sentence is the finding, one iteration on: it argued that a key
+ * SET made the contract true "only BY ACCIDENT", and value equality is
+ * accidental in the identical way. `Object.is(row[name], supplied[name])`
+ * cannot separate *the hook re-issued the record number the caller happened to
+ * submit* from *the hook never touched the key*, and those demand opposite
+ * verdicts — so #6339's own measured row (a `beforeInsert` hook that re-issues
+ * or normalises `code`) still loses its write to the one caller who submitted
+ * the same value. `options.hookWrittenKeys` answers by RECORD what the
+ * comparison could only infer; the comparison stays as the fallback for every
+ * key no record covers.
+ *
  * KNOWN LIMIT, identical to the update side's and deliberately not papered over:
- * the snapshot is SHALLOW, so a hook that mutates a caller-supplied object IN
- * PLACE is indistinguishable from a hook that did nothing, and the field is
- * still stripped. That fallback is the pre-#6339 behaviour, i.e. fail-safe; a
- * hook meaning to own a runtime-owned column should ASSIGN to it. (An
- * `autonumber` value is a scalar in every supported shape, so this limit is
- * theoretical here in a way it is not for the update path's `json` columns.)
+ * without a record the snapshot is SHALLOW, so a hook that mutates a
+ * caller-supplied object IN PLACE is indistinguishable from a hook that did
+ * nothing, and the field is still stripped. That fallback is the pre-#6339
+ * behaviour, i.e. fail-safe; a hook meaning to own a runtime-owned column
+ * should ASSIGN to it. (An `autonumber` value is a scalar in every supported
+ * shape, so this limit is theoretical here in a way it is not for the update
+ * path's `json` columns.)
  */
 export function stripRuntimeOwnedFields(
   objectSchema: { name?: string; fields?: Record<string, ConditionalFieldDef> } | undefined | null,
   data: Record<string, unknown> | undefined | null,
   supplied: Readonly<Record<string, unknown>>,
   logger?: EvaluateRulesOptions['logger'],
-  options?: { preserveAudit?: boolean; strictReadonlyWrites?: boolean },
+  options?: {
+    preserveAudit?: boolean;
+    strictReadonlyWrites?: boolean;
+    /**
+     * [#14259] The keys the `beforeInsert` hook chain ACTUALLY ASSIGNED on THIS
+     * ROW, recorded while the writes happened (`recordHookPayloadWrites`, armed
+     * per row at `engine.insert`'s hook-context construction and sealed
+     * immediately after that row's dispatch). The insert-side twin of the
+     * option #14088 gave {@link stripReadonlyFields}, and read by the same
+     * rules: OPTIONAL, and absent means "this call cannot say", never "no hook
+     * wrote anything" — a direct caller, and any row whose hook REPLACED the
+     * payload object, fall back to the `Object.is` test below exactly as before
+     * this option existed.
+     *
+     * ⚠️ Per ROW, never per call: one recording is armed for each row of a
+     * batch, so a hook that stamps row 3 cannot exempt row 4's caller-seeded
+     * record number. And a caller cannot put a key in here — see the
+     * forgery-boundary note on the recorder — so #5503 is untouched: a
+     * caller-seeded record number that no hook assigned is still dropped, still
+     * warns with the same text, and still reports through `onFieldsDropped` /
+     * `strictReadonlyWrites`.
+     */
+    hookWrittenKeys?: ReadonlySet<string>;
+  },
 ): Record<string, unknown> | undefined | null {
   const fields = objectSchema?.fields;
   if (!fields || !data) return data;
   const preserveAudit = options?.preserveAudit === true;
   const strict = options?.strictReadonlyWrites === true;
+  const hookWrittenKeys = options?.hookWrittenKeys;
   let result = data;
   for (const [name, def] of Object.entries(fields)) {
     if (!isRuntimeOwnedField(def)) continue;
@@ -1328,12 +1416,24 @@ export function stripRuntimeOwnedFields(
     // any plain snapshot, so `in` would call a hook stamp caller-supplied and
     // strip it.
     if (!Object.prototype.hasOwnProperty.call(supplied, name)) continue; // hook/middleware stamp — keep
+    // [#14259] ...or a hook ASSIGNED it on THIS row. Asked BEFORE the value
+    // comparison because it answers by RECORD the question the comparison is
+    // only a proxy for: `Object.is` reads "the hook re-issued the record number
+    // the caller also submitted" as "the hook never touched the key", and the
+    // two demand opposite verdicts. That is #6339's own argument against the
+    // key SET, applied to the values that replaced it.
+    if (hookWrittenKeys?.has(name)) continue; // the hook wrote this value — keep
     // [#6339] ...and it must still BE the caller's value. A hook that overwrote
     // this key wrote a PLATFORM value, and deleting that is what sent records
     // to the database holding a sequence number the hook had just replaced.
     // `Object.is`, not `===`: `===` reports NaN !== NaN, which would read a
     // caller-forged NaN as "a hook rewrote it" and KEEP the forgery — the one
     // input where the loose operator inverts the verdict.
+    //
+    // [#14259] STAYS as the fallback for every key the record above has nothing
+    // to say about — a call site passing no `hookWrittenKeys`, and a row whose
+    // hook replaced the payload object. ⛔ Not "keep everything": the fallback
+    // over-strips, which is the only safe direction.
     if (!Object.is((result as Record<string, unknown>)[name], supplied[name])) continue;
     if (preserveAudit && isPreservableUnderAudit(name, def)) continue; // historical import reinstates it
     if (result === data) result = { ...data };
