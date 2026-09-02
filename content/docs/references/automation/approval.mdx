@@ -69,7 +69,7 @@ const result = ApprovalDecision.parse(data);
 | :--- | :--- | :--- | :--- |
 | **approvers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| …>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string; … }[]` | ✅ | Allowed approvers for this node |
 | **behavior** | `Enum<'first_response' \| 'unanimous' \| 'quorum' \| 'per_group'>` | optional (default: `"first_response"`) | How to combine multiple approvers |
-| **minApprovals** | `integer` | optional | Approvals required — total (quorum) or per group (per_group). Default 1 |
+| **minApprovals** | `integer` | optional | Approvals required — total (quorum) or per group (per_group). Omitted ⇒ all resolvable approvers for quorum, 1 per group for per_group |
 | **lockRecord** | `boolean` | optional (default: `true`) | Lock the record from editing while pending |
 | **approvalStatusField** | `string` | optional | Business-object field to mirror request status onto |
 | **onEmptyApprovers** | `Enum<'admin_rescue' \| 'fail' \| 'auto_approve'>` | optional (default: `"admin_rescue"`) | Behavior when no concrete approver resolves at node entry |
