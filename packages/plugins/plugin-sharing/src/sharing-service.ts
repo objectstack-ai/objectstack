@@ -21,6 +21,10 @@ import {
 // implementations with a narrower shape is what forced this file to cast its
 // way out of its own contract to read fields the caller had already supplied.
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+// [#14484] The engine's own answer to "which column is this object walled
+// by?" — the twin of `SqlDriver.computeTenantField`, so the organization a grant
+// is stamped from is read off the SAME column the wall scopes the record by.
+import { resolveTenantFieldName } from '@objectstack/objectql';
 import { WRITE_ACCESS_LEVELS, normalizeAccessLevel } from './access-level.js';
 import { hasPhantomOwnerAnchor } from './federated-phantom-anchors.js';
 import {
@@ -1205,11 +1209,20 @@ export class SharingService implements ISharingService {
     // best-effort — the boot backfill, the object-wide re-grant and the
     // bu-tree re-grant queue log and continue, and the write hooks catch so a
     // user's insert/update is never failed by it.
+    // [#14484] The organization this grant belongs to, resolved here so BOTH
+    // halves of the upsert carry it. A rule-materialised grant carries the
+    // rule's organization (the evaluator threads it — see
+    // `SharingRuleService.criteriaContext`); a direct grant carries the shared
+    // record's. The resolution runs after the authorization pre-flight so a
+    // refused caller never pays the record read.
+    let organizationId: string | null;
     if (context?.isSystem) {
       this.assertNotInertGrant(input.object);
+      organizationId = await this.resolveSystemGrantOrganization(input, context);
     } else {
       this.assertSharingEnforced(input.object);
       await this.assertCanManageShares(input.object, input.recordId, context);
+      organizationId = await this.resolveDirectGrantOrganization(input, context);
     }
 
     // Upsert: if a row with same (object, record, recipient, source) exists,
@@ -1233,19 +1246,41 @@ export class SharingService implements ISharingService {
       const row: any = existing[0];
       const patch: any = {
         id: row.id,
+        // [#14484] The update half stamps too: a row written before the writer
+        // was repaired carries NULL, and the next grant that touches it is the
+        // cheapest repair there is. A resolution of `null` leaves the stored
+        // value alone rather than clearing one the backfill already wrote.
+        ...(organizationId ? { organization_id: organizationId } : {}),
         access_level: accessLevel,
         source,
         source_id: input.sourceId ?? row.source_id ?? null,
         reason: input.reason ?? row.reason ?? null,
         updated_at: now,
       };
-      await this.engine.update('sys_record_share', patch, { context: SYSTEM_CTX });
+      // [#14484] The organization rides the write context as well as the row —
+      // `{ isSystem, tenantId }` is the shape #8844's refusal prescribes for a
+      // system write, the same chokepoint a session write goes through
+      // (`ObjectQLEngine.buildDriverOptions` → `DriverOptions.tenantId`), and
+      // what satisfies the driver's tenant audit. On this verb the driver's
+      // scope keeps a NULL row in reach (`organization_id = ? OR IS NULL`) and,
+      // exactly as on `sys_upload_session`, a row stamped with a DIFFERENT
+      // organization stays out of it — the wall, not a defect.
+      await this.engine.update('sys_record_share', patch, {
+        context: { ...SYSTEM_CTX, tenantId: organizationId ?? undefined },
+      });
       return { ...row, ...patch } as RecordShare;
     }
 
     const id = makeShareId();
     const row: any = {
       id,
+      // [#14484] Carried on the row literal itself, explicitly `null` when
+      // nothing resolved: `sys_record_share` is tenant-scoped in the #13491
+      // ledger, so an organization-less system insert is the engine's to
+      // decide — derived on a `single` install, REFUSED loudly on a walled one
+      // (`ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED`, #8844) — never a silent
+      // NULL row on a table a tenant read will one day scope.
+      organization_id: organizationId,
       object_name: input.object,
       record_id: input.recordId,
       recipient_type: recipientType,
@@ -1258,8 +1293,104 @@ export class SharingService implements ISharingService {
       created_at: now,
       updated_at: now,
     };
-    await this.engine.insert('sys_record_share', row, { context: SYSTEM_CTX });
+    // [#14484] Same write context as the update half — see the note there.
+    await this.engine.insert('sys_record_share', row, {
+      context: { ...SYSTEM_CTX, tenantId: organizationId ?? undefined },
+    });
     return row as RecordShare;
+  }
+
+  /**
+   * [#14484] The organization a SYSTEM caller's grant belongs to.
+   *
+   * First the organization the caller THREADS: `SharingRuleService.reconcile`
+   * / `reconcileForRecord` pass the rule's own `criteriaContext`, so a
+   * rule-materialised grant carries the rule's organization — the 2026-09-02
+   * ruling's first pin, and the same organization the rule's criteria sweep
+   * ran under (#10119), which is what makes the grant and the sweep agree.
+   * A platform-global rule (`organization_id = null`, #7795) carries none and
+   * sweeps every organization; its grant then belongs where the record does.
+   *
+   * `tenantId` is read through {@link activeOrganizationId} — the ONE field
+   * every transport and every system writer puts the organization on; the
+   * #8844 refusal prescribes exactly `{ isSystem: true, tenantId }`.
+   */
+  private async resolveSystemGrantOrganization(
+    input: GrantShareInput,
+    context: ExecutionContext,
+  ): Promise<string | null> {
+    return activeOrganizationId(context)
+      ?? (await this.recordOrganization(input.object, input.recordId));
+  }
+
+  /**
+   * [#14484] The organization a DIRECT grant belongs to: the organization of
+   * the record being shared (the ruling's second pin), read from the record
+   * itself — never the caller's active organization first, which under a
+   * `single` posture holding several organizations may not be the record's.
+   *
+   * The acting session's organization is the FALLBACK for a record that
+   * carries none — an object with no tenant column, or an organization-less
+   * row — the `sys_approval_request` writer's ruled shape (subject first, the
+   * acting context second). It is a fact of the write, not a guess: a
+   * principal is sharing a record from inside an organization. When neither
+   * exists the grant carries `null` and the engine's #8844 rule decides.
+   */
+  private async resolveDirectGrantOrganization(
+    input: GrantShareInput,
+    context: ExecutionContext,
+  ): Promise<string | null> {
+    return (await this.recordOrganization(input.object, input.recordId))
+      ?? activeOrganizationId(context);
+  }
+
+  /**
+   * [#14484] The organization `(object, recordId)` is walled by, read off the
+   * column the object is actually walled by ({@link resolveTenantFieldName}:
+   * ADR-0066 opt-out → declared `tenancy.tenantField` → injected
+   * `organization_id`), under the system context so field-level masking cannot
+   * hide the column from the decision — the same reading
+   * {@link canManageShares} takes of the owner column.
+   *
+   * `null` for an object with no tenant column, a record that is gone, an
+   * organization-less row, and a read that failed. The last is logged: a read
+   * that did not happen must not pass for a record with no organization, and
+   * the write it feeds still ends in the engine's ruled derive-or-refuse rather
+   * than in a silently stamped guess.
+   */
+  private async recordOrganization(object: string, recordId: string): Promise<string | null> {
+    const tenantField = this.tenantFieldOf(object);
+    if (!tenantField) return null;
+    try {
+      const rows = await this.engine.find(object, {
+        where: { id: recordId },
+        fields: ['id', tenantField],
+        limit: 1,
+        context: SYSTEM_CTX,
+      });
+      const row: any = Array.isArray(rows) ? rows[0] : undefined;
+      const value = row?.[tenantField];
+      return typeof value === 'string' && value.trim() !== '' ? value : null;
+    } catch (err: any) {
+      this.logger?.warn?.(
+        '[sharing] could not read the shared record\'s organization — the grant carries none from it, '
+          + 'and the engine\'s system-write organization rule decides the row (#14484)',
+        { object, recordId, error: err?.message },
+      );
+      return null;
+    }
+  }
+
+  /** [#14484] The tenant column of `object`, or `null` when it has none / the engine cannot say. */
+  private tenantFieldOf(object: string): string | null {
+    if (typeof this.engine.getSchema !== 'function') return null;
+    let schema: unknown;
+    try {
+      schema = this.engine.getSchema(object);
+    } catch {
+      return null;
+    }
+    return schema ? resolveTenantFieldName(schema) : null;
   }
 
   /**
