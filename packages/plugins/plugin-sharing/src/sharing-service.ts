@@ -1372,9 +1372,10 @@ export class SharingService implements ISharingService {
       const value = row?.[tenantField];
       return typeof value === 'string' && value.trim() !== '' ? value : null;
     } catch (err: any) {
+      // [#14484] The id stays out of the string: it reaches operators.
       this.logger?.warn?.(
         '[sharing] could not read the shared record\'s organization — the grant carries none from it, '
-          + 'and the engine\'s system-write organization rule decides the row (#14484)',
+          + 'and the engine\'s system-write organization rule decides the row',
         { object, recordId, error: err?.message },
       );
       return null;

@@ -564,9 +564,11 @@ function finish(
   if (logOrphans && sealed.residue.recordNotFound > 0) {
     // ⭐ The orphan count, logged — the half of the ruling's "leave NULL with a
     // logged count" that the report alone cannot deliver to an operator's log.
+    // (The sweep named here is #5103's; the id stays out of the string on
+    // purpose — it reaches operators, who cannot resolve a tracker id.)
     logger?.warn?.(
       `[sharing] sys_record_share organization backfill: ${sealed.residue.recordNotFound} grant row(s) `
-        + 'reference a record that no longer exists — left NULL, not deleted; the #5103 orphan sweep '
+        + 'reference a record that no longer exists — left NULL, not deleted; the boot-time orphan sweep '
         + '(`sweepOrphanedRecordShares`, kernel:bootstrapped) reclaims them on the next boot',
       { orphans: sealed.residue.recordNotFound, dryRun: sealed.dryRun },
     );
@@ -655,7 +657,7 @@ const RESIDUE_LABELS: Record<keyof SysRecordShareBackfillResidue, string> = {
   subjectObjectUnknown: "the record's object has no schema this engine can read — wall column unknowable",
   subjectNotOrganizationScoped: "the record's object has no organization column at all",
   subjectReadFailed: 'the record could not be READ (could not ask is not gone)',
-  recordNotFound: 'ORPHAN — the record no longer exists (left NULL; the #5103 boot sweep deletes these)',
+  recordNotFound: 'ORPHAN — the record no longer exists (left NULL; the boot-time orphan sweep deletes these)',
   recordHasNoOrganization: 'the record exists, is organization-scoped, and carries no organization itself',
 };
 

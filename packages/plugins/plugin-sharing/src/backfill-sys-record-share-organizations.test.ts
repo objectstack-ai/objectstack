@@ -34,8 +34,10 @@ import {
 // ---------------------------------------------------------------------------
 // Fake engine — schemas + rows, with `find` honouring the two predicate shapes
 // the sweep issues (`{ col: null }` and `{ id: { $in: [...] } }`) plus plain
-// equality, and — for the cliff cases — a STRICT organization wall applied to
-// every non-system read, the way Layer 0 AND-composes it in production.
+// equality. The `sys_file` precedent's double, shape for shape; the cliff cases
+// below compose Layer 0's predicate into `where` themselves — which is exactly
+// what `andComposeLayers` does in production — so the double needs no wall
+// branch of its own.
 // ---------------------------------------------------------------------------
 
 interface FakeSchema {
@@ -78,12 +80,12 @@ function createFakeEngine(init: {
   schemas: Record<string, FakeSchema | undefined>;
   rows: Record<string, Array<Record<string, unknown>>>;
   failUpdateFor?: Set<string>;
-  failFindFor?: Set<string>;
-  /** When set, every NON-system read is walled to `context.tenantId` by strict equality. */
-  strictWall?: boolean;
+  /** Objects whose TABLE is absent on this install: a read of them throws ("could not ask"). */
+  unmounted?: readonly string[];
 }) {
   const rows: Record<string, Array<Record<string, unknown>>> = {};
   for (const [object, list] of Object.entries(init.rows)) rows[object] = list.map((r) => ({ ...r }));
+  for (const object of init.unmounted ?? []) delete rows[object];
   const updates: Array<{ object: string; data: Record<string, unknown>; context: unknown }> = [];
 
   const engine: SysRecordShareBackfillEngine & {
@@ -96,19 +98,9 @@ function createFakeEngine(init: {
       return schema;
     },
     async find(object: string, options?: any) {
-      if (init.failFindFor?.has(object)) throw new Error(`simulated read failure on ${object}`);
       const table = rows[object];
       if (!table) throw new Error(`object '${object}' is not mounted on this install`);
-      let out = table;
-      const ctx = options?.context ?? {};
-      if (init.strictWall && !ctx.isSystem) {
-        // Layer 0's `isolated` arm: `{ organization_id: <active org> }`,
-        // AND-composed over everything else — the strict equality that wins
-        // over the driver's NULL-tolerant arm (`backfill-sys-file-organizations.ts`).
-        const org = ctx.tenantId;
-        out = out.filter((r) => r.organization_id === org);
-      }
-      out = out.filter((r) => matchesWhere(r, options?.where));
+      let out = table.filter((r) => matchesWhere(r, options?.where));
       if (options?.orderBy?.[0]?.field === 'id') {
         out = [...out].sort((a, b) => String(a.id).localeCompare(String(b.id)));
       }
@@ -244,7 +236,7 @@ describe('[#14484] sys_record_share organization backfill — plan (dry run)', (
   });
 
   it('a subject read that FAILS leaves that object\'s rows alone as "could not ask" — the others still plan', async () => {
-    const engine = seeded({ failFindFor: new Set(['crm_case']) });
+    const engine = seeded({ unmounted: ['crm_case'] });
     const report = await planSysRecordShareOrganizationBackfill(engine);
     expect(report.residue.subjectReadFailed).toBe(1);
     expect(report.residualRows.find((r) => r.id === 'shr_case_a')?.reason).toBe('subjectReadFailed');
@@ -330,16 +322,22 @@ describe('[#14484] sys_record_share organization backfill — apply', () => {
 });
 
 describe('[#14484] ⭐ the cliff — a strict organization wall over the grant table', () => {
-  // A tenant-scoped read of `sys_record_share` under a strict wall, as Layer 0
-  // composes it for the `isolated` posture: `organization_id = <active org>`.
+  // A tenant-scoped read of `sys_record_share` under a strict wall: Layer 0's
+  // `isolated` predicate, `{ organization_id: <active org> }`
+  // (`computeTenantLayer0Filter`), AND-composed onto the query's own predicate
+  // exactly as `andComposeLayers` does in production. The strict equality is
+  // what wins over the driver's NULL-tolerant arm — the cliff.
   const tenantRead = (engine: ReturnType<typeof seeded>, org: string) =>
-    engine.find(SYS_RECORD_SHARE_BACKFILL_OBJECT, { where: { object_name: 'crm_deal' }, context: { userId: 'u', tenantId: org } });
+    engine.find(SYS_RECORD_SHARE_BACKFILL_OBJECT, {
+      where: { object_name: 'crm_deal', organization_id: org },
+      context: { userId: 'u', tenantId: org },
+    });
   const bareRead = (engine: ReturnType<typeof seeded>) =>
     engine.find(SYS_RECORD_SHARE_BACKFILL_OBJECT, { where: { object_name: 'crm_deal' }, context: { isSystem: true } });
   const ids = (rows: unknown[]) => (rows as Array<{ id: string }>).map((r) => r.id).sort();
 
   it('BEFORE the repair: the bare read returns the legacy grants, the tenant-scoped read returns NONE of them', async () => {
-    const engine = seeded({ strictWall: true });
+    const engine = seeded();
     const bare = ids(await bareRead(engine));
     expect(bare).toContain('shr_deal_a');
     expect(bare).toContain('shr_deal_b');
@@ -350,7 +348,7 @@ describe('[#14484] ⭐ the cliff — a strict organization wall over the grant t
   });
 
   it('AFTER the repair: the tenant-scoped read equals the bare read filtered to that organization', async () => {
-    const engine = seeded({ strictWall: true });
+    const engine = seeded();
     await runSysRecordShareOrganizationBackfill(engine, { dryRun: false });
 
     const bare = (await bareRead(engine)) as Array<{ id: string; organization_id: string | null }>;
