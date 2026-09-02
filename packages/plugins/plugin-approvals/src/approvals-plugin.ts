@@ -92,7 +92,7 @@ export interface ApprovalsPluginOptions {
 export class ApprovalsServicePlugin implements Plugin {
   name = 'com.objectstack.service.approvals';
   version = '1.0.0';
-  type = 'standard';
+  type = 'standard' as const;
   dependencies = ['com.objectstack.engine.objectql'];
 
   private readonly options: ApprovalsPluginOptions;

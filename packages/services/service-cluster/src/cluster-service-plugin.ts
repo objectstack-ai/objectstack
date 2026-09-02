@@ -47,7 +47,7 @@ export class ClusterServicePlugin implements Plugin {
      */
     providesServices = ['cluster'];
     version = '1.0.0';
-    type = 'standard';
+    type = 'standard' as const;
 
     private readonly options: ClusterServicePluginOptions;
     private cluster?: IClusterService;

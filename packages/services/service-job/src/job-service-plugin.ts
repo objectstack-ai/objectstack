@@ -69,7 +69,7 @@ export class JobServicePlugin implements Plugin {
    */
   optionalDependencies = ['com.objectstack.engine.objectql', 'com.objectstack.service.cluster'];
   version = '1.1.0';
-  type = 'standard';
+  type = 'standard' as const;
 
   private readonly options: JobServicePluginOptions;
   private dbAdapter?: DbJobAdapter;
