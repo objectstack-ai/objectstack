@@ -133,9 +133,16 @@ export interface SharingPluginOptions {
 
 /**
  * [#2926 ③] Boot backfill: rule grants are materialized by the write hooks,
- * but seed rows are written with `isSystem` (which the hooks deliberately
- * skip — see rule-hooks.ts), so a fresh deploy's seed data carried no
- * `sys_record_share` rows until each record was touched at runtime.
+ * and this pass covers the rows those hooks did not reach.
+ *
+ * [#13533] It was originally written for seed rows, which are written with
+ * `isSystem` and which the hooks used to skip — so a fresh deploy's seed data
+ * carried no `sys_record_share` rows until each record was touched at runtime.
+ * That skip is gone (see the retirement note in `rule-hooks.ts`), and this pass
+ * is still owed: rows written while a rule was inactive or before its hooks
+ * were bound are unreached by any hook, and this is the only pass that PURGES
+ * a deactivated rule's grants (#4433).
+ *
  * Reconcile every rule once per boot: `evaluateRule` is idempotent
  * (diff-based grant/update/revoke), so repeated boots are no-ops.
  * Best-effort per rule — one broken rule must not block startup or its
@@ -871,13 +878,17 @@ export class SharingServicePlugin implements Plugin {
       }
     });
 
-    // [#2926 ③] Materialize sharing grants for rows already present at boot —
-    // notably SeedLoader-inserted seed records, whose write goes through the
-    // isSystem short-circuit in the rule hooks and therefore never produces a
-    // `sys_record_share`. Runs on `kernel:bootstrapped` — the anchor that fires
-    // after every `kernel:ready` handler (including the AppPlugin seed loader)
-    // has settled — so the reconcile sees the seeded rows. Idempotent: a runtime
-    // write that already materialized a grant is reconciled to the same state.
+    // [#2926 ③] Materialize sharing grants for rows already present at boot.
+    // [#13533] SeedLoader rows used to be the headline case, because the rule
+    // hooks short-circuited on `isSystem` and so never produced a
+    // `sys_record_share` for them; that skip is gone. What still lands here is
+    // every row no hook reached — written before its object's hooks were bound,
+    // or while its rule was inactive — plus the withdrawal half, which no write
+    // hook can do: this pass is handed EVERY rule, so an inactive one has its
+    // grants purged (#4433). Runs on `kernel:bootstrapped` — the anchor that
+    // fires after every `kernel:ready` handler (including the AppPlugin seed
+    // loader) has settled. Idempotent: a runtime write that already
+    // materialized a grant is reconciled to the same state.
     ctx.hook('kernel:bootstrapped', async () => {
       // [#3865] Normalise retired `access_level: 'full'` rows FIRST, so the
       // rule reconcile below materialises grants from already-canonical rules

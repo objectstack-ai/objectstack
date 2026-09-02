@@ -9,9 +9,9 @@ the seed loader replaying package fixtures, a plugin's boot reconciler, a
 service self-write, a migration.
 
 This page is **the authority** for what that flag actually does. It exists
-because the flag is not one concept: it is a single boolean read at **109
+because the flag is not one concept: it is a single boolean read at **106
 distinct sites across 20 packages**, and knowing three of those behaviours gives
-no hint that the other hundred-and-six exist. Every documented app-side bug
+no hint that the other hundred-and-three exist. Every documented app-side bug
 traced to `isSystem` had the same shape — the metadata was complete and correct,
 and the gap was observable only by querying the resulting rows.
 
@@ -124,17 +124,17 @@ that silently does not happen.
 
 ### 3. Sharing (`plugin-sharing`)
 
-The largest single consumer — **20 of the 109 sites**.
+The largest single consumer — **17 of the 106 sites**.
 
 | # | Behaviour when `isSystem` | What you get / what you lose | Anchor |
 |:--|:---|:---|:---|
-| 30 | **Sharing-rule grant materialisation is skipped on all four record-write hooks** | Lose: **no `sys_record_share` rows are created**. A fully configured sharing rule grants **nothing** on seeded data until a rule is re-evaluated or the boot backfill runs. This is the behaviour that motivated #4707. Since #6783 the skip is no longer silent — it emits an INFO notice (rough edge 2) | `rule-hooks.ts:250`, `:274`, `:293`, `:322` |
+| 30 | **Sharing-rule REVOCATION is skipped on the record-`afterDelete` hook** — and on that hook only | Lose: nothing. The payload is delivered by another subscriber: `record-share-cascade.ts` binds on every sharing-capable object and stashes for system writes on its own account (#5103), with the boot orphan sweep behind it. This is one subscriber declining work another owns, not elevation silencing a consequence. ⚠️ **Grant MATERIALISATION no longer asks** — the `afterInsert` / `afterUpdate` skips, and the `before*` stash skip that fed them, were removed by the 2026-08-31 ruling on #13533; a system write materialises exactly as a user write does | `rule-hooks.ts:292` |
 | 31 | Sharing write verdict short-circuits to `allow` | Get: writes pass the sharing gate unconditionally | `plugin-sharing/src/sharing-service.ts:654` |
 | 32 | Record visibility / manage-shares checks return true | Get: no ownership or Modify-All requirement | `plugin-sharing/src/sharing-service.ts:920`, `:1007`, `:1597` |
 | 33 | `grant()` skips the enforcement + manage-shares assertions | Get: the rule evaluator can materialise through the public API. Note it is **not** a bare skip: the system branch asserts the grant is not *inert* instead (a grant on an object no verdict can consult is refused) | `plugin-sharing/src/sharing-service.ts:1208` |
 | 34 | `revoke()` deletes directly, **before** the non-manual-source guard | Get: the evaluator can revoke its own grants. Lose: the `CONFLICT` guard that warns a rule-materialised grant will be silently re-granted on the next reconcile | `plugin-sharing/src/sharing-service.ts:1286` (guard at `:1311`) |
 | 35 | `listShares()` skips the management gate | Get: full enumeration of who can see a record | `plugin-sharing/src/sharing-service.ts:1338` |
-| 36 | `sys_record_share` reads are **not** self-scoped | Get: tenant-wide share listing without `manage_sharing` | `sharing-plugin.ts:1077` |
+| 36 | `sys_record_share` reads are **not** self-scoped | Get: tenant-wide share listing without `manage_sharing` | `sharing-plugin.ts:1088` |
 | 37 | Share-link policy `enabled` check bypassed; system callers re-enter under a system context | Get: link creation/resolution while the policy is off | `plugin-sharing/src/share-link-service.ts:434`, `:488`, `:492`, `:565`, `:595` |
 | 38 | Sharing-rule provenance stamp skipped | Lose: the row is not marked as an admin customization — seeder / `defineRule` / boot reconcilers are "the package door" | `sharing-rule-provenance.ts:47` |
 | 39 | Sharing-rule service write + delete paths return early | Lose: the manage-rules gate on the service surface, and the platform-global-rule delete guard | `sharing-rule-service.ts:157`, `:382` |
@@ -217,14 +217,32 @@ should recognise it instead of re-deriving it.
    (`plugin-security/src/claim-seed-ownership.ts`). Any *third* system write
    path gets neither. If you add one, stamp ownership yourself.
 
-2. **Sharing materialisation is skipped, and now says so.** Row 30 produces
+2. **Sharing materialisation is no longer skipped — the rough edge is closed,
+   and it is recorded here rather than deleted.** This entry used to describe
    "configured but inert": nine installed sharing rules, matching records,
-   correct positions — and `sys_record_share` empty. The boot backfill does
-   eventually fix it, so the behaviour is not wrong; it was undiscoverable.
-   The INFO notice tracked as #6783 **has since shipped**
-   (`rule-hooks.ts:274`, `:293` call `noteSystemWriteSkipped`), so the skip is
-   now observable — the earlier edition of this page said it was not, and that
-   sentence was already stale when the anchors were re-censused.
+   correct positions — and `sys_record_share` empty, repaired only by a
+   re-evaluation or a restart. The reading that made it a rough edge rather
+   than a defect was that the boot backfill eventually fixes it, so the
+   behaviour was correct and merely undiscoverable; #6783 shipped an INFO
+   notice on that reasoning.
+
+   That reading did not survive contact with a runtime write. An approval
+   node's write-back is a system write — `lockRecord: true` means only a
+   platform write can land while the record is locked — and it happens long
+   after boot, so no backfill was coming: a manager approved a request and the
+   teammate who depended on the criteria rule `status == "approved"` could not
+   see it at all. The maintainer ruled on 2026-08-31 (#13533) that the skip was
+   a **bug**, because a sharing rule's declared semantics is a published
+   promise and `isSystem` names the operator, never a consequence that need not
+   happen. Both materialisation skips and the notice that announced them are
+   gone; row 30 is now the `afterDelete` skip alone, which survives on the
+   separate ground that another subscriber delivers that payload.
+
+   ⚠️ The observability half of that reading is worth keeping in mind
+   independently: the only signal a builder ever had was one INFO line, and
+   nothing in the docs or the tests said "after approval, when does the team
+   see it?". A compensating path that exists but that nobody can be expected to
+   know about is not a compensating path.
 
 3. **Strict write observability is inert under elevation.** Row 22: a caller
    that asked to be told loudly about dropped fields is told nothing, because
@@ -251,7 +269,7 @@ Ownership injection, `readonly` bypass and sharing materialisation are
 independent decisions, and a seed loader plausibly wants the first two but not
 the third. The concept is nevertheless **staying as one boolean**:
 
-- **Shipped semantics.** `isSystem` is a published contract with 109 read sites
+- **Shipped semantics.** `isSystem` is a published contract with 106 read sites
   in 20 packages. Splitting it is a breaking contract change across all of them.
   (The ruling was taken when the census read 80 sites in 18 packages; the count
   has grown, which strengthens rather than weakens the argument.)
@@ -308,12 +326,12 @@ still holds equal to the census on every pull request:
 | Appearances of the bare identifier `isSystem` in non-test sources | 813 | — |
 | — parsed as a declaration | 22 | ✅ |
 | — parsed as an object-literal / type key (producers and option objects) | 310 | — |
-| — parsed as a property **read** | 115 | ✅ |
+| — parsed as a property **read** | 112 | ✅ |
 | — parsed in some other syntactic position (a local, a cast, a conditional) | 9 | ✅ |
 | — the remainder: text inside comments and string literals | 358 | — |
 | Of those reads: reads of one of the unrelated metadata fields | 6 | ✅ |
-| Of those reads: reads of `ExecutionContext.isSystem` | **109** | ✅ |
-| — behaviour-bearing (rows 1–61 above) | 105 | ✅ |
+| Of those reads: reads of `ExecutionContext.isSystem` | **106** | ✅ |
+| — behaviour-bearing (rows 1–61 above) | 102 | ✅ |
 | — carry the flag onward only (rows 62–65 above) | 4 | ✅ |
 | Packages containing at least one elevation read | **20** | ✅ |
 | Files containing at least one elevation read | 45 | ✅ |
