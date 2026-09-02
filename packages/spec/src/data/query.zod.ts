@@ -20,9 +20,10 @@ import { strictObject } from '../shared/strict-object';
  * Represents "Order By" — one `{ field, order }` pair. Unknown keys are
  * REJECTED (#4721); spell the direction `order`, never `direction`.
  */
-// ⚠️ Keep the file header above short: `build-docs.ts` publishes the FIRST doc
-// block that documents no symbol (`scripts/lib/file-description.ts`) as this
-// page's description, so the rationale below is line comments.
+// ⚠️ Keep the file header above short: `build-docs.ts` publishes the FIRST
+// HEADER-ZONE doc block that documents no symbol — the zone ends at the first
+// declaration, so a later block cannot take over (`scripts/lib/file-description.ts`
+// selects it) — as this page's description, so the rationale below is line comments.
 //
 // ─── Why this one schema is strict while the rest of the file is not (#4721) ──
 //
