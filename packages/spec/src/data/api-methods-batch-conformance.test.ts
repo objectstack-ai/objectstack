@@ -61,16 +61,17 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   // `revoked` on ONE key. The multi-select surface this rule protects does not
   // exist for API keys, and the shape a future one would take does not need
   // `bulk` either — both read off the console build this release pins
-  // (`.objectui-sha` = `d8ec8d6d4`, `packages/plugin-grid`; re-measured at
-  // that pin, 2026-09-01 — previously measured at `9602dc820`, before that at
-  // `190fbd01d`, `9a3daf8d3`, originally at `6314e87f2`. `ObjectGrid.tsx` DID
-  // change across the move off `9602dc820`, so both claims below were
-  // re-derived rather than carried over: `ObjectGrid.tsx:3187-3202`, whose
-  // block is byte-identical to the one cited at `9602dc820:2586-2601` and
-  // shifted only by insertions above it, and
+  // (`.objectui-sha` = `67dadd602`, `packages/plugin-grid`; re-measured at
+  // that pin, 2026-09-02 — previously measured at `d8ec8d6d4`, before that at
+  // `9602dc820`, `190fbd01d`, `9a3daf8d3`, originally at `6314e87f2`.
+  // `ObjectGrid.tsx` DID change across the move off `d8ec8d6d4` (seven
+  // commits, 461 lines), so both claims below were re-derived rather than
+  // carried over: `ObjectGrid.tsx:3436-3451`, whose block is byte-identical
+  // to the one cited at `d8ec8d6d4:3187-3202` and shifted only by insertions
+  // above it, and
   // `hooks/useBulkExecutor.ts:284-289`, in a file byte-identical at both pins
   // and re-READ there rather than carried on that identity — it still ends on
-  // `label = 'bulk delete'`, the line the `284-288` span cited two pins ago
+  // `label = 'bulk delete'`, the line the `284-288` span cited three pins ago
   // stopped short of, truncating the second of the two branches it names (the
   // #10274 class of anchor error, found by re-reading rather than by the file
   // changing, which is why byte-identity is never taken as proof an anchor is
