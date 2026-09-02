@@ -423,5 +423,10 @@ export type { AuthzInvalidationBridgeOptions } from './authz-invalidation-bridge
 // door that grows an artifact-loading seam (the CLI, the marketplace install
 // path, the metadata dev-artifact loader) adopts the SAME read of both shapes
 // and the SAME single sorter, instead of each re-deriving one.
-export { resolveArtifactPackageOrder } from './artifact-packages.js';
-export type { ArtifactPackageError } from './artifact-packages.js';
+// ADR-0130 D4/D5. The implementation moved to `@objectstack/core` when the
+// metadata artifact door became its second reader (#14599) — `@objectstack/
+// objectql` cannot host a module `@objectstack/metadata` has to import, since
+// this package depends on that one. Re-exported, not re-declared: this
+// package's published surface is exactly what it was.
+export { resolveArtifactPackageOrder } from '@objectstack/core';
+export type { ArtifactPackageError } from '@objectstack/core';

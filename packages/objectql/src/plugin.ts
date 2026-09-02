@@ -4,7 +4,7 @@ import { ObjectQL } from './engine.js';
 import { assembleMetadataProtocol } from '@objectstack/metadata-protocol';
 import type { MetadataAuthoringChannel } from '@objectstack/metadata-protocol';
 import { Plugin, PluginContext } from '@objectstack/core';
-import { resolveArtifactPackageOrder, artifactPackageId } from './artifact-packages.js';
+import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/core';
 import { applyConversionsToStoredItem } from '@objectstack/spec';
 import { StorageNameMapping } from '@objectstack/spec/system';
 import { LifecycleService } from './lifecycle/lifecycle-service.js';
