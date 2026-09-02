@@ -34,6 +34,22 @@ export const ShowcaseTranslationBundle = {
           start_date: { label: 'Start Date' },
           end_date: { label: 'End Date' },
         },
+        // An author-written `validations[].message` is emitted VERBATIM unless
+        // the bundle carries it here (#14253) — the built-in field catalog's
+        // own sentences have shipped zh-CN since #3957, so a rule that declares
+        // its own message is the one way a refusal escapes the caller's
+        // language. `project_status_flow` is the showcase's state machine and
+        // the only refusal a visitor reliably triggers (the New Project wizard
+        // used to offer four statuses the machine will not accept on create),
+        // so it read as the single English sentence on a zh-CN form.
+        _validations: {
+          project_status_flow: {
+            message: 'Projects start as Planned, and then move only along the declared status flow.',
+          },
+          project_health_progression: {
+            message: 'Health changed by more than one step — confirm this is intentional.',
+          },
+        },
       },
       showcase_task: {
         label: 'Task',
@@ -269,6 +285,14 @@ export const ShowcaseTranslationBundle = {
           spent: { label: '已花费' },
           start_date: { label: '开始日期' },
           end_date: { label: '结束日期' },
+        },
+        // The zh-CN mirror of the `en` `_validations` block — see the note
+        // there. Without these two keys the write path's own refusals arrive in
+        // Chinese (built-in catalog, #3957) while these author-written ones
+        // arrive in English, inside one error envelope.
+        _validations: {
+          project_status_flow: { message: '项目的初始状态为“计划中”,此后只能按既定的状态流转变更。' },
+          project_health_progression: { message: '健康度一次变更超过一级,请确认这是有意为之。' },
         },
         // `default` — the container's DEFAULT list. `defineView({ list })`
         // declares it without a `name`, and the composer therefore registers it

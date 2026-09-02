@@ -2098,6 +2098,18 @@ function checkStateMachine(
         code,
         message: authoredRuleMessage(rule, ctx?.messages),
         label: resolveFieldLabel(rule.field, def, ctx?.messages),
+        // An authored message replaces the built-in WORDING — not the
+        // machine-readable facts beside it. `constraint` and `value` are
+        // declared on `FieldValidationError` (mirroring `FieldErrorSchema`) and
+        // are what a client ACTS on rather than displays: the legal
+        // `initialStates` a create form must offer, or the `from → to` pair a
+        // detail page greys out. Emitting them only on the built-in path meant
+        // that declaring a message — which the spec REQUIRES on every rule —
+        // silently cost the caller the rest of the envelope, so the richer
+        // envelope was reachable only by leaving the sentence empty. Nothing
+        // about the refusal changes; it gains the location it already declares.
+        ...(Object.keys(constraint).length > 0 ? { constraint } : {}),
+        ...(value !== undefined ? { value } : {}),
       };
     }
     return buildFieldError({ field: rule.field, code, def, constraint, value }, ctx?.messages);

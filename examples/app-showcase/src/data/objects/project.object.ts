@@ -135,7 +135,17 @@ export const Project = ObjectSchema.create({
       // `insert` in `events` is what makes the initialStates check run on create.
       events: ['insert', 'update'] as const,
       initialStates: ['planned'],
-      message: 'Invalid project status transition.',
+      // ONE authored sentence answers BOTH refusals this rule can raise —
+      // `invalid_initial_state` on insert and `invalid_transition` on update —
+      // because `authoredRuleMessage` resolves one key per RULE, not per code.
+      // The old wording ("Invalid project status transition.") described only
+      // the update half, so a create rejected for being born `active` was told
+      // about a "transition" it had not attempted. It is translated at
+      // `objects.showcase_project._validations.project_status_flow.message`
+      // (#14253) — an authored message is emitted verbatim unless the bundle
+      // carries that key, which is why this one used to be the single English
+      // sentence on an otherwise zh-CN form.
+      message: 'Projects start as Planned, and then move only along the declared status flow.',
       transitions: {
         planned: ['active', 'cancelled'],
         active: ['on_hold', 'completed', 'cancelled'],
