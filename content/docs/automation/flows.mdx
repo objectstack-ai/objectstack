@@ -744,6 +744,7 @@ run in `listRuns` / `getRun`, and in the log:
 | `acted` | Records **created / updated / deleted**, plus effects dispatched (notifications delivered) |
 | `skipped` | Node executions a **closed gate** prevented — one per loop iteration whose conditional edge evaluated false |
 | `unmeasured` | Executions that reached something the platform **cannot count** — see below |
+| `failed` | Node executions that **failed and were contained** — caught by a `try_catch` or routed down a `fault` edge — so the run went on; the sum of `nodes[].failures`. Absent on a run that did not track it, which is not zero |
 | `nodes[]` | Per-node terminal status with `runs` / `failures` / `skipped` and its own selected/acted |
 | `gates[]` | Which gates closed and how often, most-skipped first |
 

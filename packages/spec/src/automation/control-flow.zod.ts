@@ -314,13 +314,45 @@ export const TryCatchConfigSchema = lazySchema(() => strictObject(
     try: FlowRegionSchema.describe('Protected region'),
     catch: FlowRegionSchema.optional().describe('Handler region run when the try region fails'),
     /** Variable the caught error is bound to inside the catch region. */
-    errorVariable: z.string().default('$error').describe('Variable holding the caught error in the catch region'),
+    errorVariable: z.string().default('$error').describe('Variable holding the caught error in the catch region — a `TryCatchErrorValue`: `nodeId`, `message`, and `iteration` / `item` when the failure happened inside a loop body'),
     retry: RetryPolicySchema.optional().describe('Optional retry policy for the try region'),
   },
 ));
 
 export type TryCatchConfig = z.input<typeof TryCatchConfigSchema>;
 export type TryCatchConfigParsed = z.infer<typeof TryCatchConfigSchema>;
+
+/**
+ * The value a `try_catch` binds to `errorVariable` (default `$error`) when its
+ * `try` region has failed — after any retries — and the `catch` region runs.
+ *
+ * Declared here so the catch region's author, the engine and the run log share
+ * ONE shape. `nodeId` and `message` are the two keys the engine has always
+ * bound. `iteration` and `item` are the row identity: inside
+ * `loop { body: [ try_catch { try, catch } ] }` — the containment spelling for
+ * a per-iteration failure that must not end the sweep — the catch region has
+ * to know WHICH row failed in order to record it, and `message` alone names
+ * none. Both are present only when the failure happened inside a loop body; a
+ * try/catch outside any loop binds neither, so their absence means "not in a
+ * loop", never "row unknown".
+ *
+ * A plain `z.object`, closed by convention rather than `strictObject`: this is
+ * a value the engine assembles, not a surface an author writes, so the
+ * unknown-key prescription an authoring surface owes has nobody to address.
+ * The run-wide `$error` a `fault` edge sets is assembled separately and shares
+ * the `nodeId` / `message` core; this schema declares the try/catch binding.
+ */
+export const TryCatchErrorValueSchema = lazySchema(() => z.object({
+  nodeId: z.string().describe('Node the failure is attributed to'),
+  message: z.string().describe('Message of the error that ended the try region, after any retries'),
+  iteration: z.number().int().min(0).optional()
+    .describe('Zero-based iteration of the enclosing loop when the failure happened inside a loop body; absent outside a loop'),
+  item: z.unknown().optional()
+    .describe('The loop item being processed (the enclosing loop\'s `iteratorVariable` value) when the failure happened inside a loop body; absent outside a loop'),
+}));
+
+export type TryCatchErrorValue = z.input<typeof TryCatchErrorValueSchema>;
+export type TryCatchErrorValueParsed = z.infer<typeof TryCatchErrorValueSchema>;
 
 // ─── Well-formedness analysis ────────────────────────────────────────
 
