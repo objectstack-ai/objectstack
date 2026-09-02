@@ -176,7 +176,7 @@ async function loadDatasourceRow(
   }
   // The same ADR-0087 rehydration pass `loadDatasourceRows` performs — this
   // read bypasses the metadata service's converting loaders just as that one does.
-  return applyConversionsToStoredItem(DS_META_TYPE, parsed) as StoredDatasource;
+  return applyConversionsToStoredItem(DS_META_TYPE, parsed) as unknown as StoredDatasource;
 }
 
 /**
