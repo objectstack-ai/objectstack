@@ -32,7 +32,11 @@ import { templateEngine } from './template-engine';
 // REGISTERS it, to give the `@objectstack/lint` gate an existence verdict) must
 // agree on WHICH token cel-js was talking about, so the extraction is shared and
 // the pattern has one home.
-import { callNameFromNoOverload } from './unknown-function';
+import {
+  callNameFromNoOverload,
+  isReceiverRegistered,
+  receiverCallNameFromNoOverload,
+} from './unknown-function';
 
 export type FieldRole = 'predicate' | 'value' | 'template';
 
@@ -348,6 +352,94 @@ function unknownFunctionHint(celMessage: string): string | null {
   );
 }
 
+/**
+ * A plain dotted identifier chain written immediately left of `.name(` in
+ * `source`, or `undefined` when the receiver is anything else.
+ *
+ * cel-js's message names the receiver's TYPE (`dyn.upper()`), never the
+ * author's expression, so the only place the real receiver exists is the source
+ * — and only the plain-chain shape can be lifted out of it safely. Anything
+ * else (`record.tags[0].upper()`, `(a + b).upper()`, `'lit'.upper()`) returns
+ * `undefined` so the caller prints a shape instead of a spelling: a
+ * prescription that cannot be DERIVED must not be invented, or the repair
+ * repeats the defect it fixes one level up.
+ *
+ * `name` reaches here having matched `[A-Za-z_$][\w$]*` AND been found in
+ * {@link CEL_STDLIB_FUNCTIONS}, so it carries no regex metacharacter.
+ *
+ * Deliberately whitespace-intolerant around the dots: `record . name . upper()`
+ * is legal CEL that nobody writes, and admitting it costs a quantifier that
+ * backtracks (the ReDoS concern the role scanners below document). It falls
+ * through to the generic sentence, which is correct, just less specific.
+ */
+function receiverChainInSource(source: string, name: string): string | undefined {
+  const call = new RegExp(`[.]${name}\\s*\\(`).exec(source);
+  if (!call) return undefined;
+  const before = source.slice(0, call.index);
+  const chain = /[A-Za-z_$][\w$]*(?:[.][A-Za-z_$][\w$]*)*$/.exec(before);
+  if (!chain) return undefined;
+  // The chain must START the receiver. A character that continues an expression
+  // leftwards means the real receiver is larger than what matched — e.g.
+  // `record.tags[0].name.upper()`, where the chain is `name` and the receiver
+  // is not.
+  if (chain.index > 0 && /[\w$.)\]'"]/.test(before[chain.index - 1])) return undefined;
+  return chain[0];
+}
+
+/**
+ * The prescription for the **receiver-call** arm of a `type` refusal — a
+ * bare-callable stdlib function written as a method, `record.name.upper()`
+ * (#14203).
+ *
+ * The third leg of the repair {@link boundsHint} (#7073) and
+ * {@link unknownFunctionHint} (#13821) made for their own classes, and the one
+ * neither could cover: the name is right, so the unknown-name arm stays silent
+ * by design (calling `upper` "not a callable name" would be a fresh false
+ * statement), and the fault is not size, so the bounds arm never sees it. What
+ * was left was the dialect trailer — "`predicate`s are bare CEL" — handed to an
+ * author whose source already IS bare CEL and parses fine. Advice that cannot
+ * succeed, for the third time in the same shape.
+ *
+ * It is a high-frequency AI-author mistake rather than an exotic one: method
+ * call syntax is what almost every other language uses for string operations,
+ * so a generator that knows `upper` exists reaches for `record.name.upper()`
+ * before `upper(record.name)`. And the correct spelling is derivable from the
+ * fault itself, which is what makes a prescription honest here.
+ *
+ * ### The two keys, and why one of them is not enough
+ *
+ * **Membership of {@link CEL_STDLIB_FUNCTIONS}**, never the call shape alone.
+ * The 33 receiver-only names cel-js registers (`split`, `map`,
+ * `getFullYear`) are correct ONLY after a dot — `record.name.split(',')`
+ * type-checks and never reaches here at all, and telling anyone to write
+ * `split(record.name, ',')` would break working authoring.
+ *
+ * **Plus the environment's own record of the receiver form.** Seven advertised
+ * names hold definitions of BOTH kinds — `contains`, `endsWith`, `matches`,
+ * `size`, `startsWith`, `string`, `trim` — so catalog membership by itself
+ * would answer `record.name.contains()` (a real receiver call with the wrong
+ * arity) with "write `contains(record.name)`", which faults just as hard. That
+ * class keeps the existing trailer: its fault is the ARGUMENTS, and grading
+ * those is the blind spot #13594 deliberately keeps blind.
+ */
+function receiverCallHint(celMessage: string, source: string): string | null {
+  const name = receiverCallNameFromNoOverload(celMessage);
+  if (!name || !CEL_STDLIB_FUNCTIONS.includes(name)) return null;
+  if (isReceiverRegistered(name)) return null;
+  const receiver = receiverChainInSource(source, name);
+  return (
+    `\`${name}\` is callable bare, not as a method — a CALL-SHAPE fault, not a dialect ` +
+    `mistake, so re-spelling the expression will not fix it. ` +
+    (receiver
+      ? `Write \`${name}(${receiver})\` instead.`
+      : `Write \`${name}(…)\` with the receiver as its first argument instead.`) +
+    ` The callable names this platform advertises for authoring (the \`functions\` list ` +
+    `\`introspectScope\` returns, \`CEL_STDLIB_FUNCTIONS\`) take their subject as an ` +
+    `argument; only cel-js's own receiver methods (\`record.name.split(',')\`) are written ` +
+    `after a dot.`
+  );
+}
+
 function checkFieldExistence(source: string, schema: ExprSchemaHint | undefined, errors: ExprValidationError[]): void {
   if (!schema?.fields || schema.fields.length === 0) return;
   const known = new Set(schema.fields);
@@ -499,15 +591,20 @@ export function validateExpression(
     // because the class is certain (it comes from the engine's own verdict)
     // while the braces hint is a heuristic.
     //
+    // The `type` class carries TWO prescriptions, and they are disjoint by
+    // construction rather than by ordering: #14203's receiver-call arm fires
+    // only when the name IS advertised, #13821's unknown-name arm only when it
+    // is not. Neither speaks for a fault it cannot name.
+    //
     // A `type` fault that names no unresolvable call — an operator or ternary
     // mismatch (`1 + 'a'`, `no such overload: int + string`), or a real function
-    // handed wrong arguments — returns null from `unknownFunctionHint` and keeps
-    // the existing trailer: this arm has a name to hand back or it says nothing.
+    // handed wrong arguments (`upper(1, 2)`, `record.name.contains()`) — gets
+    // null from both and keeps the existing trailer.
     const classHint =
       compiled.error.kind === 'bounds'
         ? boundsHint(source)
         : compiled.error.kind === 'type'
-          ? unknownFunctionHint(compiled.error.message)
+          ? (receiverCallHint(compiled.error.message, source) ?? unknownFunctionHint(compiled.error.message))
           : null;
     const hint = classHint ?? bracesHint(source);
     errors.push({
