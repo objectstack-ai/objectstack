@@ -615,14 +615,14 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     }
 
     // Load the record (best-effort) so handlers can rely on `ctx.record`.
-    let record: Record<string, unknown> = {};
-    if (recordId && !actionExec.isObjectLessActionKey(objectName)) {
-        try {
-            const got = await actionExec.callData(deps, _context, 'get', { object: objectName, id: recordId }, _context.dataDriver, _context.environmentId, _context.executionContext);
-            if (got?.record) record = got.record;
-        } catch { /* record may not exist for new-record actions; pass empty */ }
-    }
-    if (record && (record as any).id == null && recordId) (record as any).id = recordId;
+    // [#14143] Through the ONE shared producer `loadActionSubjectRecord`, which
+    // also reports whether the CALLER's own scope actually delivered the row.
+    // This door and the MCP `run_action` door must emit the same signal: a
+    // documented guard (`if (ctx.recordLoadDenied) …`) that only one of two
+    // doors sets is inert on the other, which is the defect one door over.
+    const subject = await actionExec.loadActionSubjectRecord(objectName, recordId, () =>
+        actionExec.callData(deps, _context, 'get', { object: objectName, id: recordId }, _context.dataDriver, _context.environmentId, _context.executionContext));
+    const record = subject.record;
 
     // Resolve the caller identity from the request's ExecutionContext — the
     // single source `dispatch()` populates via `resolveExecutionContext`,
@@ -650,6 +650,11 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
 
     const actionContext: any = {
         record,
+        // [#14143] The caller-scope load's verdict — see
+        // `loadActionSubjectRecord`. `ctx.record.id` is stamped either way, so
+        // this is the only channel that distinguishes "the caller cannot read
+        // this row" from "this action legitimately has no record".
+        ...actionExec.actionRecordLoadSignal(subject),
         user: userFromAuth,
         session: actionExec.buildActionSession(deps, ec),
         // Slim engine facade matching the ActionContext.engine shape used by
