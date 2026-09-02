@@ -19,6 +19,7 @@
 //      `status:'failed'` carrying the reason.
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { EmailServicePlugin } from './email-plugin.js';
 import { EmailService, type EmailPersistence } from './email-service.js';
 
@@ -34,12 +35,24 @@ function fakeSettings(values: Record<string, Resolved>) {
   };
 }
 
+/**
+ * The slice of ObjectQL the plugin's `sys_email` persistence seam touches.
+ * `update` routes through `assertEngineUpdateDispatch` — the pinned shape in
+ * this package (`email-plugin.template-runtime-write.test.ts`) — so the double
+ * cannot accept a dispatch the real engine would refuse.
+ */
 function fakeEngine() {
-  const inserted: Array<{ object: string; row: any }> = [];
+  const rows: Array<{ object: string; row: any }> = [];
   return {
-    inserted,
-    async insert(object: string, row: any) { inserted.push({ object, row }); return { id: row.id }; },
-    async update() { /* no-op */ },
+    rows,
+    async insert(object: string, row: any) { rows.push({ object, row }); return { id: row.id }; },
+    async update(_object: string, data: any, options?: any) {
+      const dispatch = assertEngineUpdateDispatch(data, options);
+      if (dispatch.kind !== 'by-id') throw new Error(`unexpected update dispatch: ${dispatch.kind}`);
+      const target = rows.find((r) => r.row.id === dispatch.id);
+      if (target) Object.assign(target.row, data);
+      return { affected: target ? 1 : 0 };
+    },
     async find() { return []; },
   };
 }

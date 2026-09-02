@@ -2362,6 +2362,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-email/src/sender-address-validation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/authored-row-write-verdict.test.ts",
       "verb": "delete",
       "pinned": 1
