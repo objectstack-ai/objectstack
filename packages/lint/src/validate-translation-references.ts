@@ -102,6 +102,7 @@
 import { expandViewContainer } from '@objectstack/spec';
 import { hasPlatformObjectPrefix, isPlatformProvidedObjectName } from '@objectstack/spec/system';
 import { walkFlowNodes } from './flow-walk.js';
+import { suggestName } from './object-graph.js';
 import { walkPageComponents } from './page-walk.js';
 import { SYSTEM_FIELDS } from './system-fields.js';
 import { viewObjectName } from './view-walk.js';
@@ -156,32 +157,18 @@ function strName(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined;
 }
 
-function distance(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  let prev = Array.from({ length: n + 1 }, (_, j) => j);
-  for (let i = 1; i <= m; i++) {
-    const curr = [i, ...new Array<number>(n).fill(0)];
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
-    }
-    prev = curr;
-  }
-  return prev[n];
-}
-
 /**
- * "Did you mean?" over the known names — Levenshtein-bounded, plus a namespace
- * pass the distance metric cannot see.
+ * "Did you mean?" over the known names — a namespace pass the shared helper
+ * cannot see, falling back to `suggestName`'s containment/edit-distance
+ * budget.
  *
  * A stack prefixes its object names (`todo_task`, `crm_lead`), and the orphan
  * key is routinely the bare noun the author had in mind (`task`). That is 5
  * edits from `todo_task` — far outside the typo bound, and exactly the case
  * where the suggestion is most useful — so a candidate that differs only by a
- * snake_case namespace segment is offered before falling back to edit distance.
+ * snake_case namespace segment is offered before falling back to the shared
+ * helper. Rule-local knowledge (the namespace-segment shape), not the shared
+ * helper's business.
  */
 function suggest(target: string, known: Iterable<string>): string {
   const names = [...known];
@@ -189,18 +176,7 @@ function suggest(target: string, known: Iterable<string>): string {
     (candidate) => candidate.endsWith(`_${target}`) || candidate.startsWith(`${target}_`),
   );
   if (segmentMatch) return ` Did you mean "${segmentMatch}"?`;
-
-  let best: string | undefined;
-  let bestScore = Infinity;
-  for (const candidate of names) {
-    const d = distance(target, candidate);
-    if (d < bestScore) {
-      bestScore = d;
-      best = candidate;
-    }
-  }
-  const limit = Math.max(2, Math.floor(target.length / 3));
-  return best && bestScore <= limit ? ` Did you mean "${best}"?` : '';
+  return suggestName(target, names);
 }
 
 /** At most `max` names, sorted, for the "known values are …" tail of a hint. */
