@@ -9,6 +9,7 @@ export {
   isObjectLessActionKey,
   actionHandlerObjectKeys,
   resolveActionHandlerKeys,
+  standaloneActionOwnerKey,
   reconcileActionRegistrations,
   collectEngineActionDeclarations,
   runActionGovernanceInventory,
