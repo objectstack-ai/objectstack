@@ -570,6 +570,40 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'that a live wire code is outside the vocabulary; it does not prescribe the remedy.',
     },
 
+    // ── pending registration [#14474]: an install-time refusal that GAINED an
+    // ── envelope, so the scan can see it for the first time ────────────────
+    // Not a widened scan and not a new producer: `NamespaceConflictError` has
+    // thrown from `SchemaRegistry.installPackage` since ADR-0048 Phase 1, but
+    // it carried no `code` at all, so there was no stamp for any pattern to
+    // match. #14474 gave it the ADR-0112 envelope its three install-time
+    // siblings already carried, which is what put a site here to classify.
+    {
+        code: 'NAMESPACE_CONFLICT',
+        file: 'packages/objectql/src/registry.ts',
+        shape: 'classfield',
+        door: 'dispatcher',
+        verdict: 'pending-registration',
+        why:
+            'ADR-0048 Phase 1 — the install-time namespace gate\'s refusal, raised by ' +
+            '`SchemaRegistry.installPackage` when a package\'s `manifest.namespace` is already owned by an ' +
+            'installed package that is not a co-owner of it (ADR-0130 D1). ⭐ Its reachability is what ' +
+            'separates it from the three ADR-0130 install-time rows below, whose `door: none` turns on ' +
+            'needing an artifact install SCOPE that no HTTP caller builds: this gate needs no scope, so the ' +
+            'ordinary one-package install reaches it. MEASURED on a booted stack (`@objectstack/verify` ' +
+            '`bootStack`, dev admin, two `POST /api/v1/packages` installs declaring one namespace), not ' +
+            'inferred from the call graph. Before the envelope the door answered `500` with ' +
+            '`code: INTERNAL_ERROR` — `packages/runtime/src/domains/packages.ts` catches and calls ' +
+            '`errorFromThrown(e, 500)`, and `resolveThrownHttpError` found neither `.status` nor `.code` to ' +
+            'read, so the caller\'s fallback stood. With the envelope the SAME request answers `422` and ' +
+            'the body carries `declaredCode: NAMESPACE_CONFLICT` beside `code: VALIDATION_ERROR` (the ' +
+            'member 422 derives through `standardErrorCodeForHttpStatus`, which does not name 422 and ' +
+            'buckets it as a client error). That demote is the #9106 door narrowing, and it is exactly what ' +
+            'a `pending-registration` row records: the body PARSES, and what the producer loses instead is ' +
+            'its semantic code, silently absent from `error.code` until a ledger row lands. ⛔ Registering ' +
+            'it is the `packages/spec` lane\'s call and is NOT made here — this row is that batch\'s input, ' +
+            'and registering the code is what ratchets the row out again.',
+    },
+
     // ── boot refusals: no HTTP boundary exists yet ─────────────────────────
     // [#9460] The four `MigrationJournalRefusal` codes below arrive through the
     // same code-carrying-helper shape as `owd_widening_forbidden` — a class
