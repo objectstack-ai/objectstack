@@ -80,10 +80,12 @@
  * that says so).
  *
  * ⚠️ The EXTENSION boundary is `.ts` alone, and unlike the tree above that one
- * is not free — it is a deliberate trade with a second gate. Measured on the
- * commit this landed, under `packages/`:
+ * is not free — it is a deliberate trade with a second gate. Measured under
+ * `packages/` on f60061a460, which is a NAMED commit rather than "now" on
+ * purpose: only the three zeros are load-bearing, and the `.ts` total moves
+ * with every merge, so a reading with no commit on it rots silently.
  *
- *     .ts    5181 tracked, 48 mention the predicate   <- the scanned set
+ *     .ts    5193 tracked, 48 mention the predicate   <- the scanned set
  *     .tsx      8 tracked,  0 mention the predicate   <- excluded
  *     .mts     17 tracked,  0 mention the predicate   <- excluded
  *     .cts      0 tracked,  0 mention the predicate   <- excluded
