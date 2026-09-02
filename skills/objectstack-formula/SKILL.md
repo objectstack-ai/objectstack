@@ -41,7 +41,7 @@ formula / condition / predicate / dynamic-seed metadata.
 | Define seed records | objectstack-data (use `cel\`...\`` for dynamic dates) |
 | Author flow / automation step | objectstack-automation (use `P\`...\`` for `condition`) |
 | Author L2 hook body (TS code) | objectstack-data |
-| Cron schedule | objectstack-automation (`schedule.expression` is `cron` dialect) |
+| Cron schedule | objectstack-automation |
 | SQL fragment | driver-native; not unified into the expression registry |
 
 ---
@@ -393,11 +393,11 @@ to the envelope.
 | `audit` / `metrics` / `tracing` | `condition` / `successCriteria` | structured \| cel |
 
 ⚠️ **A `formula` field is virtual — no driver materialises a column for it**, so
-`where`, `orderBy` and `searchableFields` naming one are refused
-`400 INVALID_FIELD` at both doors. It still READS correctly, which is why the
-refusal is needed: a `where` on one used to answer `200` with zero rows.
-Denormalise onto a stored field and query that. `summary` and `autonumber` have
-real columns and need no such care.
+all three query axes refuse one at both doors: `where` and `searchableFields`
+answer `400 INVALID_FIELD`, `orderBy` answers `400 INVALID_SORT`. It still READS
+correctly, which is why refusing matters: a `where` on one used to answer
+`200` with zero rows. Denormalise onto a stored field and query that. `summary`
+and `autonumber` have real columns and need no such care.
 
 ⚠️ **A form-view `visibleWhen` is the one predicate here that faults OPEN.** It
 is CLIENT-SIDE only, and an unbound root falls back to `true`, so the control
@@ -413,19 +413,17 @@ objectstack-query `rules/filters.md` has the token list.
 
 ### Cron and template surfaces
 
-Two more registered dialects ride the same envelope. Neither is CEL, both
-accept a bare string (auto-wrapped at validate time) or their helper, and both
-read the same variable scope.
+Two more dialects ride the same envelope. Neither is CEL; both take
+a bare string (auto-wrapped) or their helper, and read the same variable scope.
 
 | Dialect | Helper | Grammar | Carriers |
 |:---|:---|:---|:---|
-| `cron` | `` cron`0 6 * * MON` `` | 5- or 6-field cron plus `@daily` / `@hourly` aliases | `Job.schedule.expression` (canonical), `connector.schedule`, `automation/execution.cronExpression`, `api/export.cronExpression` |
-| `template` | `` tmpl`Hello {{ record.first_name }}` `` | `{{ path }}` or `{{ path \| formatter[:arg] }}` — double braces only, whitelisted formatters, no conditionals | `system/email-template` `subject` / `bodyHtml` / `bodyText`, `ai/model-registry` `promptTemplate.system` / `.user`, `Object.titleFormat` (deprecated → `nameField`, ADR-0079) |
+| `cron` | `` cron`0 6 * * MON` `` | 5- or 6-field cron, or one of `@yearly` `@annually` `@monthly` `@weekly` `@daily` `@hourly` `@reboot` | `Job.schedule.expression` (canonical), `connector.schedule`, `automation/execution.cronExpression`, `api/export.cronExpression` |
+| `template` | `` tmpl`Hello {{ record.first_name }}` `` | `{{ path }}` or `{{ path \| formatter[:arg] }}` — double braces only, no conditionals; the formatter whitelist is `TEMPLATE_FORMATTERS`, exported from `@objectstack/formula` | `system/email-template` `subject` / `bodyHtml` / `bodyText`, `ai/model-registry` `promptTemplate.system` / `.user`, `Object.titleFormat` (deprecated → `nameField`, ADR-0079) |
 
-Both surfaces are declared in `shared/expression.zod.ts`; read it for the full
-carrier list, the formatter whitelist and the cron alias set. Missing template
-paths render as the empty string. Move logic into a CEL field — a template
-holds a path and a formatter, nothing else.
+`shared/expression.zod.ts` declares both surfaces and their carriers.
+Missing template paths render as the empty string. Move logic into a CEL field:
+a template holds a path and a formatter, nothing else.
 
 ---
 
