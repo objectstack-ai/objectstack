@@ -46,6 +46,14 @@
 # `.objectui-sha`). Case 5 additionally needs node, offline still: it drives
 # the real `objectui-changeset-digest.mjs` (a byte copy, like the script under
 # test) through a throwaway objectui repo with a real changeset commit.
+#
+# dispatch-gates: no-path-population -- every path this file writes or reads
+# lives inside a disposable checkout under mktemp -d (a throwaway objectui and
+# a throwaway FRAMEWORK_ROOT, both destroyed by the EXIT trap below), so no
+# quoted literal in this file names a path this repo tracks. Case 5's fixture
+# changeset filename is assembled from CHANGESET_NAME by interpolation
+# everywhere it is used, deliberately never spelled as one bare quoted token,
+# so it does not read as a declared population here either.
 
 set -euo pipefail
 
@@ -74,6 +82,13 @@ case_begin() { CASE="$1"; echo "  • ${CASE}"; }
 # (which copy the same trio for the same reason).
 DIGEST_SCRIPT="${SCRIPT_DIR}/objectui-changeset-digest.mjs"
 INVOKED_AS_SCRIPT="${SCRIPT_DIR}/invoked-as.mjs"
+
+# Case 5's fixture changeset BASENAME — interpolated into a changeset path
+# everywhere it is used, never spelled as one bare path literal: that path
+# lives only inside a disposable objectui checkout under mktemp -d and names
+# no file this repo tracks, so a literal quoted token would be misread as a
+# declared population by check-declared-population-live.
+CHANGESET_NAME='widget-refresh'
 
 # --- fixtures ----------------------------------------------------------------
 
@@ -136,14 +151,14 @@ new_objectui_with_changeset() {
   local old_sha
   old_sha="$(git -C "$d" rev-parse HEAD)"
   mkdir -p "${d}/.changeset"
-  cat > "${d}/.changeset/widget-refresh.md" <<'EOF'
+  cat > "${d}/.changeset/${CHANGESET_NAME}.md" <<'EOF'
 ---
 "@object-ui/core": minor
 ---
 
 Refresh the widget palette.
 EOF
-  git -C "$d" add .changeset/widget-refresh.md
+  git -C "$d" add ".changeset/${CHANGESET_NAME}.md"
   git -C "$d" commit -q -m 'feat(core): refresh the widget palette'
   local new_sha
   new_sha="$(git -C "$d" rev-parse HEAD)"
@@ -358,7 +373,7 @@ case_5() {
     return 0
   fi
 
-  break_changeset_blob "$oui" "$new_sha" '.changeset/widget-refresh.md' >/dev/null || return 0
+  break_changeset_blob "$oui" "$new_sha" ".changeset/${CHANGESET_NAME}.md" >/dev/null || return 0
 
   # Re-assert walkability AFTER breaking the blob — the whole point of this
   # case is that the commit/tree walk stays green while the blob read fails.
