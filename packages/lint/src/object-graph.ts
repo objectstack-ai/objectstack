@@ -82,6 +82,19 @@ export interface GraphField {
    * tolerant consumer Prime Directive #12 refuses, so only `reference` is read.
    */
   reference?: string;
+  /**
+   * The declared `multiple: true` flag, when the author wrote one.
+   *
+   * Read here because the dotted-path verdict a caller may reach for
+   * ({@link classifyDottedFilterHead} in `@objectstack/spec/data`) is a
+   * function of BOTH `type` and `multiple`: an array-valued head is
+   * deliberately unjudged there, since a numeric-index dotted path genuinely
+   * reaches into it on two of three backends. A caller handed only `type`
+   * would have to re-derive the flag from the raw stack, which is the second
+   * copy this module exists to prevent. Additive (#14282): every existing
+   * consumer that ignores the key keeps its verdicts byte-for-byte.
+   */
+  multiple?: boolean;
 }
 
 /**
@@ -128,6 +141,7 @@ function graphObjectOf(obj: AnyRec): GraphObject | null {
     fields.set(n, {
       type: typeof f.type === 'string' ? f.type : undefined,
       reference: strName(f.reference),
+      multiple: f.multiple === true ? true : undefined,
     });
   }
   if (names.size === 0) return null;
