@@ -39,13 +39,23 @@
  *
  * ## REVERT-PROOF
  *
- * Restore the old cache-first order in `loadSuspendedRunStrict`
+ * Restore the old cache-first order at the top of `loadSuspendedRunStrict`
  * (`const cached = this.suspendedRuns.get(runId); if (cached) return cached;`)
- * and the two `THE BUG` cases below fail — the first counting a duplicated
- * middle level, the second a run that rolled back instead of terminating —
- * while every negative control stays green, which is the defect stated as a
- * test. Measured: with the old order they report 4 and 4 opened levels
- * respectively where 3 are correct.
+ * and this file goes 4 red / 4 green — measured, not predicted:
+ *
+ *  - `THE BUG` shape 1 →  `[ 'lv1', 'lv2', 'lv2' ]` where `['lv1','lv2','lv3']`
+ *    is correct: the reported duplicate, reproduced literally.
+ *  - `THE BUG` shape 2 →  `expected 'paused' to be undefined`: the run did not
+ *    terminate, which is the reported "stays in approval forever".
+ *  - the `RUN_NOT_FOUND` case → the stale replica resumed a FINISHED run and
+ *    reported success.
+ *  - the `NEW REACH` case → no `STORE_UNAVAILABLE`, because a cache hit meant
+ *    the broken store was never read at all.
+ *
+ * The four that stay green under that mutation are the ones that must: the
+ * single-replica control, the healthy cold-replica control, the no-store
+ * control, and the failed-durable-save degradation. A fix that moved the defect
+ * instead of removing it would take one of those with it.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -305,11 +315,20 @@ describe('multi-replica approval resume reads the shared store (#13617)', () => 
     expect(opened).toEqual(['lv1', 'lv2']);
   });
 
-  it('NEGATIVE CONTROL: an unreadable store is STORE_UNAVAILABLE, never a lost run', async () => {
-    // The other half of the same rule, and the reason the strict reader exists
-    // (#4420): an outage is "unknown", not "gone". A caller that already wrote a
-    // decision needs "retry when the store is back" to be distinguishable from
-    // "this run is gone for good" — same failure, opposite remedy.
+  it('NEW REACH: an unreadable store is STORE_UNAVAILABLE, never a lost run', async () => {
+    // Not a control — this case is RED before the fix, and deliberately so. It
+    // is the reachability change store-authoritative reading buys: a run parked
+    // in THIS process used to be answered from memory for the life of its
+    // suspension, so its own resume never touched the store and could not
+    // produce STORE_UNAVAILABLE at all (`builtin/wait-node.ts` documented that
+    // asymmetry, and its note is corrected in the same change). Now every
+    // resume reads the store, so the outage is reported instead of papered
+    // over with a snapshot that may be stale.
+    //
+    // The code matters as much as the refusal (#4420): an outage is "unknown",
+    // not "gone". A caller that already wrote a decision needs "retry when the
+    // store is back" to be distinguishable from "this run is gone for good" —
+    // same failure, opposite remedy.
     const opened: string[] = [];
     const store = new InMemorySuspendedRunStore();
     const engine = replica(store, opened);
