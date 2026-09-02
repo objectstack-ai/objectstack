@@ -34,12 +34,21 @@
  * A two-file `TEACHING_SITES` list is the same shape as the drift it catches:
  * a hand-maintained stand-in for a fact already on disk, going stale in
  * silence as the corpus grows. It had already gone stale. Measured on
- * `origin/main` 4d0d9445: SIX files under the authored-prose roots mention this
- * route's shape, two of them are the list below, and one more — the QA
- * platform-checklist area file for the API/backend surface — carries the wire
- * path three times over, with concrete values rather than placeholders. It
+ * `origin/main` 7a17f3bf, over a 721-file corpus: THREE files carry this
+ * route on the REST wire path, two of them are the list below, and the third
+ * — the QA platform-checklist area file for the API/backend surface — carries
+ * it three times over, with concrete values rather than placeholders. It
  * spells it canonically. That was LUCK, not enforcement: nothing here would
- * have reddened had it been written with the retired plural.
+ * have reddened had it been written with the retired plural, and the rollback
+ * arm of this card's verification confirmed exactly that: the pre-#14561 file
+ * passes over a corpus in which that page teaches the retired plural.
+ *
+ * (A looser, LINE-scoped sweep reports SIX files — the number this card was
+ * triaged on. The other three are not mentions of this route at all: each
+ * names a DIFFERENT `/meta/object/...` route — an OWD probe, a field-order
+ * check — on a line that also happens to contain the word "state", with no
+ * `/state/<field>` tail anywhere. That is the sixth `PREDICATE_CASES` entry,
+ * pinned so this distinction cannot quietly move.)
  *
  * So the population is discovered rather than declared. Every authored-prose
  * file that mentions this route AT ALL is judged, and a page that stops
