@@ -378,11 +378,7 @@ PREVIOUS ATTEMPT REVIEW — fix all of these before returning:
 Non-negotiables for this dispatch:
 - Work in {target_repo}: branch claude/issue-{n}-{slug} off origin/{default_branch},
   in a DEDICATED worktree of that repository.
-- {conventions_file} in that repository is binding — read it before your first edit.
-- Deliver a DRAFT PR in {target_repo}. Never merge anything.
-- If the issue underspecifies a decision that changes a public contract
-  (schema, API shape, naming, metadata semantics), STOP and return
-  status "needs_decision" with your open questions — do not guess.
+- Deliver a DRAFT PR in {target_repo}.
 ```
 
 #### Dispatch backends

@@ -350,12 +350,12 @@ export const CEILINGS = new Map([
   // zero of each), so the verbatim ruling lives in the internal copies and in
   // the raising PR's body. No genuine deletion was available: the rule makes no
   // existing sentence redundant, and a re-wrap moves no tokens and pays nothing.
-  // 14549 -> 9788: re-locked at the landed count after the #14296 item-4 split —
+  // 14549 -> 9708: re-locked at the landed count after the #14296 item-4 split —
   // the developer-agent operating template moved to `rules/dev-template.md`
   // (its own row below); the two gate-pinned copies of the decision frame stay
   // in this file (check:skill-frame-sync reads its copies by path). Lowered,
   // not raised: shrink-only, no ruling needed for this direction.
-  ['skills/objectstack-pm-dispatch/SKILL.md', 9788],
+  ['skills/objectstack-pm-dispatch/SKILL.md', 9708],
   ['skills/objectstack-query/SKILL.md', 5552], //       -17 (was 5569)
   // 25125 -> 25143: the CRM UI Blueprint — the catalog's module-completeness
   // list, and the only place an agent is told what a finished module contains —
@@ -439,7 +439,7 @@ export const CEILINGS = new Map([
   // ruling 「其他同意」 adopting 1A/4A): the developer-agent operating template
   // moved out of SKILL.md verbatim, minus the decision-frame block the frame
   // gate pins to the entry. Pinned AT its landed count, zero headroom.
-  ['skills/objectstack-pm-dispatch/rules/dev-template.md', 1768],
+  ['skills/objectstack-pm-dispatch/rules/dev-template.md', 1838],
 
   // objectstack-ui — the two authored eval files; its `references/react-blocks.md`
   // and `contracts/react-blocks.contract.json` are generator-owned and carry no
