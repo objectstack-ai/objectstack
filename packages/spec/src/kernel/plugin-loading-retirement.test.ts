@@ -99,10 +99,10 @@ describe('[#4914] manifest.loading retirement', () => {
   it('parses cleanly once the key is deleted, and grows no `loading` property', () => {
     const parsed = ManifestSchema.parse({ ...baseManifest });
     expect(parsed.id).toBe('com.example.plugin');
-    // The non-strict strip path: absence must stay absence. If the tombstone
-    // were ever replaced by a plain deletion, an authored `loading` would be
-    // stripped here in silence — this pin plus the rejection above are what
-    // make that regression loud.
+    // Absence must stay absence. `ManifestSchema` is closed now, so a plain
+    // deletion would no longer strip an authored `loading` in silence — it would
+    // refuse it with a bare unknown-key message, without the prescription; this
+    // pin plus the rejection above are what keep the tombstone honest.
     expect(parsed).not.toHaveProperty('loading');
   });
 
