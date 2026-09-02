@@ -599,8 +599,23 @@ jobs:
       # be the job's LAST TWO steps, because anything after them can fail the
       # job while the credential already counts as a pass (#6082). Adding an
       # upload here is fine; moving it below them is not.
+      #
+      # continue-on-error: this upload is diagnostics-only (`if: always()` and
+      # `if-no-files-found: ignore` already say so), but being unguarded still
+      # put it on the shard's pass/fail path: a failed *finalize* aborts the
+      # job before the attestation pair below ever runs, so a platform-side
+      # fault here evicted a fully green shard from the merge queue (#14469 —
+      # FinalizeArtifact 403 on a 313-byte upload, content already stored).
+      # The attestation pair is untouched by this flag and remains the
+      # fail-closed credential exactly as before — it still runs, still has
+      # no `continue-on-error`, and still must succeed (#6082 unweakened).
+      # ⛔ Do not add continue-on-error, a retry, or an `if:` to the
+      # attestation pair below to "match" this step — that pair is the
+      # credential, not diagnostics, and check:shard-attestation pins its
+      # unguarded shape statically.
       - name: Publish this shard's turbo run summary
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: test-core-run-summary-${{ matrix.shard }}-of-6
