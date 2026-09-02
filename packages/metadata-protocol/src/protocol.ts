@@ -2252,6 +2252,32 @@ export function clientFacingFailureText(err: unknown, fallback: string): string 
  * persisted was silently dropped (the row reports `success: false` and the
  * counters reconcile), which is the AGENTS.md judgment question the durability
  * levels turn on.
+ *
+ * ## [#14403] …and the DISCLOSED row deliberately logs NOTHING
+ *
+ * Since #14095 a driver unique violation arrives here already wrapped in the
+ * engine's `DUPLICATE_RECORD` envelope, which declares `status: 409` — so the
+ * row is disclosed and this function returns before the `console.warn` above.
+ * That was filed as a possibly LOST diagnostic: withholding used to be what
+ * carried the driver's own sentence to an operator, and disclosure removes
+ * that carrier.
+ *
+ * Measured on the real stack rather than reasoned about — a real `SqlDriver`
+ * over better-sqlite3 through this very sink, in `@objectstack/runtime`'s
+ * `batch-row-driver-text-real-driver.integration.test.ts` — the sentence is
+ * NOT lost: the engine's own insert door logs the envelope's `cause`
+ * (#14095 / #14390, `e instanceof DuplicateRecordError ? e.cause : e`,
+ * because the platform logger serializes only `message` and `stack`), so
+ * `UNIQUE constraint failed: bd_note.email` is in the server log with the
+ * failing column intact. The diagnostic moved one hop; it was not deleted.
+ *
+ * ⛔ So do NOT add a log line to the disclosed branch. It would restate what
+ * the engine already logged, once per duplicate row of a batch, at a site
+ * where the failure was handed to the CALLER — the third answer AGENTS.md's
+ * degradation rule names, which is "not a degradation at all". The invariant
+ * this function owes is one-directional and is pinned in BOTH directions by
+ * that integration file: it logs when it WITHHOLDS, and is silent when it
+ * does not.
  */
 function clientFacingRowFailureText(err: unknown, fallback: string): string {
     // 500 as the fallback status: an error that declared nothing is a server

@@ -452,6 +452,22 @@ function toSnakeCase(str: string): string {
 
 // ─── Field Type Mapping ─────────────────────────────────────────────
 
+/**
+ * The TypeScript type each authored field type generates (#13871).
+ *
+ * Every key here MUST be a member of the `FieldType` enum in
+ * `@objectstack/spec/data` — that enum is the only statement of which field
+ * types exist, and a key outside it describes nothing. This table used to carry
+ * six that never existed anywhere (`integer`, `slug`, `uuid`, `ip_address`,
+ * `geo_point`, `encrypted`): invented here, mirrored into the migration
+ * codegen below, and readable as an acceptance surface the platform cannot
+ * honour. `generate-field-type-vocabulary.pin.test.ts` now fails on any such
+ * key, in this table and in the two vocabularies below it.
+ *
+ * The set is deliberately NOT total: a real member with no entry falls to the
+ * `|| 'unknown'` below, which is the intended behaviour for a type this
+ * generator has nothing specific to say about.
+ */
 const FIELD_TYPE_MAP: Record<string, string> = {
   text: 'string',
   textarea: 'string',
@@ -459,7 +475,6 @@ const FIELD_TYPE_MAP: Record<string, string> = {
   html: 'string',
   markdown: 'string',
   number: 'number',
-  integer: 'number',
   currency: 'number',
   percent: 'number',
   boolean: 'boolean',
@@ -479,14 +494,9 @@ const FIELD_TYPE_MAP: Record<string, string> = {
   file: 'string',
   image: 'string',
   password: 'string',
-  slug: 'string',
-  uuid: 'string',
-  ip_address: 'string',
   color: 'string',
   rating: 'number',
-  geo_point: '{ lat: number; lng: number }',
   vector: 'number[]',
-  encrypted: 'string',
 };
 
 function fieldTypeToTs(fieldType: string, multiple?: boolean): string {
@@ -860,6 +870,13 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
 
 // ─── Migration Generator ────────────────────────────────────────────
 
+/**
+ * The SQL column type each authored field type generates (#13871).
+ *
+ * Same invariant as `FIELD_TYPE_MAP`: every key is a `FieldType` member, an
+ * unmapped member falls to the `|| 'TEXT'` default on purpose, and the pin test
+ * enforces the first half.
+ */
 const FIELD_TYPE_SQL_MAP: Record<string, string> = {
   text: 'VARCHAR(255)',
   textarea: 'TEXT',
@@ -867,7 +884,6 @@ const FIELD_TYPE_SQL_MAP: Record<string, string> = {
   html: 'TEXT',
   markdown: 'TEXT',
   number: 'DECIMAL(18,2)',
-  integer: 'INTEGER',
   currency: 'DECIMAL(18,2)',
   percent: 'DECIMAL(5,2)',
   boolean: 'BOOLEAN',
@@ -887,14 +903,9 @@ const FIELD_TYPE_SQL_MAP: Record<string, string> = {
   file: 'VARCHAR(2048)',
   image: 'VARCHAR(2048)',
   password: 'VARCHAR(255)',
-  slug: 'VARCHAR(255)',
-  uuid: 'UUID',
-  ip_address: 'VARCHAR(45)',
   color: 'VARCHAR(7)',
   rating: 'INTEGER',
-  geo_point: 'POINT',
   vector: 'VECTOR',
-  encrypted: 'TEXT',
 };
 
 function fieldTypeToSql(fieldType: string): string {
@@ -991,17 +1002,17 @@ function generateMigrationTs(config: Record<string, unknown>): string {
 
       switch (fType) {
         case 'text': case 'email': case 'phone': case 'url': case 'select':
-        case 'slug': case 'password': case 'color': case 'ip_address':
+        case 'password': case 'color':
           colMethod = `table.string('${fieldName}')`;
           break;
         case 'textarea': case 'richtext': case 'html': case 'markdown':
-        case 'formula': case 'encrypted':
+        case 'formula':
           colMethod = `table.text('${fieldName}')`;
           break;
         case 'number': case 'currency': case 'percent':
           colMethod = `table.decimal('${fieldName}')`;
           break;
-        case 'integer': case 'rating':
+        case 'rating':
           colMethod = `table.integer('${fieldName}')`;
           break;
         case 'boolean':
@@ -1019,7 +1030,7 @@ function generateMigrationTs(config: Record<string, unknown>): string {
         case 'json': case 'multiselect':
           colMethod = `table.jsonb('${fieldName}')`;
           break;
-        case 'uuid': case 'lookup': case 'master_detail':
+        case 'lookup': case 'master_detail':
           colMethod = `table.uuid('${fieldName}')`;
           break;
         // `user` references sys_user, whose id is a text identifier (not a uuid),
