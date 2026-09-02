@@ -15496,13 +15496,19 @@ function selfTest() {
     }
     return { sites, perRoot };
   };
-  const tierOwnRel = relative(ROOT, fileURLToPath(import.meta.url));
+  // `relative` from `node:path` is SHADOWED inside this function — a fixture
+  // string a few thousand lines up binds that name — so the repo-relative
+  // spelling comes from ROOT, the prefix every sibling case here already joins
+  // against. A prefix that stops holding yields an empty root, which the walk
+  // above reports rather than turning into a pass.
+  const tierOwnAbs = fileURLToPath(import.meta.url);
+  const tierOwnRel = tierOwnAbs.startsWith(ROOT) ? tierOwnAbs.slice(ROOT.length) : '';
   // The definition line is FOUND, not remembered: the one line carrying both
   // the constant's name and its value. A line number in a case name that has
   // to be maintained by hand is the same species of promise as the one this
   // case replaces.
   const tierDefLine =
-    readFileSync(join(ROOT, tierOwnRel), 'utf8')
+    readFileSync(new URL(import.meta.url), 'utf8')
       .split('\n')
       .findIndex((l) => l.includes('CONTRACT_REVIEW_TIER') && l.includes(CONTRACT_REVIEW_TIER)) + 1;
   const tierRoots = [
