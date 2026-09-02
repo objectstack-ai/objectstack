@@ -413,43 +413,6 @@ Non-negotiables for this dispatch:
 Return ONLY the JSON report defined in the operating procedure.
 ```
 
-#### One semantics, N independent implementations — enumerate them in the prompt
-
-**Applicability:** the issue changes a *semantic rule* — how an operator, a
-predicate, a comparison, or an absent/empty value is interpreted — and that rule
-is implemented **more than once**, by compilers or evaluators that share no code.
-Query filters, expression languages, permission predicates and serialization
-formats all tend to grow this shape as a project adds backends.
-
-When it applies, the dispatch prompt carries an **explicit inventory of every
-implementing surface**, and requires the agent to give a verdict **for each one**
-in its PR body: **changed** / **already conformant** (with evidence) /
-**explicitly out of scope** (with a reason). A surface the PR never mentions is
-reviewed as one that was *missed*, not as one that needed no change.
-
-Why this is worth a standing clause instead of case-by-case judgment: the failure
-it prevents is not "implemented it wrong", it is **"implemented part of it and
-believed the work was finished"**. That failure is invisible at review time — the
-diff is correct and the tests are green, while the untouched surfaces keep
-answering the old way until a user hits the divergence. The cost scales with the
-count: a semantics carried by N implementations makes every ruling an N-part
-task, and the parts that get skipped are exactly the ones nobody wrote down.
-
-Two disciplines keep the inventory trustworthy:
-
-- **The inventory is maintained by PR.** Whichever change adds, retires or merges
-  an implementing surface updates the list in that same PR. An inventory going
-  stale is inevitable; an inventory with **no owner** is the defect.
-- **Re-verify before pasting.** Paths move and surfaces get added between
-  rulings, so re-derive the list from the code at dispatch time rather than
-  copying the previous prompt. An inventory that was right last month and is
-  pasted unchecked reintroduces the very miss it exists to prevent.
-
-Surfaces that are **deliberately frozen** (deprecated backends, formats kept only
-for compatibility) stay in the inventory. Their verdict is "out of scope —
-frozen", recorded rather than silently absent: a reader cannot otherwise tell a
-frozen surface from a forgotten one.
-
 #### Dispatch backends
 
 **`mode:subagent` (default).** Sub-agents inside the PM's own session. Reports
@@ -588,31 +551,6 @@ Named non-escalation classes — act immediately:
 - **Sequencing and dependency ordering** between technical tasks.
 - **Verification strategy** — what regression pass a risky-but-decided change
   needs. That is scoping the work, not deciding it.
-- **A declaration silently dropped on a new arm, when a sibling arm already has
-  a ruling.** When a declared key is silently ignored on one arm of a component
-  and an earlier ruling already made that same key a **loud authoring error** on
-  a sibling arm, the new arm **joins the existing rejection set by default** —
-  reuse that ruling, queue it, dispatch it; do not spend a fresh decision on a
-  one-word extension of an answer you already have. Only a genuine **semantic
-  difference between the arms** reopens the question. **State the boundary in the
-  same breath as the default, or the shortcut gets over-applied:** what carries
-  over is the ruling **together with its rationale**, never the verdict alone.
-  When the original rationale was measured to be arm-specific — it held on the
-  face it was ruled on and is disproved on the new one, as a "refusing this would
-  reject usage that already works" argument does the moment the new arm has no
-  such working usage — the default does not apply and the new arm earns its own
-  decision. The test is mechanical: re-check the original rationale against the
-  new arm *before* reusing the verdict. Sharing a key name is not sharing a
-  reason.
-- **Two implementations of one operation.** When one operation has two
-  implementations and they disagree, the side that already carries the
-  **governance** — authorization gates, user consent, de-duplication, audit
-  trail — is the **default survivor**; the other is rebound onto it and deleted.
-  Not reconciled, not kept as a second writer. The ungoverned side wins only
-  when **product semantics explicitly demand** it, and that semantic goes into
-  the decision text rather than being supplied afterwards as justification.
-  Keeping both implementations keeps a path around the gates — exactly what
-  `declared = enforced` exists to close.
 - A developer agent's `needs_decision` that, on review, falls into the classes
   above: answer it yourself with the decision and rationale; do not relay it
   upward.
@@ -915,119 +853,23 @@ verifies they exist.
 
 ## Upstream reporting — platform defects found while building an app
 
-An app project (built on ObjectStack, or on any platform it does not own)
-regularly trips over defects that are **not the app's to fix**. The temptation
-is to make the app tolerate it and move on. Do not. A workaround in the app
-hides the defect from the people who can fix it, ships a second source of truth
-to every future author, and outlives the upstream fix by years — and when the
-app's metadata is AI-authored, the tolerant path is copied into everything
-generated next.
+The doctrine lives in `objectstack-platform` under **"The App / Platform
+Boundary"**: capability belongs in the platform, a platform defect means
+waiting for the platform fix, never a workaround in the app. What this loop
+adds:
 
-**The upstream repository is derived, not configured.** Read it from the
-failing dependency itself (its `package.json` `repository` field, or the
-registry page). For `@objectstack/*` packages that is
-`objectstack-ai/objectstack`.
-
-### 1. Stale-premise check first
-
-Before writing anything, establish that the defect still exists upstream:
-
-- reproduce against the **current** upstream default branch or the newest
-  published version, not the version the app happens to pin;
-- search the upstream repository's open **and closed** issues and merged PRs
-  for the symptom, the error string, and the module name;
-- read the upstream changelog between your pinned version and the latest.
-
-If it is already fixed, the app-side task is an **upgrade**, not a report. Say
-so and stop.
-
-### 2. Write a report that can be acted on without your app
-
-- **Minimal repro** — the smallest metadata or code that shows the defect,
-  standalone, with no dependency on the app's own packages. If it cannot be
-  reduced, say exactly what part of the app is load-bearing and why.
-- **Pinned versions** — the exact versions of every upstream package involved
-  (`pnpm list @objectstack/…`), plus runtime and OS if relevant. "Latest" is
-  not a version.
-- **Expected vs actual**, and the **contract you are citing**: the schema line,
-  documented behaviour, or ADR the upstream is violating. A report that names
-  the contract gets triaged as a defect; one that does not gets triaged as a
-  question.
-- **What you did NOT do**: state that the app has no workaround, so the
-  upstream can see the real blast radius.
-
-### 3. File it as a guest, not as a scheduler
-
-- Open the issue **in the upstream repository**, with a backlink line
-  `Part of <app-owner>/<app-repo>#<n>` so both sides can navigate.
-- **Never apply the upstream's queue labels** (`pm:queue`, `pm:dispatched`, …),
-  never assign it, never add it to their board. Their PM triages their backlog;
-  labeling it yourself injects work into a queue whose in-flight batch you
-  cannot see — the same collision the single-scheduling-authority ban exists
-  for.
-- Do not open a fix PR upstream unless your project has the appetite and the
-  upstream's conventions invite it. If it does, that is an ordinary dispatch
-  against the upstream repository, governed by **their** conventions file.
-
-### 4. Park the app-side task honestly
-
-The app-side issue does not silently continue. Pick one and record it:
-
-- **`Blocked-by: <upstream-owner>/<upstream-repo>#<n>`** in the body — the PM's
-  batch selection skips it until that issue closes; or
-- **pin the current upstream version** with the unblock condition written down:
-  "pinned at 17.2.0; unpin when `<upstream>#<n>` ships in >= 17.3". A pin with
-  no recorded unblock condition is a workaround with better manners.
-
-Either way the app-side issue stays open and visible. **"We worked around it"
-is never a resolution** — closing it is what makes the defect permanent.
-
----
-
-## Multiple PMs — shard by repository, never share a queue
-
-The claim protocol makes concurrent PMs *safe*, not *useful*: batch
-independence is only checked within one PM's view, so two PMs on the same queue
-can claim different issues that collide on shared files. Scale in this order:
-
-1. **One PM, bigger batch** (`batch:5`), heavy tasks via `mode:cloud` — adds
-   compute without adding schedulers.
-2. **When one PM genuinely cannot keep up**, a second session takes a **whole
-   repository** as its shard (`/pm-dispatch repo:<owner>/<other-repo>`) — file
-   universes are disjoint by construction. A sharded PM states its shard in
-   every claim comment and **never claims outside it**.
-3. **Multiple PMs on the same queue: prohibited.** All cost, no throughput.
-
-**Shard ownership is registered, never assumed.** A registry issue in the
-backlog repository records which session owns which shard. A PM taking over a
-shard comments there as its FIRST action, and again when handing off. An
-unowned shard may be **caretaken** by the backlog PM, but the moment a shard is
-registered to another session the caretaker stops dispatching into it —
-in-flight claimed tasks finish under whoever claimed them, and everything else
-belongs to the new owner. State the mode in claim comments so the registry and
-the claims never disagree silently.
-
-**Work crosses shard lines; PMs never do.**
-
-- **Transfer via the target queue**: file the piece as an issue in the target
-  repository with the queue label and a source line
-  `Part of <owner/repo>#<n>`. The target shard's PM picks it up through its own
-  sweep — the queue label IS the inter-PM channel.
-- **Dependencies via `Blocked-by:`** on the waiting side.
-- **Follow-up chores belong to the consuming shard** — when an upstream change
-  lands, the dependent repository's adaptation issue is filed by the PM that
-  owns that repository; it knows its own surfaces.
-- **Shared contract surfaces have one owner.** Anything touching the shared
-  schema or contract package transfers to the backlog PM regardless of who
-  needs it — only that PM sees that repository's in-flight batch and its
-  generated-artifact collisions.
-- Cross-repository parent/sub-issue chains stay coordinated by the backlog PM;
-  sharded PMs coordinate only chains fully inside their shard.
-
-**Linkage chores are issues, not memory.** When an accepted PR's artifacts must
-flow into another repository (a regenerated client, a version bump, a refreshed
-build), file that follow-up in the consuming repository's backlog immediately,
-blocked by the PR until it merges. Nobody remembers.
+- **Derive the upstream repository** from the failing dependency's
+  `package.json` `repository` field (`objectstack-ai/objectstack` for
+  `@objectstack/*`), and confirm the defect still exists on its current default
+  branch — if it is already fixed, the app-side task is an upgrade.
+- **Report so it can be acted on without your app**: a standalone minimal
+  repro, exact pinned versions, expected vs actual, and the contract you cite.
+- **File as a guest, not as a scheduler**: open it upstream with a backlink
+  `Part of <app-owner>/<app-repo>#<n>`; never apply the upstream's queue
+  labels, never assign, never add it to their board.
+- **Park the app-side issue honestly**: `Blocked-by: <upstream>#<n>` in the
+  body, or a version pin with its unblock condition written down. It stays
+  open — "we worked around it" is never a resolution.
 
 ---
 
@@ -1058,6 +900,12 @@ alone rather than into a full batch.
   file-disjoint by construction.
 - The backlog repository is the **single scheduling authority**. Never dispatch
   into a repository whose in-flight batch you cannot see.
+- **One PM per queue.** Scale with `batch` and `mode:cloud`, never a second
+  scheduler on one queue; a second PM takes a whole other repository as its
+  shard, states it in every claim comment and never claims outside it. Work
+  crosses shards as issues: a queue-labeled card in the target repository with
+  a `Part of <owner/repo>#<n>` line, `Blocked-by:` on the waiting side, and
+  follow-up chores filed in the consuming repository — never remembered.
 - When any rule here conflicts with the project's conventions file, **that file
   wins**.
 
