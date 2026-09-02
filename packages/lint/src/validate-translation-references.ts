@@ -232,6 +232,13 @@ interface ObjectFacts {
   actions: Map<string, AnyRec>;
   sections: Set<string>;
   /**
+   * `_validations` names — the custom validation rules this object declares
+   * (`objects[].validations[].name`). `objects.<obj>._validations.<rule>.message`
+   * (#14253) is keyed by that name, so a ghost here is a rule message that
+   * renders in the source locale inside an otherwise translated refusal.
+   */
+  validations: Set<string>;
+  /**
    * `_tabs` names — the filter-preset tabs declared for this object, from
    * `page.interfaceConfig.userFilters.tabs[].name`. See {@link collectPageTabs}
    * for why that is the only carrier and how the object binding is resolved.
@@ -283,6 +290,7 @@ function emptyFacts(): ObjectFacts {
     views: new Set(),
     actions: new Map(),
     sections: new Set(),
+    validations: new Set(),
     tabs: new Set(),
   };
 }
@@ -618,6 +626,13 @@ function buildUniverse(stack: AnyRec): Universe {
       const key = strName(group.key) ?? strName(group.name);
       if (key) facts.sections.add(key);
     }
+    // #14253: `_validations.<rule>` is keyed by the rule's own `name`. A rule
+    // without a name has no key and is not registered — the resolver cannot
+    // address it either, so nothing is lost by skipping it here.
+    for (const rule of asArray(obj.validations)) {
+      const ruleName = strName(rule.name);
+      if (ruleName) facts.validations.add(ruleName);
+    }
   }
 
   // ── Stack-level views: `_views` names + form-section names ──
@@ -897,6 +912,30 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
                 : ` No page over "${objectName}" declares a filter-preset tab bar at all. Note ` +
                   `only a page's \`interfaceConfig.userFilters.tabs\` is resolvable — a list ` +
                   `view's own \`tabs\` has no renderer, so nothing reads a key written for one.`),
+          );
+        }
+
+        // _validations.<rule>
+        //
+        // Same shape as `_tabs` above: a machine name that either exists on
+        // this object or does not. An orphan here is worse than an untranslated
+        // label — the refusal a caller receives keeps its source-locale
+        // `message` beside platform-generated refusals in the caller's locale,
+        // inside one `VALIDATION_FAILED` envelope (#14253).
+        for (const ruleName of Object.keys(asRecord(rawNode._validations))) {
+          if (facts.validations.has(ruleName)) continue;
+          orphan(
+            `${inLocale} · object "${objectName}" · validation "${ruleName}"`,
+            `${objPath}._validations.${ruleName}`,
+            `Translations are keyed to validation rule "${ruleName}", which object ` +
+              `"${objectName}" does not declare in \`validations[]\`. The rule's authored ` +
+              `\`message\` keeps its source locale in every refusal.` +
+              suggest(ruleName, facts.validations),
+            `Match the key to the rule's \`name\`, or drop it if the rule was renamed or ` +
+              `removed.` +
+              (facts.validations.size > 0
+                ? ` Declared rules: ${listNames(facts.validations)}.`
+                : ` Object "${objectName}" declares no named validation rules.`),
           );
         }
 

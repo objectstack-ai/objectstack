@@ -1,6 +1,7 @@
 ---
 "@objectstack/spec": minor
 "@objectstack/objectql": minor
+'@objectstack/lint': patch
 ---
 
 feat(spec,objectql): give three authored display surfaces a bundle key — bulk-action defs, custom validation messages, dataset labels (#14253)
