@@ -5199,6 +5199,27 @@ jobs:
       - name: Check no new untranslated declared labels
         run: pnpm check:i18n-coverage
 
+      # The i18n question none of its three neighbours can answer, because it
+      # judges THEM rather than the tree. Each of them measures a POPULATION the
+      # CLI extractor produces; none can notice that the population is short a
+      # whole family. A translation group lands in the spec with a resolver,
+      # the extractor is updated later or not at all, and in between `os i18n
+      # extract` scaffolds no key for it — so no translator is asked for one, so
+      # the coverage ratchet counts a debt of zero and reports OK while the
+      # strings ship in English. That has now happened five times, and every
+      # instance was found by a person noticing rather than by an instrument.
+      #
+      # This asserts set parity between the groups `TranslationDataSchema`
+      # DECLARES and the groups `collectExpectedEntries` WALKS, with a
+      # shrink-only exemption ledger — empty as it ships — for a group that
+      # legitimately has no extractor face, each entry carrying its reason.
+      #
+      # Reads both sides from BUILT output (the spec's schema object, the CLI's
+      # walker) rather than from source text, so it belongs here with the other
+      # post-build consumer gates.
+      - name: Check every declared translation group is walked by the extractor
+        run: pnpm check:i18n-walk-parity
+
       # The THIRD i18n question, and the one neither step above can answer
       # (#5750). Both of them read STATIC declarations; the Setup app declares a
       # shell of empty group anchors and gets its ~50 menu entries at RUNTIME
