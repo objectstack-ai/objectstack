@@ -40,12 +40,22 @@ import {
 import { SystemUserId } from '@objectstack/spec/system';
 import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 
-/** In-memory ql over the three objects the bootstrap touches. */
-function makeQl(seed: { users?: any[]; grants?: any[]; sets?: any[] } = {}) {
+/**
+ * In-memory ql over the objects the bootstrap touches.
+ *
+ * [#14348] `sys_account` is one of them now: under `single` the promotion
+ * target is the oldest human that CAN AUTHENTICATE, so the selector reads this
+ * table. Modelling it explicitly (rather than letting an unknown table answer
+ * `[]`) is what keeps "this user is registered" and "this user is a
+ * credential-less directory row" two different fixture states here — the very
+ * distinction the card turned on.
+ */
+function makeQl(seed: { users?: any[]; grants?: any[]; sets?: any[]; accounts?: any[] } = {}) {
   const tables = new Map<string, any[]>([
     ['sys_permission_set', (seed.sets ?? []).map((r) => ({ ...r }))],
     ['sys_user', (seed.users ?? []).map((r) => ({ ...r }))],
     ['sys_user_permission_set', (seed.grants ?? []).map((r) => ({ ...r }))],
+    ['sys_account', (seed.accounts ?? []).map((r) => ({ ...r }))],
   ]);
   const rowsOf = (object: string) => tables.get(object) ?? [];
   return {
@@ -94,6 +104,21 @@ const user = (id: string, email: string, createdAt: string, extra: Record<string
   email,
   created_at: createdAt,
   ...extra,
+});
+
+/**
+ * [#14348] The login half of a REGISTERED user. Every `single`-posture case
+ * below is about a user who signed up, and a user who signed up holds a
+ * `sys_account` — the field was simply never modelled while the promotion
+ * ranked rows by age alone. Declaring it keeps those cases testing what their
+ * names say (owner-email is not consulted; an unverified address still gets
+ * promoted) instead of accidentally testing the new authenticable filter.
+ */
+const account = (userId: string, providerId = 'credential') => ({
+  id: `acc_${userId}`,
+  user_id: userId,
+  account_id: `${userId}@accounts.test`,
+  provider_id: providerId,
 });
 
 const infoText = (log: ReturnType<typeof logger>) =>
@@ -386,6 +411,7 @@ describe('single posture — "first user is owner" is ruled reasonable and UNCHA
         user('u_first', 'first@corp.example', '2026-08-23T01:00:00Z'),
         user('u_second', 'second@corp.example', '2026-08-23T02:00:00Z'),
       ],
+      accounts: [account('u_first'), account('u_second')],
     });
     const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: logger() });
     expect(r.adminPromoted).toBe(true);
@@ -402,6 +428,7 @@ describe('single posture — "first user is owner" is ruled reasonable and UNCHA
         user('u_first', 'first@corp.example', '2026-08-23T01:00:00Z'),
         user('u_second', 'second@corp.example', '2026-08-23T02:00:00Z'),
       ],
+      accounts: [account('u_first'), account('u_second')],
     });
     const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: logger() });
     expect(r.adminPromoted).toBe(true);
@@ -411,6 +438,9 @@ describe('single posture — "first user is owner" is ruled reasonable and UNCHA
   it('an UNVERIFIED first user is still promoted under `single` — the verified invariant was walled-only', async () => {
     const ql = makeQl({
       users: [user('u_first', 'first@corp.example', '2026-08-23T01:00:00Z', { email_verified: false })],
+      // Unverified is about the ADDRESS, not about having a login: an
+      // unverified registrant still holds an account (#14348).
+      accounts: [account('u_first')],
     });
     const r = await bootstrapPlatformAdmin(ql as any, [adminFullAccess()], { logger: logger() });
     expect(r.adminPromoted).toBe(true);

@@ -258,7 +258,7 @@ describe('ADR-0130 D5 — the ordering behaviours are INHERITED from resolvePlug
   });
 });
 
-describe('ADR-0130 D4 — the entry WRAPPER is refused from its one declaration', () => {
+describe('ADR-0130 D4 — the entry is refused from its one declaration', () => {
   // Rejection assertions carry the ADR-0112 envelope — `code` AND `status` —
   // never a bare "it throws": a bare throw assertion stays green on an
   // unrelated `Error` from somewhere else in the path.
@@ -292,15 +292,52 @@ describe('ADR-0130 D4 — the entry WRAPPER is refused from its one declaration'
   });
 
   it('accepts an assembled package body whose `objects` are definitions, not globs', () => {
-    // The load path receives assembled payloads: `ManifestSchema.objects` is
-    // `z.array(z.string())` (glob patterns), so a FULL body parse would refuse
-    // exactly what this path exists to register. The wrapper is judged; the body
-    // is the authoring door's job.
+    // The load path receives assembled payloads. This used to be a wrapper-only
+    // gate because `ManifestSchema.objects` is `z.array(z.string())` (glob
+    // patterns) and a FULL parse against it refused exactly what this path
+    // exists to register — the #14242 mismatch. Since road B the body has its
+    // own declaration (`AssembledPackageBodySchema`), so the whole entry is
+    // parsed and THIS payload is what it was declared to accept.
     const ordered = resolveArtifactPackageOrder({
       packages: [{ manifest: basePackage() }],
     }) as PackageBody[];
     expect(ordered).toHaveLength(1);
     expect(ordered[0].objects?.[0]?.name).toBe('crm_account');
+  });
+
+  it('refuses a body carrying authoring GLOBS where definitions belong (#14242 B)', () => {
+    // The refusal the full parse buys, and the one the wrapper-only gate could
+    // not give: a compiled artifact has no files left to glob, so this package
+    // would install owning nothing while every gate stayed green.
+    let caught: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      resolveArtifactPackageOrder({
+        packages: [{ manifest: { ...basePackage(), objects: ['./src/objects/*.object.ts'] } }],
+      });
+    } catch (e) { caught = e as Error & { code?: string; status?: number }; }
+    expect(caught).toBeDefined();
+    expect(caught?.code).toBe('INVALID_ARTIFACT_PACKAGE_ENTRY');
+    expect(caught?.status).toBe(422);
+    // The message names the STAGE, not just the type mismatch — an author
+    // reading "expected object, received string" learns nothing about which of
+    // the two package-body spellings this seam wanted.
+    expect(caught?.message).toContain('manifest.objects.0');
+    expect(caught?.message).toContain('DEFINITIONS');
+  });
+
+  it('refuses a body whose collection is malformed at the item level', () => {
+    // Not the same finding as the glob one: this is a definition-shaped entry
+    // that is not a valid definition. Both are body issues the wrapper-only
+    // gate let through to `registerApp`, which would have registered a
+    // half-formed object rather than refusing.
+    let caught: (Error & { code?: string; status?: number }) | undefined;
+    try {
+      resolveArtifactPackageOrder({
+        packages: [{ manifest: { ...basePackage(), objects: [{ label: 'no name' }] } }],
+      });
+    } catch (e) { caught = e as Error & { code?: string; status?: number }; }
+    expect(caught?.code).toBe('INVALID_ARTIFACT_PACKAGE_ENTRY');
+    expect(caught?.status).toBe(422);
   });
 
   it('hands back the caller\'s own body — no defaults applied, no keys stripped', () => {

@@ -51,7 +51,9 @@
  * The writes mirror better-auth's own handlers field for field — `banned` /
  * `banReason` / `banExpires` / `updatedAt`, then `deleteUserSessions` — so a
  * banned user is signed out and refused at sign-in by the vendor's OWN session
- * hook (`BANNED_USER`), which is untouched. The default ban reason is
+ * hook (`BANNED_USER`), which is untouched. The write itself lives in the
+ * package-internal `user-ban-write.ts` (#14360), shared with the SCIM
+ * deprovisioning hook in `auth-manager.ts` — one write, two callers. The default ban reason is
  * `'No reason'` because ObjectStack configures no `defaultBanReason`.
  *
  * ⚠️ Shadowing a vendor route detaches every better-auth hook keyed on its
@@ -72,6 +74,7 @@ import {
   type CredentialAccountAdapter,
 } from './last-local-credential.js';
 import type { AdminActor, EndpointResult } from './admin-user-endpoints.js';
+import { applyUserBan, applyUserUnban } from './user-ban-write.js';
 
 /**
  * Minimal better-auth `$context` surface these two routes touch. Mirrors what
@@ -161,11 +164,9 @@ export async function runAdminBanUser(
     };
   }
 
-  await ctx.internalAdapter.updateUser(userId, {
-    banned: true,
+  await applyUserBan(ctx.internalAdapter, userId, {
     banReason,
     ...(banExpires ? { banExpires } : {}),
-    updatedAt: new Date(),
   });
   // Sign the banned user out everywhere, exactly as the vendor handler does.
   await ctx.internalAdapter.deleteUserSessions(userId);
@@ -197,12 +198,7 @@ export async function runAdminUnbanUser(
   const ctx = await deps.getAuthContext();
   if (!(await ctx.internalAdapter.findUserById(userId))) return notFound();
 
-  await ctx.internalAdapter.updateUser(userId, {
-    banned: false,
-    banReason: null,
-    banExpires: null,
-    updatedAt: new Date(),
-  });
+  await applyUserUnban(ctx.internalAdapter, userId);
 
   return { status: 200, body: { success: true, data: { userId, banned: false } } };
 }

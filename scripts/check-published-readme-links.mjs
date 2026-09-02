@@ -725,6 +725,12 @@ async function run() {
 // Self-test: every limb observed FAILING and observed SILENT.
 // ---------------------------------------------------------------------------
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-published-readme-links self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   const ok = (label, cond) => {
@@ -1206,6 +1212,8 @@ function selfTest() {
       + '  pointy-bracket destination counted exactly ONCE; and angle-bracketed non-links —\n'
       + '  tags, prose, bare addresses — claimed by nothing).',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 /* Run only when invoked as a program — the extractor, the classifier and the
@@ -1213,7 +1221,14 @@ function selfTest() {
  * without the import itself sweeping the workspace. */
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    selfTest();
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-published-readme-links self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
     process.exit(0);
   }
   try {

@@ -1576,6 +1576,12 @@ async function main() {
 
 // ── Self-test ───────────────────────────────────────────────────────────────
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-required-contexts self-test reached its verdict';
+
 async function selfTest() {
   const failures = [];
   let checked = 0;
@@ -2872,6 +2878,8 @@ async function selfTest() {
       `the live required-set diff and its off-the-required-path wiring (#9642), with the comment-vs-code recognizer ` +
       `pinned in both directions + the #4690 pins).`,
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 // Exports bindings, so an import for those exports alone must run nothing (#10667).
@@ -2880,7 +2888,14 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 if (!invokedDirectly) {
   // imported as a module — expose the exports and do nothing else
 } else if (process.argv.includes('--self-test')) {
-  await selfTest();
+  if ((await selfTest()) !== SELF_TEST_VERDICT) {
+      console.error(
+          '\n✗ check-required-contexts self-test: selfTest() returned without reaching its verdict,\n'
+              + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+              + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+  }
 } else if (process.argv.includes('--verify-required-set')) {
   // Report-only, off the required path (#9642). Exit 0 = swept (0 or N
   // disagreements); exit 2 = the live set could not be read (ENVIRONMENT).

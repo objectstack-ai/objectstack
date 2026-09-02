@@ -448,6 +448,13 @@ function ratchetRemedyCarriesAuthority(message) {
   return message.includes(RATCHET_AUTHORITY_MARKER);
 }
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const failures = [];
   const expect = (label, cond) => {
@@ -838,10 +845,21 @@ function selfTest() {
     + 'the ratchet-DOWN one is not, and the success body reports what was READ per root and what '
     + 'each ROW reached — all of it also driven through a real child process.',
   );
+  selfTestReachedVerdict = true;
   process.exit(0);
 }
 
-if (process.argv.includes('--self-test')) selfTest();
+if (process.argv.includes('--self-test')) {
+  selfTest();
+  if (!selfTestReachedVerdict) {
+    console.error(
+      '\n✗ check-corpus-claim-drift self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
+}
 
 /* Table hygiene precedes everything: a row that matches the empty string would
  * report the whole corpus, and over `--update` would write that into a ledger

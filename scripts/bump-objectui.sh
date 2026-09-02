@@ -35,6 +35,15 @@
 # CHANGELOG text as if it were one (#14178). Deepen the checkout and re-run, or
 # pass `--no-changeset` to move the pin while claiming nothing about the range.
 #
+# It ALSO refuses — same invariant, one input further in — when the range
+# WALKS COMPLETELY but deriving the changeset from it still fails: the digest
+# reads git BLOBS the walk above never touches, and a changeset blob unreadable
+# at both `to` and the commit that added it throws. A level was derivable in
+# principle there, so publishing the default level would be a guess wearing a
+# declaration's clothes — the same #14178 shape, one state further in (#14393).
+# The initial pin is unaffected: it has no previous SHA and no range to have
+# walked, so it keeps its degraded (tip-subject-only) entry.
+#
 # Env:
 #   CONSOLE_BUMP=major|minor|patch  # force the changeset bump type (default: auto —
 #                             # the HIGHEST level objectui itself declared in the
@@ -92,8 +101,14 @@
 # throwaway git repos and pins the write-ordering invariant of #10797 — an
 # unreadable commit object refuses and leaves `.objectui-sha` byte-identical —
 # plus two readable-commit cases, so a guard that refused everything would fail
-# it. Offline, no node, ~1s. Reordering anything between the reads above the
-# first mutation and that mutation is what it exists to catch.
+# it, plus a case pinning the #14393 refusal above: a range that WALKS
+# COMPLETELY but whose changeset blob is unreadable at both revisions also
+# refuses with the pin untouched. The first four cases stay offline, no node,
+# ~1s; the #14393 case needs node (it drives the real digest derivation through
+# a throwaway objectui with a real changeset commit) and a copy of
+# `objectui-changeset-digest.mjs` + `invoked-as.mjs` alongside the script under
+# test. Reordering anything between the reads above the first mutation and that
+# mutation is what this file exists to catch.
 
 set -euo pipefail
 
@@ -549,25 +564,36 @@ if [[ "$NO_CHANGESET" -eq 0 && "$OLD_SHA" != "<none>" ]]; then
   fi
 fi
 
-# FIRST MUTATION OF THE WORKING TREE. Everything read out of the objectui commit
-# was read above, and an unreadable commit already refused — nothing below this
-# line can fail on a read of `$NEW_SHA` that has not already been attempted
-# (#10797). Keep it that way: a new `git -C "$OBJECTUI_ROOT" …` added after this
-# point re-opens exactly the half-applied write this ordering exists to prevent.
-echo "$NEW_SHA" > "${FRAMEWORK_ROOT}/.objectui-sha"
-echo "→ objectui pin: ${OLD_SHA:0:12} → ${NEW_SHA:0:12}${REACH_TAG}"
-
-# --- Emit the @objectstack/console changeset for the frontend delta ----------
+# --- Derive the @objectstack/console changeset BEFORE the pin write ----------
+# `RANGE_OK` was settled above, before the pin write — walkability is a
+# PRECONDITION of this whole section, and an unwalkable range already refused
+# (#14178). Reaching here means one of exactly two things: the range walks
+# (derive), or this is the initial pin with no previous SHA to walk from
+# (degrade after the pin write, below). There is no third input state to test.
+#
+# THE DERIVATION ITSELF CAN STILL FAIL even though the range WALKS COMPLETELY:
+# `objectui-changeset-digest.mjs` reads git BLOBS (`readAt`) that the commit/tree
+# walk above never touches, and the reachable failure is a changeset blob that
+# cannot be read at EITHER `to` or the commit that added it — its own
+# both-reads-failed diagnostic, then a thrown exception, non-zero exit.
+#
+# ASKED HERE, above the pin write, for the SAME #10797 invariant the range walk
+# above already keeps: a run that refuses must leave `.objectui-sha`
+# byte-identical. Deriving AFTER the pin write (as this bump used to) refused
+# the level correctly but left the pin already moved — the half-applied write
+# #10797 exists to prevent, one input further in (#14393).
+#
+# WRITTEN STRAIGHT INTO `CS_FILE`, not a temp path moved into place afterward:
+# the digest CLI only calls `writeFileSync(out, …)` once the WHOLE digest
+# object has built successfully — a `readAt` failure throws INSIDE that build,
+# before the write is ever reached, so a failing derivation leaves `CS_FILE`
+# unwritten on its own. There is no partial-write case left for a temp file to
+# guard against.
 CS_FILE=""
+DIGEST_OK=0
+BUMP=""
 if [[ "$NO_CHANGESET" -eq 0 ]]; then
-  # `RANGE_OK` was settled ABOVE, before the pin write — walkability is a
-  # PRECONDITION of this whole section, and an unwalkable range already refused
-  # (#14178). Reaching here means one of exactly two things: the range walks
-  # (derive), or this is the initial pin with no previous SHA to walk from
-  # (degrade, and say so). There is no third input state left to test.
   CS_FILE="${FRAMEWORK_ROOT}/.changeset/console-${SHORT}.md"
-  DIGEST_OK=0
-  BUMP=""
   if [[ "$RANGE_OK" -eq 1 ]]; then
     # The digest reads objectui's OWN declarations (.changeset/*.md added over
     # the range) — inclusion and level both come from there, nothing is guessed
@@ -581,33 +607,66 @@ if [[ "$NO_CHANGESET" -eq 0 ]]; then
         --bump-override "${CONSOLE_BUMP:-}" \
         --out "$CS_FILE")"; then
       DIGEST_OK=1
+    else
+      # `RANGE_OK=1` implies `OLD_SHA != "<none>"` (the walk-check above only
+      # runs when there IS a previous SHA), so reaching here is always THIS
+      # card's state: the range walked, so a level WAS derivable in principle,
+      # and the derivation failed reading a changeset blob. Declaring `patch`
+      # here used to be a guess wearing a declaration's clothes, published into
+      # @objectstack/console's CHANGELOG and the curated release notes. No
+      # record beats a wrong one (#14178 triage ruling, restated for this state
+      # #14393) — refuse instead, same as the unwalkable-range case above and
+      # for the same reason.
+      {
+        echo "✗ REFUSING to bump: the objectui range ${OLD_SHA:0:12}...${NEW_SHA:0:12} walks"
+        echo "  completely in ${OBJECTUI_ROOT}, but deriving the @objectstack/console changeset"
+        echo "  from it failed — its diagnostic is in this run's output, above."
+        echo "  A level was derivable in principle here; the derivation just failed reading a"
+        echo "  changeset blob. This bump used to emit a degraded entry carrying the default"
+        echo "  level instead (\`patch\`) as if it were a declaration nobody made, publishing"
+        echo "  into @objectstack/console's CHANGELOG and the curated release notes. No record"
+        echo "  beats a wrong one (objectstack#14178 triage ruling), so this refuses instead."
+        echo "  NOTHING WAS WRITTEN — .objectui-sha is untouched and still holds the old pin."
+        echo "  Repair the objectui object store and re-run this bump, or move the pin without"
+        echo "  a release record at all: scripts/bump-objectui.sh --no-changeset"
+        echo "  (the pin moves, nothing is derived, and nothing is claimed about the range)."
+      } >&2
+      exit 1
     fi
   fi
+fi
 
-  if [[ "$DIGEST_OK" -eq 0 ]]; then
-    # Degraded path. Emit the tip subject ONLY, labelled as degraded — the reader
-    # must be able to tell this list from a derived one (#4731).
-    #
-    # WHAT IS NO LONGER HERE (#14178): "the range could not be walked". That
-    # input refuses above rather than degrading, because its artifact carried a
-    # bump LEVEL nobody declared — `patch` on a range that declared `minor` —
-    # into published CHANGELOG text. The initial pin is a different fact and
-    # keeps its degraded entry: there is no previous SHA to walk from, no remedy
-    # to name, and nothing is being guessed about a range that does not exist.
-    BUMP="${CONSOLE_BUMP:-patch}"
-    if [[ "$OLD_SHA" == "<none>" ]]; then
-      RANGE_LABEL="(initial pin) → ${NEW_SHA:0:12}"
-      WHY="this is the initial pin, so there is no previous SHA to walk from"
-    else
-      # The range WALKS (settled above) and the digest still failed — a read
-      # error inside the derivation, not a precondition. Named as itself: the
-      # remedies above would not apply, and claiming them would send the reader
-      # to fetch a history that is already complete.
-      RANGE_LABEL="${OLD_SHA:0:12}...${NEW_SHA:0:12}"
-      WHY="the range \`${RANGE_LABEL}\` walks in this checkout, but the digest failed while \
-deriving from it — its diagnostic is in this run's output, above"
-    fi
-    cat > "$CS_FILE" <<EOF
+# NOT "the first mutation" any more — on the SUCCESS path the digest above
+# already wrote `CS_FILE` (`--out`), so the changeset file is the first
+# working-tree mutation and this pin write is the second. That is fine: the
+# digest only calls `writeFileSync(out, …)` once the WHOLE digest has built
+# successfully, so a refusal never leaves `CS_FILE` behind for this write to
+# follow — either both land, in this order, or neither does.
+#
+# THE INVARIANT THAT MUST HOLD HERE (#10797): no read of objectui — git or the
+# digest — happens BELOW this point. Everything that can fail on such a read
+# (the commit read above, the range walk, the changeset derivation) already
+# ran and already refused above. Keep it that way: a new `git -C
+# "$OBJECTUI_ROOT" …` or `node .../objectui-changeset-digest.mjs` call added
+# after this point reopens exactly the half-applied write this ordering exists
+# to prevent — a mutation already made (the changeset, or this pin) sitting
+# next to a read that still might fail.
+echo "$NEW_SHA" > "${FRAMEWORK_ROOT}/.objectui-sha"
+echo "→ objectui pin: ${OLD_SHA:0:12} → ${NEW_SHA:0:12}${REACH_TAG}"
+
+# --- Emit the degraded @objectstack/console changeset for the initial pin ----
+if [[ -n "$CS_FILE" && "$DIGEST_OK" -eq 0 ]]; then
+  # Reaching here with NO_CHANGESET=0 and DIGEST_OK=0 means RANGE_OK was 0 above
+  # — the ONLY input state left, now that the walkable-range/digest-failed
+  # state refuses above instead of degrading (#14393). RANGE_OK is 0 here only
+  # when OLD_SHA == "<none>" (the initial pin: no previous SHA, no range,
+  # nothing guessed about a walk) — a genuinely different fact from state 2,
+  # and it keeps its degraded (tip-subject-only) entry, labelled as such
+  # (#4731) so the reader can tell this list from a derived one.
+  BUMP="${CONSOLE_BUMP:-patch}"
+  RANGE_LABEL="(initial pin) → ${NEW_SHA:0:12}"
+  WHY="this is the initial pin, so there is no previous SHA to walk from"
+  cat > "$CS_FILE" <<EOF
 ---
 "@objectstack/console": ${BUMP}
 ---
@@ -622,7 +681,8 @@ complete account of the range:
 
 objectui range: \`${RANGE_LABEL}\`
 EOF
-  fi
+fi
+if [[ -n "$CS_FILE" ]]; then
   echo "→ wrote changeset $(basename "$CS_FILE") (@objectstack/console: ${BUMP})"
 fi
 

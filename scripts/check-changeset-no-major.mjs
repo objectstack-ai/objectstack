@@ -791,6 +791,12 @@ function main(argv) {
 
 // ── Self-test ────────────────────────────────────────────────────────────────
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-changeset-no-major self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   let checked = 0;
@@ -1508,6 +1514,8 @@ function selfTest() {
     `✓ check-changeset-no-major --self-test: ${checked} assertions ` +
       '(frontmatter dialects measured against @changesets/parse + the pre/exit exemption switch in both directions + the #7005 diff scoping over real temp git repos + the #4690 pins + the wiring).',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 // ── main ─────────────────────────────────────────────────────────────────────
@@ -1515,7 +1523,14 @@ function selfTest() {
 const argv = process.argv.slice(2);
 
 if (argv.includes('--self-test')) {
-  selfTest();
+  if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+          '\n✗ check-changeset-no-major self-test: selfTest() returned without reaching its verdict,\n'
+              + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+              + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+  }
 } else if (argv.includes('--list')) {
   list();
 } else {

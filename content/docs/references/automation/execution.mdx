@@ -140,8 +140,8 @@ const result = CheckpointSchema.parse(data);
 | **error** | `{ code: string; message: string; stack?: string }` | optional | Error details if step failed |
 | **retryAttempt** | `integer` | optional | Retry attempt number (0 = first try) |
 | **parentNodeId** | `string` | optional | Enclosing structured-region container node ID (loop/parallel/try_catch) |
-| **iteration** | `integer` | optional | Zero-based loop iteration or parallel branch index of the enclosing region |
-| **regionKind** | `string` | optional | Region kind the step ran in: loop-body \| parallel-branch \| try \| catch |
+| **iteration** | `integer` | optional | Zero-based loop iteration or parallel branch index of the enclosing region. A step inside a `try` / `catch` region that is itself inside a loop body carries the enclosing loop's iteration — a try/catch region has no index of its own — while `regionKind` stays `try` / `catch`. |
+| **regionKind** | `string` | optional | Region kind the step ran in: loop-body \| parallel-branch \| try \| catch. Stays `try` / `catch` for a step inside a try/catch region nested in a loop body; the loop is reported through `iteration`. |
 | **metrics** | `{ selected?: integer; acted?: integer; unmeasuredEffect?: boolean }` | optional | Records this step selected / acted on, as reported by the node executor |
 | **skippedBy** | `{ nodeId: string; edgeId?: string; label?: string }` | optional | The gate that closed, when `status` is `skipped` |
 
@@ -153,6 +153,7 @@ const result = CheckpointSchema.parse(data);
 | **acted** | `integer` | ✅ | Total records written / effects dispatched by the run |
 | **skipped** | `integer` | ✅ | Total node executions a closed gate prevented |
 | **unmeasured** | `integer` | optional | Total executions that may have caused an effect the platform cannot count. Absent = not tracked (an older run), which is not the same as zero. |
+| **failed** | `integer` | optional | Total node executions that failed — a fold of `nodes[].failures`. On a run that completed every one of them was contained (caught by a `try_catch` or routed down a `fault` edge) and the run went on. Absent = not tracked (an older run), which is not the same as zero. |
 | **nodes** | `{ nodeId: string; nodeType: string; nodeLabel?: string; status: Enum<'success' \| 'failure' \| 'skipped'>; … }[]` | ✅ | Per-node breakdown, in first-execution order |
 | **gates** | `{ nodeId: string; targetNodeId: string; edgeId?: string; label?: string; … }[]` | ✅ | Gates that closed during the run, most-skipped first |
 | **detailOmitted** | `boolean` | optional | Set when persistence dropped `nodes`/`gates` to keep the stored row bounded — the totals are still exact. Declared so empty arrays are never mistaken for "nothing ran". |
@@ -194,8 +195,8 @@ const result = CheckpointSchema.parse(data);
 | **error** | `{ code: string; message: string; stack?: string }` | optional | Error details if step failed |
 | **retryAttempt** | `integer` | optional | Retry attempt number (0 = first try) |
 | **parentNodeId** | `string` | optional | Enclosing structured-region container node ID (loop/parallel/try_catch) |
-| **iteration** | `integer` | optional | Zero-based loop iteration or parallel branch index of the enclosing region |
-| **regionKind** | `string` | optional | Region kind the step ran in: loop-body \| parallel-branch \| try \| catch |
+| **iteration** | `integer` | optional | Zero-based loop iteration or parallel branch index of the enclosing region. A step inside a `try` / `catch` region that is itself inside a loop body carries the enclosing loop's iteration — a try/catch region has no index of its own — while `regionKind` stays `try` / `catch`. |
+| **regionKind** | `string` | optional | Region kind the step ran in: loop-body \| parallel-branch \| try \| catch. Stays `try` / `catch` for a step inside a try/catch region nested in a loop body; the loop is reported through `iteration`. |
 | **metrics** | `{ selected?: integer; acted?: integer; unmeasuredEffect?: boolean }` | optional | Records this step selected / acted on, as reported by the node executor |
 | **skippedBy** | `{ nodeId: string; edgeId?: string; label?: string }` | optional | The gate that closed, when `status` is `skipped` |
 
@@ -278,7 +279,7 @@ const result = CheckpointSchema.parse(data);
 | **nodeLabel** | `string` | optional | Human-readable node label |
 | **status** | `Enum<'success' \| 'failure' \| 'skipped'>` | ✅ | Terminal status of the node across the run — `failure` if any execution failed, else `success` if any succeeded, else `skipped` |
 | **runs** | `integer` | ✅ | Times the node executed (loop iterations and parallel branches each count) |
-| **failures** | `integer` | ✅ | Executions that failed |
+| **failures** | `integer` | ✅ | Executions that failed — a failure a `try_catch` caught or a `fault` edge routed counts here too; the run-level `failed` is the sum of this across `nodes` |
 | **skipped** | `integer` | ✅ | Times a closed gate kept this node from running at all |
 | **selected** | `integer` | optional | Records read across every execution — omitted for a node that reads none |
 | **acted** | `integer` | optional | Records written / effects dispatched across every execution — omitted for a node that writes none |
@@ -297,6 +298,7 @@ const result = CheckpointSchema.parse(data);
 | **acted** | `integer` | ✅ | Total records written / effects dispatched by the run |
 | **skipped** | `integer` | ✅ | Total node executions a closed gate prevented |
 | **unmeasured** | `integer` | optional | Total executions that may have caused an effect the platform cannot count. Absent = not tracked (an older run), which is not the same as zero. |
+| **failed** | `integer` | optional | Total node executions that failed — a fold of `nodes[].failures`. On a run that completed every one of them was contained (caught by a `try_catch` or routed down a `fault` edge) and the run went on. Absent = not tracked (an older run), which is not the same as zero. |
 | **nodes** | `{ nodeId: string; nodeType: string; nodeLabel?: string; status: Enum<'success' \| 'failure' \| 'skipped'>; … }[]` | ✅ | Per-node breakdown, in first-execution order |
 | **gates** | `{ nodeId: string; targetNodeId: string; edgeId?: string; label?: string; … }[]` | ✅ | Gates that closed during the run, most-skipped first |
 | **detailOmitted** | `boolean` | optional | Set when persistence dropped `nodes`/`gates` to keep the stored row bounded — the totals are still exact. Declared so empty arrays are never mistaken for "nothing ran". |
@@ -310,7 +312,7 @@ const result = CheckpointSchema.parse(data);
 | **nodeLabel** | `string` | optional | Human-readable node label |
 | **status** | `Enum<'success' \| 'failure' \| 'skipped'>` | ✅ | Terminal status of the node across the run — `failure` if any execution failed, else `success` if any succeeded, else `skipped` |
 | **runs** | `integer` | ✅ | Times the node executed (loop iterations and parallel branches each count) |
-| **failures** | `integer` | ✅ | Executions that failed |
+| **failures** | `integer` | ✅ | Executions that failed — a failure a `try_catch` caught or a `fault` edge routed counts here too; the run-level `failed` is the sum of this across `nodes` |
 | **skipped** | `integer` | ✅ | Times a closed gate kept this node from running at all |
 | **selected** | `integer` | optional | Records read across every execution — omitted for a node that reads none |
 | **acted** | `integer` | optional | Records written / effects dispatched across every execution — omitted for a node that writes none |

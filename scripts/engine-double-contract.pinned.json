@@ -417,6 +417,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.datasource-delete-prolongation.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.datasource-delete-prolongation.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.datasource-delete-prolongation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.delete-object-registry-unregister.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2373,6 +2388,11 @@
     },
     {
       "file": "packages/plugins/plugin-email/src/plugin-shutdown-detaches-template-bridge.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-email/src/sender-address-validation.test.ts",
       "verb": "update",
       "pinned": 1
     },
