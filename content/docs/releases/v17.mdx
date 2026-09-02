@@ -2070,7 +2070,12 @@ rc.1, and administrators should know what changed:
   stalling (objectui#2955); a reassign writes structured `reassign_from` /
   `reassign_to` parties that timelines render without free-text archaeology
   (#4365); and a `runAs: 'system'` flow's writes are audited as
-  `svc:flow:<flowName>` instead of "Unknown user" (#4366).
+  `svc:flow:<flowName>` instead of "Unknown user" (#4366). That label is a
+  fallback, not a replacement for the operator — it stands in only for a run
+  that resolves no user at all (a schedule, or a system flow fired by a write
+  that itself carried no user). Where the trigger does resolve a user, #5494
+  later on this page carries that user through unchanged, so the audit row
+  still names the human.
 - **Run summaries learn honesty about side effects (#4395, #4396).**
   `connector_action` and mutating `http` nodes report `unmeasuredEffect` (the
   platform cannot know whether `crm.push_opportunity` writes), an
