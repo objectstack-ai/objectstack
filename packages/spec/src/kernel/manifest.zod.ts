@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { CORE_PLUGIN_TYPES } from './plugin.zod';
 import { retiredKey } from '../shared/retired-key';
+import { strictObject } from '../shared/strict-object';
 import { SeedSchema } from '../data/seed.zod';
 import { NavigationContributionSchema } from '../ui/app.zod';
 
@@ -63,14 +64,19 @@ export type ManifestPermissions = z.input<typeof ManifestPermissionsSchema>;
  * takes precedence over `platform` (the engine release range), so a plugin
  * keeps working across platform releases that preserve the protocol.
  */
-export const PluginEnginesSchema = z
-  .object({
-    platform: z.string().optional()
-      .describe('ObjectStack platform release range (SemVer, e.g. ">=4.0 <5")'),
-    protocol: z.string().optional()
-      .describe('Runtime/metadata protocol range, checked first (ADR §3.10 #3)'),
-  })
-  .describe('Plugin compatibility ranges (ADR-0025 §3.2)');
+export const PluginEnginesSchema = strictObject({
+  surface: 'the `engines` block of this package manifest',
+  history:
+    'Until this block was closed, an unknown key inside `engines:` parsed green and was '
+    + 'silently dropped — a transposed `protocl` left `engines.protocol` undeclared, so the '
+    + 'load-time protocol handshake had no range to check and every runtime accepted the '
+    + 'package. The declared keys are `platform` and `protocol`.',
+}, {
+  platform: z.string().optional()
+    .describe('ObjectStack platform release range (SemVer, e.g. ">=4.0 <5")'),
+  protocol: z.string().optional()
+    .describe('Runtime/metadata protocol range, checked first (ADR §3.10 #3)'),
+}).describe('Plugin compatibility ranges (ADR-0025 §3.2)');
 
 export type PluginEngines = z.input<typeof PluginEnginesSchema>;
 
@@ -140,6 +146,32 @@ export type PluginIntegrity = z.input<typeof PluginIntegritySchema>;
  * Schema for the ObjectStack Manifest.
  * This defines the structure of a package configuration in the ObjectStack ecosystem.
  * All packages (apps, plugins, drivers, modules) must conform to this schema.
+ *
+ * CLOSED against unknown keys (`strictObject`), like every inner authorable
+ * surface the #4001 campaign closed and the top-level stack door (#8687) one
+ * level up. Before this, an unknown key inside `manifest:` parsed green and
+ * was silently dropped at every door — measured on 17.2.0 at all seven:
+ * `defineStack` / `os validate` / `os compile` (`ObjectStackDefinitionSchema`),
+ * `devPlugins[]`, the artifact `packages[]` entry (authoring and assembled),
+ * `os plugin build` (`objectstack.plugin.json`), the Studio package form, the
+ * `InstalledPackage` row schema and the package request/snapshot wire shapes
+ * that embed this one. A transposed `namesapce` therefore left
+ * `manifest.namespace` undefined, and the namespace decides every object's
+ * table name, REST path and the install-time namespace gate (ADR-0129 D1-D2,
+ * ADR-0048 §3.2, ADR-0130 D1/D3) — a two-letter transposition shipped objects
+ * under a name the author never wrote, with exit 0. The nested `contributes`,
+ * `contributes.kinds[]`, `engine` and `engines` blocks are closed under the
+ * same measurement (the same doors, the same silent drop one level down).
+ *
+ * The retired keys stay `retiredKey()` tombstones rather than becoming
+ * `guidance` entries: a tombstone types the key `never` for `tsc` AND raises
+ * its prescription at parse, which is strictly stronger than a curated
+ * unknown-key line, and `strictObject` keeps tombstones out of the rename
+ * candidates (`acceptsNothing`) so a typo is never pointed at a dead key.
+ * `main` is DECLARED rather than curated: the `os plugin build` door reads it
+ * off the source manifest and writes it into the compiled one, so a
+ * prescription telling authors to delete it would have described neither
+ * file (see the key's own doc below).
  * 
  * @example App Package
  * ```yaml
@@ -155,7 +187,23 @@ export type PluginIntegrity = z.input<typeof PluginIntegritySchema>;
  *   - "./src/objects/*.object.yml"
  * ```
  */
-export const ManifestSchema = z.object({
+export const ManifestSchema = strictObject({
+  surface: 'this package manifest',
+  history:
+    'Until this surface was closed, an unknown key inside `manifest:` parsed green and its '
+    + 'value was silently dropped — a transposed `namesapce` left `manifest.namespace` '
+    + 'undefined, so every object name, table name, REST path and the install-time namespace '
+    + 'gate were decided against a namespace the author never wrote, with `os validate` '
+    + 'exiting 0. The declared keys are enumerated by `ManifestSchema` (@objectstack/spec, '
+    + 'kernel/manifest.zod.ts) and in the package-manifest reference docs.',
+  guidance: {
+    specVersion:
+      '`specVersion` is not a package-manifest key. The protocol axis the runtime checks at '
+      + 'load is `engines.protocol` — declare `engines: { protocol: \'^17\' }` (the range the '
+      + 'scaffold stamps); `specVersion` keeps its meaning only on the marketplace TEMPLATE '
+      + 'manifest (`cloud/template-manifest.zod.ts`), which is a different surface.',
+  },
+}, {
   /** 
    * Unique package identifier using reverse domain notation.
    * Must be unique across the entire ecosystem.
@@ -325,8 +373,9 @@ export const ManifestSchema = z.object({
    * "value is encrypted/masked (e.g. API Keys)" while nothing encrypted,
    * masked, resolved or even parsed the value — an author writing
    * `secret: true` next to an API key got exactly the same handling as
-   * `secret: false`. Tombstoned rather than deleted because `ManifestSchema`
-   * is not `.strict()`: a plain deletion would silently strip the key (the
+   * `secret: false`. Tombstoned rather than deleted: the tombstone types the
+   * key `never` for `tsc` and raises this prescription at parse, which a bare
+   * unknown-key refusal on the (since-closed) surface would not carry (the
    * `loading` precedent below).
    */
   configuration: retiredKey(
@@ -356,14 +405,21 @@ export const ManifestSchema = z.object({
    * `manifest.contributes` in the entire monorepo —
    * `packages/objectql/src/engine.ts` reading `kinds` — so every other
    * member parsed, entered the manifest, and changed nothing.
-   * Tombstoned rather than deleted because this object is not `.strict()`:
-   * a plain deletion would silently strip the key, replacing an inert
-   * declaration with an invisible one (the `loading` precedent below).
+   * Tombstoned rather than deleted: each tombstone types its key `never` and
+   * raises the prescription at parse — a plain deletion under the since-closed
+   * block would answer with a bare unknown-key refusal instead of the upgrade
+   * text (the `loading` precedent below).
    *
    * Survivor: `kinds` (live reader: engine → `registry.registerKind`) —
    * the block's sole remaining live member.
    */
-  contributes: z.object({
+  contributes: strictObject({
+    surface: 'the `contributes` block of this package manifest',
+    history:
+      'Until this block was closed, an unknown key inside `contributes:` parsed green and was '
+      + 'silently dropped — `kind:` for `kinds:` registered no metadata kind and said nothing. '
+      + 'The one live member is `kinds`; the retired members answer with their prescriptions.',
+  }, {
     /**
      * Register new Metadata Kinds (identifiers).
      *
@@ -374,7 +430,13 @@ export const ManifestSchema = z.object({
      * declaration never fed — the former `globs` sub-field promised exactly
      * that and was retired for it (#11169).
      */
-    kinds: z.array(z.object({
+    kinds: z.array(strictObject({
+      surface: 'a `contributes.kinds` entry of this package manifest',
+      history:
+        'Until this entry shape was closed, an unknown key on a kind entry parsed green and '
+        + 'was silently dropped. The declared keys are `id` and `description`; `globs` is a '
+        + 'retired tombstone.',
+    }, {
       id: z.string().describe('The generic identifier of the kind (e.g., "sys.bi.report")'),
       /** REMOVED (#11169) — discovery reads the metadata type registry's `filePatterns`, never this. */
       globs: retiredKey(
@@ -524,8 +586,8 @@ export const ManifestSchema = z.object({
    * stack-level `capabilities` collection) — none is reached from a
    * manifest. `PluginCapabilityManifestSchema` itself stays exported: the
    * plugin-registry surface (`plugin-registry.zod.ts`) still declares it.
-   * Tombstoned rather than deleted because `ManifestSchema` is not
-   * `.strict()` (the `loading` precedent below).
+   * Tombstoned rather than deleted so the rejection carries this
+   * prescription in both channels (the `loading` precedent below).
    */
   capabilities: retiredKey(
     '`manifest.capabilities` was removed in @objectstack/spec 17 (ADR-0049 ' +
@@ -544,8 +606,8 @@ export const ManifestSchema = z.object({
    * z.unknown())` — with zero readers anywhere, so whatever an author parked
    * here was stored and never consulted. Its emptiness in-repo was itself
    * evidence: an untyped catch-all with no users is a cheaper removal than
-   * one with unknown users. Tombstoned rather than deleted because
-   * `ManifestSchema` is not `.strict()` (the `loading` precedent below).
+   * one with unknown users. Tombstoned rather than deleted so the
+   * rejection carries this prescription (the `loading` precedent below).
    */
   extensions: retiredKey(
     '`manifest.extensions` was removed in @objectstack/spec 17 (ADR-0049 ' +
@@ -574,9 +636,12 @@ export const ManifestSchema = z.object({
    * `preload`, `codeSplitting`, `dynamicImport`, `initialization`,
    * `dependencyResolution`, `hotReload`, `caching`, `sandboxing`, `monitoring`
    * — and NOTHING read any of it. It parsed, it entered the manifest, and it
-   * changed nothing. Tombstoned rather than deleted because `ManifestSchema` is
-   * not `.strict()`: a plain deletion would silently strip the key, replacing an
-   * inert declaration with an invisible one.
+   * changed nothing. Tombstoned rather than deleted: when this landed
+   * `ManifestSchema` was not `.strict()`, so a plain deletion would have
+   * silently stripped the key, replacing an inert declaration with an invisible
+   * one; the surface has since been closed, and the tombstone stays because it
+   * types the key `never` and carries this prescription, which a bare refusal
+   * would not.
    *
    * See `plugin-loading.zod.ts` for the full record, including why `sandboxing`
    * made this a security concern and not merely tidying.
@@ -611,7 +676,12 @@ export const ManifestSchema = z.object({
    *   objectstack: ">=3.0.0"
    * ```
    */
-  engine: z.object({
+  engine: strictObject({
+    surface: 'the legacy `engine` block of this package manifest',
+    history:
+      'Until this block was closed, an unknown key inside `engine:` parsed green and was '
+      + 'silently dropped; its one declared key is `objectstack` (superseded by `engines`).',
+  }, {
     /** ObjectStack platform version requirement (SemVer range) */
     objectstack: z.string()
       .regex(/^[><=~^]*\d+\.\d+\.\d+/)
@@ -649,6 +719,23 @@ export const ManifestSchema = z.object({
    */
   packaging: PluginPackagingSchema.optional()
     .describe('Dependency packaging strategy (ADR-0025 §3.3)'),
+
+  /**
+   * Entry module of a code-bearing plugin, relative to the plugin root
+   * (ADR-0025 §3.4 step 1).
+   *
+   * `os plugin build` reads it off the SOURCE `objectstack.plugin.json` to pick
+   * the module esbuild bundles (`--entry` overrides it; with neither, the build
+   * probes `src/index.{ts,tsx,mjs,js}`), and REWRITES it into the COMPILED
+   * manifest inside the artifact as `dist/index.mjs`, the bundle a host loads.
+   * Declared because that door reads it: before this surface was closed the
+   * key was honoured while undeclared, so the schema described neither the
+   * source manifest an author writes nor the compiled one the artifact
+   * carries, and closing the surface without declaring it would have refused
+   * every plugin that names its entry.
+   */
+  main: z.string().optional()
+    .describe('Entry module of a code-bearing plugin, relative to the plugin root; `os plugin build` bundles it and writes `dist/index.mjs` here in the compiled manifest (ADR-0025 §3.4)'),
 
   /**
    * Per-file content digests of the packaged artifact (ADR-0025 §3.2).

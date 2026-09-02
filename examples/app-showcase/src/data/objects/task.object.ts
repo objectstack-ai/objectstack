@@ -105,6 +105,11 @@ export const Task = ObjectSchema.create({
       field: 'status',
       // Transitions are validated on update; insert sets the initial state.
       events: ['update'] as const,
+      // Update-only, so 'transition' is honest for the single refusal code
+      // this rule can raise. Translated at
+      // `objects.showcase_task._validations.task_status_flow.message` (#14253)
+      // — an authored message is emitted verbatim unless the bundle carries
+      // that key, and the bundle wins once it does (#14518).
       message: 'Invalid task status transition.',
       transitions: {
         backlog: ['todo'],

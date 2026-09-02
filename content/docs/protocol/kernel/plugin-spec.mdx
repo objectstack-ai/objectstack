@@ -168,10 +168,12 @@ export default definePlugin({
 required; the optional fields are `namespace`, `defaultDatasource`, `scope`,
 `description`, `permissions`, `objects`, `datasources`, `dependencies`,
 `contributes`, `data`, `navigationContributions`, `engine`, `engines`, `runtime`,
-`packaging` and `integrity`. The `configuration`, `capabilities`, `extensions` and
+`packaging`, `main` and `integrity`. The `configuration`, `capabilities`, `extensions` and
 `loading` keys are **retired tombstones** (ADR-0049 enforce-or-remove): nothing ever
 read any of them, so authoring one is now a compile error and a parse error carrying
-the migration prescription.
+the migration prescription. Any other key is refused at parse — the schema is closed
+against unknown keys, at the manifest root and inside `contributes`, `engine` and
+`engines` — with a message naming the key and, for a near miss, the declared spelling.
 
 The `displayName` / `author` / `license` / `homepage` / `optionalDependencies` /
 `peerDependencies` / `metadata` / `config` / `marketplace` keys above are

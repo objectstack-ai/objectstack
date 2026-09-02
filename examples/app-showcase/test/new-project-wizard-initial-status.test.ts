@@ -23,15 +23,20 @@
  * on it. Asserting only "it throws" would pass against a rejection for any
  * other reason — including the `required` check, which is what a naive "just
  * drop the field" fix would have tripped.
+ *
+ * The second `describe` is #14518 and is deliberately NOT wizard-scoped: the
+ * per-object translation pin that used to live in the first one is replaced by
+ * a bundle-wide one, because an instance-scoped pin is what left eight authored
+ * messages behind when #14311 fixed four.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 
+import stack from '../objectstack.config.js';
 import { Account, Project } from '../src/data/objects/index.js';
 import { NewProjectWizardPage } from '../src/ui/pages/new-project-wizard.page.js';
-import { ShowcaseTranslationBundle } from '../src/system/translations/index.js';
 
 type Rule = {
   type?: string;
@@ -39,6 +44,8 @@ type Rule = {
   field?: string;
   initialStates?: string[];
   message?: string;
+  then?: Rule;
+  otherwise?: Rule;
 };
 
 const APP_ID = 'com.objectstack.showcase';
@@ -137,33 +144,6 @@ describe('#14311 — the New Project wizard and the status state machine', () =>
     expect(defaulted).toEqual(statusRule.initialStates);
   });
 
-  it('EVERY rule on the object is on the translation channel in both shipped locales', () => {
-    // An authored `validations[].message` is emitted VERBATIM unless the bundle
-    // carries `objects.<o>._validations.<rule>.message` (#14253). Scoped to the
-    // whole object rather than to the status rule on purpose: this one wizard
-    // can also trip `end_after_start` and `spent_within_budget` from its
-    // budget/schedule step, so pinning only the status rule would let the single
-    // English sentence move one step later instead of disappearing.
-    const rules = ((Project as unknown as { validations?: Rule[] }).validations ?? [])
-      .filter((r) => typeof r?.name === 'string');
-    expect(rules.length).toBeGreaterThan(1);
-
-    for (const rule of rules) {
-      const name = rule.name!;
-      for (const locale of ['en', 'zh-CN'] as const) {
-        const entry = (ShowcaseTranslationBundle as any)[locale]
-          ?.objects?.showcase_project?._validations?.[name];
-        expect(entry?.message, `${locale} is missing a message for ${name}`).toBeTruthy();
-      }
-      // The zh-CN entry must actually BE Chinese — an English copy satisfies
-      // "a key exists" while reproducing the defect exactly.
-      const zh = (ShowcaseTranslationBundle as any)['zh-CN']
-        .objects.showcase_project._validations[name].message as string;
-      expect(zh, `${name}'s zh-CN message is not Chinese`).toMatch(/[一-龥]/);
-      expect(zh, `${name}'s zh-CN message is a copy of the authored one`).not.toBe(rule.message);
-    }
-  });
-
   it('creates with the wizard payload and refuses the status it used to offer', async () => {
     const engine = await bootShowcase();
     const account: any = await engine.insert(
@@ -200,4 +180,128 @@ describe('#14311 — the New Project wizard and the status state machine', () =>
     expect(field.constraint).toEqual({ allowed: 'planned' });
     expect(field.value).toBe('active');
   }, 30000);
+});
+
+/**
+ * [#14518] EVERY authored `validations[].message` the showcase declares is on
+ * the #14253 translation channel, in every locale the app claims to support.
+ *
+ * Bundle-wide on purpose. #14311 put `showcase_project`'s four rules on the
+ * channel and stopped there, because its scope was one wizard — which left
+ * eight (seven on `showcase_account`, one on `showcase_task`) refusing in
+ * English inside an otherwise zh-CN error envelope. A pin scoped to one object
+ * polices that object; the NEXT rule to be declared rots the same way. This
+ * asks the question of the whole registered surface instead, so a new rule
+ * without a translation fails here rather than shipping.
+ *
+ * Read on the COMPOSED stack — `stack.objects`, `stack.objectExtensions`,
+ * `stack.translations`, `stack.i18n` — the reachability principle `seed.test.ts`
+ * documents: what the resolver and the lint gates see is the composed stack,
+ * not the imported modules. The locale list is the app's OWN claim
+ * (`i18n.supportedLocales`) rather than a literal, so adding a locale to the
+ * config puts every authored sentence in scope for it instead of silently
+ * declaring coverage nobody wrote.
+ */
+describe('#14518 — every authored validation message in the showcase is translated', () => {
+  interface AuthoredRule { object: string; name: string; message: string }
+
+  /**
+   * Every named rule an object declares, DESCENDING into `conditional`
+   * branches.
+   *
+   * A `then` / `otherwise` branch is a full rule carrying its own `name`, and
+   * `checkConditional` renders THAT branch's message — the wrapping rule's
+   * sentence never reaches a caller. So a flat walk of `validations[]` misses
+   * exactly the messages a user actually reads, which is what the premise test
+   * below pins by name.
+   */
+  function authoredRules(objectName: string, validations: unknown): AuthoredRule[] {
+    const out: AuthoredRule[] = [];
+    const visit = (rule: Rule | undefined): void => {
+      if (!rule || typeof rule !== 'object') return;
+      if (typeof rule.name === 'string' && typeof rule.message === 'string' && rule.message !== '') {
+        out.push({ object: objectName, name: rule.name, message: rule.message });
+      }
+      visit(rule.then);
+      visit(rule.otherwise);
+    };
+    for (const rule of Array.isArray(validations) ? validations : []) visit(rule as Rule);
+    return out;
+  }
+
+  const declaredRules: AuthoredRule[] = [
+    ...((stack.objects ?? []) as Array<{ name?: string; validations?: unknown }>)
+      .flatMap((o) => (typeof o?.name === 'string' ? authoredRules(o.name, o.validations) : [])),
+    // An extension's `validations` MERGE into the target object at
+    // registration (`ObjectExtensionSchema` carries them), so such a rule is
+    // addressed under `extend` — not under the extension. None declares one
+    // today; the walk is here so the first one is not a silent hole.
+    ...((stack.objectExtensions ?? []) as Array<{ extend?: string; validations?: unknown }>)
+      .flatMap((e) => (typeof e?.extend === 'string' ? authoredRules(e.extend, e.validations) : [])),
+  ];
+
+  const locales = (stack.i18n?.supportedLocales ?? []) as string[];
+  const defaultLocale = (stack.i18n?.defaultLocale ?? 'en') as string;
+
+  /** What the resolver would find at `objects.<o>._validations.<rule>.message`. */
+  function bundleMessage(locale: string, objectName: string, ruleName: string): unknown {
+    for (const bundle of (stack.translations ?? []) as Array<Record<string, any>>) {
+      const found = bundle?.[locale]?.objects?.[objectName]?._validations?.[ruleName]?.message;
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+
+  it('the premise: the walk sees the registered surface, nested branches included', () => {
+    // Without these the assertions below pass vacuously — over no locales, no
+    // objects, or a rule set that stops at the top level of `validations[]`.
+    expect(locales).toContain(defaultLocale);
+    expect(locales.filter((l) => l !== defaultLocale).length).toBeGreaterThan(0);
+    expect(new Set(declaredRules.map((r) => r.object)).size).toBeGreaterThanOrEqual(3);
+    expect(declaredRules.map((r) => r.name)).toContain('churn_reason_present');
+  });
+
+  it('every authored rule message has a bundle entry in every supported locale', () => {
+    // Reported as a LIST rather than one failing assertion per rule: the whole
+    // population is the finding, and #14311 stopping at four is precisely the
+    // shape a first-failure-only report encourages.
+    const missing: string[] = [];
+    for (const rule of declaredRules) {
+      for (const locale of locales) {
+        const message = bundleMessage(locale, rule.object, rule.name);
+        if (typeof message !== 'string' || message.length === 0) {
+          missing.push(`${locale}: objects.${rule.object}._validations.${rule.name}.message`);
+        }
+      }
+    }
+    expect(missing, 'authored messages with no bundle entry refuse in the source language').toEqual([]);
+  });
+
+  it('the default-locale entry is the authored sentence verbatim', () => {
+    // The bundle WINS over `rule.message` in every locale, `en` included, so an
+    // entry that has drifted from the object turns the sentence authored beside
+    // the rule into text no reader ever sees — the object file then documents a
+    // refusal the app does not give.
+    for (const rule of declaredRules) {
+      expect(
+        bundleMessage(defaultLocale, rule.object, rule.name),
+        `objects.${rule.object}._validations.${rule.name} (${defaultLocale}) has drifted from the authored message`,
+      ).toBe(rule.message);
+    }
+  });
+
+  it('a non-default locale is actually translated, not a copy of the source', () => {
+    for (const locale of locales.filter((l) => l !== defaultLocale)) {
+      for (const rule of declaredRules) {
+        const message = bundleMessage(locale, rule.object, rule.name) as string;
+        // A copy of the English satisfies "a key exists" while reproducing the
+        // defect exactly — which is the failure mode this whole file is about.
+        expect(message, `${rule.object}.${rule.name} in ${locale} is a copy of the source`)
+          .not.toBe(rule.message);
+        if (locale.startsWith('zh')) {
+          expect(message, `${rule.object}.${rule.name} in ${locale} is not Chinese`).toMatch(/[一-龥]/);
+        }
+      }
+    }
+  });
 });

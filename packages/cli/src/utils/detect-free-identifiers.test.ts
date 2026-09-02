@@ -1,7 +1,11 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { detectFreeIdentifiers } from './detect-free-identifiers.js';
+import {
+  detectFreeIdentifiers,
+  NODE_ONLY_GLOBALS,
+  SANDBOX_GLOBALS,
+} from './detect-free-identifiers.js';
 
 /** Helper: stringify a real function so we test the exact `.toString()` path. */
 const src = (fn: (...a: any[]) => any) => String(fn);
@@ -53,6 +57,14 @@ describe('detectFreeIdentifiers (#1876 — body self-containment)', () => {
       ['nested destructuring', '({ a: { b } }) => b + 1'],
       ['rest params', '(...args) => args.length'],
       ['typeof a local', '(ctx) => { const v = ctx.v; return typeof v; }'],
+      // #14301 — the node-only refusal is a SCOPE analysis, not a token scan.
+      // A locally-bound name that happens to spell a host global is bound, and
+      // a member NAMED after one is not a reference at all. Both would be
+      // false refusals, and a false refusal here costs an author a body they
+      // were entitled to.
+      ['a local shadowing a host global', '(ctx) => { const Intl = ctx.fmt; return Intl.format(ctx.d); }'],
+      ['a member named after a host global', '(ctx) => { return ctx.Intl.format(ctx.d); }'],
+      ['a param named after a host global', '(ctx, Intl) => Intl.format(ctx.d)'],
     ];
     for (const [label, source] of selfContained) {
       it(label, () => {
@@ -80,5 +92,80 @@ describe('detectFreeIdentifiers (#1876 — body self-containment)', () => {
     expect(detectFreeIdentifiers('this is not a function').free).toEqual([]);
     expect(detectFreeIdentifiers('').free).toEqual([]);
     expect(detectFreeIdentifiers('{ not: valid').free).toEqual([]);
+  });
+  // ── #14301 — globals the NODE HOST has and the sandbox does not ──────────
+  //
+  // The reported shape: `Intl` sat in one generous allowlist beside `JSON`, so
+  // a handler calling `Intl.DateTimeFormat` had no free identifier, lowered
+  // into `body.source`, and threw `ReferenceError` in production while every
+  // local gate was green. The split makes the reference visible again; the
+  // membership of the two sets is not asserted here from knowledge — it is
+  // measured inside the real sandbox by `sandbox-globals-probe.test.ts`.
+  describe('reports host globals the sandbox does not provide', () => {
+    it('the card reproduction — Intl.DateTimeFormat', () => {
+      const r = detectFreeIdentifiers(
+        "(ctx) => { const f = new Intl.DateTimeFormat('en-US'); ctx.input.label = f.format(new Date(ctx.input.at)); }",
+      );
+      expect(r.unparsed).toBe(false);
+      expect(r.free).toEqual(['Intl']);
+      expect(r.nodeOnly).toEqual(['Intl']);
+    });
+
+    it('`nodeOnly` is a labelled SUBSET of `free`, not a second list', () => {
+      // Both halves at once. The caller needs them apart because the remedies
+      // are opposite — inline the helper, but a host global cannot be inlined
+      // — and needs them together because the refusal names every name.
+      const r = detectFreeIdentifiers('(ctx) => { ctx.x = slugify(ctx.name) + Intl.NumberFormat; }');
+      expect(r.free).toEqual(['Intl', 'slugify']);
+      expect(r.nodeOnly).toEqual(['Intl']);
+      expect(r.nodeOnly.every((n) => r.free.includes(n))).toBe(true);
+    });
+
+    it('a sandbox-provided global is still waived — the positive control', () => {
+      const r = detectFreeIdentifiers('(ctx) => { ctx.x = JSON.stringify(Math.round(ctx.n)); }');
+      expect(r.free).toEqual([]);
+      expect(r.nodeOnly).toEqual([]);
+    });
+
+    it('every member of NODE_ONLY_GLOBALS is reported when referenced free', () => {
+      // Set-wide rather than per-name: a member added to the set without the
+      // detector reading it would otherwise sit inert, which is the exact
+      // shape of the defect being closed one level up.
+      for (const name of NODE_ONLY_GLOBALS) {
+        const r = detectFreeIdentifiers(`(ctx) => { ctx.x = ${name}; }`);
+        expect({ name, free: r.free, nodeOnly: r.nodeOnly }).toEqual({
+          name,
+          free: [name],
+          nodeOnly: [name],
+        });
+      }
+    });
+
+    it('every member of SANDBOX_GLOBALS is waived when referenced free', () => {
+      for (const name of SANDBOX_GLOBALS) {
+        const r = detectFreeIdentifiers(`(ctx) => { ctx.x = ${name}; }`);
+        expect({ name, free: r.free, nodeOnly: r.nodeOnly }).toEqual({
+          name,
+          free: [],
+          nodeOnly: [],
+        });
+      }
+    });
+
+    it('junk input reports neither list (conservative — never blocks extraction)', () => {
+      // The bias the file's header states, restated over the NEW field: a
+      // source this analysis cannot make sense of must not produce a refusal.
+      // Asserted over the same three junk shapes the #1876 case uses, and
+      // without asserting `unparsed` — TS error-recovery decides that, and the
+      // invariant that matters is that neither list fills.
+      for (const junk of ['this is not a function', '', '{ not: valid']) {
+        const r = detectFreeIdentifiers(junk);
+        expect({ junk, free: r.free, nodeOnly: r.nodeOnly }).toEqual({
+          junk,
+          free: [],
+          nodeOnly: [],
+        });
+      }
+    });
   });
 });

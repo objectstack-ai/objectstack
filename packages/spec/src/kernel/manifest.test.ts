@@ -351,10 +351,11 @@ describe('ManifestSchema', () => {
 
 describe('contributes dead-member retirement (#10724, ADR-0049 — tombstoned, not deleted)', () => {
   // Nine members had zero readers monorepo-wide (#10627's controlled census,
-  // completed on cloud 2026-08-24). `ManifestSchema` and the `contributes`
-  // object are NOT `.strict()`, so a plain deletion would have silently
-  // stripped the keys — `retiredKey()` is what makes each rejection carry the
-  // prescription, and the prescription is what these pins assert (the specific
+  // completed on cloud 2026-08-24). When they were retired `ManifestSchema` and
+  // the `contributes` object were NOT `.strict()`, so a plain deletion would
+  // have silently stripped the keys; both are `strictObject` now, and the keys
+  // stay `retiredKey()` tombstones because a bare unknown-key refusal would not
+  // carry the prescription — which is what these pins assert (the specific
   // zod issue, never just "it threw").
   const base = { id: 'com.example.retired', version: '1.0.0', type: 'plugin', name: 'Retired' };
   const authored: Array<[member: string, value: unknown]> = [
@@ -405,9 +406,10 @@ describe('contributes.routes retirement (#10726, ADR-0049 — maintainer-ruled O
   // The one `contributes` member split onto its own card: zero readers like
   // its nine #10724 siblings (#10627's controlled census, cloud leg closed
   // clean by #10812), but four published surfaces taught it as THE way to
-  // serve a code-handler endpoint, so removal needed its own ruling. Neither
-  // `ManifestSchema` nor the `contributes` object is `.strict()`, so the
-  // removal is a `retiredKey()` tombstone; the pin asserts the SPECIFIC zod
+  // serve a code-handler endpoint, so removal needed its own ruling. The
+  // removal is a `retiredKey()` tombstone (it carries the prescription, which
+  // the since-closed block's bare unknown-key refusal would not); the pin
+  // asserts the SPECIFIC zod
   // issue — located at the key, carrying the removal record and the
   // imperative `http.server` fix — never just "it threw".
   const base = { id: 'com.example.routes', version: '1.0.0', type: 'plugin', name: 'Routes' };
@@ -442,8 +444,9 @@ describe('contributes.kinds[].globs retirement (#11169, ADR-0049 — maintainer-
   // The sub-field promised glob-driven file-type discovery that actually runs
   // off the metadata type registry's `filePatterns` — which `contributes.kinds`
   // does not extend — so an authored `globs` was stored, served back, and never
-  // consulted. The kinds item object is not `.strict()`, so the removal is a
-  // `retiredKey()` tombstone; the pin asserts the SPECIFIC zod issue.
+  // consulted. The removal is a `retiredKey()` tombstone (the kinds entry
+  // shape is closed now, and a tombstone still carries the prescription a bare
+  // refusal would not); the pin asserts the SPECIFIC zod issue.
   const base = { id: 'com.example.kinds', version: '1.0.0', type: 'plugin', name: 'Kinds' };
 
   it('REJECTS an authored kinds[].globs with the prescription as the issue', () => {
@@ -480,10 +483,11 @@ describe('dead-container retirement (#11332, ADR-0049 — tombstoned, not delete
   // Three top-level manifest containers had ZERO reads of the container itself
   // monorepo-wide (objectstack + objectui + cloud, controlled census), which
   // settles every key beneath them at once — a key cannot be read if the
-  // object holding it never is. `ManifestSchema` is NOT `.strict()`, so a
-  // plain deletion would have silently stripped the keys — `retiredKey()` is
-  // what makes each rejection carry the prescription, and the prescription is
-  // what these pins assert (the specific zod issue, never just "it threw").
+  // object holding it never is. When they were retired `ManifestSchema` was NOT
+  // `.strict()`, so a plain deletion would have silently stripped the keys; the
+  // surface is `strictObject` now and the keys stay `retiredKey()` tombstones
+  // because a bare unknown-key refusal would not carry the prescription — which
+  // is what these pins assert (the specific zod issue, never just "it threw").
   const base = { id: 'com.example.retired', version: '1.0.0', type: 'plugin', name: 'Retired' };
   const authored: Array<[container: string, value: unknown, mustMention: RegExp]> = [
     [

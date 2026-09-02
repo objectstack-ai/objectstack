@@ -203,6 +203,73 @@ async function refusePackageRequest(
  * case in `package-door-5xx-message-sanitization.test.ts` so it goes red the
  * day either lands.
  */
+/**
+ * The fields a REGISTRY-sourced package entry is declared to carry on this
+ * door: the installed-package record shape (`InstalledPackageSchema`,
+ * `@objectstack/spec/kernel` — that schema is the authority; this list mirrors
+ * it deliberately, so publishing a newly declared field here is a decision
+ * rather than a side effect), plus `_diagnostics`, which is not part of the
+ * record at all — `decorateMetadataItem` in `@objectstack/metadata-protocol`
+ * grafts it onto every item leaving `getMetaItems`, and this door serves that
+ * output. It is listed because it is MEASURED to be the only thing the
+ * decoration adds for `type: 'package'`, not because the record declares it.
+ */
+const REGISTRY_PACKAGE_RESPONSE_FIELDS = [
+  'manifest',
+  'status',
+  'enabled',
+  'installedAt',
+  'updatedAt',
+  'installedVersion',
+  'previousVersion',
+  'statusChangedAt',
+  'errorMessage',
+  'settings',
+  'upgradeHistory',
+  'registeredNamespaces',
+  '_diagnostics',
+  // [#14375] The ADR-0070 D2 writability verdict. Like `_diagnostics` this is
+  // NOT a record field: `getMetaItems({ type: 'package' })` stamps it on every
+  // registry item, and this door's contract is to CARRY it (the durable row is
+  // spread over the registry item, so a durable copy without the key must leave
+  // the verdict standing) — pinned in `package-list-writable-carry.test.ts`.
+  // Listed here because an allowlist that omitted it would drop the field
+  // SILENTLY, answering 200 with the verdict simply gone.
+  'writable',
+] as const;
+
+/**
+ * Project a registry-sourced entry onto its declared fields before it is spread
+ * into a response — defence in depth behind the `500 Converting circular
+ * structure to JSON` repair, not the repair itself.
+ *
+ * The repair is at the PRODUCER: `SchemaRegistry.installPackage`
+ * (`@objectstack/objectql`) stores a serializable projection of the manifest
+ * instead of the caller's live `defineStack()` object, whose `plugins: [...]`
+ * held initialised plugin instances and through them the engine — a cycle since
+ * the engine grew `actionActivation -> store -> engine`. So this door has
+ * nothing unserializable left to hand out.
+ *
+ * What the projection adds is the failure MODE for the next undeclared member:
+ * `{ ...item }` let ONE bad member on ONE package fail the whole list for every
+ * caller, and an explicit field list degrades the same member to a field this
+ * response never mentions. Only the REGISTRY half is projected — the database
+ * half below is `PackageService`'s own durable JSON, whose shape this door does
+ * not own and must not narrow.
+ *
+ * Undefined fields are omitted, so the bytes are unchanged for every entry that
+ * already served fine.
+ */
+function toRegistryPackageResponse(item: unknown): Record<string, unknown> {
+  if (item === null || typeof item !== 'object') return {};
+  const src = item as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const field of REGISTRY_PACKAGE_RESPONSE_FIELDS) {
+    if (src[field] !== undefined) out[field] = src[field];
+  }
+  return out;
+}
+
 function sendThrownError(res: any, error: unknown): void {
   const thrown = resolveThrownHttpError(error);
   // The dispatcher twin's expression, byte for byte — one rule, two doors.
@@ -730,7 +797,7 @@ export function registerPackageRoutes(
             const id = item.manifest?.id || item.id;
             if (id) {
               packagesMap.set(id, {
-                ...item,
+                ...toRegistryPackageResponse(item),
                 source: 'registry',
               });
             }
@@ -882,7 +949,7 @@ export function registerPackageRoutes(
           (item.manifest?.id || item.id) === packageId
         );
         if (match) {
-          sendOk(res, { package: { ...match, source: 'registry' } });
+          sendOk(res, { package: { ...toRegistryPackageResponse(match), source: 'registry' } });
           return;
         }
       }
