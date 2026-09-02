@@ -409,3 +409,11 @@ export type {
 } from './write-epoch.js';
 export { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
 export type { AuthzInvalidationBridgeOptions } from './authz-invalidation-bridge.js';
+
+// [ADR-0130 D4/D5] Reading a release artifact's package list, and ordering it.
+// The load path in `plugin.ts` consumes this; it is exported so every other
+// door that grows an artifact-loading seam (the CLI, the marketplace install
+// path, the metadata dev-artifact loader) adopts the SAME read of both shapes
+// and the SAME single sorter, instead of each re-deriving one.
+export { resolveArtifactPackageOrder } from './artifact-packages.js';
+export type { ArtifactPackageError } from './artifact-packages.js';
