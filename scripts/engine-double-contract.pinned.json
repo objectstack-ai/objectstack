@@ -3192,6 +3192,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-automation/src/suspended-run-store.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-datasource/src/__tests__/datasource-admin-plugin.test.ts",
       "verb": "findOne",
       "pinned": 1
