@@ -28,6 +28,15 @@
  * first — `resolveRouteActionDeclaration`) is documented on the collection,
  * not changed.
  *
+ * One carve-out inside row (c), measured against the #7397 vacuity guard in
+ * `stack-inline-action-crossref.test.ts`: `mergeActionsIntoObjects` copies a
+ * bound standalone action into its object's `actions` on the way OUT of
+ * `defineStack`, so a built stack fed back in carries that action in both
+ * positions, byte-identical. That echo is one declaration seen twice — the
+ * runtime, too, skips a standalone whose object-embedded key is already
+ * registered — and it is absorbed; an embedded twin that differs in any field
+ * is the authored collision and stays refused.
+ *
  * Message shape is contract (one condition ⇒ one wording), so the refusal
  * cases pin the full line — the key, and where each declaration was written —
  * rather than `toThrow()` alone: a bare throw cannot tell "refused for the
@@ -95,7 +104,7 @@ describe('defineStack - duplicate scope-qualified action key', () => {
     );
   });
 
-  it('(c) refuses a bound standalone beside an embedded twin on the same object — the merge appends, one key', () => {
+  it('(c) refuses a bound standalone beside a DIFFERING embedded twin on the same object — the merge appends, one key', () => {
     const msg = refusal({
       manifest,
       objects: [{ ...probeItem, actions: [act('dup_c')] }],
@@ -181,6 +190,48 @@ describe('defineStack - the cross-scope pair stays accepted (two keys, documente
     expect((out.actions ?? []).map((a) => `${a.objectName ?? 'global'}:${a.name}`)).toEqual(['global:dup_y']);
     const item = (out.objects ?? []).find((o) => o.name === 'probe_item');
     expect((item?.actions ?? []).map((a) => a.name)).toEqual(['dup_y']);
+  });
+
+  it("absorbs the merge's echo: a built stack (bound action copied into its object) re-enters defineStack clean", () => {
+    const built = defineStack({
+      manifest,
+      objects: [probeItem],
+      actions: [act('echo_one', { objectName: 'probe_item' }), act('echo_two', { objectName: 'probe_item' })],
+    });
+    const item = (built.objects ?? []).find((o) => o.name === 'probe_item');
+    expect((item?.actions ?? []).map((a) => a.name)).toEqual(['echo_one', 'echo_two']);
+    expect(refusal(built)).toBeNull();
+  });
+
+  it('absorbs a hand-written embedded copy only when it is identical to the bound standalone', () => {
+    const bound = act('twin', { objectName: 'probe_item' });
+    expect(refusal({
+      manifest,
+      objects: [{ ...probeItem, actions: [{ ...bound }] }],
+      actions: [bound],
+    })).toBeNull();
+    // One field apart (a different label) and it is two declarations again.
+    const msg = refusal({
+      manifest,
+      objects: [{ ...probeItem, actions: [{ ...bound, label: 'Twin (embedded)' }] }],
+      actions: [bound],
+    });
+    expect(msg).toContain("  ✗ Action key 'probe_item:twin' is declared twice: ");
+  });
+
+  it('names only the distinct declarations when an echo sits beside a real collision', () => {
+    const bound = act('mixed', { objectName: 'probe_item' });
+    const msg = refusal({
+      manifest,
+      objects: [{ ...probeItem, actions: [{ ...bound }, act('mixed')] }],
+      actions: [bound],
+    });
+    expect(msg).toContain(ENVELOPE_ONE);
+    expect(msg).toContain(
+      "  ✗ Action key 'probe_item:mixed' is declared twice: " +
+        "stack.actions[0] (objectName 'probe_item') and " +
+        "objects['probe_item'].actions[1] (embedded on the object). ",
+    );
   });
 
   it('accepts the same name bound to two different objects — two keys', () => {

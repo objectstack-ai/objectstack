@@ -374,16 +374,19 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * `'global'` for an object-less action), a colon, then the action name — with
    * no wildcard semantics, so `defineStack` refuses two declarations that
    * resolve to the same key: both written here, both on one object's `actions`,
-   * or one in each position. One global and one object-bound action MAY share a
-   * `name`: they occupy two keys, and a by-name reader on the object's route
-   * resolves the object's own `actions` (embedded, or merged in from here)
-   * before a standalone global declaration.
+   * or one in each position (an embedded copy identical to the bound action it
+   * was merged from is that same declaration, counted once — a built stack
+   * re-enters `defineStack` clean). One global and one object-bound action MAY
+   * share a `name`: they occupy two keys, and a by-name reader on the object's
+   * route resolves the object's own `actions` (embedded, or merged in from
+   * here) before a standalone global declaration.
    */
   actions: z.array(ActionSchema).optional().describe(
     'Global and Object Actions. Unique per scope, not per stack: the runtime keys every action by '
     + "its owning object's name (or 'global' when object-less), a colon, then the action name, and "
     + 'defineStack refuses two declarations that resolve to one key — both here, both on one '
-    + "object's actions, or one in each position. One global and one object-bound action may share "
+    + "object's actions, or one in each position (an embedded copy identical to the bound action it "
+    + "was merged from is that declaration counted once). One global and one object-bound action may share "
     + "a name; on that object's route the object's own actions take precedence for by-name readers.",
   ),
   // `themes` was REMOVED in 17.1 (#10485, ADR-0049 enforce-or-remove — ruled
@@ -1538,6 +1541,35 @@ function joinDeclarationOrigins(origins: readonly string[]): string {
 }
 
 /**
+ * Structural equality over parsed metadata — primitives, arrays and plain
+ * objects (key order ignored, `undefined`-valued keys ignored); anything else
+ * by reference. `ActionSchema` is plain data, so this is exactly "the same
+ * declaration" for an action.
+ */
+function structurallyEqual(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((item, i) => structurallyEqual(item, b[i]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = Object.keys(left).filter((k) => left[k] !== undefined);
+  const otherKeys = Object.keys(right).filter((k) => right[k] !== undefined);
+  if (keys.length !== otherKeys.length) return false;
+  return keys.every((k) => k in right && structurallyEqual(left[k], right[k]));
+}
+
+/** One action declaration the duplicate-key walk saw, and where it was written. */
+interface ActionDeclarationSite {
+  origin: string;
+  action: unknown;
+  /** Written in `stack.actions` (true) or on an object's own `actions` (false). */
+  standalone: boolean;
+}
+
+/**
  * Same-scope duplicate action keys — one refusal line per colliding key.
  *
  * The runtime registers and dispatches every action under one exact-string
@@ -1546,20 +1578,31 @@ function joinDeclarationOrigins(origins: readonly string[]): string {
  * `executeAction`; the runtime's `collectActionDeclarations` and
  * `standaloneActionObjectName` build the same key), with no wildcard
  * semantics. Two declarations that resolve to one key collapse to one handler
- * registration: whichever registers second wins, and the other stays a live,
- * declared, permission-gated button whose handler is unreachable — nothing at
- * author, build or boot time says so, and the loser fails only when a user
- * clicks it (the ADR-0078 shape arriving at collection level). Measured on
- * main before this check: two standalone globals sharing a name, two
- * standalone actions bound to the same object, a bound standalone beside an
- * embedded twin on the same object (`mergeActionsIntoObjects` APPENDS, so
- * both survived into `object.actions`) and two embedded twins all built clean.
+ * registration: whichever registers second wins (`registerAction` is a plain
+ * `Map.set`), and the other stays a live, declared, permission-gated button
+ * whose handler is unreachable — nothing at author, build or boot time says
+ * so, and the loser fails only when a user clicks it (the ADR-0078 shape
+ * arriving at collection level). Measured on main before this check: two
+ * standalone globals sharing a name, two standalone actions bound to the same
+ * object, a bound standalone beside an embedded twin on the same object
+ * (`mergeActionsIntoObjects` APPENDS, so both survived into `object.actions`)
+ * and two embedded twins all built clean.
  *
  * Scope resolution mirrors the runtime exactly: a standalone action is scoped
  * by its `objectName` (post-parse — the legacy `object` alias is already
  * canonicalized) or global; an embedded action is scoped by the object it is
  * written on, whatever its own `objectName` says (the runtime keys embedded
  * declarations by the owning object).
+ *
+ * One declaration, two positions — counted ONCE: `mergeActionsIntoObjects`
+ * copies every bound standalone action into its object's `actions` on the way
+ * out of `defineStack`, so a built stack fed back in carries each bound
+ * action in both positions, byte-identical. That echo is not a second
+ * declaration (the runtime, too, skips a standalone whose object-embedded key
+ * is already registered), and `defineStack`'s output must stay valid
+ * `defineStack` input. So an embedded declaration structurally identical to a
+ * standalone one bound to the same object is absorbed into it; an embedded
+ * twin that differs in ANY field is the authored collision and is refused.
  *
  * Deliberately NOT refused: the cross-scope pair — one global and one
  * object-bound declaration sharing a `name`. They occupy two distinct keys, and
@@ -1569,30 +1612,51 @@ function joinDeclarationOrigins(origins: readonly string[]): string {
  * changed here.
  */
 function collectDuplicateActionKeyErrors(config: ObjectStackDefinition): string[] {
-  const originsByKey = new Map<string, string[]>();
-  const note = (scope: string, name: string, origin: string): void => {
+  const sitesByKey = new Map<string, ActionDeclarationSite[]>();
+  const note = (scope: string, name: string, site: ActionDeclarationSite): void => {
     const key = `${scope}:${name}`;
-    const list = originsByKey.get(key) ?? [];
-    list.push(origin);
-    originsByKey.set(key, list);
+    const list = sitesByKey.get(key) ?? [];
+    list.push(site);
+    sitesByKey.set(key, list);
   };
 
   for (const [i, action] of (config.actions ?? []).entries()) {
     if (action.objectName) {
-      note(action.objectName, action.name, `stack.actions[${i}] (objectName '${action.objectName}')`);
+      note(action.objectName, action.name, {
+        origin: `stack.actions[${i}] (objectName '${action.objectName}')`,
+        action,
+        standalone: true,
+      });
     } else {
-      note(GLOBAL_ACTION_SCOPE, action.name, `stack.actions[${i}] (no objectName, so scope '${GLOBAL_ACTION_SCOPE}')`);
+      note(GLOBAL_ACTION_SCOPE, action.name, {
+        origin: `stack.actions[${i}] (no objectName, so scope '${GLOBAL_ACTION_SCOPE}')`,
+        action,
+        standalone: true,
+      });
     }
   }
   for (const obj of config.objects ?? []) {
     for (const [j, action] of (obj.actions ?? []).entries()) {
-      note(obj.name, action.name, `objects['${obj.name}'].actions[${j}] (embedded on the object)`);
+      note(obj.name, action.name, {
+        origin: `objects['${obj.name}'].actions[${j}] (embedded on the object)`,
+        action,
+        standalone: false,
+      });
     }
   }
 
   const errors: string[] = [];
-  for (const [key, origins] of originsByKey) {
-    if (origins.length < 2) continue;
+  for (const [key, sites] of sitesByKey) {
+    if (sites.length < 2) continue;
+    // Drop the merge's echoes: an embedded site identical to a standalone site
+    // under the same key is that standalone declaration, seen again.
+    const distinct = sites.filter(
+      (site) =>
+        site.standalone ||
+        !sites.some((other) => other.standalone && structurallyEqual(other.action, site.action)),
+    );
+    if (distinct.length < 2) continue;
+    const origins = distinct.map((site) => site.origin);
     errors.push(
       `Action key '${key}' is declared ${origins.length === 2 ? 'twice' : `${origins.length} times`}: ` +
         `${joinDeclarationOrigins(origins)}. The runtime registers and dispatches every action under ` +
