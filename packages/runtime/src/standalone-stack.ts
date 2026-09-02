@@ -757,7 +757,19 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         new ObjectQLPlugin({ environmentId, runPlatformMigrations: cfg.runPlatformMigrations ?? true }),
     ];
     if (artifactBundle) {
-        plugins.push(new AppPlugin(artifactBundle, undefined, { skipSeedData: cfg.skipSeedData ?? false }));
+        plugins.push(new AppPlugin(artifactBundle, undefined, {
+            skipSeedData: cfg.skipSeedData ?? false,
+            // [#12892 step 2] The MetadataPlugin composed above reads this SAME
+            // artifact through the artifact door (`artifactSource.path` is
+            // `artifactPath`), which strict-parses, forward-converts and
+            // ADR-0010-stamps every item — so it, not AppPlugin's ADR-0057
+            // block, registers `positions` / `permissions` / `capabilities` /
+            // `sharingRules` on this boot. One route, one owner (maintainer
+            // ruling 2026-08-29 on #12892). The option is a DECLARATION that
+            // the door runs here, which is why it is set in this function and
+            // nowhere else: the two lines that make it true are 20 lines apart.
+            securityMetadataRegistrar: 'artifact-door',
+        }));
     }
 
     // Surface artifact-declared metadata so a caller using this result

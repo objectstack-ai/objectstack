@@ -63,7 +63,79 @@
  * reversed — the condition it named ("only one face would read it") is what
  * stopped being true.
  *
- * # Reverse verification — direction predicted BEFORE it was run, per case
+ * # `alias` is ESCAPED, not gated — as of #14235
+ *
+ * `RemoteTransport.aggregate` emits a caller-supplied output NAME in exactly
+ * two positions. #13714 routed BOTH of `driver-sql`'s through
+ * `SqlDriver.aliasIdentifierSql`; #14113 moved this transport's AGGREGATION
+ * alias to the same escaping and deliberately left the groupBy alias alone,
+ * because the groupBy position carried the landed #6401 pin below asserting the
+ * refusal. #14235 is the card that reverses that pin on the record: an
+ * output-column key is a NAME — quoted and escaped — and a column REFERENCE is
+ * grammar, so `field` keeps `assertSafeIdentifier` and `outKey` no longer has
+ * it. `GroupByNodeSchema.alias` is the same class of key as
+ * `AggregationNodeSchema.alias`, and the in-memory face projects
+ * `g.alias ?? g.field` verbatim, so this face was the last one refusing names
+ * the contract permits — with a bare `Error` before #14287, an opaque 500 after
+ * `mapDataError`, and a 400 `INVALID_REQUEST` since.
+ *
+ * ⚠️ The `[#6401] refuses an unsafe identifier in \`alias\`` case named in the
+ * #6212 record below **no longer exists** — it is replaced in place by
+ * `[#14235] ESCAPES an alias that would close the quoting`, on the same input.
+ * The record is left as it was measured rather than rewritten to match today's
+ * cases: it is the #6212 ablation, not this one.
+ *
+ * ## Reverse verification (#14235) — direction predicted BEFORE it was run
+ *
+ * Restore the two pre-#14235 lines at the groupBy select site —
+ * `this.assertSafeIdentifier(outKey)` above the push, and
+ * `` `"${field}" AS "${outKey}"` `` as the aliased emission:
+ *
+ * - the two capture cases (`ESCAPES an alias that would close the quoting`,
+ *   `a dotted or spaced alias round-trips`) go RED by THROWING inside the call
+ *   — `unsafe identifier rejected: "bucket"; DROP TABLE deal; --"` /
+ *   `"Region Name"` — not on a comparison.
+ * - both executing cases go RED the same way, inside `driver.aggregate`.
+ * - the `field`-position control (`still refuses an unsafe identifier inside a
+ *   structured entry`) stays GREEN — untouched by this change, and that is
+ *   exactly what it is here to hold.
+ * - `projects \`alias\` as the column name` and `an alias equal to the field
+ *   name emits no self-rename` stay GREEN: `bucket` and `stage` pass
+ *   `SAFE_IDENTIFIER` either way, so they pin byte-identical emission across
+ *   the change.
+ * - every date-bucket, parity and string-form case stays GREEN.
+ *
+ * MEASURED, case for case as predicted — **4 failed / 14 passed of 18**:
+ *
+ * ```
+ * ESCAPES an alias that would close   Error: RemoteTransport: unsafe identifier
+ *   the quoting                       rejected: "bucket"; DROP TABLE deal; --"
+ * a dotted or spaced alias            …rejected: "Region Name", then
+ *   round-trips                       …rejected: "deal.stage_bucket"
+ * a dotted alias comes back under     …rejected: "deal.stage_bucket"
+ *   the result key (executing)
+ * an alias that tries to close the    …rejected: "bucket"; DROP TABLE deal; --"
+ *   quoting (executing)
+ * ── green ──
+ * still refuses an unsafe identifier inside a structured entry   (the CONTROL)
+ * projects `alias` as the column name · no self-rename for alias === field
+ * the string-form control · all five date-bucket refusals · both parity cases
+ * ```
+ *
+ * Not one failure came through a comparison: the restored gate throws before
+ * any SQL is built, which is why the guard could not simply be deleted from the
+ * `field` position and why the control above is the case that holds it.
+ *
+ * ⚠️ No `dist/` leg applies to this ablation. The suite imports the mutated
+ * unit as `./remote-transport.js` — a RELATIVE, in-package specifier that
+ * vitest resolves to `src/remote-transport.ts`, not through the package's
+ * `exports` — and `vitest.config.ts` declares no alias (it sets
+ * `disableConsoleIntercept` and nothing else). The mutation was proved on disk
+ * by grep counts on both the injected and the removed text and by
+ * `git hash-object` against the HEAD blob, and the restore by the same hash
+ * matching again plus an empty `git diff HEAD`.
+ *
+ * # Reverse verification (#6212) — direction predicted BEFORE it was run, per case
  *
  * Restore `const groupBy: string[] = Array.isArray(query?.groupBy) ? … : []`
  * (with a cast, since the narrowed signature no longer permits it):
@@ -115,9 +187,11 @@
  * rather than merely that something was thrown.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { RemoteTransport } from './remote-transport.js';
+import { TursoDriver } from './turso-driver.js';
+import { makeLibsqlSqliteStub, asLibsqlClient, type LibsqlSqliteStub } from './libsql-sqlite-stub.testkit.js';
 
 interface WireBearingError extends Error {
   code?: string;
@@ -218,25 +292,59 @@ describe('[#6212] RemoteTransport compiles the GroupByNode union', () => {
       expect(calls[0].sql).toBe('SELECT "stage", count("stage") AS "n" FROM "deal" GROUP BY "stage"');
     });
 
-    it('[#6401] refuses an unsafe identifier in `alias`, not only in `field`', async () => {
-      // The alias is caller-supplied text that now reaches the statement as a
-      // quoted identifier, so it needs the gate `field` already has. The
-      // assertion names the OFFENDING TEXT, not just the sentence (#6144): a
-      // `field` that is itself safe is what makes this case reach the alias
-      // check at all.
+    it('[#14235] ESCAPES an alias that would close the quoting — one inert name, one statement', async () => {
+      // ⚠️ This case REPLACES the #6401 pin that asserted the same input is
+      // REFUSED (`unsafe identifier rejected`, naming the offending text). That
+      // pin was the deliberate call when the alias was newly read here, and
+      // reversing it is a recorded, non-silent reversal rather than a rider:
+      // #13714 routed BOTH of driver-sql's output-name positions through
+      // `aliasIdentifierSql`, #14113 moved this transport's aggregation alias
+      // to escaping, and #14235 brings the second output-name position of the
+      // same method to the same line. An output-column key is a NAME: it is
+      // quoted and escaped, never gated.
+      //
+      // The old assertion is REPLACED, not dropped — the exact input it named
+      // is the input here, and what is pinned now is the statement it produces.
       const { t, calls } = transportWithCapturingClient();
-      const err = await t
-        .aggregate('deal', {
-          groupBy: [{ field: 'stage', alias: 'bucket"; DROP TABLE deal; --' }],
-          aggregations: [{ function: 'count', alias: 'n' }],
-        })
-        .then(
-          () => { throw new Error('expected the transport to refuse an unsafe alias'); },
-          (e) => e as Error,
+      const rows = await t.aggregate('deal', {
+        groupBy: [{ field: 'stage', alias: 'bucket"; DROP TABLE deal; --' }],
+        aggregations: [{ function: 'count', alias: 'n' }],
+      });
+      expect(rows).toEqual([]);
+      // The whole payload is ONE column name, the quote doubled — the standard
+      // escape inside a quoted SQL identifier. It is data, never grammar.
+      expect(calls).toHaveLength(1);
+      expect(calls[0].sql).toBe(
+        'SELECT "stage" AS "bucket""; DROP TABLE deal; --", count(*) AS "n" FROM "deal" GROUP BY "stage"',
+      );
+      // ⛔ ONE statement, not two: a payload that had broken out of its quoting
+      // would appear as a second one here. The executing block at the foot of
+      // this file proves the same thing against a real database, which is the
+      // only instrument that tells "escaped" apart from "broke out".
+      expect(calls[0].sql.match(/SELECT/g)).toHaveLength(1);
+      // And the grouping key is still the FIELD, exactly as for a bare alias.
+      expect(calls[0].sql.endsWith('GROUP BY "stage"')).toBe(true);
+    });
+
+    it('[#14235] a dotted or spaced alias round-trips as one quoted output column', async () => {
+      // The reachable population the card measured: a caller writing
+      // `groupBy: [{ field, alias }]` through the Query Protocol directly.
+      // Both spellings work on the in-memory, MongoDB and SQL faces and were an
+      // opaque 500 on this one — no `code`, no `status`, out of `mapDataError`.
+      for (const alias of ['Region Name', 'deal.stage_bucket']) {
+        const { t, calls } = transportWithCapturingClient();
+        await t.aggregate('deal', {
+          groupBy: [{ field: 'stage', alias }],
+          aggregations: [{ function: 'count', field: 'stage', alias: 'n' }],
+        });
+        expect(calls).toHaveLength(1);
+        expect(calls[0].sql).toBe(
+          `SELECT "stage" AS "${alias}", count("stage") AS "n" FROM "deal" GROUP BY "stage"`,
         );
-      expect(err.message).toContain('unsafe identifier rejected');
-      expect(err.message).toContain('bucket"; DROP TABLE deal; --');
-      expect(calls).toEqual([]);
+        // ⛔ The dot stays INSIDE the quotes. The failure this rules out is a
+        // face that reads an output NAME as a qualified REFERENCE.
+        expect(calls[0].sql).not.toContain('"deal"."stage_bucket"');
+      }
     });
 
     it('still refuses an unsafe identifier inside a structured entry', async () => {
@@ -392,6 +500,72 @@ describe('[#6212] RemoteTransport compiles the GroupByNode union', () => {
       expect(err.status).toBe(501);
       expect(err.message).toContain('Bucketed here: day, month, quarter, year');
       expect(err.message).toContain("dialect 'better-sqlite3'");
+    });
+  });
+
+  // ── [#14235] Executed, not merely emitted ─────────────────────────────────
+
+  /**
+   * ⚠️ Only EXECUTING the statement tells "escaped" apart from "broke out" —
+   * #14113's reasoning one position over, and the reason its pin is backed by a
+   * real database rather than a captured string. A capture assertion alone
+   * passes on an alias that terminates the quoting, because the text still
+   * *looks* like a select list. libsql IS SQLite, so the stub runs exactly what
+   * this transport emits: an alias that escaped its quoting is a syntax error
+   * (or a second statement better-sqlite3 refuses to prepare), and reading the
+   * value back under the literal alias is the proof that it did not.
+   */
+  describe('[#14235] the escaped groupBy alias is inert against a real database', () => {
+    const DEAL = {
+      name: 'deal',
+      fields: { id: { type: 'string' }, stage: { type: 'string' }, amount: { type: 'number' } },
+    };
+    let driver: TursoDriver;
+    let stub: LibsqlSqliteStub;
+
+    beforeAll(async () => {
+      stub = makeLibsqlSqliteStub();
+      driver = new TursoDriver({ url: 'libsql://groupby-alias.turso.io', client: asLibsqlClient(stub) });
+      await driver.connect();
+      // The mode this block is about — the one with its own hand-written SQL.
+      expect(driver.transportMode).toBe('remote');
+      await driver.syncSchema(DEAL.name, DEAL);
+      for (const row of [
+        { id: '1', stage: 'won', amount: 10 },
+        { id: '2', stage: 'won', amount: 20 },
+        { id: '3', stage: 'lost', amount: 30 },
+      ]) {
+        await driver.create(DEAL.name, { ...row });
+      }
+    });
+
+    afterAll(async () => {
+      await driver.disconnect();
+      stub.close();
+    });
+
+    it('a dotted alias comes back under the result key the caller asked for, on rows', async () => {
+      const rows = (await driver.aggregate(DEAL.name, {
+        object: DEAL.name,
+        groupBy: [{ field: 'stage', alias: 'deal.stage_bucket' }],
+        aggregations: [{ function: 'sum', field: 'amount', alias: 'deal.total' }],
+      } as never)) as Array<Record<string, unknown>>;
+      const byBucket = Object.fromEntries(rows.map((r) => [r['deal.stage_bucket'], r['deal.total']]));
+      // A dot is inert inside a quoted identifier — the whole claim of the card.
+      expect(byBucket).toEqual({ won: 30, lost: 30 });
+    });
+
+    it('an alias that tries to close the quoting and append a statement leaves the table standing', async () => {
+      const alias = 'bucket"; DROP TABLE deal; --';
+      const rows = (await driver.aggregate(DEAL.name, {
+        object: DEAL.name,
+        groupBy: [{ field: 'stage', alias }],
+        aggregations: [{ function: 'count', alias: 'n' }],
+      } as never)) as Array<Record<string, unknown>>;
+      // The payload came back as a COLUMN NAME — it was data, never grammar.
+      expect(rows.map((r) => r[alias]).sort()).toEqual(['lost', 'won']);
+      // And the table it named is still there, with every row.
+      expect(stub.raw.prepare('select count(*) as c from deal').all()).toEqual([{ c: 3 }]);
     });
   });
 });

@@ -550,6 +550,13 @@ const REAL_NOTE =
   'no SDK method builds this URL -- the sys_user unlock_user action posts it directly; ' +
   'platform-admin gated (ADR-0068)';
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const fail = [];
   let cases = 0;
@@ -820,6 +827,7 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`check-auth-mount-ledger --self-test: ${cases} assertions OK (right boundary, lane exclusion, rationale, pending ratchet).`);
+  selfTestReachedVerdict = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -834,7 +842,18 @@ function refuse(why) {
 
 function main() {
   const argv = process.argv.slice(2);
-  if (argv.includes('--self-test')) return selfTest();
+  if (argv.includes('--self-test')) {
+      const selfTestCode = selfTest();
+      if (!selfTestReachedVerdict) {
+          console.error(
+              '\n✗ check-auth-mount-ledger self-test: selfTest() returned without reaching its verdict,\n'
+                  + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                  + 'that never finished as a self-test that passed.\n',
+          );
+          process.exit(1);
+      }
+      return selfTestCode;
+  }
 
   const mountAbs = join(ROOT, MOUNT_SOURCE);
   const ledgerAbs = join(ROOT, LEDGER_SOURCE);

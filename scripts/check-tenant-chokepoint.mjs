@@ -318,6 +318,12 @@ export function violationsOf(file, { builders, unclassifiable }, exempt = EXEMPT
 
 const wrap = (body) => `class SqlDriver {\n${body}\n}`;
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-tenant-chokepoint self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   const assert = (cond, msg) => { if (!cond) failures.push(msg); };
@@ -477,6 +483,8 @@ function selfTest() {
     `✓ check:tenant-chokepoint self-test: ${reports.length} reporting shape(s), ` +
     `${silent.length} silent counterpart(s), fatal/exemption/floor channels proved in both directions.`,
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 // ---------------------------------------------------------------------------
@@ -562,7 +570,14 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 if (!invokedDirectly) {
   // imported as a module — expose the exports and do nothing else
 } else if (process.argv.includes('--self-test')) {
-  selfTest();
+  if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+          '\n✗ check-tenant-chokepoint self-test: selfTest() returned without reaching its verdict,\n'
+              + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+              + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+  }
   process.exit(0);
 }
 

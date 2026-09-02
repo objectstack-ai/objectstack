@@ -294,6 +294,12 @@ function list() {
 // git index, so a temp dir (no `git init`) is the faithful analogue of that
 // script's temp repo: it exercises the real discovery path, not an imitation.
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-workflow-status-functions self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   let checked = 0;
@@ -600,6 +606,8 @@ jobs:
     process.exit(1);
   }
   console.log(`✓ check-workflow-status-functions --self-test: ${checked} assertions over temp fixture roots (real scan() path)`);
+
+  return SELF_TEST_VERDICT;
 }
 
 // Exports bindings, so an import for those exports alone must run nothing (#10667).
@@ -608,7 +616,14 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 if (!invokedDirectly) {
   // imported as a module — expose the exports and do nothing else
 } else if (process.argv.includes('--self-test')) {
-  selfTest();
+  if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+          '\n✗ check-workflow-status-functions self-test: selfTest() returned without reaching its verdict,\n'
+              + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+              + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+  }
 } else if (process.argv.includes('--list')) {
   list();
 } else {
