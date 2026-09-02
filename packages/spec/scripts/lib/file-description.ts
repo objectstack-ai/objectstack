@@ -466,6 +466,47 @@ function stripDocGutter(block: string): string[] {
  */
 const SKILL_EXAMPLE_MARKER = '<!-- os:check -->';
 
+/**
+ * The `@module <path>` marker, which SELECTS a block but is not part of it.
+ *
+ * `findModuleDocBlock` reads this tag as the author's explicit "this block
+ * documents the module" — `hasModuleMarker` above, and the module comment's
+ * #13334 section. That makes it machinery for the SELECTOR, and it stays in the
+ * source where the selector reads it. The renderer, though, emitted it verbatim
+ * like any other prose line, so fourteen published reference pages opened on the
+ * literal text `@module ui/sharing` instead of on their first sentence.
+ *
+ * The sibling surface never had the defect: `../build-skill-references.ts` drops
+ * `@`-opening lines before taking a module's one-line description, which is why
+ * the skill index reads `Sharing & Embedding Protocol` for the same file. This
+ * is the docs half of that rule, spelled here rather than restated there.
+ *
+ * Dropped rather than rewritten, for the same reason `SKILL_EXAMPLE_MARKER` is:
+ * it is machinery, not content, and the one thing it says — the module's own
+ * path — is what the page's route and title already say twice over.
+ *
+ * SCOPE: this tag, deliberately, and NOT `^@\w+` at large. The two other block
+ * tags that reach a page carry a payload a reader needs — `@example Basic field
+ * mapping` is the caption of the fence beneath it, `@category Security` is a
+ * classification — so a line-drop would take that prose with them, and "no page
+ * loses non-tag prose" is this fix's acceptance criterion. `@see` shows the
+ * shape those two want instead: `renderProse` REWRITES it into `See also: …`
+ * rather than dropping it. `@module` is the one tag whose entire content is the
+ * marker, so it is the one tag a drop is right for.
+ *
+ * Judged with the same UNTRIMMED `^@module\b` test `hasModuleMarker` selects
+ * on, so the renderer drops exactly what the selector recognised — never a
+ * mid-sentence mention of the tag, never an indented `@module` inside a list
+ * item, and never one shown inside a fenced example (the prose-level condition
+ * at the call site covers that, as it does for the marker above).
+ */
+const MODULE_MARKER = /^@module\b/;
+
+/** A machinery line the rendered page must never show, whichever kind it is. */
+function isMarkerLine(line: string): boolean {
+  return line.trim() === SKILL_EXAMPLE_MARKER || MODULE_MARKER.test(line);
+}
+
 /** What a line is, which decides which transforms may touch it. */
 type LineKind = 'prose' | 'fenced' | 'indented';
 
@@ -745,14 +786,15 @@ export function renderFileDescription(source: string, ctx: FileDescriptionContex
   const block = findModuleDocBlock(source);
   if (block === null) return '';
 
-  // Dropped BEFORE classification, so the marker never reaches the page and
-  // never separates a fence from the `@example` tag above it. Only at prose
-  // level: the same text inside a fenced block is an author illustrating the
-  // convention, which is content (see SKILL_EXAMPLE_MARKER).
+  // Dropped BEFORE classification, so neither marker reaches the page and the
+  // `os:check` one never separates a fence from the `@example` tag above it.
+  // Only at prose level: the same text inside a fenced block is an author
+  // illustrating the convention, which is content (see SKILL_EXAMPLE_MARKER and
+  // MODULE_MARKER).
   const gutterless = stripDocGutter(block);
   const markerKind = classifyLines(gutterless);
   const lines = withTagBlocksSeparated(
-    gutterless.filter((line, i) => !(markerKind[i] === 'prose' && line.trim() === SKILL_EXAMPLE_MARKER)),
+    gutterless.filter((line, i) => !(markerKind[i] === 'prose' && isMarkerLine(line))),
   );
   const kind = classifyLines(lines);
 
