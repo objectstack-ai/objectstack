@@ -2316,6 +2316,7 @@ const COMPOUND_ANCHOR_LEDGER = [
   ['scripts/check-self-test-workflow-commands.mjs', 'runSelfTest', true],
   ['scripts/check-step-collectors.mjs', 'selfTestTargets', true],
   ['scripts/check-step-collectors.mjs', 'selfTestDiscoveries', true],
+  ['scripts/measure-durability-swallow-family.mjs', 'selfTestMode', true],
   ['scripts/measure-self-test-floor.mjs', 'selfTestDefs', true],
   ['scripts/pm/dispatch-gates.mjs', 'selfTestOnlyCallables', true],
   ['scripts/pm/dispatch-gates.mjs', 'maskSelfTests', true],
@@ -15986,7 +15987,18 @@ function selfTest() {
   // anyone to pass — which is the whole defect. Only a real run can tell them
   // apart, and only a real run can measure the two REMEDIES against each other.
   {
-    const seamCard = 'scripts/measure-durability-swallow-family.mjs';
+    // The card has to be one NO convention KIND hits, so the only difference
+    // between the snippet's block harvest and `--commands` is the SPELLING
+    // split this pair measures; the strictly-better direction is driven
+    // separately, on `testCard` below, and conflating the two would leave
+    // neither measured. This was `measure-durability-swallow-family.mjs` until
+    // #13919 wired that instrument's controls as `check:swallow-census-controls`
+    // — which made it a GATE SCRIPT, so the "adds or edits a GATE SCRIPT"
+    // convention started hitting it and the two counts stopped agreeing for a
+    // reason that is not about spelling at all. ⛔ Do not repair a future
+    // recurrence by loosening the equality: repoint the card, and pick one that
+    // no check family runs.
+    const seamCard = 'scripts/measure-partial-retirement-annotation.mjs';
     const humanRun = runCli([seamCard]);
     const humanOut = humanRun.stdout ?? '';
     t('the seam card still derives at all', humanRun.status === 0 && humanOut.trim().length > 0);
