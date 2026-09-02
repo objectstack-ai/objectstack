@@ -1,5 +1,5 @@
 ---
-'@objectstack/plugin-auth': patch
+'@objectstack/plugin-auth': minor
 '@objectstack/cli': patch
 ---
 
