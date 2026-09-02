@@ -221,6 +221,36 @@ describe('readonlyWhen strips CALLER-submitted values only (#9107)', () => {
     // `ctx.input.data.x = ctx.input.data.x` has written nothing, and `Object.is`
     // says so. Pinned because "a hook touched this key" is exactly the weaker
     // rule that WOULD open a laundering path.
+    //
+    // ⚠️ READ THIS BESIDE `MEASURED: a lone self-assigning hook leaves the
+    // CALLER value on the key` (`engine-readonly-strip-caller-values.test.ts`,
+    // and its insert-side twin in
+    // `engine-hook-provenance-sibling-seams.test.ts`), which pins the OPPOSITE
+    // verdict for the IDENTICAL hook spelling: there the caller's forged value
+    // SURVIVES. Neither pin is stale. They are the two faces of one recorded,
+    // deliberate asymmetry (#14259, maintainer ruling B):
+    //
+    //  - THERE the strip guards an author-declared `readonly` or runtime-owned
+    //    COLUMN. Hook authorship IS the exemption on offer, so #14088's record
+    //    of "the chain assigned this key" is the right evidence, and its
+    //    blindness to the VALUE is exactly what makes it correct — it is what
+    //    separates "the hook wrote the null the caller also sent" from "the
+    //    hook never touched the key".
+    //  - HERE the strip guards a `readonlyWhen` STATE LOCK, whose entire
+    //    guarantee is that NO caller write survives a TRUE predicate (#4889's
+    //    frozen paid-invoice lines). That same blindness would let this exact
+    //    line — or a normalisation that is the identity for canonical input —
+    //    hand the CALLER's value hook ownership and silently unlock the lock.
+    //    So this seam keeps VALUE EQUALITY, on purpose. Measured on #14472's
+    //    branch: threading the record into `isCallerSuppliedValue` turned this
+    //    very test red (`closed_note` committed the forgery where the lock had
+    //    stripped it to `null`).
+    //
+    // Accepted residual, stated rather than hidden: a hook that genuinely
+    // DERIVES a locked field loses its write when the caller echoed the
+    // identical value. No instance exists in the tree. A ruling that reverses
+    // this INVERTS this pin and its sibling together; it never deletes either.
+    // `isCallerSuppliedValue`'s docblock carries the argument.
     engine.registerHook('beforeUpdate', async (ctx: any) => {
       if (Object.prototype.hasOwnProperty.call(ctx.input.data, 'closed_note')) {
         ctx.input.data.closed_note = ctx.input.data.closed_note;
