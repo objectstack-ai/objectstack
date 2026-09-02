@@ -8209,6 +8209,7 @@ export class ObjectStackProtocolImplementation implements
                         label: fields[f]?.label || f,
                         sortable: true
                     })),
+                    // `hidden` withholds the column; it does not govern the derived default sort (ruled 2026-09-01).
                     sort: fields['created_at'] ? ([{ field: 'created_at', order: 'desc' }] as any) : undefined,
                     searchableFields: columns.slice(0, 3) // Make first few textual columns searchable
                 }
