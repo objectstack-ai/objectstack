@@ -412,7 +412,8 @@ wrapped before it is a bundle at all.
 
 ```typescript
 // src/translations/index.ts
-import type { TranslationBundle, TranslationData } from '@objectstack/spec/system';
+import { defineTranslationBundle } from '@objectstack/spec';
+import type { TranslationData } from '@objectstack/spec/system';
 import { withSourceFallback } from '@objectstack/platform-objects/apps';
 import { enObjects } from './en.objects.generated.js';
 import { zhCNObjects } from './zh-CN.objects.generated.js';
@@ -420,14 +421,14 @@ import { zhCNGeneratedSourceHashes } from './zh-CN.source-hashes.generated.js';
 
 const enSource: TranslationData = { objects: enObjects };
 
-export const StorageTranslations: TranslationBundle = {
+export const StorageTranslations = defineTranslationBundle({
   en: enSource,
   // 4th argument = the `--source-hashes` companion. Without it a leaf whose SOURCE has
   // moved goes on serving the superseded fill under a green `os i18n check` forever.
   // The 3rd stays undefined: it judges hand-authored `apps` / `dashboards` / `pages`,
   // which a fully generated set does not have.
   'zh-CN': withSourceFallback({ objects: zhCNObjects }, enSource, undefined, zhCNGeneratedSourceHashes),
-};
+});
 ```
 
 A plugin that owns its objects loads that bundle from its own `kernel:ready` hook rather
