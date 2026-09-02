@@ -79,7 +79,9 @@ audit trails, go to the **objectstack-data** skill (`rules/hooks.md`,
 
 ## Custom Hooks
 
-Create your own hooks following the convention: `{plugin-namespace}:{event-name}`.
+Create your own hooks following the convention: `{plugin-namespace}:{event-name}`
+— namespace required, lower-case: `auth:user-login`, `billing:invoice-paid`;
+never `userLogin` (no namespace) or `auth:USER_LOGIN`.
 
 ```typescript
 // In your plugin
@@ -235,20 +237,6 @@ ctx.hook('kernel:ready', () => console.log('B'));
 Handlers for one event run **sequentially and are awaited**; the next
 lifecycle phase does not begin until every handler settles.
 
-## Hook Naming Conventions
-
-Follow the pattern: `{namespace}:{event-name}`
-
-**Good names:**
-- `auth:user-login`
-- `sales:opportunity-created`
-- `billing:invoice-paid`
-- `analytics:event-tracked`
-
-**Bad names:**
-- `userLogin` (no namespace)
-- `auth:USER_LOGIN` (use lowercase)
-
 ## Testing Hooks
 
 `kernel.context` is **protected** — tests cannot call
@@ -283,46 +271,21 @@ describe('Hook System', () => {
 
     await kernel.shutdown();
   });
-
-  it('passes arguments to hook handler', async () => {
-    const kernel = new LiteKernel({ logger: { level: 'silent' } });
-    let receivedData: any;
-    let probe!: PluginContext;
-
-    kernel.use({
-      name: 'test-plugin',
-      async init(ctx) {
-        probe = ctx;
-        ctx.hook('test:event', async (data) => {
-          receivedData = data;
-        });
-      },
-    });
-
-    await kernel.bootstrap();
-    await probe.trigger('test:event', { foo: 'bar' });
-
-    expect(receivedData).toEqual({ foo: 'bar' });
-
-    await kernel.shutdown();
-  });
 });
 ```
 
-## Best Practices
+## Rules of thumb
 
-1. **Use kernel hooks for platform lifecycle only** — boot, shutdown,
-   metadata reload, seed settle. Record lifecycle → engine hooks
-   (objectstack-data).
-2. **Pick the right boot anchor** — route/service registration in
-   `kernel:ready`; reconcile/backfill in `kernel:bootstrapped`; socket
-   `listen()` in `kernel:listening`; seed-dependent reconcilers on
-   `app:seeded` (and make them idempotent).
-3. **Catch errors unless you want to abort** — handler errors propagate and
-   can fail bootstrap.
-4. **Rebind on `metadata:reloaded`** — anything derived from boot-time
-   metadata goes stale after a hot reload / publish.
-5. **Use descriptive custom hook names** — follow `{namespace}:{event-name}`.
-6. **Document custom hooks** — what they do, what arguments they pass.
-7. **Test hook handlers** — trigger through a probe plugin's `PluginContext`
-   (never `kernel.context`, which is protected).
+✅ Kernel hooks carry **platform lifecycle only**; record lifecycle is an
+engine hook (objectstack-data).
+✅ Pick the anchor by what must already have happened: route/service
+registration → `kernel:ready`; reconcile/backfill → `kernel:bootstrapped`;
+socket `listen()` → `kernel:listening`; seed-dependent (idempotent) work →
+`app:seeded`.
+✅ Catch handler errors unless you want to abort boot — they propagate.
+✅ Rebind anything derived from boot-time metadata on `metadata:reloaded`.
+
+❌ Never subscribe to a `data:*` kernel event — it registers and never fires.
+❌ Never `kernel.context.trigger(...)` in a test — `context` is protected;
+trigger through a probe plugin's `PluginContext`.
+❌ Never create a circular plugin dependency — both kernels throw.

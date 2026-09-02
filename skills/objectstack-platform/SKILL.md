@@ -714,7 +714,7 @@ For comprehensive documentation with incorrect/correct examples:
 
 - **[Plugin Lifecycle](./rules/plugin-lifecycle.md)** — 3-phase lifecycle (init/start/destroy), execution order, complete examples
 - **[Service Registry](./rules/service-registry.md)** — DI container, factories, lifecycles (singleton/transient/scoped), core fallbacks
-- **[Hooks & Events](./rules/plugin-hooks-events.md)** — Kernel hooks & events reference (record-level lifecycle hooks → [objectstack-data](../objectstack-data/SKILL.md))
+- **[Hooks & Events](./references/plugin-hooks.md)** — Kernel hooks & events reference (record-level lifecycle hooks → [objectstack-data](../objectstack-data/SKILL.md))
 
 ---
 
@@ -862,7 +862,7 @@ Built-in kernel events: `kernel:ready`, `kernel:bootstrapped`,
 > registered for `'data:beforeInsert'` will register successfully and then
 > **silently never fire**. Kernel hooks are for platform lifecycle only.
 
-See [rules/plugin-hooks-events.md](./rules/plugin-hooks-events.md) for the kernel event list, payloads, and patterns.
+See [references/plugin-hooks.md](./references/plugin-hooks.md) for the kernel event list, payloads, and patterns.
 
 ### Logger
 
