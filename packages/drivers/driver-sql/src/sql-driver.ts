@@ -1488,9 +1488,9 @@ function refuseDateBucketedGroupBy(granularity: string, bucketedHere: string[], 
  *
  * ## Why the DDL seam needs a door the schema already has
  *
- * `reference` is the only relationship spelling the spec declares;
- * `reference_to` is a REJECTED ALIAS, not a normalised one. Measured on
- * `origin/main`:
+ * `reference` is the only relationship spelling the spec declares. ON THE
+ * AUTHORING FACE `reference_to` is a REJECTED ALIAS, not a normalised one.
+ * Measured on `origin/main`:
  *
  * ```
  * FieldSchema.safeParse({ name:'parent', type:'lookup', reference_to:'p' })
@@ -1498,6 +1498,20 @@ function refuseDateBucketedGroupBy(granularity: string, bucketedHere: string[], 
  *      "Unrecognized key(s) on this field: `reference_to`.
  *       Did you mean `reference_to` → `reference`?"
  * ```
+ *
+ * ⚠️ That verdict is the authoring face and only the authoring face — do NOT
+ * read this door as "a stored `reference_to` stays verbatim forever". #13700
+ * landed the `field-reference-to-alias` conversion (`toMajor: 18`,
+ * `retiredFromLoadPath: true`, in `packages/spec/src/conversions/registry.ts`),
+ * and its docblock already states the split this comment has to be read
+ * against: the entry "covers the two paths that serve or rewrite EXISTING data
+ * — stored rehydration and `os migrate meta`", where the key is NORMALISED to
+ * `reference` rather than refused, while "the DDL doors above keep guarding
+ * the third path (metadata handed straight to a driver, around both the gate
+ * and the stored pass); they are downstream of this entry, not replaced by
+ * it." This door is one of those DDL doors. Refused when authored, rewritten
+ * when already at rest, refused again here — three paths, and this comment
+ * speaks for the third.
  *
  * Until #11567 this driver read `reference_to` and ONLY `reference_to`, as the
  * gate on a `table.foreign(name).references('id')`. So one key had TWO doors

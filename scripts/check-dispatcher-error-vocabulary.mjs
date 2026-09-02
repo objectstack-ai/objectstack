@@ -2130,6 +2130,13 @@ export function checkDoorTyping({ doorSource, files }) {
 // Self-test
 // ---------------------------------------------------------------------------
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const fail = [];
   let cases = 0;
@@ -3514,6 +3521,7 @@ function selfTest() {
     `check-dispatcher-error-vocabulary --self-test: ${Object.keys(samples).length} shapes ` +
     `+ ${cases} assertions OK (vocabulary + #9098 door typing)`,
   );
+  selfTestReachedVerdict = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -3522,7 +3530,18 @@ function selfTest() {
 
 function main() {
   const argv = process.argv.slice(2);
-  if (argv.includes('--self-test')) return selfTest();
+  if (argv.includes('--self-test')) {
+      const selfTestCode = selfTest();
+      if (!selfTestReachedVerdict) {
+          console.error(
+              '\n✗ check-dispatcher-error-vocabulary self-test: selfTest() returned without reaching its verdict,\n'
+                  + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                  + 'that never finished as a self-test that passed.\n',
+          );
+          process.exit(1);
+      }
+      return selfTestCode;
+  }
 
   const readFile = (abs) => readFileSync(abs, 'utf8');
   const ledger = parseLedgerCodes(readFileSync(join(ROOT, LEDGER_ZOD), 'utf8'));

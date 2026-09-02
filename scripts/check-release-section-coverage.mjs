@@ -608,6 +608,13 @@ const CURRENT_INDEX_V16 =
 const NO_PARENTHETICAL_INDEX_V13 =
   '- [v13.0.0](/docs/releases/v13) — Permission Model v2 (ADR-0090): Roles and Profiles converge.';
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 export function selfTest() {
   // ⛔ FIRST, and it RETURNS rather than recording a case. The floor lives in
   // another file; a read that did not happen measured nothing — least of all
@@ -969,6 +976,7 @@ export function selfTest() {
     + 'with a read that could not happen refusing as PREREQUISITE NOT MET instead of rendering as a '
     + 'verdict about that gate.',
   );
+  selfTestReachedVerdict = true;
   return EXIT_OK;
 }
 
@@ -1069,7 +1077,18 @@ function annotate(findings) {
 // ── Run ──────────────────────────────────────────────────────────────────────
 
 function main(argv) {
-  if (argv.includes('--self-test')) return selfTest();
+  if (argv.includes('--self-test')) {
+      const selfTestCode = selfTest();
+      if (!selfTestReachedVerdict) {
+          console.error(
+              '\n✗ check-release-section-coverage self-test: selfTest() returned without reaching its verdict,\n'
+                  + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                  + 'that never finished as a self-test that passed.\n',
+          );
+          process.exit(1);
+      }
+      return selfTestCode;
+  }
   const strict = argv.includes('--strict');
 
   const versions = gaVersions(readFileSync(SPEC_CHANGELOG, 'utf8'));

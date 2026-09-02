@@ -43,8 +43,8 @@ Drivers can be selected in two ways:
 | URL pattern | Inferred driver | npm package |
 | :--- | :--- | :--- |
 | `mongodb://…`, `mongodb+srv://…` | MongoDB | `@objectstack/driver-mongodb` |
-| `postgres://…`, `postgresql://…` | PostgreSQL (Knex `pg`) | `@objectstack/driver-sql` + `pg` |
-| `mysql://…`, `mysql2://…` | MySQL (Knex `mysql2`) | `@objectstack/driver-sql` + `mysql2` |
+| `postgres://…`, `postgresql://…` | PostgreSQL (Knex `pg`) | `@objectstack/driver-sql` + `pg` (**optional** peer — install it yourself, or boot fails loudly) |
+| `mysql://…`, `mysql2://…` | MySQL (Knex `mysql2`) | `@objectstack/driver-sql` + `mysql2` (**optional** peer — install it yourself, or boot fails loudly) |
 | `libsql://…`, `http(s)://*.turso.…` | Turso / libSQL | `@objectstack/driver-turso` (**optional** — install it yourself) |
 | `wasm-sqlite://…`, `*.wasm.db` | SQLite (pure-JS WASM) | `@objectstack/driver-sqlite-wasm` |
 | `file:…`, `sqlite:…`, `:memory:`, `*.db` / `*.sqlite` | SQLite (Knex `better-sqlite3`) | `@objectstack/driver-sql` + `better-sqlite3` |

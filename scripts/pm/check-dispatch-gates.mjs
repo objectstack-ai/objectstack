@@ -6,6 +6,31 @@
  *
  *   node scripts/pm/check-dispatch-gates.mjs   # runs the tool's --self-test
  *
+ * ## On an agent container, run this DETACHED (#14281)
+ *
+ * `package.json`'s `check:pm-dispatch-gates` script is exactly this file —
+ * `node scripts/pm/check-dispatch-gates.mjs` — and JSON holds no comments, so
+ * the instruction a script comment would carry lands here instead, in the
+ * header of the file that script runs. The battery this file spawns re-runs
+ * `dispatch-gates.mjs`'s own CLI as a child process many times (see the "Why
+ * the self-test ONLY" section below), and on an agent container that makes a
+ * full run longer than the container's foreground command cap, which SIGTERMs
+ * a run past it — this file's `result.signal` branch further down reports
+ * exactly that kill, but only once the process has already been cut off. Do
+ * not run `pnpm check:pm-dispatch-gates` (or `dispatch-gates.mjs --self-test`
+ * directly) in the foreground there. Detach it and poll the log instead:
+ *
+ *   nohup pnpm check:pm-dispatch-gates > /tmp/pm-dispatch-gates.log 2>&1 &
+ *
+ * then tail the log file until it stops growing. `dispatch-gates.mjs`'s
+ * `selfTest()` streams each case's `✓`/`✗` line as that case is decided, so a
+ * run killed mid-battery — by this cap, or by anything else — leaves every
+ * case decided before the kill in the log, readable as a partial result. The
+ * measured runtime and case count are not repeated here — a reading belongs
+ * to a named commit, not to a header (the convention the next section states
+ * for this same file) — see #14281 for the reading that motivated this
+ * section.
+ *
  * ## Why the gate exists
  *
  * scripts/pm/dispatch-gates.mjs derives the "local gates for this card" line of

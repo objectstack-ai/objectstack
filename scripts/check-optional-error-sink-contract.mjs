@@ -794,6 +794,14 @@ function run({ list = false } = {}) {
  * `expectSinks` / `expectCast` / `expectImpure` / `expectNoError` can tell the
  * two apart, so each case states all of them.
  */
+
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
     const cases = [
         {
@@ -1073,11 +1081,21 @@ function selfTest() {
             `all three narrowings pinned as counts, prefilter pinned over ${LOG_CHANNELS.size} channel(s) ` +
             '× 4 spellings plus its reject side.',
     );
+    selfTestReachedVerdict = true;
     return 0;
 }
 
 const argv = process.argv.slice(2);
 if (argv.includes('--self-test')) {
-    process.exit(selfTest());
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+        console.error(
+            '\n✗ check-optional-error-sink-contract self-test: selfTest() returned without reaching its verdict,\n'
+                + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+    }
+    process.exit(selfTestCode);
 }
 process.exit(run({ list: argv.includes('--list') }));

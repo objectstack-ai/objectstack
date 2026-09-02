@@ -494,6 +494,12 @@ const GUARD_CLOSURE_CASES = [
     [[FAKE_HELPER, RAW_CALL]]],
 ];
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-query-options-erasure-ratchet self-test reached its verdict';
+
 async function selfTest() {
   const failures = [];
   const assert = (cond, msg) => { if (!cond) failures.push(msg); };
@@ -904,6 +910,8 @@ async function selfTest() {
     `over ${GUARD_CLOSURE_CASES.length} synthetic tree(s)), ` +
     `and ${HEADROOM_CANARY_FILE} parses at --stack-size=${PARSER_STACK_SIZE_KB} through this gate's own channel.`,
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 // ---------------------------------------------------------------------------
@@ -1001,7 +1009,14 @@ async function main() {
 // full ESLint passes over packages/** inside the importer.
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    await selfTest();
+    if ((await selfTest()) !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-query-options-erasure-ratchet self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
     process.exit(0);
   }
   await main();

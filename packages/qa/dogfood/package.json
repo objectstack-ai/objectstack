@@ -14,6 +14,7 @@
     "@objectstack/connector-openapi": "workspace:*",
     "@objectstack/connector-rest": "workspace:*",
     "@objectstack/example-crm": "workspace:*",
+    "@objectstack/example-multi-package": "workspace:*",
     "@objectstack/example-showcase": "workspace:*",
     "@objectstack/mcp": "workspace:*",
     "@objectstack/metadata": "workspace:*",

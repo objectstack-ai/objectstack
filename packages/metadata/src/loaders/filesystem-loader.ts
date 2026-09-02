@@ -20,8 +20,19 @@ import type {
   MetadataSaveResult,
 } from '@objectstack/spec/system';
 import type { Logger } from '@objectstack/core';
-import type { MetadataLoader } from './loader-interface.js';
+import type { MetadataLoader, MetadataKeyedItem } from './loader-interface.js';
 import type { MetadataSerializer } from '../serializers/serializer-interface.js';
+
+/**
+ * The pre-#14205 key: a body's own top-level `name`, when it has one. Kept for
+ * exactly the shapes {@link FilesystemLoader.loadManyKeyed} refuses to mint a
+ * key for, so those items behave precisely as they did before that method
+ * existed — no regression, and no invented name either.
+ */
+function ownNameOf(data: unknown): string | null {
+  const own = (data as { name?: unknown } | null)?.name;
+  return typeof own === 'string' && own !== '' ? own : null;
+}
 
 export class FilesystemLoader implements MetadataLoader {
   readonly contract: MetadataLoaderContract = {
@@ -149,10 +160,86 @@ export class FilesystemLoader implements MetadataLoader {
     type: string,
     options?: MetadataLoadOptions
   ): Promise<T[]> {
+    return (await this.loadManyEntries<T>(type, options)).map(entry => entry.data);
+  }
+
+  /**
+   * [#14341] The keyed half of {@link loadMany} — see {@link MetadataKeyedItem}
+   * for why the store's key travels BESIDE the body instead of being folded
+   * into it.
+   *
+   * THE RULE, in one sentence: an item is keyed by this loader's own
+   * name-to-path derivation — {@link nameFromFilename}, the very basename
+   * derivation `list()` reports — ONLY where that derivation is a bijection for
+   * the file (it sits directly under `ROOT/TYPE/` and carries one of the
+   * extensions {@link findFile} tries, so `findFile(type, key)` resolves back to
+   * this same file); every other shape keeps the pre-#14205 behaviour verbatim,
+   * keyed by `body.name` when it has one and dropped when it has none.
+   *
+   * Why the rule stops there (PM ruling on #14341, 2026-09-02, knowingly over
+   * triage's "a nested path keeps whatever `list()` reports for it today"):
+   * `list()` and `findFile()` DISAGREE outside that shape. For
+   * `ROOT/TYPE/crm/account.json`, `list()` reports the bare `account`, but
+   * `findFile()` resolves that name against `ROOT/TYPE/account.json` and finds
+   * nothing — the only name reaching the file is `crm/account`, which nothing
+   * reports. An extension-less file is read by `loadMany()` and reported by
+   * `list()`, and `findFile()` resolves neither. Keying by either side would
+   * mint a name some other door cannot open, and two directories holding the
+   * same basename would collide in silence
+   * (`MetadataManager.admitLoaderItems()` keeps the first and says nothing).
+   * The card's own fence: "keying items under names nothing else uses … is
+   * worse than today's honest drop". So the drop stays exactly where the key is
+   * unsettled, and is pinned as a RECORD in
+   * `filesystem-loader-keyed-items.test.ts`. Repairing the derivation itself —
+   * one shared name-to-path function for `list()`, `findFile()` and this method
+   * — moves `listNames()` output and is #14486, NOT this method's business.
+   *
+   * One consequence, deliberate: a flat file whose `body.name` DISAGREES with
+   * its basename is now keyed by the BASENAME. That is #14205's rule (identity
+   * is the key the store holds an item under, not `body.name`) applied to this
+   * loader, and it aligns `MetadataManager.list()` with `listNames()` for that
+   * shape.
+   *
+   * The body is handed back by reference, unchanged: nothing is written into a
+   * body that deliberately has no `name`. `limit` bounds the items LOADED,
+   * exactly as `loadMany()` does — an entry the key rule drops has still been
+   * read and still counts against it.
+   */
+  async loadManyKeyed<T = any>(
+    type: string,
+    options?: MetadataLoadOptions
+  ): Promise<MetadataKeyedItem<T>[]> {
+    const typeDir = path.join(this.rootDir, type);
+    const keyed: MetadataKeyedItem<T>[] = [];
+
+    for (const entry of await this.loadManyEntries<T>(type, options)) {
+      const name =
+        this.resolvableNameForPath(typeDir, entry.file) ?? ownNameOf(entry.data);
+
+      if (name) {
+        keyed.push({ name, data: entry.data });
+      }
+    }
+
+    return keyed;
+  }
+
+  /**
+   * The single walk behind {@link loadMany} and {@link loadManyKeyed}: one glob,
+   * one serializer pass, one `limit`. Shared so the two can never answer with
+   * different bodies for the same file — {@link MetadataLoader.loadManyKeyed}
+   * requires `data` to be "the same body `loadMany()` would return for the
+   * item", and a second copy of this walk is how that would quietly stop being
+   * true.
+   */
+  private async loadManyEntries<T = any>(
+    type: string,
+    options?: MetadataLoadOptions
+  ): Promise<{ file: string; data: T }[]> {
     const { patterns = ['**/*'], recursive: _recursive = true, limit } = options || {};
 
     const typeDir = path.join(this.rootDir, type);
-    const items: T[] = [];
+    const items: { file: string; data: T }[] = [];
 
     try {
       // Build glob patterns
@@ -178,7 +265,7 @@ export class FilesystemLoader implements MetadataLoader {
 
             if (serializer) {
               const data = serializer.deserialize<T>(content);
-              items.push(data);
+              items.push({ file, data });
             }
           } catch (error) {
             this.logger?.warn('Failed to load file', {
@@ -250,11 +337,7 @@ export class FilesystemLoader implements MetadataLoader {
         nodir: true,
       });
 
-      return files.map(file => {
-        const ext = path.extname(file);
-        const basename = path.basename(file, ext);
-        return basename;
-      });
+      return files.map(file => FilesystemLoader.nameFromFilename(file));
     } catch (error) {
       this.logger?.error('Failed to list', undefined, {
         type,
@@ -360,11 +443,54 @@ export class FilesystemLoader implements MetadataLoader {
   }
 
   /**
+   * The extensions {@link findFile} tries, in the order it tries them. Shared
+   * with {@link resolvableNameForPath} so the set a name can be RESOLVED under
+   * cannot drift from the set {@link loadManyKeyed} is willing to KEY by.
+   */
+  private static readonly RESOLVABLE_EXTENSIONS = ['.json', '.yaml', '.yml', '.ts', '.js'];
+
+  /**
+   * The metadata name this loader reports for a file: the basename with its
+   * extension stripped. One derivation, shared by {@link list} and
+   * {@link loadManyKeyed}, so the two cannot drift for the shape where they
+   * agree — `dotted.config.json` is `dotted.config` for both.
+   */
+  private static nameFromFilename(file: string): string {
+    return path.basename(file, path.extname(file));
+  }
+
+  /**
+   * The key for a file IF this loader's name-to-path mapping is a bijection for
+   * it: a file directly under `ROOT/TYPE/` carrying an extension
+   * {@link findFile} tries, so `findFile(type, key)` resolves back to this very
+   * file. `null` for every other shape — a nested path, an extension-less file,
+   * an extension spelled in a case `findFile()` does not compose — which is why
+   * {@link loadManyKeyed} falls back to `body.name` there rather than minting a
+   * key no other door can open.
+   */
+  private resolvableNameForPath(typeDir: string, file: string): string | null {
+    const rel = path.relative(typeDir, file);
+
+    // Nested, or outside the type directory altogether.
+    if (rel === '' || rel.split(path.sep).length !== 1) {
+      return null;
+    }
+
+    // Case-SENSITIVE on purpose: `findFile()` composes `name + ext` with these
+    // exact spellings, so `Foo.JSON` is not resolvable under `Foo`.
+    if (!FilesystemLoader.RESOLVABLE_EXTENSIONS.includes(path.extname(rel))) {
+      return null;
+    }
+
+    return FilesystemLoader.nameFromFilename(rel);
+  }
+
+  /**
    * Find file for a given type and name
    */
   private async findFile(type: string, name: string): Promise<string | null> {
     const typeDir = path.join(this.rootDir, type);
-    const extensions = ['.json', '.yaml', '.yml', '.ts', '.js'];
+    const extensions = FilesystemLoader.RESOLVABLE_EXTENSIONS;
 
     for (const ext of extensions) {
       const filePath = path.join(typeDir, `${name}${ext}`);

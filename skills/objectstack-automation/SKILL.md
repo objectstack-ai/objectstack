@@ -1,10 +1,11 @@
 ---
 name: objectstack-automation
 description: >
-  Design ObjectStack automation — Flows (visual logic), Triggers,
-  Approvals, state machines, scheduled jobs, and webhooks.
-  Use when the user is adding `*.flow.ts`, wiring an
-  event-driven rule, or modelling an approval chain. Do not use for data
+  Design ObjectStack automation — Flows (visual logic), Triggers, Approvals,
+  state machines, and the `jobs` (`defineJob`) / `webhooks` (`defineWebhook`)
+  stack collections. Use when the user is adding `*.flow.ts`, wiring an
+  event-driven rule, modelling an approval chain, or building an interactive
+  screen flow / wizard (objectstack-ui routes those here). Do not use for data
   lifecycle hooks at the object layer (see objectstack-data) or for kernel
   / plugin events (see objectstack-platform). CEL expressions in flow
   conditions / edge guards: load objectstack-formula alongside.
@@ -19,28 +20,19 @@ metadata:
 
 # Automation Design — ObjectStack Automation Protocol
 
-Expert instructions for designing business automation using the ObjectStack
-specification. This skill covers Flows (visual logic orchestration), state
-machines & approvals, Triggers (event-driven automation), and ETL
-pipelines.
-
----
-
 ## When to Use This Skill
 
 - You are building a **visual flow** (auto-launched, screen, or scheduled).
 - You need a **state machine** or **approval process** for a business object.
 - You are setting up **event-driven triggers** (record create/update/delete).
 - You need **scheduled automation** (daily reports, data cleanup).
-- You are designing an **ETL pipeline** for data synchronisation.
 
-> **Predicates and conditions are CEL.** Every `condition` / `guard` /
-> `entryCondition` / filter `value` in this skill is an **Expression**
-> envelope evaluated by `@objectstack/formula`. Use the `P\`...\`` and
-> `cel\`...\`` tagged templates from `@objectstack/spec`. See the
-> **objectstack-formula** skill for the full CEL contract, stdlib
-> (`now()`, `today()`, `daysFromNow(n)`, `daysBetween(a, b)`, `isBlank(v)`, `coalesce(v, fb)`),
-> and the legacy → CEL translation table.
+> **Predicates and conditions are CEL** — every `condition` / `guard` /
+> `entryCondition` / filter `value` here is an **Expression** envelope evaluated
+> by `@objectstack/formula`. A slot takes a plain CEL string; the
+> `P\`...\`` / `cel\`...\`` tags wrap the same string with author-time validation.
+> Both parse — pick one per file (the example apps use plain strings). See
+> **objectstack-formula** for the CEL contract, stdlib and legacy → CEL table.
 
 ---
 
@@ -56,7 +48,7 @@ parallel. Flows are the primary automation building block in ObjectStack.
 | `autolaunched` | Runs without user interaction — triggered by events, APIs, or other flows |
 | `screen` | Interactive — presents UI screens to the user (wizards, forms) |
 | `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** (daily cleanup, weekly reports) — or a **per-record date sweep** via `config.timeRelative`, see *Time-relative triggers* |
-| `record_change` | Fires automatically on record create/update/delete (bind via the `start` node's `triggerType`) |
+| `record_change` | Fires automatically on record create/update/delete (bind via the `start` node's `triggerType`). `autolaunched` + the same `record-*` binding behaves identically — the engine reads the start node either way; `record_change` also opts into the trigger-readiness lint |
 | `api` | Invoked explicitly via the API / `engine.execute()`, **or** bound as an inbound **webhook**: `POST /api/v1/automation/hooks/:flowName/:hookId` (see *Inbound webhook triggers* below) |
 
 ### Flow Node Types
@@ -71,13 +63,13 @@ plugins register more via `registerNodeExecutor`, e.g. `approval` below):
 | `start` | Entry point — every flow has exactly one |
 | `end` | Exit point — can have multiple (early exit, error exit) |
 | `decision` | Conditional branching — routed by **edge `condition` predicates**, not node config (see the approval example below) |
-| `loop` | Iterate a bounded body region over a collection |
+| `loop` | Iterate a **nested `config.body` region** once per item of `config.collection`; `iteratorVariable` (default `item`) and optional `indexVariable` bind inside it, `maxIterations` caps it |
+| `parallel` | Fan out into `config.branches[]` (≥ 2 regions) run concurrently, **joined implicitly** at block end — no split/join pair to mis-wire |
+| `try_catch` | Run `config.try`; on failure run `config.catch` with the error in `errorVariable` (default `$error`); `config.retry` re-runs `try` with backoff first. **No `finally`** — the container's ordinary out-edges are the continuation |
 | `map` | Sequential multi-instance — invoke a subflow once per item of a collection; each iteration may pause (batch approvals) |
-| `parallel_gateway` | Fork execution into parallel branches |
-| `join_gateway` | Synchronise parallel branches back together |
 | `wait` | Pause execution until a timer elapses or a named signal arrives |
-| `boundary_event` | Attach to another node — fires on timeout or error |
 | `subflow` | Invoke another flow (reusable composition) |
+| `parallel_gateway` / `join_gateway` / `boundary_event` | **Not author-facing** — BPMN-interop forms the mapper lowers a `parallel` / `try_catch` container INTO (`automation/control-flow.zod.ts`). Author the container |
 
 #### Data Operations
 
@@ -96,7 +88,7 @@ plugins register more via `registerNodeExecutor`, e.g. `approval` below):
 | `http` | Call an external HTTP API — canonical since protocol 11.0; `http_request` survives only as a deprecation-window alias |
 | `notify` | Send a notification through the messaging service (inbox channel by default) |
 | `connector_action` | Invoke a pre-built integration connector |
-| `script` | Call a **registered** function named by `config.function` (see pitfall 9) |
+| `script` | Call a **registered** function named by `config.function` (see *Valid-but-silently-wrong* #3) |
 | `screen` | Display a UI form to the user (screen flows only) |
 
 #### Human Decision
@@ -104,6 +96,26 @@ plugins register more via `registerNodeExecutor`, e.g. `approval` below):
 | Node | Purpose |
 |:-----|:--------|
 | `approval` | Route a record for human sign-off — **suspends** the run until a decision, then continues down the `approve` / `reject` branch (contributed by `plugin-approvals`) |
+
+### `notify` — the most-used node type
+
+`NotifyConfigSchema` (`automation/io-node-config.zod.ts`) is `strictObject` — an
+undeclared key is a named parse error. **RAW** keys never interpolate: a
+`{token}` in one is forwarded verbatim, never resolved.
+
+```ts
+{ id: 'tell_owner', type: 'notify', label: 'Notify Owner', config: {
+    recipients: '{record.assignee}',   // REQUIRED — id, CSV, or string[]
+    title: 'Done: {record.title}',     // inline path; XOR `template` (RAW, localizable)
+    message: 'Closed by {$User.Id}',   // body; only with inline `title`
+    topic: 'task',                     // RAW; default 'notify'
+    severity: 'warning',               // RAW; CLOSED enum info|warning|critical
+    channels: ['inbox'],               // RAW; default inbox
+    sourceObject: 'task',              // click-through: a PAIR, else dropped
+    sourceId: '{record.id}',           //   at execute time
+    actionUrl: 'https://…/tasks/123',  // overrides the synthesized link
+} }
+```
 
 ### Flow Variables
 
@@ -136,60 +148,18 @@ variables: [
 > of `field → value` / `field → { $operator: value }`, NOT the UI view-filter
 > `[{ field, operator, value }]` triples — and writes with **`fields`**
 > (a single call updates *every* matching row — no per-row loop needed).
-> `label` is **required** on the flow and on every node.
+> `label` is **required** on the flow and on every node, and every path through
+> the graph must reach an `end` node.
 
-> **Handling a failed node: a `fault` edge.** `{ source, target, type: 'fault' }`
-> routes a failed node to a handler instead of ending the run. **`type: 'fault'`
-> is what routes — a `label: 'error'` alone does nothing:** the edge stays
-> ordinary, and every unconditional out-edge traverses on SUCCESS, so the
-> handler would run when the node succeeds and never when it fails
-> (`objectstack validate` reports `flow-error-label-not-fault`).
-> A handled failure does NOT consume a flow-level `errorHandling.retry`, which
-> replays the flow from the start — prefer a fault edge when the failure is
-> local. The handler reads `{<nodeId>.error}` (or run-wide `{$error}`). The run
-> then reports success, and the failed step stays in the trace.
->
-> **It is not a way past a guardrail.** Only *runtime* failures route — a 404, a
-> rate-limit, a rejected write, a subflow that failed on its own. A *guard*
-> refusal stays fatal with or without a fault edge. A failure is a guard when
-> re-running unchanged could never succeed **and** the fix is to edit metadata:
-> a missing required config key (`objectName`, `url`, `flowName`,
-> `connectorId`/`actionId`), a filter token that resolved to nothing so the
-> condition was dropped, a graph that recurses past the nesting ceiling, or a run
-> that would execute unscoped.
->
-> Never add a fault edge to silence such an error: a dropped filter condition
-> **widens** the query, so routing it would let a `delete_record` empty the
-> object while the run reported success. Fix the metadata — `objectstack
-> validate` names the offending template.
-
-> **Writing a `readonly` field? Set `runAs: 'system'`.** `readonly: true`
-> governs the end-user surface: under the default `runAs: 'user'`, the engine
-> **silently strips** a `readonly` field from an `update_record` payload
-> — the step reports success but the value never lands. A flow that
-> maintains a `readonly` field (approval stamps, conversion flags, SLA
-> markers, rollups) must run `runAs: 'system'`, the trusted-writer channel.
-> `os validate` / `os build` fail a `runAs:'user'` `update_record` that writes
-> a `readonly` field, so the mismatch surfaces at build time, not as wrong data
-> days later. (`readonlyWhen` fields are the same story, per record state —
-> flagged as a warning.) Do **not** work around this by removing `readonly`;
-> that loses the field's edit protection.
-
-> **Elevate the write, not the flow.** A `screen` flow stays `runAs: 'user'`.
-> When one step in it must write a `readonly` field, move that step into a
-> dedicated `runAs: 'system'` flow and call it from a `subflow` node — raising
-> the whole flow silently elevates every other write in it.
->
-> **A `runAs: 'system'` sweep must pin its organization.** System context has no
-> trigger user, so nothing narrows the query: a scan or rollup with no
-> organization predicate reads and writes across every tenant. The tenant column
-> is platform-injected — filter on it, never re-declare it per object.
-
+<!-- os:check -->
 ```typescript
-{
+import { defineFlow } from '@objectstack/spec';
+
+export const EscalateOverdueCasesFlow = defineFlow({
   name: 'escalate_overdue_cases',
   label: 'Escalate Overdue Cases',
   type: 'schedule',
+  status: 'active',
   runAs: 'system',   // a scheduled run has no trigger user — elevate explicitly
   nodes: [
     {
@@ -235,8 +205,161 @@ variables: [
     { id: 'e2', source: 'escalate_overdue', target: 'notify_manager' },
     { id: 'e3', source: 'notify_manager',   target: 'end' },
   ],
-}
+});
 ```
+
+### Failure routing & `runAs`
+
+> **Handling a failed node: a `fault` edge.** `{ source, target, type: 'fault' }`
+> routes a failed node to a handler instead of ending the run. **`type: 'fault'`
+> is what routes — a `label: 'error'` alone does nothing:** the edge stays
+> ordinary, and every unconditional out-edge traverses on SUCCESS, so the
+> handler would run when the node succeeds and never when it fails
+> (`objectstack validate` reports `flow-error-label-not-fault`).
+> A handled failure does NOT consume a flow-level `errorHandling.retry`, which
+> replays the flow from the start — prefer a fault edge when the failure is
+> local. The handler reads `{<nodeId>.error}` (or run-wide `{$error}`). The run
+> then reports success, and the failed step stays in the trace.
+>
+> **It is not a way past a guardrail.**
+
+| ROUTES (runtime failure) | Does NOT route (fatal either way) |
+|:--|:--|
+| 404, rate-limit, rejected write, failed subflow | missing required config key (`objectName`, `url`, `flowName`, `connectorId`/`actionId`); filter token that resolved to nothing; graph past the nesting ceiling; unscoped run |
+
+Routing a guard refusal is worse than the failure: a dropped filter condition
+**widens** the query, so a routed `delete_record` empties the object while the
+run reports success. `objectstack validate` names the offending template.
+
+> **Writing a `readonly` field? Set `runAs: 'system'`.** `readonly: true`
+> governs the end-user surface: under the default `runAs: 'user'`, the engine
+> **silently strips** a `readonly` field from an `update_record` payload
+> — the step reports success but the value never lands. A flow that
+> maintains a `readonly` field (approval stamps, conversion flags, SLA
+> markers, rollups) must run `runAs: 'system'`, the trusted-writer channel.
+> `os validate` / `os build` fail a `runAs:'user'` `update_record` that writes
+> a `readonly` field, so the mismatch surfaces at build time, not as wrong data
+> days later. (`readonlyWhen` fields are the same story, per record state —
+> flagged as a warning.) Do **not** work around this by removing `readonly`;
+> that loses the field's edit protection.
+
+> **Elevate the write, not the flow.** A `screen` flow stays `runAs: 'user'`.
+> When one step in it must write a `readonly` field, move that step into a
+> dedicated `runAs: 'system'` flow and call it from a `subflow` node — raising
+> the whole flow silently elevates every other write in it.
+>
+> **A `runAs: 'system'` sweep must pin its organization.** System context has no
+> trigger user, so nothing narrows the query: a scan or rollup with no
+> organization predicate reads and writes across every tenant. The tenant column
+> is platform-injected — filter on it, never re-declare it per object.
+
+### Filter tokens (`config.filter`)
+
+The one slot where two `{…}` dialects meet, and the one whose failure **widens**
+a query instead of narrowing it.
+
+- **Precedence — flow variables win, placeholders pass through.** The flow
+  template engine runs first. A whole-string token it resolves is a flow value;
+  one it does **not** resolve that IS a recognised filter placeholder
+  (`{current_user_id}`, `{current_year_start}`) passes through **verbatim** for
+  the query engine to expand. So a flow variable named after a placeholder
+  **shadows** it. Only `filter` gets this hand-off — in `title`, `message`,
+  `fields` and `url` a bare `{current_year_start}` is a nonsense reference.
+- **Static checkability splits by position.** A `{record.…}` token **inside a
+  filter** naming an unknown field, or hopping a relation the start node does not
+  list in `config.expand`, is an **ERROR** at `objectstack validate`: it resolves
+  to nothing, the condition is DROPPED, and the node refuses to execute. The
+  *same* reference **outside** a filter (message body, `http` url, write payload)
+  only renders an empty string — a **warning**. A `{var}` naming a flow variable
+  or node output is **not statically checkable at all**.
+
+---
+
+## Valid-but-silently-wrong (passes build, fails at runtime)
+
+These are *legal* metadata that authors — AI especially — get wrong. Most are now
+caught by `objectstack build` (a hard error, or an advisory warning), but write
+them right the first time:
+
+1. **Flow node VALUE interpolation uses SINGLE braces.** Value fields on a node's
+   `config` (`fields`, `inputs`, notify `message`/`title`, …) interpolate
+   `{token}`:
+   - `{var}` / `{record.title}` — variable / record field
+   - `{record.tags.0}` — **array index** (e.g. a `multiple: true` lookup, stored as an array)
+   - `{$User.Id}` / `{NOW()}` / `{TODAY() + 30}` — current user / date macros
+   - `{round(x)}` `{floor(x)}` `{ceil(x)}` `{abs(x)}` `{min(a,b)}` `{max(a,b)}` —
+     mirror the CEL stdlib 1:1. `round` is **integer-only** (no `round(x, 2)`);
+     for N decimals write `{round(x * 100) / 100}` (scale 2)
+   - anything without `{…}` is a **literal**
+
+   ❌ `body: '{{ai_reply}}'` — double-brace is the *formula / template-field* dialect, **not** flow values
+   ❌ `ticket: '$source.id'` — a bare `$ref` is a literal string, not interpolated
+   ✅ `body: '{ai_reply}'`, `ticket: '{source.id}'`
+   ❌ `'{ROUND(x, 2)}'` / `'{Math.round(x)}'` / `'{(x).toFixed(2)}'` — any other
+   name in call position **fails the node** with a named error naming the
+   supported set. The build does **not** catch these (conditions are checked,
+   call-position names are not) and a `fault` edge cannot route it.
+
+2. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
+   Reference a field explicitly.
+   ❌ `update_record … fields: { ref: '{newRec}' }` → yields the whole record object
+   ✅ `fields: { ref: '{newRec.id}' }`
+
+3. **`script` nodes call a registered function — that is all they do.** Set
+   `config.function` to a function registered via
+   `defineStack({ functions: { my_fn: (ctx) => … } })`. It is **required**: an
+   empty `script` node refuses at execute, and one pointing at an unregistered
+   function fails loudly.
+
+   There is no other dispatch form: use **`notify`** for delivery, a
+   **`connector_action`** or `http` webhook for Slack, a function for logic.
+
+   **A flow `function` is a PURE compute step — it does NOT read/write the
+   database.** It receives `ctx.input` and **returns** a value; `config.outputVariable`
+   exposes that value as a flow variable, and a later **declarative** node persists
+   it. Keep data effects on the flow graph (visible, governed, build-checkable):
+
+   ```ts
+   // ❌ DON'T: expect the function to update the record itself (it has no data API)
+   // ✅ DO: function returns values → outputVariable → update_record persists
+   { id: 'ai', type: 'script', config: {
+       function: 'helpdesk.aiTriageStub',     // returns { ai_category, ai_sentiment, … }
+       inputs: { ticketId: '{record.id}' },   // inputs are interpolated
+       outputVariable: 'ai',
+   } },
+   { id: 'apply', type: 'update_record', config: {
+       objectName: 'helpdesk_ticket',
+       filter: { id: '{record.id}' },
+       fields: { ai_category: '{ai.ai_category}', ai_sentiment: '{ai.ai_sentiment}' },
+   } },
+   ```
+
+   `defineStack({ functions: { 'helpdesk.aiTriageStub': (ctx) => ({ ai_category: 'other', … }) } })`.
+   If you genuinely need data-lifecycle **side effects** (read/write other records),
+   that's an L2 **hook** (objectstack-data) — hooks get `ctx.api`; flow functions don't.
+
+   A function that writes where the platform cannot see **declares** it, so the
+   run reports "cannot say" rather than `acted: 0`:
+
+   ```ts
+   defineStack({ functions: {
+     'helpdesk.aiTriageStub': (ctx) => ({ ai_category: 'other' }),  // pure — the default
+     'billing.sync': { handler: syncBilling, effect: 'writes' },    // declared writer
+   } });
+   ```
+
+4. **Conditions are bare CEL — only the stdlib is callable.** `now()`,
+   `today()`, `daysFromNow(n)`, `daysAgo(n)`, `daysBetween(a, b)`, `isBlank(v)`,
+   `coalesce(a, b)`, `abs/round/min/max`, `upper/lower/contains/matches`, plus CEL
+   built-ins (`has`, `size`, `int`, `string`, …) — see **objectstack-formula** for the full table.
+   An UNKNOWN function (`PRIOR()`, a typo'd name) and a `{…}`-wrapped field ref
+   both **fail the build**: a brace is a template, not CEL — write `record.x`,
+   not `{record.x}`.
+
+5. **`notify` reports SUCCESS when the `messaging` capability is absent.** The
+   executor logs `no messaging service registered` and returns success with
+   `output: { delivered: 0, failed: 0, skipped: true }` and `metrics.acted: 0` —
+   a green run that delivered nothing. Declare `messaging` in `requires`.
 
 ---
 
@@ -290,6 +413,9 @@ Notes:
   returns the legal next states so UIs/agents can read the transition table
   instead of hard-coding it (`next: null` = no FSM governs the field, **or**
   `?from=` was omitted — always pass `from`).
+- **An unlisted `from` state is NOT guarded.** An update whose current state is
+  not a key of `transitions` is treated leniently (no lock) — list every state
+  you want guarded rather than relying on an implicit "any → any".
 - Predicate conditions in sibling rules evaluate against the merged record in
   the **`record.<field>`** CEL scope (bare field names do not resolve).
 
@@ -302,10 +428,10 @@ run **suspends** when it reaches the node and **resumes** down the node's
 just successive Approval nodes wired together on the canvas, so the whole review
 is one diagram a reviewer (or AI) can read end-to-end.
 
-> The old process-level concepts re-home onto the flow graph + node config — see
-> the re-home table below. The approval *state* (`sys_approval_request` /
+> There is no `approvals: [...]` stack collection — approval flows live in your
+> normal `flows: [...]`. The approval *state* (`sys_approval_request` /
 > `sys_approval_action`, the record lock, the status mirror, approver
-> resolution) is unchanged and still owned by `plugin-approvals`.
+> resolution) is owned by `plugin-approvals`.
 
 ```typescript
 // A record-triggered flow: high-value opportunities need manager sign-off,
@@ -400,13 +526,10 @@ Three pieces author it:
 
 1. **`revise` out-edge** — a third branch label alongside `approve` / `reject`,
    targeting an **`approval_revise`** node. It must be that node type: the window
-   is a *service-owned* pause (`resumeAuthority: 'service'`), so only
-   `POST /api/v1/approvals/requests/:id/resubmit` can end it. ADR-0044 D3 first
-   prescribed an ordinary `wait` here and its **2026-07-28 amendment reversed
-   that** — a `wait` is `resumeAuthority: 'any'`, so a raw
-   `POST /api/v1/automation/:name/runs/:runId/resume` walked the back-edge with no
-   submitter check and no audit row, and could destroy the run outright. The
-   `approval_revise` node takes **no config** — there is no signal to wait on.
+   is a *service-owned* pause (`resumeAuthority: 'service'`), ended only by
+   `POST /api/v1/approvals/requests/:id/resubmit`; a `wait` is
+   `resumeAuthority: 'any'`, so a raw run-resume would walk the back-edge
+   unchecked. The node takes **no config** — there is no signal to wait on.
 2. **`type: 'back'` resubmit edge** — the edge from the revise window back into
    the approval node MUST be typed `'back'`. This is the *only* thing that
    legalizes the cycle: `registerFlow` validates the graph **minus `back` edges**
@@ -439,23 +562,6 @@ Three pieces author it:
 > is an explicit verb (`POST /api/v1/approvals/requests/:id/resubmit`), never a
 > record-save. See the `showcase_budget_approval` flow in the showcase app in
 > the framework repo for the canonical shape.
-
-### Re-homing the old process model
-
-If you've seen the pre-ADR-0019 `ApprovalProcess.create({...})` shape, every
-concept maps onto the flow:
-
-| Old process concept | Now |
-|:--------------------|:----|
-| `steps: [...]` (linear list) | successive **Approval nodes** joined by edges |
-| `entryCriteria` (process or step) | a `condition` on the **edge entering** the node |
-| `onApprove` / `onReject` actions | downstream **nodes** wired to the `approve` / `reject` out-edge |
-| `rejectionBehavior: 'back_to_previous'` | a **back-edge** to an earlier node |
-| `rejectionBehavior: 'reject_process'` | the `reject` edge routed to an `end` node |
-| `approvers` / `behavior` / `lockRecord` / `approvalStatusField` / `escalation` | the Approval node's `config` (`ApprovalNodeConfigSchema`) |
-
-There is no `approvals: [...]` stack collection anymore — approval flows live in
-your normal `flows: [...]`.
 
 ### Recording a decision
 
@@ -593,17 +699,10 @@ Time-word cheat sheet across surfaces (do not mix them up):
 | Surface | Event-time record | Pre-event record | Live record |
 |:--------|:------------------|:-----------------|:------------|
 | Flow condition / `{…}` template | `record` (trigger snapshot) | `previous` | — (use a `get_record` node) |
-| Object hook **handler** (`ctx`) | `ctx.input` (write payload); `ctx.result` after the write | `ctx.previous` | — (query via `ctx.ql`) |
-| Object hook **`condition`** (CEL) | `record` (stored ⊕ payload) | `previous` | — |
 | Approval `expression` approver | `trigger.*` | `vars.previous` | `current.*` |
 
-**There is no `ctx.record`.** `HookContext` declares `input` / `result` /
-`previous` / `session` / `ql` (plus `object` / `event`) — a handler reads the
-write payload as `ctx.input`. The bare `record` / `previous` roots are the
-**condition**'s CEL scope, not the handler's context object: `record` is the
-stored row overlaid with this write's payload and `previous` is the
-pre-write row, both made total over the object's declared fields. See
-`objectstack-formula` §5 for where `previous` is bound and where it is not.
+Object-hook `ctx` is a different vocabulary — see **objectstack-data**
+`references/data-hooks.md`.
 
 ### Node Config (`ApprovalNodeConfigSchema`)
 
@@ -658,20 +757,25 @@ binding lives entirely in the flow's **`start` node `config`**, which the
 automation engine parses (`resolveTriggerBinding`) and wires to the matching
 ObjectQL lifecycle hook.
 
-### Prerequisite — enable the `triggers` capability
+### Prerequisite — declare the capabilities your nodes need
 
-Record-change, schedule, **and inbound-webhook (`api`)** triggers ship behind the
-`triggers` capability. **Without it the flows register but never fire.** Add it
-to the package config:
+Metadata registers without its token; the surface just never runs — two of them
+silently:
+
+| `requires` token | Turns on | Absent ⇒ |
+|:--|:--|:--|
+| `automation` | the flow engine + node executors | flows never execute |
+| `triggers` | `record-*` / schedule / `api` start bindings | flows register, never fire |
+| `job` | cron cadence + the `timeRelative` sweep | scheduled flows never launch |
+| `queue` | the inbound-webhook consumer | inbound POST answers **503** |
+| `approvals` | `approval` / `approval_revise` (`plugin-approvals`) | no executor for the node type |
+| `messaging` | `notify` delivery to inbox (`sys_inbox_message`) | **silent:** success with `skipped: true` |
+| `webhooks` | `defineStack({ webhooks })` outbound registrations | nothing delivered outbound |
 
 ```typescript
 defineStack({
   // …
-  requires: ['automation', 'triggers'],
-  //   + 'job'   for scheduled (cron) flows
-  //   + 'queue' for inbound-webhook ('api') flows — the trigger-api plugin
-  //             depends on the queue service; without it every inbound POST
-  //             returns 503 SERVICE_UNAVAILABLE.
+  requires: ['automation', 'triggers', 'job', 'queue', 'approvals', 'messaging'],
 });
 ```
 
@@ -706,32 +810,31 @@ read at runtime, not Zod-validated):
 
 ### Trigger Configuration — on the `start` node
 
+The binding is the START NODE — this is that node, not a whole flow (a flow also
+owns `label`, `type`, `nodes` and the `edges` `FlowSchema` requires):
+
 ```typescript
 {
-  name: 'notify_on_escalation',
-  label: 'Notify on Escalation',
-  type: 'record_change',
-  nodes: [
-    {
-      id: 'start',
-      type: 'start',
-      label: 'On Case Escalated',
-      config: {
-        objectName: 'support_case',
-        triggerType: 'record-after-update',
-        // bare CEL; gates whether the flow launches on the event
-        condition: cel`previous.status != 'escalated' && record.status == 'escalated'`,
-      },
-    },
-    // …downstream nodes, connected via `edges`
-  ],
+  id: 'start',
+  type: 'start',
+  label: 'On Case Escalated',
+  config: {
+    objectName: 'support_case',
+    triggerType: 'record-after-update',
+    // bare CEL; gates whether the flow launches on the event
+    condition: "previous.status != 'escalated' && record.status == 'escalated'",
+  },
 }
 ```
 
+> **Prefer `record-after-*`** unless you must modify or reject the record;
+> **guard** one that writes its own object, or it re-triggers itself. A
+> `record-before-*` flow that throws silently blocks the write — give it a
+> user-facing message.
+
 > **`previous`** and **`record`** are the CEL variables available in update
 > triggers — `previous.x` is the value before the change, `record.x` is the
-> value after. (Salesforce-flavor `OLD` / `NEW` were removed in M9.5 and now
-> fault the predicate.) See [objectstack-formula](../objectstack-formula/SKILL.md).
+> value after. See [objectstack-formula](../objectstack-formula/SKILL.md).
 
 ### Time-relative triggers — scheduled per-record date sweep
 
@@ -774,179 +877,31 @@ day, a threshold is never missed.
 }
 ```
 
+**Date EQUALITY never matches**, so a hand-rolled sweep filters windows, not
+days: a `date` field carries a time component, so `field == daysFromNow(N)` (or
+`{ $in: [...] }`) compares two differently-timed timestamps and silently returns
+nothing (build warns `flow-date-equality-filter`). Tier each threshold as a
+one-day **window** (`$gte`/`$lt`):
+
+```ts
+filter: { status: 'active', $or: [
+  { end_date: { $gte: '{TODAY() + 7}',  $lt: '{TODAY() + 8}'  } },
+  { end_date: { $gte: '{TODAY() + 30}', $lt: '{TODAY() + 31}' } },
+  { end_date: { $gte: '{TODAY() + 60}', $lt: '{TODAY() + 61}' } },
+] }
+```
+
+Abutting windows tile the timeline, so each record matches exactly one tier —
+fires once, idempotent, no guard field. Use `{TODAY() + N}` template tokens in
+CRUD-node filter values; a `cel\`…\`` envelope is not evaluated there and would be
+compared as a literal object. For "days remaining" in a message, use
+`daysBetween(today(), record.end_date)`.
+
 Exactly one of `offsetDays` (discrete T-minus days) or `withinDays` (a range;
 negative = overdue) is required. Ships in `@objectstack/trigger-schedule` —
 needs `requires: ['automation', 'triggers']` **plus `'job'`** (the sweep cadence
 runs on the job service). Full descriptor schema:
 `node_modules/@objectstack/spec/src/automation/time-relative-trigger.zod.ts`.
-
----
-
-## Best Practices
-
-### Flow Design
-
-1. **Keep flows small and composable.** Use `subflow` nodes to break complex
-   logic into reusable parts.
-2. **Always handle errors.** Add `boundary_event` nodes for timeout and error
-   scenarios.
-3. **Use variables for all dynamic values.** Never hard-code record IDs or
-   API keys in node config.
-4. **Prefer `get_record` over multiple `http` calls** when the data
-   lives in ObjectStack.
-5. **Always set `timeoutMs` on `http` nodes.** Unset means **no timeout at
-   all** — a hung endpoint stalls the run indefinitely.
-
-### State Machine Design (ADR-0020)
-
-1. **Author it as a `state_machine` validation rule** on the object, not a
-   `workflow` metadata type (retired) — one rule per state field.
-2. **Define explicit transitions** — `{ from: [allowedTo] }`. A state mapped to
-   `[]` is a final/dead-end state.
-3. **Don't rely on implicit "any → any"** — an update to a `from` state not
-   listed as a key is treated leniently (no lock), so list every state you want
-   guarded.
-4. **Put guards in a sibling `script` / `conditional` rule**, not in the
-   transition table (the machine stays a flat table).
-5. **Put side-effects (emails, notifications, task creation) in a
-   record-triggered Flow** (ADR-0019), not on the transition.
-
-### Trigger Design
-
-1. **Prefer `record-after-*` triggers** unless you need to modify/reject the record.
-2. **Avoid infinite loops:** Do not update the same object in a
-   `record-after-update` trigger without a guard condition.
-3. **Use the start-node `condition`** to narrow when the trigger fires — avoid
-   running expensive logic on every save.
-
----
-
-## Common Pitfalls
-
-1. **Circular flow references.** Flow A calls Flow B which calls Flow A. Use
-   a depth counter or `visited` set to detect cycles.
-2. **Unmatched `parallel_gateway` / `join_gateway`.** Every fork must have a
-   corresponding join.
-3. **Missing `end` node.** Every path through the flow must terminate.
-4. **`record-before-*` trigger throwing unhandled errors.** This silently
-   prevents the record operation — always provide a user-friendly error message.
-5. **Scheduled flows without idempotency.** If the flow runs twice
-   accidentally, the result should be the same.
-
-### Valid-but-silently-wrong (passes build, fails at runtime)
-
-These are *legal* metadata that authors — AI especially — get wrong. Most are now
-caught by `objectstack build` (a hard error, or an advisory warning), but write
-them right the first time:
-
-6. **Flow node VALUE interpolation uses SINGLE braces.** Value fields on a node's
-   `config` (`fields`, `inputs`, notify `message`/`title`, …) interpolate
-   `{token}`:
-   - `{var}` / `{record.title}` — variable / record field
-   - `{record.tags.0}` — **array index** (e.g. a `multiple: true` lookup, stored as an array)
-   - `{$User.Id}` / `{NOW()}` / `{TODAY() + 30}` — current user / date macros
-   - `{round(x)}` `{floor(x)}` `{ceil(x)}` `{abs(x)}` `{min(a,b)}` `{max(a,b)}` —
-     mirror the CEL stdlib 1:1. `round` is **integer-only** (no `round(x, 2)`);
-     for N decimals write `{round(x * 100) / 100}` (scale 2)
-   - anything without `{…}` is a **literal**
-
-   ❌ `body: '{{ai_reply}}'` — double-brace is the *formula / template-field* dialect, **not** flow values
-   ❌ `ticket: '$source.id'` — a bare `$ref` is a literal string, not interpolated
-   ✅ `body: '{ai_reply}'`, `ticket: '{source.id}'`
-   ❌ `'{ROUND(x, 2)}'` / `'{Math.round(x)}'` / `'{(x).toFixed(2)}'` — any other
-   name in call position **fails the node** with a named error naming the
-   supported set. The build does **not** catch these (conditions are checked,
-   call-position names are not) and a `fault` edge cannot route it.
-
-7. **`create_record`'s `outputVariable` holds the created RECORD, not its id.**
-   Reference a field explicitly.
-   ❌ `update_record … fields: { ref: '{newRec}' }` → yields the whole record object
-   ✅ `fields: { ref: '{newRec.id}' }`
-
-8. **Time-relative rules ("alert N days before a date") are SCHEDULE flows, not
-   record-change date-equality.** `record.end_date == daysFromNow(60)` on a
-   `record-*` trigger only fires if the record happens to be written on that exact
-   day — unattended rules never run. **And date EQUALITY never matches anyway**: a
-   `date` field carries a time component, so `field == daysFromNow(N)` (or
-   `{ $in: [daysFromNow(N), …] }`) compares two differently-timed timestamps and
-   silently returns nothing (build warns `flow-date-equality-filter`).
-   ✅ A daily `schedule` flow whose `get_record` filters each tier as a one-day
-   **window** (`$gte`/`$lt`), never an equality:
-   ```ts
-   filter: { status: 'active', $or: [
-     { end_date: { $gte: '{TODAY() + 7}',  $lt: '{TODAY() + 8}'  } },
-     { end_date: { $gte: '{TODAY() + 30}', $lt: '{TODAY() + 31}' } },
-     { end_date: { $gte: '{TODAY() + 60}', $lt: '{TODAY() + 61}' } },
-   ] }
-   ```
-   (Use `{TODAY() + N}` template tokens in CRUD-node filter values — a
-   `cel\`…\`` envelope is not evaluated there and would be compared as a
-   literal object.)
-   Abutting windows tile the timeline so each record matches exactly one tier —
-   fires once, idempotent, no guard field. For "days remaining" in the message,
-   `daysBetween(today(), record.end_date)`.
-
-9. **`script` nodes call a registered function — that is all they do.** Set
-   `config.function` to a function registered via
-   `defineStack({ functions: { my_fn: (ctx) => … } })`. It is **required**: an
-   empty `script` node refuses at execute, and one pointing at an unregistered
-   function fails loudly.
-
-   The other dispatch forms were retired in spec 17 because none of them
-   ran: `config.actionType: 'email' | 'slack'` were logger-backed stubs that
-   delivered nothing (with `config.template` / `.recipients` / `.variables`
-   feeding a message no channel sent), and inline `config.script` JS was never
-   executed (no server-side sandbox). Use a **`notify`** node for real
-   notification delivery, a **`connector_action`** (Slack connector) or `http`
-   webhook for Slack, and a registered function for logic. Stored flows convert
-   with `os migrate meta --from 16`.
-
-   **A flow `function` is a PURE compute step — it does NOT read/write the
-   database.** It receives `ctx.input` and **returns** a value; `config.outputVariable`
-   exposes that value as a flow variable, and a later **declarative** node persists
-   it. Keep data effects on the flow graph (visible, governed, build-checkable):
-
-   ```ts
-   // ❌ DON'T: expect the function to update the record itself (it has no data API)
-   // ✅ DO: function returns values → outputVariable → update_record persists
-   { id: 'ai', type: 'script', config: {
-       function: 'helpdesk.aiTriageStub',     // returns { ai_category, ai_sentiment, … }
-       inputs: { ticketId: '{record.id}' },   // inputs are interpolated
-       outputVariable: 'ai',
-   } },
-   { id: 'apply', type: 'update_record', config: {
-       objectName: 'helpdesk_ticket',
-       filter: { id: '{record.id}' },
-       fields: { ai_category: '{ai.ai_category}', ai_sentiment: '{ai.ai_sentiment}' },
-   } },
-   ```
-
-   `defineStack({ functions: { 'helpdesk.aiTriageStub': (ctx) => ({ ai_category: 'other', … }) } })`.
-   If you genuinely need data-lifecycle **side effects** (read/write other records),
-   that's an L2 **hook** (objectstack-data) — hooks get `ctx.api`; flow functions don't.
-
-   The rule is load-bearing: a `script` step reports **no** record metrics in the
-   run summary *because* every write a pure function causes is a downstream node
-   that counts itself. A function that writes anyway makes its run report
-   `acted: 0` — indistinguishable from a sweep that silently did nothing. When a
-   function must write somewhere the platform cannot see (an upstream billing
-   API), **declare it** so the run stays honest — its step is then counted as an
-   effect that cannot be measured, never as zero:
-
-   ```ts
-   defineStack({ functions: {
-     'helpdesk.aiTriageStub': (ctx) => ({ ai_category: 'other' }),  // pure — the default
-     'billing.sync': { handler: syncBilling, effect: 'writes' },    // declared writer
-   } });
-   ```
-
-10. **Conditions are bare CEL — only the stdlib is callable.** `now()`,
-    `today()`, `daysFromNow(n)`, `daysAgo(n)`, `daysBetween(a, b)`, `isBlank(v)`,
-    `coalesce(a, b)`, `abs/round/min/max`, `upper/lower/contains/matches`, plus CEL
-    built-ins (`has`, `size`, `int`, `string`, …) — see **objectstack-formula** for the full table.
-    An UNKNOWN function (`PRIOR()`, a typo'd name) and a `{…}`-wrapped field ref
-    both **fail the build**: a brace is a template, not CEL — write `record.x`,
-    not `{record.x}`.
 
 ---
 
@@ -959,7 +914,6 @@ For enterprise automation design, align with this CRM-style structure:
 | Screen flow | `src/flows/*.flow.ts` | Use explicit `variables`, node graph (`nodes` + `edges`), and decision branches |
 | Approval flow | `src/flows/*.flow.ts` | A flow with `approval` node(s); set `approvers` / `behavior` / `lockRecord` / `approvalStatusField` in node `config`, branch on `approve` / `reject` edges |
 | Flow registry | `src/flows/index.ts` | Export `allFlows: Flow[]` and register centrally in `defineStack({ flows })` |
-| Action-to-flow bridge | `src/actions/*.actions.ts` | Trigger screen flows via `Action.type = 'flow'` for user-driven automation entry |
 
 Default approach for metadata apps: model business lifecycle in Flow/Approval
 metadata first; reserve custom code for edge-case integrations.
@@ -968,19 +922,10 @@ metadata first; reserve custom code for edge-case integrations.
 
 ## Verify your work
 
-**Conditions and declared bare-CEL slots** (`condition`, a screen's
-`visibleWhen`) are validated at flow **registration** and by the build: a
-syntax error, an unknown function (`PRIOR()`) or a `{…}`-wrapped reference
-**throws**, located and corrective — never silent.
-
-**Node values** take the single-brace `flow-template` dialect (`'{round(x)}'`);
-no validator checks its call names, so an unknown function is NOT build-checked —
-it throws `FlowExpressionFunctionError` at **run time**.
-
-The quiet case is a typo'd *field* name: bare refs (`status == 'open'`) DO
-resolve (the engine flattens the record's fields into scope), so a typo is only
-an advisory did-you-mean. `record.status` stays canonical; `os validate` errors
-on unknown `record.<field>`:
+A bare ref (`status == 'open'`) resolves — the engine flattens the record's
+fields into scope — so a typo there is only an advisory did-you-mean.
+`record.status` stays canonical, and `os validate` errors on an unknown
+`record.<field>`:
 
 ```bash
 os validate     # CEL/predicate validation (record.<field> existence) + schema
@@ -993,6 +938,9 @@ sharing rule, exiting non-zero. In a scaffolded project: `npm run validate`.
 ---
 
 ## References
+
+The send-back shape has a graded eval at
+[evals/approvals/test-revise-loop.md](./evals/approvals/test-revise-loop.md).
 
 See [references/_index.md](./references/_index.md) for the full list of Zod
 schemas (with one-line descriptions) — pointers into

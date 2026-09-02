@@ -4164,6 +4164,14 @@ function reportDepthCost() {
 // A checker nobody checks is the shape this gate exists to prevent. These
 // fixtures pin both directions: it must FLAG the #4420 shape and must NOT flag
 // the shapes that are legitimately `warn`.
+
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
     const cases = [
         {
@@ -5153,6 +5161,7 @@ function selfTest() {
         return 1;
     }
     console.log(`\n✓ self-test (log-level rule): ${cases.length} case(s) passed\n`);
+    selfTestReachedVerdict = true;
     return 0;
 }
 
@@ -5164,6 +5173,11 @@ function selfTest() {
 // the FLAGGING ones are those same seams as they read BEFORE those fixes. A
 // gate for a family that has recurred three times must be pinned against the
 // three instances, in both directions, or the fourth recurrence lands green.
+// The dispatch calls TWO self-test entries and combines their statuses, so each
+// one needs its own handshake: a `return` above either verdict prints nothing and
+// leaves `undefined`, which the `||` below reads as a pass (#13798).
+let readSeamsReachedVerdict = false;
+
 function selfTestReadSeams() {
     // The guard `DatabaseLoader` and `MetadataProtocol` both wrote after the
     // fixes, reproduced verbatim so the fixtures exercise the real shape.
@@ -6378,6 +6392,7 @@ function selfTestReadSeams() {
         `\n✓ self-test (read-seam invention rule): ${cases.length} case(s) passed, and the baseline ` +
             'offer stays marked maintainer-only (#8435)\n',
     );
+    readSeamsReachedVerdict = true;
     return 0;
 }
 
@@ -6385,7 +6400,23 @@ const args = process.argv.slice(2);
 if (args.includes('--self-test')) {
     // Both rules' fixtures always run — a red one must not hide the other.
     const logLevelStatus = selfTest();
+    if (!selfTestReachedVerdict) {
+        console.error(
+            '\n✗ check-durability-degradation-log-level self-test: selfTest() returned without reaching its verdict,\n'
+                + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+    }
     const readSeamStatus = selfTestReadSeams();
+    if (!readSeamsReachedVerdict) {
+        console.error(
+            '\n✗ check-durability-degradation-log-level self-test: selfTestReadSeams() returned without\n'
+                + 'reaching its verdict, so no success line was printed. Exiting 0 here would report a\n'
+                + 'self-test that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+    }
     process.exit(logLevelStatus || readSeamStatus ? 1 : 0);
 } else if (args.includes('--depth-cost')) {
     // A diagnostic, deliberately not part of any verdict — see `reportDepthCost`.

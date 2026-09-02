@@ -47,8 +47,17 @@
 # check (branch protection on main requires TypeScript Type Check, Build Core,
 # Test Core and Dogfood Regression Gate), so an absent one blocks nothing and is
 # simply invisible. resolve-guard turns that silence into an explicit red.
+#
+# "How long was publish broken?" is answered by walking the `publish-smoke /
+# packed-tarballs` commit-status history on the release-branch head, never by
+# scanning this workflow's run list, because the list interleaves the weekly
+# registry canary (schedule-triggered, unrelated to any release candidate)
+# with release-candidate smokes, and an unlabeled canary green reads as "the
+# RC smoke passed" (#14190 — a six-day outage misread from exactly that).
 
 name: Publish Smoke
+
+run-name: ${{ github.event_name == 'schedule' && 'Registry canary (published latest) — scheduled' || github.event_name == 'workflow_dispatch' && format('Publish smoke — manual dispatch on {0}', github.ref_name) || format('Packed-tarball smoke (release candidate) — after Release run {0}', github.event.workflow_run.head_sha) }}
 
 on:
   workflow_run:

@@ -286,6 +286,12 @@ function main() {
 // positive control on a temp fixture, paired with a byte-identity control on a clean one.
 // ---------------------------------------------------------------------------
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'sync-docs-image-tags self-test reached its verdict';
+
 function selfTest() {
   const failures = [];
   let checked = 0;
@@ -578,6 +584,8 @@ function selfTest() {
     + 'BYTE-IDENTICAL and unwritten; rolling tags, the X.Y.Z metavariable, placeholders, interpolations and '
     + 'version-shaped prose are observed UNMOVED.',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 // ---------------------------------------------------------------------------
@@ -587,7 +595,14 @@ function selfTest() {
 // the gate's version of the same bug.
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    selfTest();
+    if (selfTest() !== SELF_TEST_VERDICT) {
+        console.error(
+            '\n✗ sync-docs-image-tags self-test: selfTest() returned without reaching its verdict,\n'
+                + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+                + 'that never finished as a self-test that passed.\n',
+        );
+        process.exit(1);
+    }
   } else {
     main();
   }
