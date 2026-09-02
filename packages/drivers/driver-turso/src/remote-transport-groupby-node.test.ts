@@ -105,7 +105,35 @@
  *   the change.
  * - every date-bucket, parity and string-form case stays GREEN.
  *
- * MEASURED: see the PR body for the run.
+ * MEASURED, case for case as predicted — **4 failed / 14 passed of 18**:
+ *
+ * ```
+ * ESCAPES an alias that would close   Error: RemoteTransport: unsafe identifier
+ *   the quoting                       rejected: "bucket"; DROP TABLE deal; --"
+ * a dotted or spaced alias            …rejected: "Region Name", then
+ *   round-trips                       …rejected: "deal.stage_bucket"
+ * a dotted alias comes back under     …rejected: "deal.stage_bucket"
+ *   the result key (executing)
+ * an alias that tries to close the    …rejected: "bucket"; DROP TABLE deal; --"
+ *   quoting (executing)
+ * ── green ──
+ * still refuses an unsafe identifier inside a structured entry   (the CONTROL)
+ * projects `alias` as the column name · no self-rename for alias === field
+ * the string-form control · all five date-bucket refusals · both parity cases
+ * ```
+ *
+ * Not one failure came through a comparison: the restored gate throws before
+ * any SQL is built, which is why the guard could not simply be deleted from the
+ * `field` position and why the control above is the case that holds it.
+ *
+ * ⚠️ No `dist/` leg applies to this ablation. The suite imports the mutated
+ * unit as `./remote-transport.js` — a RELATIVE, in-package specifier that
+ * vitest resolves to `src/remote-transport.ts`, not through the package's
+ * `exports` — and `vitest.config.ts` declares no alias (it sets
+ * `disableConsoleIntercept` and nothing else). The mutation was proved on disk
+ * by grep counts on both the injected and the removed text and by
+ * `git hash-object` against the HEAD blob, and the restore by the same hash
+ * matching again plus an empty `git diff HEAD`.
  *
  * # Reverse verification (#6212) — direction predicted BEFORE it was run, per case
  *
