@@ -37,7 +37,7 @@ import {
 } from './lib/docs-import-surface';
 import { renderFileDescription } from './lib/file-description';
 import { anchorFor } from './lib/format-type';
-import { createSink } from './lib/generated-output';
+import { AUTO_GENERATED_BANNER, createSink } from './lib/generated-output';
 import {
   blurbCoverage,
   docLinkTargets,
@@ -440,7 +440,7 @@ function generateZodFileMarkdown(zodFile: string, schemas: Array<{name: string, 
   md += `title: ${zodTitle}\n`;
   md += `description: ${zodTitle} protocol schemas\n`;
   md += `---\n\n`;
-  md += `{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}\n\n`;
+  md += AUTO_GENERATED_BANNER;
   
   if (fileDesc) {
       md += `${fileDesc}\n\n`;
@@ -869,6 +869,7 @@ Object.entries(CATEGORIES).forEach(([category, title]) => {
   mdx += `title: ${title}\n`;
   mdx += `description: Complete reference for all ${title.toLowerCase()} schemas\n`;
   mdx += `---\n\n`;
+  mdx += AUTO_GENERATED_BANNER;
   
   mdx += `This section contains all protocol schemas for the ${category} layer of ObjectStack.\n\n`;
   
