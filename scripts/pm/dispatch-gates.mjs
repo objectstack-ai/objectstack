@@ -15427,6 +15427,99 @@ function selfTest() {
   t('the suspect table is not empty and every entry carries its reason', SUSPECT_TIER_GLOBS.length > 0 && SUSPECT_TIER_GLOBS.every((g) => g.glob && g.why));
   t('the contract-review tier constant is a non-empty model id — the single source the PM skill points at', typeof CONTRACT_REVIEW_TIER === 'string' && CONTRACT_REVIEW_TIER.length > 0);
 
+  // ── The tier constant's ONE-VALUE-SITE promise (#14616) ───────────────────
+  //
+  // The PM skill promises 「档位单源 … 模型升级只改一行一个文件」, and until this
+  // case that promise was held by a `git grep` someone remembers to run. The
+  // drift it exists against is measured rather than feared: the value was
+  // spelled in SIXTEEN places across these same two roots — prose, mandate
+  // rows, header comments, self-test fixtures — while the promise above read
+  // as true, and a promise held by hand is what one model refresh erases.
+  //
+  // What is counted is the constant's OWN VALUE, read from the constant at run
+  // time. Never a second literal — that spelling would BE the site the case
+  // exists to forbid — and never a family or prefix pattern: a prefix scan
+  // would be a family floor the human floor has not granted, and would itself
+  // be a second spelling of the model family inside this tool, i.e. the defect
+  // recreated by its own guard. One consequence is deliberate: the verbatim
+  // maintainer rulings quoted in the skill's main file and in its dispatch
+  // runbook name the model FAMILY as prose, not as this value, so an
+  // exact-value scan does not reach them — and it must not be widened until it
+  // would, because a gate that can demand edits to a maintainer's recorded
+  // words is the wrong gate.
+  //
+  // Both roots are DERIVED, not spelled: the skill tree is the directory of the
+  // mandate glob naming its main file, and the tool tree is this module's own
+  // directory. The population therefore follows a rename instead of rotting,
+  // and no fresh path literal enters this file's own watch-hint set — measured
+  // over its own source, 23 hints before this case and 23 after (`maskSelfTests`
+  // blanks this body, which is what makes a fixture path here inert at all).
+  //
+  // The walk takes its base directory as an argument, so the same code can be
+  // pointed at a scratch copy of the population to prove it reds; a second
+  // spelling anywhere under the roots is reported as `file:line`, never as a
+  // bare count a reader cannot act on.
+  const tierValueSites = (base, roots, value) => {
+    const sites = [];
+    const perRoot = [];
+    for (const root of roots) {
+      // An empty root would join to `base` and walk the whole tree — the one
+      // way this case could turn a rename into a pass instead of a red.
+      if (!root || root === '.') {
+        sites.push('(a scan root derives from a mandate glob that is no longer in the table)');
+        perRoot.push(0);
+        continue;
+      }
+      let scanned = 0;
+      const stack = [root];
+      while (stack.length > 0) {
+        const rel = stack.pop();
+        const abs = join(base, rel);
+        if (!existsSync(abs)) {
+          sites.push(`${rel} (MISSING)`);
+          continue;
+        }
+        if (statSync(abs).isDirectory()) {
+          for (const name of readdirSync(abs)) stack.push(join(rel, name));
+          continue;
+        }
+        scanned += 1;
+        readFileSync(abs, 'utf8')
+          .split('\n')
+          .forEach((text, i) => {
+            for (let at = text.indexOf(value); at >= 0; at = text.indexOf(value, at + value.length)) {
+              sites.push(`${rel}:${i + 1}`);
+            }
+          });
+      }
+      perRoot.push(scanned);
+    }
+    return { sites, perRoot };
+  };
+  const tierOwnRel = relative(ROOT, fileURLToPath(import.meta.url));
+  // The definition line is FOUND, not remembered: the one line carrying both
+  // the constant's name and its value. A line number in a case name that has
+  // to be maintained by hand is the same species of promise as the one this
+  // case replaces.
+  const tierDefLine =
+    readFileSync(join(ROOT, tierOwnRel), 'utf8')
+      .split('\n')
+      .findIndex((l) => l.includes('CONTRACT_REVIEW_TIER') && l.includes(CONTRACT_REVIEW_TIER)) + 1;
+  const tierRoots = [
+    dirname(MANDATORY_TIER_GLOBS.find((g) => g.glob === '.claude/skills/pm-dispatch/SKILL.md')?.glob ?? ''),
+    dirname(tierOwnRel),
+  ];
+  const tierScan = tierValueSites(ROOT, tierRoots, CONTRACT_REVIEW_TIER);
+  t(
+    `the tier constant's VALUE is spelled in exactly ONE site under ${tierRoots.join(' + ')} — ` +
+      `${tierScan.perRoot.join('+')} files read, the definition at ${tierOwnRel}:${tierDefLine} the only one allowed ` +
+      `(found: ${tierScan.sites.join(', ') || 'NOTHING — this scan reached no occurrence at all'})`,
+    tierDefLine > 0 &&
+      tierScan.perRoot.every((n) => n > 0) &&
+      tierScan.sites.length === 1 &&
+      tierScan.sites[0] === `${tierOwnRel}:${tierDefLine}`,
+  );
+
   // ── The change set derived from git (#9320) ───────────────────────────────
   //
   // These build a real repository and run the real derivation over it. A
