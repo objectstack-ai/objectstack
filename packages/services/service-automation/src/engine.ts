@@ -5330,54 +5330,73 @@ export class AutomationEngine implements IAutomationService {
      * indistinguishable to the caller, so the run may still be parked and
      * resumable. That path is reported at `error` (#4632/#6299) precisely
      * because nothing above it can tell the difference; see the catch below.
+     *
+     * [#14332] WHERE THE RUN IS READ FROM: {@link loadSuspendedRunStrict} —
+     * the same store-authoritative read `resumeInternal` takes, and the STRICT
+     * loader by deliberate choice rather than the degrading
+     * {@link loadSuspendedRun}. NOT FOUND (the store answered and holds no row
+     * for this id) reads as "already terminal / unknown" and returns `false`,
+     * exactly as before; a store that cannot be READ throws out of the loader
+     * into the catch below, which keeps this site's own #4632 DURABILITY record
+     * at `error`. The degrading loader would have answered `null` under its own
+     * best-effort `warn` and silently downgraded that verdict — the posture is
+     * preserved here by picking the loader that preserves it.
+     *
+     * ⚠️ The consequence of a store-authoritative read, stated rather than left
+     * to be discovered: while a store is configured this process's map is no
+     * longer an answer, so a store outage reaches the `error` record above even
+     * for a run THIS replica is holding — where the old cache-first read
+     * cancelled from the local snapshot instead. That snapshot is the defect:
+     * the row delete is by id and is therefore right either way, but
+     * {@link forgetSuspendedRun} notifies the executor of the node recorded on
+     * the SNAPSHOT, so a stale replica tore down the pause of a node the run had
+     * already left and left the live one's armed.
      */
     async cancelRun(runId: string, reason?: string): Promise<boolean> {
-        let run = this.suspendedRuns.get(runId) ?? null;
-        if (!run && this.store) {
-            try {
-                run = await this.store.load(runId);
-            } catch (err) {
-                // #6299 — same family, same mechanism as `forgetSuspendedRun`
-                // above: the driver's uncontrolled text goes to the structured
-                // slot so the record stays one physical line.
-                //
-                // #4632 verdict: DURABILITY — raised from `warn` to `error`. The
-                // failed read is silently turned into "no such suspended run"
-                // and this method returns `false`, which its own contract
-                // documents as idempotent success (already terminal / unknown),
-                // so the cancellation is SKIPPED while the call reads clean. The
-                // only in-repo caller measures the cost: plugin-approvals'
-                // revise-window recall
-                // (`packages/plugins/plugin-approvals/src/approval-service.ts`)
-                // never reads the boolean at all — it only catches a THROW, and
-                // grades that throw `error` with "the run may be stranded"
-                // (#4420). A store-read failure produces precisely that stranded
-                // run WITHOUT firing that alarm: the request is marked
-                // `recalled`, the record lock is released, `resumeError` stays
-                // undefined — and the run stays parked in the store, to be
-                // re-armed and resumed by the next restart, inside a flow whose
-                // approval has already been withdrawn.
-                //
-                // This is why #6230's verdict must not be copied here.
-                // `loadSuspendedRun` is a DECLARED best-effort reader for
-                // incidental callers (a gate lookup, a screen fetch), and
-                // `resumeInternal` takes the strict form exactly where the
-                // difference matters. `cancelRun` has no strict alternative, and
-                // its degradation decides a WRITE.
-                //
-                // THIRD argument (`error(message, error?, meta?)`), `Error` slot
-                // deliberately empty (#5575).
-                this.logger.error(
-                    `[automation] cancelRun('${runId}') could not read the durable suspended-run store, so the ` +
-                        `cancellation was SKIPPED and reported as idempotent success — this call returns false, which ` +
-                        `its callers read as "no such suspended run". The run is NOT cancelled: if it is parked in the ` +
-                        `store it stays parked, and the next restart re-arms and resumes it while the caller has ` +
-                        `already recorded the cancellation. Fix the store failure in this record's meta, then re-issue ` +
-                        `cancelRun('${runId}').`,
-                    undefined,
-                    describeThrownForLog(err),
-                );
-            }
+        let run: SuspendedRun | null = null;
+        try {
+            run = await this.loadSuspendedRunStrict(runId);
+        } catch (err) {
+            // #6299 — same family, same mechanism as `forgetSuspendedRun`
+            // above: the driver's uncontrolled text goes to the structured
+            // slot so the record stays one physical line.
+            //
+            // #4632 verdict: DURABILITY — raised from `warn` to `error`. The
+            // failed read is silently turned into "no such suspended run"
+            // and this method returns `false`, which its own contract
+            // documents as idempotent success (already terminal / unknown),
+            // so the cancellation is SKIPPED while the call reads clean. The
+            // only in-repo caller measures the cost: plugin-approvals'
+            // revise-window recall
+            // (`packages/plugins/plugin-approvals/src/approval-service.ts`)
+            // never reads the boolean at all — it only catches a THROW, and
+            // grades that throw `error` with "the run may be stranded"
+            // (#4420). A store-read failure produces precisely that stranded
+            // run WITHOUT firing that alarm: the request is marked
+            // `recalled`, the record lock is released, `resumeError` stays
+            // undefined — and the run stays parked in the store, to be
+            // re-armed and resumed by the next restart, inside a flow whose
+            // approval has already been withdrawn.
+            //
+            // This is why #6230's verdict must not be copied here.
+            // `loadSuspendedRun` is a DECLARED best-effort reader for
+            // incidental callers (a gate lookup, a screen fetch), and
+            // `resumeInternal` takes the strict form exactly where the
+            // difference matters. `cancelRun` has no strict alternative, and
+            // its degradation decides a WRITE.
+            //
+            // THIRD argument (`error(message, error?, meta?)`), `Error` slot
+            // deliberately empty (#5575).
+            this.logger.error(
+                `[automation] cancelRun('${runId}') could not read the durable suspended-run store, so the ` +
+                    `cancellation was SKIPPED and reported as idempotent success — this call returns false, which ` +
+                    `its callers read as "no such suspended run". The run is NOT cancelled: if it is parked in the ` +
+                    `store it stays parked, and the next restart re-arms and resumes it while the caller has ` +
+                    `already recorded the cancellation. Fix the store failure in this record's meta, then re-issue ` +
+                    `cancelRun('${runId}').`,
+                undefined,
+                describeThrownForLog(err),
+            );
         }
         if (!run) return false;
         await this.forgetSuspendedRun(run, 'cancelled');
@@ -5747,9 +5766,19 @@ export class AutomationEngine implements IAutomationService {
         let parentId = (context as Record<string, unknown> | undefined)?.$parentRunId;
         let hops = 0;
         while (typeof parentId === 'string' && parentId && hops++ < 32) {
-            const parent =
-                this.suspendedRuns.get(parentId) ??
-                (this.store ? await this.store.load(parentId).catch(() => null) : null);
+            // [#14332] The DEGRADING loader, by deliberate choice: this walk runs
+            // inside the catch arm that is already handling a run's failure, so it
+            // must not throw, and its recorded posture is exactly
+            // `loadSuspendedRun`'s — a store failure reads as "no ancestor here"
+            // and stops the walk. What changes is only WHICH suspension is read:
+            // the shared store's, not this replica's memory of where the parent
+            // was last parked. The old `??` chain had #13617's own harm shape —
+            // a stale parent failed at a node it had already left, so
+            // `forgetSuspendedRun` released the wrong node's pause. The one thing
+            // gained beyond that: the bare `.catch(() => null)` swallowed a store
+            // failure in total silence, and the loader records it (at `warn`,
+            // its declared best-effort level — no new `error` seam here).
+            const parent = await this.loadSuspendedRun(parentId);
             if (!parent) return;
             await this.failSuspendedRun(parent, `subflow descendant failed: ${error}`);
             parentId = (parent.context as Record<string, unknown> | undefined)?.$parentRunId;
@@ -5776,9 +5805,14 @@ export class AutomationEngine implements IAutomationService {
 
     /**
      * Like {@link listSuspendedRuns} but includes runs held only in the durable
-     * {@link SuspendedRunStore} (e.g. suspended before a restart). The in-memory
-     * cache takes precedence on id collisions. Falls back to the in-memory list
-     * when no store is configured.
+     * {@link SuspendedRunStore} (e.g. suspended before a restart). Falls back to
+     * the in-memory list when no store is configured.
+     *
+     * [#14332] The DURABLE row wins an id collision — the store is the shared
+     * answer to "where is this run parked" and this process's map is only its
+     * own memory of it. A run present in the map but absent from the durable
+     * listing is still included, because a capped or failed enumeration is not
+     * the per-id "no row" the strict loader rests on; see the merge below.
      */
     async listSuspendedRunsDurable(): Promise<Array<{ runId: string; flowName: string; nodeId: string; correlation?: string }>> {
         const byId = new Map<string, { runId: string; flowName: string; nodeId: string; correlation?: string }>();
@@ -5831,8 +5865,28 @@ export class AutomationEngine implements IAutomationService {
                 );
             }
         }
-        // In-memory entries win — they are the freshest copy.
+        // [#14332] The DURABLE row wins a collision. The comment this replaces
+        // said the opposite — "In-memory entries win — they are the freshest
+        // copy" — which is true of exactly one deployment shape, a single
+        // process. Put several replicas over one store and this map is a
+        // per-replica snapshot of the node a run was parked at THE LAST TIME
+        // THIS REPLICA TOUCHED IT, with no invalidation channel to it at all
+        // (the mechanism is in {@link loadSuspendedRunStrict}), so preferring it
+        // reported a run at a node it had already left.
+        //
+        // Map entries the durable list does not carry are still appended, and
+        // that is NOT the strict loader's rule being softened: a LIST is not a
+        // per-id answer. `store.list()` is a capped, best-effort enumeration
+        // (`ObjectStoreSuspendedRunStore` reads at most 1000 `paused` rows) and
+        // this line is also reached on the DEGRADED path above, where the
+        // enumeration failed outright and `byId` is empty. So "absent from the
+        // list" is not the evidence "the store answered and has no row" is,
+        // which is what {@link loadSuspendedRunStrict} rests on when it lets
+        // only {@link cacheOnlySuspensions} answer out of the map. Applying that
+        // qualifier here would let a truncated or failed enumeration silently
+        // drop live runs from an operability listing.
         for (const r of this.suspendedRuns.values()) {
+            if (byId.has(r.runId)) continue;
             byId.set(r.runId, { runId: r.runId, flowName: r.flowName, nodeId: r.nodeId, correlation: r.correlation });
         }
         return [...byId.values()];

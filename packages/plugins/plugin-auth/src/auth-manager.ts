@@ -11,7 +11,11 @@ import type {
   AuthPluginConfig,
   OidcProvidersConfig,
 } from '@objectstack/spec/system';
-import { SystemObjectName, audiencePermitsSelfRegistration } from '@objectstack/spec/system';
+import {
+  SystemObjectName,
+  audiencePermitsSelfRegistration,
+  preferredLocaleFromHeader,
+} from '@objectstack/spec/system';
 import {
   assertAudienceConfig,
   classifyCreationMethod,
@@ -1005,6 +1009,85 @@ export function normalizeAuthEmailLocale(raw: string | undefined): string | unde
 }
 
 /**
+ * #14319 — the auth email locale the REQUEST asked for, or `undefined`.
+ *
+ * Maintainer ruling 2026-09-02 (in session). Quoted verbatim and untranslated,
+ * as rulings are:
+ *
+ * > 注册 / 登录 / 重置密码等由请求触发的 auth 邮件，语言优先取请求的
+ * > `Accept-Language`（命中 `AUTH_EMAIL_TEMPLATE_LOCALES` 才生效），其次才是
+ * > 部署默认（`localization.locale` → `i18n.defaultLocale`）。
+ *
+ * The motivating case is the one no deployment default can answer: at cloud
+ * self-service signup there is no workspace yet, so nothing on the server
+ * represents this person's language — only the request does.
+ *
+ * The header is parsed by the platform's ONE parser,
+ * {@link preferredLocaleFromHeader}, which REST already uses for metadata
+ * translation and the runtime dispatcher for `ExecutionContext.requestLocale`.
+ * A second parser here would let the mail a user receives disagree with the
+ * screen that triggered it — the very class of defect this card is about.
+ *
+ * A hit is REQUIRED, not merely preferred: only a locale this platform ships an
+ * auth row for takes effect, so `fr-FR` falls through to the deployment default
+ * instead of naming a row that does not exist. That is deliberately narrower
+ * than {@link normalizeAuthEmailLocale}, which passes an unshipped regional tag
+ * through because a tenant may overlay `en-GB` rows and the deployment default
+ * may legitimately ask for them. The asymmetry is the ruling's own: a
+ * per-request header is a weaker claim than a deployment's declaration.
+ *
+ * ⚠️ The source is read defensively because better-auth is NOT consistent about
+ * what it hands these callbacks — measured against the installed 1.7.x, not
+ * assumed: `sendResetPassword`, `sendVerificationEmail` and
+ * `sendInvitationEmail` are called with `ctx.request` (a Web `Request`), while
+ * `sendMagicLink` is called with the endpoint `ctx` itself, and the
+ * change-email notice fires from the global `after` hook, which also holds a
+ * `ctx`. One reader covering all three shapes beats three call sites each
+ * guessing at one.
+ */
+export function authEmailLocaleFromRequest(source: unknown): string | undefined {
+  const header = acceptLanguageHeader(source);
+  if (!header) return undefined;
+  const preferred = preferredLocaleFromHeader(header);
+  if (!preferred) return undefined;
+  const normalized = normalizeAuthEmailLocale(preferred);
+  const shipped: readonly string[] = AUTH_EMAIL_TEMPLATE_LOCALES;
+  return normalized && shipped.includes(normalized) ? normalized : undefined;
+}
+
+/**
+ * The `accept-language` value off a Web `Request`, a better-auth endpoint
+ * context, or anything carrying either. Never throws: a vendor changing the
+ * shape it hands a callback must degrade to the deployment default, never fail
+ * the send.
+ */
+function acceptLanguageHeader(source: unknown): string | undefined {
+  if (!source || typeof source !== 'object') return undefined;
+  const nested = (source as { request?: unknown }).request;
+  const bags = [
+    (source as { headers?: unknown }).headers,
+    nested && typeof nested === 'object' ? (nested as { headers?: unknown }).headers : undefined,
+  ];
+  for (const bag of bags) {
+    if (!bag || typeof bag !== 'object') continue;
+    try {
+      const getter = (bag as { get?: unknown }).get;
+      if (typeof getter === 'function') {
+        const value = (bag as Headers).get('accept-language');
+        if (typeof value === 'string' && value) return value;
+        continue;
+      }
+      const record = bag as Record<string, unknown>;
+      const value = record['accept-language'] ?? record['Accept-Language'];
+      if (typeof value === 'string' && value) return value;
+    } catch {
+      // A header bag that throws on read is not a reason to fail the send.
+    }
+  }
+  return undefined;
+}
+
+/**
  * #6039 — the 429 an SMS quota refusal must reach the caller as.
  *
  * better-call (better-auth's router) maps ONLY `APIError` to a real HTTP status:
@@ -1349,7 +1432,8 @@ export class AuthManager {
             ? { autoSignIn: this.config.emailAndPassword.autoSignIn } : {}),
           ...(this.config.emailAndPassword?.revokeSessionsOnPasswordReset != null
             ? { revokeSessionsOnPasswordReset: this.config.emailAndPassword.revokeSessionsOnPasswordReset } : {}),
-        sendResetPassword: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }) => {
+        // #14319 — better-auth calls this as `sendResetPassword(data, ctx.request)`.
+        sendResetPassword: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => {
           // #2766 V1.5 — placeholder addresses (phone-only users) are never
           // real recipients. Refuse loudly instead of "sending" into the void;
           // the reset path for these users is phone sign-in / an admin
@@ -1381,7 +1465,7 @@ export class AuthManager {
           const result = await email.sendTemplate({
             template: 'auth.password_reset',
             to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
-            ...this.emailLocaleArg(),
+            ...this.emailLocaleArg(request),
             data: {
               user: { name: user.name || user.email, email: user.email, id: user.id },
               resetUrl: url,
@@ -1412,7 +1496,8 @@ export class AuthManager {
             ? { autoSignInAfterVerification: this.config.emailVerification.autoSignInAfterVerification } : {}),
           ...(this.config.emailVerification?.expiresIn != null
             ? { expiresIn: this.config.emailVerification.expiresIn } : {}),
-          sendVerificationEmail: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }) => {
+          // #14319 — better-auth calls this as `sendVerificationEmail(data, ctx.request)`.
+          sendVerificationEmail: async ({ user, url, token }: { user: { id: string; email: string; name?: string }; url: string; token: string }, request?: unknown) => {
             const email = this.getEmailService();
             if (!email) {
               // Verification is enabled (this callback only exists when it is)
@@ -1438,7 +1523,7 @@ export class AuthManager {
             const result = await email.sendTemplate({
               template: 'auth.verify_email',
               to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
-              ...this.emailLocaleArg(),
+              ...this.emailLocaleArg(request),
               data: {
                 user: { name: user.name || user.email, email: user.email, id: user.id },
                 verificationUrl: url,
@@ -2118,7 +2203,9 @@ export class AuthManager {
             }
             const newEmail = typeof ctx?.body?.newEmail === 'string' ? ctx.body.newEmail : '';
             if (succeeded && from?.email && newEmail) {
-              await this.sendChangeEmailNotice(from, newEmail);
+              // #14319 — the notice goes to the account owner, who IS the
+              // caller here, so the request rung applies.
+              await this.sendChangeEmailNotice(from, newEmail, ctx);
             }
             return;
           }
@@ -2935,6 +3022,15 @@ export class AuthManager {
             await emailService.sendTemplate({
               template: 'auth.invitation',
               to: recipientEmail,
+              // #14319 — DELIBERATELY no request argument, and the only one of
+              // the five sends without one. better-auth DOES hand this callback
+              // a `ctx.request`, but it is the INVITER's: stamping their
+              // browser language onto the invitee's mail would recreate this
+              // very card one seat over. The 2026-09-02 ruling enumerates
+              // signup, sign-in and password reset — sends where the requester
+              // IS the recipient — and the superseded 2026-08-13 ruling named
+              // invitations as its own counterexample. So an invitee gets the
+              // deployment default until a per-user language exists to read.
               ...this.emailLocaleArg(),
               data: {
                 inviter: {
@@ -3080,7 +3176,9 @@ export class AuthManager {
       const { magicLink } = await import('better-auth/plugins/magic-link');
       // magic-link reuses the `verification` table — no extra schema mapping needed.
       return magicLink({
-        sendMagicLink: async ({ email: recipientEmail, url, token }) => {
+        // #14319 — this one is called with the endpoint CTX, not a Request
+        // (measured; magic-link/index.mjs `sendMagicLink({...}, ctx)`).
+        sendMagicLink: async ({ email: recipientEmail, url, token }, ctx?: unknown) => {
           // #2766 V1.5 — placeholder addresses are never real recipients.
           if (isPlaceholderEmail(recipientEmail)) {
             throw new Error(
@@ -3102,7 +3200,7 @@ export class AuthManager {
             await emailService.sendTemplate({
               template: 'auth.magic_link',
               to: recipientEmail,
-              ...this.emailLocaleArg(),
+              ...this.emailLocaleArg(ctx),
               data: {
                 magicLinkUrl: url,
                 token,
@@ -4345,20 +4443,23 @@ export class AuthManager {
    * ⛔ No undo/rollback link is passed, and the template declares no hole for
    * one: a one-click revert is a separate flow and a separate decision.
    *
-   * The deployment-default locale IS named now (#8195), via
-   * {@link setDefaultEmailLocale} — so the three non-`en-US` rows this template
-   * has shipped since #8019 are finally selectable through the platform's own
-   * send path, instead of waiting on a caller or a tenant overlay. With nothing
-   * pushed, the argument is omitted entirely and `EmailService`'s ladder
-   * resolves its documented `en-US` default exactly as before.
+   * The locale is named through the #14319 ladder: the caller's own
+   * `Accept-Language` first ({@link authEmailLocaleFromRequest}), then the
+   * deployment default (#8195, {@link setDefaultEmailLocale}). The request rung
+   * is legitimate here precisely because the recipient IS the caller — this
+   * notice goes to the account's CURRENT address, i.e. to the person who just
+   * asked to change it. With neither rung answering, the argument is omitted
+   * entirely and `EmailService`'s ladder resolves its documented `en-US`
+   * default exactly as before.
    *
-   * Still NOT a per-recipient preference: `sys_user` carries no locale column
-   * and the 2026-08-13 ruling defers one until there is measured pull. This is
-   * the deployment's language, not the reader's.
+   * Still NOT a per-recipient stored preference: `sys_user` carries no locale
+   * column and the 2026-09-02 ruling continues to defer one. What is read is
+   * the language this request expressed, not a profile.
    */
   private async sendChangeEmailNotice(
     from: { email: string; name?: string; id?: string },
     newEmail: string,
+    requestSource?: unknown,
   ): Promise<void> {
     try {
       const email = this.getEmailService();
@@ -4372,7 +4473,7 @@ export class AuthManager {
       await email.sendTemplate({
         template: 'auth.email_change_notice',
         to: { address: from.email, ...(from.name ? { name: from.name } : {}) },
-        ...this.emailLocaleArg(),
+        ...this.emailLocaleArg(requestSource),
         data: {
           user: { name: from.name || from.email, email: from.email, ...(from.id ? { id: from.id } : {}) },
           newEmail: target,
@@ -4572,27 +4673,42 @@ export class AuthManager {
    * #8195 — the deployment-default locale named on every auth **email**, so the
    * localized `sys_email_template` rows can be selected at all.
    *
-   * Maintainer ruling 2026-08-13: the recipient locale is the **deployment
-   * default**, resolved at the plugin layer; `Accept-Language` is rejected
-   * (auth mail is frequently sent outside the triggering request —
-   * invitations, admin-initiated resets — and a per-device header is the wrong
-   * authority for it). AuthPlugin pushes the value on `kernel:ready`, exactly
-   * as it pushes {@link setDefaultSmsLocale}.
+   * This is the SECOND rung of a two-rung ladder, not the whole of it. The
+   * request's own `Accept-Language` outranks it — see
+   * {@link authEmailLocaleFromRequest}, which carries the operative ruling.
+   * What lands here is the deployment's declaration, used when the request
+   * asked for nothing this platform ships a row for, or when there is no
+   * request at all (invitations, scheduled and admin-initiated mail).
    *
-   * #14319 — that "deployment default" is the workspace's declared language,
-   * `localization.locale` (ADR-0053), whenever the operator has explicitly set
-   * one; `II18nService.getDefaultLocale()` (the app artifact's build-time
-   * `i18n.defaultLocale`) stands underneath it. Email read only the build-time
-   * half before, so a workspace that switched to Chinese in Setup received
-   * Chinese auth SMS and English auth mail. The precedence lives in
-   * `AuthPlugin`; this setter stays a plain sink.
+   * The deployment's declaration has two producers of its own (#14591): the
+   * workspace's `localization.locale` (ADR-0053) whenever the operator has
+   * explicitly set one, and `II18nService.getDefaultLocale()` — the app
+   * artifact's build-time `i18n.defaultLocale` — standing underneath it. Email
+   * read only the build-time half before, so a workspace that switched to
+   * Chinese in Setup received Chinese auth SMS and English auth mail. That
+   * precedence is resolved in `AuthPlugin`; this setter stays a plain sink for
+   * whichever of the two won, and the request rung is applied above it at send
+   * time.
    *
-   * Unset ⇒ nothing is named and `EmailService`'s ladder resolves its
-   * documented `en-US` default, i.e. today's behaviour.
+   * AuthPlugin pushes the value on `kernel:ready`, exactly as it pushes
+   * {@link setDefaultSmsLocale}. Unset ⇒ nothing is named and `EmailService`'s
+   * ladder resolves its documented `en-US` default.
    *
-   * Per-user locale is deliberately NOT resolved: the same ruling defers a
-   * `sys_user.locale` column until there is measured pull for it. When one
-   * arrives it layers on top of this as an override, so nothing here is wasted.
+   * ⚠️ Ruling history, because this rung used to be the ONLY one. The
+   * 2026-08-13 ruling made the deployment default the whole answer and
+   * REJECTED `Accept-Language` outright, reasoning that auth mail is
+   * frequently sent outside the triggering request — invitations,
+   * admin-initiated resets — so a per-device header was the wrong authority
+   * for it. **That ruling was superseded on 2026-09-02** (#14319): cloud
+   * self-service signup has no workspace yet, so no deployment default can
+   * represent that user at all, and English mail to a Chinese signup was the
+   * measured result. The 2026-08-13 reasoning did not simply lose — it is why
+   * the request rung applies only where the requester IS the recipient, and
+   * why the invitation send below still reads this rung.
+   *
+   * Per-user locale is STILL deferred by the 2026-09-02 ruling — `sys_user`
+   * carries no locale column and none is added here. When one arrives it
+   * layers on top as a third rung, so nothing here is wasted.
    */
   setDefaultEmailLocale(locale: string | undefined): void {
     this.emailLocale = normalizeAuthEmailLocale(locale);
@@ -4607,8 +4723,12 @@ export class AuthManager {
    * what the ladder's "no locale means the DOCUMENTED default" contract is
    * written against.
    */
-  private emailLocaleArg(): { locale?: string } {
-    return this.emailLocale ? { locale: this.emailLocale } : {};
+  private emailLocaleArg(requestSource?: unknown): { locale?: string } {
+    // #14319 — request rung first, deployment rung underneath. Callers that
+    // have no request (or whose recipient is not the requester) pass nothing
+    // and get exactly the pre-#14319 behaviour.
+    const locale = authEmailLocaleFromRequest(requestSource) ?? this.emailLocale;
+    return locale ? { locale } : {};
   }
 
   /**
