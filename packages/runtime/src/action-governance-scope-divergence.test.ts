@@ -54,10 +54,25 @@ import { resolveRouteActionDeclaration, type ActionExecutionDeps } from './actio
 const ACTION = 'promote_lead';
 const OBJECT_KEY = 'global'; // object-less action — `GLOBAL_ACTION_OBJECT_KEY`
 
-/** A `sys_metadata`-shaped read engine over a fixed row array. */
+/**
+ * A `sys_metadata`-shaped READ-ONLY engine over a fixed row array.
+ *
+ * Read-only on purpose: `DatabaseLoader`'s read paths call `find` / `findOne`
+ * / `count` and nothing else (`ensureSchema` returns immediately on the
+ * `engine` branch), so a double that also declared `update` / `delete` would
+ * be declaring dispatch surface this fixture never exercises.
+ *
+ * The WHERE matcher REFUSES what it does not implement rather than reading a
+ * combinator as a field name — the conforming shape `check:where-matcher`
+ * exists to keep: `{ $or: [...] }` must not silently match nothing.
+ */
 function readEngine(rows: Array<Record<string, unknown>>, opts: { failFind?: () => Error } = {}) {
     const matches = (r: Record<string, unknown>, w: Record<string, unknown>) =>
-        Object.entries(w).every(([k, v]) => r[k] === v);
+        Object.entries(w).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`readEngine: unsupported WHERE combinator '${k}'`);
+            if (v !== null && typeof v === 'object') throw new Error(`readEngine: unsupported WHERE operator on '${k}'`);
+            return r[k] === v;
+        });
     return {
         async find(_table: string, q: any) {
             if (opts.failFind) throw opts.failFind();
@@ -69,9 +84,6 @@ function readEngine(rows: Array<Record<string, unknown>>, opts: { failFind?: () 
         async count(_table: string, q: any) {
             return rows.filter((r) => matches(r, q?.where ?? {})).length;
         },
-        async insert(_table: string, data: any) { rows.push(data); return data; },
-        async update(_table: string, data: any) { return data; },
-        async delete() { return { deleted: 1 }; },
     };
 }
 
