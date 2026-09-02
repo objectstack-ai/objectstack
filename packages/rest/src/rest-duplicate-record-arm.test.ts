@@ -390,7 +390,7 @@ describe('#14389 §3 — the envelope and the raw error it carries answer the sa
     // through the untouched `isUniqueViolationError` arm. For ONE conflict the
     // two must agree, or the platform gives two answers to one constraint
     // depending on whether the engine happened to envelope it.
-    it.each(LEGS.filter((l) => l.raw().code !== 'UNIQUE_VIOLATION').map((l) => [l.label, l] as const))(
+    it.each(LEGS.filter((l) => (l.raw() as { code?: unknown }).code !== 'UNIQUE_VIOLATION').map((l) => [l.label, l] as const))(
         '%s',
         (_n, leg) => {
             const raw = leg.raw();
