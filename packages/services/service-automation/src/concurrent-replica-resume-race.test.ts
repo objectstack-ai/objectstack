@@ -47,10 +47,27 @@
  *
  * ## REVERT-PROOF
  *
- * Delete the `claimAdvance` call from `resumeInternal` (resume unconditionally
- * through `forgetSuspendedRun`, as before this card) and this file goes
- * 5 red / 6 green — measured, not predicted, and recorded in the PR body with
- * the mutation's on-disk proof.
+ * Replace the `claimAdvance` call in `resumeInternal` with the unconditional
+ * `await this.forgetSuspendedRun(run, 'resumed')` it had before this card, and
+ * this file goes 4 red / 4 green — measured on the committed tree, not
+ * predicted, with the mutation confirmed on disk by anchored counts and the
+ * blob hash (recorded in the PR body):
+ *
+ *  - `SHAPE A` → `[ 'notify', 'notify' ]` where `[ 'notify' ]` is correct: the
+ *    action fired twice, which is the doubled side effect this card is about.
+ *  - `SHAPE B` → the same, for the automated-approve shape.
+ *  - `SIZED` → `{ trials: 25, doubled: 25, extraOpens: 25 }`: every raced run
+ *    advanced twice, and opened its next approval level a second time.
+ *  - the declared-degradation case → no `warn` at all, because the seam that
+ *    emits it is the one the mutation removes.
+ *
+ * The four that stay green are the ones that must: the sequential single-
+ * approver control (the shape the report called not obviously reachable), both
+ * single-replica controls (the in-process `resuming` guard is untouched), and
+ * the no-store control. A fix that moved the defect instead of removing it
+ * would take one of those with it. `multi-replica-resume-staleness.test.ts`
+ * stays 8/8 green under the same mutation — it pins the SEQUENTIAL half, and
+ * this change does not touch it.
  */
 
 import { describe, it, expect } from 'vitest';
