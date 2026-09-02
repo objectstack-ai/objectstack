@@ -22,18 +22,24 @@ metadata:
 
 | Surface | Shape | Legal option keys |
 |:--|:--|:--|
-| engine `find` / `findOne` | `engine.find('task', {…}, { context })` | `context`, `where`, `fields`, `orderBy`, `limit`, `offset`, `search`, `searchFields`, `expand` |
+| engine `find` / `findOne` | `engine.find('task', {…}, { context })` | `context`, `where`, `fields`, `orderBy`, `limit`, `offset`, `search`, `searchFields`, `expand` — **plus** the six driver passthrough keys `transaction`, `tenantId`, `tenantIds`, `timezone`, `bypassTenantAudit`, `preserveAudit` |
 | engine `aggregate` | `engine.aggregate('deal', {…})` | `context`, `where`, `groupBy`, `aggregations`, `having`, `timezone` |
 | engine `count` | `engine.count('task', {…})` | `context`, `where` |
 | protocol / REST | `findData({ object: 'task', query: {…} })` | `object` sits OUTSIDE the query |
 | nested `expand` value | a `QueryAST` — `{ object, fields, where }` | (see **Expand**) |
 
 `ENGINE_FIND_OPTION_KEYS` / `ENGINE_AGGREGATE_OPTION_KEYS` are **closed sets**:
-an unlisted key is refused by name (`find('task') does not recognise option
+a key outside the row is refused by name (`find('task') does not recognise option
 'bogus'`), never ignored. A standalone `{ object: 'account', limit: 20 }` literal
 is therefore a **`QueryAST`** — legal as `findData`'s `query` or an `expand`
 value — not an engine option bag. `top` folds to `limit`, `filter` to `where`,
 before that check.
+
+The passthrough six ride along on `find`/`findOne` (and on `update`/`delete`)
+because there the option bag IS the base of the driver options, which is how an
+explicit `tenantId` reaches the driver. `count` and `aggregate` never forward the
+bag, so on those two the same keys are deliberately ILLEGAL — accepting them
+would be the silently-ignored option this check exists to close.
 
 ### Which filter dialect?
 

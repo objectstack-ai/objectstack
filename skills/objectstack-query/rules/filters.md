@@ -30,8 +30,12 @@ Comprehensive guide for building ObjectStack query filters.
 `$icontains` is the case-INSENSITIVE twin" — ASCII folding only, so `café` does
 not match `CAFÉ`. Use `$icontains` for anything a human typed. `$like`/`$ilike`
 match the WHOLE value, so a pattern with no wildcard is an exact comparison, not
-a substring search; `driver-mongodb`, objectql `having` and service-analytics
-refuse them (`INVALID_FILTER`) rather than approximating.
+a substring search. Their reach is narrower than the rest of the table: the SQL
+family, `driver-memory` and `@objectstack/formula` answer them, while
+`driver-mongodb`, objectql `having` and service-analytics each keep an operator
+allowlist that omits them and refuse — `Unsupported filter operator`,
+`INVALID_FILTER` / 400 — rather than approximating. A pattern ending in a lone
+unpaired backslash is refused by every face.
 
 ## Implicit Equality (Shorthand)
 
@@ -149,24 +153,10 @@ where: {
 
 ## Common Mistakes
 
-### ❌ Wrong: Multiple operators on different fields inside $or
+### ❌ Wrong: expecting sibling keys to be an OR
 
-```typescript
-// ❌ This is an AND, not an OR
-where: {
-  role: 'admin',
-  status: 'active'
-}
-// Correct only if you want both conditions
-
-// ✅ For OR, wrap in $or array
-where: {
-  $or: [
-    { role: 'admin' },
-    { status: 'active' }
-  ]
-}
-```
+`where: { role: 'admin', status: 'active' }` is an AND — sibling keys always
+are. For OR, wrap them in a `$or` array (see **Logical Operators** above).
 
 ### ❌ Wrong: Using string operators on non-string fields
 
@@ -175,18 +165,9 @@ only; use the comparison operators for numbers and dates.
 
 ### ⚠️ Prefer `$null` to a bare `null` comparand
 
-```typescript
-// ⚠️ Works — a bare null lowers to IS NULL on both paths — but it reads
-//    as "equals null" and has no IS NOT NULL spelling
-where: {
-  deleted_at: null
-}
-
-// ✅ Explicit, and `$null: false` is IS NOT NULL
-where: {
-  deleted_at: { $null: true }
-}
-```
+`where: { deleted_at: null }` works — a bare null lowers to `IS NULL` on both
+paths — but it reads as "equals null" and has no `IS NOT NULL` spelling. Write
+`{ deleted_at: { $null: true } }` instead; `$null: false` is `IS NOT NULL`.
 
 ## Date Filtering Patterns
 
