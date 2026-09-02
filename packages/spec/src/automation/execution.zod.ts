@@ -128,8 +128,14 @@ export const ExecutionStepLogSchema = lazySchema(() => z.object({
   // so run observability can nest per-iteration / per-branch body steps under
   // the container instead of showing it as a single opaque step.
   parentNodeId: z.string().optional().describe('Enclosing structured-region container node ID (loop/parallel/try_catch)'),
-  iteration: z.number().int().min(0).optional().describe('Zero-based loop iteration or parallel branch index of the enclosing region'),
-  regionKind: z.string().optional().describe('Region kind the step ran in: loop-body | parallel-branch | try | catch'),
+  // A `try` / `catch` region has no index of its own, so a step it ran for a
+  // loop body — `loop { body: [ try_catch { try, catch } ] }`, the containment
+  // spelling for a per-iteration failure that must not end the sweep — carries
+  // the ENCLOSING LOOP's iteration while `regionKind` keeps naming the
+  // try/catch region: the step says which region ran it AND which row it ran
+  // for. Without that, a caught per-row failure is attributable to no row.
+  iteration: z.number().int().min(0).optional().describe('Zero-based loop iteration or parallel branch index of the enclosing region. A step inside a `try` / `catch` region that is itself inside a loop body carries the enclosing loop\'s iteration — a try/catch region has no index of its own — while `regionKind` stays `try` / `catch`.'),
+  regionKind: z.string().optional().describe('Region kind the step ran in: loop-body | parallel-branch | try | catch. Stays `try` / `catch` for a step inside a try/catch region nested in a loop body; the loop is reported through `iteration`.'),
   // #4354: what the step did to the data, and — for a `skipped` step — which
   // gate stopped it. Both feed the run summary aggregated on ExecutionLog.
   metrics: ExecutionStepMetricsSchema.optional()
@@ -154,7 +160,7 @@ export const FlowRunNodeSummarySchema = lazySchema(() => z.object({
   status: z.enum(['success', 'failure', 'skipped'])
     .describe('Terminal status of the node across the run — `failure` if any execution failed, else `success` if any succeeded, else `skipped`'),
   runs: z.number().int().min(0).describe('Times the node executed (loop iterations and parallel branches each count)'),
-  failures: z.number().int().min(0).describe('Executions that failed'),
+  failures: z.number().int().min(0).describe('Executions that failed — a failure a `try_catch` caught or a `fault` edge routed counts here too; the run-level `failed` is the sum of this across `nodes`'),
   skipped: z.number().int().min(0).describe('Times a closed gate kept this node from running at all'),
   selected: z.number().int().min(0).optional().describe('Records read across every execution — omitted for a node that reads none'),
   acted: z.number().int().min(0).optional().describe('Records written / effects dispatched across every execution — omitted for a node that writes none'),
@@ -189,6 +195,11 @@ export type FlowRunGateSummary = z.input<typeof FlowRunGateSummarySchema>;
  * measurement so every flow gets it, rather than each app rebuilding a detector
  * out of the same primitives that fail silently.
  *
+ * `failed` reads BESIDE that filter rather than inside it: `acted = 0` with
+ * `failed > 0` is not a sweep that silently stopped but one whose writes were
+ * attempted and failed — contained, so the run still reads `completed` — and
+ * the remedy is the failing node, not the gate.
+ *
  * Totals are sums over `nodes`, which is itself a fold of the run's step log,
  * so a loop that ran a write 30 times contributes 30 to `acted`. A `subflow`
  * node rolls its child run's totals up into this one — the child keeps its own
@@ -215,6 +226,28 @@ export const FlowRunSummarySchema = lazySchema(() => z.object({
    */
   unmeasured: z.number().int().min(0).optional()
     .describe('Total executions that may have caused an effect the platform cannot count. Absent = not tracked (an older run), which is not the same as zero.'),
+  /**
+   * The count a green run hides. `loop { body: [ try_catch { try, catch } ] }`
+   * is the containment spelling — a per-iteration failure is caught, the loop
+   * goes on to the next item and the run completes — and until this field
+   * existed the run row said nothing about it: the caught failure was in the
+   * step log and in `nodes[].failures`, but no run-level number and no summary
+   * line carried it, so a run that lost two rows out of five was
+   * indistinguishable from one that lost none. This is `nodes[].failures`,
+   * folded: `failed = Σ nodes[].failures`, and stated as a fold so the
+   * run-level count can never disagree with the per-node breakdown.
+   *
+   * Every node execution that failed counts — on a run that completed all of
+   * them were contained (caught by a `try_catch` or routed down a `fault`
+   * edge); on a run that failed, the fatal one is in the count too.
+   *
+   * Same convention as `unmeasured`, for the same reason: optional, and absent
+   * is NOT zero. A run recorded before this field existed did not carry the
+   * count, and defaulting it to `0` would tell an operator "nothing failed"
+   * about a run nobody measured.
+   */
+  failed: z.number().int().min(0).optional()
+    .describe('Total node executions that failed — a fold of `nodes[].failures`. On a run that completed every one of them was contained (caught by a `try_catch` or routed down a `fault` edge) and the run went on. Absent = not tracked (an older run), which is not the same as zero.'),
   nodes: z.array(FlowRunNodeSummarySchema).describe('Per-node breakdown, in first-execution order'),
   gates: z.array(FlowRunGateSummarySchema).describe('Gates that closed during the run, most-skipped first'),
   detailOmitted: z.boolean().optional()
