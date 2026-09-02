@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { SchemaRegistry } from './registry';
-import type { ServiceObject } from '@objectstack/spec';
+import type { ServiceObject } from '@objectstack/spec/data';
 
 function makeObject(name: string, label = name): ServiceObject {
   return {
