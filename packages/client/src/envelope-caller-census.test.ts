@@ -390,18 +390,29 @@ const verdictTotal = (v: Verdict) =>
     LEDGER.filter((r) => r.verdict === v).reduce((n, r) => n + r.count, 0);
 
 /**
- * The SDK source of one namespace's method, from `NAME: async` to the closing
- * `},` at the same indentation — so section 4 reads what each method ENDS with
- * off the source rather than restating it. Anchored to the NAMESPACE first
- * (`analytics = {` … `};` is a class field at two-space indentation) because
- * `query: async` and `explain: async` are spelled in other namespaces too, and
- * the first match in the file is not the analytics one.
+ * The SDK source of one namespace's method — so section 4 reads what each
+ * method ENDS with off the source rather than restating it.
+ *
+ * Three anchoring decisions, each paid for by a wrong slice:
+ *  - comments are MASKED first (the tree's own `maskComments`), so a docblock
+ *    naming `res.json()` or `unwrapResponse` can neither satisfy nor fail a
+ *    CODE assertion;
+ *  - the NAMESPACE is located first (`analytics = {` … `};` is a class field
+ *    at two-space indentation) because `query: async` and `explain: async`
+ *    are spelled in other namespaces too, and the first match in the file is
+ *    not the analytics one;
+ *  - the slice runs from `NAME: async` to the next sibling property at the
+ *    same indentation or the namespace's closing `};` — a method's own closing
+ *    `}` is not a safe anchor: `queryDataset`'s parameter type literal closes
+ *    with one at that indentation, and the last property closes without a
+ *    comma.
  */
 function methodSource(src: string, ns: string, name: string): string {
-    const block = new RegExp(`\\n  ${ns} = \\{[\\s\\S]*?\\n  \\};`).exec(src);
+    const masked = maskComments(src);
+    const block = new RegExp(`\\n  ${ns} = \\{[\\s\\S]*?\\n  \\};`).exec(masked);
     if (!block) throw new Error(`namespace \`${ns}\` not found in index.ts`);
-    // `},?` — the LAST property of a namespace closes with a bare `}`.
-    const m = new RegExp(`\\n(\\s+)${name}: async[\\s\\S]*?\\n\\1\\},?`).exec(block[0]);
+    // `[ \t]+`, not `\s+`: the indentation capture must not absorb a newline.
+    const m = new RegExp(`\\n([ \\t]+)${name}: async[\\s\\S]*?(?=\\n\\1[A-Za-z_$][\\w$]*: |\\n  \\};)`).exec(block[0]);
     if (!m) throw new Error(`method \`${ns}.${name}\` not found in index.ts`);
     return m[0];
 }
