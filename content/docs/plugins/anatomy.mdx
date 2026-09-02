@@ -118,11 +118,12 @@ export interface Plugin {
     version?: string;
 
     /**
-     * Plugin Type (Optional)
-     * One of: standard, ui, driver, server, app, theme, agent, objectql.
+     * Plugin Type (Optional) — a `PluginType`, the closed set the spec declares
+     * (`CORE_PLUGIN_TYPES` plus `standard`): standard, ui, driver, server, app,
+     * theme, agent, objectql. A value outside it does not compile.
      * @default 'standard'
      */
-    type?: string;
+    type?: PluginType;
 
     /**
      * Dependencies (Optional)

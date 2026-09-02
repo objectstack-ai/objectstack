@@ -60,7 +60,7 @@ import { isInProcessClusterDriver } from './split-brain-guard.js';
 export class MetadataClusterBridgePlugin implements Plugin {
     name = 'com.objectstack.service.metadata-cluster-bridge';
     version = '1.0.0';
-    type = 'standard';
+    type = 'standard' as const;
 
     private detach?: () => void;
     private detachMutation?: () => void;

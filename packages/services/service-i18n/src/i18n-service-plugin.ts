@@ -72,7 +72,7 @@ export class I18nServicePlugin implements Plugin {
    */
   providesServices = ['i18n'];
   version = '1.0.0';
-  type = 'standard';
+  type = 'standard' as const;
 
   private readonly options: I18nServicePluginOptions;
   private i18n: II18nService | null = null;
