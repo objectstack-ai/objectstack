@@ -78,32 +78,6 @@ Notes an author has to know:
   tenancy posture — state the business boundary, not the deployment shape.
 - **`'tenant'` and `'org'` are rejected.** The word is `'organization'`.
 
-## When to Add Indexes
-
-### ✅ Always Index
-
-1. **Foreign keys** — declare them; never automatic
-2. **Filter fields** — Columns used in WHERE clauses
-3. **Sort fields** — Columns used in ORDER BY
-4. **Unique constraints** — Enforce uniqueness at DB level
-5. **Composite filters** — Fields commonly filtered together
-
-### ⚠️ Consider Indexing
-
-1. **Join columns** — Non-foreign-key join fields
-2. **Frequent aggregations** — GROUP BY columns
-3. **Range queries** — Date ranges, numeric ranges
-4. **Subset queries** — a partial index can help, but it is a database-layer
-   migration, not a declaration (see below)
-
-### ❌ Avoid Indexing
-
-1. **Low cardinality** — Boolean fields (unless combined with others)
-2. **Rarely queried** — Fields almost never filtered/sorted
-3. **High write volume** — Every insert/update maintains indexes
-4. **Large text** — Full-text index only when needed
-5. **Calculated fields** — Index source fields instead
-
 ## Examples
 
 ### Composite Index (Multi-Column)
@@ -158,86 +132,17 @@ indexes: [
 ]
 ```
 
-### ❌ Incorrect — Over-Indexing
+### Composite index order
 
-```typescript
-indexes: [
-  { fields: ['is_active'] },        // ❌ Boolean, low cardinality
-  { fields: ['is_deleted'] },       // ❌ Boolean, low cardinality
-  { fields: ['is_verified'] },      // ❌ Boolean, low cardinality
-  { fields: ['status'] },           // ❌ Already indexed elsewhere
-  { fields: ['created_at'] },       // ❌ Already indexed elsewhere
-]
-```
-
-### ✅ Correct — Strategic Indexing
-
-```typescript
-indexes: [
-  // Composite for common query pattern
-  { fields: ['is_active', 'created_at'] },
-
-  // Single index covers multiple queries
-  { fields: ['status', 'priority'] },
-]
-```
-
-### ❌ Incorrect — Wrong Order in Composite
-
-```typescript
-indexes: [
-  // Querying by created_at with status filter
-  { fields: ['created_at', 'status'] },  // ❌ Wrong order
-]
-```
-
-### ✅ Correct — Most Selective First
-
-```typescript
-indexes: [
-  // Status is more selective (filters more), goes first
-  { fields: ['status', 'created_at'] },  // ✅ Correct order
-]
-```
-
-## Composite Index Strategy
-
-### Order Matters
-
-```typescript
-// Index: ['status', 'priority', 'created_at']
-
-// ✅ Can use index
-WHERE status = 'active'
-WHERE status = 'active' AND priority = 'high'
-WHERE status = 'active' AND priority = 'high' ORDER BY created_at
-
-// ❌ Cannot use index efficiently
-WHERE priority = 'high'  // Skips first column
-WHERE created_at > '2026-01-01'  // Skips first two columns
-```
-
-### Left-to-Right Rule
-
-Composite indexes are used **left-to-right**. Querying only the second or third column doesn't use the index.
-
-### Selectivity Rule
-
-Place most **selective** (unique) fields first, then range/sort fields last.
-
-```typescript
-// Good order: selective → range
-{ fields: ['tenant_id', 'status', 'created_at'] }
-
-// Bad order: range → selective
-{ fields: ['created_at', 'status', 'tenant_id'] }
-```
+A composite index is used **left-to-right**: `['status', 'priority', 'created_at']`
+serves `status`, `status + priority`, and `status + priority ORDER BY created_at`,
+but not a query that filters on `priority` alone. Put the most selective column
+first and the range/sort column last.
 
 ## Access methods and partial indexes
 
-Both are real database capabilities. Neither is part of the **declaration**
-surface, and the keys that used to pretend otherwise (`type`, `partial`) were
-retired at protocol 17 precisely because nothing consumed them.
+Both are real database capabilities, and neither is part of the **declaration**
+surface — issue them from a database-layer migration.
 
 **Access method (`btree` / `hash` / `gin` / `gist` / `fulltext`).** The driver
 and dialect decide. Postgres defaults to B-tree, which is the right choice for
@@ -274,28 +179,6 @@ form in a migration.
 > index you create in a migration is not reported as drift and is never
 > targeted by `os migrate apply --allow-destructive`.
 
-## Performance Trade-offs
-
-### Index Benefits
-- ✅ Faster SELECT queries
-- ✅ Faster ORDER BY operations
-- ✅ Faster JOIN operations
-- ✅ Enforce uniqueness at DB level
-
-### Index Costs
-- ❌ Slower INSERT/UPDATE/DELETE (index maintenance)
-- ❌ Increased storage (each index duplicates data)
-- ❌ Query planner overhead (more indexes = more choices)
-
-### General Guidelines
-
-| Table Size | Max Indexes | Reasoning |
-|:-----------|:------------|:----------|
-| < 1K rows | 2-3 | Low volume, indexes may not help |
-| 1K - 100K rows | 3-5 | Balance read/write performance |
-| 100K - 1M rows | 5-8 | Read optimization critical |
-| > 1M rows | 8-12 | Consider partitioning + indexes |
-
 ## Index Naming Convention
 
 ObjectStack auto-generates index names. To specify custom names:
@@ -308,35 +191,6 @@ ObjectStack auto-generates index names. To specify custom names:
 ```
 
 **Auto-generated pattern:** `idx_{object}_{field1}_{field2}_{...}`
-
-## Monitoring Index Usage
-
-Use database tools to monitor index usage:
-
-```sql
--- PostgreSQL: Find unused indexes
-SELECT
-  schemaname, tablename, indexname, idx_scan
-FROM pg_stat_user_indexes
-WHERE idx_scan = 0
-ORDER BY schemaname, tablename;
-
--- MySQL: Check index cardinality
-SHOW INDEX FROM your_table;
-```
-
-## Best Practices
-
-1. **Index foreign keys** — always; declare each one
-2. **Composite for common queries** — Combine frequently filtered columns
-3. **Order matters** — Most selective field first
-4. **Partial for subsets** — but build it in a migration, not a declaration
-5. **Unique for constraints** — Enforce at DB level, and always state the scope
-6. **Monitor usage** — Remove unused indexes
-7. **Limit total indexes** — Balance read/write performance
-8. **Avoid over-indexing** — More indexes ≠ better performance
-9. **Test with production data** — Index effectiveness depends on data volume
-10. **Use EXPLAIN** — Verify query plans before deploying indexes
 
 ## Common Query Patterns
 

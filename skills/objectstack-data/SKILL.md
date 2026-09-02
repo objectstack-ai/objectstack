@@ -548,6 +548,7 @@ schema. There is no object-level `permissions` key (and no `hooks` key either) â
 
 Grant CRUD access per object with boolean bits on a permission set:
 
+<!-- os:check -->
 ```typescript
 import { definePermissionSet } from '@objectstack/spec';
 
@@ -605,7 +606,7 @@ is `active: false`; the validity window has passed; `organization_id` mismatch.
 `GET /api/v1/security/explain?object=&operation=&userId=` answers from the
 enforcing code path (explaining another user needs `manage_users`).
 
-### Access depth (`readScope` / `writeScope`)
+### Access depth (scope-depth) â€” the ERP "see my unit / my unit and below" axis
 
 On an owner-scoped (`private`) object, a per-object grant in a permission set may
 carry `readScope` / `writeScope` to widen the owner match declaratively instead of
@@ -812,6 +813,7 @@ unknown keys are rejected.
 
 ### Example
 
+<!-- os:check -->
 ```typescript
 // src/objects/sys-user.object.ts
 import { ObjectSchema } from '@objectstack/spec/data';

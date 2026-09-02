@@ -12,86 +12,6 @@ ObjectStack enforces strict naming conventions to ensure consistency and machine
 | Option `value` | lowercase machine ID | lowercase | `in_progress` |
 | Option `label` | Any case | — | `"In Progress"` |
 
-## Incorrect vs Correct
-
-### ❌ Incorrect — Object Name
-
-```typescript
-export default ObjectSchema.create({
-  name: 'ProjectTask',  // ❌ PascalCase not allowed
-  fields: { /* ... */ }
-});
-```
-
-### ✅ Correct — Object Name
-
-```typescript
-export default ObjectSchema.create({
-  name: 'project_task',  // ✅ snake_case
-  fields: { /* ... */ }
-});
-```
-
-### ❌ Incorrect — Field Keys
-
-```typescript
-fields: {
-  firstName: { type: 'text' },     // ❌ camelCase not allowed
-  'Due-Date': { type: 'datetime' }, // ❌ kebab-case not allowed
-  Status: { type: 'select' },       // ❌ PascalCase not allowed
-}
-```
-
-### ✅ Correct — Field Keys
-
-```typescript
-fields: {
-  first_name: { type: 'text' },     // ✅ snake_case
-  due_date: { type: 'datetime' },   // ✅ snake_case
-  status: { type: 'select' },       // ✅ snake_case
-}
-```
-
-### ❌ Incorrect — Schema Properties
-
-```typescript
-{
-  type: 'lookup',
-  reference: 'account',
-  lookup_filters: [],  // ❌ snake_case not allowed for TS config
-  max_length: 255,     // ❌ snake_case not allowed for TS config
-}
-```
-
-### ✅ Correct — Schema Properties
-
-```typescript
-{
-  type: 'lookup',
-  reference: 'account',
-  lookupFilters: [{ field: 'status', operator: 'eq', value: 'active' }],  // ✅ camelCase
-  maxLength: 255,                                                          // ✅ camelCase
-}
-```
-
-### ❌ Incorrect — Select Option Values
-
-```typescript
-options: [
-  { label: 'In Progress', value: 'In Progress' },  // ❌ space/caps in value
-  { label: 'Done', value: 'Done' },                // ❌ uppercase in value
-]
-```
-
-### ✅ Correct — Select Option Values
-
-```typescript
-options: [
-  { label: 'In Progress', value: 'in_progress' },  // ✅ lowercase, snake_case
-  { label: 'Done', value: 'done' },                // ✅ lowercase
-]
-```
-
 ## Critical Rules
 
 1. **Never** use `camelCase` or `PascalCase` for object names or field keys
@@ -99,9 +19,3 @@ options: [
 3. **Option values** must be lowercase machine identifiers (use snake_case for multi-word)
 4. **Option labels** can use any case for display purposes
 5. **Machine names are immutable** — changing them requires data migration
-
-## Rationale
-
-- **snake_case for data**: Database-friendly, SQL-compatible, cross-platform consistency
-- **camelCase for config**: TypeScript/JavaScript convention for object properties
-- **Lowercase option values**: Case-sensitive database comparisons, URL-safe, API-friendly

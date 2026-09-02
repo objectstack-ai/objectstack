@@ -123,8 +123,7 @@ export default ObjectSchema.create({
     hours_allocated: { type: 'number' },
   },
   indexes: [
-    // One assignment per (project, employee) pair — uniqueness is an index
-    // concern; there is no 'unique' validation type.
+    // One assignment per (project, employee) pair.
     { fields: ['project_id', 'employee_id'], unique: 'organization' },
   ],
 });
@@ -394,20 +393,3 @@ export default ObjectSchema.create({
   },
 });
 ```
-
-## Best Practices
-
-1. **Use lookup by default** — Only use master_detail when lifecycle coupling is required
-2. **Unique constraints on junctions** — Prevent duplicate many-to-many entries
-3. **Meaningful junction names** — Use descriptive names like `project_assignment` not `project_employee`
-4. **deleteBehavior on master_detail** — Always specify `cascade` or `restrict`
-5. **Required on master_detail** — Child should always require parent
-6. **Roll-ups for aggregation** — Use summary fields on parent for counts/sums
-7. **lookupFilters for scoping** — Limit lookup options to relevant records (`lookupFilters: [{ field, operator: 'eq', value }]`)
-
-## Performance Considerations
-
-- **Index foreign keys** — Always create indexes on lookup/master_detail fields
-- **Avoid deep hierarchies** — tree relationships > 5 levels can impact query performance
-- **Junction table indexes** — Composite index on both foreign keys in junction tables
-- **Summary field caching** — Roll-up summaries are cached and updated on child changes

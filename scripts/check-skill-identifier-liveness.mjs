@@ -307,14 +307,6 @@ const BINDINGS = [
     why: 'The reference table of lifecycle events. A missing event is a hook an author never learns exists.',
   },
   {
-    id: 'hook-lifecycle-events-rule',
-    file: 'skills/objectstack-data/rules/hooks.md',
-    heading: '### 8 Lifecycle Events',
-    symbol: 'HookEvent',
-    source: 'packages/spec/src/data/hook.zod.ts',
-    why: 'The heading states the count, so the section claims exhaustiveness in its own words — and the count goes stale silently when the enum grows.',
-  },
-  {
     id: 'lifecycle-classes',
     file: 'skills/objectstack-data/rules/lifecycle.md',
     heading: '## Lifecycle Classes',

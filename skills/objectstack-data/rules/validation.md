@@ -21,15 +21,15 @@ There is no other type. In particular:
   with a **unique index** ([see below](#uniqueness--use-unique-indexes)).
 - **No `async` / `custom` type** — external checks and arbitrary validation
   code belong in a `beforeInsert` / `beforeUpdate` **lifecycle hook**
-  (see [hooks.md](./hooks.md)).
+  (see [references/data-hooks.md](../references/data-hooks.md)).
 
 ## Expression Syntax
 
 `condition` / `when` are **CEL predicates** (ADR-0032). Author them with the
 `P` tag from `@objectstack/spec`; a plain string is also accepted and parsed
 as CEL. Record fields are addressed as `record.<field>`; on update the prior
-row is available as `previous.<field>`. CEL uses `==`, `!=`, `&&`, `||`,
-`!` — not SQL's `=`, `AND`, `IS NULL`.
+row is available as `previous.<field>`. CEL operator and null-handling rules:
+see **objectstack-formula**.
 
 **⚠️ CRITICAL:** For `script` **and** `cross_field`, the predicate expresses
 the **failure** condition — validation **fails** when it evaluates to `true`.
@@ -39,7 +39,7 @@ the **failure** condition — validation **fails** when it evaluates to `true`.
 ```typescript
 import { P } from '@objectstack/spec';
 
-validations: [
+const validations = [
   {
     name: 'prevent_past_dates',
     type: 'script',
@@ -48,7 +48,7 @@ validations: [
     severity: 'error',
     events: ['insert', 'update'],
   },
-]
+];
 ```
 
 ### Common Script Patterns
@@ -310,26 +310,6 @@ Lower numbers execute **first**.
 }
 ```
 
-### ❌ Incorrect — SQL Syntax in a CEL Predicate
-
-```typescript
-{
-  type: 'script',
-  condition: "status = 'approved' AND approver_id IS NULL",  // ❌ not CEL
-  message: 'Approved records need an approver',
-}
-```
-
-### ✅ Correct — CEL Predicate
-
-```typescript
-{
-  type: 'script',
-  condition: P`record.status == 'approved' && isBlank(record.approver_id)`,
-  message: 'Approved records need an approver',
-}
-```
-
 ### ❌ Incorrect — Validation Fires Too Often
 
 ```typescript
@@ -351,88 +331,3 @@ Lower numbers execute **first**.
   events: ['update'],  // ✅ Only validate on update
 }
 ```
-
-## Common Patterns
-
-### Prevent Backdating
-
-```typescript
-{
-  name: 'no_backdate',
-  type: 'script',
-  condition: P`record.effective_date < today()`,
-  message: 'Effective date cannot be in the past',
-  events: ['insert'],
-}
-```
-
-### Require Approval for High Values
-
-```typescript
-{
-  name: 'high_value_approval',
-  type: 'conditional',
-  when: P`record.amount > 10000`,
-  message: 'High-value transaction validation',
-  then: {
-    name: 'approval_required',
-    type: 'script',
-    condition: P`isBlank(record.approved_by)`,
-    message: 'High-value transactions require approval',
-  },
-}
-```
-
-### Email Domain Whitelist
-
-```typescript
-{
-  name: 'email_domain',
-  type: 'format',
-  field: 'email',
-  regex: '^[a-zA-Z0-9._%+-]+@(company\\.com|partner\\.com)$',
-  message: 'Email must be from company.com or partner.com',
-}
-```
-
-### Phone Number Format
-
-```typescript
-{
-  name: 'phone_format',
-  type: 'format',
-  field: 'phone',
-  regex: '^\\+?[1-9]\\d{1,14}$',  // E.164 format
-  message: 'Phone must be in international format (+1234567890)',
-}
-```
-
-### Composite Uniqueness (Tenant + Email)
-
-Not a validation — declare a unique index on the object:
-
-```typescript
-indexes: [
-  { fields: ['department', 'email'], unique: 'organization' },
-]
-```
-
-## Best Practices
-
-1. **Use declarative validation first** — Only use script validation when declarative rules don't fit
-2. **Severity matters** — Use `warning` for soft rules, `error` for hard rules
-3. **Events scope** — Only validate on relevant operations to avoid overhead
-4. **Priority order** — System validations first (0-99), app validations second (100-999), user validations last (1000+)
-5. **Clear error messages** — Tell users exactly what's wrong and how to fix it
-6. **State machine for workflows** — Use state_machine instead of complex script logic
-7. **Uniqueness is an index concern** — Declare `indexes: [{ fields, unique: 'organization' | 'global' }]` with the scope stated, never a script-based existence check
-8. **External checks are hooks** — Call APIs from `beforeInsert`/`beforeUpdate` hooks, not validations
-9. **Cross-field for comparisons** — More efficient than script validation
-10. **Test thoroughly** — Validate edge cases, nulls, empty strings
-
-## Performance Considerations
-
-- **Script validations are expensive** — Use sparingly, prefer declarative rules
-- **Priority affects order** — Lower priority = runs first
-- **Unique indexes are enforced by the database** — no per-write query cost beyond index maintenance
-- **State machine is optimized** — Better than complex conditional logic
