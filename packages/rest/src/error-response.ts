@@ -698,6 +698,81 @@ function classifyDataError(error: any, object?: string): { status: number; body:
             },
         };
     }
+    // [#14389] The engine's insert-conflict envelope → 409 `UNIQUE_VIOLATION`,
+    // with the structured `field` restored.
+    //
+    // Since #14095 `engine.insert` answers a driver's unique violation with the
+    // `DuplicateRecordError` envelope — `code: 'DUPLICATE_RECORD'`, `status:
+    // 409`, `object`, `field` when the dialect determinably named a column,
+    // the driver error whole on `cause`. It DECLARES a status, so it reached
+    // the declared-status passthrough below first and left through it: status
+    // right, `field` gone, and the platform's own sentence in `error`, while
+    // the `isUniqueViolationError` arm further down — holding the curated
+    // end-user wording and the `field` key since #7821 — was never reached
+    // for an insert conflict any more. Surfaced FIRST, beside the two
+    // structured 409s above, for the same reason they are: the structured
+    // field must survive the generic catch-alls.
+    //
+    // **The wire `code` stays `UNIQUE_VIOLATION`** (triage ruling on the card,
+    // 2026-09-02: the answer that changes nothing for clients — every consumer
+    // branching on this conflict today reads `UNIQUE_VIOLATION`, and renaming
+    // a wire code under existing consumers is a published-contract change,
+    // not a door's call). The producer's own spelling rides beside it as
+    // `declaredCode`, per the same ruling. ⚠️ Read the field's contract before
+    // widening this: `ApiErrorSchema.declaredCode` and ADR-0112's 2026-08-16
+    // amendment define presence as the DEMOTION of an UNREGISTERED spelling,
+    // and `DUPLICATE_RECORD` is registered — so this is the one flat emission
+    // where a present `declaredCode` is a vocabulary member. Emitted as the
+    // ruling states it and pinned as such (`rest-duplicate-record-arm.test.ts`
+    // §0/§1); whether the field's contract or this emission moves is the
+    // contract review's question, not this arm's.
+    //
+    // **Two sentences — the `DELETE_RESTRICTED` split above.** `error` is the
+    // curated end-user sentence the #6250/#7821 arm has always produced: fixed
+    // text plus, at most, the bare column identifier the ENGINE resolved
+    // through `uniqueViolationColumn` (`field` is read off the envelope, not
+    // re-derived — the envelope is the contract). `developerMessage` is the
+    // engine's own sentence (`message`): it names the object and the column
+    // and carries no value. The envelope's own `developerMessage` is
+    // deliberately NOT relayed — it addresses the in-process caller of
+    // `engine.insert` ("attached as `cause`", "branch on `code ===
+    // 'DUPLICATE_RECORD'`"), and neither holds on this wire.
+    //
+    // **The body echoes nothing the driver said.** `cause` never reaches the
+    // wire and the sentence is fixed text. This matters most for
+    // `driver-memory`, whose raw refusal declares `status: 409` itself and so
+    // ALREADY took the passthrough before #14095 — with a message quoting the
+    // offending values as JSON. The envelope removed that; this arm keeps it
+    // removed.
+    //
+    // ⚠️ Gated on the ENVELOPE — name AND code — not on the code alone as the
+    // two siblings above are, and the difference is load-bearing: they relay
+    // `error.message`, this arm REPLACES it. A hook that deliberately throws
+    // the registered `DUPLICATE_RECORD` from a sandbox body is a different
+    // producer speaking a member of the vocabulary; it keeps the answer the
+    // sandbox unwrap door gives it today (its own sentence, its own code —
+    // `rest-thrown-code-vocabulary.test.ts` §2) rather than having its
+    // sentence swapped for this one and the QuickJS debug wrapper shipped as
+    // `developerMessage`.
+    if (error?.code === 'DUPLICATE_RECORD' && error?.name === 'DuplicateRecordError') {
+        const field = typeof error?.field === 'string' && error.field.length > 0 ? error.field : undefined;
+        const refused = typeof error?.object === 'string' && error.object.length > 0 ? error.object : object;
+        return {
+            status: 409,
+            body: {
+                error: field
+                    ? `A record with this ${field} already exists`
+                    : 'A record with this value already exists',
+                code: 'UNIQUE_VIOLATION',
+                declaredCode: 'DUPLICATE_RECORD',
+                ...(typeof error?.message === 'string' && error.message.length > 0
+                    ? { developerMessage: error.message }
+                    : {}),
+                ...(field ? { field } : {}),
+                ...(refused ? { object: refused } : {}),
+            },
+        };
+    }
     // A declared datasource that is refused by the host policy, or failed to
     // connect under OS_ALLOW_DRIVER_CONNECT_FAILURE → 503 (framework#3828).
     // Handled before the catch-alls because nothing about the REQUEST is wrong:
