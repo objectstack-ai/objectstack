@@ -9,6 +9,7 @@ import { AnalyticsService } from './analytics-service.js';
 import type { AnalyticsServiceConfig } from './analytics-service.js';
 import type { AnalyticsDriverCapabilities } from './strategies/types.js';
 import { pickDisplayField, type DimensionLabelDeps } from './dimension-labels.js';
+import { assertReadScopeCannotVacate } from './read-scope-sql.js';
 
 /**
  * The slice of the DECLARED engine contracts this plugin's auto-bridges
@@ -518,6 +519,30 @@ export class AnalyticsServicePlugin implements Plugin {
         const map = new Map<unknown, string>();
         const displayField = pickDisplayField(dataEngine()?.getObject?.(targetObject)?.fields);
         if (!displayField || !executeAggregate || ids.length === 0) return map;
+        // [#14329] The FOURTH read-scope door, and the same guard the other
+        // three answer with. #13640 guarded the ObjectQL engine merge and
+        // #13926 the echo merge and `NativeSQLStrategy.applyReadScope`; this
+        // hook is a fourth consumer of the same `readScopeProvider` output
+        // that meets NEITHER `compileScopedFilterToSql` nor the guard — the
+        // `$and` below hands the scope straight to `executeAggregate`, so a
+        // vacating spelling (`$not` over `$in: []` and its measured siblings,
+        // reachable from any out-of-repo `getReadScope` producer the
+        // `StrategyContext` spec contract admits) used to let this per-record
+        // read run effectively unscoped for the ids in hand — leaking exactly
+        // the display names the referenced object's RLS exists to hide.
+        //
+        // Placement mirrors `ObjectQLStrategy.resolveFkAttr`, this hook's
+        // structural twin (same id-`$in` `$and` scope, same `executeAggregate`,
+        // guarded since #13640): AFTER the early returns, because a call that
+        // reads nothing cannot widen anything and refusing it would be pure
+        // over-denial; and BEFORE the chunk loop, so one scope gets one verdict
+        // rather than one per 500 ids. The condition is spelled to match the
+        // composition on the next line exactly, so the set of scopes guarded
+        // and the set of scopes `$and`-ed are provably the same set.
+        //
+        // ⛔ Zero compiler change: the #13571 lowering residue is ruled and
+        // untouched. This guard is the walk, not the lowering.
+        if (scope) assertReadScopeCannotVacate(scope, targetObject);
         // #3680 — the sort-key pass hands over the PRE-window id set (every
         // grouped value, not just the displayed page), so a high-cardinality
         // lookup dimension can push thousands of ids through here. Chunk the
