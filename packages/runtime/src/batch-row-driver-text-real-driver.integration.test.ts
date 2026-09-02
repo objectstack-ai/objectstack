@@ -42,6 +42,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { inspect } from 'node:util';
 import { ObjectQL } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -86,13 +87,27 @@ const NOTE = {
  */
 const ABSENT_TENANCY_TABLE = 'sys_organization';
 
+/**
+ * [#14403] The first bytes of the batch-row sink's OWN log line
+ * (`clientFacingRowFailureText`, `metadata-protocol/src/protocol.ts`). A
+ * literal rather than an import: the sink keeps that function private on
+ * purpose, and what this suite pins is the line an OPERATOR reads, which is
+ * the string itself.
+ */
+const SINK_WITHHOLD_PREFIX = "[Protocol] Withheld a caught error's text from a batch row";
+
 describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
     /** [#10629] The expected-noise capture belonging to the latest rig. */
     let noise: ExpectedReadRefusalCapture | null = null;
     let dir: string | null = null;
     let engine: ObjectQL | null = null;
+    /** [#14403] Undoes the latest rig's `console.warn` recorder. */
+    let restoreWarn: (() => void) | null = null;
 
     afterEach(async () => {
+        // [#14403] First, so a throw below can never leave `console.warn` patched.
+        restoreWarn?.();
+        restoreWarn = null;
         try { await engine?.destroy(); } catch { /* noop */ }
         engine = null;
         if (dir) { rmSync(dir, { recursive: true, force: true }); dir = null; }
@@ -145,11 +160,29 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
             engine.registry.registerObject(o as any, 'com.objectstack.test.8502');
         }
         const protocol: any = new ObjectStackProtocolImplementation(engine as any);
-        return { protocol, real, rawOf: () => raw };
+
+        // [#14403] Record the sink's own withhold line so BOTH directions of
+        // its decision can be asserted: it must log exactly when it withheld.
+        // ⛔ Recorded, never muted — every call is forwarded to the real
+        // `console.warn`, so what a shard log shows is unchanged by this
+        // suite. The recorder wraps whatever `console.warn` is current, so it
+        // composes with the driver-channel pass-through above rather than
+        // replacing it.
+        const sinkWarnings: string[] = [];
+        const outerWarn = console.warn;
+        restoreWarn = () => { console.warn = outerWarn; };
+        console.warn = (...args: unknown[]) => {
+            if (typeof args[0] === 'string' && args[0].startsWith(SINK_WITHHOLD_PREFIX)) {
+                sinkWarnings.push(args.map((a) => (typeof a === 'string' ? a : inspect(a))).join(' '));
+            }
+            (outerWarn as (...a: unknown[]) => void)(...args);
+        };
+
+        return { protocol, real, rawOf: () => raw, sinkWarnings };
     }
 
     it('deleteManyData leaks neither the DELETE statement nor the bound id it names', async () => {
-        const { protocol, real, rawOf } = await rig();
+        const { protocol, real, rawOf, sinkWarnings } = await rig();
         await engine!.insert('bd_parent', { id: 'p1', name: 'kept' });
         await engine!.insert('bd_child', { id: 'c1', name: 'dependent', parent: 'p1' });
 
@@ -180,6 +213,19 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
         expect(payload).not.toContain('SQLITE');
         expect(payload).not.toContain('bd_child');
 
+        // ── [#14403] The sink's OPERATOR half, direction one: it withheld,
+        // so it LOGGED — and the line carries the driver's own sentence whole.
+        // That is what keeps withholding distinguishable from DELETING the
+        // diagnostic, which is the failure this file's sink was built against.
+        //
+        // It is also the live control for the disclosed row in the next test,
+        // where the same recorder on the same rig must see nothing: without
+        // this assertion a green zero over there could mean the recorder was
+        // never wired rather than that the sink stayed silent.
+        expect(sinkWarnings).toHaveLength(1);
+        expect(sinkWarnings[0]).toContain('cause (withheld from the response)');
+        expect(sinkWarnings[0]).toContain('FOREIGN KEY constraint failed');
+
         // Non-vacuity on the other side: the row is still there, so the
         // failure was real rather than a swallowed success.
         expect(await engine!.findOne('bd_parent', { where: { id: 'p1' } })).toBeTruthy();
@@ -189,7 +235,7 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
     });
 
     it('batchData create leaks neither the INSERT statement nor the values it carries', async () => {
-        const { protocol, rawOf } = await rig();
+        const { protocol, rawOf, sinkWarnings } = await rig();
         await engine!.insert('bd_note', { id: 'n1', body: 'first', email: 'dup@example.com' });
 
         const res: any = await protocol.batchData({
@@ -247,22 +293,43 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
         expect(payload).not.toContain('UNIQUE constraint failed');
         expect(payload).not.toContain('SQLITE_CONSTRAINT');
 
-        // ── ⚠️ The OPERATOR half of this row is a KNOWN RESIDUAL, not a pin ──
-        // Measured on this exact rig: with the row disclosed, the sink returns
-        // before its `console.warn`, so the warn fires ZERO times and the
-        // driver's own sentence — `UNIQUE constraint failed: bd_note.email` —
-        // reaches neither the response nor the console. Withholding used to be
-        // what carried it to an operator; disclosure removed the carrier
-        // without replacing it.
+        // ── [#14403] The OPERATOR half — re-measured, and now a PIN ────────
+        // What stood here called this a KNOWN RESIDUAL and deliberately
+        // asserted nothing, on the reading that the driver's own sentence
+        // "reaches neither the response nor the console". Re-measured on this
+        // exact rig, one half of that holds and the other does not — so it is
+        // pinned instead of left as prose that can drift:
         //
-        // ⛔ Deliberately NOT asserted either way here: asserting the zero
-        // would PIN the loss as correct, and the remedy is one file over in
-        // `metadata-protocol/src/protocol.ts`, which is another card's surface.
-        // The seed loader's twin of this defect IS fixed (`seedFailureCause`
-        // now reaches through `cause`) and is pinned in
-        // `seed-loader-driver-text-real-driver.integration.test.ts`; this one
-        // is tracked as the residual on #14403. When it is taken, the pin
-        // belongs right here.
+        //   * TRUE — the sink returns before its `console.warn`, so its own
+        //     line fires ZERO times for this row. That is CORRECT rather than
+        //     a loss: the line exists to record a WITHHOLD, and nothing was
+        //     withheld. The caller received the producer's authored sentence.
+        //   * FALSE — "nor the console". The driver's sentence does reach an
+        //     operator one layer down, on the engine's insert door:
+        //     `ERROR Insert operation failed {"object":"bd_note","error":
+        //     {"message":"UNIQUE constraint failed: bd_note.email …"}}`.
+        //     That line takes the envelope's `cause` on purpose (#14095 /
+        //     #14390, `e instanceof DuplicateRecordError ? e.cause : e`,
+        //     because the platform logger serializes only `message` and
+        //     `stack`) and is pinned in objectql's
+        //     `driver-fault-redaction.test.ts`, which asserts the failing
+        //     column survives in it. The diagnostic moved one hop; it was
+        //     never deleted.
+        //
+        // ⇒ There is nothing to repair in `metadata-protocol/src/protocol.ts`,
+        // and adding a second log line to its disclosed branch would be wrong
+        // twice over: it would restate what the engine already logged, once
+        // per duplicate row of a batch, at a site where the failure was handed
+        // to the CALLER — which AGENTS.md's degradation rule names as not a
+        // degradation at all.
+        //
+        // So what is pinned is the sink's decision/log COHERENCE, in both
+        // directions on one rig: it logs when it withholds (the
+        // `deleteManyData` case above, same recorder) and is silent when it
+        // discloses (here). A regression that started withholding this row
+        // again reddens both at once — the sentence assertions up top, and
+        // this zero.
+        expect(sinkWarnings).toEqual([]);
     });
 
     it('a stopped batch does not re-publish the withheld text through its NOT_ATTEMPTED rows', async () => {
