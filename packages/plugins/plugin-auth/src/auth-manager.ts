@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Auth, BetterAuthOptions } from 'better-auth';
+import type { SCIMIdentityState, SCIMTransactionContext } from '@better-auth/scim';
 // better-auth value imports (betterAuth + plugins) are deferred via dynamic
 // import() in getOrCreateAuth() / buildPluginList() so that disabled plugins
 // never get loaded into the process. See Stage 2F (RSS investigation).
@@ -101,6 +102,11 @@ import {
   LAST_LOCAL_CREDENTIAL_CODE,
   LAST_LOCAL_CREDENTIAL_MESSAGE,
 } from './last-local-credential.js';
+import {
+  applyUserBan,
+  applyUserUnban,
+  SCIM_DEACTIVATION_BAN_REASON,
+} from './admin-ban-endpoints.js';
 import {
   PHONE_SMS_TOPICS,
   builtinPhoneSmsBody,
@@ -3276,6 +3282,16 @@ export class AuthManager {
               return verifyScimBearerToken(engine as never, secret, input.token);
             },
           },
+          // [#14360] The host half of `active`: stable @better-auth/scim
+          // writes no `banned` itself any more (the 1.6.x coupling left the
+          // package in 1.7.0) — it hands the aggregate lifecycle state to
+          // this callback inside the SCIM transaction and only revokes
+          // sessions. Routed to the platform's own ban write; the break-glass
+          // last-administrator guard judges it at the engine. See
+          // `reconcileScimUserLifecycle` for the contract and the measurement.
+          identity: {
+            reconcileUser: (state, context) => this.reconcileScimUserLifecycle(state, context),
+          },
         });
       });
     }
@@ -4838,6 +4854,108 @@ export class AuthManager {
   async getApi(): Promise<Auth<any>['api']> {
     const auth = await this.getOrCreateAuth();
     return auth.api;
+  }
+
+  /**
+   * [#14360] `identity.reconcileUser` — the host half of SCIM `active`.
+   *
+   * `@better-auth/scim` 1.7.0 removed its own `banned` write (1.6.30 mapped
+   * `active` onto the admin plugin's ban and refused a deactivation without
+   * that plugin; on the installed 1.7.2 the substring `ban` occurs zero times
+   * in the package) and replaced it with this optional callback: the vendor
+   * computes the user's AGGREGATE lifecycle state — `active` is true while
+   * any participating SCIM source says so — inside the request's
+   * transaction, calls the host, and then revokes the user's sessions when
+   * the state is inactive (`dist/index.mjs`, the identity facade's
+   * `reconcileUser`). Without a host implementation an IdP's `active: false`
+   * revoked sessions and wrote nothing: `sys_user.banned` stayed false and a
+   * local-password user signed straight back in, while ADR-0071, the
+   * generated docs and the #13816 refusal all asserted the ban.
+   *
+   * This method restores declared = enforced by routing the state to the
+   * platform's OWN ban write (`admin-ban-endpoints.ts`):
+   *
+   *  - `active: false` on a row that is not banned ⇒ `applyUserBan` with
+   *    `SCIM_DEACTIVATION_BAN_REASON` and no expiry. The vendor's
+   *    `session.create` hook (`BANNED_USER`) then refuses sign-in — the same
+   *    enforcement the admin ban has, because it is the same write.
+   *  - `active: true` on a row banned WITH that reason ⇒ `applyUserUnban`.
+   *    A ban carrying any other reason was placed by an administrator and is
+   *    not the IdP's to lift: an attribute sync (every SCIM PUT carries
+   *    `active: true`) must not silently re-admit a user banned for cause.
+   *  - Anything else is a no-op. The callback is contractually idempotent
+   *    ("Implementations must be idempotent") and the vendor invokes it on
+   *    EVERY user mutation, so a PATCH that changes only `displayName`
+   *    touches no ban column.
+   *
+   * A consequence worth stating: on 1.7.2 a SCIM `DELETE /Users/{id}` no
+   * longer deletes the better-auth user (the vendor tombstones the source);
+   * it leaves the user with no active source, so this callback disables the
+   * account. Re-provisioning through the tombstone re-links the same user,
+   * the state turns active, and the SCIM ban is lifted by the second bullet.
+   *
+   * The break-glass last-administrator guard (ADR-0024 D5.2, #5892) is an
+   * ENGINE `beforeUpdate` hook on `sys_user`, so it judges this write exactly
+   * as it judges the admin mount's: deactivating the last administrator
+   * throws its 403 `PERMISSION_DENIED`, the adapter rethrows it as an
+   * `APIError`, the vendor re-throws `APIError`s unchanged out of this
+   * callback (`runSCIMApplicationCallback`, measured on 1.7.2 — any other
+   * throw becomes a SCIM 500 "SCIM identity reconciliation failed" carrying
+   * the original as `cause`), the transaction rolls back, and the IdP
+   * receives a SCIM error with `status: "403"` and the guard's own
+   * explanation. The account stays active; nothing is skipped silently.
+   *
+   * Deliberately NOT applied here: the last-LOCAL-credential guard the admin
+   * mount re-runs (`isLastLocalCredentialHolder`). That guard protects the
+   * password escape hatch from an administrator's click; on this path the
+   * identity provider is the authority for the user it deprovisions, and
+   * keeping a departed user's password alive because it happened to be the
+   * last one is the wrong direction for a deprovisioning contract. 1.6.x
+   * never applied it on the SCIM path either — the vendor wrote the column
+   * straight through the adapter.
+   *
+   * Every read and write goes through `context.database` — the vendor's
+   * transaction-bound adapter — never through an `internalAdapter` resolved
+   * outside it, so the ban commits or rolls back with the SCIM mutation it
+   * belongs to.
+   */
+  private async reconcileScimUserLifecycle(
+    state: SCIMIdentityState,
+    context: SCIMTransactionContext,
+  ): Promise<void> {
+    const db = context.database;
+    const user = await db.findOne<{ banned?: unknown; banReason?: unknown }>({
+      model: 'user',
+      where: [{ field: 'id', value: state.userId }],
+    });
+    if (!user) {
+      // The vendor holds a `scimSubject` for this user inside the same
+      // transaction, so a missing row is an invariant break, not a state to
+      // reconcile. Thrown, not logged: the vendor turns it into a SCIM 500
+      // and rolls the mutation back — a deactivation that cannot find its
+      // account must not report success.
+      throw new Error(
+        `[auth] SCIM identity reconciliation: better-auth user '${state.userId}' has no sys_user row`,
+      );
+    }
+    const writer = {
+      updateUser: (id: string, data: Record<string, unknown>) =>
+        db.update({ model: 'user', where: [{ field: 'id', value: id }], update: data }),
+    };
+    const banned = user.banned === true;
+    if (!state.active) {
+      // Already disabled — by an earlier SCIM pass or by an administrator.
+      if (banned) return;
+      await applyUserBan(writer, state.userId, {
+        banReason: SCIM_DEACTIVATION_BAN_REASON,
+        banExpires: null,
+      });
+      return;
+    }
+    if (!banned) return;
+    // An administrator's ban is not the IdP's to lift.
+    if (user.banReason !== SCIM_DEACTIVATION_BAN_REASON) return;
+    await applyUserUnban(writer, state.userId);
   }
 
   /**

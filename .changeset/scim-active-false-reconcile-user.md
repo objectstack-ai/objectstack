@@ -1,0 +1,7 @@
+---
+"@objectstack/plugin-auth": minor
+---
+
+SCIM `active: false` disables the account again. Stable `@better-auth/scim` (1.7.0+) no longer writes the admin plugin's `banned` column itself — it hands the aggregate lifecycle state to an optional host callback, `identity.reconcileUser`, and only revokes sessions. `plugin-auth` passed no `identity` member, so an identity provider deactivating a user revoked sessions and wrote nothing: `sys_user.banned` stayed false and a user holding a local password signed straight back in. `AuthManager` now implements the callback and routes it to the platform's own ban write: `active: false` bans the user (reason `Deactivated via SCIM`, no expiry) and the vendor's `BANNED_USER` sign-in refusal applies; `active: true` lifts a ban that carries that reason — an administrator's ban (any other reason) is not the identity provider's to lift, so an attribute sync never re-admits a user banned for cause. The break-glass last-administrator guard (ADR-0024 D5.2) judges the write at the engine, so deactivating the last administrator through SCIM is refused with a 403 SCIM error and the account stays active. A SCIM `DELETE /Users/{id}` — which on 1.7.2 tombstones the source rather than deleting the user — now leaves that account disabled too.
+
+New exports from `@objectstack/plugin-auth` (the shared write the SCIM hook and the `/admin/ban-user` mount both call): `applyUserBan`, `applyUserUnban`, `SCIM_DEACTIVATION_BAN_REASON`, and the `UserBanWriter` / `UserBanFields` types.
