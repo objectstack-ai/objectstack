@@ -350,6 +350,221 @@ describe('#14333 concurrent resumes of one run on two replicas advance it exactl
         expect(lines.filter((l) => l.includes('advance guarantee'))).toEqual([]);
     });
 
+    // ── THE CONDITION ITSELF: "still parked at node N", not "still present" ──
+    //
+    // Everything above races two claims that arrive while the row is still at
+    // the node both replicas read, so the LOSER loses by finding no row at all.
+    // That cannot tell a compare-and-set from an existence check — measured:
+    // with both comparisons deleted from `InMemorySuspendedRunStore.
+    // claimSuspension`, every test on the branch stayed green.
+    //
+    // The window the condition actually closes is the other one: a loser whose
+    // claim lands AFTER the winner has already advanced and RE-PARKED. Now a
+    // row exists again, at a different parking, and an existence-only consume
+    // deletes the parking another replica is standing on and traverses forward
+    // from a snapshot that is two beats stale. The two tests below hold the
+    // loser's claim until exactly that moment — one per comparison, so a
+    // mutation that deletes only one of them still reddens.
+
+    /** A promise with its resolver, for holding a claim open. */
+    function latch(): { held: Promise<void>; release: () => void } {
+        let release!: () => void;
+        const held = new Promise<void>((r) => { release = () => r(); });
+        return { held, release };
+    }
+
+    /**
+     * A replica's own view of the SHARED store — the real topology: two
+     * processes, one database, each process holding its own client. Only the
+     * TIMING of `claimSuspension` is this wrapper's business; the claim itself
+     * is the shared store's, taken against the shared row.
+     */
+    function delayedClaimClient(
+        shared: InMemorySuspendedRunStore,
+        held: Promise<void>,
+        seen: Array<{ nodeId: string; correlation?: string }>,
+    ): SuspendedRunStore {
+        return {
+            save: (r: SuspendedRun) => shared.save(r),
+            load: (id: string) => shared.load(id),
+            delete: (id: string) => shared.delete(id),
+            list: () => shared.list(),
+            async claimSuspension(runId, parkedAt) {
+                seen.push({ ...parkedAt });
+                await held;
+                return shared.claimSuspension(runId, parkedAt);
+            },
+        };
+    }
+
+    /** The same view with no delay — the winner's client. */
+    function client(shared: InMemorySuspendedRunStore): SuspendedRunStore {
+        return {
+            save: (r: SuspendedRun) => shared.save(r),
+            load: (id: string) => shared.load(id),
+            delete: (id: string) => shared.delete(id),
+            list: () => shared.list(),
+            claimSuspension: (id, at) => shared.claimSuspension(id, at),
+        };
+    }
+
+    it('THE CONDITION (node): a claim landing after the winner RE-PARKED is lost, not granted', async () => {
+        const shared = new InMemorySuspendedRunStore();
+        const led = ledgers();
+        const gate = latch();
+        const seen: Array<{ nodeId: string; correlation?: string }> = [];
+        const a = replica(client(shared), led);
+        const b = replica(delayedClaimClient(shared, gate.held, seen), led);
+
+        const runId = await parkAtLv1(a);
+        expect(led.opened).toEqual(['lv1']);
+
+        // B's decision arrives first and reads the run at `lv1` — then its claim
+        // stalls (a slow client, a queued statement, a paused container).
+        const bDecision = approve(b, runId);
+
+        // A's decision lands and completes: `notify` fires once and the run
+        // RE-PARKS at `lv2`. A row for this run exists again.
+        const aResult = await approve(a, runId);
+        expect(aResult.success).toBe(true);
+        expect(aResult.status).toBe('paused');
+        expect(led.fired).toEqual(['notify']);
+        expect(led.opened).toEqual(['lv1', 'lv2']);
+
+        // The precondition this test rests on, asserted rather than assumed: B
+        // is claiming the parking it READ, which is the one A has left.
+        expect(seen).toEqual([{ nodeId: 'lv1', correlation: 'req_lv1' }]);
+
+        // Now B's claim reaches the store.
+        gate.release();
+        const bResult = await bDecision;
+
+        // It must LOSE. Existence-only, it wins: the `lv2` row is present, so
+        // it is deleted and B traverses forward from its stale `lv1` snapshot.
+        expect(bResult.success).toBe(false);
+        expect(bResult.code).toBe('RESUME_IN_PROGRESS');
+        expect(bResult.status).toBeUndefined();
+
+        // The observable effects are unchanged by the loser: one `notify`, one
+        // `lv2`. Existence-only reads `[ 'notify', 'notify' ]` here.
+        expect(led.fired).toEqual(['notify']);
+        expect(led.opened).toEqual(['lv1', 'lv2']);
+
+        // ⛔ And the winner's parking SURVIVED. This is the half a doubled
+        // effect alone would not catch: an existence-only consume destroys the
+        // live `lv2` suspension, stranding the run for good.
+        expect(await a.hasSuspendedRun(runId)).toBe(true);
+        expect(await b.hasSuspendedRun(runId)).toBe(true);
+        const stored = await shared.load(runId);
+        expect(stored?.nodeId).toBe('lv2');
+    });
+
+    it('THE CONDITION (correlation): a re-entry at the SAME node with a new correlation is lost', async () => {
+        // The one shape where a run legitimately re-parks at the node it just
+        // left: `map` re-entry, whose correlation carries the child run id
+        // (`map:<childRunId>`), so the node id alone cannot separate the
+        // parking a replica read from the parking that replaced it. Only the
+        // correlation comparison can.
+        const shared = new InMemorySuspendedRunStore();
+        const gate = latch();
+        const seen: Array<{ nodeId: string; correlation?: string }> = [];
+        // Each re-entry records the item it just finished, then parks for the
+        // next one — so an item recorded twice is the doubled effect here.
+        const done: string[] = [];
+        const items = ['item_1', 'item_2', 'item_3'];
+
+        function mapReplica(store: SuspendedRunStore): AutomationEngine {
+            const engine = new AutomationEngine(silentLogger(), store);
+            engine.registerNodeExecutor({
+                type: 'map_items',
+                descriptor: defineActionDescriptor({
+                    type: 'map_items', version: '1.0.0', name: 'Map items',
+                    supportsPause: true, resumeAuthority: 'service',
+                }),
+                async execute() {
+                    const next = items[done.length];
+                    if (next === undefined) return { success: true };
+                    done.push(next);
+                    return { success: true, suspend: true, correlation: `map:${next}` };
+                },
+            });
+            engine.registerFlow('sweep', {
+                name: 'sweep',
+                label: 'Sweep',
+                type: 'autolaunched',
+                nodes: [
+                    { id: 'start', type: 'start', label: 'Start' },
+                    { id: 'sweep_items', type: 'map_items', label: 'Sweep items' },
+                    { id: 'end', type: 'end', label: 'End' },
+                ],
+                edges: [
+                    { id: 'e1', source: 'start', target: 'sweep_items' },
+                    { id: 'e2', source: 'sweep_items', target: 'end' },
+                ],
+            } as any);
+            return engine;
+        }
+
+        const a = mapReplica(client(shared));
+        const b = mapReplica(delayedClaimClient(shared, gate.held, seen));
+
+        const runId = (await a.execute('sweep')).runId!;
+        expect(done).toEqual(['item_1']);
+
+        // B reads the run parked at `sweep_items` / `map:item_1`, then stalls.
+        const bDecision = approve(b, runId);
+
+        // A completes the item: the node RE-RUNS and re-parks at the SAME node
+        // with a NEW correlation.
+        const aResult = await approve(a, runId);
+        expect(aResult.status).toBe('paused');
+        expect(done).toEqual(['item_1', 'item_2']);
+        expect((await shared.load(runId))?.nodeId).toBe('sweep_items');
+        expect((await shared.load(runId))?.correlation).toBe('map:item_2');
+        expect(seen).toEqual([{ nodeId: 'sweep_items', correlation: 'map:item_1' }]);
+
+        gate.release();
+        const bResult = await bDecision;
+
+        // Node id alone says "still parked at sweep_items" and would GRANT it.
+        // The correlation is the whole difference.
+        expect(bResult.success).toBe(false);
+        expect(bResult.code).toBe('RESUME_IN_PROGRESS');
+        // No item swept twice, and item_3 was not pulled forward.
+        expect(done).toEqual(['item_1', 'item_2']);
+        // The live parking survived.
+        expect((await shared.load(runId))?.correlation).toBe('map:item_2');
+    });
+
+    it('the loser is traced at DEBUG — an ordinary outcome, not a degradation', async () => {
+        // The caller is told in the result, so this line exists only for an
+        // operator reconstructing a race. At `warn` a busy any-of level would
+        // emit a steady stream of records describing correct behaviour.
+        const store = new InMemorySuspendedRunStore();
+        const led = ledgers();
+        const lines: string[] = [];
+        const a = replica(store, led, capturingLogger(lines));
+        const b = replica(store, led, capturingLogger(lines));
+
+        const runId = await parkAtLv1(a);
+        await Promise.all([approve(a, runId), approve(b, runId)]);
+
+        const claimLines = lines.filter((l) => l.includes('lost the advance claim'));
+        expect(claimLines).toHaveLength(1);
+        expect(claimLines[0]!.startsWith('debug ')).toBe(true);
+        expect(claimLines[0]).toContain("at node 'lv1'");
+        // ⛔ Not a degradation: nothing about the advance claim is raised to
+        // `warn` or `error` on this path. (Scoped to the claim family on
+        // purpose — a directly-constructed engine also emits the unrelated
+        // #4792 "node-type vocabulary was never sealed" warn, and widening
+        // this to "no warn at all" would pin that instead of this.)
+        const raised = lines.filter(
+            (l) => (l.startsWith('warn ') || l.startsWith('error ')) &&
+                (l.includes('advance claim') || l.includes('advance guarantee')),
+        );
+        expect(raised).toEqual([]);
+    });
+
     // ── The seam is LOUD when a store cannot express the guarantee ──────────
 
     it('a store without claimSuspension gets a ONE-TIME declared degradation, and still resumes', async () => {

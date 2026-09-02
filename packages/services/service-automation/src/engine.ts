@@ -2105,9 +2105,17 @@ export class AutomationEngine implements IAutomationService {
             // Handed to the CALLER, so not a degradation and deliberately NOT a
             // log site (AGENTS.md "Degradation log levels": a failure the
             // requester was told about does not look normal from the outside).
-            // Nothing was consumed and nothing ran, so the envelope is the same
-            // STORE_UNAVAILABLE the strict load answers, for the same reason —
-            // retry verbatim once the store is reachable.
+            // The envelope is the same STORE_UNAVAILABLE the strict load
+            // answers, for the same reason — existence is UNKNOWN, not "gone
+            // for good" (#4420).
+            //
+            // ⛔ What this branch may NOT claim is that the suspension was not
+            // consumed. A throw can arrive AFTER a committed delete — a dropped
+            // connection on the way back from a landed statement — so the one
+            // thing known here is that THIS resume did not continue the run.
+            // The result text says exactly that and no more; a retry is what
+            // resolves the ambiguity, answering RUN_NOT_FOUND if the row is in
+            // fact gone.
             return { kind: 'unavailable', message: (err as Error).message };
         }
         if (outcome === 'unsupported') {
@@ -5190,13 +5198,24 @@ export class AutomationEngine implements IAutomationService {
                 // Same envelope, same reason as the strict load's failure
                 // above: existence is UNKNOWN, not "gone for good", and the
                 // identical call is expected to work once the store recovers
-                // (#4420). Nothing was consumed and nothing ran.
+                // (#4420).
+                //
+                // The text states only what is KNOWN. The strict load's failure
+                // can say the suspension was not consumed, because it fails
+                // before anything is consumed; this one cannot — a claim throws
+                // just as readily after a committed delete as before one, so
+                // "NOT consumed" would be a claim about a fact this seam does
+                // not have. What it does know is that this resume did not
+                // continue the run, and that a retry settles the rest.
                 return {
                     success: false,
                     code: 'STORE_UNAVAILABLE',
                     error:
-                        `Durable suspended-run store unreachable for run '${runId}' — the suspension was NOT ` +
-                        `consumed; retry once the store is available: ${claim.message}`,
+                        `Durable suspended-run store unreachable while claiming the advance for run '${runId}' — ` +
+                        `this resume did NOT continue the run, and whether the store consumed the suspension is ` +
+                        `UNKNOWN (a failure can arrive after a committed delete). Retry once the store is ` +
+                        `available: a retry that finds the run still parked continues it, and one that finds the ` +
+                        `suspension gone answers RUN_NOT_FOUND: ${claim.message}`,
                 };
             }
             await this.forgetSuspendedRun(run, 'resumed', claim.kind === 'claimed');
