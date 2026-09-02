@@ -1786,3 +1786,142 @@ describe('[#13551] the record-share `$in` drops nullish `record_id` rows', () =>
     expect(f.$or[1].id.$in).toEqual(['42', 'a1']);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// [#14484] Every sys_record_share write carries organization_id
+// ─────────────────────────────────────────────────────────────────────
+//
+// Ruled 2026-09-02 (decision batch #11 item 3, A adopted): a rule-materialised
+// grant carries the granting RULE's organization, a direct grant the shared
+// RECORD's. Pinned here against the service's own engine double, one direction
+// per case, with the precedence stated where two answers exist.
+describe('[#14484] grant stamps organization_id on both halves of the upsert', () => {
+  const ORG_RECORD = 'org_record';
+  const ORG_CALLER = 'org_caller';
+  const ORG_RULE = 'org_rule';
+
+  /** An org-walled business object — the injected `organization_id` column is declared. */
+  const DEAL_SCHEMA = {
+    name: 'deal',
+    sharingModel: 'private',
+    fields: { id: {}, name: {}, owner_id: {}, organization_id: {} },
+  };
+
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: SharingService;
+  beforeEach(() => {
+    engine = makeFakeEngine({ deal: DEAL_SCHEMA, account: ACCOUNT_SCHEMA, sys_record_share: {} });
+    svc = new SharingService({ engine });
+    engine._tables.deal = [{ id: 'd1', name: 'Big deal', owner_id: 'admin', organization_id: ORG_RECORD }];
+    engine._tables.account = [{ id: 'a1', name: 'Acme', owner_id: 'admin' }];
+  });
+
+  it("a DIRECT grant carries the RECORD's organization — not the caller's active one", async () => {
+    // The caller acts from ORG_CALLER; the record lives in ORG_RECORD. Under a
+    // `single` posture holding several organizations both are real, and the
+    // ruling names the record's.
+    await svc.grant(
+      { object: 'deal', recordId: 'd1', recipientId: 'bob' },
+      { userId: 'admin', tenantId: ORG_CALLER } as any,
+    );
+    expect(engine._tables.sys_record_share[0].organization_id).toBe(ORG_RECORD);
+  });
+
+  it('the organization rides the WRITE CONTEXT too — the #8844 `{ isSystem, tenantId }` shape', async () => {
+    const insert = vi.spyOn(engine, 'insert');
+    await svc.grant({ object: 'deal', recordId: 'd1', recipientId: 'bob' }, { userId: 'admin' } as any);
+    expect(insert).toHaveBeenCalledTimes(1);
+    // The double's `insert(object, data)` is 2-ary; the service passes the
+    // options bag as a third argument, which is what this pin reads.
+    const options = (insert.mock.calls[0] as unknown[])[2] as any;
+    expect(options.context).toMatchObject({ isSystem: true, tenantId: ORG_RECORD });
+  });
+
+  it("a record on an object with NO tenant column falls back to the acting session's organization", async () => {
+    // `account` declares no `organization_id`; the acting organization is a
+    // fact of the write (the `sys_approval_request` writer's ruled fallback).
+    await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'bob' },
+      { userId: 'admin', tenantId: ORG_CALLER } as any,
+    );
+    expect(engine._tables.sys_record_share[0].organization_id).toBe(ORG_CALLER);
+  });
+
+  it('nothing to derive from ⇒ an EXPLICIT null on the row, for the engine\'s #8844 rule to decide', async () => {
+    const insert = vi.spyOn(engine, 'insert');
+    await svc.grant({ object: 'account', recordId: 'a1', recipientId: 'bob' }, { userId: 'admin' } as any);
+    const row = engine._tables.sys_record_share[0];
+    expect(row).toHaveProperty('organization_id', null);
+    // …and no tenant is threaded on the context either: `undefined`, which the
+    // engine reads as "not carried" — never `''` or `'null'`.
+    expect(((insert.mock.calls[0] as unknown[])[2] as any).context.tenantId).toBeUndefined();
+  });
+
+  it("a SYSTEM caller carrying an organization (the rule evaluator's criteriaContext) wins over the record's", async () => {
+    // `SharingRuleService.reconcile` passes `{ ...SYSTEM_CTX, tenantId: rule.organization_id }`.
+    // The record lives in ORG_RECORD; the grant belongs to the RULE.
+    await svc.grant(
+      { object: 'deal', recordId: 'd1', recipientId: 'bob', source: 'rule', sourceId: 'rule_1' },
+      { isSystem: true, tenantId: ORG_RULE } as any,
+    );
+    expect(engine._tables.sys_record_share[0].organization_id).toBe(ORG_RULE);
+  });
+
+  it("a SYSTEM caller carrying NO organization (a platform-global rule) derives the record's", async () => {
+    await svc.grant(
+      { object: 'deal', recordId: 'd1', recipientId: 'bob', source: 'rule', sourceId: 'rule_global' },
+      { isSystem: true } as any,
+    );
+    expect(engine._tables.sys_record_share[0].organization_id).toBe(ORG_RECORD);
+  });
+
+  it('the UPDATE half stamps a pre-repair NULL row in place, and threads the organization on its context', async () => {
+    // A row written before the writer was repaired: same upsert key, no organization.
+    engine._tables.sys_record_share = [{
+      id: 'shr_legacy', object_name: 'deal', record_id: 'd1', recipient_type: 'user', recipient_id: 'bob',
+      access_level: 'read', source: 'manual', organization_id: null, created_at: '2026-01-01T00:00:00Z',
+    }];
+    const update = vi.spyOn(engine, 'update');
+    const r = await svc.grant(
+      { object: 'deal', recordId: 'd1', recipientId: 'bob', accessLevel: 'edit' },
+      { userId: 'admin' } as any,
+    );
+    expect(r.id).toBe('shr_legacy');
+    expect(engine._tables.sys_record_share).toHaveLength(1);
+    expect(engine._tables.sys_record_share[0].organization_id).toBe(ORG_RECORD);
+    expect((update.mock.calls[0]![2] as any).context).toMatchObject({ isSystem: true, tenantId: ORG_RECORD });
+  });
+
+  it('an update that resolves NOTHING leaves the stored organization alone (never clears a backfilled value)', async () => {
+    engine._tables.sys_record_share = [{
+      id: 'shr_kept', object_name: 'account', record_id: 'a1', recipient_type: 'user', recipient_id: 'bob',
+      access_level: 'read', source: 'manual', organization_id: 'org_backfilled', created_at: '2026-01-01T00:00:00Z',
+    }];
+    const update = vi.spyOn(engine, 'update');
+    await svc.grant(
+      { object: 'account', recordId: 'a1', recipientId: 'bob', accessLevel: 'edit' },
+      { userId: 'admin' } as any,
+    );
+    const patch = update.mock.calls[0]![1] as any;
+    expect(patch).not.toHaveProperty('organization_id');
+    expect(engine._tables.sys_record_share[0].organization_id).toBe('org_backfilled');
+  });
+
+  it('a record read that FAILS is logged and leaves the grant to the engine — never a stamped guess', async () => {
+    const warn = vi.fn();
+    svc = new SharingService({ engine, logger: { warn } });
+    const originalFind = engine.find.bind(engine);
+    vi.spyOn(engine, 'find').mockImplementation(async (object: string, options?: any) => {
+      // Only the organization read (projected to the tenant column) fails;
+      // the management pre-flight's reads keep working so the grant reaches it.
+      if (object === 'deal' && Array.isArray(options?.fields) && options.fields.includes('organization_id')) {
+        throw new Error('simulated driver outage');
+      }
+      return originalFind(object, options);
+    });
+    await svc.grant({ object: 'deal', recordId: 'd1', recipientId: 'bob' }, { userId: 'admin' } as any);
+    expect(engine._tables.sys_record_share[0]).toHaveProperty('organization_id', null);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]![0])).toMatch(/could not read the shared record's organization/);
+  });
+});

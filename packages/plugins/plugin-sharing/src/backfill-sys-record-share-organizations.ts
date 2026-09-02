@@ -473,7 +473,7 @@ export async function planSysRecordShareOrganizationBackfill(
       + 'On a multi-tenant install this means the engine exposed no schema for the object; '
       + 'on an install that opted the object out of system fields it is expected.',
     );
-    return finish(base, options.logger);
+    return finish(base, options.logger, true);
   }
 
   const grants = await scanUnstampedGrants(
@@ -545,16 +545,23 @@ export async function planSysRecordShareOrganizationBackfill(
     });
   }
 
-  return finish(base, options.logger);
+  return finish(base, options.logger, true);
 }
 
-/** Seal a report's totals and emit the two log lines the ruling asks for. */
+/**
+ * Seal a report's totals and emit the log lines the ruling asks for.
+ *
+ * The orphan line is emitted by the PLAN only: a run that plans and then
+ * applies (`runSysRecordShareOrganizationBackfill`) would otherwise say it
+ * twice for one population, and the apply half never changes that count.
+ */
 function finish(
   report: Omit<SysRecordShareBackfillReport, 'totals'>,
   logger: SysRecordShareBackfillLogger | undefined,
+  logOrphans: boolean,
 ): SysRecordShareBackfillReport {
   const sealed = { ...report, totals: totalsOf(report) };
-  if (sealed.residue.recordNotFound > 0) {
+  if (logOrphans && sealed.residue.recordNotFound > 0) {
     // ⭐ The orphan count, logged — the half of the ruling's "leave NULL with a
     // logged count" that the report alone cannot deliver to an operator's log.
     logger?.warn?.(
@@ -619,7 +626,7 @@ export async function applySysRecordShareOrganizationBackfill(
     written,
     failures,
   };
-  return finish(applied, options.logger);
+  return finish(applied, options.logger, false);
 }
 
 /**
