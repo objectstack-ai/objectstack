@@ -98,6 +98,11 @@ describe('[#13823] RestApiEndpoint.handlerStatus retirement', () => {
       expect(issue!.message).toMatch(/501 NOT_IMPLEMENTED.*declarative-endpoint executor/s);
       // And the ruled-out alternative, so nobody re-declares it as a repair.
       expect(issue!.message).toMatch(/not a platform capability/s);
+      // Customer-facing text carries the ADR, never an issue id — a `#NNNN`
+      // token resolves to nothing for the reader who meets this refusal
+      // (`check:doc-authoring`); the durable reference is ADR-0049.
+      expect(issue!.message).toMatch(/ADR-0049/);
+      expect(issue!.message).not.toMatch(/#\d{3,}/);
     },
   );
 

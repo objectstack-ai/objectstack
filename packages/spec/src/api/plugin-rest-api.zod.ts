@@ -129,7 +129,7 @@ export type RestApiRouteCategory = z.input<typeof RestApiRouteCategory>;
 // prescription outward. ENFORCE — mounting a 501 stub for `stub` / `planned`
 // — was ruled out as a zero-pull new capability, not a repair.
 const HANDLER_STATUS_RETIRED =
-  '`RestApiEndpoint.handlerStatus` was removed in @objectstack/spec 17 (#13823, ADR-0049 '
+  '`RestApiEndpoint.handlerStatus` was removed in @objectstack/spec 17 (ADR-0049 '
   + 'enforce-or-remove) — nothing ever read it: no registrar, dispatcher or adapter consulted '
   + "the key, so an endpoint declared `stub` or `planned` was served exactly like an "
   + '`implemented` one, and the `501 NOT_IMPLEMENTED` its docstring promised is raised by the '
