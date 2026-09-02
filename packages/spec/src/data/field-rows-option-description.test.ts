@@ -321,7 +321,7 @@ describe('#13671 — the object.form options repeater offers only keys the door 
     }
   });
 
-  it('leaves the OBJECT-level `icon` row alone — a different subject', () => {
+  it('declares exactly one `icon` input in total — the OBJECT-level row, a different subject', () => {
     // The object form declares two `icon` inputs in total before #13671 and
     // one after. The survivor is the object's own Lucide icon in Basics, which
     // `ObjectSchema` declares and Studio renders; an over-broad deletion that
