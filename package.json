@@ -152,6 +152,7 @@
     "check:stall-guard": "node scripts/run-with-stall-guard.mjs --self-test",
     "check:stall-guard-budget": "node scripts/check-stall-guard-budget.mjs --self-test && node scripts/check-stall-guard-budget.mjs",
     "check:stall-guard-headroom": "node scripts/measure-stall-guard-headroom.mjs --self-test",
+    "check:swallow-census-controls": "node scripts/measure-durability-swallow-family.mjs --self-test=gated",
     "gen:system-context-census": "node scripts/check-system-context-census.mjs --fix",
     "check:system-context-census": "node scripts/check-system-context-census.mjs --self-test && node scripts/check-system-context-census.mjs"
   },

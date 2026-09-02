@@ -1448,6 +1448,7 @@ describe('validateTranslationReferences — object-branch coverage vs the schema
         fields: { name: { type: 'text', label: 'Name' } },
         fieldGroups: [{ key: 'basics', label: 'Basics' }],
         actions: [{ name: 'convert_lead', label: 'Convert' }],
+        validations: [{ name: 'lead_needs_name', type: 'script', message: 'Name is required' }],
       },
     ],
     views: [{ name: 'open_leads', objectName: 'crm_lead', label: 'Open Leads' }],
@@ -1503,6 +1504,11 @@ describe('validateTranslationReferences — object-branch coverage vs the schema
       ghost: { _tabs: { ghost_tab: { label: 'Ghost' } } },
       path: 'translations[0].en.objects.crm_lead._tabs.ghost_tab',
     },
+    _validations: {
+      kind: 'reference-checked',
+      ghost: { _validations: { ghost_rule: { message: 'Ghost' } } },
+      path: 'translations[0].en.objects.crm_lead._validations.ghost_rule',
+    },
   };
 
   it('classifies every key `ObjectTranslationDataSchema` declares, and no key it does not', () => {
@@ -1537,6 +1543,7 @@ describe('validateTranslationReferences — object-branch coverage vs the schema
         _sections: { basics: { label: 'Basics' } },
         _actions: { convert_lead: { label: 'Convert' } },
         _tabs: { urgent: { label: 'Urgent' } },
+        _validations: { lead_needs_name: { message: 'A name is required' } },
       }),
     );
     expect(findings).toEqual([]);
