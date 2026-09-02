@@ -344,17 +344,11 @@ each selected issue, before dispatching, execute in order:
    and pick another issue. **First comment wins.**
 
 **Read the claim comment back — GitHub's body sanitizer deletes short `<…>`
-spans in place, and backticks do not protect them.** The shape above is built
-out of placeholders, and the branch name inside it is the key that both the race
-check and the stale-claim reclaim below read. Measured on this loop, writing
-then reading the stored body back: `<!-- dev-report -->` came back as *nothing at
-all*, `expected <n> to be 19` came back as `expected  to be 19`, `git log --
-<path>` came back as `git log -- `. All three were inside code spans. This is
-**not** the truncation shape that step 0's *Repair first* handles: the rest of
-the body survives intact, so there is no truncation point to find, the rendered
-page looks correct, and the API returned success. The first of those spans cost
-the most — it was a report-collection marker, so the instruction to sweep for it
-had been deleted from the very text that carried it.
+spans in place, and backticks do not protect them** (measured: a code-spanned
+HTML comment came back as nothing at all, the rest of the body intact and the
+API reporting success). The shape above is built out of placeholders, and the
+identity lines inside it are what the race check and the stale-claim reclaim
+below read.
 
 - Write literal angle brackets as HTML entities (`&lt;` / `&gt;`), or put a
   space after the `<`. A code span is not protection.
@@ -518,8 +512,6 @@ Verdict per issue:
   check is green (the queue rebuilds against the current default branch, which
   is the sanctioned path); where none exists, merge serially only after remote
   CI is fully green, and only if the project allows the PM to merge at all.
-  This applies to **developer-agent PRs dispatched by this loop only** — the
-  PM's own tooling PRs stay with the maintainer.
 - **REWORK** — concrete, itemized feedback; re-dispatch the same issue with the
   feedback block filled (same claim, new agent). **Maximum 2 rework rounds**
   per issue; a third failure escalates instead.
@@ -825,29 +817,11 @@ TypeScript generics) and HTML comments alike. Write a space after each "<"
 and read the stored body back when a snippet is load-bearing.
 ````
 
----
-
-## Report contract (what a developer agent returns)
-
-```json
-{
-  "issue": 123,
-  "status": "done | rework | blocked | needs_decision",
-  "branch": "claude/issue-123-short-slug",
-  "pr": "https://github.com/acme/hotcrm/pull/456 | null",
-  "summary": "what was implemented, 2-4 sentences",
-  "tests": "commands run + pass/fail evidence",
-  "open_questions": [
-    { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
-  ],
-  "out_of_scope_findings": ["filed as #<n>: …"]
-}
-```
-
-`open_questions` must be non-empty when `status` is `needs_decision`, and each
-entry becomes input to the escalation analysis. `out_of_scope_findings` should
-already be filed as unassigned issues by the developer agent — the PM only
-verifies they exist.
+**Report contract.** The JSON in the template's final-message block is the
+whole contract. `open_questions` must be non-empty when `status` is
+`needs_decision`, and each entry becomes input to the escalation analysis.
+`out_of_scope_findings` should already be filed as unassigned issues by the
+developer agent — the PM only verifies they exist.
 
 ---
 
