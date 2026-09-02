@@ -77,13 +77,20 @@
  * Ablation, direction declared in writing BEFORE the run
  * ---------------------------------------------------------------------------
  * Removing the `rollbackMetaItem` emit (door 1) from `protocol.ts`:
- *   -> §2's "rollbackMetaItem announces the restored body" turns RED
- *   -> every other case in this file stays GREEN — the two `revertCommit`
- *      limbs, the legacy delete, the positive control, all four negative
- *      controls and the reachability section observe other code paths.
+ *   -> BOTH of §2's rollback cases turn RED — "announces the restored body"
+ *      and "folds a PLURAL request type", since each reads `seen` and each
+ *      would find it empty.
  *   -> §5's structural count drops from 7 to 6 and turns RED, which is the
  *      point of counting rather than merely locating.
- * Measured result is recorded in the PR body.
+ *   -> every other case stays GREEN — the three `revertCommit` cases, the two
+ *      legacy-delete cases, the positive control, all four negative controls,
+ *      the three reachability cases and §5's other two structural pins all
+ *      observe code paths the ablation does not touch.
+ *   => 3 RED / 15 GREEN of 18.
+ * The measured result is recorded in the PR body. No rebuild is involved: the
+ * import is the same-package relative `./protocol.js`, so vitest compiles
+ * `src/protocol.ts` itself — which is exactly what an ablation going red
+ * without a build proves, and what a `dist`-resolved one could not.
  */
 
 import { describe, expect, it } from 'vitest';
