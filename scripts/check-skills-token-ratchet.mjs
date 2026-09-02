@@ -313,7 +313,11 @@ export const CEILINGS = new Map([
   // a transition gate written as a `validations[]` invariant bricks rows that
   // were legal when stored, and an invariant written as `requiredWhen` never
   // enforces itself at all. +110 tokens, 1 absorbed by headroom, ceiling +109.
-  ['skills/objectstack-data/SKILL.md', 13892],
+  // 13892 -> 10009: RE-LOCK at the landed count after the `rules/security.md`
+  // split (#14296 item 1 = A, condition (b)). The raise recorded above is spent
+  // and its headroom leaves with it; the moved text is priced in its own row
+  // below, so the package total is unchanged by the re-lock itself.
+  ['skills/objectstack-data/SKILL.md', 10009],
   ['skills/objectstack-formula/SKILL.md', 6002], //     -53 (was 6055)
   ['skills/objectstack-i18n/SKILL.md', 6338], //        -11 (was 6349)
   // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).
@@ -418,6 +422,10 @@ export const CEILINGS = new Map([
   ['skills/objectstack-data/rules/lifecycle.md', 1590],
   ['skills/objectstack-data/rules/naming.md', 773],
   ['skills/objectstack-data/rules/relationships.md', 3778],
+  // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
+  // Control block moved here whole. Pinned at its landed count — no headroom,
+  // because a split that arrives with budget is a raise wearing a new path.
+  ['skills/objectstack-data/rules/security.md', 2480],
   // 3024 -> 3109 (2026-08-31 app-repo-principles raise, see the block above).
   // Severity Levels listed the three values and left the CHOICE unstated: a
   // block rests on a judgement a person made, so a machine-inferred signal — a
