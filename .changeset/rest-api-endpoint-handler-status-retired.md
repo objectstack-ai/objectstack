@@ -84,5 +84,8 @@ The retirement kit:
 - teaching sweep: `content/docs/**`, `examples/**`, `packages/*/README.md` and
   `packages/create-objectstack/**` carry no hand-written mention; the generated
   reference page regenerates. The published skill `skills/objectstack-api`
-  still teaches the key (governed surface — reported for the skills lane, not
-  edited here)
+  taught the key at this PR's base (a9b2be0b0); `main` already dropped that
+  teaching in the #14448 optimization flight (bae4088f3 — zero `handlerStatus`
+  / Handler Status / RouteCoverage hits under `skills/` at 99b8faf8f, with
+  `RestApiEndpoint` still hitting the skill as the live control), so no
+  skills-lane follow-up is needed
