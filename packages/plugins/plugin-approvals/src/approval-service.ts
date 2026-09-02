@@ -607,7 +607,20 @@ function rowFromRequest(row: any): ApprovalRequestRow {
   } as any;
 }
 
-/** `created_at + escalation.timeoutHours`, when the node declares an SLA. */
+/**
+ * `created_at + escalation.timeoutHours`, when the node declares an SLA.
+ *
+ * Calendar (wall-clock) hours, by construction: the hours are added as elapsed
+ * milliseconds, so the deadline does not skip nights, weekends or holidays —
+ * the platform ships no business-hours calendar to count against. This is the
+ * one runtime site that turns the declared number into a deadline; the sweep
+ * below and the `sla_due_at` read projection both go through it, and
+ * `approval-service-sla-calendar-clock.test.ts` pins the clock (a request
+ * opened Friday 17:00 with `timeoutHours: 4` is due Friday 21:00; a 168-hour
+ * deadline spans the weekend; a DST transition changes nothing, because the
+ * arithmetic is elapsed time, not local calendar time). The same sentence
+ * lives in the declaration's `describe` text on `ApprovalEscalationSchema`.
+ */
 function slaDueAt(createdAt: unknown, cfg: any): string | undefined {
   const hours = cfg?.escalation?.timeoutHours;
   if (typeof hours !== 'number' || hours <= 0 || !createdAt) return undefined;

@@ -71,7 +71,7 @@ import { refuseRepeatedQueryParams, assertFilterParamSuppliedOnce } from './quer
 // ignored filter is the one wrong answer a caller cannot detect.
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
-import { RestServerConfig, RestApiConfig, CrudEndpointsConfig, MetadataEndpointsConfig, BatchEndpointsConfig, RouteGenerationConfig } from '@objectstack/spec/api';
+import { RestServerConfig, RestApiConfig, CrudEndpointsConfigParsed, RouteGenerationConfigParsed } from '@objectstack/spec/api';
 // [#11683] The catalog's own floor for "a required `code` and no more specific
 // one" — see its use in `registerSharingEndpoints`, where the nested ADR-0112
 // envelope declares `code` REQUIRED while the flat classification it re-dresses
@@ -80,7 +80,14 @@ import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 // [#11637] The DECLARED contract for `config.api`, imported as a VALUE rather
 // than a type. Both hops into this package were casts, so this schema had
 // never run on any deployment path — see `assertDeclaredApiConfig` below.
-import { RestApiConfigSchema } from '@objectstack/spec/api';
+import {
+    RestApiConfigSchema,
+    CrudEndpointsConfigSchema,
+    MetadataEndpointsConfigSchema,
+    BatchEndpointsConfigSchema,
+    RouteGenerationConfigSchema,
+} from '@objectstack/spec/api';
+import type { z } from 'zod';
 import { DataProtocol, MetadataProtocol } from '@objectstack/spec/api';
 // [#9741] Declared request shapes for the meta-read doors below — imported so
 // each door's request literal is compiled against the spec contract instead of
@@ -738,7 +745,7 @@ type NormalizedRestServerConfig = {
             delete: boolean;
             list: boolean;
         };
-        patterns: CrudEndpointsConfig['patterns'];
+        patterns: CrudEndpointsConfigParsed['patterns'];
         dataPrefix: string;
         objectParamStyle: 'path' | 'query';
     };
@@ -774,24 +781,94 @@ type NormalizedRestServerConfig = {
         includeObjects: string[] | undefined;
         excludeObjects: string[] | undefined;
         nameTransform: 'none' | 'plural' | 'kebab-case' | 'camelCase';
-        overrides: RouteGenerationConfig['overrides'];
+        overrides: RouteGenerationConfigParsed['overrides'];
     };
 };
 
 /**
- * The declared `api` contract, minus the ONE retired key whose posture this seam
- * does not own (see {@link RestServer.assertDeclaredApiConfig}).
+ * The DECLARED contract of each `RestServerConfig` sub-object this seam parses,
+ * keyed by the sub-object's name — the table `normalizeConfig` runs before it
+ * builds anything (#11637 for `api`, #11984 for the four siblings).
  *
- * Built on first use, not at module load: `RestApiConfigSchema` is a
- * `lazySchema` Proxy whose whole point is deferring allocation until someone
- * parses, and calling `.omit()` at module top level would resolve it on every
- * import of this file. Cached because `.omit()` allocates a fresh schema and a
- * `RestServer` is constructed per boot (and per test).
+ * `api` is the one entry with a subtraction: its retired `requireAuth`
+ * tombstone is `.omit()`ed because this seam does not own that key's posture
+ * (see {@link RestServer.assertDeclaredApiConfig}). The four siblings carry no
+ * tombstone of their own and are taken whole. ⛔ `RestServerConfigSchema` — the
+ * whole-config schema — is deliberately NOT in this table: its `openApi31`
+ * tombstone (#4579) is a `retiredKey()` whose parse REFUSES the key, while
+ * #3963 chose warn-and-ignore for a retired REST config key. Parsing per
+ * sub-object leaves that tombstone unexecuted, which keeps the posture a
+ * maintainer would have to flip on purpose.
+ *
+ * Built on first use, not at module load: every schema here is a `lazySchema`
+ * Proxy whose whole point is deferring allocation until someone parses, and
+ * calling `.omit()` at module top level would resolve `RestApiConfigSchema` on
+ * every import of this file. Cached because `.omit()` allocates a fresh schema
+ * and a `RestServer` is constructed per boot (and per test).
  */
-function buildDeclaredApiConfigSchema() {
-    return RestApiConfigSchema.omit({ requireAuth: true });
+function buildDeclaredSubConfigSchemas() {
+    return {
+        api: RestApiConfigSchema.omit({ requireAuth: true }),
+        crud: CrudEndpointsConfigSchema,
+        metadata: MetadataEndpointsConfigSchema,
+        batch: BatchEndpointsConfigSchema,
+        routes: RouteGenerationConfigSchema,
+    };
 }
-let declaredApiConfigSchemaCache: ReturnType<typeof buildDeclaredApiConfigSchema> | undefined;
+type DeclaredSubConfigSchemas = ReturnType<typeof buildDeclaredSubConfigSchemas>;
+type DeclaredSubConfigName = keyof DeclaredSubConfigSchemas;
+let declaredSubConfigSchemasCache: DeclaredSubConfigSchemas | undefined;
+function declaredSubConfigSchemas(): DeclaredSubConfigSchemas {
+    return (declaredSubConfigSchemasCache ??= buildDeclaredSubConfigSchemas());
+}
+
+/**
+ * The exported name of each declared schema, for the refusal text: the
+ * prescription is the payload, and an operator reading a boot failure must be
+ * able to find the rule that refused them without reading our source.
+ */
+const DECLARED_SUB_CONFIG_SCHEMA_NAMES: Record<DeclaredSubConfigName, string> = {
+    api: 'RestApiConfigSchema',
+    crud: 'CrudEndpointsConfigSchema',
+    metadata: 'MetadataEndpointsConfigSchema',
+    batch: 'BatchEndpointsConfigSchema',
+    routes: 'RouteGenerationConfigSchema',
+};
+
+/**
+ * Run one sub-object's DECLARED contract and return the parsed output —
+ * defaults applied, unknown keys stripped (every schema in the table is a
+ * non-strict `z.object()`). Throws on a value the schema rejects, naming the
+ * sub-object and every failing key with zod's own issue text. This is a
+ * construction-time refusal, not an HTTP envelope: nothing has been mounted
+ * yet, and the operator reading the boot log is the audience.
+ *
+ * An absent sub-object parses as `{}` — exactly what the `?? {}` in front of
+ * the old casts read — so the schema's defaults fill it.
+ *
+ * `rationale` lets a caller append a paragraph the issues justify (the
+ * `api.version` mount rationale) and ONLY then: appending it unconditionally
+ * was measured to send an operator to a line of their config they never wrote.
+ */
+function parseDeclaredSubConfig<T extends z.ZodType>(
+    name: DeclaredSubConfigName,
+    schema: T,
+    value: unknown,
+    rationale?: (issues: ReadonlyArray<z.core.$ZodIssue>) => string,
+): z.output<T> {
+    const result = schema.safeParse(value ?? {});
+    if (result.success) return result.data;
+
+    const details = result.error.issues
+        .map((issue) => `  - ${name}.${issue.path.join('.') || '(root)'}: ${issue.message}`)
+        .join('\n');
+    throw new Error(
+        `REST API configuration is invalid: \`${name}\` does not satisfy `
+        + `\`${DECLARED_SUB_CONFIG_SCHEMA_NAMES[name]}\` (@objectstack/spec/api), the schema that declares it.\n`
+        + details
+        + (rationale?.(result.error.issues) ?? ''),
+    );
+}
 
 /**
  * RestServer
@@ -3407,55 +3484,59 @@ export class RestServer {
      *    `.omit()` to make some config boot — a strategy outside the enum is
      *    wrong where it is WRITTEN, not where it is read.
      *
-     * The sibling sub-objects (`crud`, `metadata`, `batch`, `routes`) are still
-     * cast, not parsed, and carry declared constraints of their own
-     * (`batch.maxBatchSize: z.number().int().min(1).max(1000)`, the
-     * `routes.nameTransform` enum, ...). Same defect class, filed separately:
-     * this change deliberately puts ONE narrowing in front of contract review
-     * rather than five.
+     * The sibling sub-objects (`crud`, `metadata`, `batch`, `routes`) went
+     * through the same door in [#11984], one narrowing later — parsed by
+     * `parseDeclaredSubConfig` from the same table, and their parsed output
+     * CONSUMED. The asymmetry with `api` is measured, not stylistic: for each
+     * of the four, every key `normalizeConfig` reads is one its schema
+     * declares (the key diff is empty), and none carries a tombstone, so a
+     * consumed parse cannot strip anything the runtime honours. `api` keeps
+     * #11637's validate-only shape here; its `??` chain below duplicates the
+     * schema's defaults key for key today, and folding it onto the parse is a
+     * separate, separately-measured change — not a rider on the siblings.
      */
     private assertDeclaredApiConfig(api: unknown): void {
-        declaredApiConfigSchemaCache ??= buildDeclaredApiConfigSchema();
-        const result = declaredApiConfigSchemaCache.safeParse(api ?? {});
-        if (result.success) return;
-
-        const details = result.error.issues
-            .map((issue) => `  - api.${issue.path.join('.') || '(root)'}: ${issue.message}`)
-            .join('\n');
-        // The `version` rationale is appended only when `version` is what
-        // failed. Measured during this change's own ablation: a
-        // `projectResolution` refusal printed the whole "an empty version
-        // mounts the entire API at /api//" paragraph, which reads as a
-        // diagnosis of a key the operator did not write — worse than no
-        // rationale, because it sends them to the wrong line of their config.
-        const versionFailed = result.error.issues.some((issue) => issue.path[0] === 'version');
-        throw new Error(
-            'REST API configuration is invalid: `api` does not satisfy `RestApiConfigSchema` '
-            + '(@objectstack/spec/api), the schema that declares it.\n'
-            + details
-            + (versionFailed
+        parseDeclaredSubConfig('api', declaredSubConfigSchemas().api, api, (issues) => (
+            // The `version` rationale is appended only when `version` is what
+            // failed. Measured during #11637's own ablation: a
+            // `projectResolution` refusal printed the whole "an empty version
+            // mounts the entire API at /api//" paragraph, which reads as a
+            // diagnosis of a key the operator did not write — worse than no
+            // rationale, because it sends them to the wrong line of their config.
+            issues.some((issue) => issue.path[0] === 'version')
                 ? '\nThis is refused at construction because `api.version` becomes a path segment in '
                   + 'EVERY route this server mounts (`getApiBasePath()` = `apiPath ?? '
                   + '`${basePath}/${version}``) — an empty version mounts the entire API at `/api//`, '
                   + 'and one carrying `/` splices an extra segment into every route.'
-                : ''),
-        );
+                : ''
+        ));
     }
 
     /**
      * Normalize configuration with defaults
      */
     private normalizeConfig(config: RestServerConfig): NormalizedRestServerConfig {
-        // [#11637] Parse before the cast, not instead of it: the cast below is
-        // what makes the rest of this method type-check, and it is only sound
-        // once the declared contract has actually been run.
+        // [#11637] `api`: parse BEFORE the cast, not instead of it — the cast
+        // is what makes the `api` block below type-check, and it is only sound
+        // once the declared contract has actually been run. Validate-only; see
+        // `assertDeclaredApiConfig` for why its parsed output is discarded.
         this.assertDeclaredApiConfig(config.api);
         const api = (config.api ?? {}) as Partial<RestApiConfig>;
-        const crud = (config.crud ?? {}) as Partial<CrudEndpointsConfig>;
-        const metadata = (config.metadata ?? {}) as Partial<MetadataEndpointsConfig>;
-        const batch = (config.batch ?? {}) as Partial<BatchEndpointsConfig>;
-        const routes = (config.routes ?? {}) as Partial<RouteGenerationConfig>;
-        
+        // [#11984] The four siblings: parsed AND consumed. Each used to be
+        // `(config.<sub> ?? {}) as Partial<...>`, so `batch.maxBatchSize: 0`
+        // was the live batch cap (`0` is not nullish) and
+        // `routes.nameTransform: 'snake_case'` sat in this config as if it were
+        // declared. The parsed output is safe to build from because, per
+        // sub-object, every key read below is one its schema declares
+        // (measured key by key — the diff is empty for all four), so the
+        // non-strict parse cannot strip anything the runtime honours, and the
+        // schema's `.default()`s ARE the defaults: one source, not two.
+        const schemas = declaredSubConfigSchemas();
+        const crud = parseDeclaredSubConfig('crud', schemas.crud, config.crud);
+        const metadata = parseDeclaredSubConfig('metadata', schemas.metadata, config.metadata);
+        const batch = parseDeclaredSubConfig('batch', schemas.batch, config.batch);
+        const routes = parseDeclaredSubConfig('routes', schemas.routes, config.routes);
+
         return {
             api: {
                 version: api.version ?? 'v1',
@@ -3476,8 +3557,11 @@ export class RestServer {
             crud: {
                 // Per key, not per object: since ADR-0122 `crud.operations` is the
                 // AUTHOR state, so a caller may enable three of the five and leave the
-                // rest to the schema's own per-key `.default(true)`. `??` on the whole
-                // object would only have filled it when it was absent entirely.
+                // rest to the schema's own per-key `.default(true)` — which the parse
+                // above applies whenever the object is PRESENT. The `??` here covers
+                // the one case the schema leaves open: `operations` itself is
+                // `.optional()`, so an absent object arrives as `undefined`, not as
+                // five defaults.
                 operations: {
                     create: crud.operations?.create ?? true,
                     read: crud.operations?.read ?? true,
@@ -3486,13 +3570,13 @@ export class RestServer {
                     list: crud.operations?.list ?? true,
                 },
                 patterns: crud.patterns,
-                dataPrefix: crud.dataPrefix ?? '/data',
-                objectParamStyle: crud.objectParamStyle ?? 'path',
+                dataPrefix: crud.dataPrefix,
+                objectParamStyle: crud.objectParamStyle,
             },
             metadata: {
-                prefix: metadata.prefix ?? '/meta',
-                enableCache: metadata.enableCache ?? true,
-                cacheTtl: metadata.cacheTtl ?? 3600,
+                prefix: metadata.prefix,
+                enableCache: metadata.enableCache,
+                cacheTtl: metadata.cacheTtl,
                 // [ADR-0106 D8] Default ON — masking is the platform default and
                 // ships with the current major. The key has a declared seat
                 // (`MetadataEndpointsConfigSchema.maskObjectFields` in
@@ -3502,6 +3586,8 @@ export class RestServer {
                 // knob the runtime `/metadata` dispatcher shares (it has no REST
                 // config to read).
                 maskObjectFields: isObjectSchemaMaskingEnabled(metadata.maskObjectFields),
+                // `endpoints` is `.optional()` like `crud.operations` above: the
+                // `??` is for the absent object; the parse fills a present one.
                 endpoints: {
                     types: metadata.endpoints?.types ?? true,
                     items: metadata.endpoints?.items ?? true,
@@ -3510,20 +3596,21 @@ export class RestServer {
                 },
             },
             batch: {
-                maxBatchSize: batch.maxBatchSize ?? 200,
-                enableBatchEndpoint: batch.enableBatchEndpoint ?? true,
+                maxBatchSize: batch.maxBatchSize,
+                enableBatchEndpoint: batch.enableBatchEndpoint,
+                // `operations` is `.optional()` — same shape as `crud.operations`.
                 operations: {
                     createMany: batch.operations?.createMany ?? true,
                     updateMany: batch.operations?.updateMany ?? true,
                     deleteMany: batch.operations?.deleteMany ?? true,
                     upsertMany: batch.operations?.upsertMany ?? true,
                 },
-                defaultAtomic: batch.defaultAtomic ?? true,
+                defaultAtomic: batch.defaultAtomic,
             },
             routes: {
                 includeObjects: routes.includeObjects,
                 excludeObjects: routes.excludeObjects,
-                nameTransform: routes.nameTransform ?? 'none',
+                nameTransform: routes.nameTransform,
                 overrides: routes.overrides,
             },
         };

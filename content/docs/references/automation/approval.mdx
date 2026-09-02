@@ -38,7 +38,7 @@ const result = ApprovalDecision.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `true`) | SLA escalation switch. Defaults to true: an escalation block carrying timeoutHours is live unless this is explicitly false — the feature-level switch is whether the escalation block exists at all |
-| **timeoutHours** | `number` | ✅ | Hours before escalation triggers |
+| **timeoutHours** | `number` | ✅ | Calendar (wall-clock) hours before escalation triggers — nights, weekends and holidays count. The platform ships no business-hours calendar: a request opened at 17:00 on a Friday with timeoutHours 4 escalates at 21:00 that same Friday |
 | **action** | `Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>` | optional (default: `"notify"`) | Action on escalation timeout |
 | **escalateTo** | `string` | optional | User id or position machine name to escalate to |
 | **notifySubmitter** | `boolean` | optional (default: `true`) | Notify the original submitter on escalation |
@@ -69,7 +69,7 @@ const result = ApprovalDecision.parse(data);
 | :--- | :--- | :--- | :--- |
 | **approvers** | `{ type: Enum<'manager' \| 'position' \| 'department' \| 'team' \| 'field' \| 'expression' \| …>; value?: string; resolveAs?: Enum<'user' \| 'department' \| 'position' \| 'team'>; group?: string; … }[]` | ✅ | Allowed approvers for this node |
 | **behavior** | `Enum<'first_response' \| 'unanimous' \| 'quorum' \| 'per_group'>` | optional (default: `"first_response"`) | How to combine multiple approvers |
-| **minApprovals** | `integer` | optional | Approvals required — total (quorum) or per group (per_group). Default 1 |
+| **minApprovals** | `integer` | optional | Approvals required — total (quorum) or per group (per_group). Omitted ⇒ all resolvable approvers for quorum, 1 per group for per_group |
 | **lockRecord** | `boolean` | optional (default: `true`) | Lock the record from editing while pending |
 | **approvalStatusField** | `string` | optional | Business-object field to mirror request status onto |
 | **onEmptyApprovers** | `Enum<'admin_rescue' \| 'fail' \| 'auto_approve'>` | optional (default: `"admin_rescue"`) | Behavior when no concrete approver resolves at node entry |
@@ -102,7 +102,7 @@ const result = ApprovalDecision.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **enabled** | `boolean` | optional (default: `true`) | SLA escalation switch. Defaults to true: an escalation block carrying timeoutHours is live unless this is explicitly false — the feature-level switch is whether the escalation block exists at all |
-| **timeoutHours** | `number` | ✅ | Hours before escalation triggers |
+| **timeoutHours** | `number` | ✅ | Calendar (wall-clock) hours before escalation triggers — nights, weekends and holidays count. The platform ships no business-hours calendar: a request opened at 17:00 on a Friday with timeoutHours 4 escalates at 21:00 that same Friday |
 | **action** | `Enum<'reassign' \| 'auto_approve' \| 'auto_reject' \| 'notify'>` | optional (default: `"notify"`) | Action on escalation timeout |
 | **escalateTo** | `string` | optional | User id or position machine name to escalate to |
 | **notifySubmitter** | `boolean` | optional (default: `true`) | Notify the original submitter on escalation |
