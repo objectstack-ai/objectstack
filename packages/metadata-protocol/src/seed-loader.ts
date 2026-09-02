@@ -101,10 +101,54 @@ function quotableSeedFailureDetail(err: unknown): string | undefined {
   return typeof declared === 'string' && declared.length > 0 ? declared : undefined;
 }
 
-/** The caught sentence, whole — for the LOG, which never withholds. */
+/**
+ * How far to follow an `error.cause` chain. Producers wrap, but not deeply —
+ * the same bound `@objectstack/types`' unique-violation predicate walks, chosen
+ * for the same reason rather than copied: a chain longer than this is a bug in
+ * the producer, not a diagnostic worth mining.
+ */
+const MAX_CAUSE_DEPTH = 4;
+
+/**
+ * The caught sentence, whole — for the LOG, which never withholds.
+ *
+ * ## [#14095] It reaches through `cause`, and that is the whole point
+ *
+ * A producer that ENVELOPES a lower-level failure keeps its own diagnosis on
+ * `cause` and puts a platform sentence on `message` — which is exactly what
+ * `engine.insert` now does for a driver's unique violation (`DUPLICATE_RECORD`,
+ * `status: 409`, the driver error whole on `cause`). Read off `message` alone,
+ * this function would hand the operator the platform sentence and the driver's
+ * own words — `UNIQUE constraint failed: dt_acct.email`, MySQL's index name,
+ * Postgres' DETAIL line — would reach NEITHER the response nor the log.
+ *
+ * That is the failure this file's own header calls the one that makes a
+ * disclosure fix "a net loss for whoever has to fix the database": withholding
+ * text becomes indistinguishable from DELETING the diagnostic. The envelope
+ * moved the diagnostic one hop rather than deleting it, so the log follows the
+ * hop. The insert door met the identical problem at its own logging seam and
+ * took the identical remedy (it logs the envelope's `cause`); this is that
+ * remedy at the seam a seed write reaches instead.
+ *
+ * The DEEPEST non-empty sentence wins, because that is the one nothing else
+ * restates: every wrapper above it has already put its own summary on the
+ * payload. Structural, never a type check — this package must not import
+ * `@objectstack/objectql` (that is the dependency direction, backwards), and
+ * an envelope from any producer deserves the same treatment as one from that
+ * one.
+ */
 function seedFailureCause(err: unknown): string {
-  const message = (err as { message?: unknown } | null | undefined)?.message;
-  return typeof message === 'string' && message.length > 0 ? message : String(err);
+  const own = (err as { message?: unknown } | null | undefined)?.message;
+  let deepest = typeof own === 'string' && own.length > 0 ? own : undefined;
+
+  let node: unknown = (err as { cause?: unknown } | null | undefined)?.cause;
+  for (let depth = 0; node !== null && node !== undefined && depth < MAX_CAUSE_DEPTH; depth += 1) {
+    const message = (node as { message?: unknown }).message;
+    if (typeof message === 'string' && message.length > 0) deepest = message;
+    node = (node as { cause?: unknown }).cause;
+  }
+
+  return deepest ?? String(err);
 }
 
 /**
@@ -118,11 +162,23 @@ function seedFailureCause(err: unknown): string {
  * saw it, so "what did the response say?" has a different answer than the log
  * suggests. Both passes share this one vocabulary so the two halves of the file
  * cannot drift into answering that question differently.
+ *
+ * ## [#14095] The question is asked about the SENTENCE, not about the error
+ *
+ * It used to ask "was this ERROR's text withheld?" — fine while the printed
+ * sentence was always `err.message`. Now that {@link seedFailureCause} reaches
+ * through `cause`, the two can differ: an enveloped driver fault has its
+ * PLATFORM sentence quoted to the caller and its DRIVER sentence printed here,
+ * and the old question answers `Cause` — telling an operator the reporter saw
+ * a sentence the reporter never saw. So the label compares the sentence about
+ * to be printed against the one the payload actually quoted; `Cause` means
+ * "these are the same words", which is the only reading that stays true for
+ * all three populations (withheld outright, enveloped, plainly declared).
  */
-function seedCauseLabel(err: unknown): string {
-  return quotableSeedFailureDetail(err) === undefined
-    ? 'Cause (withheld from the seed response)'
-    : 'Cause';
+function seedCauseLabel(err: unknown, printed: string): string {
+  return quotableSeedFailureDetail(err) === printed
+    ? 'Cause'
+    : 'Cause (withheld from the seed response)';
 }
 
 /**
@@ -135,7 +191,7 @@ function seedFailureLogLine(payloadMessage: string, err: unknown): string {
   const cause = seedFailureCause(err);
   return payloadMessage.includes(cause)
     ? `[SeedLoader] ${payloadMessage}`
-    : `[SeedLoader] ${payloadMessage} ${seedCauseLabel(err)}: ${cause}`;
+    : `[SeedLoader] ${payloadMessage} ${seedCauseLabel(err, cause)}: ${cause}`;
 }
 
 /** The environments a seed dataset can be scoped to — mirrors `SeedSchema.env`. */
@@ -1665,6 +1721,12 @@ export class SeedLoaderService implements ISeedLoaderService {
             // now agree, and the line owes the two things AGENTS.md
             // ("Degradation log levels") requires of an `error`: the
             // CONSEQUENCE and the FIX.
+            // [#14095] Derived ONCE and shared by both halves below: the label
+            // asks its question ABOUT the sentence being printed, and
+            // `seedFailureCause` now reaches through `cause`, so a second
+            // derivation is a chance for the marker to describe a sentence this
+            // line is not printing.
+            const causeSentence = seedFailureCause(err);
             this.logger.error(
               `[SeedLoader] Deferred reference back-fill FAILED — ${deferred.objectName}.${deferred.field} stays NULL ` +
                 `on record '${deferred.recordExternalId}'. The row itself was seeded, so every row counter looks healthy ` +
@@ -1675,7 +1737,7 @@ export class SeedLoaderService implements ISeedLoaderService {
                 // [#8442] Same cause vocabulary as the pass-1 write sites: the
                 // raw sentence always, MARKED when the payload half withheld it
                 // so an operator can see the reporter did not receive this line.
-                `${seedCauseLabel(err)}: ${seedFailureCause(err)}`,
+                `${seedCauseLabel(err, causeSentence)}: ${causeSentence}`,
               err instanceof Error ? err : undefined,
               {
                 object: deferred.objectName,

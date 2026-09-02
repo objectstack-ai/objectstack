@@ -208,10 +208,61 @@ describe('[#8502] a REAL driver fault is withheld from every batch row', () => {
         expect(raw.message).toContain('dup@example.com');
 
         const payload = JSON.stringify(res);
-        expect(res.results[0].errors[0].message).toBe('The create of this record failed. The reason is in the server log.');
+
+        // ── The row's SENTENCE moved populations (#14095) ──────────────────
+        // ⚠️ RETRIAGED, not re-baselined. `clientFacingRowFailureText` is a
+        // POSITIVE list: it quotes a caught sentence exactly when the producer
+        // DECLARES a client refusal (a 4xx status/statusCode, or the
+        // VALIDATION_FAILED shape) and withholds it otherwise. Nothing about
+        // that rule moved. What moved is which side of it THIS error is on:
+        // since #14095 the insert door answers a driver unique violation with
+        // the ADR-0112 envelope `DUPLICATE_RECORD` / `status: 409`, so the row
+        // is now a DECLARED refusal and the sink quotes it — which is the
+        // remedy this file's own sink documents ("declaring is cheaper than
+        // the workaround"), taken by the producer.
+        //
+        // The withheld population is NOT vacated: the `deleteManyData` case
+        // above is the live control. Its FK fault declares no status, still
+        // takes the withheld branch, and still says the generic sentence — so
+        // a regression that stopped withholding UNDECLARED faults reddens
+        // here, in this same file, on the very next test.
+        expect(res.results[0].errors[0].message).toBe(
+            "Duplicate record refused on 'bd_note': a unique constraint on 'email' already holds this value. "
+            + 'No record was written.',
+        );
+        // The row now carries the machine-readable half too, which is what an
+        // idempotent batch writer branches on — it was `INTERNAL_ERROR` with no
+        // status while the sentence was withheld.
+        expect(res.results[0].errors[0].code).toBe('DUPLICATE_RECORD');
+        expect(res.results[0].errors[0].httpStatus).toBe(409);
+
+        // ── …and NOT ONE leak assertion moved ──────────────────────────────
+        // These are what this file exists for, and they hold against the new
+        // sentence for the reason the envelope was built that way: the
+        // platform sentence carries no statement, no bound value and no
+        // dialect text — the driver's error is preserved WHOLE on `cause`,
+        // which never reaches response data.
         expect(payload).not.toContain('insert into');
         expect(payload).not.toContain('dup@example.com');
         expect(payload).not.toContain('UNIQUE constraint failed');
+        expect(payload).not.toContain('SQLITE_CONSTRAINT');
+
+        // ── ⚠️ The OPERATOR half of this row is a KNOWN RESIDUAL, not a pin ──
+        // Measured on this exact rig: with the row disclosed, the sink returns
+        // before its `console.warn`, so the warn fires ZERO times and the
+        // driver's own sentence — `UNIQUE constraint failed: bd_note.email` —
+        // reaches neither the response nor the console. Withholding used to be
+        // what carried it to an operator; disclosure removed the carrier
+        // without replacing it.
+        //
+        // ⛔ Deliberately NOT asserted either way here: asserting the zero
+        // would PIN the loss as correct, and the remedy is one file over in
+        // `metadata-protocol/src/protocol.ts`, which is another card's surface.
+        // The seed loader's twin of this defect IS fixed (`seedFailureCause`
+        // now reaches through `cause`) and is pinned in
+        // `seed-loader-driver-text-real-driver.integration.test.ts`; this one
+        // is tracked as the residual on #14403. When it is taken, the pin
+        // belongs right here.
     });
 
     it('a stopped batch does not re-publish the withheld text through its NOT_ATTEMPTED rows', async () => {
