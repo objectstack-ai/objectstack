@@ -570,84 +570,15 @@
 // dependencies' own test files.
 import { configDefaults, defineConfig } from 'vitest/config';
 import path from 'path';
+import { integrationTestFiles } from './vitest-tiers.js';
 
-// The integration tier, by MEASURED behaviour (see the section above; the pin
-// test `test/vitest-tiers-partition.test.ts` keeps this list equal to what the
-// files do). Relative to this package root; each entry is an exact path.
-export const INTEGRATION_FILES = [
-  'src/adr-0048-app-split.test.ts',
-  'src/commands/meta/delete-reset-carriers.test.ts',
-  'src/commands/migrate/duplicates.contract.test.ts',
-  'src/commands/migrate/duplicates.created-at-canonical.test.ts',
-  'src/commands/migrate/duplicates.integration.test.ts',
-  'src/commands/migrate/duplicates.null-seam.test.ts',
-  'src/commands/migrate/duplicates.pre-repair.test.ts',
-  'src/commands/migrate/meta.stored-flow-resolution.integration.test.ts',
-  'src/commands/migrate/multi-value-columns.dialect-probe.test.ts',
-  'src/commands/migrate/multi-value-columns.dry-run.test.ts',
-  'src/commands/secret/orphans.guards.test.ts',
-  'src/commands/validate-json-strict-exit.e2e.test.ts',
-  'src/utils/artifact-boot-migration.report-only-drift.test.ts',
-  'src/utils/platform-migrations-arming.integration.test.ts',
-  'src/utils/schema-migrate.deferred-ddl.integration.test.ts',
-  'src/utils/schema-migrate.host-composition.integration.test.ts',
-  'src/utils/schema-migrate.integration.test.ts',
-  'src/utils/schema-migrate.readonly-probe.integration.test.ts',
-  'src/utils/schema-migrate.teardown.integration.test.ts',
-  'src/utils/schema-migration-plugins.declaration-boot-write-guard.test.ts',
-  'src/utils/secret-reference-union.test.ts',
-  'src/utils/sqlite-occupancy.test.ts',
-  'src/utils/sys-secret-orphan-sweep.test.ts',
-  'src/utils/unmanaged-tables.integration.test.ts',
-  'test/artifact-pinned-boot.e2e.test.ts',
-  'test/authoring-rule-command-parity.test.ts',
-  'test/build-json-advisory-parity.e2e.test.ts',
-  'test/build-json-failure-conversions.e2e.test.ts',
-  'test/build-json-failure-warnings.e2e.test.ts',
-  'test/build-json-undeclared-key-parity.e2e.test.ts',
-  'test/build-multi-package-artifact.e2e.test.ts',
-  'test/cloud-login-json-ndjson.e2e.test.ts',
-  'test/compile-artifact-packages.e2e.test.ts',
-  'test/emit-json-pipe.test.ts',
-  'test/format-zod-union.test.ts',
-  'test/generate-agent-retired.e2e.test.ts',
-  'test/generate-skill.e2e.test.ts',
-  'test/hook-body-build-reach.e2e.test.ts',
-  'test/init-created-files-summary.e2e.test.ts',
-  'test/invocation-loudness.e2e.test.ts',
-  'test/json-stdout-purity.e2e.test.ts',
-  'test/lint-conversion-notices.e2e.test.ts',
-  'test/login-json-ndjson.e2e.test.ts',
-  'test/login-json-noninteractive.e2e.test.ts',
-  'test/metadata-type-schema-gate.test.ts',
-  'test/migrate-apply-refuses-before-ddl.e2e.test.ts',
-  'test/migrate-exit-code.e2e.test.ts',
-  'test/migrate-meta.e2e.test.ts',
-  'test/migrate-plan-exits.e2e.test.ts',
-  'test/migrate-unloadable-host-config-exit.e2e.test.ts',
-  'test/qa-empty-glob-exit-code.e2e.test.ts',
-  'test/run-dev-unbuilt-workspace.e2e.test.ts',
-  'test/serve-app-anchored-optional-import.e2e.test.ts',
-  'test/serve-app-runtime-hooks.e2e.test.ts',
-  'test/serve-boot-diagnostics.e2e.test.ts',
-  'test/serve-host-fallback-base.e2e.test.ts',
-  'test/serve-mcp-capability-collision.e2e.test.ts',
-  'test/serve-mcp-stdio-answers.e2e.test.ts',
-  'test/serve-no-artifact.e2e.test.ts',
-  'test/serve-node-env-production-default.e2e.test.ts',
-  'test/serve-organizations-host-resolution.e2e.test.ts',
-  'test/serve-organizations-mount-failure.e2e.test.ts',
-  'test/serve-port-drift-notice.e2e.test.ts',
-  'test/serve-port-readback.e2e.test.ts',
-  'test/serve-process-child-env.e2e.test.ts',
-  'test/serve-publishes-bound-port.e2e.test.ts',
-  'test/serve-stdio-stdout-purity.e2e.test.ts',
-  'test/start-port-banner-agreement.e2e.test.ts',
-  'test/validate-json-failure-conversions.e2e.test.ts',
-  'test/validate-json-failure-warnings.e2e.test.ts',
-  'test/validate-json-warning-parity.e2e.test.ts',
-  'test/validate-top-level-strict.e2e.test.ts',
-];
+// The integration tier, DERIVED from what the files DO — never written down.
+// `vitest-tiers.ts` holds the predicate, the walk and the argument for both;
+// `test/vitest-tiers-partition.test.ts` pins what a derivation cannot pin
+// about itself. Package-root-relative, POSIX-separated, sorted; each entry is
+// an exact path, which is what lets the same array serve as the integration
+// project's `include` and the unit project's `exclude`.
+export const INTEGRATION_FILES = integrationTestFiles(__dirname);
 
 export default defineConfig({
   resolve: {
