@@ -314,19 +314,20 @@ describe('#14348 — the promotion target is the oldest human that can AUTHENTIC
     // reserved to the maintainer; this change only fixes FRESH bootstraps.
     const engine = await boot();
     await seedDirectoryPerson(engine, 'usr_person0', 'person0@demo.example', '2026-01-01T00:00:00.000Z');
-    await seedLoginableUser(engine, 'usr_login', 'admin@demo.example', '2026-02-01T00:00:00.000Z');
 
-    // First pass under the OLD world's outcome: hand-write the legacy grant.
+    // Build the legacy state the OLD code really produced, without deleting
+    // anything: a first pass over a people-only population seeds the permission
+    // sets and promotes nobody, and the grant on the directory row is then
+    // written by hand — which is exactly the row the old selector would have
+    // picked.
     const { logger: seedLogger } = collectingLogger();
-    await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, { logger: seedLogger });
+    const seedPass = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, {
+      logger: seedLogger,
+    });
+    expect(seedPass.reason).toBe('no_authenticable_user');
     const sets = await findRows(engine, 'sys_permission_set', { name: 'admin_full_access' });
     const adminPsId = sets[0]?.id;
-    // Reset to the legacy state: the grant belongs to the directory row.
-    for (const link of await findRows(engine, 'sys_user_permission_set', {
-      permission_set_id: adminPsId,
-    })) {
-      await (engine as any).delete('sys_user_permission_set', link.id, { context: SYSTEM_CTX });
-    }
+    expect(adminPsId).toBeTruthy();
     await (engine as any).insert(
       'sys_user_permission_set',
       {
@@ -338,6 +339,10 @@ describe('#14348 — the promotion target is the oldest human that can AUTHENTIC
       { context: SYSTEM_CTX },
     );
     expect(await adminGrantHolders(engine)).toEqual(['usr_person0']);
+
+    // A loginable admin now exists alongside the legacy grant — the new
+    // selector's preferred target, which must NOT be reached.
+    await seedLoginableUser(engine, 'usr_login', 'admin@demo.example', '2026-02-01T00:00:00.000Z');
 
     const { logger } = collectingLogger();
     const report = await bootstrapPlatformAdmin(engine as any, defaultPermissionSets, { logger });
