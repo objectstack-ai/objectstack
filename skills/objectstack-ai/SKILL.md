@@ -186,8 +186,9 @@ kernel.use(new MCPServerPlugin());
 
 The HTTP surface is **default-on**, served per-request by the runtime dispatcher
 at **`POST /api/v1/mcp`** — nothing to start (`OS_MCP_SERVER_ENABLED=false` opts
-out). A long-lived **stdio** transport is a separate opt-in
-(`autoStart: true`, or `OS_MCP_SERVER_ENABLED=true`).
+out). The long-lived **stdio** transport has its own switch and defaults off:
+`autoStart: true`, or `OS_MCP_STDIO_ENABLED=true`. (`OS_MCP_SERVER_ENABLED=true`
+still starts it — deprecated, and it warns at boot.)
 
 The tools a client then sees — from `registerObjectTools` / `registerActionTools`,
 each family gated by the caller's OAuth scopes, every call under the caller's
@@ -201,9 +202,6 @@ permissions and row-level security:
 | `validate_expression` | build-accurate CEL check before a formula is authored into metadata |
 | `create_record`, `update_record`, `delete_record` | writes; `delete_record` is annotated destructive |
 | `list_actions`, `run_action` | your AI-exposed business Actions — the same `ai.exposed` opt-in as above |
-
-Your skills' `instructions` reach this surface too: the same package projects
-them onto the MCP `prompts` primitive.
 
 ---
 
