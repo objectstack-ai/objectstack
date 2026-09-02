@@ -392,7 +392,28 @@ function declarationProvenance(winner, container, line, note = null) {
  * today's behaviour.
  */
 const DECLARATION_MAP_DIR = 'packages/spec/declaration-map';
+const AUTHORABLE_SURFACE_DIR = 'packages/spec/authorable-surface';
 const AUTHORABLE_SURFACE_FILE = 'packages/spec/authorable-surface.base.json';
+
+/**
+ * ⚠️ BOTH authorable-surface artifacts are read, as a UNION, and the reason is a measured
+ * false-negative class rather than belt-and-braces.
+ *
+ * `authorable-surface.base.json` is what #12824 names, and it is an ANCHOR: its own
+ * `description` says it is "a verbatim copy of the keys in authorable-surface/ as they
+ * stood at `baseRev`" — a fixed commit for the deletion gate. Measured on this tree it
+ * lagged the live ratchet by 532 keys, and the lag is load-bearing here: `data/Object:editMode`
+ * and every key of `security/OrgScopingEntitlement` and `api/ProvenanceWaiver` are absent
+ * from it and present in `authorable-surface/`, so reading the anchor ALONE would suppress
+ * anchors on genuinely authorable keys — a false negative, growing with every key added
+ * after `baseRev`, which is the one direction the ruling forbids.
+ *
+ * The union can only ever KEEP an anchor that either source vouches for, never drop one
+ * more. `[RETIRED]` is stripped for the same reason: the ratchet's own description says a
+ * tombstoned key "still rejects with an upgrade prescription", so it is still surface a
+ * page documents, and an exact-match lookup would silently drop all 103 of them.
+ */
+const AUTHORABLE_KEY_SUFFIX_RE = /\s\[[A-Z]+\]$/;
 
 /**
  * The container qualifier, built from those two artifacts. PURE, so `--self-test` pins
@@ -420,7 +441,7 @@ function buildContainerSurface(shards, keys) {
       } else byName.set(name, target);
     }
   }
-  const authorable = new Set(keys || []);
+  const authorable = new Set((keys || []).map((k) => String(k).replace(AUTHORABLE_KEY_SUFFIX_RE, '')));
   return {
     available: true,
     resolve: (name) => byName.get(name),
@@ -455,13 +476,22 @@ function liveContainerSurface() {
     const shards = readdirSync(dir)
       .filter((f) => f.endsWith('.json'))
       .map((f) => JSON.parse(readFileSync(join(dir, f), 'utf8')));
-    const surface = JSON.parse(readFileSync(join(repoRoot, AUTHORABLE_SURFACE_FILE), 'utf8'));
-    if (!shards.length || !Array.isArray(surface.keys) || !surface.keys.length) throw new Error('empty artifacts');
-    containerSurfaceCache = buildContainerSurface(shards, surface.keys);
+    const keys = [];
+    try {
+      const sdir = join(repoRoot, AUTHORABLE_SURFACE_DIR);
+      for (const f of readdirSync(sdir)) {
+        if (f.endsWith('.json')) keys.push(...(JSON.parse(readFileSync(join(sdir, f), 'utf8')).keys || []));
+      }
+    } catch { /* the live ratchet is optional; the anchor below is the floor */ }
+    try {
+      keys.push(...(JSON.parse(readFileSync(join(repoRoot, AUTHORABLE_SURFACE_FILE), 'utf8')).keys || []));
+    } catch { /* and vice versa — one of the two is enough */ }
+    if (!shards.length || !keys.length) throw new Error('empty artifacts');
+    containerSurfaceCache = buildContainerSurface(shards, keys);
   } catch (e) {
     // ONE note, on stderr, so the degradation is visible without changing any output the
     // consumers parse. Anchors are unaffected — see UNAVAILABLE_CONTAINER_SURFACE.
-    process.stderr.write(`affected-docs: container qualification disabled (${DECLARATION_MAP_DIR} / ${AUTHORABLE_SURFACE_FILE} unreadable: ${e && e.message}); data-property anchors keep their pre-#13713 behaviour\n`);
+    process.stderr.write(`affected-docs: container qualification disabled (${DECLARATION_MAP_DIR} / ${AUTHORABLE_SURFACE_DIR} + ${AUTHORABLE_SURFACE_FILE} unreadable: ${e && e.message}); data-property anchors keep their pre-#13713 behaviour\n`);
     containerSurfaceCache = UNAVAILABLE_CONTAINER_SURFACE;
   }
   return containerSurfaceCache;
@@ -3107,6 +3137,14 @@ function selfTest() {
     true, mergeSurface.isAuthorable('data/Object', 'x'));
   check('buildContainerSurface.isAuthorable', 'and a property of the wrong type is not authorable by NAME alone — #12824 disproved discriminator 3', 'ui/ListView:x',
     false, mergeSurface.isAuthorable('ui/ListView', 'x'));
+  // `[RETIRED]` is a TOMBSTONE, not a deletion: the ratchet's own description says such a
+  // key "still rejects with an upgrade prescription", so it is still surface a page
+  // documents. An exact-match lookup would silently drop all 103 of them.
+  const retiredSurface = buildContainerSurface([{ entries: { S: 'ui/PageCardProps' }, collisions: [] }], ['ui/PageCardProps:body [RETIRED]']);
+  check('buildContainerSurface.isAuthorable', 'a tombstoned key is still authorable — the annotation is stripped, not matched', 'ui/PageCardProps:body',
+    true, retiredSurface.isAuthorable('ui/PageCardProps', 'body'));
+  check('buildContainerSurface.isAuthorable', 'and the annotation is not smuggled into the key itself', 'ui/PageCardProps:body [RETIRED]',
+    false, retiredSurface.isAuthorable('ui/PageCardProps', 'body [RETIRED]'));
 
   // ---- the two ruled true positives, against the LIVE generated artifacts ----
   // ⭐ Deliberately NOT fixtures. The ruling pins these two rows, and a fixture surface
@@ -3126,6 +3164,15 @@ function selfTest() {
   // deliberately rather than silently.
   check('liveContainerSurface', 'DatasourceDef is NOT in the generated map — the schemaMode pin therefore survives via case (c), the unmapped keep', 'unmapped', 'undefined', String(live.resolve('DatasourceDef')));
   check('liveContainerSurface', 'and data/Datasource:schemaMode IS authorable, so the pin also survives via case (a) the day the map carries its container', 'authorable', true, live.isAuthorable('data/Datasource', 'schemaMode'));
+  // ⭐ THE ANCHOR IS A FLOOR, NOT THE SOURCE. `authorable-surface.base.json` is pinned at a
+  // fixed `baseRev` for the deletion gate, so reading it ALONE suppresses anchors on every
+  // key added since — a false negative that grows. This pin is what goes red if the union
+  // with the live `authorable-surface/` ratchet is ever removed: `data/Object:editMode` is
+  // a real key of `ObjectSchemaBase`, present in the ratchet and absent from the anchor.
+  check('liveContainerSurface', 'a key added since the anchor commit is still authorable — the live ratchet is read too', 'data/Object:editMode',
+    true, live.isAuthorable('data/Object', 'editMode'));
+  check('liveContainerSurface', 'and a tombstoned key of a mapped container is authorable through the live ratchet as well', 'ui/PageCardProps:body',
+    true, live.isAuthorable('ui/PageCardProps', 'body'));
   for (const [src, line, want, label] of [
     [authorableSource, 2, ['userActions'], 'userActions at its declaration form still mints — ruled true positive 1'],
     [datasourceDefSourceLive, 2, ['schemaMode'], 'schemaMode at its declaration form still mints — ruled true positive 2'],

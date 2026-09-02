@@ -113,10 +113,21 @@ never by parsing this clause back out.
 Option D of the same ruling, and the half that *does* move rows. It landed once the spec
 side (#13712) published the mapping it needs: `packages/spec/declaration-map/*.json` maps a
 **TS declaration name** to a **spec type name** (`ObjectSchemaBase` → `data/Object`), and
-`packages/spec/authorable-surface.base.json` keys the authorable surface as
-`container:property` (`data/Object:userActions`). Both are generated and covered by
-`check:generated`; this script only ever reads them, and ⛔ never carries a local mapping
-table of its own — a container the map lacks is a spec-lane card, not a local fix.
+the authorable surface is keyed as `container:property` (`data/Object:userActions`). All of
+it is generated and covered by `check:generated`; this script only ever reads it, and ⛔
+never carries a local mapping table of its own — a container the map lacks is a spec-lane
+card, not a local fix.
+
+⚠️ The authorable surface is read as the **union** of `packages/spec/authorable-surface/`
+(the live per-category ratchet, read as one set) and
+`packages/spec/authorable-surface.base.json` (the artifact #12824 names). The second is an
+**anchor**, pinned at a fixed `baseRev` for the deletion gate — measured on this tree it
+lagged the ratchet by 532 keys, including `data/Object:editMode` and every key of
+`security/OrgScopingEntitlement` and `api/ProvenanceWaiver`. Reading the anchor alone would
+suppress anchors on genuinely authorable keys, and that class grows with every key added
+after `baseRev`. A union can only ever keep an anchor one source vouches for, never drop
+one more. `[RETIRED]` is stripped for the same reason: a tombstoned key still rejects with
+an upgrade prescription, so it is still surface a page documents.
 
 For a data property `prop` (`name:` / `name?:` / `name =`) whose most specific enclosing
 declaration is the container `C`:
