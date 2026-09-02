@@ -24,23 +24,11 @@ computation or boolean predicates: **CEL** (Google Common Expression
 Language). This skill is the canonical reference for AI authors emitting
 formula / condition / predicate / dynamic-seed metadata.
 
-> **Strategic context.** The future authors of metadata are AI agents.
-> CEL was chosen because it has (a) a formal grammar, (b) a public training
-> corpus, (c) AST-first persistence, and (d) sandboxed bounded execution.
-> The previous custom Salesforce-flavor engine was **deleted** in M9.5.
->
 > **Predicates / formulas are bare CEL — never wrap field references in `{…}`
 > braces.** The #1 authoring mistake is a condition like
 > `{record.rating} >= 4`: in CEL, `{…}` is a **map literal**, so it is a parse
 > error. Write bare CEL: `record.rating >= 4`. Braces are *only* for `{{ … }}`
-> text templates (see Template surfaces).
->
-> **As of 7.6 (ADR-0032) a malformed expression no longer fails silently.**
-> It used to evaluate to `null`/`false` (a flow "fired" but did nothing). Now
-> `objectstack build` **fails** with a located, corrective, schema-aware message
-> (unknown `record.<field>` → did-you-mean), and at runtime the engine **throws**
-> (the flow/rule fails loudly). The `validate_expression` agent tool runs the
-> same shared validator so you can check an expression *before* saving.
+> text templates (see Cron and template surfaces).
 
 ---
 
@@ -59,18 +47,9 @@ formula / condition / predicate / dynamic-seed metadata.
 
 ## Core contract
 
-Every expression in metadata is the same envelope:
-
-```ts
-type Expression = {
-  dialect: 'cel' | 'cron' | 'template';
-  source?: string;
-  ast?: unknown;
-  meta?: { rationale?: string; generatedBy?: string };
-};
-```
-
-**Three registered dialects**:
+Every expression in metadata is the same envelope — `dialect` plus `source`,
+with optional `ast` and `meta` — declared as `Expression` / `ExpressionInput` in
+`shared/expression.zod.ts`. **Three registered dialects**:
 
 | Dialect    | Engine                 | Purpose                                           | Helper        | Example                                |
 |:-----------|:-----------------------|:--------------------------------------------------|:--------------|:---------------------------------------|
@@ -82,15 +61,8 @@ There is **no `js` dialect** — it was retired. Procedural JavaScript is
 the L2 `ScriptBody { language: 'js' }` authoring surface (hook bodies, mapping
 transforms — see objectstack-data), not an expression dialect.
 
-**Authors emit the right dialect for the surface.** Bare strings on cron and
-template fields are auto-wrapped at validate time, but emitting the full
-envelope is preferred for clarity. `cron` and `template` use the same variable
-scope as CEL — you do **not** learn three languages.
-
 > **AI authors:** when emitting structured-output JSON for metadata, always
-> emit the full envelope `{ dialect, source }` — do not emit bare strings.
-> After M9.7 lands, you will emit `ast` directly. Until then, emit `source`
-> and let `objectstack compile` parse it.
+> emit the full envelope `{ dialect, source }` — never a bare string.
 
 ---
 
@@ -105,7 +77,7 @@ scope as CEL — you do **not** learn three languages.
 | Equality | `==` / `!=` |
 | Logical | `&&` / `\|\|` / `!` |
 | Ternary | `cond ? a : b` |
-| String literal | `'single quotes'` (always) |
+| String literal | `'abc'` — CEL parses `"abc"` too |
 | Membership | `record.region in ['us', 'eu']` |
 | Key existence (NOT null-safety) | `has(record.foo)` |
 | Null check | `record.foo == null` or `isBlank(record.foo)` |
@@ -210,7 +182,7 @@ If you need a helper that doesn't exist, prefer adding it to the stdlib
 (small, pure, dependency-free) over inlining a complex CEL expression.
 
 > **Only the functions above are callable.** An UNKNOWN function — `PRIOR()`, a
-> legacy `ISBLANK()`, a typo'd `isBlnk()` — **fails `objectstack build`** with a
+> legacy `ISBLANK()`, a typo'd `isBlnk()` — **fails `os build`** with a
 > "no matching overload" type error, rather than silently no-op'ing the
 > predicate at run time. Use `previous.x` (not `PRIOR()`), `isBlank()` (not `ISBLANK()`).
 
@@ -240,7 +212,7 @@ F`record.salutation + ' ' + record.first_name + ' ' + record.last_name`
 
 ```ts
 F`coalesce(record.cost, 0) > 0
-  ? ((coalesce(record.revenue, 0) - record.cost) * 100.0) / record.cost
+  ? ((coalesce(record.revenue, 0) - record.cost) * 100) / record.cost
   : 0.0`
 ```
 
@@ -258,9 +230,8 @@ For field-level conditional rules, emit the canonical field properties:
 `visibleWhen`, `readonlyWhen`, and `requiredWhen`. Never emit
 `conditionalRequired` — it was REMOVED in protocol 17 and is a parse error.
 
-❌ Salesforce-flavor — **fails CEL compile**: `objectstack build` errors with a
-located message, and the flow engine throws if it ever reaches runtime (see the
-ADR-0032 note at the top of this skill):
+❌ Salesforce-flavor — **fails CEL compile**: `os build` errors with a
+located message, and the flow engine throws if it ever reaches runtime:
 
 ```ts
 "status = 'qualified'"
@@ -282,8 +253,11 @@ ADR-0032 note at the top of this skill):
 { close_date: new Date(Date.now() + 45 * 86400000), created_at: new Date() }
 ```
 
-This is the determinism gate: `objectstack build` runs twice produce
-byte-identical `dist/objectstack.json` only when seed dates use CEL.
+This is the determinism gate: two consecutive `os build` runs produce
+byte-identical `dist/objectstack.json` only when every dynamic seed value is
+`` cel`...` `` — no `new Date()`, no `Date.now()`, no random or otherwise
+impure source. The stdlib helpers honour the pinned `now` from `EvalContext`,
+so they are safe inside one.
 
 ### 5. Update hook condition — `previous` vs `record`
 
@@ -420,37 +394,17 @@ holds a path and a formatter, nothing else.
 
 ---
 
-## Determinism contract
-
-Builds are deterministic only if:
-
-1. All seed dynamic values use `cel\`...\`` (no `new Date()`, no `Date.now()`).
-2. CEL stdlib helpers honor the pinned `now` from `EvalContext`.
-3. No expression source contains random / non-pure data.
-
-Two consecutive `objectstack build` runs must produce byte-identical
-`dist/objectstack.json` — spot-check by diffing the artifact.
-
----
-
-## Open questions
-
-- Authors will emit `ast` directly once `CelExprSchema` is published as JSON
-  Schema for AI constrained decoding (M9.7).
-- A visual node-graph editor backed by `CelExprSchema` is M9.8 (Studio).
-
----
-
 ## Verify your work
 
-A malformed expression no longer fails silently (ADR-0032, see the note near the
-top of this skill): both `os validate` and `os build` run the shared validator
-over every formula and predicate in the stack — CEL syntax **plus**
-`record.<field>` existence on the target object — and fail non-zero with a
-did-you-mean. Use `os validate` as the fast post-edit check (no artifact emitted;
-`npm run validate` in a scaffolded project). To check a *single* expression
-before saving it, call the `validate_expression` agent tool, which runs the same
-validator inline.
+A malformed expression does not fail silently (ADR-0032). It used to evaluate to
+`null` / `false` — a flow "fired" and did nothing; now `os validate` and
+`os build` run the shared validator over every formula and predicate in the
+stack — CEL syntax **plus** `record.<field>` existence on the target object —
+and fail non-zero with a located, did-you-mean message, while at runtime the
+engine **throws** and the rule fails loudly. Use `os validate` as the fast
+post-edit check (no artifact emitted; `npm run validate` in a scaffolded
+project). To check a *single* expression before saving it, call the
+`validate_expression` agent tool, which runs the same validator inline.
 
 ---
 
