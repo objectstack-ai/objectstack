@@ -186,7 +186,7 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **rateLimit** | `string` | optional | Rate limit policy name |
 | **cacheable** | `boolean` | optional (default: `false`) | Whether response can be cached |
 | **cacheTtl** | `integer` | optional | Cache TTL in seconds |
-| **handlerStatus** | `never` | optional | [REMOVED] `RestApiEndpoint.handlerStatus` was removed in @objectstack/spec 17 (#13823, ADR-0049 enforce-or-remove) — nothing ever read it: no registrar, dispatcher or adapter consulted the key, so an endpoint declared `stub` or `planned` was served exactly like an `implemented` one, and the `501 NOT_IMPLEMENTED` its docstring promised is raised by the declarative-endpoint executor for a target it cannot serve, never from this field. Delete the key. An endpoint that has no handler yet is simply not registered; a declared-but-unbuilt route answering 501 is not a platform capability (ruling record, 2026-09-01). |
+| **handlerStatus** | `never` | optional | [REMOVED] `RestApiEndpoint.handlerStatus` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no registrar, dispatcher or adapter consulted the key, so an endpoint declared `stub` or `planned` was served exactly like an `implemented` one, and the `501 NOT_IMPLEMENTED` its docstring promised is raised by the declarative-endpoint executor for a target it cannot serve, never from this field. Delete the key. An endpoint that has no handler yet is simply not registered; a declared-but-unbuilt route answering 501 is not a platform capability (ruling record, 2026-09-01). |
 
 
 ---
@@ -361,7 +361,7 @@ const result = ErrorHandlingConfigSchema.parse(data);
 | **rateLimit** | `string` | optional | Rate limit policy name |
 | **cacheable** | `boolean` | optional (default: `false`) | Whether response can be cached |
 | **cacheTtl** | `integer` | optional | Cache TTL in seconds |
-| **handlerStatus** | `never` | optional | [REMOVED] `RestApiEndpoint.handlerStatus` was removed in @objectstack/spec 17 (#13823, ADR-0049 enforce-or-remove) — nothing ever read it: no registrar, dispatcher or adapter consulted the key, so an endpoint declared `stub` or `planned` was served exactly like an `implemented` one, and the `501 NOT_IMPLEMENTED` its docstring promised is raised by the declarative-endpoint executor for a target it cannot serve, never from this field. Delete the key. An endpoint that has no handler yet is simply not registered; a declared-but-unbuilt route answering 501 is not a platform capability (ruling record, 2026-09-01). |
+| **handlerStatus** | `never` | optional | [REMOVED] `RestApiEndpoint.handlerStatus` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — nothing ever read it: no registrar, dispatcher or adapter consulted the key, so an endpoint declared `stub` or `planned` was served exactly like an `implemented` one, and the `501 NOT_IMPLEMENTED` its docstring promised is raised by the declarative-endpoint executor for a target it cannot serve, never from this field. Delete the key. An endpoint that has no handler yet is simply not registered; a declared-but-unbuilt route answering 501 is not a platform capability (ruling record, 2026-09-01). |
 
 ### Nested Shape: `RestApiRouteRegistration.middleware[number]`
 
