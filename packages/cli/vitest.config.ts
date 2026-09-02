@@ -493,15 +493,15 @@
 // Before adding a `test` block for speed, re-measure: if `tests` is still the
 // dominant term, the block is not the lever.
 //
-// ## THE TWO TIERS (#13504) — `unit` and `integration`, population on 3b5f8168b5
+// ## THE TWO TIERS (#13504, #14554) — `unit` and `integration`, DERIVED population
 //
 // Maintainer ruling (2026-09-01): split this suite into two NAMED tiers — a
 // unit-fast tier that is the local default and does not monopolise the shared
 // verify lock, and a real-kernel integration tier that is CI-mandatory and run
 // locally on demand. Nothing is skipped, weakened, deleted or doubled: every
-// file below still runs under `pnpm test`, because `vitest run` with no
-// `--project` runs every project. The tiers only change what a NARROWED local
-// run selects.
+// test file in this package still runs under `pnpm test`, because `vitest run`
+// with no `--project` runs every project. The tiers only change what a NARROWED
+// local run selects.
 //
 //   pnpm --filter @objectstack/cli exec vitest run --project unit          # fast, local default
 //   pnpm --filter @objectstack/cli exec vitest run --project integration   # the real thing, on demand
@@ -509,32 +509,37 @@
 //
 // ⛔ THE PREDICATE IS WHAT A FILE DOES, NOT WHAT IT IS CALLED. The ACCEPT on
 // #13504 fixed that the `*.e2e.test.ts` name disagrees with behaviour, so a
-// tier keyed on the name routes coverage to the wrong place. `INTEGRATION_FILES`
-// below is an explicit list, and `test/vitest-tiers-partition.test.ts` (unit
-// tier) re-derives it from the comment-masked SOURCE of every test file and
-// fails when the two disagree — so a new file that spawns the CLI or boots a
-// driver cannot land in the fast tier silently, and a stale entry cannot
-// linger. A file is `integration` when, in code position, it either
+// tier keyed on the name routes coverage to the wrong place. The predicate is
+// stated ONCE, in `vitest-tiers.ts` — SPAWN (the real CLI, or this package's
+// source in a cold tsx child) or KERNEL (a real kernel or driver booted in
+// process), evaluated in code position with comments masked. Type-only
+// imports, spelling lists, fixture objects that merely SAY
+// `client: 'better-sqlite3'` and prose do not count; that module's header
+// carries the regexes and the false positives they were tuned against, and is
+// the place to read or change them.
 //
-//   SPAWNS the real CLI (or this package's TypeScript source in a cold tsx
-//   child): it calls `runServe(` from `test/helpers/serve-process.ts`, or it
-//   value-imports `node:child_process` AND names an entry basename
-//   (`run-dev.js` / `run.js`), or imports `CLI` / `TSX` from that helper, or
-//   names the `.bin/tsx` binary;
+// ⛔ AND THERE IS NO LIST HERE TO KEEP IN STEP (#14554). `INTEGRATION_FILES`
+// below is DERIVED from that predicate at config load. A hand-maintained list
+// is a copy of a fact already on disk, and the copy goes stale whenever
+// ANOTHER PR lands a qualifying test file: the pin then fires inside the merge
+// queue, against a `main` that is by construction newer than any queued PR's
+// own run, and — because GitHub stacks queue entries — ejects every PR behind
+// it too. Measured 2026-09-02: five ejections in a rolling 24 hours, ONE
+// independent hit, four bystanders touching no `packages/cli` path at all. A
+// derived population is classified rather than reported, so that shape is
+// gone. What `test/vitest-tiers-partition.test.ts` (unit tier) still holds —
+// coverage of the union, that the derivation reaches vitest, and the predicate
+// itself against fixture sources — and why a derivation needs a pin at all, is
+// set out in its own header.
 //
-//   or BOOTS a real kernel or driver in-process: a value import of
-//   `bootSchemaStack` from `schema-migrate`, of `better-sqlite3`, or of any
-//   `@objectstack/driver-*` package, or a `new ObjectQL(` construction.
-//
-// Type-only imports, spelling lists, fixture config objects that merely SAY
-// `client: 'better-sqlite3'`, and prose do not count — the pin's own header
-// carries the regexes and the false positives they were tuned against.
-//
-// Population on 3b5f8168b5 (merge of origin/main 2a26536196): 230 files =
-// 158 unit + 72 integration (49 spawn the CLI, 24 boot a kernel/driver, 1
-// both). The list moved twice between the first cut (00ff228fe0: 228 = 158 +
-// 70) and this one, and the pin caught both in the merge queue: one NEW
-// spawner file and one EXISTING file that started constructing `new ObjectQL(`
+// Population on this branch: 230 files = 158 unit + 72 integration. Deriving
+// reproduced the last hand-maintained list EXACTLY: `vitest list --filesOnly
+// --project <name>` returns byte-identical lists before and after #14554 (158
+// and 72, zero added, zero removed), so nothing moved tier when the list went
+// away. Before it did, the list moved twice between the first cut
+// (00ff228fe0: 228 = 158 + 70) and 3b5f8168b5, and the pin caught both in the
+// merge queue: one NEW spawner file and one EXISTING file that started
+// constructing `new ObjectQL(`
 // — the second is the shape a name-based tier can never see. Reconciled
 // against the #13872 census (f532630d02, 220 files, 35 spawners / 29
 // kernel-booters / 1 both):
