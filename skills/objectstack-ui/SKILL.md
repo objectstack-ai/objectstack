@@ -1614,7 +1614,7 @@ export const opportunityCube = defineCube({
 });
 ```
 
-### Cube Rules (enforced)
+### Cube Rules
 
 1. **`sql` = object name** (e.g. `'opportunity'`). The ObjectQL strategy
    reads it via `cube.sql.trim()` — do **not** put raw SQL there.
