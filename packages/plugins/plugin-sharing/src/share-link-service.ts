@@ -406,6 +406,12 @@ export class ShareLinkService implements IShareLinkService {
     context: ExecutionContext,
   ) => Promise<boolean>;
   private readonly logger?: ShareLinkServiceOptions['logger'];
+  /**
+   * [#12981] Latched by the FIRST refused usage stamp on this instance and
+   * never reset; `reportUsageStampRefusal` reads it so the durability report
+   * is made once, not once per refused write (the rule's own words).
+   */
+  private usageStampRefusalReported = false;
 
   constructor(opts: ShareLinkServiceOptions) {
     this.engine = opts.engine;
@@ -698,7 +704,10 @@ export class ShareLinkService implements IShareLinkService {
       new Set<string>([...(policy.redactFields ?? []), ...((row.redact_fields as string[]) ?? [])]),
     );
 
-    // Stamp usage. Errors here MUST NOT block the read — log-and-continue.
+    // Stamp usage. A refusal here MUST NOT block the read — by this line the
+    // token, the record and the policy have all answered and the holder is
+    // owed the record — but it is a DURABILITY degradation, not telemetry to
+    // drop on the floor: see `reportUsageStampRefusal` (#12981).
     try {
       await this.engine.update(
         'sys_share_link',
@@ -709,11 +718,78 @@ export class ShareLinkService implements IShareLinkService {
         },
         { context: SYSTEM_CTX },
       );
-    } catch {
-      // best-effort — usage telemetry is a nice-to-have
+    } catch (err) {
+      this.reportUsageStampRefusal(row, err);
     }
 
     return { link: row, redactFields };
+  }
+
+  /**
+   * [#12981] Storage refused the `use_count` / `last_used_at` stamp that
+   * `resolveToken` issues on a successful resolution. Report it as a
+   * durability degradation — ONCE per service instance.
+   *
+   * ## Why this is a durability site and not "usage telemetry"
+   *
+   * The catch this reporter replaced said "best-effort — usage telemetry is a
+   * nice-to-have". The persistence CLAIM, though, is not made by
+   * `resolveToken`'s response (which carries neither counter; its two public
+   * HTTP callers project a nine-field whitelist that excludes both). It is
+   * made by the declarations: `sys_share_link` declares `use_count` as
+   * "Incremented by resolveToken on every successful resolution" and
+   * `last_used_at` as "Stamped by resolveToken; used by the dashboard to
+   * highlight active links", both `readonly: true` — which is exactly why this
+   * write goes out under `SYSTEM_CTX` (`isSystem` exempts statically readonly
+   * fields). And the shipped `active_links` grid lists both columns. So after
+   * a swallowed refusal: HTTP 200 to the holder, and an admin grid asserting a
+   * count the system's own declaration defines — now wrong, with no signal
+   * anywhere. AGENTS.md → "Degradation log levels", in its own words:
+   * persisted state and runtime state disagree while nothing looks broken.
+   * ⇒ `error`, not `warn`. Neither legal alternative applies: the failure is
+   * handed to no caller, and a write was genuinely issued.
+   *
+   * ## Why ONCE, per instance, never reset
+   *
+   * `resolveToken` runs on EVERY public share-link request. A line per refused
+   * stamp is the mirror-image failure the rule names — "say it once, at the
+   * first degradation, not once per failed write" — a flood nobody reads,
+   * which is what made the founding incident's `warn` unreadable. The latch is
+   * per service instance (the plugin builds one) and deliberately does not
+   * reset on a later successful stamp: a latch that reset would print on every
+   * other request under flapping storage, i.e. the per-request flood again.
+   * Later refusals are silent BY DESIGN, and the one line says so.
+   *
+   * ## The sink, and why `error` is reachable here (#13398 class ruling)
+   *
+   * `ShareLinkServiceOptions['logger']` is the `{ info?, warn, error? }` shape
+   * — `error` optional, `warn` required and guaranteed (#9754 / #10556) — the
+   * ruling's own option-C terminal shape, and already published. What the
+   * ruling forbids is raising a site to `error` when that means GROWING
+   * `error?` onto a published sink that lacks it (its option B); this sink
+   * declares it, so nothing is widened. Spelled the `outbox-sweep.ts` way: a
+   * conditional `error?.(…)` call against a host sink without `error` emits
+   * nothing, so the `warn` fallback is an explicit branch.
+   */
+  private reportUsageStampRefusal(row: ShareLink, err: unknown): void {
+    if (this.usageStampRefusalReported) return;
+    this.usageStampRefusalReported = true;
+    const cause = (err as { message?: unknown } | null | undefined)?.message ?? err;
+    const message =
+      '[share-link] usage stamp REFUSED — `use_count` / `last_used_at` on `sys_share_link` are NOT being '
+      + 'persisted. Links keep resolving normally (the holder is still served the record), so nothing looks '
+      + 'broken, but the `active_links` grid and every "how often was this link used" audit now under-count. '
+      + 'Fix: resolve the storage refusal named as the cause (the `sys_share_link` table, the driver, or the '
+      + 'system-context write path); stamps refused meanwhile are NOT replayed. Reported ONCE per service '
+      + `instance — later refusals are silent. Cause: ${String(cause)}`;
+    const meta = {
+      link: row.id,
+      object: row.object_name,
+      record: row.record_id,
+      reason: (err as { code?: unknown } | null | undefined)?.code ?? 'UNKNOWN',
+    };
+    if (this.logger?.error) this.logger.error(message, meta);
+    else this.logger?.warn?.(message, meta);
   }
 
   /**

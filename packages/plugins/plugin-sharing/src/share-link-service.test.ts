@@ -607,3 +607,186 @@ describe('[#13856] declared redactFields survive publicSharing opt-out', () => {
     expect(caught.code).toBe('SHARING_NOT_ENABLED');
   });
 });
+
+// [#12981, batch 9] The `use_count` / `last_used_at` stamp at the end of
+// `resolveToken` used to be swallowed by an empty `catch` ("usage telemetry is
+// a nice-to-have"). It is a durability site: `sys_share_link` DECLARES both
+// counters as written by `resolveToken`, and the shipped `active_links` grid
+// asserts them — so a refused stamp left an admin grid asserting a number the
+// system's own declaration defines, wrongly, with no signal. The repair reports
+// the refusal through the service's existing `{ info?, warn, error? }` sink at
+// `error` (falling back to the guaranteed `warn`), ONCE per instance, and
+// leaves the resolution itself untouched.
+describe('[#12981] a refused usage stamp is reported ONCE as a durability degradation', () => {
+  /** A sink that records every call, per level, so counts are exact. */
+  function makeSink() {
+    const calls = { error: [] as any[][], warn: [] as any[][], info: [] as any[][] };
+    return {
+      calls,
+      logger: {
+        info: (...a: any[]) => { calls.info.push(a); },
+        warn: (...a: any[]) => { calls.warn.push(a); },
+        error: (...a: any[]) => { calls.error.push(a); },
+      },
+    };
+  }
+
+  /**
+   * An engine whose `sys_share_link` UPDATE is refused with `err` for as long
+   * as `refusing.on` is true — every other operation (find / insert / the
+   * record probe) is the plain fake, so the ONLY thing that fails is the stamp.
+   */
+  function makeRefusingEngine(err: unknown) {
+    const base = makeFakeEngine(SCHEMAS);
+    base._tables.ai_conversations = [{ id: 'c1', title: 'Demo' }];
+    const refusing = { on: true };
+    const engine = {
+      ...base,
+      async update(object: string, idOrData: any, dataOrOptions?: any) {
+        if (refusing.on && object === 'sys_share_link') throw err;
+        return base.update(object, idOrData, dataOrOptions);
+      },
+    };
+    return { base, engine, refusing };
+  }
+
+  async function mint(service: ShareLinkService) {
+    return service.createLink(
+      { object: 'ai_conversations', recordId: 'c1', audience: 'link_only', permission: 'view' },
+      { userId: 'u1' },
+    );
+  }
+
+  const REFUSAL = Object.assign(new Error('SQLITE_READONLY: attempt to write a readonly database'), {
+    code: 'STORAGE_REFUSED',
+  });
+
+  it('positive — the link still resolves, and the refusal is reported at error naming both counters', async () => {
+    const { engine, base } = makeRefusingEngine(REFUSAL);
+    const sink = makeSink();
+    const service = new ShareLinkService({ engine: engine as any, logger: sink.logger });
+    const link = await mint(service);
+
+    const resolved = await service.resolveToken(link.token);
+
+    // The resolution is UNCHANGED by the refusal: the holder is served.
+    expect(resolved).not.toBeNull();
+    expect(resolved!.link.id).toBe(link.id);
+    expect(resolved!.redactFields).toEqual(['metadata']);
+    // ...and the counters genuinely did not move — the thing being reported.
+    expect(base._tables.sys_share_link[0].use_count).toBe(0);
+    expect(base._tables.sys_share_link[0].last_used_at).toBeNull();
+
+    // The report: exactly one, at `error`, not degraded to `warn` while
+    // `error` is available. Consequence and fix in the one line, plus the
+    // cause, per AGENTS.md → "Degradation log levels".
+    expect(sink.calls.error).toHaveLength(1);
+    expect(sink.calls.warn).toHaveLength(0);
+    expect(sink.calls.info).toHaveLength(0);
+    const [message, meta] = sink.calls.error[0];
+    expect(message).toContain('use_count');
+    expect(message).toContain('last_used_at');
+    expect(message).toContain('sys_share_link');
+    expect(message).toContain('active_links');
+    expect(message).toContain('Fix:');
+    expect(message).toContain('SQLITE_READONLY: attempt to write a readonly database');
+    expect(meta).toMatchObject({
+      link: link.id,
+      object: 'ai_conversations',
+      record: 'c1',
+      reason: 'STORAGE_REFUSED',
+    });
+  });
+
+  // ⭐ The "say it ONCE" pin. `resolveToken` runs on every public request, so a
+  // line per refused stamp is the flood the rule forbids. N = 5 ≥ 3.
+  it('say it ONCE — five consecutive refused stamps produce exactly one report', async () => {
+    const { engine } = makeRefusingEngine(REFUSAL);
+    const sink = makeSink();
+    const service = new ShareLinkService({ engine: engine as any, logger: sink.logger });
+    const link = await mint(service);
+
+    for (let i = 0; i < 5; i++) {
+      // Every resolution still serves — the degradation never leaks to the holder.
+      expect(await service.resolveToken(link.token), `resolution #${i + 1}`).not.toBeNull();
+    }
+
+    expect(sink.calls.error).toHaveLength(1);
+    expect(sink.calls.warn).toHaveLength(0);
+    expect(sink.calls.error[0][0]).toContain('Reported ONCE');
+  });
+
+  // Reverse control. Without it, "once" and "never" are indistinguishable: a
+  // reporter that never fires also passes the pin above only through the
+  // positive test, so the control pins the OTHER direction — a stamp that
+  // lands produces nothing at any level.
+  it('reverse control — five stamps that LAND produce zero output at every level', async () => {
+    const { engine, refusing, base } = makeRefusingEngine(REFUSAL);
+    refusing.on = false;
+    const sink = makeSink();
+    const service = new ShareLinkService({ engine: engine as any, logger: sink.logger });
+    const link = await mint(service);
+
+    for (let i = 0; i < 5; i++) {
+      expect(await service.resolveToken(link.token)).not.toBeNull();
+    }
+
+    expect(sink.calls.error).toHaveLength(0);
+    expect(sink.calls.warn).toHaveLength(0);
+    expect(sink.calls.info).toHaveLength(0);
+    // Invariance of the success path: the declared semantics hold verbatim —
+    // `use_count` "incremented on every successful resolution", `last_used_at` stamped.
+    expect(base._tables.sys_share_link[0].use_count).toBe(5);
+    expect(typeof base._tables.sys_share_link[0].last_used_at).toBe('string');
+    expect(Number.isNaN(Date.parse(base._tables.sys_share_link[0].last_used_at))).toBe(false);
+  });
+
+  // "At the FIRST degradation" is not "on the first call": storage that starts
+  // refusing after a healthy run is reported at the moment it turns, once.
+  it('the first degradation after healthy stamps is reported, once, and later refusals stay silent', async () => {
+    const { engine, refusing, base } = makeRefusingEngine(REFUSAL);
+    refusing.on = false;
+    const sink = makeSink();
+    const service = new ShareLinkService({ engine: engine as any, logger: sink.logger });
+    const link = await mint(service);
+
+    await service.resolveToken(link.token);
+    await service.resolveToken(link.token);
+    expect(sink.calls.error).toHaveLength(0);
+    expect(base._tables.sys_share_link[0].use_count).toBe(2);
+
+    refusing.on = true;
+    for (let i = 0; i < 3; i++) expect(await service.resolveToken(link.token)).not.toBeNull();
+
+    expect(sink.calls.error).toHaveLength(1);
+    expect(sink.calls.warn).toHaveLength(0);
+    // The counters froze at the last landed value — exactly the drift the line reports.
+    expect(base._tables.sys_share_link[0].use_count).toBe(2);
+  });
+
+  // The sink's `error` is optional by contract (#9754: hosts inject reduced
+  // sinks); `warn` is the guaranteed channel. A `{ warn }`-only host must still
+  // hear the report — a conditional `error?.(…)` call would have emitted nothing.
+  it('falls back to the guaranteed warn channel when the host sink declares no error', async () => {
+    const { engine } = makeRefusingEngine(REFUSAL);
+    const warns: any[][] = [];
+    const service = new ShareLinkService({
+      engine: engine as any,
+      logger: { warn: (...a: any[]) => { warns.push(a); } },
+    });
+    const link = await mint(service);
+
+    for (let i = 0; i < 3; i++) expect(await service.resolveToken(link.token)).not.toBeNull();
+
+    expect(warns).toHaveLength(1);
+    expect(warns[0][0]).toContain('use_count');
+    expect(warns[0][1]).toMatchObject({ link: link.id, reason: 'STORAGE_REFUSED' });
+  });
+
+  it('a host with no logger at all is served exactly as before — the resolution never throws', async () => {
+    const { engine } = makeRefusingEngine(REFUSAL);
+    const service = new ShareLinkService({ engine: engine as any });
+    const link = await mint(service);
+    await expect(service.resolveToken(link.token)).resolves.not.toBeNull();
+  });
+});
