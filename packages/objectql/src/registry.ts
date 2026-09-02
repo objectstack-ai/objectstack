@@ -41,7 +41,7 @@ import { applyProtection } from '@objectstack/spec/shared';
 // (`id || name`). The install gate's co-ownership set must name packages by the
 // same string the artifact loader ordered them by, or a co-owner would be
 // admitted — or refused — under a key nothing else in the path uses.
-import { artifactPackageId } from './artifact-packages.js';
+import { artifactPackageId } from '@objectstack/core';
 
 /**
  * Reserved namespaces that do not get FQN prefix applied.
