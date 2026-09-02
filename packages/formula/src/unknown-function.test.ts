@@ -3,7 +3,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildEnv, celEngine } from './cel-engine';
-import { callNameFromNoOverload, firstUnknownFunctionCall } from './unknown-function';
+import {
+  callNameFromNoOverload,
+  firstUnknownFunctionCall,
+  isReceiverRegistered,
+  receiverCallNameFromNoOverload,
+} from './unknown-function';
 import { CEL_STDLIB_FUNCTIONS } from './validate';
 
 /**
@@ -224,3 +229,64 @@ describe('callNameFromNoOverload — the shared extraction (#13594)', () => {
   });
 });
 
+
+// #14203 — the second question about the same message: not "which token did
+// cel-js name?" but "was it written as a method?". A sibling reader rather than
+// a flag, so the extraction above keeps answering both call forms identically
+// for its two existing consumers.
+describe('receiverCallNameFromNoOverload — the call-FORM reading (#14203)', () => {
+  it.each([
+    ["found no matching overload for 'dyn.upper()'", 'upper'],
+    ["found no matching overload for 'string.upper()'", 'upper'],
+    ["found no matching overload for 'dyn.nosuchmethod(string)'", 'nosuchmethod'],
+    ["found no matching overload for 'list<dyn>.size()'", 'size'],
+  ])('%s → %s', (message, expected) => {
+    expect(receiverCallNameFromNoOverload(message)).toBe(expected);
+  });
+
+  it.each([
+    "found no matching overload for 'upper(int, int)'",
+    "found no matching overload for 'totallyBogusFn(int, int)'",
+    "found no matching overload for 'split(dyn, string)'",
+    'no such overload: int + string',
+  ])('is undefined for a BARE call or a non-call verdict: %s', (message) => {
+    expect(receiverCallNameFromNoOverload(message)).toBeUndefined();
+  });
+
+  it('does not reach past the closing quote into the source excerpt', () => {
+    // cel-js's `formatErrorWithHighlight` puts the author's own source on the
+    // following lines, dots and all — and a BARE call must stay undefined even
+    // when those lines are full of receiver-looking text.
+    const message =
+      "found no matching overload for 'split(dyn, string)'\n" +
+      "  record.a.b.split(',')\n" +
+      '         ^';
+    expect(receiverCallNameFromNoOverload(message)).toBeUndefined();
+  });
+});
+
+describe('isReceiverRegistered — the second key a call-shape prescription needs (#14203)', () => {
+  it.each(['contains', 'endsWith', 'matches', 'size', 'startsWith', 'string', 'trim'])(
+    '`%s` is advertised bare AND registered as a receiver method — both forms are real',
+    (name) => {
+      expect(isReceiverRegistered(name)).toBe(true);
+    },
+  );
+
+  it.each(['upper', 'lower', 'isBlank', 'daysFromNow', 'abs', 'coalesce'])(
+    '`%s` is bare-only — a receiver call of it is a call-SHAPE fault',
+    (name) => {
+      expect(isReceiverRegistered(name)).toBe(false);
+    },
+  );
+
+  it.each(['split', 'map', 'getFullYear'])('`%s` is receiver-registered — the inverse class', (name) => {
+    expect(isReceiverRegistered(name)).toBe(true);
+  });
+
+  it('says nothing about existence — an unregistered name is simply not a receiver method', () => {
+    // The two questions stay separate: `firstUnknownFunctionCall` owns existence.
+    expect(isReceiverRegistered('totallyBogusFn')).toBe(false);
+    expect(firstUnknownFunctionCall('totallyBogusFn(1,2)')?.name).toBe('totallyBogusFn');
+  });
+});

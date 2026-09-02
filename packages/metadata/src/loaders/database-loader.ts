@@ -307,7 +307,9 @@ export class DatabaseLoader implements MetadataLoader {
     return this.driver!.create(table, data);
   }
 
-  private async _update(table: string, id: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {
+  // `null` is the driver path's not-found answer (`IDataDriver.update()`,
+  // #13878); both callers here resolve the row first and discard the result.
+  private async _update(table: string, id: string, data: Record<string, unknown>): Promise<Record<string, unknown> | null> {
     if (this.engine) {
       // [#11231] The resolved id AFTER the spread, so it WINS — the same
       // convention as `rest-server.ts`'s batch arm and `protocol.updateData`
