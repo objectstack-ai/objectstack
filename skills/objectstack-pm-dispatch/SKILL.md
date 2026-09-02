@@ -7,11 +7,9 @@ description: >
   drive accepted pull requests to landing — escalating to the maintainer only
   what genuinely needs a human decision. Ships the developer-agent operating
   template the loop injects into every dispatch (no custom agent types
-  required) and the upstream-reporting procedure for platform defects an app
-  project finds. Use when asked to "work through the backlog",
-  "batch-dispatch issues", "派发 issue 给开发 agent", to stand up a
-  multi-agent delivery loop in an ObjectStack app project, or to report a
-  platform bug found while building an app. Do not use for authoring
+  required). Use when asked to "work through the backlog",
+  "batch-dispatch issues", "派发 issue 给开发 agent", or to stand up a
+  multi-agent delivery loop in an ObjectStack app project. Do not use for authoring
   ObjectStack metadata (the domain skills cover that), for a single
   already-scoped change you can just make, or as a replacement for the
   project's own conventions file — that file always wins.
