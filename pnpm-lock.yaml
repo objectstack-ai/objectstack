@@ -1387,6 +1387,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1409,6 +1412,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1431,6 +1437,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1477,6 +1486,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1505,6 +1517,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1569,6 +1584,9 @@ importers:
       hono:
         specifier: ^4.12.34
         version: 4.13.2
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1627,6 +1645,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1667,6 +1688,9 @@ importers:
       '@types/nodemailer':
         specifier: ^8.0.1
         version: 8.0.1
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1698,6 +1722,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1723,6 +1750,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1754,6 +1784,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1800,6 +1833,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1840,6 +1876,9 @@ importers:
       better-sqlite3:
         specifier: ^13.0.3
         version: 13.0.3
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1871,6 +1910,9 @@ importers:
       '@types/node':
         specifier: ^26.2.0
         version: 26.2.0
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

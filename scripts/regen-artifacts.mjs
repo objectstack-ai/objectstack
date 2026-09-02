@@ -411,6 +411,59 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'then, never a bound, and the per-(owner, script) key is exactly what lets a fourth one '
       + 'arrive needing nothing but this row.',
   },
+  // ── #14062: the `packages/plugins/**` family's starting ledgers ──────────────
+  //
+  // The director ruling of 2026-09-01 (maintainer verbatim: 「同意」) onboarded all
+  // fourteen plugin packages into the `check:test-typecheck` instrument family. Four
+  // of them measured non-zero and therefore carry a ledger and a
+  // `gen:test-typecheck-debt` script; the other ten measured ZERO and deliberately
+  // have NEITHER, because at zero residue a ledger holds nothing while a MISSING one
+  // is read by the gate as `{ entries: {} }` — under which any error is red
+  // immediately, with no entry to be added to. That is why this block adds four rows
+  // and not fourteen: `reconcileGenerators`'s population is the manifest SCRIPTS, so
+  // a package that defines no generator needs no disposition, and inventing one would
+  // record a decision about a file that does not exist.
+  {
+    path: 'packages/plugins/plugin-approvals/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/plugin-approvals',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/client/test-typecheck-debt.json` above; same '
+      + 'generator, same per-package ledger, same reason a merge must never recompute it: the '
+      + 'half-merged tree is not the tree whose type errors this file records, so a file that '
+      + 'GAINED errors would enter the ledger as merge noise instead of as red. This is also the '
+      + 'largest of them (324 errors over 8 files), which makes the merge-noise route the most '
+      + 'attractive and the most expensive one to take.',
+  },
+  {
+    path: 'packages/plugins/plugin-auth/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/plugin-auth',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'directly above; same generator, same per-package ledger, same reason a merge must never '
+      + 'recompute it.',
+  },
+  {
+    path: 'packages/plugins/plugin-sharing/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/plugin-sharing',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it. Its residue is only 3 errors, and that makes it MORE exposed to the failure this row '
+      + 'prevents rather than less: a recomputation on a half-merged tree can double a 3 without '
+      + 'anyone noticing the number moved.',
+  },
+  {
+    path: 'packages/plugins/knowledge-ragflow/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/knowledge-ragflow',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it.',
+  },
   {
     path: 'packages/sdui-parser/objectui-lockstep.json',
     gen: 'gen:sdui-lockstep',

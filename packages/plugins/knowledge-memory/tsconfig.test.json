@@ -1,0 +1,70 @@
+// The TEST-layer type-check program (#14062 — the `packages/plugins/**` family
+// adopting the mechanism #5286 set for `packages/spec`, #5449 generalised,
+// #12542 carried to `packages/rest` and #13176 to `packages/plugins/
+// plugin-security`). `tsconfig.json` beside this one stays exactly as it is: it
+// is the BUILD config. This sibling puts the test layer in front of tsc under
+// the module semantics vitest really executes it with, and `package.json`'s
+// `typecheck` script NAMES it (via `check:test-typecheck --project`), because a
+// config no script invokes is exactly the phantom this whole change is about.
+//
+// The family was onboarded as a family by the director ruling of 2026-09-01 on
+// #14062 (maintainer verbatim: 「同意」), which also carries the #5286
+// maintainer authority for the starting ledgers. The reason it is a family and
+// not one package: the ledger's shrink-only guarantee said NOTHING about a
+// third of the repo's runtime surface, and a guarantee with a silent hole is
+// worse than a narrower one honestly drawn, because readers generalise it.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - MODULE SEMANTICS ONLY, plus `lib`. The tests are written and executed as
+//     ESM by vitest (esbuild/vite). Matching that is FIDELITY, not laxity: it is the
+//     same subtraction `packages/spec`, `packages/rest` and `plugin-security`
+//     each made, and it removes a config-tier error pile that says nothing
+//     about the tests.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`,
+//     `rootDir`, `paths` and `types` are all INHERITED from `tsconfig.json`
+//     (and through it the root config), and none of them is re-declared here.
+//     ⚠️ A child that declared its own `paths` would REPLACE the parent map
+//     rather than merge into it, silently sending a source-resolved specifier
+//     back to `dist/` — a BUILD ARTIFACT — so this file declares none.
+//     Nothing here may loosen a type rule; if a test does not compile, that is
+//     the finding.
+//
+//   - `lib: ["ES2022"]`, for the same reason `packages/rest` states: the root
+//     config's `lib` is ES2020 and vitest runs on a Node that has es2022
+//     builtins, so the gap is reported as TS2550 about the CHECK. No `DOM`:
+//     nothing in this layer touches a browser global.
+//
+// MEASURED at e80889095, workspace closure built first (`tsc --noEmit --pretty false
+// --listFiles -p tsconfig.test.json`, and the same command without `--listFiles`):
+//
+//   files in this program        388
+//   own `src/**/*.test.ts` in it 1
+//   errors under BUILD semantics 0
+//   errors under THIS config     0
+//
+// The two readings agree, so this package carried no config-tier pile at all.
+//
+// BEFORE THIS FILE: the build config does NOT exclude tests, so `tsc
+// --noEmit` already read this one file. This program is the family's
+// uniform instrument over the same file, not a new reader of it.
+//
+// There is NO `test-typecheck-debt.json` beside this config, and its ABSENCE is the
+// zero: `check:test-typecheck` reads a missing ledger as `{ entries: {} }`, under which
+// ANY error in ANY file here is red immediately, with no entry to be added to. That is
+// strictly stronger than a ledger holding nothing, and it is the same call
+// `plugin-security` recorded for itself in #13176. If this package ever acquires
+// residue that cannot be fixed in the PR that causes it, THAT is when a ledger and a
+// `gen:test-typecheck-debt` script are owed — and adding one is maintainer-only
+// (#5286), exactly as the gate says when it refuses.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

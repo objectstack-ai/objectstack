@@ -1,0 +1,49 @@
+{
+  "_comment": "Per-file tsc error debt of the @objectstack/plugin-auth TEST layer (#5286). `tsconfig.test.json` compiles `src/**/*.test.ts` — which `tsconfig.json` excludes and therefore no gate ever read — and every file below still carries errors from before that gate existed. THIS FIELD IS GENERATED: every regeneration rewrites it from scripts/check-test-typecheck.mts, and the EXACT ratchet below requires a regeneration on every repair — so an edit made here is gone by the next one. Anything true of THIS package goes in the sibling `_note` field, which is authored, is preserved verbatim, and is never written by the generator (#12624). This comment states NO cause for the errors, deliberately: the classes differ per package and per file, they move as the debt is paid down, and a cause written here is rewritten verbatim into every ledger by every regeneration — so it outlives its own repair and cannot be corrected in the file where it is read. Measure instead, before repairing anything: `tsc --noEmit --pretty false -p tsconfig.test.json` in the package prints the real classes with their TS codes. Each entry maps a file to its per-SIGNATURE error counts, never to a bare total (#13470): a signature is the TS code plus the diagnostic message with structural type blobs collapsed, and it carries NO line or column — so the pin survives edits that move code around, and only stops matching when the error itself becomes a different error. EXACT ratchet, judged by re-running tsc: a file that gains errors is red, a file that loses them is red until its number is re-recorded, a file that reaches zero is red until its entry is deleted, a signature that ARRIVES or VANISHES is red even when the file total is unchanged, and a file NOT listed here may have no errors at all. Regenerate with: pnpm --filter @objectstack/plugin-auth gen:test-typecheck-debt",
+  "_note": "STARTING LEDGER, opened by #14062 under the director ruling of 2026-09-01 (maintainer verbatim: 「同意」), which carries the #5286 maintainer authority for it. 94 errors over 10 files, every one PRE-EXISTING — the build config's `exclude` named `**/*.test.ts`, so no tsc program this package's `typecheck` runs had ever read any of its 87 test files. Measured identically with and without the vitest module semantics: this package carried no config-tier pile at all. The largest class is TS2493 x36 (tuple index out of bounds, from indexing fixed-length mock call tuples). ⛔ Opening the ratchet is not paying it down; paydown follows this ledger's own shrink-only discipline, on its own cards.",
+  "entries": {
+    "src/admin-import-users.test.ts": {
+      "TS2493: Tuple type '…' of length '0' has no element at index '0'.": 6,
+      "TS2493: Tuple type '…' of length '0' has no element at index '1'.": 1,
+      "TS2532: Object is possibly 'undefined'.": 4
+    },
+    "src/admin-user-endpoints.test.ts": {
+      "TS18048: 'auditRow' is possibly 'undefined'.": 5,
+      "TS2345: Argument of type 'null' is not assignable to parameter of type '…'.": 1,
+      "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 1,
+      "TS2493: Tuple type '…' of length '0' has no element at index '0'.": 7,
+      "TS2493: Tuple type '…' of length '0' has no element at index '1'.": 4
+    },
+    "src/auth-manager.jwt-eddsa-fallback.test.ts": {
+      "TS7006: Parameter 'call' implicitly has an 'any' type.": 2
+    },
+    "src/auth-manager.test.ts": {
+      "TS18048: 'arg' is possibly 'undefined'.": 3,
+      "TS18048: 'patch' is possibly 'undefined'.": 15,
+      "TS18048: 'wrote' is possibly 'undefined'.": 1,
+      "TS2339: Property 'data' does not exist on type 'undefined'.": 3,
+      "TS2493: Tuple type '…' of length '0' has no element at index '0'.": 3,
+      "TS2493: Tuple type '…' of length '0' has no element at index '1'.": 13,
+      "TS2532: Object is possibly 'undefined'.": 5
+    },
+    "src/auth-plugin.test.ts": {
+      "TS2322: Type '…' is not assignable to type '…'.": 11,
+      "TS2769: No overload matches this call.": 1
+    },
+    "src/better-auth-schema-parity.test.ts": {
+      "TS2345: Argument of type '…' is not assignable to parameter of type 'PhoneNumberOptions'.": 1
+    },
+    "src/oauth-provider-schema-parity.test.ts": {
+      "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 1
+    },
+    "src/objectql-adapter.test.ts": {
+      "TS2741: Property 'mode' is missing in type '…' but required in type '…'.": 3
+    },
+    "src/reconcile-membership.test.ts": {
+      "TS2493: Tuple type '…' of length '2' has no element at index '2'.": 2
+    },
+    "src/sso-client-secret-at-rest.test.ts": {
+      "TS6133: 'Field' is declared but its value is never read.": 1
+    }
+  }
+}

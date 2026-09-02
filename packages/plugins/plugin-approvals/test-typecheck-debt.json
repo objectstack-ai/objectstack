@@ -1,0 +1,49 @@
+{
+  "_comment": "Per-file tsc error debt of the @objectstack/plugin-approvals TEST layer (#5286). `tsconfig.test.json` compiles `src/**/*.test.ts` — which `tsconfig.json` excludes and therefore no gate ever read — and every file below still carries errors from before that gate existed. THIS FIELD IS GENERATED: every regeneration rewrites it from scripts/check-test-typecheck.mts, and the EXACT ratchet below requires a regeneration on every repair — so an edit made here is gone by the next one. Anything true of THIS package goes in the sibling `_note` field, which is authored, is preserved verbatim, and is never written by the generator (#12624). This comment states NO cause for the errors, deliberately: the classes differ per package and per file, they move as the debt is paid down, and a cause written here is rewritten verbatim into every ledger by every regeneration — so it outlives its own repair and cannot be corrected in the file where it is read. Measure instead, before repairing anything: `tsc --noEmit --pretty false -p tsconfig.test.json` in the package prints the real classes with their TS codes. Each entry maps a file to its per-SIGNATURE error counts, never to a bare total (#13470): a signature is the TS code plus the diagnostic message with structural type blobs collapsed, and it carries NO line or column — so the pin survives edits that move code around, and only stops matching when the error itself becomes a different error. EXACT ratchet, judged by re-running tsc: a file that gains errors is red, a file that loses them is red until its number is re-recorded, a file that reaches zero is red until its entry is deleted, a signature that ARRIVES or VANISHES is red even when the file total is unchanged, and a file NOT listed here may have no errors at all. Regenerate with: pnpm --filter @objectstack/plugin-approvals gen:test-typecheck-debt",
+  "_note": "STARTING LEDGER, opened by #14062 under the director ruling of 2026-09-01 (maintainer verbatim: 「同意」), which carries the #5286 maintainer authority for it. 324 errors over 8 files, every one PRE-EXISTING: that PR added `tsconfig.test.json` and edited no test file, so each of these would have been reported on `origin/main` had a tsc program ever compiled this layer. The finding measured 345 by the same recipe minus the vitest module semantics; the 21 difference is the config tier (20 x TS2550 from `lib: ES2021`, 1 x TS1470 `import.meta` in a CommonJS program) and not one line of test code. 263 of the 324 sit in `src/approval-service.test.ts` and are overwhelmingly one shape — `openNodeRequest` returns `ApprovalRequestRow | ApprovalNodeAutoOutcome` and callers read members off the union without narrowing. ⛔ The ruling is explicit that opening the ratchet is NOT the same job as paying it down: paydown follows this ledger's own shrink-only discipline, on its own cards.",
+  "entries": {
+    "src/admin-exemption-retired.test.ts": {
+      "TS2339: Property 'id' does not exist on type '…'.": 11,
+      "TS2339: Property 'pending_approvers' does not exist on type '…'.": 3
+    },
+    "src/approval-actor-impersonation.test.ts": {
+      "TS18048: 'row' is possibly 'undefined'.": 2,
+      "TS2339: Property 'id' does not exist on type '…'.": 18
+    },
+    "src/approval-override-audit.test.ts": {
+      "TS2339: Property 'id' does not exist on type '…'.": 17,
+      "TS2339: Property 'pending_approvers' does not exist on type '…'.": 2
+    },
+    "src/approval-revise.test.ts": {
+      "TS6133: 'APPROVALS_HOOK_PACKAGE' is declared but its value is never read.": 1
+    },
+    "src/approval-service.test.ts": {
+      "TS18048: 'act' is possibly 'undefined'.": 1,
+      "TS18048: 'action' is possibly 'undefined'.": 3,
+      "TS18048: 'row' is possibly 'undefined'.": 2,
+      "TS18048: 'sub' is possibly 'undefined'.": 2,
+      "TS2339: Property 'created_at' does not exist on type '…'.": 2,
+      "TS2339: Property 'flow_node_id' does not exist on type '…'.": 1,
+      "TS2339: Property 'flow_run_id' does not exist on type '…'.": 1,
+      "TS2339: Property 'id' does not exist on type '…'.": 182,
+      "TS2339: Property 'lock_record' does not exist on type '…'.": 3,
+      "TS2339: Property 'pending_approvers' does not exist on type '…'.": 40,
+      "TS2339: Property 'process_label' does not exist on type '…'.": 2,
+      "TS2339: Property 'process_name' does not exist on type '…'.": 1,
+      "TS2339: Property 'sla_due_at' does not exist on type '…'.": 2,
+      "TS2339: Property 'status' does not exist on type '…'.": 1,
+      "TS2339: Property 'step_label' does not exist on type '…'.": 2,
+      "TS2339: Property 'submitted_at' does not exist on type '…'.": 2,
+      "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 16
+    },
+    "src/approver-cross-org.integration.test.ts": {
+      "TS2339: Property 'pending_approvers' does not exist on type '…'.": 5
+    },
+    "src/record-lock-schedule-run.integration.test.ts": {
+      "TS2352: Conversion of type 'RunDataContext | undefined' to type '…' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.": 1
+    },
+    "src/status-mirror-cascade.integration.test.ts": {
+      "TS2339: Property 'id' does not exist on type '…'.": 1
+    }
+  }
+}
