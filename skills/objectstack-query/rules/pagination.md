@@ -9,11 +9,8 @@ Guide for implementing pagination in ObjectStack queries.
 | Offset | UI page navigation, small datasets | Simple, random page access | Slow on large offsets, drift on inserts |
 | Keyset (manual `where`) | Infinite scroll, real-time feeds | Consistent results, O(1) performance | No random page access |
 
-> ⛔ **The `cursor` query property was REMOVED in `@objectstack/spec`
-> 17.** No engine or driver ever read it: a query carrying `cursor`
-> silently returned **page 1 forever**. The key is tombstoned — a query
-> carrying it fails to parse with the prescription — and
-> `QueryBuilder.cursor()` is gone. Implement keyset pagination with a
+> ⛔ `cursor` is a removed key (see the removal table in `SKILL.md`), and
+> `QueryBuilder.cursor()` is gone with it. Implement keyset pagination with a
 > `where` filter on the sort key (pattern below).
 
 ## Offset Pagination
@@ -157,25 +154,6 @@ When building paginated REST endpoints:
 
 ## Common Mistakes
 
-### ❌ Wrong: Using the removed `cursor` property
-
-```typescript
-// ❌ cursor was removed in protocol 17 — the tombstone rejects this query outright
-{
-  object: 'post',
-  limit: 20,
-  cursor: { created_at: '2025-01-15T10:30:00Z' }
-}
-
-// ✅ Express the keyset as a where filter on the sort key
-{
-  object: 'post',
-  where: { created_at: { $lt: '2025-01-15T10:30:00Z' } },
-  orderBy: [{ field: 'created_at', order: 'desc' }],
-  limit: 20
-}
-```
-
 ### ❌ Wrong: Large offset values
 
 ```typescript
@@ -215,15 +193,11 @@ When building paginated REST endpoints:
 
 ## DISTINCT Queries
 
-> ⛔ **`query.distinct` was REMOVED in `@objectstack/spec` 17.** No driver ever
-> rendered `SELECT DISTINCT`. The key is tombstoned — a query carrying it fails
-> to parse with the prescription — and `QueryBuilder.distinct()` is gone. Group
-> by the fields instead: each unique combination becomes one result row.
+> ⛔ `distinct` is a removed key (see the removal table in `SKILL.md`), and
+> `QueryBuilder.distinct()` is gone with it. Group by the fields instead: each
+> unique combination becomes one result row.
 
 ```typescript
-// ❌ tombstoned — this query is refused at parse
-// { object: 'order', fields: ['customer_id', 'product_category'], distinct: true }
-
 // ✅ groupBy collapses duplicates
 const rows = await engine.aggregate('order', {
   groupBy: ['customer_id', 'product_category'],
