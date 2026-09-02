@@ -5549,9 +5549,27 @@ export function spawnedProgramTargets(rel, source, isTracked) {
  * ── The PACKAGE a gate re-derives from: the fourth edge, and the one that is
  *    not a program (#13518) ────────────────────────────────────────────────────
  *
- * The three follows above all end at a PROGRAM — a module the gate imports, a
- * file whose program text it opens, a program it spawns — and inherit that
- * program's declared population. This one ends at DATA: a workspace package's
+ * The three scans above all end at a PROGRAM — a module the gate imports, a
+ * file whose program text it opens, a program it spawns — but only TWO of them
+ * inherit that program's declared population. The import and spawn scans feed
+ * `hintsOfModule` in `discoverFamilies`; the READ scan does not, and nothing
+ * feeds `entry.reads` into it. It reaches a card through the LAST key in
+ * `coveringKey`, which is an identity claim about a single FILE (#13000) and
+ * never a population. Measured on this tree: the read edge is 12 families, 16
+ * (family, target) pairs over 15 distinct targets, and it carries 0 inherited
+ * hints — against 373 for the import edge, 7 for the manifest edge and 1 for
+ * the run edge (#14289). Reading a program's TEXT is not performing its work,
+ * and identity-only is the correct behaviour, so the claim was the defect
+ * rather than the code.
+ *
+ * ⚠️ TWO numberings live in this file and they count different things. Here the
+ * edges are numbered in SOURCE ORDER, all four of them, which makes this one
+ * the fourth. `discoverFamilies` numbers only the POPULATION FOLLOWS — import,
+ * spawn, manifest — which makes the same edge its third. Neither is wrong; the
+ * sentence claiming three population follows all ending at a program was, and
+ * that is what is repaired above.
+ *
+ * This one ends at DATA: a workspace package's
  * `package.json`, whose `exports` map is the tree's own declaration of what a
  * package's public entry points ARE.
  *
@@ -5596,8 +5614,9 @@ export function spawnedProgramTargets(rel, source, isTracked) {
  * `hintsOfManifest` (in `discoverFamilies`) answers with the package's tracked
  * SOURCE subtree, and it answers only for a manifest that declares an
  * `exports` map. That test is a fact of the tree, read from the followed file's
- * own declaration — the `declaredInheritedPopulation` discipline the other
- * three follows take, one file kind over — and never a regex over the gate's
+ * own declaration — the `declaredInheritedPopulation` discipline the other TWO
+ * follows take, one file kind over (the read scan takes none of it: it
+ * inherits no population to narrow, #14289) — and never a regex over the gate's
  * prose about what it thinks it reads.
  *
  * It is also what makes the edge precise rather than merely broad. Measured on
@@ -8334,8 +8353,12 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
         if (gateFiles.has(mod) || entry.imports.includes(mod)) continue;
         entry.imports.push(mod);
       }
-      // The SECOND edge to another program, under the same two refusals as the
-      // first and for the same reasons (#13511). It sits BELOW the self-test
+      // The SECOND POPULATION FOLLOW, under the same two refusals as the first
+      // and for the same reasons (#13511). ⚠️ "Second" counts FOLLOWS, not
+      // edges: the read scan a few lines up is an edge too, and it is the
+      // second of those in source order, but it inherits no population and so
+      // is not one of these (#14289 — `packageManifestTargets`' docblock holds
+      // both numberings side by side). It sits BELOW the self-test
       // guard deliberately: the narrowing above is invocation-shaped — an
       // inherited population describes the gate's WORK — and that argument does
       // not change with the edge it arrives over. One rule, not two. Cost of
@@ -8345,8 +8368,11 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
         if (gateFiles.has(ran) || entry.runs.includes(ran)) continue;
         entry.runs.push(ran);
       }
-      // The THIRD edge under the same self-test guard, for the same
-      // invocation-shaped reason the spawn follow states (#13518). The
+      // The THIRD AND LAST POPULATION FOLLOW, under the same self-test guard
+      // and for the same invocation-shaped reason the spawn follow states
+      // (#13518). Its own docblock calls it the FOURTH EDGE, numbering all four
+      // scans in source order; here the count is of follows, and there are
+      // three (#14289). The
       // gate-file refusal the other two make does not apply and is not spelled:
       // a `package.json` is never a discovered gate file, so there is nothing
       // to refuse.
