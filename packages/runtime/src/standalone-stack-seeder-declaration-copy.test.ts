@@ -69,6 +69,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ObjectKernel } from '@objectstack/core';
 import { Runtime } from './runtime.js';
 import { createStandaloneStack } from './standalone-stack.js';
 import { SecurityPlugin } from '@objectstack/plugin-security';
@@ -164,9 +165,33 @@ const ARTIFACT = {
 
 const BOOT_TIMEOUT = 180_000;
 
+/**
+ * A declared metadata item, as either copy hands it over — deliberately loose:
+ * the whole point of this file is that the two copies carry DIFFERENT key sets,
+ * so the shape cannot be stated once.
+ */
+type DeclaredItem = any;
+
+/**
+ * The two slot surfaces this measurement reads, named rather than erased to
+ * `any` at the lookup (`pnpm check:slot-lookup`, #4251). `objectql` is read for
+ * exactly two things: the SchemaRegistry both `readDeclared` spellings reach,
+ * and the `find` the seeders' rows come back through.
+ */
+interface ObjectQlRegistrySlot {
+  readonly registry: { listItems(type: string): DeclaredItem[] | undefined };
+  /** The private field `plugin-sharing`'s `readDeclared` spells instead. */
+  readonly _registry: unknown;
+  find(object: string, query: Record<string, unknown>): Promise<DeclaredItem[]>;
+}
+
+interface MetadataListSlot {
+  list(type: string): DeclaredItem[] | Promise<DeclaredItem[]> | undefined;
+}
+
 /** One boot; every question below is a question about the SAME boot. */
 let dir: string;
-let kernel: any;
+let kernel: ObjectKernel;
 /** What `readDeclared(engine, KIND)` returns — the ObjectQL SchemaRegistry copy. */
 let registryCopy: Record<string, any[]>;
 /** What `metadataService.list(KIND)` would have returned at the same moment. */
@@ -201,8 +226,8 @@ beforeAll(async () => {
   await kernel.use(new SharingServicePlugin() as any);
   await kernel.bootstrap();
 
-  const ql: any = kernel.getService('objectql');
-  const metadata: any = kernel.getService('metadata');
+  const ql = kernel.getService<ObjectQlRegistrySlot>('objectql');
+  const metadata = kernel.getService<MetadataListSlot>('metadata');
 
   const KINDS = ['permission', 'capability', 'sharing_rule'] as const;
   registryCopy = {};
@@ -212,8 +237,9 @@ beforeAll(async () => {
     // spells the receiver `engine.registry` and plugin-sharing spells it
     // `engine._registry`; the pin below asserts those are one object.
     registryCopy[kind] = (ql.registry.listItems(kind) ?? []).filter(Boolean);
-    const listed = metadata.list(kind);
-    doorCopy[kind] = (typeof listed?.then === 'function' ? await listed : listed) ?? [];
+    // `await` covers both spellings the facade may answer with — a plain array
+    // or a promise of one — without a `then` probe the checker cannot narrow.
+    doorCopy[kind] = (await metadata.list(kind)) ?? [];
   }
 
   rows = {};
@@ -229,7 +255,7 @@ afterAll(async () => {
 
 describe('#14491 — the third copy exists, and both seeder spellings read it', () => {
   it('`engine.registry` and `engine._registry` are ONE SchemaRegistry, so the two `readDeclared` spellings cannot diverge', () => {
-    const ql: any = kernel.getService('objectql');
+    const ql = kernel.getService<ObjectQlRegistrySlot>('objectql');
     expect(ql.registry).toBe(ql._registry);
   });
 
@@ -255,7 +281,7 @@ describe('#14491 — the third copy exists, and both seeder spellings read it', 
     // The card's asymmetry, re-measured. `roles:` is not in
     // `PLURAL_TO_SINGULAR` either, so nothing lands under `roles` in the
     // registry: both reads are empty from both spellings.
-    const ql: any = kernel.getService('objectql');
+    const ql = kernel.getService<ObjectQlRegistrySlot>('objectql');
     expect((ql.registry.listItems('position') ?? []).filter(Boolean)).toEqual([]);
     expect((ql.registry.listItems('roles') ?? []).filter(Boolean)).toEqual([]);
   });
