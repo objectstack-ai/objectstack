@@ -9661,6 +9661,30 @@ export class RestServer {
                         if (!dataset) {
                             return res.status(404).json({ code: 'NOT_FOUND', message: `Dataset "${body.datasetName}" not found.` });
                         }
+                        // [#14253] Localize the SAVED definition here, at the
+                        // metadata boundary, the same way `/meta/:type` does.
+                        //
+                        // A dataset's dimension and measure `label`s are drawn
+                        // on the dashboard — chart axes, legends, the caption
+                        // under a metric tile — and they get there through the
+                        // QUERY, not through `/meta/datasets`:
+                        // `AnalyticsService` copies `dataset.measures[].label`
+                        // onto `AnalyticsResult.fields[].label` ("for
+                        // legends/KPIs"). So translating only the metadata read
+                        // would have closed the door nobody draws through and
+                        // left the one in the issue's screenshot open — the
+                        // covered-at-one-door asymmetry this repo keeps paying
+                        // for. Translating the DEFINITION carries through the
+                        // existing enrichment untouched, so nothing downstream
+                        // learns about bundles: the analytics service stays
+                        // free of i18n, and there is no second resolution path.
+                        //
+                        // ⛔ The INLINE branch is deliberately not translated:
+                        // a Studio preview posts a draft the designer is
+                        // editing, which carries no saved name to address a
+                        // bundle entry with, and overwriting a draft's copy
+                        // would misreport what the designer is about to save.
+                        dataset = await this.translateMetaItem(req, 'dataset', environmentId, dataset);
                     }
                     if (!dataset) {
                         return res.status(400).json({ code: 'VALIDATION_FAILED', message: 'Provide body.dataset (inline) or body.datasetName.' });
