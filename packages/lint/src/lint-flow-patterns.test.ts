@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { TimeRelativeTriggerSchema, LoopConfigSchema, ParallelConfigSchema, FlowSchema } from '@objectstack/spec/automation';
+import { TimeRelativeTriggerSchema, LoopConfigSchema, ParallelConfigSchema, TryCatchConfigSchema, FlowSchema } from '@objectstack/spec/automation';
 // [#5659] The shared identity reduction, asserted beside the rule that consumes
 // it — the rule's verdict and the drivers' verdict are one object now.
 import { reduceFilterVerdict } from '@objectstack/spec/data';
@@ -25,6 +25,8 @@ import {
   FLOW_MULTIPLE_DEFAULT_EDGES,
   FLOW_INERT_NODE_CONDITION,
   FLOW_MULTI_WRITE_UNFILTERED,
+  FLOW_LOOP_BODY_UNCONTAINED,
+  FLOW_TRY_CATCH_WITHOUT_CATCH,
 } from './lint-flow-patterns.js';
 
 const CEL = (source: string) => ({ dialect: 'cel', source });
@@ -572,7 +574,11 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
     });
 
     it('flags a loop-body write — the shape that passed the build and is refused at run time', () => {
-      const fnds = lintFlowPatterns(sweepFlow());
+      // Scoped to this rule (#14394): the same fixture now also trips the
+      // containment warning — an `update_record` inside a `loop` body with no
+      // `try_catch` — a different verdict about a different node. The twin
+      // below pins that co-occurrence explicitly rather than filtering it away.
+      const fnds = lintFlowPatterns(sweepFlow()).filter((f) => f.rule === FLOW_RUNAS_UNSCOPED);
       expect(fnds).toHaveLength(1);
       expect(fnds[0].rule).toBe(FLOW_RUNAS_UNSCOPED);
       expect(fnds[0].severity).toBe('error');
@@ -586,7 +592,11 @@ describe('lintFlowPatterns — user-less runAs unscoped (#1888 / ADR-0049 / ADR-
 
     it('flags a loop-body delete_record the same way', () => {
       const fnds = lintFlowPatterns(sweepFlow({ bodyNodeType: 'delete_record' }));
-      expect(fnds.map((f) => f.rule)).toEqual([FLOW_RUNAS_UNSCOPED]);
+      // Both verdicts, in the order the pass emits them: the flow-level `runAs`
+      // error, then the #14394 containment warning for the same nested write —
+      // an unscoped loop-body write is ALSO an uncontained one, and each rule
+      // says its own thing about it exactly once.
+      expect(fnds.map((f) => f.rule)).toEqual([FLOW_RUNAS_UNSCOPED, FLOW_LOOP_BODY_UNCONTAINED]);
       expect(fnds[0].message).toContain("its data node 'touch' (delete_record), in loop 'loop_rows' body,");
     });
 
@@ -1240,9 +1250,11 @@ describe('#5383 — flow-inert-node-condition descends into a loop body', () => 
   });
 
   it('flags it, scoped to the region so the message still names exactly one node', () => {
-    const fnds = lintFlowPatterns(nested());
-    // Exactly one finding overall: no collateral from the descent, and no second
-    // copy reported against the enclosing `loop`.
+    // Scoped to this rule: the fixture's `create_record` also trips the #14394
+    // containment warning, which is a different rule about a different node.
+    const fnds = lintFlowPatterns(nested()).filter((f) => f.rule === FLOW_INERT_NODE_CONDITION);
+    // Exactly one finding for this rule: no collateral from the descent, and no
+    // second copy reported against the enclosing `loop`.
     expect(fnds).toHaveLength(1);
     expect(fnds[0].rule).toBe(FLOW_INERT_NODE_CONDITION);
     expect(fnds[0].where).toBe(
@@ -1352,7 +1364,9 @@ describe('#5383 — the branch-routing family reads the region’s own edges', (
         { id: 'b1', source: 'gate', target: 'nudge', condition: 'lead.score > 50' },
         { id: 'b2', source: 'gate', target: 'skip', isDefault: true, condition: 'lead.score <= 50' },
       ],
-    }));
+    // Scoped to this rule: the body's `notify` also trips the #14394
+    // containment warning.
+    })).filter((f) => f.rule === FLOW_DEFAULT_EDGE_WITH_CONDITION);
     expect(fnds).toHaveLength(1);
     expect(fnds[0].rule).toBe(FLOW_DEFAULT_EDGE_WITH_CONDITION);
     // The severity asymmetry the issue called out: a build-stopping rule that
@@ -1445,7 +1459,9 @@ describe('#5383 — a recursive config scan does not double-report the container
     const fnds = lintFlowPatterns(loopBodyFlow({
       nodes: [{ id: 'send_reminder', type: 'notify', config: { title: 'Reminder: {{lead.name}}' } }],
       edges: [],
-    }));
+    // Scoped to this rule: the body's `notify` also trips the #14394
+    // containment warning.
+    })).filter((f) => f.rule === FLOW_DOUBLE_BRACE_INTERP);
     // Exactly one. The `loop`'s own config physically CONTAINS `body`, and
     // `collectTemplateStrings` is recursive, so descending without stripping the
     // region slots would report this a SECOND time against 'loop_leads'.
@@ -1720,12 +1736,14 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
    */
   describe('inside a nested region (#5383 / #5635)', () => {
     it('flags a loop-body sweep, scoped to the region, exactly once', () => {
+      // Scoped to this rule: a `delete_record` in a loop body also trips the
+      // #14394 containment warning.
       const fnds = lintFlowPatterns(loopBodyFlow({
         nodes: [
           { id: 'sweep', type: 'delete_record', config: { objectName: 'campaign_member', multi: true } },
         ],
         edges: [],
-      }));
+      })).filter((f) => f.rule === FLOW_MULTI_WRITE_UNFILTERED);
       expect(fnds).toHaveLength(1);
       expect(fnds[0].rule).toBe(FLOW_MULTI_WRITE_UNFILTERED);
       expect(fnds[0].where).toBe(
@@ -1765,7 +1783,7 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
       const fnds = lintFlowPatterns(loopBodyFlow({
         nodes: [{ id: 'loop_touchpoints', type: 'loop', label: 'Loop Touchpoints', config: nestedTouchpointsResetLoop }],
         edges: [],
-      }));
+      })).filter((f) => f.rule === FLOW_MULTI_WRITE_UNFILTERED);
       expect(fnds).toHaveLength(1);
       expect(fnds[0].rule).toBe(FLOW_MULTI_WRITE_UNFILTERED);
       expect(fnds[0].where).toBe(
@@ -1781,7 +1799,316 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
           config: { objectName: 'campaign_member', filter: { lead_id: '{lead.id}' }, multi: true },
         }],
         edges: [],
-      }))).toHaveLength(0);
+        // Scoped to this rule: a bounded write is still an uncontained one, so
+        // the #14394 warning is present and is not this rule's business.
+      })).filter((f) => f.rule === FLOW_MULTI_WRITE_UNFILTERED)).toHaveLength(0);
+    });
+  });
+});
+
+/**
+ * #13681 / #14394 — per-iteration containment, the rule PAIR.
+ *
+ * The measured facts these cases pin (measurement on the real `AutomationEngine`,
+ * recorded on #13681): a 5-item sweep whose 3rd item fails processes 3 items and
+ * reports `acted: 0` when the body is bare; the same sweep processes all 5 and
+ * completes when the body is `try_catch { try, catch }`; and a `try_catch` with
+ * NO `catch` produces output byte-identical to the bare control. Hence one rule
+ * for the missing wrapper and one for the wrapper that contains nothing.
+ */
+describe('per-iteration containment (#13681 / #14394)', () => {
+  /** A scheduled sweep whose per-item work is whatever the case puts in the body. */
+  const sweep = (bodyNodes: unknown[], bodyEdges: unknown[] = [], loopExtra: Record<string, unknown> = {}) => ({
+    flows: [{
+      name: 'case_sla_monitor',
+      label: 'Case SLA monitor',
+      type: 'schedule',
+      // `system`, so the fixture answers about containment only and does not
+      // also trip the user-less `runAs` gate (FLOW_RUNAS_UNSCOPED).
+      runAs: 'system',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start', config: { triggerType: 'schedule', schedule: 'cron:0 9 * * *' } },
+        {
+          id: 'each', type: 'loop', label: 'For each breached case',
+          config: {
+            collection: '{cases}', iteratorVariable: 'currentCase',
+            body: { nodes: bodyNodes, edges: bodyEdges },
+            ...loopExtra,
+          },
+        },
+      ],
+      edges: [{ id: 'e1', source: 'start', target: 'each' }],
+    }],
+  });
+
+  const notifyOwner = {
+    id: 'notify_owner', type: 'notify', label: 'Notify owner',
+    config: { title: 'SLA breach', recipients: ['{currentCase.owner}'] },
+  };
+
+  /**
+   * The measured minimal `catch`: one bare `assignment` node with NO `config`.
+   * `edges` omitted (defaults to `[]`), `errorVariable` omitted (defaults to
+   * `$error`). Quoted verbatim from #13681's measurement — not re-derived.
+   */
+  const MINIMAL_CATCH = { nodes: [{ id: 'handled', type: 'assignment', label: 'Handled' }] };
+
+  describe('rule A — a loop body with a fallible node and no containment', () => {
+    it('flags the fallible node, naming the loop AND the node', () => {
+      const fnds = lintFlowPatterns(sweep([notifyOwner]));
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].rule).toBe(FLOW_LOOP_BODY_UNCONTAINED);
+      expect(fnds[0].where).toBe(
+        "flow 'case_sla_monitor' · loop 'each' body · node 'notify_owner' (notify)",
+      );
+      // The loop is named in the message too — `where` locates the node, the
+      // message says which iteration boundary is unprotected.
+      expect(fnds[0].message).toContain("inside loop 'each'");
+      expect(fnds[0].message).toContain('no `try_catch` between them');
+      // Warning, not a build gate: fail-fast is a legitimate reading.
+      expect(fnds[0].severity).toBeUndefined();
+      // The prescribed spelling, with the measured minimal `catch`.
+      expect(fnds[0].hint).toContain("type: 'try_catch'");
+      expect(fnds[0].hint).toContain("{ id: 'handled', type: 'assignment', label: 'Handled' }");
+      expect(fnds[0].hint).toContain('`catch: {}` and `catch: { nodes: [] }` are both refused');
+    });
+
+    it('flags every fallible builtin in the body, once each', () => {
+      const fallible = [
+        { id: 'n1', type: 'get_record', label: 'Get', config: { objectName: 'case', filter: { id: '{currentCase.id}' } } },
+        { id: 'n2', type: 'create_record', label: 'Create', config: { objectName: 'task' } },
+        { id: 'n3', type: 'update_record', label: 'Update', config: { objectName: 'case', fields: { seen: true }, filter: { id: '{currentCase.id}' } } },
+        { id: 'n4', type: 'delete_record', label: 'Delete', config: { objectName: 'task', filter: { case_id: '{currentCase.id}' } } },
+        { id: 'n5', type: 'http', label: 'Call', config: { url: 'https://example.test' } },
+        { id: 'n6', type: 'notify', label: 'Notify', config: { title: 'x' } },
+        { id: 'n7', type: 'connector_action', label: 'Connector', config: { connectorId: 'c', action: 'a' } },
+        { id: 'n8', type: 'script', label: 'Script', config: { function: 'f' } },
+        { id: 'n9', type: 'subflow', label: 'Subflow', config: { flowName: 'child' } },
+        { id: 'n10', type: 'map', label: 'Map', config: { collection: '{items}' } },
+        { id: 'n11', type: 'approval', label: 'Approval', config: { approvers: ['{$User.Id}'] } },
+      ];
+      const fnds = lintFlowPatterns(sweep(fallible)).filter((f) => f.rule === FLOW_LOOP_BODY_UNCONTAINED);
+      expect(fnds.map((f) => f.where)).toEqual(
+        fallible.map((n) => `flow 'case_sla_monitor' · loop 'each' body · node '${n.id}' (${n.type})`),
+      );
+    });
+
+    it('leaves the provably non-fallible builtins alone', () => {
+      // Read off their executors: `assignment` / `decision` return success on
+      // every path; `wait` and `screen` suspend and have no failure return.
+      const fnds = lintFlowPatterns(sweep([
+        { id: 'a', type: 'assignment', label: 'Set', config: { assignments: { seen: true } } },
+        { id: 'd', type: 'decision', label: 'Gate' },
+        { id: 'w', type: 'wait', label: 'Wait', config: { durationMs: 1000 } },
+      ]));
+      expect(fnds).toHaveLength(0);
+    });
+
+    it('leaves an UNKNOWN (plugin-registered) node type alone — the declared decision', () => {
+      // Counting unread executors fallible would flag every third-party node in
+      // every loop; this family's list is a record of readings, not a guess.
+      // The cost is a false negative here, stated in the rule's docblock.
+      expect(lintFlowPatterns(sweep([
+        { id: 'x', type: 'acme_charge_card', label: 'Charge', config: { amount: 10 } },
+      ]))).toHaveLength(0);
+    });
+
+    it('leaves a legacy flat-graph loop (no `body`) alone', () => {
+      // `LoopConfigSchema.body` is optional — a body-less loop is the legacy
+      // flat-graph form and has no region to judge.
+      const legacy = {
+        flows: [{
+          name: 'case_sla_monitor', label: 'Case SLA monitor', type: 'schedule', runAs: 'system',
+          nodes: [
+            { id: 'start', type: 'start', label: 'Start', config: { triggerType: 'schedule', schedule: 'cron:0 9 * * *' } },
+            { id: 'each', type: 'loop', label: 'Loop', config: { collection: '{cases}', iteratorVariable: 'currentCase' } },
+            { id: 'notify_owner', type: 'notify', label: 'Notify owner', config: { title: 'SLA breach' } },
+          ],
+          edges: [{ id: 'e1', source: 'start', target: 'each' }, { id: 'e2', source: 'each', target: 'notify_owner' }],
+        }],
+      };
+      expect(lintFlowPatterns(legacy).filter((f) => f.rule === FLOW_LOOP_BODY_UNCONTAINED)).toHaveLength(0);
+    });
+
+    it('reads ancestry, not depth — a `try_catch` inside a `parallel` branch still contains', () => {
+      const guarded = {
+        id: 'guard', type: 'try_catch', label: 'Guarded',
+        config: { try: { nodes: [notifyOwner], edges: [] }, catch: MINIMAL_CATCH },
+      };
+      expect(lintFlowPatterns(sweep([{
+        id: 'fan', type: 'parallel', label: 'Fan out',
+        config: {
+          branches: [
+            { name: 'notify', nodes: [guarded], edges: [] },
+            { name: 'log', nodes: [{ id: 'note', type: 'assignment', label: 'Note' }], edges: [] },
+          ],
+        },
+      }]))).toHaveLength(0);
+    });
+
+    it('flags a fallible node inside a `parallel` branch, with the branch in `where`', () => {
+      const fnds = lintFlowPatterns(sweep([{
+        id: 'fan', type: 'parallel', label: 'Fan out',
+        config: {
+          branches: [
+            { name: 'email', nodes: [{ id: 'send', type: 'notify', label: 'Send', config: { title: 'x' } }], edges: [] },
+            { name: 'log', nodes: [{ id: 'note', type: 'assignment', label: 'Note' }], edges: [] },
+          ],
+        },
+      }]));
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].rule).toBe(FLOW_LOOP_BODY_UNCONTAINED);
+      expect(fnds[0].where).toBe(
+        "flow 'case_sla_monitor' · loop 'each' body → parallel 'fan' branch 0 · node 'send' (notify)",
+      );
+    });
+
+    it('reports a nested loop ONCE, against the inner loop where the wrap belongs', () => {
+      const fnds = lintFlowPatterns(sweep([{
+        id: 'each_line', type: 'loop', label: 'For each line',
+        config: {
+          collection: '{currentCase.lines}', iteratorVariable: 'line',
+          body: { nodes: [notifyOwner], edges: [] },
+        },
+      }]));
+      expect(fnds).toHaveLength(1);
+      // Scoped to the INNER loop's own graph, not reported a second time through
+      // the outer one: per-iteration containment is a per-loop question, and the
+      // `try_catch` belongs in the innermost body.
+      expect(fnds[0].where).toBe(
+        "flow 'case_sla_monitor' · loop 'each' body · loop 'each_line' body · node 'notify_owner' (notify)",
+      );
+    });
+  });
+
+  describe('rule B — a `try_catch` with no `catch` region', () => {
+    it('flags the near-miss inside a loop body, and says it dies like an unwrapped node', () => {
+      const fnds = lintFlowPatterns(sweep([{
+        id: 'guard', type: 'try_catch', label: 'Guarded',
+        config: { try: { nodes: [notifyOwner], edges: [] } },
+      }]));
+      // Exactly one finding: rule A treats ANY enclosing `try_catch` as
+      // containment precisely so this shape is named once, by the rule that can
+      // name the missing key.
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].rule).toBe(FLOW_TRY_CATCH_WITHOUT_CATCH);
+      expect(fnds[0].where).toBe(
+        "flow 'case_sla_monitor' · loop 'each' body · node 'guard' (try_catch)",
+      );
+      expect(fnds[0].severity).toBeUndefined();
+      expect(fnds[0].message).toContain('declares no `catch` region');
+      expect(fnds[0].message).toContain('identical output');
+      expect(fnds[0].hint).toContain("{ id: 'handled', type: 'assignment', label: 'Handled' }");
+    });
+
+    it('flags a TOP-LEVEL catch-less `try_catch` too — it fails through wherever it is written', () => {
+      const fnds = lintFlowPatterns({
+        flows: [{
+          name: 'charge', label: 'Charge', type: 'autolaunched',
+          nodes: [
+            { id: 'start', type: 'start', label: 'Start', config: { triggerType: 'api' } },
+            { id: 'guard', type: 'try_catch', label: 'Guarded', config: { try: { nodes: [{ id: 'pay', type: 'http', label: 'Pay', config: { url: 'https://example.test' } }], edges: [] } } },
+          ],
+          edges: [{ id: 'e1', source: 'start', target: 'guard' }],
+        }],
+      });
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].rule).toBe(FLOW_TRY_CATCH_WITHOUT_CATCH);
+      expect(fnds[0].where).toBe("flow 'charge' · node 'guard' (try_catch)");
+    });
+
+    it('says what `retry` does and does not buy, when one is declared', () => {
+      const fnds = lintFlowPatterns(sweep([{
+        id: 'guard', type: 'try_catch', label: 'Guarded',
+        config: {
+          try: { nodes: [notifyOwner], edges: [] },
+          retry: { maxRetries: 3, backoffMs: 1000, backoffMultiplier: 2 },
+        },
+      }]));
+      expect(fnds).toHaveLength(1);
+      expect(fnds[0].rule).toBe(FLOW_TRY_CATCH_WITHOUT_CATCH);
+      expect(fnds[0].message).toContain('delays that outcome rather than changing it');
+    });
+
+    it('says NOTHING about a `catch` that is present but malformed — the schema refuses those', () => {
+      // `catch: {}` and `catch: { nodes: [] }` are rejected by the parse itself
+      // (`FlowRegionSchema.nodes` is `.min(1)`), loudly and with the schema's own
+      // message. Lint speaks for the shape the schema ACCEPTS and the runtime
+      // then makes useless.
+      for (const malformed of [{}, { nodes: [] }]) {
+        expect(TryCatchConfigSchema.safeParse({
+          try: { nodes: [{ id: 'x', type: 'assignment', label: 'X' }] }, catch: malformed,
+        }).success).toBe(false);
+        expect(lintFlowPatterns(sweep([{
+          id: 'guard', type: 'try_catch', label: 'Guarded',
+          config: { try: { nodes: [notifyOwner], edges: [] }, catch: malformed },
+        }])).filter((f) => f.rule === FLOW_TRY_CATCH_WITHOUT_CATCH)).toHaveLength(0);
+      }
+      // …and the minimal spelling the docs prescribe IS accepted.
+      expect(TryCatchConfigSchema.safeParse({
+        try: { nodes: [{ id: 'x', type: 'assignment', label: 'X' }] }, catch: MINIMAL_CATCH,
+      }).success).toBe(true);
+    });
+  });
+
+  /**
+   * The NEGATIVE CONTROL the ruling asks for, made executable: the exact
+   * spelling `content/docs/automation/flows.mdx` §"Per-iteration containment"
+   * teaches — same ids, same labels — must both PARSE under `FlowSchema` and
+   * produce no finding from either rule.
+   */
+  describe('the documented spelling — `loop { try_catch { try, catch } }`', () => {
+    const DOCUMENTED_FLOW = {
+      name: 'case_sla_monitor',
+      label: 'Case SLA monitor',
+      type: 'schedule' as const,
+      runAs: 'system' as const,
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start', config: { triggerType: 'schedule', schedule: 'cron:0 9 * * *' } },
+        { id: 'find_cases', type: 'get_record', label: 'Find breached cases', config: { objectName: 'case', filter: { sla_breached: true }, outputVariable: 'cases' } },
+        {
+          id: 'each_case', type: 'loop', label: 'For each breached case',
+          config: {
+            collection: '{cases}',
+            iteratorVariable: 'currentCase',
+            body: {
+              nodes: [{
+                id: 'guard', type: 'try_catch', label: 'Guarded iteration',
+                config: {
+                  try: {
+                    nodes: [{ id: 'notify_owner', type: 'notify', label: 'Notify owner', config: { title: 'SLA breach', recipients: ['{currentCase.owner}'] } }],
+                    edges: [],
+                  },
+                  // The measured minimal handler: one bare `assignment`, no
+                  // `config`; `edges` and `errorVariable` both omitted.
+                  catch: { nodes: [{ id: 'handled', type: 'assignment', label: 'Handled' }] },
+                },
+              }],
+              edges: [],
+            },
+          },
+        },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'find_cases' },
+        { id: 'e2', source: 'find_cases', target: 'each_case' },
+      ],
+    };
+
+    it('parses under FlowSchema — the docs example is authorable', () => {
+      const parsed = FlowSchema.safeParse(DOCUMENTED_FLOW);
+      expect(parsed.success ? [] : parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`)).toEqual([]);
+      expect(parsed.success).toBe(true);
+    });
+
+    it('raises NO finding from either containment rule', () => {
+      const fnds = lintFlowPatterns({ flows: [DOCUMENTED_FLOW] });
+      expect(fnds.filter((f) => f.rule === FLOW_LOOP_BODY_UNCONTAINED)).toHaveLength(0);
+      expect(fnds.filter((f) => f.rule === FLOW_TRY_CATCH_WITHOUT_CATCH)).toHaveLength(0);
+    });
+
+    it('raises no finding from ANY flow rule — the page teaches a clean shape', () => {
+      expect(lintFlowPatterns({ flows: [DOCUMENTED_FLOW] })).toHaveLength(0);
     });
   });
 });

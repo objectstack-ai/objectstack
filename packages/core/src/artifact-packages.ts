@@ -9,6 +9,26 @@
  * turns an artifact — either shape — into the ordered list of manifests the
  * load path registers.
  *
+ * ## Why this lives in `@objectstack/core` and not next to one of its readers
+ *
+ * There are TWO readers of `packages[]`, not one, and they sit in packages that
+ * cannot import each other: `ObjectQLPlugin` (`@objectstack/objectql`, which
+ * calls `registerApp` per package) and `MetadataPlugin`
+ * (`@objectstack/metadata`, whose artifact door registers each package body's
+ * collections stamped with that body's id). `@objectstack/objectql` depends on
+ * `@objectstack/metadata`, so the metadata door physically cannot import this
+ * module from where it started life.
+ *
+ * The alternative — a second read of `packages[]` inside the metadata door —
+ * would have split more than the sort: this function is also the GATE (it
+ * parses each entry against `ArtifactPackageSchema` and refuses a duplicate
+ * package id), so two readers would have disagreed about which artifacts are
+ * loadable, not just about what order to load them in. `@objectstack/core`
+ * already owns `resolvePluginOrder` and is already a dependency of both
+ * readers, so hosting it here adds NO package edge to the graph. ⛔ Do not
+ * re-home this next to either reader; the next reader will have the same
+ * problem.
+ *
  * ## Both shapes are read (D4), and the fallback is the compatibility mechanism
  *
  * - `packages` present → iterate it.
@@ -102,7 +122,7 @@
  * missing-dependency semantics are re-adjudicated here.
  */
 
-import { resolvePluginOrder, type OrderablePlugin } from '@objectstack/core';
+import { resolvePluginOrder, type OrderablePlugin } from './plugin-order.js';
 import { ArtifactPackageSchema } from '@objectstack/spec';
 
 /**

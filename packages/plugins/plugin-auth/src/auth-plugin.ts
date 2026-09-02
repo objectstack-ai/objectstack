@@ -781,11 +781,19 @@ export class AuthPlugin implements Plugin {
           // localized `sys_email_template` rows are reachable through the
           // platform's own send path instead of sitting dormant.
           //
-          // Maintainer ruling 2026-08-13: the recipient locale is the
-          // **deployment default**, resolved here at the plugin layer.
-          // `Accept-Language` is rejected — auth mail is routinely sent
-          // outside the triggering request (invitations, admin-initiated
-          // resets), so a per-device request header is the wrong authority.
+          // This binds the DEPLOYMENT rung, resolved here at the plugin
+          // layer. Since the 2026-09-02 ruling (#14319) it is the SECOND rung:
+          // a request-triggered send whose recipient IS the requester takes
+          // that caller's own `Accept-Language` first, resolved at send time in
+          // `AuthManager` (`authEmailLocaleFromRequest`, which carries the
+          // ruling text). What is bound here answers when the request named no
+          // locale this platform ships a row for, or when there is no request
+          // at all — invitations, scheduled and admin-initiated mail.
+          //
+          // ⚠️ The superseded 2026-08-13 ruling made this rung the WHOLE answer
+          // and rejected `Accept-Language` outright. Do not restore that
+          // reading here; the single place the history is recorded is
+          // `AuthManager.setDefaultEmailLocale`.
           //
           // #14319 measured that "the deployment default" has TWO producers,
           // and that auth email was reading the weaker one:

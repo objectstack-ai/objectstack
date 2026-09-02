@@ -7548,7 +7548,7 @@ export function pendingChangesetFamilies(entries, matchedChecks, probe = CHANGES
 export function pendingChangesetLines(pending, probe = CHANGESET_PROBE_PATH) {
   if (pending.length === 0) return [];
   const lines = [
-    `Once a changeset exists, ${pending.length} more famil(ies) apply — write one unless this card is docs-only:`,
+    `Once a changeset exists, ${pending.length} more famil(ies) apply — write one unless this card publishes nothing from any released package (then the skip-changeset label instead, per the os-dev clause):`,
   ];
   for (const { entry, hits } of [...pending].sort((a, b) => a.check.localeCompare(b.check))) {
     const via = hits.map((h) => `${h.via} '${h.hint}'`).join('; ');
@@ -15297,7 +15297,7 @@ function selfTest() {
   t('and its provenance says so, rather than claiming a source literal', csTriggered[0]?.hits?.[0]?.via?.startsWith('CI trigger in') === true);
   // Rendering.
   const pendingOut = pendingChangesetLines(pending);
-  t('the section heading counts the families and carries the docs-only escape', /^Once a changeset exists, 2 more famil\(ies\) apply — write one unless this card is docs-only:$/.test(pendingOut[0]));
+  t('the section heading counts the families and carries the publishes-nothing escape, stated as the os-dev clause states it', /^Once a changeset exists, 2 more famil\(ies\) apply — write one unless this card publishes nothing from any released package \(then the skip-changeset label instead, per the os-dev clause\):$/.test(pendingOut[0]));
   t('every row is a RUNNABLE invocation, the same as the matched list', pendingOut.filter((l) => l.startsWith('  - ')).every((l) => l.startsWith('  - pnpm ') || l.startsWith('  - node ')));
   t('every row prints the hypothetical path it would match, so the lead cannot read as a real one', pendingOut.filter((l) => l.startsWith('  - ')).every((l) => l.includes(CHANGESET_PROBE_PATH)));
   t('the section says out loud that it is not a fourth bucket', pendingOut.some((l) => l.includes('NOT a fourth bucket')));
