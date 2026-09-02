@@ -100,16 +100,7 @@ import { BUNDLE_REQUIRE_EXTERNALS } from '../src/utils/config.js';
  *
  * All four are #14336. Repair the template, delete the line, same PR.
  */
-const KNOWN_UNVALIDATED_SCAFFOLDS: Record<string, string> = {
-  object:
-    'parses, then fails the author-time rules: `security-owd-unset` (no sharingModel authored).',
-  view:
-    'unrecognized `pageSize` on the list view, and `type` / `objectName` on the view container.',
-  action:
-    "`type: 'custom'` is not an Action type, and `handler` is not an Action key.",
-  app:
-    '`navigation` takes an array of nav items; the scaffold writes a `{ type, items }` object.',
-};
+const KNOWN_UNVALIDATED_SCAFFOLDS: Record<string, string> = {};
 
 /** The name `os g <type> <name>` is invoked with throughout this file. */
 const STEM = 'probe_thing';
