@@ -135,7 +135,7 @@ The largest single consumer — **20 of the 109 sites**.
 | 34 | `revoke()` deletes directly, **before** the non-manual-source guard | Get: the evaluator can revoke its own grants. Lose: the `CONFLICT` guard that warns a rule-materialised grant will be silently re-granted on the next reconcile | `plugin-sharing/src/sharing-service.ts:1286` (guard at `:1311`) |
 | 35 | `listShares()` skips the management gate | Get: full enumeration of who can see a record | `plugin-sharing/src/sharing-service.ts:1338` |
 | 36 | `sys_record_share` reads are **not** self-scoped | Get: tenant-wide share listing without `manage_sharing` | `sharing-plugin.ts:1077` |
-| 37 | Share-link policy `enabled` check bypassed; system callers re-enter under a system context | Get: link creation/resolution while the policy is off | `plugin-sharing/src/share-link-service.ts:434`, `:488`, `:492`, `:565`, `:595` |
+| 37 | Share-link policy `enabled` check bypassed; system callers re-enter under a system context | Get: link creation/resolution while the policy is off | `plugin-sharing/src/share-link-service.ts:440`, `:494`, `:498`, `:571`, `:601` |
 | 38 | Sharing-rule provenance stamp skipped | Lose: the row is not marked as an admin customization — seeder / `defineRule` / boot reconcilers are "the package door" | `sharing-rule-provenance.ts:47` |
 | 39 | Sharing-rule service write + delete paths return early | Lose: the manage-rules gate on the service surface, and the platform-global-rule delete guard | `sharing-rule-service.ts:157`, `:382` |
 
