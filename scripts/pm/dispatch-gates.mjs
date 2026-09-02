@@ -2332,6 +2332,7 @@ const COMPOUND_ANCHOR_LEDGER = [
   ['scripts/check-regen-pending.mjs', 'prePushIsArmedSelfTest', false],
   ['scripts/check-regen-pending.mjs', 'decisionTableSelfTest', false],
   ['scripts/check-turbo-task-graph.mjs', 'runSelfTest', false],
+  ['scripts/check-workspace-manifest-cycles.mjs', 'runSelfTest', false],
   ['scripts/check-self-test-wired.mjs', 'carriesSelfTest', true],
   ['scripts/check-self-test-workflow-commands.mjs', 'runSelfTest', true],
   ['scripts/check-step-collectors.mjs', 'selfTestTargets', true],

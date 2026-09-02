@@ -296,6 +296,26 @@ describe('ApprovalNodeConfigSchema', () => {
     expect(perGroup.behavior).toBe('per_group');
     expect(perGroup.approvers[0].group).toBe('legal');
   });
+
+  // The schema injects NO default for `minApprovals`: omitting it leaves the
+  // key undefined and the enforced threshold is then chosen by `behavior` —
+  // every resolvable approver under `quorum`, one per group under `per_group`.
+  // The `.describe()` prose is the only place an author can read that, so pin
+  // both halves together: a threshold silently declared as 1 while the runtime
+  // demands unanimity is the drift this test exists to catch.
+  it('declares the per-behavior default of an omitted minApprovals', () => {
+    const quorum = ApprovalNodeConfigSchema.parse({ ...minimal, behavior: 'quorum' });
+    expect(quorum.minApprovals).toBeUndefined();
+    const perGroup = ApprovalNodeConfigSchema.parse({ ...minimal, behavior: 'per_group' });
+    expect(perGroup.minApprovals).toBeUndefined();
+
+    const doc = ApprovalNodeConfigSchema.shape.minApprovals.description ?? '';
+    expect(doc).toContain('quorum');
+    expect(doc).toContain('per_group');
+    expect(doc).toContain('all resolvable approvers for quorum');
+    expect(doc).toContain('1 per group for per_group');
+    expect(doc).not.toContain('Default 1');
+  });
 });
 
 describe('ApprovalEscalationSchema', () => {
