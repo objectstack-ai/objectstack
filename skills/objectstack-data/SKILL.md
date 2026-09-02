@@ -157,7 +157,7 @@ fresh as whatever writes it. Cover both write paths:
 | A project is renamed | `afterUpdate` hook on `project` — re-stamp `project_name` on that project's tasks |
 
 Rows written by a path that bypasses hooks (bulk import, direct SQL) need a
-one-off backfill. See [Lifecycle Hooks](./rules/hooks.md).
+one-off backfill. See [Lifecycle Hooks](./references/data-hooks.md).
 
 **The errors an author sees for the dotted path** (grep either back to here).
 `os validate` → `searchable-field-unknown`:
@@ -315,7 +315,7 @@ For comprehensive documentation with incorrect/correct examples:
 - **[Validation Rules](./rules/validation.md)** — All validation types, script inversion, severity levels
 - **[Index Strategy](./rules/indexing.md)** — btree/gin/gist/fulltext, composite indexes, partial indexes
 - **[Data Lifecycle & Retention](./rules/lifecycle.md)** — `lifecycle` classes (record/audit/telemetry/transient/event), retention/TTL/rotation/archive policies; ❗ append-only objects must declare one (distinct from lifecycle *hooks* below)
-- **[Lifecycle Hooks](./rules/hooks.md)** — Hook quick reference (→ see [references/data-hooks.md](./references/data-hooks.md) for the full 8-event guide + the sandboxed `body` ctx/capability contract)
+- **[Lifecycle Hooks](./references/data-hooks.md)** — the 8 lifecycle events, `handler` vs sandboxed `body` (ctx + capability contract), registration, canonical patterns
 - **[Datasources & Federation](./rules/datasources.md)** — `defineDatasource`, external/federated objects (`remoteName`/`columnMap`), auto-connect gating, credentials; ❌ no `field.columnName` on external objects
 
 ---
@@ -530,10 +530,9 @@ export default defineHook({
 The `handler` above is the inline (in-process) form. The **preferred**,
 metadata-native form is a sandboxed `body` — `{ language: 'js', source, capabilities }`
 run in an isolated VM, the shape that AI/Studio-authored hooks and every build
-artifact carry. See [rules/hooks.md](./rules/hooks.md) for the quick reference, or
-[references/data-hooks.md](./references/data-hooks.md) for complete documentation
-of all 8 lifecycle events, both registration forms, the **sandboxed `body` ctx +
-capability contract**, and patterns.
+artifact carry. See [references/data-hooks.md](./references/data-hooks.md) for all 8
+lifecycle events, both registration forms, the **sandboxed `body` ctx + capability
+contract**, and the canonical patterns.
 
 ---
 
