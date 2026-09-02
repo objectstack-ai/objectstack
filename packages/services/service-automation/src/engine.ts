@@ -1622,11 +1622,31 @@ export class AutomationEngine implements IAutomationService {
     private readonly runSummaryLog: RunSummaryLogLevel;
     private logger: Logger;
     /**
-     * Runs paused at a node, keyed by runId (ADR-0019). In-memory hot cache —
-     * mirrored to {@link store} when one is configured, so a pause survives a
-     * process restart. See {@link SuspendedRun}.
+     * Runs paused at a node, keyed by runId (ADR-0019). Process-local copy of
+     * the pause — mirrored to {@link store} when one is configured, so a pause
+     * survives a process restart. See {@link SuspendedRun}.
+     *
+     * [#13617] NOT a read-through cache sitting in front of the store. When a
+     * store is configured the STORE is the authority and this map answers only
+     * for the runs it never accepted ({@link cacheOnlySuspensions}). Reading
+     * this map first is what made a multi-replica approval flow re-create every
+     * level — the mechanism is in {@link loadSuspendedRunStrict}.
      */
     private suspendedRuns = new Map<string, SuspendedRun>();
+    /**
+     * [#13617] Runs whose durable save FAILED, so {@link store} holds no row
+     * for them and its "no such run" says nothing about them. These are the
+     * only runs {@link loadSuspendedRunStrict} will answer out of
+     * {@link suspendedRuns} while a store is configured — which is what keeps
+     * {@link persistSuspendedRun}'s documented degradation (a save failure
+     * costs cross-restart durability, not in-process resumability) working.
+     *
+     * Written by {@link persistSuspendedRun} — added when a save throws,
+     * cleared when one lands — and dropped alongside the cache entry by
+     * {@link forgetSuspendedRun}, the single choke point every consumption
+     * passes through, so it is bounded by the map it qualifies.
+     */
+    private cacheOnlySuspensions = new Set<string>();
     /**
      * Optional durable backing for {@link suspendedRuns}. When set, suspended
      * runs are persisted on suspend and rehydrated on resume after a restart;
@@ -1788,7 +1808,17 @@ export class AutomationEngine implements IAutomationService {
         if (this.store) {
             try {
                 await this.store.save(run);
+                // [#13617] The store now holds this pause, so it — not this map
+                // — is the answer for it. Cleared here and not only on the
+                // failure path: a re-suspend whose save lands after an earlier
+                // one failed must stop being read out of memory.
+                this.cacheOnlySuspensions.delete(run.runId);
             } catch (err) {
+                // [#13617] The store was never given the row, so its "no such
+                // run" is silence about this run rather than an answer. This is
+                // what lets `loadSuspendedRunStrict` keep serving it from the
+                // map — the in-process resumability the message below promises.
+                this.cacheOnlySuspensions.add(run.runId);
                 // #6499 — the cause is the datasource DRIVER's own text, so it
                 // goes to the logger's STRUCTURED slot, never spliced into the
                 // message; see `forgetSuspendedRun`'s catch below for the full
@@ -1831,6 +1861,10 @@ export class AutomationEngine implements IAutomationService {
      */
     private async forgetSuspendedRun(run: SuspendedRun, reason: SuspensionReleaseReason): Promise<void> {
         this.suspendedRuns.delete(run.runId);
+        // [#13617] The qualifier goes with the entry it qualifies — this is the
+        // one choke point every consumption passes through, so nothing can leave
+        // a run marked "the store never took this" after its map entry is gone.
+        this.cacheOnlySuspensions.delete(run.runId);
         if (this.store) {
             try {
                 await this.store.delete(run.runId);
@@ -4521,12 +4555,52 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /** {@link loadSuspendedRun} without the degradation: a store read failure
-     *  THROWS instead of reading as "no such run". */
+     *  THROWS instead of reading as "no such run".
+     *
+     *  [#13617] STORE-AUTHORITATIVE. When a {@link SuspendedRunStore} is
+     *  configured, the store answers and {@link suspendedRuns} answers only for
+     *  a run the store never accepted ({@link cacheOnlySuspensions}). It used
+     *  to be the other way round — this process's map first, the store only on
+     *  a miss — which is a correct read for exactly one deployment shape: a
+     *  single process. Put several replicas behind a load balancer over one
+     *  database and that map is a per-replica snapshot of the node a run was
+     *  parked at THE LAST TIME THIS REPLICA TOUCHED IT, and nothing invalidates
+     *  it, because there is no invalidation channel to it at all.
+     *
+     *  The measured shape, a multi-level approval flow: replica A parks the run
+     *  at `lv1` and keeps it in its map. The `lv1` decision round-robins to
+     *  replica B, which advances the run to `lv2` in the store and in B's map;
+     *  A's map still says `lv1`. The `lv2` decision lands back on A, which read
+     *  its own map, resumed from `lv1`, and traversed to `lv2` a SECOND time —
+     *  the same level re-created as a fresh pending request tens of
+     *  milliseconds after the first one completed, so one approver approves
+     *  every level twice. Land the same one-beat-stale read on the FINAL level
+     *  and the run rolls back to the previous one instead of terminating. A
+     *  single replica shows zero duplicates because there is one map and it is
+     *  never behind.
+     *
+     *  Both callers that must not be wrong funnel through here: `resumeInternal`
+     *  (which node does this resume continue from) and {@link hasSuspendedRun}
+     *  (the approvals pre-flight that decides whether to record a decision at
+     *  all), so one seam settles both.
+     *
+     *  ⛔ NOT a re-ordering of the resume path. The suspension is still consumed
+     *  before `traverseNext` and {@link forgetSuspendedRun} is untouched —
+     *  which ordering is right is #13937's question, and unruled. This changes
+     *  only WHICH suspension is read, never when it is consumed. */
     private async loadSuspendedRunStrict(runId: string): Promise<SuspendedRun | null> {
-        const cached = this.suspendedRuns.get(runId);
-        if (cached) return cached;
-        if (!this.store) return null;
-        return await this.store.load(runId);
+        if (!this.store) return this.suspendedRuns.get(runId) ?? null;
+        const stored = await this.store.load(runId);
+        if (stored) return stored;
+        // The store has no row. For every run it ever accepted that IS the
+        // answer — including the runs this process advanced past, whose stale
+        // map entries are the whole defect above. The lone exception is a run
+        // whose durable save failed here: the store was never handed that row,
+        // so its silence says nothing about it, and `persistSuspendedRun`
+        // deliberately keeps such a run resumable in-process (it reports the
+        // lost durability at `error`).
+        if (this.cacheOnlySuspensions.has(runId)) return this.suspendedRuns.get(runId) ?? null;
+        return null;
     }
 
     /**
