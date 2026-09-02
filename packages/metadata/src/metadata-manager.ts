@@ -1070,6 +1070,73 @@ export class MetadataManager implements IMetadataService {
    * result may be memoized depends on what happened to the read's registration
    * while it ran, which only `list()` can see.
    */
+  /**
+   * Merge one loader's answer for `type` into `items`, under the identity that
+   * loader holds each item by.
+   *
+   * ## [#14205] The identity of a loader-held item is its ROW KEY
+   *
+   * Both plural readers used to key a loader's items by `body.name`, and admit
+   * an item only when the body carried a string one:
+   *
+   * ```ts
+   * if (itemAny && typeof itemAny.name === 'string' && !items.has(itemAny.name))
+   * ```
+   *
+   * A body is not required to name itself. `register(type, name, data)` takes
+   * the key as its ARGUMENT, and `assertMetadataRegisterContract` says in as
+   * many words that "A document with NO `name` of its own is fine — the argument
+   * is the key". An aggregated `defineView` container is exactly that: no own
+   * `name` by design, identity carried in the row's `name` column.
+   *
+   * So the old gate dropped every such item the moment the registry went cold
+   * and only the loader could answer — a persisted view container vanished from
+   * `list('view')` after a restart, and `listDiagnosed()` called the short
+   * answer complete because no loader had thrown. Same gate, same effect, in
+   * `listForIndex()`: a nameless `api` row fell out of the endpoint index, where
+   * a miss reads as "nothing declares this route".
+   *
+   * The repair is to ask the loader for the key instead of guessing it from the
+   * body ({@link MetadataLoader.loadManyKeyed}), and to keep the key BESIDE the
+   * body: nothing is written into a body that deliberately has none, so the
+   * register contract's refusal of a disagreeing `data.name` still means what it
+   * says.
+   *
+   * Nothing consumers see today changes shape. For any item that went through
+   * `register()`, a `data.name` that exists is required to EQUAL the key, so the
+   * keyed merge produces the identical map entry; what is new is only the
+   * entries the old gate refused. The `loadMany()` fallback below is the
+   * pre-#14205 behaviour verbatim, for loaders that cannot produce keys
+   * (`RemoteLoader`'s wire format carries bodies only).
+   *
+   * Read failures are NOT caught here: `readListUncached` warns-and-continues,
+   * `listForIndex` deliberately throws, and that difference is each caller's to
+   * keep.
+   */
+  private async admitLoaderItems(
+    loader: MetadataLoader,
+    type: string,
+    items: Map<string, unknown>
+  ): Promise<void> {
+    if (typeof loader.loadManyKeyed === 'function') {
+      const keyed = await loader.loadManyKeyed(type);
+      for (const entry of keyed) {
+        if (!entry || typeof entry.name !== 'string' || entry.name === '') continue;
+        if (items.has(entry.name)) continue;
+        items.set(entry.name, entry.data);
+      }
+      return;
+    }
+
+    const loaderItems = await loader.loadMany(type);
+    for (const item of loaderItems) {
+      const itemAny = item as { name?: unknown } | null;
+      if (itemAny && typeof itemAny.name === 'string' && !items.has(itemAny.name)) {
+        items.set(itemAny.name, item);
+      }
+    }
+  }
+
   private async readListUncached(type: string): Promise<ListReadResult> {
     const items = new Map<string, unknown>();
 
@@ -1095,13 +1162,7 @@ export class MetadataManager implements IMetadataService {
     const errors: string[] = [];
     for (const loader of this.loaders.values()) {
       try {
-        const loaderItems = await loader.loadMany(type);
-        for (const item of loaderItems) {
-          const itemAny = item as any;
-          if (itemAny && typeof itemAny.name === 'string' && !items.has(itemAny.name)) {
-            items.set(itemAny.name, item);
-          }
-        }
+        await this.admitLoaderItems(loader, type, items);
         this.reportLoaderReadRecovered(loader.contract.name);
       } catch (e) {
         degraded = true;
@@ -1277,13 +1338,7 @@ export class MetadataManager implements IMetadataService {
 
     for (const loader of this.loaders.values()) {
       // No try/catch, on purpose — see the doc comment above.
-      const loaderItems = await loader.loadMany(type);
-      for (const item of loaderItems) {
-        const itemAny = item as { name?: unknown };
-        if (itemAny && typeof itemAny.name === 'string' && !items.has(itemAny.name)) {
-          items.set(itemAny.name, item);
-        }
-      }
+      await this.admitLoaderItems(loader, type, items);
     }
 
     return Array.from(items.values());

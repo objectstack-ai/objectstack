@@ -117,6 +117,25 @@ function refuse(code: string, message: string): ArtifactPackageError {
   return err;
 }
 
+/**
+ * The id one artifact package is keyed by.
+ *
+ * `||`, not `??`, on purpose: `ObjectQL.registerApp` keys the installed package
+ * on `manifest.id || manifest.name`, so an empty-string `id` falls back to
+ * `name` there. Every seam that has to name a package — this module's ordering
+ * map, and the install gate's co-ownership set (ADR-0130 D1) — reads the id
+ * through THIS function, so none of them can order or admit a package under a
+ * key the registry never stores it by.
+ *
+ * @returns The package id, or `undefined` when the manifest carries neither a
+ *   usable `id` nor a usable `name`.
+ */
+export function artifactPackageId(manifest: unknown): string | undefined {
+  const id = (manifest as { id?: unknown; name?: unknown } | null | undefined)?.id
+    || (manifest as { name?: unknown } | null | undefined)?.name;
+  return typeof id === 'string' && id !== '' ? id : undefined;
+}
+
 /** The ordering-relevant projection of one artifact package. */
 interface ArtifactPackageNode extends OrderablePlugin {
   /** The caller's ORIGINAL manifest body — never a parsed clone. */
@@ -186,14 +205,9 @@ export function resolveArtifactPackageOrder(artifact: unknown): unknown[] {
     // header: the schema is a gate here, and a parsed clone carries defaults
     // and drops undeclared keys the singular-`manifest` branch keeps.
     const manifest = (entry as { manifest?: unknown }).manifest;
-    // `||`, not `??`, on purpose: `ObjectQL.registerApp` keys the installed
-    // package on `manifest.id || manifest.name`, so an empty-string `id` falls
-    // back to `name` there — this seam must agree on what the id IS, or the
-    // sorter would order a package under a key the registry never stores it by.
-    const id = (manifest as { id?: unknown; name?: unknown }).id
-      || (manifest as { name?: unknown }).name;
+    const id = artifactPackageId(manifest);
 
-    if (typeof id !== 'string' || id === '') {
+    if (id === undefined) {
       throw refuse(
         'INVALID_ARTIFACT_PACKAGE_ENTRY',
         `Release artifact \`packages[${index}]\` carries a manifest with no usable `
