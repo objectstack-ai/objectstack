@@ -1091,9 +1091,16 @@ jobs:
       # ci.yml's Console Pin Gate (#4290) uses this exact key, so the pin bump's
       # PR run and this job share one build — keep the two in step if either
       # input set changes.
-      - name: Cache vendored Console dist (keyed on the objectui pin)
+      #
+      # Split restore/save, matching ci.yml, and not the combined actions/cache
+      # action: the combined form's post-step saves even when the job FAILED,
+      # and build-console.sh writes the SHA stamp BEFORE it asserts the bundle
+      # canary — so a canary failure here would seed this shared, repo-scoped
+      # key with a stamped-but-broken dist that later runs restore and sail
+      # through. See ci.yml's split-restore note for the full rationale.
+      - name: Restore vendored Console dist (keyed on the objectui pin)
         id: console-dist-cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: packages/console/dist
           key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
@@ -1108,6 +1115,31 @@ jobs:
 
       - name: Verify Console dist stamp matches pin
         run: pnpm check:console-sha
+
+      # The spec-injection half of the same question, spelled exactly as
+      # ci.yml's Console Pin Gate spells it — both consumers of one cache key
+      # apply one check. check:console-sha answers only "which objectui SHA",
+      # and scripts/assert-console-spec-injection.mjs runs INSIDE
+      # build-console.sh, which the `if: cache-hit != 'true'` above skips — so
+      # on a cache hit nothing had asked whether the dist this job is about to
+      # PUBLISH bundles this tree's @objectstack/spec rather than the published
+      # tarball. --require-stamp because the vacuity check:console-sha tolerates
+      # (no dist, or a dist no build ever stamped) is wrong on a publish lane.
+      - name: Verify the restored Console dist bundles this tree's spec
+        env:
+          CONSOLE_DIST_CACHE_KEY: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
+        run: pnpm check:console-injection --require-stamp
+
+      # Reached only with every console assertion above green: Actions steps
+      # default to `success()`, and nothing between the restore and here carries
+      # `if: always()` or `continue-on-error`. Saving only on a miss keeps an
+      # immutable entry from being rewritten on every release run.
+      - name: Save vendored Console dist
+        if: steps.console-dist-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: packages/console/dist
+          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh') }}
 
       - name: Downstream backward-compat smoke (live hotcrm)
         # Pre-publish gate (#2035): the about-to-publish @objectstack/spec must
