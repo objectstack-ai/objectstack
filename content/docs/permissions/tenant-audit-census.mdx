@@ -183,29 +183,29 @@ cannot read, and they are neither in nor out.
 
 | what | count |
 | :--- | ---: |
-| write call sites on the application surface | **217** |
-| …whose object name is statically decidable | 145 |
+| write call sites on the application surface | **218** |
+| …whose object name is statically decidable | 146 |
 | …whose object name is chosen at run time | 72 |
-| …against an object with tenancy ENABLED | 145 |
+| …against an object with tenancy ENABLED | 146 |
 | …against an object that declares tenancy off | 0 |
-| threading a tenant context | 133 |
+| threading a tenant context | 134 |
 | PROVABLY carrying none (options read, no context key) | **17** |
 | …of those, against a decidably tenancy-enabled object | **9** |
 | options argument UNREADABLE — may or may not carry one | 67 |
 | …of those, against a decidably tenancy-enabled object | 32 |
-| threading a decidably ELEVATED (`isSystem`) context | 99 |
+| threading a decidably ELEVATED (`isSystem`) context | 100 |
 | threading a context that is decidably NOT elevated | 0 |
 | threading a context whose elevation is a run-time fact | 101 |
 
 | how the instrument reached the site | count |
 | :--- | ---: |
-| receiver carried a readable engine type | 172 |
+| receiver carried a readable engine type | 173 |
 | receiver erased, placed by the object NAME | 19 |
 | receiver erased, placed by an `object: string` PARAMETER | 15 |
 | receiver erased, placed by an `UNTYPED_RECEIVERS` row | 11 |
 
 | object name spelled inline | 108 |
-| object name spelled through a `const` | 37 |
+| object name spelled through a `const` | 38 |
 | object name is an `object: string` parameter | 19 |
 | object name is some other run-time expression | 53 |
 
@@ -224,13 +224,13 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-01 at `d3ebf3b55`.
+Measured on 2026-09-02 at `38f9d540b`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 534 |
-| engine-shaped types recognised | 56 |
+| tracked non-test sources scanned | 540 |
+| engine-shaped types recognised | 57 |
 | declared objects in the registry | 297 |
-| same-named calls subtracted as non-engine | 119 |
+| same-named calls subtracted as non-engine | 129 |
 
 {/* END GENERATED: tenant-audit-census */}

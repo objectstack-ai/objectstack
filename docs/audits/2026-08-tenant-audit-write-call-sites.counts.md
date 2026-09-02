@@ -29,17 +29,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 217 |
-| Object name statically decidable | 145 |
+| Write call sites | 218 |
+| Object name statically decidable | 146 |
 | Object name chosen at run time | 72 |
-| Against a tenancy-enabled object | 145 |
+| Against a tenancy-enabled object | 146 |
 | Against an object declaring tenancy off | 0 |
-| Threading a tenant context | 133 |
+| Threading a tenant context | 134 |
 | Provably carrying none | 17 |
 | …and decidably tenancy-enabled | 9 |
 | Options argument unreadable | 67 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 99 |
+| Threading a decidably elevated context | 100 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 101 |
 
@@ -52,14 +52,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-01 at `d3ebf3b55`.
+Measured on 2026-09-02 at `38f9d540b`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 534 |
-| engine-shaped types recognised | 56 |
+| tracked non-test sources scanned | 540 |
+| engine-shaped types recognised | 57 |
 | declared objects in the registry | 297 |
-| same-named calls subtracted as non-engine | 119 |
+| same-named calls subtracted as non-engine | 129 |
 
 ## Every site
 
@@ -139,6 +139,7 @@ Measured on 2026-09-01 at `d3ebf3b55`.
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `update` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 3 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_position_permission_set` | enabled | context, elevation undecidable | 1 |
+| `packages/plugins/plugin-sharing/src/backfill-sys-record-share-organizations.ts` | `update` | `sys_record_share` | enabled | elevated | 1 |
 | `packages/plugins/plugin-sharing/src/primary-bu-projection.ts` | `update` | `sys_user` | enabled | elevated | 2 |
 | `packages/plugins/plugin-sharing/src/record-orphan-cleanup.ts` | `delete` | `table` | undecidable | options unreadable | 2 |
 | `packages/plugins/plugin-sharing/src/share-link-service.ts` | `insert` | `sys_share_link` | enabled | elevated | 1 |
