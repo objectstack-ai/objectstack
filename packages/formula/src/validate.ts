@@ -26,6 +26,13 @@ import {
   type FieldCelType,
 } from './cel-engine';
 import { templateEngine } from './template-engine';
+// #13594 — the one reader of cel-js's `found no matching overload for '…'`
+// template. Both this module (which asks whether the name is ADVERTISED, to word
+// a hint) and `firstUnknownFunctionCall` (which asks whether the environment
+// REGISTERS it, to give the `@objectstack/lint` gate an existence verdict) must
+// agree on WHICH token cel-js was talking about, so the extraction is shared and
+// the pattern has one home.
+import { callNameFromNoOverload } from './unknown-function';
 
 export type FieldRole = 'predicate' | 'value' | 'template';
 
@@ -255,18 +262,6 @@ function boundsHint(source: string): string | null {
 }
 
 /**
- * cel-js's unknown-call vocabulary, both of its spellings — a bare call
- * (`` `found no matching overload for 'totallyBogusFn(int, int)'` ``) and a
- * receiver call (`` `…for 'dyn.nosuchmethod(string)'` ``). Both are emitted from
- * one template family in `cel-js/lib/operators.js`, and the name we want is the
- * segment immediately before the argument list, after any receiver-type prefix.
- *
- * Anchored on the closing `)'` so the greedy receiver prefix cannot run past the
- * call into the source excerpt cel-js appends on the following lines.
- */
-const NO_OVERLOAD_RE = /found no matching overload for '(?:.*[.])?([A-Za-z_$][\w$]*)\(.*?\)'/;
-
-/**
  * The nearest advertised callable to `name`, or `undefined` when nothing is
  * close enough that a suggestion beats silence.
  *
@@ -340,7 +335,7 @@ function nearestCallable(name: string): string | undefined {
  * would be falsified by that ruling.
  */
 function unknownFunctionHint(celMessage: string): string | null {
-  const name = NO_OVERLOAD_RE.exec(celMessage)?.[1];
+  const name = callNameFromNoOverload(celMessage);
   if (!name || CEL_STDLIB_FUNCTIONS.includes(name)) return null;
   const suggestion = nearestCallable(name);
   return (

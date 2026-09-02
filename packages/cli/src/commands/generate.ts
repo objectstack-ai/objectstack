@@ -113,6 +113,29 @@ export default ${toCamelCase(name)}Action;
   flow: {
     description: 'Automation flow',
     defaultDir: 'src/flows',
+    /**
+     * A record-change flow in the shape `FlowSchema` accepts (#14087).
+     *
+     * What this template used to write refused to load: a top-level `trigger:
+     * { type, object, events }` block, nodes carrying `name`/`next`, and no
+     * `edges`. `FlowSchema` is `.strict()` and declares none of that, so the
+     * FIRST flow anybody scaffolded was a file their own `os validate`
+     * rejected — with an error enumerating what is allowed rather than saying
+     * where the trigger had moved to.
+     *
+     * The binding lives on the START node's `config`, which is where
+     * `AutomationEngine.resolveTriggerBinding` reads it from: `objectName`,
+     * one `record-*` `triggerType` token, and an optional bare-CEL
+     * `condition`. `triggerType` is NOT judged by the schema — a node `config`
+     * is an open slot (ADR-0018) — so the token's grammar is held by
+     * `validate-flow-trigger-readiness`, an author-time rule `os validate`
+     * gates on. `generate-scaffold-validates.test.ts` puts this output through
+     * both layers, which is the drift this template is not allowed to repeat.
+     *
+     * `status` stays `'draft'`: the scaffold fixes the SHAPE and leaves the
+     * arming decision to the author (`os validate` says so — draft flows do
+     * fire, so declare `'active'` to arm deliberately).
+     */
     generate: (name: string) => `import * as Automation from '@objectstack/spec/automation';
 
 /**
@@ -121,20 +144,32 @@ export default ${toCamelCase(name)}Action;
 const ${toCamelCase(name)}Flow: Automation.Flow = {
   name: '${toSnakeCase(name)}_flow',
   label: '${toTitleCase(name)} Flow',
-  type: 'autolaunched',
+  type: 'record_change',
   status: 'draft',
-  trigger: {
-    type: 'record_change',
-    object: '${toSnakeCase(name)}',
-    events: ['after_insert', 'after_update'],
-  },
   nodes: [
     {
       id: 'start',
       type: 'start',
-      name: 'Start',
-      next: 'end',
+      label: 'Start',
+      // A record-change flow binds its trigger HERE, on the START node's
+      // config — there is no top-level \`trigger\` key.
+      //   objectName  the object whose writes fire this flow
+      //   triggerType one record-{before,after}-{create,update,delete,write}
+      //               token ('write' is create OR update, in one flow)
+      //   condition   optional bare-CEL gate, e.g. 'record.amount >= 500'
+      config: {
+        objectName: '${toSnakeCase(name)}',
+        triggerType: 'record-after-write',
+      },
     },
+    {
+      id: 'end',
+      type: 'end',
+      label: 'End',
+    },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'end', type: 'default' },
   ],
 };
 
@@ -257,15 +292,27 @@ export default ${toCamelCase(name)}Skill;
 };
 
 /**
- * Every metadata type `os generate` can scaffold, with the directory it
- * scaffolds into — derived from `GENERATORS` rather than restated.
+ * Every metadata type `os generate` can scaffold — the directory it scaffolds
+ * into, and the source it writes — derived from `GENERATORS` rather than
+ * restated.
  *
- * Exported for `generate-file-name-registry-parity.test.ts`, and derived on
- * purpose: the pin's job is to hold for the NEXT generator somebody adds, and
- * a hand-kept list would leave that one unmeasured while still reading green.
+ * Exported for `generate-file-name-registry-parity.test.ts` (which reads
+ * `type` / `defaultDir`) and `generate-scaffold-validates.test.ts` (which
+ * reads `generate` to materialize each scaffold and put it through the schema
+ * `os validate` parses it with). Derived on purpose: each pin's job is to hold
+ * for the NEXT generator somebody adds, and a hand-kept list would leave that
+ * one unmeasured while still reading green.
  */
-export const GENERATOR_SCAFFOLD_TARGETS: readonly { type: string; defaultDir: string }[] =
-  Object.entries(GENERATORS).map(([type, gen]) => ({ type, defaultDir: gen.defaultDir }));
+export const GENERATOR_SCAFFOLD_TARGETS: readonly {
+  type: string;
+  defaultDir: string;
+  generate: (name: string) => string;
+}[] =
+  Object.entries(GENERATORS).map(([type, gen]) => ({
+    type,
+    defaultDir: gen.defaultDir,
+    generate: gen.generate,
+  }));
 
 // ─── Retired Generators ─────────────────────────────────────────────
 

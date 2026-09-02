@@ -53,7 +53,7 @@
  * normalized tier, and none was affected by the retirement.
  *
  * One advisory rule (`warning` — nothing is broken, a mis-rooted predicate just
- * never matches) plus THREE **gating** rules (`error` — the predicate can never
+ * never matches) plus FOUR **gating** rules (`error` — the predicate can never
  * evaluate at all):
  *
  * - `visibility-predicate-syntax` (**error**, #6253) — a predicate the canonical
@@ -65,6 +65,12 @@
  *   `DEFAULT_LIMITS` parse bound (`maxAstNodes` 256, `maxDepth` 32, …). Same
  *   verdict, same severity, different EDIT — see §Syntax for why that is worth
  *   its own id.
+ * - `visibility-predicate-unknown-function` (**error**, #13594) — a predicate
+ *   that PARSES perfectly and calls a function the CEL environment does not
+ *   register (`current_user.can(object, verb)`, `totallyBogusFn(1,2)`). See the
+ *   §Function existence block below for the ruling that put it here, for why it
+ *   is the one `check()` verdict this file adopts, and for the four things it
+ *   deliberately still does not report.
  * - `visibility-bare-identifier` (**error**, #6128 / #5149 requirement 3) — a
  *   predicate referencing a top-level identifier that no binding root can
  *   resolve (`status == 'active'` instead of `record.status == 'active'`). See
@@ -138,16 +144,97 @@
  * it. {@link NON_CEL_SPELLINGS} supplies that, and cannot change any verdict —
  * it is consulted only after the parse has already failed.
  *
- * Deliberately NOT `validateExpression` / `celEngine.compile`, though those are
- * the ADR-0032 entries and the temptation is obvious. `compile()` is parse **+
- * type-check**, and the difference is not theoretical: measured, it rejects
- * `type == 'grid'` with `no such overload: type == string`. That shape is this
- * file's pinned blind spot (see the CEL-TYPE bullet below) — a deliberate,
- * test-documented decision to stay conservative — and routing this rule through
- * `compile()` would silently overturn it from the syntax branch, widening an
- * `error`-level gate from "does not parse" to "does not type-check" on a surface
- * whose predicates are overwhelmingly `dyn`. The ruling says syntax; the parse
- * verdict is exactly syntax.
+ * The SYNTAX rule is still deliberately not routed through `validateExpression`
+ * / `celEngine.compile`, and the reason is the one this file has always given —
+ * quoted here as it stood, because #13594 supersedes exactly one clause of it
+ * and leaves the rest standing:
+ *
+ * > Deliberately NOT `validateExpression` / `celEngine.compile`, though those
+ * > are the ADR-0032 entries and the temptation is obvious. `compile()` is parse
+ * > **+ type-check**, and the difference is not theoretical: measured, it
+ * > rejects `type == 'grid'` with `no such overload: type == string`. That shape
+ * > is this file's pinned blind spot (see the CEL-TYPE bullet below) — a
+ * > deliberate, test-documented decision to stay conservative — and routing this
+ * > rule through `compile()` would silently overturn it from the syntax branch,
+ * > widening an `error`-level gate from "does not parse" to "does not
+ * > type-check" on a surface whose predicates are overwhelmingly `dyn`. The
+ * > ruling says syntax; the parse verdict is exactly syntax.
+ *
+ * Every sentence there is still true, and `visibility-predicate-syntax` still
+ * gives the parse verdict and only the parse verdict. What changed is that ONE
+ * verdict inside `compile()` turned out not to be a type-check at all — see
+ * §Function existence.
+ *
+ * ## Function existence — the one `check()` verdict this file adopts (#13594)
+ *
+ * ### The evidence that reopened it
+ *
+ * objectui#4421: an authored `current_user.can(object, verb)` predicate passed
+ * this gate CLEAN and then faulted at runtime on every surface. Measured
+ * side-by-side, with controls, before the ruling:
+ *
+ * ```text
+ * source                          this gate      validateExpression
+ * totallyBogusFn(1,2)             CLEAN          ok=false
+ * record.x.nosuchmethod('a')      CLEAN          ok=false
+ * country === "USA"               syntax         ok=false   <- control: gate reached
+ * status == 'active'              bare-ident     ok=true    <- control: gate reached
+ * ```
+ *
+ * Two rows that FIRE are what make the two CLEAN rows a reading rather than a
+ * blank run. The card was filed against `validateExpression`; that premise was
+ * falsified twice over (published artifact and working tree) — the ADR-0032
+ * validator has refused unknown calls since #1877 — and the hole was here, on
+ * the one predicate surface `validate-expressions.ts` does not walk.
+ *
+ * ### The ruling
+ *
+ * Maintainer, 2026-08-31, on a censused premise (host-registered extra CEL
+ * functions in the reachable corpus = **0**, positive control firing): this gate
+ * is EXTENDED to report an unknown-function call as an `error`. It is a **scoped
+ * supersession** of the parse-only ruling quoted above — superseded for function
+ * existence, and for nothing else. The execution comment carries six refinements;
+ * three of them are the boundaries below, verbatim.
+ *
+ * ### Why this is not the widening the old ruling forbade
+ *
+ * 1. **The oracle is the environment, not a curated list.**
+ *    「oracle = 引擎实际注册集(cel-js `check()` 裁定),⛔ 不是 `CEL_STDLIB_FUNCTIONS` 常量。」
+ *    The catalog advertises 35 names; the environment registers 72. A gate keyed
+ *    on the catalog would refuse 37 functions that evaluate today — which is why
+ *    this file asks `@objectstack/formula`'s `firstUnknownFunctionCall` and never
+ *    reads a name list of its own. Same discipline as `firstUndeclaredReference`
+ *    and `parseCelToAst`: the verdict is never ours (#4812).
+ * 2. **Existence is not type-checking.**
+ *    「只拒未知函数裁定,⛔ 不搬运 `check()` 的其他抱怨。」 A `dyn` predicate is
+ *    refused only when it NAMES something that does not exist. `type(record.x)
+ *    == string` still passes, `type == 'grid'` is still a blind spot, `upper(1,
+ *    2)` is still not our business, and `1 + 'a'` is still nobody's. The blind
+ *    spot narrowed by exactly one axis and is pinned that way.
+ * 3. **It cannot be a false positive.** The validation environment and the
+ *    runtime environment are the same builder (53 probes, 0 divergence), so a
+ *    call this refuses is a call that WILL fault when evaluated. The old ruling's
+ *    fear — an `error`-level gate rejecting predicates that work — needs a fault
+ *    class that is data-dependent, and existence is not one.
+ * 4. **No suggestion is offered.** 「不给 `nearestName` 建议。」 —
+ *    `nearestName('can', <the function set>)` answers `'min'`. The engine's own
+ *    wording ships verbatim and nothing is guessed on top of it.
+ *
+ * The fault this closes is the one metadata validation exists for, and the one
+ * an AI author hits hardest: a plausible-looking function name that does not
+ * exist is exactly what a generator invents, and on an action surface the
+ * consequence is fail-CLOSED and nearly silent — the action vanishes for every
+ * user, grant-holders included, behind one deduped `console.warn`.
+ *
+ * ### NOT MEASURED
+ *
+ * The census that supplied the premise reached objectstack, objectui and one
+ * shipped host app. `cloud` and `objectos` — the two repos that carry host
+ * configuration — and published third-party apps were unreachable, and objectui's
+ * own template-function registry (`FormulaFunctions`) is a different engine
+ * outside this gate's jurisdiction. If a host in one of those registers extra CEL
+ * functions, its predicates are refused by this rule. That gap was declared to
+ * the maintainer before the ruling and accepted with it.
  *
  * ### The refusal is one verdict and TWO edits (#7217)
  *
@@ -262,6 +349,15 @@
  *   measured blind spot in the safe direction — a missed catch, never a false
  *   build error — pinned by a test so it reads as a decision.
  *
+ *   ⚠️ **Function existence excepted (#13594).** The pin used to read "the
+ *   CEL-type blind spot stays a blind spot" without qualification; the ruling in
+ *   §Function existence narrows it by exactly one axis. `type == 'grid'` and
+ *   `type(record.x) == string` are unchanged — the first is refused as `no such
+ *   overload: type == string`, which is not a call verdict, and the second
+ *   type-checks clean. What is no longer blind is a call to a name the
+ *   environment does not register at all. Everything the checker says about the
+ *   TYPES flowing through a `dyn` predicate stays unread.
+ *
  * ### The one position this rule does not judge (#7696)
  *
  * A bare word on the RIGHT of `==` / `!=`, on a **metadata-editing form**
@@ -328,10 +424,11 @@
 import {
   collectCelRootIdentifiers,
   firstUndeclaredReference,
+  firstUnknownFunctionCall,
   parseCelToAst,
   parseCelToAstWithReason,
 } from '@objectstack/formula';
-import type { CelAstNode, CelBoundsOverrun } from '@objectstack/formula';
+import type { CelAstNode, CelBoundsOverrun, UnknownFunctionCall } from '@objectstack/formula';
 
 import { collectionEntries } from './collection-entries.js';
 import { walkPageComponents } from './page-walk.js';
@@ -349,6 +446,15 @@ export const VISIBILITY_PREDICATE_SYNTAX = 'visibility-predicate-syntax';
  * consequence is identical, the FIX is not, and `--json` consumers key on the id.
  */
 export const VISIBILITY_PREDICATE_OVER_BUDGET = 'visibility-predicate-over-budget';
+/**
+ * A predicate calling a function the CEL environment does not register —
+ * #13594, the scoped supersession of this file's parse-only ruling (see the
+ * module note's §Function existence). A separate id from
+ * {@link VISIBILITY_PREDICATE_SYNTAX} for the same reason `over-budget` is one:
+ * the source parses perfectly, so the dialect prescription cannot succeed on it
+ * and `--json` consumers key on the id.
+ */
+export const VISIBILITY_PREDICATE_UNKNOWN_FUNCTION = 'visibility-predicate-unknown-function';
 
 export type VisibilitySeverity = 'error' | 'warning';
 
@@ -380,9 +486,9 @@ export interface VisibilityOptions {
 export interface VisibilityFinding {
   /**
    * `warning` for the ADR-0089 D3b advisory (`visibility-root-mislayered`);
-   * `error` for the three rules that gate — `visibility-predicate-syntax`,
-   * `visibility-predicate-over-budget` and `visibility-bare-identifier` (see
-   * module note).
+   * `error` for the four rules that gate — `visibility-predicate-syntax`,
+   * `visibility-predicate-over-budget`, `visibility-predicate-unknown-function`
+   * and `visibility-bare-identifier` (see module note).
    */
   severity: VisibilitySeverity;
   /** Diagnostic rule id, e.g. `visibility-root-mislayered`. */
@@ -727,7 +833,8 @@ const MISLAYER_BY_LAYER: Record<
 /**
  * Inspect one element carrying a visibility predicate. Emits the mis-layered-root
  * finding (when the effective predicate's binding root does not match `layer`),
- * the syntax finding, and the bare-identifier finding.
+ * the syntax / over-budget finding, the unknown-function finding (#13594), and
+ * the bare-identifier finding.
  *
  * There is no alias-KEY step here: `visibility-alias-deprecated` was retired
  * under #6318 (see the module note for the per-site measurement and for the D2
@@ -823,7 +930,60 @@ function checkElement(
     });
   }
 
-  // (3) #6128 — a reference no binding root can resolve. Unlike (1) this one
+  // (3) #13594 — the predicate calls a function the CEL environment does not
+  // register. GATES, by the ruling quoted in the module note's §Function
+  // existence. Reached only when the front end ACCEPTED the source: a refusal
+  // has no type verdict to read, and the two arms above already own it.
+  //
+  // Independent of (4) rather than exclusive with it, and that is a change to
+  // the one-finding property this file used to state flatly. The exclusivity
+  // that mattered is intact — (2) and (4) still cannot both fire, because a
+  // source with no AST yields no identifiers to judge. What (3) adds is a
+  // verdict about a DIFFERENT token with a DIFFERENT fix: in `bogusFn(status)`
+  // the call name and the rootless value are two real defects, and an author who
+  // is told about only one comes back with the other. Suppressing either would
+  // be the silence #5149 is about, so both are reported and the property is
+  // restated per RULE PAIR instead of per predicate.
+  //
+  // The finding carries NO "did you mean" suggestion, and the hint says nothing
+  // about why — ruling refinement 2, 「不给 `nearestName` 建议。」 The measured
+  // hazard: `nearestName('can', <the function set>)` answers `min`, two edits on
+  // a three-character name, jumping from a permission verb to a numeric
+  // function. An author who takes it (an LLM author above all, following the
+  // last sentence it was handed) writes `min(object, verb)` and is further from
+  // working than before it asked. The engine's own wording ships verbatim and
+  // nothing is guessed on top of it.
+  const unknownCall: UnknownFunctionCall | null =
+    source && !refusal ? firstUnknownFunctionCall(source) : null;
+  if (source && unknownCall) {
+    findings.push({
+      severity: 'error',
+      rule: VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
+      where,
+      path,
+      // The prose carries no tracker id: a runtime string reaches authors and
+      // operators who cannot resolve one (`check:doc-authoring`). The anchors —
+      // #5149 for the fail-open half, objectui#4421 for the fail-closed half —
+      // are in the comment above and in the module note, where the reader who
+      // CAN resolve them is.
+      message:
+        `visibility predicate calls \`${unknownCall.name}\`, which the platform's CEL environment ` +
+        `does not register — ${unknownCall.detail} (predicate: \`${quoteSource(source)}\`). The ` +
+        `predicate parses, so nothing else reports it, and it faults the moment it is evaluated: on ` +
+        `a view/page surface the console falls OPEN and the element renders unconditionally, exactly ` +
+        `like one carrying no predicate at all; on an action surface — evaluated with ` +
+        `\`throwOnError: true\` — it falls CLOSED and the action disappears for EVERY user, ` +
+        'including one who holds the grant, leaving one deduped `console.warn` as the only signal.',
+      hint:
+        `\`${unknownCall.name}\` is not a function this platform registers — a NAME fault, not a ` +
+        `dialect mistake, so re-spelling the predicate will not fix it. The callable names ` +
+        `advertised for authoring are the \`functions\` list \`introspectScope\` returns ` +
+        `(\`CEL_STDLIB_FUNCTIONS\`): pick one of those, or precompute the value into a formula ` +
+        `field on the object and test that field instead.`,
+    });
+  }
+
+  // (4) #6128 — a reference no binding root can resolve. Unlike (1) this one
   // GATES: a mis-rooted predicate is at least a statement about a namespace
   // someone binds somewhere, while a bare identifier resolves nowhere, on no
   // layer, under neither a total nor a sparse record (#4953) — so there is no
@@ -887,8 +1047,10 @@ function isFieldObject(entry: unknown): entry is AnyRec {
  *
  * Returns findings (empty = clean). `visibility-root-mislayered` is advisory
  * (`warning`); `visibility-predicate-syntax` (#6253),
- * `visibility-predicate-over-budget` (#7217) and `visibility-bare-identifier`
- * (#6128) are `error` and the caller is expected to fail the build on them.
+ * `visibility-predicate-over-budget` (#7217),
+ * `visibility-predicate-unknown-function` (#13594) and
+ * `visibility-bare-identifier` (#6128) are `error` and the caller is expected to
+ * fail the build on them.
  *
  * The binding-root check is layer-directional (ADR-0089 D3). A form view that
  * declares `data: { provider: 'schema', schemaId }` is judged at `metadata` on
@@ -897,7 +1059,9 @@ function isFieldObject(entry: unknown): entry is AnyRec {
  * predicate is flagged), or leave it at the `'runtime'` default for `*.view.ts` /
  * `*.page.ts` surfaces (so a `data.`-rooted predicate is flagged). The syntax and
  * bare-identifier checks are layer-agnostic — but the ROOT their hints prescribe
- * is not, which is the second half of what #7815 fixes.
+ * is not, which is the second half of what #7815 fixes. The unknown-function
+ * check (#13594) is layer-agnostic in both halves: it prescribes a NAME, and the
+ * environment registers the same names on every layer.
  */
 export function validateVisibilityPredicates(
   stack: AnyRec,

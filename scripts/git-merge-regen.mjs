@@ -73,7 +73,30 @@ import {
   ownerOf,
   ownerRunCommand,
 } from './regen-artifacts.mjs';
+import { blankAnchorLineNumbers } from './doc-line-anchors.mjs';
 import { workspacePackages } from './workspace-enumerator.mjs';
+
+/**
+ * The comparators a row's `mixed` field may name (#14064).
+ *
+ * A comparator answers ONE question: *given two revisions of this file, is their
+ * difference confined to the half the generator re-derives?* When it is, dropping
+ * either revision loses nothing — which is the entire premise of deferring. When it
+ * is not, the difference includes hand-written text that no `gen:` can restore, and
+ * a deferral would delete it silently.
+ *
+ * Keyed by name rather than by function so the TABLE stays free of imports and
+ * top-level statements (the shape `check:entry-guard` relies on), and so an
+ * unrecognised name is a loud refusal here instead of a silent `undefined` there.
+ */
+const MIXED_COMPARATORS = Object.freeze({
+  /**
+   * Equal modulo `file:line` anchor numbers. The generated half of
+   * `content/docs/permissions/system-context.mdx` is exactly those numbers:
+   * `check-system-context-census.mjs --fix` rewrites them and touches nothing else.
+   */
+  'line-anchors': blankAnchorLineNumbers,
+});
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -91,6 +114,92 @@ function markPending(path, cwd = process.cwd()) {
   if (existing.includes(path)) return marker;
   appendFileSync(marker, `${path}\n`);
   return marker;
+}
+
+/** Read a merge input, or `null` when git supplied nothing for that side. */
+function readSide(file) {
+  if (!file || !existsSync(file)) return null;
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * For a MIXED row: would deferring — keeping OURS whole and dropping THEIRS whole —
+ * lose anything a later regeneration cannot restore? (#14064)
+ *
+ * Two shapes are lossless, and they are the ones the comparator can PROVE:
+ *
+ *   1. THEIRS differs from the ANCESTOR only in the generated half. Then theirs
+ *      contributes nothing but numbers `--fix` will re-derive from the merged tree,
+ *      and dropping it drops nothing. This is the common case by a wide margin —
+ *      24 of the last 25 main commits to `system-context.mdx`.
+ *   2. THEIRS and OURS agree once the generated half is blanked. Then whatever
+ *      hand-written change theirs carries, ours carries too, so keeping ours keeps
+ *      it. (Two branches landing the same doc edit, or one rebased onto the other.)
+ *
+ * Everything else — including every case where a side is missing or unreadable — is
+ * reported unsafe. ⛔ The default must be unsafe rather than safe: the failure this
+ * exists to stop is invisible (exit 0, no markers, gates green over deleted prose),
+ * so an unreadable input has to become a conflict a human sees, never a deferral
+ * nobody does.
+ *
+ * @returns {{ safe: true, why: string } | { safe: false, why: string }}
+ */
+function deferralIsLossless(entry, ancestorFile, oursFile, theirsFile) {
+  const normalize = MIXED_COMPARATORS[entry.mixed];
+  if (!normalize) {
+    return {
+      safe: false,
+      why: `\`mixed: '${entry.mixed}'\` names no comparator in git-merge-regen.mjs`
+        + ` (known: ${Object.keys(MIXED_COMPARATORS).join(', ') || 'none'})`,
+    };
+  }
+  const ours = readSide(oursFile);
+  const theirs = readSide(theirsFile);
+  if (ours === null || theirs === null) {
+    return { safe: false, why: 'one side of the merge could not be read, so nothing can be proven about it' };
+  }
+  const nTheirs = normalize(theirs);
+  const ancestor = readSide(ancestorFile);
+  if (ancestor !== null && nTheirs === normalize(ancestor)) {
+    return { safe: true, why: 'the incoming side changed nothing but the generated half' };
+  }
+  if (nTheirs === normalize(ours)) {
+    return { safe: true, why: 'both sides carry the same hand-written text; only the generated half differs' };
+  }
+  return { safe: false, why: 'the incoming side carries hand-written changes that no regeneration can restore' };
+}
+
+/**
+ * The MIXED path's answer when deferral would lose prose: give the file a REAL text
+ * merge instead of dropping a side (#14064).
+ *
+ * `git merge-file` writes its result into `%A`, which is also git's output file, so
+ * a clean merge leaves the union of both sides' prose on disk and the deferral's
+ * only remaining job — re-deriving the generated half from the merged tree — is
+ * still done by the mandatory regeneration. That is exactly the resolution a human
+ * performed by hand on the merge that found this defect, and it is why this limb
+ * can succeed rather than merely fail loudly.
+ *
+ * A conflicting text merge leaves markers and returns non-zero, which is the right
+ * outcome for "two people edited the same prose": loud, and addressed to someone who
+ * can actually adjudicate it.
+ *
+ * @returns {boolean} true when the text merge was clean
+ */
+function textMergeInPlace(ancestorFile, oursFile, theirsFile) {
+  try {
+    execFileSync('git', ['merge-file', '-L', 'ours', '-L', 'base', '-L', 'theirs', oursFile, ancestorFile, theirsFile], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function drive(argv) {
@@ -111,6 +220,39 @@ function drive(argv) {
         + '  Leaving it CONFLICTED rather than guessing. Run `node scripts/git-merge-regen.mjs --self-test`.',
     );
     return 1;
+  }
+
+  // ⭐ A MIXED row (#14064) is only deferrable for the merges where the side being
+  // dropped carried nothing but the generated half. The unconditional deferral
+  // below is correct for every wholly-generated row and is a silent deletion here.
+  if (entry.mixed) {
+    const verdict = deferralIsLossless(entry, argv[0], argv[1], argv[2]);
+    if (!verdict.safe) {
+      const clean = textMergeInPlace(argv[0], argv[1], argv[2]);
+      if (!clean) {
+        console.error(
+          `  ⚠ ${path}\n`
+            + `     NOT deferred: ${verdict.why}.\n`
+            + '     This file is MIXED — a generated half plus hand-written prose — so keeping one\n'
+            + '     side whole would delete the other side\'s prose with no conflict and no red gate.\n'
+            + '     Text-merged instead, and it CONFLICTS. Resolve the prose by hand; the anchor\n'
+            + `     numbers do not matter here — take either side and then run:\n`
+            + `       ${ownerRunCommand(ownerOf(entry), entry.gen)}\n`
+            + '     which re-derives them from the merged tree.',
+        );
+        return 1;
+      }
+      markPending(path);
+      console.error(
+        `  ⟳ ${path}\n`
+          + `     NOT deferred: ${verdict.why}.\n`
+          + '     This file is MIXED, so it was TEXT-MERGED (cleanly — both sides\' prose is in the\n'
+          + '     result) rather than resolved to one side. The generated half still needs:\n'
+          + `       ${ownerRunCommand(ownerOf(entry), entry.gen)}\n`
+          + '     The pre-commit hook will not let this commit through until you do.',
+      );
+      return 0;
+    }
   }
 
   markPending(path);
@@ -686,6 +828,136 @@ function endToEnd() {
   }
 }
 
+/**
+ * Every `mixed` row names a comparator that EXISTS and DISCRIMINATES (#14064).
+ *
+ * The second half is the one worth writing down. Resolving the name proves only
+ * that a function is there; a comparator that collapsed everything to the same
+ * value — `() => ''`, or one whose parser silently stopped finding anchors — would
+ * report every deferral lossless and restore the exact defect this field was added
+ * to close, with the driver, this reconciliation and every doc gate still green.
+ * So each comparator is run against a pair it MUST call equal and a pair it MUST
+ * call different, which is the firing control the "safe" verdict rests on.
+ */
+function reconcileMixedComparators() {
+  const rows = REGEN_ARTIFACTS.filter((e) => e.mixed);
+  const unknown = rows.filter((e) => !MIXED_COMPARATORS[e.mixed]);
+  if (unknown.length) {
+    return fail(`row(s) declare a \`mixed\` comparator that does not exist:\n  `
+      + unknown.map((e) => `${e.path} → ${e.mixed}`).join('\n  ')
+      + `\n  Known comparators: ${Object.keys(MIXED_COMPARATORS).join(', ')}\n`
+      + '  The driver CONFLICTS on an unknown name rather than deferring, so this is red, not silent —\n'
+      + '  but a routed mixed file that cannot be adjudicated is a hand-merge every time until it is fixed.');
+  }
+
+  // The controls are per comparator, not per row: they pin the comparator's
+  // discrimination, which is what every row naming it depends on.
+  const controls = {
+    'line-anchors': {
+      same: ['Prose.\n\n`pkg/src/a.ts:100` and `:205`.\n', 'Prose.\n\n`pkg/src/a.ts:117` and `:990`.\n'],
+      different: ['Prose.\n\n`pkg/src/a.ts:100`.\n', 'Prose. Extra sentence.\n\n`pkg/src/a.ts:100`.\n'],
+    },
+  };
+  for (const name of new Set(rows.map((e) => e.mixed))) {
+    const control = controls[name];
+    if (!control) {
+      return fail(`comparator '${name}' has no firing control in reconcileMixedComparators.\n`
+        + '  An unexercised comparator is one that cannot be shown to discriminate, and a comparator\n'
+        + '  that does not discriminate reports every deferral safe. Add both control pairs.');
+    }
+    const cmp = MIXED_COMPARATORS[name];
+    if (cmp(control.same[0]) !== cmp(control.same[1])) {
+      return fail(`comparator '${name}' calls an anchors-only pair DIFFERENT.\n`
+        + '  Every merge of a purely re-anchored file would now hand-conflict.');
+    }
+    if (cmp(control.different[0]) === cmp(control.different[1])) {
+      return fail(`comparator '${name}' calls a prose-changing pair EQUAL.\n`
+        + '  ⛔ This is the #14064 defect restored: the driver would silently drop the prose again.');
+    }
+  }
+  console.log(`✓ ${rows.length} mixed row(s) name a comparator that exists and discriminates`
+    + ` (${[...new Set(rows.map((e) => e.mixed))].join(', ')})`);
+  return true;
+}
+
+/**
+ * Prove BOTH limbs of the mixed-row guard against real git (#14064).
+ *
+ * `endToEnd` above proves the deferral; this proves the two things the deferral
+ * must NOT do. Behaviour, not wiring, for the same reason: the failure being
+ * guarded is a merge that exits 0 with no markers, which is indistinguishable from
+ * success unless something reads the resulting bytes.
+ */
+function endToEndMixed() {
+  const entry = REGEN_ARTIFACTS.find((e) => e.mixed);
+  if (!entry) {
+    console.log('✓ end-to-end (mixed): no mixed rows declared — nothing to prove');
+    return true;
+  }
+  const target = entry.path;
+  const BASE = '# Page\n\nIntro prose.\n\nThe guard is at `packages/rest/src/rest-server.ts:100`.\n';
+  const OURS = '# Page\n\nIntro prose.\n\nThe guard is at `packages/rest/src/rest-server.ts:140`.\n';
+
+  const run = (theirs, label) => {
+    const dir = mkdtempSync(join(tmpdir(), 'os-regen-mixed-'));
+    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      git('init', '-q', '--initial-branch=main', '.');
+      git('config', 'user.email', 'selftest@objectstack.ai');
+      git('config', 'user.name', 'self-test');
+      git('config', 'merge.os-regen.name', 'regenerate instead of text-merging');
+      git('config', 'merge.os-regen.driver', `node "${join(REPO_ROOT, 'scripts/git-merge-regen.mjs')}" %O %A %B %P`);
+      mkdirSync(join(dir, dirname(target)), { recursive: true });
+      writeFileSync(join(dir, '.gitattributes'), `${target} merge=os-regen\n`);
+      writeFileSync(join(dir, target), BASE);
+      git('add', '-A');
+      git('commit', '-qm', 'base');
+      git('checkout', '-qb', 'incoming');
+      writeFileSync(join(dir, target), theirs);
+      git('commit', '-qam', 'theirs');
+      git('checkout', '-q', 'main');
+      writeFileSync(join(dir, target), OURS);
+      git('commit', '-qam', 'ours');
+      let conflicted = false;
+      try {
+        git('merge', 'incoming', '-m', 'merge');
+      } catch {
+        conflicted = true;
+      }
+      return { merged: readFileSync(join(dir, target), 'utf8'), conflicted, status: git('status', '--porcelain') };
+    } catch (err) {
+      return { error: err?.stderr?.toString() || err?.message || String(err) };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  // (1) THEIRS re-anchored only — the 24-in-25 case. Must still defer to OURS.
+  const anchorsOnly = run('# Page\n\nIntro prose.\n\nThe guard is at `packages/rest/src/rest-server.ts:212`.\n', 'anchors-only');
+  if (anchorsOnly.error) return fail(`self-test (mixed, anchors-only): ${anchorsOnly.error}`);
+  if (anchorsOnly.conflicted) return fail('self-test (mixed): an anchors-only incoming change CONFLICTED — #13646\'s win is gone.');
+  if (anchorsOnly.merged !== OURS) {
+    return fail('self-test (mixed): an anchors-only incoming change was not deferred to OURS.');
+  }
+
+  // (2) THEIRS added prose. Whatever happens, that prose must not vanish silently.
+  const NEEDLE = 'A paragraph only main has.';
+  const withProse = run(`# Page\n\nIntro prose.\n\n${NEEDLE}\n\nThe guard is at \`packages/rest/src/rest-server.ts:100\`.\n`, 'prose');
+  if (withProse.error) return fail(`self-test (mixed, prose): ${withProse.error}`);
+  const kept = withProse.merged.includes(NEEDLE);
+  const loud = withProse.conflicted || /^<{7}|^={7}$|^>{7}/m.test(withProse.merged) || /^(UU|AA)/m.test(withProse.status);
+  if (!kept && !loud) {
+    return fail('self-test (mixed): ⛔ incoming PROSE was dropped with no conflict and no marker.\n'
+      + '  This is #14064 exactly — the merge exits 0, the gates stay green, the documentation is gone.');
+  }
+  if (!kept) {
+    return fail('self-test (mixed): incoming prose is absent from a merge that could have kept it cleanly.');
+  }
+
+  console.log('✓ end-to-end (mixed): anchors-only deferred to OURS; incoming prose survived instead of being dropped');
+  return true;
+}
+
 if (process.argv.includes('--self-test')) {
   console.log('git-merge-regen --self-test\n');
   const results = [
@@ -697,7 +969,9 @@ if (process.argv.includes('--self-test')) {
     reconcileOwnership(),
     hookIsExecutable(),
     registeredDriverResolves(),
+    reconcileMixedComparators(),
     endToEnd(),
+    endToEndMixed(),
   ];
   console.log(
     results.every(Boolean)
