@@ -885,7 +885,7 @@ describe('dashboard-filter-field-unknown — gap 1: dotted paths are resolved (#
 
   it('errors when a HOP names nothing on the bound object', () => {
     const findings = unknown(validateWidgetBindings(
-      dashboardDottedStack({ dateRange: { field: 'acount.signed_at' } }),
+      dashboardDottedStack({ dateRange: { field: 'accont.signed_at' } }),
     ));
     expect(findings).toHaveLength(1);
     const [f] = findings;
@@ -893,7 +893,7 @@ describe('dashboard-filter-field-unknown — gap 1: dotted paths are resolved (#
     // Names the dashboard, the widget, the filter, the path and WHICH hop failed.
     expect(f.where).toBe('dashboard "pipeline_health" › widget "open_deals"');
     expect(f.message).toContain('dateRange');
-    expect(f.message).toContain('traverses "acount"');
+    expect(f.message).toContain('traverses "accont"');
     expect(f.message).toContain('crm_deal');
     expect(f.message).toContain('Did you mean "account"?');
     expect(f.path).toBe('dashboards[0].widgets[0]');
@@ -921,16 +921,16 @@ describe('dashboard-filter-field-unknown — gap 1: dotted paths are resolved (#
   it('carries the explicit wording when filterBindings re-targets onto a bad path', () => {
     const findings = unknown(validateWidgetBindings(dashboardDottedStack(
       {},
-      { filterBindings: { dateRange: 'acount.signed_at' } },
+      { filterBindings: { dateRange: 'accont.signed_at' } },
     )));
     expect(findings).toHaveLength(1);
     expect(findings[0].message).toContain('via filterBindings');
-    expect(findings[0].message).toContain('acount.signed_at');
+    expect(findings[0].message).toContain('accont.signed_at');
   });
 
   it('is silent when the widget opts a bad dotted filter out entirely', () => {
     expect(validateWidgetBindings(dashboardDottedStack(
-      { dateRange: { field: 'acount.signed_at' } },
+      { dateRange: { field: 'accont.signed_at' } },
       { filterBindings: { dateRange: false } },
     ))).toEqual([]);
   });
@@ -945,7 +945,7 @@ describe('dashboard-filter-field-unknown — gap 1: dotted paths are resolved (#
   });
 
   it('takes skip 2 — an object with no readable field map is never reported', () => {
-    const s = dashboardDottedStack({ dateRange: { field: 'acount.signed_at' } });
+    const s = dashboardDottedStack({ dateRange: { field: 'accont.signed_at' } });
     delete (s.objects[0] as { fields?: unknown }).fields;
     expect(unknown(validateWidgetBindings(s))).toHaveLength(0);
   });
@@ -1054,7 +1054,7 @@ describe('dashboard-filter-field-unknown — gap 2: the PER-OBJECT injected set 
  * the same "this board cannot render" reference-integrity class.
  */
 describe('#14275 acceptance — the migrated branch gates `validate` AND `build`', () => {
-  const missing = dashboardDottedStack({ dateRange: { field: 'acount.signed_at' } });
+  const missing = dashboardDottedStack({ dateRange: { field: 'accont.signed_at' } });
   const unjoined = dashboardDottedStack({}, {}, { include: [] });
 
   for (const command of ['validate', 'build'] as const) {
