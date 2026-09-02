@@ -7,7 +7,7 @@ import {
   nearestName,
   CEL_STDLIB_FUNCTIONS,
 } from './validate';
-import { firstUndeclaredReference } from './cel-engine';
+import { buildEnv, firstUndeclaredReference } from './cel-engine';
 
 describe('validateExpression (ADR-0032)', () => {
   describe('predicates (CEL)', () => {
@@ -319,6 +319,154 @@ describe('validateExpression (ADR-0032)', () => {
       expect(message).toMatch(/SIZE fault, not a dialect mistake/);
       expect(message).toMatch(/Shrink it/);
       expect(message).not.toMatch(/NAME fault/);
+    });
+  });
+
+  // #14203 — the third leg of #7073 / #13821. A bare-callable stdlib name
+  // written as a METHOD (`record.name.upper()`) is refused correctly and then
+  // handed the dialect trailer, which cannot succeed: the source already IS
+  // bare CEL and parses fine. #13821's arm stays silent here by design — the
+  // name is right, so calling `upper` "not a callable name" would replace a
+  // useless sentence with a false one — which left this class with no
+  // prescription at all until now.
+  //
+  // The fence is catalog membership PLUS the environment's own record of the
+  // receiver form, never the call shape alone. Each negative below is one class
+  // that keying on shape alone would have swallowed, and the `upper(record.name)`
+  // control makes the pair a pair: the prescription this arm hands out has to
+  // type-check, or the repair is another sentence that cannot succeed.
+  describe('receiver call vs dialect: a bare-callable name written as a method (#14203)', () => {
+    const dialectTrailer = (role: 'predicate' | 'value') =>
+      ` — ${role}s are bare CEL (e.g. \`record.rating >= 4\`).`;
+
+    it.each([
+      { name: "the card's own shape", source: 'record.name.upper()', fn: 'upper', spelling: 'upper(record.name)' },
+      { name: 'a nested receiver chain', source: 'record.owner.name.lower()', fn: 'lower', spelling: 'lower(record.owner.name)' },
+      { name: 'a call inside a conjunction', source: "record.a == 1 && record.name.upper() == 'X'", fn: 'upper', spelling: 'upper(record.name)' },
+      { name: 'a non-string stdlib function', source: 'record.due.daysFromNow()', fn: 'daysFromNow', spelling: 'daysFromNow(record.due)' },
+    ])('prescribes the bare call assembled from the SOURCE — $name', ({ source, fn, spelling }) => {
+      const r = validateExpression('predicate', source);
+      expect(r.ok).toBe(false);
+      expect(r.errors).toHaveLength(1);
+      const { message } = r.errors[0];
+      // The front half — cel-js's own vocabulary, matching the runtime fault — is kept.
+      expect(message).toMatch(/^invalid CEL predicate: found no matching overload for /);
+      expect(message).toContain(`\`${fn}\` is callable bare, not as a method`);
+      expect(message).toMatch(/CALL-SHAPE fault, not a dialect mistake/);
+      // The spelling comes from the SOURCE: cel-js's message names the receiver's
+      // TYPE (`dyn.upper()`), so `record.name` exists nowhere in the fault text.
+      expect(message).toContain(`Write \`${spelling}\` instead.`);
+      // ⛔ The defect itself: the dialect trailer must NOT reach this class…
+      expect(message).not.toContain(dialectTrailer('predicate'));
+      expect(message).not.toMatch(/bare CEL/);
+      // …and this is not #13821's class, whose sentence would be false here.
+      expect(message).not.toMatch(/NAME fault/);
+    });
+
+    it('applies to the `value` role too — one producer, all ~10 slots', () => {
+      const r = validateExpression('value', 'record.name.lower()');
+      expect(r.ok).toBe(false);
+      expect(r.errors[0].message).toMatch(/^invalid CEL value:/);
+      expect(r.errors[0].message).toContain('Write `lower(record.name)` instead.');
+      expect(r.errors[0].message).not.toContain(dialectTrailer('value'));
+    });
+
+    // A prescription that cannot be DERIVED must not be invented — inventing one
+    // would repeat, one level up, the defect this card is about. The receiver
+    // still gets NAMED (the function and its call shape), just not spelled.
+    it.each([
+      { name: 'an indexed receiver', source: 'record.tags[0].upper()' },
+      { name: 'a parenthesised expression', source: '(record.a + record.b).upper()' },
+      { name: 'a string literal', source: "'literal'.upper()" },
+      { name: 'a chain that starts with an index — the near-miss', source: 'record.x[0].name.upper()' },
+    ])('falls back to the call SHAPE when the receiver is not a plain chain — $name', ({ source }) => {
+      const message = validateExpression('predicate', source).errors[0].message;
+      expect(message).toContain('`upper` is callable bare, not as a method');
+      expect(message).toContain('Write `upper(…)` with the receiver as its first argument instead.');
+      // ⛔ No fabricated spelling. `record.x[0].name.upper()` is the measured
+      // near-miss: `name` is a plain chain, and it is not the receiver.
+      expect(message).not.toMatch(/Write `[A-Za-z_$][\w$]*\([^…)]/);
+      expect(message).not.toContain(dialectTrailer('predicate'));
+    });
+
+    // The exclusion is MEASURED, not remembered. Catalog membership alone would
+    // answer `record.name.contains()` — an arity fault on a legitimate receiver
+    // call — with "write `contains(record.name)`", which faults just as hard.
+    it('pins the advertised names the environment ALSO registers as receiver methods', () => {
+      const definitions = (
+        buildEnv(() => new Date(0)) as unknown as {
+          getDefinitions(): { functions: Array<{ name: string; receiverType: string | null }> };
+        }
+      ).getDefinitions().functions;
+      const receiverRegistered = new Set(
+        definitions.filter((fn) => fn.receiverType != null).map((fn) => fn.name),
+      );
+      expect(
+        CEL_STDLIB_FUNCTIONS.filter((fn) => receiverRegistered.has(fn)).sort(),
+        'a name crossing this line moves it between the two classes below — ' +
+          'the arm keys on it, so re-derive both before making this green',
+      ).toEqual(['contains', 'endsWith', 'matches', 'size', 'startsWith', 'string', 'trim']);
+      // …and the arm's own class is real on the other side of the line.
+      expect(receiverRegistered.has('upper')).toBe(false);
+    });
+
+    // ⛔ Negative, class 1: what must stay VALID. `split`/`map`/`getFullYear`
+    // are correct ONLY after a dot, so they never reach this arm at all — and
+    // the last row proves the prescription itself type-checks.
+    it.each([
+      ["record.name.split(',')", 'a receiver-ONLY name, correctly written as a method'],
+      ['record.dates.map(d, d)', 'a comprehension macro'],
+      ['record.created.getFullYear()', 'a receiver-only date accessor'],
+      ["record.name.contains('x')", 'a BOTH-forms name, correctly written as a method'],
+      ['record.name.trim()', 'the same, with no arguments'],
+      ['upper(record.name)', 'THE PRESCRIPTION THIS ARM HANDS OUT — it must type-check'],
+    ])('%s stays valid and never reaches this arm (%s)', (source) => {
+      expect(validateExpression('predicate', source).ok).toBe(true);
+    });
+
+    // ⛔ Negative, class 2: a `type` fault this arm may not speak for keeps the
+    // trailer it has today, byte for byte.
+    it.each([
+      { name: 'a BOTH-forms name faulting on ARITY, not on shape', source: 'record.name.contains()' },
+      { name: 'the same for `startsWith`', source: 'record.name.startsWith()' },
+      { name: 'the same for `matches`', source: 'record.n.matches()' },
+      { name: 'a bare-callable name called BARE with wrong arguments', source: 'upper(1, 2)' },
+      { name: 'an operator type mismatch — no call in it at all', source: "1 + 'a'" },
+    ])('keeps the dialect trailer — $name', ({ source }) => {
+      const r = validateExpression('predicate', source);
+      expect(r.ok).toBe(false);
+      expect(r.errors[0].message).toContain(dialectTrailer('predicate'));
+      expect(r.errors[0].message).not.toMatch(/CALL-SHAPE fault/);
+    });
+
+    // ⛔ Negative, class 3: #13821's arm answers exactly the sources it answered
+    // before, in both call forms.
+    it.each([
+      { name: 'an unknown METHOD', source: 'record.name.nosuchmethod()', fn: 'nosuchmethod' },
+      { name: 'a receiver-only name used BARE', source: "split(record.name, ',')", fn: 'split' },
+      { name: 'an unknown bare name', source: 'nosuchfn(record.name)', fn: 'nosuchfn' },
+    ])("keeps #13821's unknown-name arm — $name", ({ source, fn }) => {
+      const message = validateExpression('predicate', source).errors[0].message;
+      expect(message).toContain(`\`${fn}\` is not a callable name here`);
+      expect(message).toMatch(/NAME fault, not a dialect mistake/);
+      expect(message).not.toMatch(/CALL-SHAPE fault/);
+    });
+
+    it('leaves the `bounds` prescription untouched — a class was routed, not the shared tail replaced', () => {
+      const overBudget = Array.from({ length: 80 }, (_, i) => `record.f${i} == ${i}`).join(' && ');
+      const message = validateExpression('predicate', overBudget).errors[0].message;
+      expect(message).toMatch(/SIZE fault, not a dialect mistake/);
+      expect(message).not.toMatch(/CALL-SHAPE fault/);
+    });
+
+    // ⛔ Same discipline as #13821's arm: what the catalog CONTAINS is being
+    // adjudicated separately, so a sentence asserting a count would be falsified
+    // by that ruling without failing here.
+    it('points at the callable set without asserting its size', () => {
+      const message = validateExpression('predicate', 'record.name.upper()').errors[0].message;
+      expect(message).toContain('`introspectScope`');
+      expect(message).toContain('`CEL_STDLIB_FUNCTIONS`');
+      expect(message).not.toMatch(/\b\d+\s+(?:functions|names|entries)\b/);
     });
   });
 

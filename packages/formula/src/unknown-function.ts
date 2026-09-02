@@ -48,6 +48,9 @@
  * with one template family: a bare call (`'totallyBogusFn(int, int)'`) and a
  * receiver call (`'dyn.nosuchmethod(string)'`). {@link NO_OVERLOAD_RE} takes the
  * segment immediately before the argument list, after any receiver-type prefix.
+ * Which of the two forms was written is a separate question, asked separately by
+ * {@link receiverCallNameFromNoOverload} — the existence verdict below is
+ * deliberately blind to it.
  *
  * ## What this deliberately does NOT report
  *
@@ -108,6 +111,36 @@ export function callNameFromNoOverload(message: string): string | undefined {
 }
 
 /**
+ * The RECEIVER spelling of {@link NO_OVERLOAD_RE}'s template family, with the
+ * receiver-type prefix REQUIRED instead of optional. Matches
+ * `found no matching overload for 'dyn.upper()'` and never the bare
+ * `…for 'upper(int, int)'`.
+ *
+ * The prefix class excludes the quote (and the newline) so it cannot reach past
+ * the closing `)'` — the same anchoring concern its sibling documents, since
+ * cel-js appends the author's own source, dots and all, on the following lines.
+ */
+const RECEIVER_NO_OVERLOAD_RE = /found no matching overload for '[^'\n]*[.]([A-Za-z_$][\w$]*)\(.*?\)'/;
+
+/**
+ * The METHOD name inside a receiver-form `found no matching overload for '…'`
+ * message (`'dyn.upper()'` → `upper`), or `undefined` when the message is any
+ * other shape — a bare call included.
+ *
+ * A sibling of {@link callNameFromNoOverload} rather than a flag on it: that
+ * function answers "which token did cel-js name?" for two consumers that must
+ * keep getting the same answer for both call forms, while this one answers a
+ * second, independent question — "was it written as a method?".
+ *
+ * The receiver segment cel-js prints is a TYPE (`dyn`, `string`,
+ * `list<dyn>`), never the author's own expression, so it is matched and
+ * discarded. A caller that wants to NAME the receiver has to read the source.
+ */
+export function receiverCallNameFromNoOverload(message: string): string | undefined {
+  return RECEIVER_NO_OVERLOAD_RE.exec(message)?.[1];
+}
+
+/**
  * Every function name the canonical evaluation environment registers — bare
  * callables (`upper(x)`) and receiver-only methods (`s.split(',')`) alike.
  *
@@ -121,16 +154,46 @@ export function callNameFromNoOverload(message: string): string | undefined {
  * names exist. The clock passed here is the same fixed instant `compile` uses
  * for its own parse-time environment, and is never called.
  */
-let registeredNames: ReadonlySet<string> | undefined;
+interface RegisteredNames {
+  /** Every registered name, whichever call form(s) it occupies. */
+  all: ReadonlySet<string>;
+  /** The subset registered as a receiver method, `x.fn()`. */
+  receiver: ReadonlySet<string>;
+}
 
-function registeredFunctionNames(): ReadonlySet<string> {
+let registeredNames: RegisteredNames | undefined;
+
+function registeredFunctionNames(): RegisteredNames {
   if (!registeredNames) {
     const env = buildEnv(() => new Date(0)) as unknown as {
-      getDefinitions(): { functions: Array<{ name: string }> };
+      getDefinitions(): { functions: Array<{ name: string; receiverType: string | null }> };
     };
-    registeredNames = new Set(env.getDefinitions().functions.map((fn) => fn.name));
+    const functions = env.getDefinitions().functions;
+    registeredNames = {
+      all: new Set(functions.map((fn) => fn.name)),
+      // `receiverType` is cel-js's own record of which call form a definition
+      // occupies: `null` for `fn(x)`, the receiver's type for `x.fn()`. A name
+      // can hold definitions of both kinds.
+      receiver: new Set(functions.filter((fn) => fn.receiverType != null).map((fn) => fn.name)),
+    };
   }
   return registeredNames;
+}
+
+/**
+ * Whether the evaluation environment registers `name` as a receiver method
+ * (`x.fn()`) — in ADDITION to a bare call, or instead of one.
+ *
+ * Exported because "the name is in the bare-callable catalog" does not imply
+ * "writing it after a dot is wrong": seven advertised names hold definitions of
+ * both kinds (`contains`, `endsWith`, `matches`, `size`, `startsWith`,
+ * `string`, `trim`; `validate.test.ts` pins the set). A consumer that
+ * prescribes a call SHAPE needs this second answer, or it tells the author of
+ * `record.name.contains()` — an arity fault on a legitimate receiver call — to
+ * rewrite into a bare call that faults just as hard.
+ */
+export function isReceiverRegistered(name: string): boolean {
+  return registeredFunctionNames().receiver.has(name);
 }
 
 /** A call to a name the evaluation environment does not register. */
@@ -174,6 +237,6 @@ export function firstUnknownFunctionCall(source: string): UnknownFunctionCall | 
   if (!name) return null;
   // Registered, so the fault is about the ARGUMENTS or the call position, not
   // about whether the name exists. Blind spot, deliberately (refinement 3).
-  if (registeredFunctionNames().has(name)) return null;
+  if (registeredFunctionNames().all.has(name)) return null;
   return { name, detail: compiled.error.message.split('\n')[0].trim() };
 }
