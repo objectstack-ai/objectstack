@@ -283,15 +283,25 @@ function makeStubEngine() {
 }
 
 /**
- * @param environmentId `'env_prod'` is an ordinary environment boot; passing
- * `undefined` is CONTROL-PLANE BOOTSTRAP mode, the topology whose reachability
- * §3 measures.
+ * @param mode `'environment'` is an ordinary environment boot;
+ * `'bootstrap'` leaves `environmentId` UNDEFINED — control-plane bootstrap,
+ * the topology whose reachability §3 measures.
+ *
+ * A NAMED mode rather than the `environmentId` itself, deliberately: a default
+ * parameter fires on an explicitly passed `undefined`, so a factory taking the
+ * id directly would have silently produced an environment boot for the very
+ * call meant to ask for bootstrap, and every bootstrap-mode case below would
+ * have measured the wrong topology. It did, on the first run — those cases
+ * answered 403 from the two-tier gate, which is §3's assertion, not §2's. The
+ * `expect` below is the second half of the fix: the harness now proves the
+ * topology it claims instead of assuming the constructor received it.
  */
-function makeProtocol(environmentId: string | undefined = 'env_prod') {
+function makeProtocol(mode: 'environment' | 'bootstrap' = 'environment') {
     const h = makeStubEngine();
     const protocol = new ObjectStackProtocolImplementation(
-        h.engine, () => new Map(), environmentId,
+        h.engine, () => new Map(), mode === 'bootstrap' ? undefined : 'env_prod',
     ) as any;
+    expect(protocol.environmentId).toBe(mode === 'bootstrap' ? undefined : 'env_prod');
     // The env-writable escape hatch (`OS_METADATA_WRITABLE`) turns
     // `isOverlayAllowed` true for any type it lists, which would move §3's
     // code-only type onto the REPOSITORY path and quietly change what is being
@@ -466,7 +476,7 @@ describe('[#14179] door 3 — deleteMetaItem’s legacy raw-engine exit', () => 
     it('announces the deletion it really performs', async () => {
         // Control-plane bootstrap: `environmentId === undefined` is the mode
         // §3 measures this branch to be confined to.
-        const { protocol, seen, engine, rows } = makeProtocol(undefined);
+        const { protocol, seen, engine, rows } = makeProtocol('bootstrap');
         await seedCodeOnlyRow(engine, 'api', 'legacy_endpoint');
         expect(rows.size).toBe(1);
 
@@ -482,7 +492,7 @@ describe('[#14179] door 3 — deleteMetaItem’s legacy raw-engine exit', () => 
     });
 
     it('carries the org scope the delete predicate used', async () => {
-        const { protocol, seen, engine } = makeProtocol(undefined);
+        const { protocol, seen, engine } = makeProtocol('bootstrap');
         await engine.insert('sys_metadata', {
             type: 'api', name: 'legacy_endpoint',
             organization_id: 'org_acme',
@@ -551,7 +561,7 @@ describe('[#14179] reachability: the legacy exit is confined to bootstrap mode',
     });
 
     it('a normal boot refuses a code-only delete before the branch — artifact-free limb', async () => {
-        const { protocol, seen, engine } = makeProtocol('env_prod');
+        const { protocol, seen, engine } = makeProtocol('environment');
         await engine.insert('sys_metadata', {
             type: 'api', name: 'legacy_endpoint',
             organization_id: null, package_id: null, state: 'active',
@@ -565,7 +575,7 @@ describe('[#14179] reachability: the legacy exit is confined to bootstrap mode',
     });
 
     it('a normal boot refuses a code-only delete before the branch — artifact-backed limb', async () => {
-        const { protocol, seen, engine, serveArtifact } = makeProtocol('env_prod');
+        const { protocol, seen, engine, serveArtifact } = makeProtocol('environment');
         serveArtifact('api', 'shipped_endpoint', { name: 'shipped_endpoint', _packageId: PKG });
         await engine.insert('sys_metadata', {
             type: 'api', name: 'shipped_endpoint',
@@ -586,7 +596,7 @@ describe('[#14179] reachability: the legacy exit is confined to bootstrap mode',
 
 describe('[#14179] the row-absent exits stay silent', () => {
     it('the legacy path’s miss deletes nothing and announces nothing', async () => {
-        const { protocol, seen } = makeProtocol(undefined);
+        const { protocol, seen } = makeProtocol('bootstrap');
 
         const res = await protocol.deleteMetaItem({ type: 'api', name: 'never_existed' });
 
