@@ -14,7 +14,7 @@ export { MetadataManager, type WatchCallback, type MetadataManagerOptions } from
 export { MetadataPlugin } from './plugin.js';
 
 // Loaders
-export { type MetadataLoader } from './loaders/loader-interface.js';
+export { type MetadataLoader, type MetadataKeyedItem } from './loaders/loader-interface.js';
 export { MemoryLoader } from './loaders/memory-loader.js';
 export { RemoteLoader } from './loaders/remote-loader.js';
 export { DatabaseLoader, type DatabaseLoaderOptions } from './loaders/database-loader.js';
