@@ -144,17 +144,9 @@ async start(ctx: PluginContext) {
 
 ## Well-Known Service Keys
 
-| Service Key | Plugin Name | Package |
-|:------------|:------------|:--------|
-| `objectql` (also `data`) | `com.objectstack.engine.objectql` | `@objectstack/objectql` |
-| `driver.*` | `com.objectstack.driver.*` | `@objectstack/driver-*` |
-| `auth` | `com.objectstack.auth` | `@objectstack/plugin-auth` |
-| `metadata` | `com.objectstack.metadata` | `@objectstack/metadata` |
-| `realtime` | `com.objectstack.service.realtime` | `@objectstack/service-realtime` |
-| `cache` | `com.objectstack.service.cache` | `@objectstack/service-cache` |
-
-The REST plugin (`com.objectstack.rest.api`, `@objectstack/rest`) registers
-**no** service — there is no `rest` service key.
+The full plugin-name -> service-key table (13 rows, including which plugins
+register no service at all) lives in
+[../SKILL.md](../SKILL.md#well-known-plugin-names--services).
 
 ## Core Fallback Injection
 
@@ -266,54 +258,3 @@ async start(ctx: PluginContext) {
   ctx.replaceService('cache', new RedisCache(oldCache));  // ✅ Explicit replacement
 }
 ```
-
-## Service Naming Conventions
-
-1. **Use lowercase, hyphen-separated names** — e.g., `db-pool`, `request-logger`
-2. **Use namespaces for multiple instances** — e.g., `driver.postgres`, `driver.mysql`
-3. **Use descriptive names** — e.g., `auth-service` not `as`
-4. **Avoid abbreviations** — e.g., `database` not `db` (unless well-known like `db-pool`)
-
-## Testing Service Registration
-
-```typescript
-import { describe, it, expect } from 'vitest';
-import { LiteKernel } from '@objectstack/core';
-import MyPlugin from './plugin';
-
-describe('Service Registration', () => {
-  it('registers service in init phase', async () => {
-    const kernel = new LiteKernel();
-    kernel.use(MyPlugin);
-    await kernel.bootstrap();
-
-    const service = kernel.getService('my-service');
-    expect(service).toBeDefined();
-    expect(service.name).toBe('MyService');
-
-    await kernel.shutdown();
-  });
-
-  it('throws when service not found', async () => {
-    const kernel = new LiteKernel();
-    await kernel.bootstrap();
-
-    expect(() => kernel.getService('non-existent')).toThrow();
-
-    await kernel.shutdown();
-  });
-});
-```
-
-## Best Practices
-
-1. **Register in init()** — All service registration in Phase 1
-2. **Consume in start()** — Use getService() only in Phase 2
-3. **Use try/catch for optional services** — Don't assume availability
-4. **Use descriptive service keys** — Clear, namespaced names
-5. **Declare dependencies** — Let kernel handle initialization order
-6. **Use factories for lazy init** — Defer expensive creation
-7. **Use scoped services for requests** — Request-specific contexts
-8. **Don't register null** — Register a real instance or factory
-9. **Use replaceService() explicitly** — Don't re-register
-10. **Document your services** — What they do, what they depend on

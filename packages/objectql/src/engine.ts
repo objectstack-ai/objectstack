@@ -10229,6 +10229,38 @@ export class ObjectQL implements IObjectQLEngine {
     return this.insert(object, rows, { ...(options ?? {}), __partialRowErrors: true } as any);
   }
 
+  /**
+   * Update one record by id, or every record a predicate selects.
+   *
+   * # The error contract on a unique violation (#14390)
+   *
+   * A driver's unique-constraint refusal leaves this door as the ADR-0112
+   * envelope `DuplicateRecordError` — `code: 'DUPLICATE_RECORD'`, `status: 409`,
+   * the driver's own error whole on `cause`, and `field` when the dialect
+   * determinably named the conflicting COLUMN — identically on every driver
+   * and on both driver exits (the by-id `driver.update` and the predicate
+   * `driver.updateMany`). It is the insert door's contract (#14095), one verb
+   * over: before this, the same user action answered `409 DUPLICATE_RECORD` on
+   * create and `500 INTERNAL_ERROR` on edit, because the raw driver error
+   * carried neither `code` nor `status` and the REST boundary sanitised it.
+   *
+   * A predicate write names no row. `field` is what `uniqueViolationColumn`
+   * reads off the driver's error; WHICH of the N matched rows conflicted is a
+   * question that error does not answer, and this door invents no answer to it
+   * (triage ruling, 2026-09-02: a fabricated row attribution is worse than an
+   * absent one).
+   *
+   * ⛔ Every other driver failure is rethrown UNCHANGED — a NOT NULL violation,
+   * a deadlock, a missing table, an unreachable store. The verdict is
+   * `isUniqueViolationError` (`@objectstack/types`), the one predicate the repo
+   * has for the question; this door adds no dialect knowledge of its own. The
+   * operator log line (`Update operation failed`) keeps carrying the driver's
+   * own diagnosis, read through the envelope's `cause`.
+   *
+   * The envelope sits on the two driver exits, not on the outer `catch`: that
+   * `catch` also sees the `afterUpdate` dispatch and the roll-up recompute, and
+   * a violation raised by a nested driver call in there is not this object's.
+   */
   async update(object: string, data: any, options?: EngineUpdateOptions & WriteObservabilityOptions): Promise<any> {
      object = this.resolveObjectName(object);
      this.logger.debug('Update operation starting', { object });
@@ -11156,7 +11188,22 @@ export class ObjectQL implements IObjectQLEngine {
                  updateSchema, hookContext.input.data as Record<string, unknown>,
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
                );
-               result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
+               // [#14390] The by-id driver exit — where a driver's refusal
+               // leaves this door, and where a recognised unique violation
+               // stops being the driver's error. `envelopeUniqueViolation`
+               // returns everything else untouched (a NOT NULL, a deadlock, a
+               // missing table, an unreachable store), so only the conflict
+               // changes shape; the contract is stated on `update()` above.
+               // Wrapped HERE rather than at the outer `catch` below, and
+               // deliberately: that `try` also encloses the `afterUpdate`
+               // dispatch and the roll-up recompute, so an envelope applied
+               // there would attribute a violation raised by a nested driver
+               // call inside a hook to THIS object.
+               try {
+                   result = await driver.update(object, hookContext.input.id as string, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
+               } catch (driverError) {
+                   throw envelopeUniqueViolation(driverError, object);
+               }
            } else {
                // [#6262] A bulk SET clause must not carry `id`. Reaching this
                // branch AT ALL means `resolveEngineUpdateDispatch` returned
@@ -11353,7 +11400,18 @@ export class ObjectQL implements IObjectQLEngine {
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
                );
                // `updateMany` presence is part of the ladder verdict resolved above.
-               result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
+               // [#14390] The predicate driver exit, enveloped on the same
+               // terms as the by-id exit above. A multi-row write names no
+               // row: `field` is whatever `uniqueViolationColumn` reads off
+               // the driver's error, and NOTHING is invented about which of
+               // the N matched rows conflicted — a fabricated row attribution
+               // is worse than an absent one (triage ruling, 2026-09-02),
+               // exactly as the composite-index case already behaves on insert.
+               try {
+                   result = await driver.updateMany!(object, ast, hookContext.input.data as Record<string, unknown>, hookContext.input.options as any);
+               } catch (driverError) {
+                   throw envelopeUniqueViolation(driverError, object);
+               }
                isPredicateWrite = true;
            }
 
@@ -11469,7 +11527,15 @@ export class ObjectQL implements IObjectQLEngine {
           // `set` clause exactly as an INSERT does in its `values` list. Same
           // redaction, same one argument — the message, the level and the
           // `object` are unchanged.
-          this.logger.error('Update operation failed', redactBoundStatement(e) as Error, { object });
+          //
+          // [#14390] …and, as on the insert door (#14095), the line still
+          // carries what the DATABASE said now that the caller receives an
+          // envelope: the platform logger serializes `message` and `stack`
+          // only, so logging the envelope would silently drop the failing
+          // column and the driver's own frames. The log takes the `cause`;
+          // `e` is what is rethrown one line down, unchanged.
+          const logged = e instanceof DuplicateRecordError ? e.cause : e;
+          this.logger.error('Update operation failed', redactBoundStatement(logged) as Error, { object });
           throw e;
        }
      });

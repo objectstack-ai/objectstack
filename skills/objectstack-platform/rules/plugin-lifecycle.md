@@ -107,11 +107,6 @@ async init(ctx: PluginContext) {
 }
 ```
 
-> Kernel hooks cover **platform lifecycle only**. Record-level lifecycle
-> (`beforeInsert` / `afterUpdate` / …) runs on the ObjectQL engine — there
-> are no `data:*` kernel events (a handler for one would silently never
-> fire). See **objectstack-data**.
-
 ## Phase 2: start() — Active Behavior
 
 **Purpose:** Execute business logic that requires all services to be available.
@@ -198,36 +193,12 @@ async start(ctx: PluginContext) {
 }
 ```
 
-### ❌ Incorrect — Using getService() in init() Without a Declared Dependency
+### Declaring a dependency before `getService()` in `init()`
 
-```typescript
-const CachePlugin: Plugin = {
-  name: 'com.example.cache',
-
-  async init(ctx: PluginContext) {
-    const db = ctx.getService('db-pool');  // ❌ May not exist yet
-    ctx.registerService('cache', new Cache(db));
-  },
-};
-```
-
-### ✅ Correct — Declare the Dependency, Then getService() in init() Is Safe
-
-```typescript
-const CachePlugin: Plugin = {
-  name: 'com.example.cache',
-  dependencies: ['com.example.db'],  // ✅ db plugin inits first
-
-  async init(ctx: PluginContext) {
-    const db = ctx.getService('db-pool');  // ✅ Guaranteed registered
-    ctx.registerService('cache', new Cache(db));
-  },
-};
-```
-
-Never register `null` as a placeholder: `registerService` throws on a
-duplicate key, so you can't re-register later, and `getService()` treats a
-falsy value as missing and throws anyway.
+`getService()` in `init()` is safe only for a plugin named in
+`dependencies`. The worked ❌/✅ pair, and why `null` is never a valid
+placeholder, are in
+[service-registry.md](./service-registry.md#incorrect-vs-correct).
 
 ### ❌ Incorrect — Missing destroy()
 
@@ -289,52 +260,3 @@ See the **Complete Plugin Example** (AuditPlugin) in
 plugin that registers a service in `init()`, subscribes to the
 `kernel:ready` / `metadata:reloaded` kernel events, and cleans up in
 `destroy()`.
-
-## Best Practices
-
-1. **Keep init() fast** — Only register services, don't do heavy work
-2. **Use start() for connections** — Database, network, external services
-3. **Always implement destroy()** — Release resources properly
-4. **Declare dependencies explicitly** — Don't assume service availability
-5. **Use try/catch in destroy()** — Cleanup should never throw
-6. **Check service availability** — Use try/catch or hasService() for optional services
-7. **Use ctx.logger** — Don't use console.log directly
-8. **Avoid circular dependencies** — Design for linear dependency graph
-9. **Version your plugin** — Use semantic versioning
-10. **Use reverse domain names** — e.g., `com.example.plugin-name`
-
-## Testing Lifecycle
-
-```typescript
-import { describe, it, expect } from 'vitest';
-import { LiteKernel } from '@objectstack/core';
-import MyPlugin from './plugin';
-
-describe('MyPlugin Lifecycle', () => {
-  it('registers service in init phase', async () => {
-    const kernel = new LiteKernel({ logger: { level: 'silent' } });
-    kernel.use(MyPlugin);
-    await kernel.bootstrap();
-
-    const service = kernel.getService('my-service');
-    expect(service).toBeDefined();
-
-    await kernel.shutdown();
-  });
-
-  it('cleans up in destroy phase', async () => {
-    const kernel = new LiteKernel();
-    kernel.use(MyPlugin);
-    await kernel.bootstrap();
-
-    // Verify resource is created
-    const service = kernel.getService('my-service');
-    expect(service.isConnected()).toBe(true);
-
-    await kernel.shutdown();
-
-    // Verify resource is cleaned up
-    expect(service.isConnected()).toBe(false);
-  });
-});
-```
