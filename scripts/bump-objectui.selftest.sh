@@ -28,10 +28,32 @@
 # all the way through and assert the pin MOVES (and that an already-current pin
 # is left alone). A guard that refuses everything fails them.
 #
-# Offline, no node, no network: throwaway git repos under `mktemp -d`, and the
-# script under test is exercised as a byte copy inside a throwaway FRAMEWORK_ROOT
-# (the real one is derived from `${BASH_SOURCE[0]}/..`, so a copy is the only way
-# to run it without writing into this repo's own `.objectui-sha`).
+# CASE 5 PINS A SECOND, NARROWER REFUSAL (#14393): the range can WALK
+# COMPLETELY (every commit and tree object present) and the bump still must
+# refuse, because the changeset BLOB the digest needs to derive a bump level is
+# unreadable at both revisions. This is not the #9408/#14178 shape above — the
+# discriminator is `RANGE_OK`, settled by the commit/tree walk alone — so this
+# case builds a real objectui changeset commit and deletes only its blob
+# object, then asserts `--check-walkable` still exits 0 on the broken tree
+# before asserting the bump itself refuses. This bump used to emit a degraded
+# `patch` changeset here instead (silently, exit 0) — see the reproduction log
+# in the #14393 PR body for the byte-for-byte before/after.
+#
+# Cases 1-4 stay offline, no node, no network: throwaway git repos under
+# `mktemp -d`, and the script under test is exercised as a byte copy inside a
+# throwaway FRAMEWORK_ROOT (the real one is derived from `${BASH_SOURCE[0]}/..`,
+# so a copy is the only way to run it without writing into this repo's own
+# `.objectui-sha`). Case 5 additionally needs node, offline still: it drives
+# the real `objectui-changeset-digest.mjs` (a byte copy, like the script under
+# test) through a throwaway objectui repo with a real changeset commit.
+#
+# dispatch-gates: no-path-population -- every path this file writes or reads
+# lives inside a disposable checkout under mktemp -d (a throwaway objectui and
+# a throwaway FRAMEWORK_ROOT, both destroyed by the EXIT trap below), so no
+# quoted literal in this file names a path this repo tracks. Case 5's fixture
+# changeset filename is assembled from CHANGESET_NAME by interpolation
+# everywhere it is used, deliberately never spelled as one bare quoted token,
+# so it does not read as a declared population here either.
 
 set -euo pipefail
 
@@ -53,6 +75,20 @@ CASE=""
 ok()   { echo "    ✓ $*"; PASSED=$((PASSED + 1)); }
 bad()  { echo "    ✗ $*" >&2; FAILED=$((FAILED + 1)); }
 case_begin() { CASE="$1"; echo "  • ${CASE}"; }
+
+# case_5 additionally needs a copy of the digest script `bump-objectui.sh`
+# calls and the `isEntrypoint` helper it imports, alongside the script under
+# test — mirroring `objectui-changeset-digest.mjs`'s own self-test fixtures
+# (which copy the same trio for the same reason).
+DIGEST_SCRIPT="${SCRIPT_DIR}/objectui-changeset-digest.mjs"
+INVOKED_AS_SCRIPT="${SCRIPT_DIR}/invoked-as.mjs"
+
+# Case 5's fixture changeset BASENAME — interpolated into a changeset path
+# everywhere it is used, never spelled as one bare path literal: that path
+# lives only inside a disposable objectui checkout under mktemp -d and names
+# no file this repo tracks, so a literal quoted token would be misread as a
+# declared population by check-declared-population-live.
+CHANGESET_NAME='widget-refresh'
 
 # --- fixtures ----------------------------------------------------------------
 
@@ -84,6 +120,76 @@ new_framework() {
   mkdir -p "${d}/scripts" "${d}/.changeset"
   cp "$UNDER_TEST" "${d}/scripts/bump-objectui.sh"
   if [[ -n "$pin" ]]; then printf '%s\n' "$pin" > "${d}/.objectui-sha"; fi
+}
+
+# Same, plus a byte copy of the digest script `bump-objectui.sh` shells out to
+# and the `invoked-as.mjs` helper it imports — needed only by cases that do NOT
+# pass `--no-changeset` and so actually reach the changeset section.
+new_framework_with_digest() {
+  local d="$1" pin="${2-}"
+  new_framework "$d" "$pin"
+  cp "$DIGEST_SCRIPT" "${d}/scripts/objectui-changeset-digest.mjs"
+  cp "$INVOKED_AS_SCRIPT" "${d}/scripts/invoked-as.mjs"
+}
+
+# A throwaway objectui repo with a REAL changeset commit — commit A (the
+# previous pin), commit B adding `.changeset/<name>.md` declaring a real
+# package/level, so the range A..B WALKS COMPLETELY and the digest has a real
+# blob to read (#14393). Prints "OLD_SHA NEW_SHA" on stdout.
+new_objectui_with_changeset() {
+  local d="$1"
+  mkdir -p "$d"
+  git -C "$d" init -q
+  git -C "$d" symbolic-ref HEAD refs/heads/main
+  git -C "$d" config user.email 'selftest@example.invalid'
+  git -C "$d" config user.name 'selftest'
+  git -C "$d" config commit.gpgsign false
+  git -C "$d" config gc.auto 0
+  git -C "$d" config core.commitGraph false
+  git -C "$d" config fetch.writeCommitGraph false
+  git -C "$d" commit -q --allow-empty -m 'feat(console): the previous pin'
+  local old_sha
+  old_sha="$(git -C "$d" rev-parse HEAD)"
+  mkdir -p "${d}/.changeset"
+  cat > "${d}/.changeset/${CHANGESET_NAME}.md" <<'EOF'
+---
+"@object-ui/core": minor
+---
+
+Refresh the widget palette.
+EOF
+  git -C "$d" add ".changeset/${CHANGESET_NAME}.md"
+  git -C "$d" commit -q -m 'feat(core): refresh the widget palette'
+  local new_sha
+  new_sha="$(git -C "$d" rev-parse HEAD)"
+  git -C "$d" update-ref refs/remotes/origin/main HEAD
+  printf '%s %s\n' "$old_sha" "$new_sha"
+}
+
+# Delete the changeset blob added at `sha` under `path` from the object store,
+# then PROVE it is gone — same discipline as `break_commit_object`, one layer
+# further in (a blob, not a commit object). `--check-walkable` walks commits
+# and trees, never blobs, so this leaves the range walk green (asserted by the
+# caller) while making `readAt` fail at BOTH `to` and the commit that added it
+# — `to` and `sha` are the SAME commit in this fixture (the changeset is read
+# at the tip that added it, before any release consumes it), so a single
+# deleted blob object answers both reads identically.
+break_changeset_blob() {
+  local d="$1" sha="$2" path="$3"
+  local blob
+  blob="$(git -C "$d" rev-parse "${sha}:${path}")"
+  local loose="${d}/.git/objects/${blob:0:2}/${blob:2}"
+  if [[ ! -f "$loose" ]]; then
+    bad "fixture: expected a loose blob object at ${loose}, found none (packed already?)"
+    return 1
+  fi
+  rm -f "$loose"
+  if git -C "$d" cat-file -e "$blob" 2>/dev/null; then
+    bad "fixture: blob ${blob:0:12} is still readable after deleting it"
+    return 1
+  fi
+  printf '%s\n' "$blob"
+  return 0
 }
 
 # Delete a commit object from the store, then PROVE it is gone. A fixture that
@@ -243,15 +349,89 @@ case_4() {
   fi
 }
 
+# --- case 5: range WALKS, changeset blob unreadable at both revisions -------
+# (#14393.) Discriminator from case 1/2: the COMMIT object is fully readable
+# and the range walks completely — only the changeset BLOB the digest needs to
+# derive a level is gone. Discriminator from the initial-pin degrade (which
+# this file does not otherwise exercise): there IS a previous SHA and the
+# range DOES walk, so a level was derivable in principle and the derivation
+# failed rather than never having an input.
+case_5() {
+  case_begin 'range walks, changeset blob unreadable at both revisions ⇒ refuses, .objectui-sha byte-identical'
+  local fw="${TMPROOT}/c5/fw" oui="${TMPROOT}/c5/objectui"
+  local shas old_sha new_sha
+  shas="$(new_objectui_with_changeset "$oui")"
+  old_sha="${shas%% *}"
+  new_sha="${shas##* }"
+  new_framework_with_digest "$fw" "$old_sha"
+
+  local walk_rc=0
+  node "$DIGEST_SCRIPT" --objectui-root "$oui" --from "$old_sha" --to "$new_sha" \
+    --check-walkable >/dev/null 2>&1 || walk_rc=$?
+  if [[ "$walk_rc" -ne 0 ]]; then
+    bad "fixture: the range does not walk BEFORE breaking the blob (rc=${walk_rc}) — not this card's state"
+    return 0
+  fi
+
+  break_changeset_blob "$oui" "$new_sha" ".changeset/${CHANGESET_NAME}.md" >/dev/null || return 0
+
+  # Re-assert walkability AFTER breaking the blob — the whole point of this
+  # case is that the commit/tree walk stays green while the blob read fails.
+  walk_rc=0
+  node "$DIGEST_SCRIPT" --objectui-root "$oui" --from "$old_sha" --to "$new_sha" \
+    --check-walkable >/dev/null 2>&1 || walk_rc=$?
+  if [[ "$walk_rc" -eq 0 ]]; then
+    ok 'fixture: --check-walkable still exits 0 after the blob is deleted (walk is commits/trees, not blobs)'
+  else
+    bad "fixture: --check-walkable now exits ${walk_rc} — the blob deletion broke the WALK, not just the blob read"
+    return 0
+  fi
+
+  cp "${fw}/.objectui-sha" "${TMPROOT}/c5.before"
+  run_bump "$fw" "$oui" --no-commit "$new_sha"
+
+  if [[ "$EC" -eq 0 ]]; then
+    bad "expected a non-zero exit, got 0 — the bump did not refuse"
+  else
+    ok "refused (exit ${EC})"
+  fi
+  if cmp -s "${TMPROOT}/c5.before" "${fw}/.objectui-sha"; then
+    ok ".objectui-sha is byte-identical to before the run"
+  else
+    bad ".objectui-sha CHANGED — half-applied state: $(cat "${fw}/.objectui-sha")"
+  fi
+  if log_has 'REFUSING to bump'; then
+    ok 'the refusal names itself'
+  else
+    bad "no 'REFUSING to bump' in the output; got: $(tail -10 "$LOG" | tr '\n' '|')"
+  fi
+  if log_has 'walks'; then
+    ok 'the refusal says the range WALKS (the discriminator from the unwalkable-range refusal)'
+  else
+    bad "the refusal does not say the range walks: $(tail -10 "$LOG" | tr '\n' '|')"
+  fi
+  if log_has 'NOTHING WAS WRITTEN'; then
+    ok 'the message states that nothing was written'
+  else
+    bad "the refusal does not tell the operator the tree is clean"
+  fi
+  if [[ ! -e "${fw}/.changeset/console-${new_sha:0:12}.md" ]]; then
+    ok 'no changeset was emitted'
+  else
+    bad 'a changeset was emitted for a range whose derivation failed'
+  fi
+}
+
 echo "bump-objectui.sh self-test — write-ordering invariant (#10797)"
 case_1
 case_2
 case_3
 case_4
+case_5
 
 echo
 if [[ "$FAILED" -gt 0 ]]; then
   echo "✗ bump-objectui self-test FAILED — ${FAILED} assertion(s) failed, ${PASSED} passed." >&2
   exit 1
 fi
-echo "✓ bump-objectui self-test PASSED — ${PASSED} assertions across 4 cases."
+echo "✓ bump-objectui self-test PASSED — ${PASSED} assertions across 5 cases."

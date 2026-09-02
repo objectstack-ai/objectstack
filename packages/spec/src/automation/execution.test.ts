@@ -94,6 +94,27 @@ describe('ExecutionStepLogSchema', () => {
       startedAt: '2026-02-01T10:00:00Z',
     })).toThrow(); // missing status
   });
+
+  it('a step inside a try/catch region nested in a loop body carries the enclosing loop iteration with regionKind still `try`', () => {
+    // `loop { body: [ try_catch { try, catch } ] }` — the containment spelling
+    // for a per-iteration failure that must not end the sweep. The try region
+    // has no index of its own, so `iteration` is the LOOP's; `regionKind`
+    // keeps naming the region that ran the step. Both at once is what makes a
+    // caught per-row failure attributable to its row.
+    const step = ExecutionStepLogSchema.parse({
+      nodeId: 'charge',
+      nodeType: 'http',
+      status: 'failure',
+      startedAt: '2026-01-01T00:00:00Z',
+      parentNodeId: 'guard',
+      regionKind: 'try',
+      iteration: 3,
+      error: { code: 'NODE_FAILURE', message: 'card declined' },
+    });
+    expect(step.parentNodeId).toBe('guard');
+    expect(step.regionKind).toBe('try');
+    expect(step.iteration).toBe(3);
+  });
 });
 
 // ==========================================
@@ -229,6 +250,38 @@ describe('FlowRunSummarySchema', () => {
     // effects at all; defaulting it to 0 would tell an operator "fully
     // measured" about a run nobody measured.
     expect(FlowRunSummarySchema.parse(brokenSweep).unmeasured).toBeUndefined();
+  });
+
+  it('carries the contained-failure count a green run hides, folded from `nodes[].failures`', () => {
+    // `loop { body: [ try_catch { try, catch } ] }` over five rows, two
+    // caught: the run COMPLETED, and `failed` is the only run-level number
+    // that says two rows were lost. It is the per-node counter folded — the
+    // same `runs`/`failures` a try-region node has always reported — so the
+    // run-level count can never disagree with the per-node breakdown.
+    const summary = FlowRunSummarySchema.parse({
+      selected: 5, acted: 5, skipped: 0, failed: 2,
+      nodes: [
+        { nodeId: 'charge', nodeType: 'update_record', status: 'failure' as const, runs: 5, failures: 2, skipped: 0, acted: 3 },
+        { nodeId: 'flag', nodeType: 'create_record', status: 'success' as const, runs: 2, failures: 0, skipped: 0, acted: 2 },
+      ],
+      gates: [],
+    });
+    expect(summary.failed).toBe(2);
+    expect(summary.failed).toBe(summary.nodes.reduce((sum, node) => sum + node.failures, 0));
+  });
+
+  it('leaves `failed` absent on a run that never tracked it — absent is not zero, and is not defaulted', () => {
+    // Same convention as `unmeasured`: a run recorded before the field existed
+    // did not count contained failures, and a `0` here would tell an operator
+    // "nothing failed" about a run nobody measured.
+    const summary = FlowRunSummarySchema.parse(brokenSweep);
+    expect(summary.failed).toBeUndefined();
+    expect(Object.keys(summary)).not.toContain('failed');
+  });
+
+  it('rejects a negative or fractional `failed`', () => {
+    expect(() => FlowRunSummarySchema.parse({ ...brokenSweep, failed: -1 })).toThrow();
+    expect(() => FlowRunSummarySchema.parse({ ...brokenSweep, failed: 1.5 })).toThrow();
   });
 
   it('rides on an execution log', () => {
