@@ -42,6 +42,19 @@ const forbiddenTokenHook = {
   },
 };
 
+// [#14301] A global the NODE HOST provides and the sandbox does not. Reads as
+// self-contained — `Intl` is standard in every browser and in Node — which is
+// precisely why it is the ACCIDENTAL class and not the structural one.
+const nodeOnlyGlobalHook = {
+  name: 'stamp_due_label',
+  object: 'task',
+  events: ['beforeInsert'],
+  handler: (ctx: any) => {
+    const f = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC' });
+    ctx.input.due_label = f.format(new Date(ctx.input.due_at));
+  },
+};
+
 const selfContainedHook = {
   name: 'normalize_name',
   object: 'account',
@@ -89,6 +102,41 @@ describe('checkHookBodyLowering', () => {
     // Says what actually changed. "no behavior change" is true of behaviour and
     // false of deployment shape, which is the whole defect.
     expect(issues[0].message).toContain('deployment shape');
+  });
+
+  describe('a host global the sandbox lacks is the ACCIDENTAL class (#14301)', () => {
+    it('reports it as an ERROR under the not-lowerable rule', () => {
+      const issues = checkHookBodyLowering({ hooks: [nodeOnlyGlobalHook] });
+
+      expect(issues).toHaveLength(1);
+      expect(issues[0].severity).toBe('error');
+      expect(issues[0].rule).toBe(NOT_LOWERABLE_RULE);
+      expect(issues[0].path).toBe('hooks[0].handler');
+      expect(issues[0].message).toContain("hook 'stamp_due_label'");
+      expect(issues[0].message).toContain('Intl');
+      expect(issues[0].message).toContain('deployment shape');
+    });
+
+    it('prints the remedy that is POSSIBLE, not the inline one', () => {
+      // The wrong-remedy failure is worse than none: there is nothing to inline
+      // `Intl` from, so an author (or a code-writing model) told to inline it
+      // lands on a second broken shape. The remedy sentence is chosen from the
+      // refusal's own `nodeOnlyIdentifiers`, never re-derived here.
+      const [issue] = checkHookBodyLowering({ hooks: [nodeOnlyGlobalHook] });
+      expect(issue.message).toContain('provided by the Node host');
+      expect(issue.message).toContain('cannot be inlined');
+      expect(issue.message).toContain('string handler ref');
+      expect(issue.message).toContain('validation rule');
+      expect(issue.message).not.toContain('Inline the value(s) into the handler');
+    });
+
+    it('leaves the module-scope remedy exactly as it was', () => {
+      // The reverse leg: the #13651 sentence must not have been rewritten for
+      // every author by a branch added for one new sub-case.
+      const [issue] = checkHookBodyLowering({ hooks: [freeIdentifierHook] });
+      expect(issue.message).toContain('Inline the value(s) into the handler, or reach them through `ctx`.');
+      expect(issue.message).not.toContain('provided by the Node host');
+    });
   });
 
   it('keeps the STRUCTURAL refusal a warning — the bundle is its designed answer', () => {

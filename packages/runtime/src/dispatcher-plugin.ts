@@ -1,9 +1,9 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext, IHttpServer, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
-import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, serverFaultProvenance, demotedDeclaredCode } from '@objectstack/types';
+import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, serverFaultProvenance, demotedDeclaredCode, logServerFault, describeFaultRequest } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
-import type { IAuthService, IMetadataService } from '@objectstack/spec/contracts';
+import type { IAuthService, IMetadataService, Logger } from '@objectstack/spec/contracts';
 import type { CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
 import { HttpDispatcher, HttpDispatcherResult, type HttpProtocolContext } from './http-dispatcher.js';
 import { isServiceServeable } from './service-serveable.js';
@@ -184,6 +184,23 @@ interface RouteDefinition {
 }
 
 /**
+ * [#14310] What the two response exits need in order to make a 5xx loud: the
+ * kernel logger to write to, and the request whose coordinates the line
+ * carries.
+ *
+ * Threaded as one optional bag rather than two positional parameters because
+ * both exits are called from ~50 route handlers through the locally-shadowed
+ * `sendResult` / `errorResponse` wrappers — the bag lets those wrappers bind
+ * the logger once at `start()` and add only the per-request half at the call
+ * site. Optional throughout: a caller that supplies nothing still gets the
+ * line, on `console.error`, which is the property this issue is about.
+ */
+interface DispatcherFaultLogContext {
+    logger?: Logger;
+    req?: unknown;
+}
+
+/**
  * Register a single RouteDefinition on the HTTP server.
  * Returns true if the route was successfully registered.
  */
@@ -193,6 +210,7 @@ function mountRouteOnServer(
     routePath: string,
     securityHeaders?: Record<string, string>,
     resolveUser?: (headers: Record<string, any>) => Promise<any | undefined>,
+    faultLogger?: Logger,
 ): boolean {
     const handler = async (req: any, res: any) => {
         try {
@@ -293,6 +311,23 @@ function mountRouteOnServer(
                     res.send(buffered);
                 }
             } else {
+                // [#14310] This family writes its own result rather than going
+                // through `sendResultBase`, so it owes the same 5xx line. A
+                // declared fault here carries no throw — the envelope's own
+                // message is what there is to print.
+                logServerFault(
+                    {
+                        status: result.status,
+                        ...(typeof result.body?.error?.message === 'string'
+                            ? { message: result.body.error.message }
+                            : {}),
+                        ...(typeof result.body?.error?.code === 'string'
+                            ? { code: result.body.error.code }
+                            : {}),
+                        request: describeFaultRequest(req),
+                    },
+                    faultLogger,
+                );
                 res.status(result.status);
                 if (securityHeaders) {
                     for (const [k, v] of Object.entries(securityHeaders)) {
@@ -306,7 +341,7 @@ function mountRouteOnServer(
                 }
             }
         } catch (err: any) {
-            errorResponseBase(err, res, securityHeaders);
+            errorResponseBase(err, res, securityHeaders, { logger: faultLogger, req });
         }
     };
 
@@ -339,7 +374,33 @@ function sendResultBase(
     result: HttpDispatcherResult,
     res: any,
     securityHeaders?: Record<string, string>,
+    fault?: DispatcherFaultLogContext,
 ): void {
+    // [#14310] The RETURNED exit's half. This is the path the card was filed
+    // on: every `/packages` handler catches its own fault and answers
+    // `deps.errorFromThrown(e, 500)`, so nothing is ever thrown past here —
+    // `errorResponseBase` is not reached, `__obsRecordedError` is never set,
+    // and the 500 left no trace of any kind.
+    //
+    // The original throw is already unwound by the time the envelope arrives,
+    // so this line carries the envelope's own `code` and `message` rather than
+    // a stack. That is not a shortfall to fix by threading the error down: a
+    // 5xx message is withheld from the WIRE (#3867), not from this process, so
+    // `deps.error`'s pre-sanitisation text is what the door resolved and the
+    // code is what a search keys on. The stack-bearing line is the thrown
+    // exit's, one function up.
+    if (result.handled && result.response) {
+        const body = result.response.body as { error?: { code?: unknown; message?: unknown } } | undefined;
+        logServerFault(
+            {
+                status: result.response.status,
+                ...(typeof body?.error?.code === 'string' ? { code: body.error.code } : {}),
+                ...(typeof body?.error?.message === 'string' ? { message: body.error.message } : {}),
+                request: describeFaultRequest(fault?.req ?? (res as any)?.__obsRequest),
+            },
+            fault?.logger,
+        );
+    }
     const applySecurityHeaders = () => {
         if (!securityHeaders) return;
         for (const [k, v] of Object.entries(securityHeaders)) {
@@ -575,12 +636,31 @@ function sendResultBase(
  * asserts the code at `error.code` against a real `AnalyticsService` on a real
  * mounted route.
  */
-function errorResponseBase(err: any, res: any, securityHeaders?: Record<string, string>): void {
+function errorResponseBase(
+    err: any,
+    res: any,
+    securityHeaders?: Record<string, string>,
+    fault?: DispatcherFaultLogContext,
+): void {
     const validation = validationFailureDetails(err);
     const httpStatus =
         (typeof err?.status === 'number' ? err.status : undefined) ??
         (typeof err?.statusCode === 'number' ? err.statusCode : undefined) ??
         (validation ? VALIDATION_FAILED_STATUS : 500);
+    // [#14310] The THROWN exit's half of "a 5xx is never silent". The
+    // `__obsRecordedError` side-channel below hands the same error to
+    // `errorReporter`, which is NOT a substitute: it defaults to
+    // `NoopErrorReporter`, so on a dev server — the surface an operator
+    // actually watches — the fault reached nobody. `logServerFault` owns the
+    // 5xx test, so a 4xx refusal answered here still costs no line.
+    logServerFault(
+        {
+            status: httpStatus,
+            error: err,
+            request: describeFaultRequest(fault?.req ?? (res as any)?.__obsRequest),
+        },
+        fault?.logger,
+    );
     res.status(httpStatus);
     if (securityHeaders) {
         for (const [k, v] of Object.entries(securityHeaders)) {
@@ -820,10 +900,14 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // `errorResponse(...)` call below picks these up via lexical
             // scope, so the 50+ route handlers don't need to thread the
             // security headers through manually.
+            // [#14310] The fault logger is bound ONCE here, so every route's
+            // `sendResult(...)` / `errorResponse(...)` call is unchanged and
+            // still gets a loud 5xx. The per-request half rides the
+            // `res.__obsRequest` side-channel the instrument wrapper parks.
             const sendResult = (result: HttpDispatcherResult, res: any) =>
-                sendResultBase(result, res, securityHeaders);
+                sendResultBase(result, res, securityHeaders, { logger: ctx.logger });
             const errorResponse = (err: any, res: any) =>
-                errorResponseBase(err, res, securityHeaders);
+                errorResponseBase(err, res, securityHeaders, { logger: ctx.logger });
 
             // ── Observability ──────────────────────────────────────────
             // Noop defaults; production hosts inject real adapters.
@@ -1909,11 +1993,11 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 let count = 0;
                 if (enableProjectScoping && projectResolution === 'required') {
-                    if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders, resolveRequestUser)) count++;
+                    if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders, resolveRequestUser, ctx.logger)) count++;
                 } else {
-                    if (mountRouteOnServer(route, server, routePath, securityHeaders, resolveRequestUser)) count++;
+                    if (mountRouteOnServer(route, server, routePath, securityHeaders, resolveRequestUser, ctx.logger)) count++;
                     if (enableProjectScoping) {
-                        if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders, resolveRequestUser)) count++;
+                        if (mountRouteOnServer(route, server, toScopedPath(routePath), securityHeaders, resolveRequestUser, ctx.logger)) count++;
                     }
                 }
                 return count;
