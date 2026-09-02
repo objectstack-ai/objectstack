@@ -324,21 +324,6 @@ workflows at `os i18n check` / `os lint --i18n-strict` instead.
 
 ---
 
-## AI-Powered Translation Suggestions
-
-`II18nService.suggestTranslations(locale, items)` is an optional contract method
-that enriches diff items with `aiSuggested` / `aiConfidence`. It is
-**contract-only today**: no shipped adapter implements it, and there is no CLI
-command for it. Implement it on a custom adapter to integrate:
-
-- Translation Management Systems (TMS) like Phrase, Crowdin, Lokalise
-- Machine translation APIs (Google Translate, DeepL)
-- Internal translation memory databases
-
-> **Best Practice:** Review and approve machine suggestions before committing them.
-
----
-
 ## Integration with II18nService
 
 ### Service Contract
@@ -418,22 +403,10 @@ Commit the translation files, import them into your bundle, and register it via
 
 ---
 
-## CRM I18n Blueprint
+## Shipped examples
 
-`examples/app-crm` ships the bundled layout (one `crm.translation.ts`, `en` +
-`zh-CN`); `examples/app-todo` the per-locale one (`{en,zh-CN,ja-JP}.ts` + `index.ts`).
-
-Use this structure for metadata apps:
-
-| Layer | CRM Pattern |
-|:--|:--|
-| Stack config | `i18n` with an explicit locale list; the source layout is a convention |
-| Translation assembly | One `defineTranslationBundle` call — inline locales, or importing per-locale files |
-| Locale content | Object-scoped translations (`objects.crm_account.fields.*`, `_views`, `_actions`) + global app/messages |
-| Naming integrity | Translation object/field keys exactly match metadata machine names |
-
-For new locales, copy one locale file as a baseline, then run `os i18n check`
-before release.
+`examples/app-crm` — the bundled layout (one `crm.translation.ts`, `en` + `zh-CN`).
+`examples/app-todo` — the per-locale layout (`{en,zh-CN,ja-JP}.ts` + `index.ts`).
 
 ---
 
@@ -456,38 +429,6 @@ Same rule for its sibling keys: `app` → `apps`, `nav` →
 `apps.<app>.navigation.<id>.label`, `dashboard` → `dashboards`,
 `_globalOptions` → `objects.<obj>.fields.<field>.options`, `_meta.locale` →
 top-level `locale`, and `_actions.confirmMessage` → `_actions.confirmText`.
-
-### ❌ Mismatched Object Names
-
-Translation keys must match metadata exactly:
-
-```typescript
-// Metadata
-{ name: 'project_task' }
-
-// Translation (WRONG)
-{ objects: { projectTask: { label: '项目任务' } } }
-
-// Translation (CORRECT)
-{ objects: { project_task: { label: '项目任务' } } }
-```
-
-### ❌ Hardcoded Option Values
-
-Always use lowercase machine values for options:
-
-```typescript
-// Metadata
-options: [
-  { value: 'in_progress', label: 'In Progress' },
-]
-
-// Translation (WRONG)
-options: { 'In Progress': '进行中' }
-
-// Translation (CORRECT)
-options: { in_progress: '进行中' }
-```
 
 ### ❌ Ignoring Coverage Reports
 
