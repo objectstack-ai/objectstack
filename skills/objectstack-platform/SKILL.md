@@ -434,27 +434,36 @@ mode-dependent — dev hops to the next free port, production fails loudly. See
 ### `requires:` — which service plugins boot
 
 Step 4's list is the fixed core. Every other service plugin is opt-in, and
-`requires: [...]` on the stack root is what turns it on — the CLI expands each
-token through its `CAPABILITY_PROVIDERS` registry
-(`packages/cli/src/commands/serve.ts`):
+`requires: [...]` on the stack root is what turns it on. The CLI expands each
+token through the `CAPABILITY_PROVIDERS` registry in
+`packages/cli/src/commands/serve.ts` — all 20 of its entries:
 
 | Token | Provider package |
 |:--|:--|
-| `automation` | `@objectstack/service-automation` (flows, and any declarative `connectors:` entry) |
-| `analytics` · `audit` · `cache` | `@objectstack/service-analytics` / `-audit` / `service-cache` |
-| `storage` · `queue` · `job` | `@objectstack/service-storage` / `-queue` / `-job` |
-| `messaging` · `email` · `sms` | `@objectstack/service-messaging` / `plugin-email` / `service-sms` |
-| `triggers` · `realtime` · `mcp` | `@objectstack/service-triggers` / `-realtime` / `mcp` |
+| `automation` | `@objectstack/service-automation` — flows, and any declarative `connectors:` entry |
+| `analytics` `cache` `storage` `queue` `job` `messaging` `realtime` `settings` `sms` | `@objectstack/service-` + the token |
 | `marketplace` | `@objectstack/service-package` |
+| `audit` `email` `sharing` `reports` `approvals` `webhooks` | `@objectstack/plugin-` + the token |
+| `pinyin-search` | `@objectstack/plugin-pinyin-search` |
+| `mcp` | `@objectstack/mcp` |
+| `triggers` | `@objectstack/trigger-record-change`, plus `trigger-schedule` and `trigger-api`. **Pair it with `job`** — schedule and time-relative triggers run on the job service |
 
-Tier-gated tokens (`ai`, `ai-studio`, `i18n`, `ui`, `auth`) and the remaining
-vocabulary (`sharing`, `approvals`, `reports`, `settings`, `webhooks`,
-`pinyin-search`, `hierarchy-security`, `ai-seat`, `governance`) resolve the same
-way. The authoritative list is `PLATFORM_CAPABILITY_TOKENS`
+The other eight tokens in the vocabulary are **not** in that map and do not
+resolve through it:
+
+- **Tier-gated** — `ai`, `ai-studio`, `i18n`, `ui`, `auth` have no provider
+  entry; dedicated blocks in `serve.ts` `run()` open their tier instead
+  (`ai`/`ai-studio` through the intent-driven AI block, the other three through
+  their tier blocks).
+- **Enterprise / cloud** — `hierarchy-security` has no open-edition provider and
+  ships in `@objectstack/security-enterprise`, loaded through `plugins[]`;
+  `ai-seat` and `governance` are resolved only by cloud's objectos-runtime.
+
+The authoritative list of all 28 is `PLATFORM_CAPABILITY_TOKENS`
 (`@objectstack/spec`, `kernel/platform-capabilities.ts`) — an unknown token is
 **rejected by `defineStack` at authoring time**, not at boot.
 
-Four rules that change what you write:
+Five rules that change what you write:
 
 - **Precedence:** `requires` › `tiers` › `--preset` › built-in default. An
   explicit instance in `plugins:` always shadows capability resolution.
@@ -467,6 +476,9 @@ Four rules that change what you write:
 - **Keep `automation` whenever `plugins:` lists a connector** — connector
   executors register their provider factories with it, and without it they have
   nowhere to register and boot fails.
+- **Pair `triggers` with `job`.** `triggers` alone arms record-change triggers;
+  schedule and time-relative triggers run on the job service, so autolaunched
+  scheduled flows stay silent without `job`.
 
 ### `onEnable` — where an app binds runtime code
 
