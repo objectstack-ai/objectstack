@@ -432,6 +432,18 @@ describe('the mirror direction: a reader that is never coming back', () => {
   // process ENDS. That the bound itself runs and trips is shown out of band,
   // by tracing a run whose reader blocks its loop for the whole run — see the
   // PR for the `BOUND TRIPPED` trace.
+  //
+  // ⚠️ The same nondeterminism means an ABLATION of the bound can come back
+  // GREEN, and a single green one here is a ZERO READING rather than evidence
+  // this case has stopped discriminating. Measured on one box minutes apart,
+  // same tree: disabling the no-progress branch red this case at 180072 ms
+  // once, and passed it in 31.9 s the run before — that run's backlog fit in
+  // what the kernel and node happened to absorb, so the write callback
+  // resolved on its own and the branch was never reached. Re-run it, or drive
+  // the child OUT OF BAND (`spawn`, `stderr.pause()`, never read) where the
+  // pending bytes can actually be counted: 135408 bytes still held at a clean
+  // exit 2 in 19271 ms, against 145638 held by a child still alive at 90 s
+  // with the branch disabled.
 
   it("keeps its mirror of the shim's bound equal to the shim's own", () => {
     // The derivation above is only as good as `SHIM_DRAIN_STALL_MS` still being
