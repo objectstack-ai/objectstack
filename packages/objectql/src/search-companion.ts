@@ -3,7 +3,7 @@
 /**
  * Search-normalization companion column (`__search`) — pinyin recall (#2486).
  *
- * `$search` (ADR-0061 Tier 1) is a `$contains` over source columns, so typing
+ * `$search` (ADR-0061 Tier 1) is a `$icontains` over source columns, so typing
  * the full pinyin (`zhangwei`) or initials (`zw`) of a CJK name ("张伟") can
  * never hit — the stored value is the CJK original. This module provides the
  * additive fix: a single hidden companion column per object that stores
@@ -283,7 +283,7 @@ function isDdlManaged(schema: CompanionObjectMeta): boolean {
  * Unlike #6810 the index is NOT re-declared in the object's `indexes[]`, and
  * that is a measured difference rather than an omission. #6810's predicate is
  * `organization_id = ?` — equality, which a B-tree serves. This column's ONLY
- * reader is `buildSearchFilter`, which emits `{ __search: { $contains: term } }`
+ * reader is `expandSearchToFilter`, which emits `{ __search: { $contains: term } }`
  * (`search-filter.ts`) — a leading-wildcard `LIKE '%term%'` that no B-tree can
  * answer, and `IndexSchema` spells nothing else (`name` / `fields` / `unique`;
  * no trigram/GIN method). Declaring one would buy write amplification on every

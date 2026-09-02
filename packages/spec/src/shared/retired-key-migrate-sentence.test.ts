@@ -70,8 +70,8 @@ const SPEC_SRC_ROOT = path.resolve(HERE, '..');
 /** #7030: `packages/lint/src`, the one other corpus carrying this sentence. */
 const LINT_SRC_ROOT = path.resolve(HERE, '../../../lint/src');
 /**
- * [#10848] The population widens by EXACTLY ONE governed file (maintainer
- * ruling 2026-08-22, deliberately not all of `.claude/**`): the retirement
+ * [#10848] The population widened by EXACTLY ONE governed file (maintainer
+ * ruling 2026-08-22, deliberately not all of `.claude/`): the retirement
  * playbook every new tombstone's guidance string is authored from. It sat
  * outside both corpora and prescribed the withdrawn sentence, so the skill
  * taught authors to red this very pin — and a red pin over a skill-taught
@@ -79,12 +79,27 @@ const LINT_SRC_ROOT = path.resolve(HERE, '../../../lint/src');
  * the corpus walk: it is markdown (the walk yields `.ts` only), its `--from`
  * operand is a placeholder like `<N-1>` (never `\d+`), its sentences end at a
  * code-span close (never at a string-literal quote), and `reconstruct()`
- * would drop every markdown line that opens with `*`/`**`. So it is judged
+ * would drop every markdown line that opens with an asterisk. So it is judged
  * below as its own corpus: raw text, whitespace-normalised, with
  * placeholder-aware anchors — the withdrawn-claim direction reuses
  * `WITHDRAWN_CLAIM` verbatim.
+ *
+ * [#13859] ONE hard-coded path is a population of one, and the sentence does
+ * not stay inside it: the withdrawn automatic-rewrite claim reached the
+ * PUBLISHED skill catalog — the artifacts a customer agent actually loads, and
+ * that land in codebases this repo cannot see — with nothing scanning them.
+ * The corpus below is therefore DISCOVERED rather than named: this playbook
+ * plus every `.md` file under `skills/`. Discovery is the input, so it is
+ * itself asserted non-vacuous — a walk that silently reached zero published
+ * files would leave this pin exactly as narrow as it was, while reading green.
  */
 const RETIREMENT_SKILL_MD = path.resolve(HERE, '../../../../.claude/skills/spec-property-retirement/SKILL.md');
+/**
+ * [#13859] The published catalog root. Discovered, never listed: a checked-in
+ * file list is a second population to keep in sync, and the one that rots is
+ * always the list.
+ */
+const PUBLISHED_SKILLS_ROOT = path.resolve(HERE, '../../../../skills');
 
 /** One scanned corpus: a root directory, plus its own out-of-scope exemptions. */
 interface Corpus {
@@ -388,62 +403,185 @@ describe('`os migrate meta` sentences are the house sentence, across corpora (#6
 });
 
 /**
- * [#10848] Markdown-corpus anchors for the retirement skill (see the
- * `RETIREMENT_SKILL_MD` docblock). Same two legal shapes as
- * `HOUSE_AT_MARKER`/`MIXED_AT_MARKER`, adapted on exactly three axes: the
- * `--from` operand may be a placeholder (`<N-1>`, `<N>`) as well as a literal
- * major; the judged text is the whole file with runs of whitespace collapsed
- * (markdown wraps sentences mid-clause); and "last sentence of its literal"
- * becomes "last sentence of its double-backtick code span" (`.``), so prose
- * cannot bury the command mid-span either. The marker requires the leading
- * `Run` on purpose: the skill legitimately NAMES the command mid-prose
- * (`migrate meta --from <old>` in §3's `retiredFromLoadPath` bullet) without
- * prescribing a sentence — only taught sentence templates are judged.
+ * [#10848] Markdown-corpus anchors (see the `RETIREMENT_SKILL_MD` docblock).
+ * Same two legal shapes as `HOUSE_AT_MARKER`/`MIXED_AT_MARKER`, adapted on
+ * exactly three axes: the `--from` operand may be a placeholder (`<N-1>`,
+ * `<N>`) as well as a literal major; the judged text is the whole file with
+ * runs of whitespace collapsed (markdown wraps sentences mid-clause); and
+ * "last sentence of its literal" becomes "last sentence of its container".
+ *
+ * The marker requires the leading `Run` on purpose: a skill legitimately NAMES
+ * the command mid-prose (`migrate meta --from <old>` in the playbook's §3
+ * `retiredFromLoadPath` bullet; a dozen bare `os migrate meta …` invocations in
+ * the published upgrade skill) without prescribing a sentence — only sentences
+ * are judged. That property is what makes the widened population safe, so it
+ * stays.
+ *
+ * [#13859] "Container" is TWO things once the corpus is more than the playbook,
+ * and one anchor for both would be a false-positive machine. A taught TEMPLATE
+ * is written as a double-backtick code span, so its sentence must close that
+ * span (`.` then the span's two backticks) — prose cannot bury the command
+ * mid-span, which is the property the source corpus gets from its closing
+ * quote. A sentence QUOTED in prose or inside a fenced transcript has no span
+ * to close: the published upgrade skill quotes the house sentence verbatim
+ * inside a rendered parse error, whose next line is `expected: never`. Under a
+ * span-only anchor every such occurrence is an unconditional RED — not a
+ * property, since nothing but a code span could ever satisfy it, but a trap
+ * that fires the moment the corpus stops being one file. So a non-span
+ * occurrence is judged for its WORDING, ending at its own period. What that
+ * gives up, deliberately and only in prose: burying (`… apply them by hand.
+ * Also do X.`) passes there, while it stays RED inside a template and in every
+ * `.ts` prescription above — the two places a reader copies text from.
  */
 const SKILL_FROM_OPERAND = /(?:\d+|<[^>`]+>)/.source;
 const SKILL_MARKER = new RegExp(
   `Run \`os migrate meta --from ${SKILL_FROM_OPERAND}\``,
   'g',
 );
-const SKILL_HOUSE_AT_MARKER = new RegExp(
-  `^Run \`os migrate meta --from ${SKILL_FROM_OPERAND}\` to list the mechanical edits for existing sources; apply them by hand\\.\`\``,
-);
-const SKILL_MIXED_AT_MARKER = new RegExp(
-  `^Run \`os migrate meta --from ${SKILL_FROM_OPERAND}\` to list the mechanical edits for the [^;]+ case[^;]*; [^;]+\\.\`\``,
-);
+/** The two legal wordings, from the marker up to the sentence's final period. */
+const SKILL_HOUSE_BODY = `^Run \`os migrate meta --from ${SKILL_FROM_OPERAND}\` to list the mechanical edits for existing sources; apply them by hand\\.`;
+const SKILL_MIXED_BODY = `^Run \`os migrate meta --from ${SKILL_FROM_OPERAND}\` to list the mechanical edits for the [^;]+ case[^;]*; [^;]+?\\.`;
+/** Container-final anchors: a code span closes; a quoted sentence just ends. */
+const SKILL_TEMPLATE_END = '``';
+const SKILL_PROSE_END = '(?:\\s|$)';
+const SKILL_HOUSE_TEMPLATE = new RegExp(`${SKILL_HOUSE_BODY}${SKILL_TEMPLATE_END}`);
+const SKILL_MIXED_TEMPLATE = new RegExp(`${SKILL_MIXED_BODY}${SKILL_TEMPLATE_END}`);
+const SKILL_HOUSE_PROSE = new RegExp(`${SKILL_HOUSE_BODY}${SKILL_PROSE_END}`);
+const SKILL_MIXED_PROSE = new RegExp(`${SKILL_MIXED_BODY}${SKILL_PROSE_END}`);
 
-describe('the spec-property-retirement skill agrees with this pin (#10848 — the one-file population widening)', () => {
-  const raw = fs.readFileSync(RETIREMENT_SKILL_MD, 'utf8');
-  const flat = raw.replace(/\s+/g, ' ');
+/** Label prefix for the internal playbook, mirroring the `spec:`/`lint:` convention. */
+const PLAYBOOK_LABEL = 'internal:spec-property-retirement/SKILL.md';
 
-  it('every prescription sentence the skill teaches is house-form or MIXED two-clause', () => {
-    const bad = [...flat.matchAll(SKILL_MARKER)]
-      .filter((m) => {
-        const rest = flat.slice(m.index ?? 0);
-        return !(SKILL_HOUSE_AT_MARKER.test(rest) || SKILL_MIXED_AT_MARKER.test(rest));
-      })
-      .map((m) => flat.slice(m.index ?? 0, (m.index ?? 0) + 120));
-    expect(bad, bad.join('\n')).toEqual([]);
+interface MarkdownFile {
+  /** Corpus-prefixed path, e.g. `skills:objectstack-upgrade/SKILL.md`. */
+  file: string;
+  /** Whole file, runs of whitespace collapsed. */
+  flat: string;
+}
+
+/**
+ * [#13859] Deterministic markdown discovery. `readdirSync(…).sort()` so the
+ * corpus order — and therefore every failure message — is identical on every
+ * machine and every run. `lstatSync` so a symlink is SKIPPED rather than
+ * followed: a link pointing outside the repo would make the corpus depend on
+ * the checkout around it, and following one back inside would judge a file
+ * twice. Nothing else is skipped, and nothing is skipped silently — the
+ * discovery anti-vacuity assertion below is what notices when it is.
+ */
+function* walkMarkdown(dir: string): Generator<string> {
+  for (const name of fs.readdirSync(dir).sort()) {
+    const p = path.join(dir, name);
+    const st = fs.lstatSync(p);
+    if (st.isSymbolicLink()) continue;
+    if (st.isDirectory()) yield* walkMarkdown(p);
+    else if (st.isFile() && p.endsWith('.md')) yield p;
+  }
+}
+
+/** The internal retirement playbook, then the published catalog in sorted order. */
+function markdownCorpus(): MarkdownFile[] {
+  const files: Array<{ file: string; abs: string }> = [{ file: PLAYBOOK_LABEL, abs: RETIREMENT_SKILL_MD }];
+  for (const abs of walkMarkdown(PUBLISHED_SKILLS_ROOT)) {
+    files.push({ file: `skills:${path.relative(PUBLISHED_SKILLS_ROOT, abs)}`, abs });
+  }
+  return files.map(({ file, abs }) => ({ file, flat: fs.readFileSync(abs, 'utf8').replace(/\s+/g, ' ') }));
+}
+
+interface MarkdownSite {
+  file: string;
+  /** True when the marker opens a double-backtick code span — a taught template. */
+  template: boolean;
+  excerpt: string;
+  ok: boolean;
+}
+
+/** Every `os migrate meta` prescription sentence in one markdown file, with its verdict. */
+function judgeMarkdownSentences({ file, flat }: MarkdownFile): MarkdownSite[] {
+  return [...flat.matchAll(SKILL_MARKER)].map((m) => {
+    const at = m.index ?? 0;
+    const rest = flat.slice(at);
+    const template = flat.slice(0, at).endsWith('``');
+    const ok = template
+      ? SKILL_HOUSE_TEMPLATE.test(rest) || SKILL_MIXED_TEMPLATE.test(rest)
+      : SKILL_HOUSE_PROSE.test(rest) || SKILL_MIXED_PROSE.test(rest);
+    return { file, template, excerpt: rest.slice(0, 120), ok };
+  });
+}
+
+describe('the retirement playbook and the published skill catalog agree with this pin (#10848, corpus widened #13859)', () => {
+  const corpus = markdownCorpus();
+
+  it('[#13859] anti-vacuity for the DISCOVERY: the playbook and at least one published skill', () => {
+    // The corpus is this suite's input, so a walk that reached zero published
+    // files would restore the exact one-file blindness #13859 is about — and
+    // every assertion below would stay green while it did. Assert the shape of
+    // the population itself, not a count that ages out with the catalog.
+    expect(corpus.length).toBeGreaterThan(0);
+    const labels = corpus.map((c) => c.file);
+    expect(labels).toContain(PLAYBOOK_LABEL);
+    const published = labels.filter((l) => l.startsWith('skills:'));
+    expect(published.length).toBeGreaterThanOrEqual(1);
+    // Deterministic ordering: the published tail is sorted, so a failure names
+    // its sites in a stable order rather than in readdir order.
+    expect(published).toEqual([...published].sort());
   });
 
-  it('anti-vacuity: the skill teaches BOTH shapes, so the scan judges at least two sites', () => {
-    // Convention 5 carries the house template and its one allowed variant
-    // (the partial-conversion two-clause shape). Zero or one marker means the
-    // skill stopped teaching a shape — or this scan went blind on the file.
-    const rests = [...flat.matchAll(SKILL_MARKER)].map((m) => flat.slice(m.index ?? 0));
+  it('every prescription sentence in the markdown corpus is house-form or MIXED two-clause', () => {
+    const bad = corpus.flatMap(judgeMarkdownSentences).filter((s) => !s.ok);
+    expect(
+      bad,
+      bad.map((s) => `${s.file} [${s.template ? 'template' : 'prose'}] — "${s.excerpt}"`).join('\n'),
+    ).toEqual([]);
+  });
+
+  it('anti-vacuity: the PLAYBOOK teaches BOTH shapes, so the scan judges at least two sites', () => {
+    // Pinned to the one file that OWNS both templates — never a whole-corpus
+    // claim. Convention 5 carries the house template and its one allowed
+    // variant (the partial-conversion two-clause shape); zero or one marker
+    // means the playbook stopped teaching a shape, or this scan went blind on
+    // it. A published skill that names the command once is not a regression,
+    // so widening this floor to the corpus would assert nothing and fail on
+    // the catalog's own editorial choices.
+    const playbook = corpus.find((c) => c.file === PLAYBOOK_LABEL);
+    expect(playbook, PLAYBOOK_LABEL).toBeDefined();
+    const rests = [...playbook!.flat.matchAll(SKILL_MARKER)].map((m) => playbook!.flat.slice(m.index ?? 0));
     expect(rests.length).toBeGreaterThanOrEqual(2);
-    expect(rests.some((r) => SKILL_HOUSE_AT_MARKER.test(r))).toBe(true);
-    expect(rests.some((r) => SKILL_MIXED_AT_MARKER.test(r))).toBe(true);
+    expect(rests.some((r) => SKILL_HOUSE_TEMPLATE.test(r))).toBe(true);
+    expect(rests.some((r) => SKILL_MIXED_TEMPLATE.test(r))).toBe(true);
   });
 
-  it('[#9529] the withdrawn automatic-rewrite claim is absent from the skill, in every spelling', () => {
+  it('[#9529] the withdrawn automatic-rewrite claim is absent from the corpus, in every spelling', () => {
     // Judged over the raw text rather than reconstruct(): a markdown line
-    // opening with `*`/`**` would be dropped as a comment line, hiding a
-    // claim. WITHDRAWN_CLAIM is English-only, so the skill's Chinese prose
-    // cannot fabricate a match; a hit is a real regression of the ruling.
-    const claims = [...flat.matchAll(WITHDRAWN_CLAIM)].map(
-      (m) => flat.slice(Math.max(0, (m.index ?? 0) - 60), (m.index ?? 0) + 60),
+    // opening with an asterisk would be dropped as a comment line, hiding a
+    // claim. WITHDRAWN_CLAIM is English-only BY DESIGN — the playbook's
+    // Chinese prose (and any that follows it into the catalog) cannot
+    // fabricate a match, so a hit is a real regression of the ruling. This is
+    // the direction #13859 widened for: the claim is red wherever it appears,
+    // and "wherever" now includes the published catalog.
+    const claims = corpus.flatMap(({ file, flat }) =>
+      [...flat.matchAll(WITHDRAWN_CLAIM)].map(
+        (m) => `${file} — "${flat.slice(Math.max(0, (m.index ?? 0) - 60), (m.index ?? 0) + 60)}"`,
+      ),
     );
     expect(claims, claims.join('\n')).toEqual([]);
+  });
+
+  it('[#13859] the markdown judge is not vacuous — template and prose anchors each hold', () => {
+    const judge = (flat: string): MarkdownSite[] => judgeMarkdownSentences({ file: 'synthetic.md', flat });
+    const house = 'Run `os migrate meta --from <N-1>` to list the mechanical edits for existing sources; apply them by hand.';
+    const mixed = 'Run `os migrate meta --from 16` to list the mechanical edits for the `1y` case; the rest are reported.';
+    // A taught template must close its code span, in both legal shapes.
+    expect(judge(`5. \`\`${house}\`\``).map((s) => [s.template, s.ok])).toEqual([[true, true]]);
+    expect(judge(`\`\`${mixed}\`\``).map((s) => [s.template, s.ok])).toEqual([[true, true]]);
+    // …and a template that buries the command mid-span stays RED.
+    expect(judge(`\`\`${house} Also do X.\`\``).map((s) => s.ok)).toEqual([false]);
+    // A sentence quoted in prose or a transcript is judged on wording alone.
+    expect(judge(`error text … ${house} expected: never`).map((s) => [s.template, s.ok])).toEqual([[false, true]]);
+    expect(judge('Run `os migrate meta --from 16` to rewrite it automatically.').map((s) => s.ok)).toEqual([false]);
+    expect(judge('Run `os migrate meta --from 16` to remove it.').map((s) => s.ok)).toEqual([false]);
+    // Naming the command mid-prose without the leading `Run` is not a sentence.
+    expect(judge('Stored flows convert with `os migrate meta --from 16`.')).toEqual([]);
+    // The withdrawn claim trips wherever it appears, fence or prose.
+    expect([...'``os migrate meta --from 16` rewrites your source files.``'.matchAll(WITHDRAWN_CLAIM)]).not.toEqual([]);
   });
 });
