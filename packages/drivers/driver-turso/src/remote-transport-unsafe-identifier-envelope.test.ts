@@ -54,7 +54,12 @@
  * The last two `describe`s pin both halves: the same inputs are refused, and
  * safe identifiers still compile and run. That is what makes this an envelope
  * change rather than a gating change — the `groupBy` alias GATING question is
- * a separate card and stays open.
+ * a separate card and stays open. [#14235] That card has since landed: the
+ * `groupBy` OUT KEY position is ESCAPED rather than refused now, so its case
+ * below asserts the quoted emission instead of a refusal — every OTHER
+ * position named above (`object`, `field`, the `groupBy` FIELD, the DDL table,
+ * column and index names) is untouched and still refuses with this envelope,
+ * and the accept-set `describe` below still drives the `groupBy` FIELD.
  *
  * ## Reverse verification — direction predicted BEFORE it was run
  *
@@ -234,27 +239,35 @@ describe('[#14287] RemoteTransport — an unsafe identifier is a 400 INVALID_REQ
       expect(seen).toEqual([]);
     });
 
-    it('the `groupBy` OUT KEY refuses with the envelope — gating unchanged, envelope added', async () => {
-      // ⚠️ Deliberate scope line. Whether this position should be ESCAPED
-      // rather than refused (as `driver-sql` escapes it post-#13714, and as
-      // #14113 changed the aggregation alias to do one position over) is a
-      // separate, still-open card: it MOVES the accept set. This case pins that
-      // the refusal itself is unchanged and only its envelope is new — so the
-      // day that card lands, this is the test that has to be rewritten
-      // deliberately rather than found red by surprise.
+    it('[#14235] the `groupBy` OUT KEY is ESCAPED, not refused — the one position that moved', async () => {
+      // ⚠️ This case is the deliberate rewrite #14287's scope line asked for.
+      // It read: "the day that card lands, this is the test that has to be
+      // rewritten deliberately rather than found red by surprise" — #14235 is
+      // that card, and this is that rewrite, on the same input.
+      //
+      // ⛔ It is the ONLY position that moved. Every sibling case in this
+      // describe — `object`, the aggregation `field`, the `groupBy` FIELD — and
+      // every DDL case below still refuses with the envelope, unchanged;
+      // `unsafeIdentifierError` and `UNSAFE_IDENTIFIER_CODE` are untouched.
+      // What #14235 decided is which POSITIONS the gate governs, not what the
+      // gate answers when it fires: an output NAME is quoted and escaped, a
+      // column REFERENCE is validated.
       const { t, seen } = await capturing();
-      const err = await refusalFrom('groupBy alias', () =>
-        t.aggregate(OBJECT_DEF.name, {
-          object: OBJECT_DEF.name,
-          groupBy: [{ field: 'region', alias: 'envelope_probe.region' }],
-          aggregations: [{ function: 'count', alias: 'n' }],
-        } as never),
-      );
-      expect(envelopeOf(err)).toEqual({
-        ...ENVELOPE,
-        message: 'RemoteTransport: unsafe identifier rejected: "envelope_probe.region"',
-      });
-      expect(seen).toEqual([]);
+      const rows = await t.aggregate(OBJECT_DEF.name, {
+        object: OBJECT_DEF.name,
+        groupBy: [{ field: 'region', alias: 'envelope_probe.region' }],
+        aggregations: [{ function: 'count', alias: 'n' }],
+      } as never);
+      // No refusal, and the alias reaches the database as ONE quoted name.
+      expect(seen).toEqual([
+        'SELECT "region" AS "envelope_probe.region", count(*) AS "n" ' +
+          'FROM "envelope_probe" GROUP BY "region"',
+      ]);
+      // Executed, not merely emitted: the value comes back under the caller's
+      // own key. (`region` is a real column here, so the statement runs.)
+      expect(
+        (rows as Array<Record<string, unknown>>).every((r) => 'envelope_probe.region' in r),
+      ).toBe(true);
     });
   });
 
