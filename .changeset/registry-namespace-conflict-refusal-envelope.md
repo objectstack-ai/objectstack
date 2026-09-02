@@ -14,6 +14,6 @@ Why it matters, measured rather than read: unlike its three install-time sibling
 
 A refusal the platform decided is a client-side conflict was telling operators the server had broken, which invites a retry instead of a rename.
 
-Not narrowed, not widened: no accept-set changes, no export changes, and no ledger registration. `NAMESPACE_CONFLICT` is not an `ErrorCode` member, so the door's #9106 narrowing demotes it off `error.code` onto the wire's open `declaredCode` sibling and `error.code` stays the closed member 422 derives.
+Not narrowed, not widened: no accept-set changes, no export changes, and no ledger registration. `NAMESPACE_CONFLICT` is not an `ErrorCode` member, so the door's narrowing demotes it off `error.code` onto the wire's open `declaredCode` sibling and `error.code` stays the closed member 422 derives.
 
 `@objectstack/runtime` carries the classification row for the new code in the dispatcher error-code vocabulary (verdict `pending-registration`, door `dispatcher` — the measured verdict, not the expected one). That row is the input to a ledger-registration batch in the `packages/spec` lane; registering the code is what ratchets the row back out and what would let `error.code` carry the semantic spelling.

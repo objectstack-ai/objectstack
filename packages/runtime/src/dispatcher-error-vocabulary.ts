@@ -577,6 +577,9 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
     // it carried no `code` at all, so there was no stamp for any pattern to
     // match. #14474 gave it the ADR-0112 envelope its three install-time
     // siblings already carried, which is what put a site here to classify.
+    // The door narrowing its `why` names is #9106's — the file header above
+    // carries it. The anchor lives here rather than in the string, because a
+    // runtime string reaches operators who cannot resolve a tracker id.
     {
         code: 'NAMESPACE_CONFLICT',
         file: 'packages/objectql/src/registry.ts',
@@ -597,7 +600,8 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
             'read, so the caller\'s fallback stood. With the envelope the SAME request answers `422` and ' +
             'the body carries `declaredCode: NAMESPACE_CONFLICT` beside `code: VALIDATION_ERROR` (the ' +
             'member 422 derives through `standardErrorCodeForHttpStatus`, which does not name 422 and ' +
-            'buckets it as a client error). That demote is the #9106 door narrowing, and it is exactly what ' +
+            'buckets it as a client error). That demote is the door narrowing described in this file\'s ' +
+            'header, and it is exactly what ' +
             'a `pending-registration` row records: the body PARSES, and what the producer loses instead is ' +
             'its semantic code, silently absent from `error.code` until a ledger row lands. ⛔ Registering ' +
             'it is the `packages/spec` lane\'s call and is NOT made here — this row is that batch\'s input, ' +
