@@ -15,7 +15,7 @@
   "scripts": {
     "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.typecheck.json"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
