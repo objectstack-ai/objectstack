@@ -343,22 +343,29 @@ const POSITIVE_CONTROLS = [
     tier: 'carries-error',
   },
   {
-    file: 'packages/plugins/plugin-sharing/src/share-link-service.ts',
+    file: 'packages/verify/src/harness.ts',
     why:
-      '`resolveToken`\'s usage stamp: `try { await this.engine.update(\'sys_share_link\', ...) } '
-      + 'catch { /* best-effort -- usage telemetry is a nice-to-have */ }`. Silent by the log axis, an '
-      + 'awaited write in the try, and nothing bound -- the dark shape exactly.\n\n'
-      + 'CHOSEN FOR ITS STABILITY, which is the property a dark control needs and the previous one '
-      + 'lacked. This control used to name `bootstrap-system-capabilities.ts`, whose `why` read "the '
+      '`inviteForAudienceGate`\'s invitation row: `try { await engine.insert(\'sys_invitation\', ...) } '
+      + 'catch { /* Best-effort -- the gate answers either way. */ }`. Silent by the log axis, an awaited '
+      + 'write in the try, and nothing bound -- the dark shape exactly.\n\n'
+      + 'CHOSEN FOR ITS STABILITY, which is the property a dark control needs and the previous two '
+      + 'lacked. This control first named `bootstrap-system-capabilities.ts`, whose `why` read "the '
       + 'card\'s shape, verbatim, still standing" -- and #12981 batch 2 repaired it, which turned this '
-      + 'self-test red for doing exactly what the ruling asked. ANY tier-1 DARK member of the worklist '
-      + 'is a control the repair programme is designed to destroy, so repointing at another one only '
-      + 'moves the breakage to the batch that repairs THAT file. This member is different: batch 1 '
-      + 'judged it OUT of the programme on the merits -- the swallowed write is a `use_count` / '
-      + '`last_used_at` telemetry stamp, and escalating a FUNCTIONAL degradation to `error` is the '
-      + 'over-application AGENTS.md forbids -- so it is a genuine dark member with a recorded reason '
-      + 'to stay one. ⛔ If a later card ever does repair it, repoint this control at another member '
-      + 'ruled OUT rather than at a member merely not repaired YET.',
+      + 'self-test red for doing exactly what the ruling asked. It then named `share-link-service.ts`\'s '
+      + 'usage stamp on the strength of batch 1\'s reading that a `use_count` / `last_used_at` stamp is '
+      + 'telemetry -- and batch 8 REVERSED that reading (the persistence claim is made by the field '
+      + 'declarations and the shipped `active_links` grid, not by the resolve response), so batch 9 '
+      + 'repaired it and this self-test went red again. ANY tier-1 DARK member of the worklist is a '
+      + 'control the repair programme is designed to destroy, so repointing at another one only moves '
+      + 'the breakage to the batch that repairs THAT file. This member is different: batch 8 judged it '
+      + 'OUT of the programme on the merits and wrote the determination into the file itself (the '
+      + 'comment inside this very catch): nothing claims to have persisted -- the helper answers `void` '
+      + 'and its only caller is the `signUp` that POSTs the sign-up on the very next line -- and the '
+      + 'loss is answered one line later, LOUDLY: under the default `invite_only` posture a missing '
+      + 'invitation makes that POST refuse and `signUp` throws with the audience gate\'s own status and '
+      + 'body. So it is a genuine dark member with a recorded reason to stay one. ⛔ If a later card '
+      + 'ever does repair it, repoint this control at another member ruled OUT rather than at a member '
+      + 'merely not repaired YET.',
     tier: 'dark',
   },
 ];
