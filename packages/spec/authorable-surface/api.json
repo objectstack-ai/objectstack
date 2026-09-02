@@ -442,6 +442,7 @@
     "api/DataEvent:changes",
     "api/DataEvent:id",
     "api/DataEvent:object",
+    "api/DataEvent:organizationId",
     "api/DataEvent:recordId",
     "api/DataEvent:timestamp",
     "api/DataEvent:type",

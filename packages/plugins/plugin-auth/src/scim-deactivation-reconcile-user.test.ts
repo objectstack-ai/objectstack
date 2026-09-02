@@ -475,16 +475,17 @@ describe('[#14360] deactivating the last administrator is refused through SCIM, 
     expect(row?.ban_reason ?? null).toBeNull();
     await expectSignInAccepted(h, owner.email);
 
-    // RESIDUAL — pinned as observed, filed as #14522, ⛔ not this card's to
-    // fix: the vendor's own `scimUser.active = false` write, made BEFORE the
-    // callback inside what it believes is a transaction, survives the
-    // refusal, because the adapter's #3653 SCIM transaction scoping never
-    // opens an engine transaction on 1.7.2 (measured: 0 `engine.transaction`
-    // and 0 `driver.beginTransaction` calls across POST + PATCH /Users). So
-    // the SCIM resource reports `active: false` while the account is still
-    // enabled. When #14522 lands, this line flips to `true` DELIBERATELY —
-    // that is the whole reason it is asserted rather than left unread.
-    expect(await scimActive(h, owner.scimId)).toBe(false);
+    // [#14522] The vendor's own `scimUser.active = false` write, made BEFORE
+    // the callback inside its transaction, is rolled back WITH the refusal:
+    // the adapter's #3653 SCIM transaction scoping opens a real engine
+    // transaction now that the scope is opened at `handleRequest` (it was
+    // stamped with `enterWith` inside `verifyBearerToken` and never reached
+    // the writes — measured as 0 `engine.transaction` calls across POST +
+    // PATCH /Users). So the SCIM resource keeps reporting `active: true` for
+    // the account that stayed enabled. This line read `false` on purpose
+    // while that residual was open and was flipped DELIBERATELY with the fix;
+    // the positive control below is the genuine `false`.
+    expect(await scimActive(h, owner.scimId)).toBe(true);
   }, 60_000);
 
   it('(c) positive control: with a second administrator left behind, the same request succeeds', async () => {
