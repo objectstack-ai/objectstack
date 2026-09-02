@@ -754,6 +754,11 @@ const METADATA_DOCUMENT_TRANSLATORS: Record<
   object: translateObject,
   app: translateApp,
   dashboard: translateDashboard,
+  // A dataset's measure labels are drawn on the dashboard, under every metric
+  // tile and on every chart axis (#14253). Registering it HERE is the whole
+  // wiring — `TRANSLATABLE_METADATA_TYPES` is derived below, and
+  // `@objectstack/rest` reads the derived set.
+  dataset: translateDataset,
   page: translatePage,
 };
 
@@ -986,6 +991,137 @@ export function translateDashboard<T extends DashboardLike>(
     ...(label !== undefined ? { label } : {}),
     ...(description !== undefined ? { description } : {}),
     ...(widgets !== undefined ? { widgets } : {}),
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Dataset metadata resolver (label / description / dimension + measure labels)
+// ────────────────────────────────────────────────────────────────────────────
+
+/** Minimal dimension/measure shape consumed by {@link translateDataset}. */
+export interface DatasetMemberLike {
+  /** `DatasetDimensionSchema.name` / `DatasetMeasureSchema.name`. */
+  name?: string;
+  /** `I18nLabelSchema` — a plain string OR an inline locale map (#5728). */
+  label?: unknown;
+  [key: string]: unknown;
+}
+
+/** Minimal dataset metadata shape consumed by {@link translateDataset}. */
+export interface DatasetLike {
+  name: string;
+  label?: unknown;
+  description?: unknown;
+  dimensions?: DatasetMemberLike[];
+  measures?: DatasetMemberLike[];
+  [key: string]: any;
+}
+
+function lookupDatasetAttr(
+  bundle: TranslationBundle | undefined,
+  name: string,
+  attr: 'label' | 'description',
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.datasets?.[name]?.[attr];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+function lookupDatasetMemberLabel(
+  bundle: TranslationBundle | undefined,
+  datasetName: string,
+  group: 'dimensions' | 'measures',
+  memberName: string,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const candidate =
+      pickData(bundle, code)?.datasets?.[datasetName]?.[group]?.[memberName]?.label;
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Overlay the bundle's labels onto a dataset's `dimensions[]` / `measures[]`,
+ * returning the SAME array reference when nothing matched.
+ */
+function translateDatasetMembers(
+  members: unknown,
+  bundle: TranslationBundle | undefined,
+  datasetName: string,
+  group: 'dimensions' | 'measures',
+  opts?: ResolveOptions,
+): unknown {
+  if (!Array.isArray(members)) return members;
+  let changed = false;
+  const next = members.map((raw) => {
+    const member = raw as DatasetMemberLike;
+    if (!member || typeof member !== 'object' || typeof member.name !== 'string' || member.name.length === 0) {
+      return raw;
+    }
+    const label = lookupDatasetMemberLabel(bundle, datasetName, group, member.name, opts);
+    if (label === undefined) return raw;
+    changed = true;
+    return { ...member, label };
+  });
+  return changed ? next : members;
+}
+
+/**
+ * Apply the active locale to a dataset metadata document — translates the
+ * dataset's `label` / `description` and each dimension's and measure's `label`
+ * against `datasets.<name>.{dimensions,measures}.<member>.label`. The input
+ * document is not mutated.
+ *
+ * ## Why a dataset needs this at all
+ *
+ * A dataset reads like a back-office definition, but a measure label is drawn
+ * ON THE DASHBOARD — under every metric tile and on every chart axis. Before
+ * this, `dataset` was neither in {@link TRANSLATABLE_METADATA_TYPES} nor
+ * addressed by any bundle group, so a fully translated dashboard rendered
+ * Chinese tile titles with `Untouched > 14 days` directly beneath them
+ * (#14253).
+ *
+ * Registering the translator in {@link METADATA_DOCUMENT_TRANSLATORS} is the
+ * whole wiring: `TRANSLATABLE_METADATA_TYPES` is DERIVED from that table, and
+ * `@objectstack/rest` reads the derived set, so the REST boundary follows with
+ * nothing else to remember (#3786).
+ *
+ * ## Writes only where the bundle answered
+ *
+ * `Dataset.label` / `.description` and the member labels are `I18nLabelSchema`,
+ * so an author may already have written an inline `{ en, 'zh-CN' }` map (#5728).
+ * Overwriting one with a resolved string would flatten a four-language label
+ * down to one, so — exactly as `translatePage` does — a key the bundle does not
+ * carry leaves the authored value untouched, and the arrays keep their identity
+ * when nothing matched.
+ */
+export function translateDataset<T extends DatasetLike>(
+  doc: T,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): T {
+  if (!doc || typeof doc !== 'object') return doc;
+  const name = doc.name;
+  if (!name || !bundle) return doc;
+
+  const label = lookupDatasetAttr(bundle, name, 'label', opts);
+  const description = lookupDatasetAttr(bundle, name, 'description', opts);
+  const dimensions = translateDatasetMembers(doc.dimensions, bundle, name, 'dimensions', opts);
+  const measures = translateDatasetMembers(doc.measures, bundle, name, 'measures', opts);
+
+  return {
+    ...doc,
+    ...(label !== undefined ? { label } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(dimensions !== doc.dimensions ? { dimensions } : {}),
+    ...(measures !== doc.measures ? { measures } : {}),
   };
 }
 

@@ -606,6 +606,23 @@ const FLOW_SCREEN_FIELD_NO_HELP =
   + '`name`/`label`/`type`/`required`/`options`/`defaultValue`/`placeholder`/`visibleWhen`, so there is '
   + 'nothing here to translate. Use `placeholder` for the in-input hint the field does declare.';
 
+/**
+ * The measured exclusion on `datasets.<name>.dimensions.<d>` and
+ * `.measures.<m>`.
+ *
+ * Not inherited by symmetry from the dataset's own `description`: the authoring
+ * schema states it directly. `DatasetDimensionSchema` and `DatasetMeasureSchema`
+ * each carry a `guidance` entry for `description` reading "its author-facing
+ * text is `label`. `description` is declared on the DATASET itself" — so a key
+ * here would parse clean and translate nothing, the ADR-0078 shape this file
+ * keeps paying to remove.
+ */
+const DATASET_MEMBER_NO_DESCRIPTION =
+  'a dataset dimension/measure has no `description` — its author-facing text is `label`, and '
+  + '`DatasetDimensionSchema` / `DatasetMeasureSchema` say so at the authoring site too. '
+  + '`description` is declared on the DATASET itself: translate it at '
+  + "'datasets.<dataset_name>.description'.";
+
 const FLOW_SCREEN_FIELD_NO_OPTIONS =
   'select-option labels are not translatable on a screen field: `ScreenFieldConfig.options[].value` is '
   + 'unconstrained (numbers and booleans are legal), so an option map keyed by value — the shape '
@@ -709,6 +726,84 @@ const translationDataShape = () => ({
       subCaption: z.string().optional().describe("Translated metric sub-caption (overlays the widget's `options.description`, a different authored field from `description`)"),
     })).optional().describe('Widget translations keyed by widget id'),
   })).optional().describe('Dashboard translations keyed by dashboard name'),
+
+  /**
+   * Analytics dataset translations keyed by dataset name (`Dataset.name`).
+   *
+   * Convention (auto-resolved by `translateDataset`):
+   *   datasets.<name>.label
+   *   datasets.<name>.description
+   *   datasets.<name>.dimensions.<dimension_name>.label
+   *   datasets.<name>.measures.<measure_name>.label
+   *
+   * **The hole this closes (#14253).** A dataset reads like a back-office
+   * definition, but a measure label is drawn ON THE DASHBOARD — under every
+   * metric tile and on every chart axis — and `dataset` was neither in
+   * `TRANSLATABLE_METADATA_TYPES` nor addressed by any group. Measured on a
+   * translated dashboard: the tile titles and descriptions were Chinese (those
+   * are `dashboards.<name>.widgets.<id>.*`) and directly beneath each one the
+   * measure label rendered `Untouched > 14 days` / `Oldest touch`. Not a
+   * drifted key: no key.
+   *
+   * **Why a top-level group and not `dashboards.<name>.…`.** A dataset is the
+   * ONE semantic definition every presentation binds to by reference
+   * (ADR-0021 D1) — the same measure is drawn by N widgets across M dashboards.
+   * Addressing it under a dashboard would ask the translator to write the same
+   * string once per presentation and would leave a dataset that no dashboard
+   * references (a report's, or an API consumer's) unaddressable. One
+   * definition, one key.
+   *
+   * **The key face is measured against `DatasetSchema`.** A dimension and a
+   * measure each declare exactly one piece of display copy — `label` — and
+   * `dataset.zod.ts` says so twice, in the `guidance` it already gives an
+   * author who writes `description` on either: *"its author-facing text is
+   * `label`. `description` is declared on the DATASET itself"*. So
+   * `description` is declared here on the dataset and NOWHERE below it; a
+   * `dimensions.<d>.description` key would parse clean and translate nothing.
+   *
+   * ⚠️ These four are `I18nLabelSchema` at the authoring site, so a dataset's
+   * copy may already be an inline `{ en, 'zh-CN' }` map (#5728).
+   * `translateDataset` writes ONLY where the bundle actually has an entry, so
+   * an inline map the bundle does not cover is left intact rather than
+   * flattened to one language — the same rule `translatePage` follows.
+   */
+  datasets: z.record(z.string(), strictObject({
+    surface: 'this dataset translation',
+    history: TRANSLATION_HISTORY,
+    aliases: {
+      name: 'label', title: 'label', displayName: 'label',
+      dimension: 'dimensions', axes: 'dimensions', groupBy: 'dimensions',
+      measure: 'measures', metrics: 'measures', metric: 'measures', values: 'measures',
+    },
+    guidance: {
+      // The dataset layer is deliberately smaller than a query, and none of
+      // these is display copy — pointing an author at `label` would translate
+      // the wrong thing.
+      object: '`object` is the dataset\'s base object name, not display copy — the object\'s own label is translated at \'objects.<object_name>.label\'.',
+      include: '`include` lists relationship names/paths the joins are compiled from — machine names, identical in every locale.',
+      filter: '`filter` is the dataset\'s intrinsic scope predicate, not display copy.',
+      format: '`format` is a number format string (e.g. "$0,0.00"), not display copy. For a locale-correct currency symbol declare `currency` (ISO 4217) on the measure — presentations render it through `Intl`.',
+    },
+  }, {
+    label: z.string().optional().describe('Translated dataset label'),
+    description: z.string().optional().describe('Translated dataset description'),
+    dimensions: z.record(z.string(), strictObject({
+      surface: 'this dataset dimension translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { name: 'label', title: 'label', displayName: 'label', text: 'label' },
+      guidance: { description: DATASET_MEMBER_NO_DESCRIPTION },
+    }, {
+      label: z.string().optional().describe('Translated dimension label (drawn on chart axes and group headers)'),
+    })).optional().describe('Dimension translations keyed by dimension name (`DatasetDimensionSchema.name`)'),
+    measures: z.record(z.string(), strictObject({
+      surface: 'this dataset measure translation',
+      history: TRANSLATION_HISTORY,
+      aliases: { name: 'label', title: 'label', displayName: 'label', text: 'label' },
+      guidance: { description: DATASET_MEMBER_NO_DESCRIPTION },
+    }, {
+      label: z.string().optional().describe('Translated measure label (drawn under every metric tile and on chart axes)'),
+    })).optional().describe('Measure translations keyed by measure name (`DatasetMeasureSchema.name`)'),
+  })).optional().describe('Analytics dataset translations keyed by dataset name'),
 
   /**
    * Page translations keyed by page name (`Page.name`).
@@ -1106,7 +1201,7 @@ export const TranslationDataSchema = lazySchema(() => strictObject({
   surface: 'this locale of the translation bundle',
   history: TRANSLATION_HISTORY,
   guidance: TRANSLATION_KEY_GUIDANCE,
-  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
+  aliases: { object: 'objects', fields: 'objects', app: 'apps', page: 'pages', dashboard: 'dashboards', dataset: 'datasets', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions' },
   // `locale` lives on the ITEM, not on a bundle entry (the bundle keys ARE the
   // locales). Naming it keeps the suggestion useful for an author who moved a
   // `translation` item into a bundle and left the field behind.
@@ -1232,7 +1327,7 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
   surface: 'this translation',
   history: TRANSLATION_HISTORY,
   guidance: TRANSLATION_KEY_GUIDANCE,
-  aliases: { object: 'objects', app: 'apps', page: 'pages', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
+  aliases: { object: 'objects', app: 'apps', page: 'pages', dataset: 'datasets', flow: 'flows', setting: 'settings', message: 'messages', strings: 'messages', labels: 'messages', actions: 'globalActions', lang: 'locale', language: 'locale' },
 }, {
   ...translationDataShape(),
   locale: LocaleSchema.describe('BCP-47 locale this item translates (e.g. "zh-CN")'),
