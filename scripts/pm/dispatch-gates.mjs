@@ -2825,7 +2825,7 @@ export function packageRootBinding(scriptPath, moduleBody, tree) {
  *                                   the root by other gates
  *   families carrying dead literals       46 -> 45
  *   dead literals                        152 -> 147
- *   ...of them in the "never was a repo path" class   128 -> 123
+ *   ...of them in the empty-`deepest` class          128 -> 123
  *
  * PROVENANCE, which is the criterion this file prices and never volume: 5 of 5
  * admitted hints are TRUE leads and 50 of 50 pairs with them, each verified at
@@ -2895,7 +2895,9 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  * the hint `lib/dist-freshness`, a string that never was a repo path while the
  * file it names exists. That is a hint set stating something FALSE about the
  * source, and the residue said so out loud: `unreachableReason` printed "never
- * was a repo path" about targets that are on disk.
+ * was a repo path" about targets that are on disk. ⚠️ That sentence is retired
+ * — `unreachableReason` no longer claims a base it did not test (#14208) — so
+ * it is quoted here as history and will not be found in today's output.
  *
  * So the prefix is resolved against `scriptPath`'s own directory instead
  * (`resolveModuleRelativeHint`). For a literal already spelled from the root by
@@ -3899,7 +3901,8 @@ export function judgedAsPattern(hint) {
  * With the form corrected the three branches mean what they say for BOTH
  * comparison modes: `deepest === form` is "the population's root is right
  * there", a strictly shorter `deepest` is a genuine move under a surviving
- * parent, and an empty one is a literal that never was a repo path.
+ * parent, and an empty one is a literal no tracked path begins with — a
+ * specifier, or a path anchored at a base this scan did not resolve (#14208).
  */
 export function comparedForm(hint) {
   if (!judgedAsPattern(hint)) return collapseHint(hint);
@@ -5839,9 +5842,11 @@ export function watchHintTree(files = trackedFiles()) {
  * tree can actually answer (#9883 H2). It separates three populations that
  * would otherwise print identically as "matched nothing":
  *
- *   ''                  the literal was never a repo path — a MIME type, a
- *                       remote ref, a package or repo specifier that survived
- *                       the extractor. Nothing moved; it was never live;
+ *   ''                  no tracked path begins with the literal — a MIME type,
+ *                       a remote ref, a package or repo specifier that survived
+ *                       the extractor, or a path anchored at a base this scan
+ *                       did not resolve (#14208). Nothing moved under it; as
+ *                       spelled it was never live;
  *   a shorter prefix    the tree HAS the parent and stops there — the layout
  *                       moved under a gate that still names the old spelling.
  *                       This is the class that is usually a real miss;
@@ -5928,7 +5933,9 @@ export const MODULE_SPECIFIER_EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js'
  *
  * These nine families used to print "never was a repo path" — false, but filed
  * BY CONSTRUCTION, i.e. under the heading that tells a reader there is nothing
- * to chase. Resolving the literal against its writing script (the producer-side
+ * to chase. (That sentence is retired; the branch now names what the sweep
+ * established without claiming a base it did not test — #14208.)
+ * Resolving the literal against its writing script (the producer-side
  * repair in `resolveModuleRelativeHint`) was right and stays; what it also did
  * was move the falsehood from an inert bucket into the actionable one:
  *
@@ -6207,10 +6214,11 @@ export function unreachableFamilies(entries, files, sweep = null) {
  * The three cases `deepestTrackedPrefix` distinguishes split two-to-one on the
  * question a reader actually has, which is "is this a miss I should chase?":
  *
- *   by construction   the literal was never a repo path (no tracked path under
+ *   by construction   no tracked path begins with the literal (nothing under
  *                     even its first segment — a package specifier, a cross-repo
- *                     slug), or the tree HAS the population and the covering
- *                     rule refuses the literal as too generic. Neither is a
+ *                     slug, or a base this scan did not resolve), or the tree
+ *                     HAS the population and the covering rule refuses the
+ *                     literal as too generic. Neither is a
  *                     defect in the gate or in the tree, and NO change to either
  *                     makes the derivation reach it. This is the class that is
  *                     merely a standing fact.
@@ -6289,7 +6297,17 @@ export function unreachableReason(dead, cap = 3) {
       if (target) {
         return `'${hint}' — the tree HAS ${target}; the literal is that file's extensionless module spelling, which no whole-segment comparison reaches`;
       }
-      if (!deepest) return `'${hint}' — no tracked path under its first segment; never was a repo path`;
+      // ⚠️ This sentence used to end "never was a repo path" — a claim about
+      // EVERY base, made from evidence about ONE (#14208). check:generated's
+      // `api-surface`, `export-origins` and `src/meta-spelling/…` all printed
+      // under it while sitting on disk under `packages/spec/`, which is a
+      // dead-lead label on a live path: the reader is told there is nothing to
+      // chase, about three files they could open. What the sweep actually
+      // established is the first clause, and the second now names the two ways
+      // that happens instead of asserting the literal never existed.
+      if (!deepest) {
+        return `'${hint}' — no tracked path under its first segment; a specifier, or a path anchored at a base this scan did not resolve`;
+      }
       // Every branch below reasons about the form the COMPARISON used, so the
       // pattern-judged shapes get their own sentence instead of borrowing the
       // collapse's. Borrowing it is what made the residue assert a directory
@@ -11176,8 +11194,13 @@ function selfTest() {
       !hintCovers('src/data', 'packages/spec/src/data/field.zod.ts'),
   );
   // The residue's claim stops being false: a resolved literal HAS a tracked
-  // prefix, so `unreachableReason` no longer files it as "never was a repo path"
-  // about a file that exists.
+  // prefix, so `unreachableReason` no longer files it under the by-construction
+  // sentence about a file that exists.
+  //
+  // ⚠️ The assertion is written against the sentence that branch prints TODAY,
+  // not against a phrase it used to print. Pinned to a retired phrase this pin
+  // would pass on any tree at all — the branch cannot emit a string nothing
+  // renders — which is a green over the exact regression it exists to catch.
   //
   // ⚠️ This case asserted ONLY `Boolean(deepest)` — that the hint had LEFT the
   // "never" branch — and leaving that branch is precisely what puts a hint into
@@ -11197,8 +11220,9 @@ function selfTest() {
     },
   ];
   t(
-    'a resolved dead hint has a tracked prefix, so the residue stops calling it "never a repo path"',
-    Boolean(distFreshnessDead[0].deepest) && !/never was a repo path/.test(unreachableReason(distFreshnessDead)),
+    'a resolved dead hint has a tracked prefix, so the residue stops filing it by construction',
+    Boolean(distFreshnessDead[0].deepest) &&
+      !/no tracked path under its first segment/.test(unreachableReason(distFreshnessDead)),
   );
   t(
     '...and it does NOT arrive at "the layout moved" instead — the tree HAS the file, named',
@@ -14698,7 +14722,11 @@ function selfTest() {
   t('...and leaves the real hint beside it unmarked', plantedNames.startsWith('packages/spec/src,') && !plantedNames.includes('packages/spec/src ✗'));
   const plantedNote = deadNamesNote(plantedRow);
   t('the note counts the dead against the declared total', plantedNote.includes('1 of 2 declared literal(s)'));
-  t("...and names WHY in the unreachable listing's own voice", /never was a repo path/.test(plantedNote));
+  t(
+    "...and names WHY in the unreachable listing's own voice",
+    /a base this scan did not resolve/.test(plantedNote),
+    plantedNote,
+  );
   t(
     'the note is capped like the listing it sits under, never an inventory',
     /…$/.test(deadNamesNote({ declared: 9, dead: [1, 2, 3, 4].map((n) => ({ hint: `no/such/p-${n}`, deepest: '' })) })),
@@ -14708,7 +14736,18 @@ function selfTest() {
     'a family that declares NO population is NOT unreachable — that is the undetermined verdict, a different fact',
     !sweptNames.includes('check:declares-nothing'),
   );
-  t('the sweep names WHY: a literal no tracked path begins with was never a repo path', /never was a repo path/.test(reasonOf('check:never-was')));
+  // ⚠️ The claim asserted here is the FIRST clause — no tracked path begins
+  // with the literal. The second used to read "never was a repo path", which
+  // is a claim about every base made from evidence about one, and it printed
+  // over three live files (#14208). Both halves are pinned so a regression to
+  // the universal reds rather than passing on the surviving prefix.
+  t(
+    'the sweep names WHY: no tracked path begins with the literal, without claiming it never was one',
+    /no tracked path under its first segment/.test(reasonOf('check:never-was')) &&
+      /a base this scan did not resolve/.test(reasonOf('check:never-was')) &&
+      !/never was a repo path/.test(reasonOf('check:never-was')),
+    reasonOf('check:never-was'),
+  );
   t('the sweep names WHY: the tree stops at a shorter prefix, so the layout moved under it', /stops at packages\/spec\/src/.test(reasonOf('check:moved')));
   // The third cause is the one a bare "matched nothing" would send a reader
   // hunting a directory that is sitting in front of them: the population is
@@ -14936,7 +14975,7 @@ function selfTest() {
   t('and the by-construction families under theirs', /unreachable BY CONSTRUCTION/.test(listedText));
   t('the real miss sorts BEFORE the standing facts, never buried among them', listedText.indexOf('THE LAYOUT MOVED') < listedText.indexOf('BY CONSTRUCTION'));
   t('every swept family is named in the listing, runnably', sweep.every((u) => listedText.includes(runnableInvocation(u.entry))));
-  t('each entry still carries the reason it could not reach', /never was a repo path/.test(listedText) && /the tree HAS it/.test(listedText));
+  t('each entry still carries the reason it could not reach', /a base this scan did not resolve/.test(listedText) && /the tree HAS it/.test(listedText));
   // The empty case must not print as a missing section, and the corpus size is
   // required for the #4690 reason one level down.
   const emptyListing = unreachableLines([], 4).join('\n');
