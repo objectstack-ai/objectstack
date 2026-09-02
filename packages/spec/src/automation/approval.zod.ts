@@ -721,11 +721,16 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
 
   /**
    * Threshold for `quorum` (total approvals required, M of N) and `per_group`
-   * (approvals required from EACH group). Defaults to 1. Clamped at runtime so
-   * it can never exceed the resolvable approver count (no deadlock).
+   * (approvals required from EACH group). Omitted, the threshold follows the
+   * behaviour rather than a fixed 1: `quorum` requires every resolvable
+   * approver, `per_group` requires one approval per group. Clamped at runtime
+   * so it can never exceed the resolvable approver count (no deadlock).
    */
   minApprovals: z.number().int().min(1).optional()
-    .describe('Approvals required — total (quorum) or per group (per_group). Default 1'),
+    .describe(
+      'Approvals required — total (quorum) or per group (per_group). '
+      + 'Omitted ⇒ all resolvable approvers for quorum, 1 per group for per_group',
+    ),
 
   /** Lock the triggering record from edits while this node is pending. */
   lockRecord: z.boolean().default(true).describe('Lock the record from editing while pending'),

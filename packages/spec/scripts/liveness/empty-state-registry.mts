@@ -117,6 +117,16 @@ export const EMPTY_STATE_REGISTRY: EmptyStateEntry[] = [
       'packages/core/src/security/resolve-authz-context.ts (resolveAuthzContext.hasPlatformAdminGrant — the single source of truth) and packages/plugins/plugin-security/src/explain-engine.ts (the identical predicate, replicated so the panel cannot overstate)',
   },
 
+  {
+    file: 'packages/spec/src/automation/approval.zod.ts',
+    property: 'minApprovals',
+    semantics: 'closed',
+    rationale:
+      "The approval threshold of a `quorum` / `per_group` node, and a case where the permissive-looking word is the restrictive one. Omitted under `quorum` the runtime requires EVERY resolvable approver — the threshold falls back to the resolved approver count, so a node whose author never wrote the key blocks until all of them sign, the least-privilege direction rather than the widest. Under `per_group` omission means one approval per group, and every group must still reach it. The `all` in the declared text therefore names APPROVERS REQUIRED, never access granted. Registered rather than reworded around the scanner because that sentence is the only place an author learns the omitted threshold is not 1 — which is precisely the drift this classification exists to keep visible.",
+    evidence:
+      'packages/plugins/plugin-approvals/src/approval-service.ts (ApprovalService.isApprovalSatisfied — the omitted-threshold fallbacks and their clamp to the resolvable count)',
+  },
+
   // ---- Scope selectors ---------------------------------------------------
 
   {
