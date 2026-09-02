@@ -1,5 +1,5 @@
 ---
-"@objectstack/metadata": patch
+"@objectstack/metadata": minor
 ---
 
 fix(metadata): key loader-held items by the row key they were stored under, so a body with no top-level `name` is no longer dropped from `list()` (#14205)
