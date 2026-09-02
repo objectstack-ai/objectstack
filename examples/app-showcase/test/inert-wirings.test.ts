@@ -14,7 +14,13 @@ import { stripComments } from '../../../scripts/js-comment-mask.mjs';
 import stack from '../objectstack.config.js';
 import { PLATFORM_CAPABILITY_NAMES } from '@objectstack/spec/security';
 import { FILE_REFERENCE_TYPES, valueSchemaFor } from '@objectstack/spec/data';
-import { healthFor, sweepProjectHealth, bindShowcaseJobRuntime } from '../src/automation/jobs/index.js';
+// The job handler's argument type, from the package that BUILDS it
+// (`AppPlugin`) — not a local re-description of it. A fake context typed to a
+// hand-written approximation is how a double drifts looser than the contract it
+// replaces; this one is checked against the real member types below.
+import type { JobHandlerContext } from '@objectstack/runtime';
+import { healthFor, sweepProjectHealth } from '../src/automation/jobs/index.js';
+import * as jobsModule from '../src/automation/jobs/index.js';
 import { POSITION_PERMISSION_SET_BINDINGS } from '../src/security/bind-position-sets.js';
 import {
   ADMIN_EMAIL,
@@ -126,6 +132,55 @@ describe('declarative jobs resolve their handler (#4774 ①)', () => {
   });
 });
 
+/**
+ * One job run's argument, as `AppPlugin` builds it (`JobHandlerContext`,
+ * #14094), with the two engine verbs the sweep uses recorded.
+ *
+ * There is no binding step to fake — that is the whole of #14257 — so this is
+ * the ONLY way the handler is reachable from here, on either boot path.
+ *
+ * `ql` is declared `satisfies` the CONTRACT's own member types rather than a
+ * local interface, so a drift in `IDataEngine.find`/`.update` reds here instead
+ * of being absorbed by a hand-written approximation of them. The cast that
+ * follows widens only to the engine members this handler never touches.
+ */
+function jobRun(rows: {
+  projects?: Array<Record<string, unknown>>;
+  tasks?: Array<Record<string, unknown>>;
+}) {
+  const reads: Array<{ object: string; query: any }> = [];
+  const writes: Array<Record<string, unknown>> = [];
+  const logged: Array<{ level: string; message: string }> = [];
+
+  const ql = {
+    find: async (object: string, query?: any) => {
+      reads.push({ object, query });
+      if (object === 'showcase_project') return rows.projects ?? [];
+      if (object === 'showcase_task') return rows.tasks ?? [];
+      return [];
+    },
+    update: async (_object: string, data: any) => {
+      writes.push(data as Record<string, unknown>);
+      return data;
+    },
+  } satisfies Partial<JobHandlerContext['ql']>;
+
+  const logger = {
+    debug: (message: string) => void logged.push({ level: 'debug', message }),
+    info: (message: string) => void logged.push({ level: 'info', message }),
+    warn: (message: string) => void logged.push({ level: 'warn', message }),
+    error: (message: string) => void logged.push({ level: 'error', message }),
+  } satisfies JobHandlerContext['logger'];
+
+  const context: JobHandlerContext = {
+    jobId: 'showcase_health_sweep',
+    bundle: stack,
+    ql: ql as unknown as JobHandlerContext['ql'],
+    logger,
+  };
+  return { context, reads, writes, logged };
+}
+
 describe('sweepProjectHealth computes health from burn vs progress (#4774 ①)', () => {
   it('is green when spending tracks delivery', () => {
     expect(healthFor({ budget: 150_000, spent: 60_000, taskProgress: [100, 80, 45, 0, 0] })).toBe('green');
@@ -154,62 +209,91 @@ describe('sweepProjectHealth computes health from burn vs progress (#4774 ①)',
   });
 
   it('sweeps only in-play projects and writes only what changed', async () => {
-    const projects = [
-      { id: 'p_active', status: 'active', health: 'green', budget: 90_000, spent: 88_000 },
-      { id: 'p_hold', status: 'on_hold', health: 'red', budget: 100_000, spent: 10_000 },
-    ];
-    const tasks = [
-      { project: 'p_active', progress: 0 },
-      { project: 'p_active', progress: 0 },
-      { project: 'p_hold', progress: 90 },
-    ];
-    const reads: Array<{ object: string; query: any }> = [];
-    const writes: Array<Record<string, unknown>> = [];
-
-    bindShowcaseJobRuntime({
-      ql: {
-        find: async (object: string, query: any) => {
-          reads.push({ object, query });
-          if (object === 'showcase_project') return projects;
-          if (object === 'showcase_task') return tasks;
-          return [];
-        },
-        update: async (_object: string, data: Record<string, unknown>) => {
-          writes.push(data);
-          return data;
-        },
-      },
+    const run = jobRun({
+      projects: [
+        { id: 'p_active', status: 'active', health: 'green', budget: 90_000, spent: 88_000 },
+        { id: 'p_hold', status: 'on_hold', health: 'red', budget: 100_000, spent: 10_000 },
+      ],
+      tasks: [
+        { project: 'p_active', progress: 0 },
+        { project: 'p_active', progress: 0 },
+        { project: 'p_hold', progress: 90 },
+      ],
     });
 
-    await sweepProjectHealth({ jobId: 'showcase_health_sweep' });
+    await sweepProjectHealth(run.context);
 
     // Only `active` / `on_hold` are read — settled projects are not relitigated.
-    expect(reads[0]?.object).toBe('showcase_project');
-    expect(reads[0]?.query?.where?.status?.$in).toEqual(['active', 'on_hold']);
+    expect(run.reads[0]?.object).toBe('showcase_project');
+    expect(run.reads[0]?.query?.where?.status?.$in).toEqual(['active', 'on_hold']);
     // p_active: burn 0.978 vs done 0 → red (changed from green).
     // p_hold:   burn 0.10  vs done 0.90 → green (changed from red).
-    expect(writes).toEqual([
+    expect(run.writes).toEqual([
       { id: 'p_active', health: 'red' },
       { id: 'p_hold', health: 'green' },
     ]);
   });
 
   it('is a no-op when nothing changed', async () => {
-    const writes: unknown[] = [];
-    bindShowcaseJobRuntime({
-      ql: {
-        find: async (object: string) =>
-          object === 'showcase_project'
-            ? [{ id: 'p1', status: 'active', health: 'green', budget: 100, spent: 10 }]
-            : [{ project: 'p1', progress: 100 }],
-        update: async (_o: string, d: Record<string, unknown>) => {
-          writes.push(d);
-          return d;
-        },
-      },
+    const run = jobRun({
+      projects: [{ id: 'p1', status: 'active', health: 'green', budget: 100, spent: 10 }],
+      tasks: [{ project: 'p1', progress: 100 }],
     });
-    await sweepProjectHealth({ jobId: 'showcase_health_sweep' });
-    expect(writes).toEqual([]);
+    await sweepProjectHealth(run.context);
+    expect(run.writes).toEqual([]);
+  });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// 1b. The sweep reaches its engine through its ARGUMENT (#14257)
+// ───────────────────────────────────────────────────────────────────────────
+describe('the nightly sweep survives an ARTIFACT-served boot (#14257)', () => {
+  it('recomputes when `functions` is all that was merged and `onEnable` never ran', async () => {
+    // The artifact path is not a variant of the in-process boot, it is a
+    // strictly NARROWER one: `objectstack build` emits `functions` into a
+    // sibling runtime module exporting only `{ functions, meta }`, the artifact
+    // JSON carries no `onEnable`, and `mergeRuntimeModule`
+    // (`packages/runtime/src/load-artifact-bundle.ts`) merges only `functions`.
+    //
+    // So this reaches the handler exactly the way that boot does — out of the
+    // `functions` entry, the one thing an artifact carries — having called
+    // NOTHING beforehand. No test in this file calls `onEnable`, and that
+    // absence is the assertion: before #14257 this same call wrote nothing at
+    // all, because the module-scope handle `onEnable` was supposed to fill was
+    // `undefined`, so the handler logged "no engine handle bound yet" and
+    // returned — on schedule, silently, recorded as a clean run.
+    const entry = functionEntry('sweepProjectHealth') as {
+      handler: (ctx: JobHandlerContext) => Promise<void>;
+    };
+    const run = jobRun({
+      projects: [{ id: 'p_artifact', status: 'active', health: 'green', budget: 90_000, spent: 88_000 }],
+      tasks: [{ project: 'p_artifact', progress: 0 }],
+    });
+
+    await entry.handler(run.context);
+
+    expect(run.reads.map((r) => r.object)).toEqual(['showcase_project', 'showcase_task']);
+    expect(run.writes).toEqual([{ id: 'p_artifact', health: 'red' }]);
+  });
+
+  it('exports no binding seam for `onEnable` to fill', () => {
+    // Gone from the EXPORT SURFACE, not merely unused: this is the repo's only
+    // shipped `defineJob`, i.e. what an author copies, so an app still offering
+    // `bindShowcaseJobRuntime` would keep teaching the shape that fails here.
+    expect(Object.keys(jobsModule)).not.toContain('bindShowcaseJobRuntime');
+  });
+
+  it('no authored source re-introduces the module-scope handle', () => {
+    // CODE, not comments — the handler's docblock and this file's own prose
+    // name the retired seam on purpose, explaining why it went.
+    const scanned = [...sourceFiles(), `${process.cwd()}/objectstack.config.ts`];
+    const offenders = scanned
+      .filter((f) => /bindShowcaseJobRuntime|no engine handle bound yet/.test(codeOf(f)))
+      .map((f) => f.slice(process.cwd().length + 1));
+    expect(
+      offenders,
+      `these sources still carry the superseded onEnable-binding seam: ${offenders.join(', ')}`,
+    ).toEqual([]);
   });
 });
 
