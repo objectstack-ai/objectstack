@@ -1370,10 +1370,19 @@ export class RemoteTransport {
       // while emitting `count(distinct "stage")`. That the ALIAS follows the
       // declared name rather than the lowering is what keeps a caller's result
       // key predictable from their own query.
+      //
+      // [#14113] The alias is ESCAPED here, not gated — see
+      // {@link RemoteTransport.aliasIdentifierSql}. `assertSafeIdentifier` used
+      // to guard this position too, and it refused EVERY analytics cube query
+      // on a remote datasource: a measure is named `<cube>.<measure>` on the
+      // wire and `ObjectQLStrategy` uses that name verbatim as the aggregation
+      // `alias`, so the dot failed `SAFE_IDENTIFIER` and this face threw a bare
+      // `Error` with no `code`/`status` — an opaque 500 out of `mapDataError`
+      // for a query that is spelled correctly. The `field` position above keeps
+      // the guard, which is where it does real work.
       const alias = agg.alias || `${func}_${field === '*' ? 'all' : field}`;
-      this.assertSafeIdentifier(alias);
       const argSql = lowering.distinct ? `distinct ${fieldSql}` : fieldSql;
-      selectParts.push(`${lowering.sql}(${argSql}) AS "${alias}"`);
+      selectParts.push(`${lowering.sql}(${argSql}) AS ${this.aliasIdentifierSql(alias)}`);
     }
 
     if (selectParts.length === 0) selectParts.push('*');
@@ -1837,6 +1846,45 @@ export class RemoteTransport {
     if (!SAFE_IDENTIFIER.test(name)) {
       throw new Error(`RemoteTransport: unsafe identifier rejected: "${name}"`);
     }
+  }
+
+  /**
+   * [#14113] Quote a single output NAME as a SQL identifier, doubling any
+   * embedded quote. The ALIAS half of the distinction #13714 drew one face
+   * over, where the same position routes through knex's `wrapIdentifier`
+   * ({@link SqlDriver.aliasIdentifierSql}) for exactly this reason.
+   *
+   * ## Why an alias is escaped where a reference is validated
+   *
+   * A column REFERENCE may legitimately be qualified, so it is checked by
+   * {@link RemoteTransport.assertSafeIdentifier} and must keep going through
+   * it. An ALIAS is one name by definition: `AggregationNodeSchema` declares
+   * it `z.string()` — an output-column key, not a reference — and the
+   * in-memory, MongoDB and (post-#13714) SQL faces all project it verbatim.
+   * Holding it to `SAFE_IDENTIFIER` made this face the outlier: it refused
+   * names the contract permits while its own emission could carry them safely.
+   * A dot is inert inside `AS "…"`, and `<cube>.<measure>` is the name EVERY
+   * analytics measure arrives under.
+   *
+   * ## ⛔ Escaping is not "dropping the check"
+   *
+   * The alias reaches the statement RAW inside `AS "…"`, so an alias
+   * containing a `"` would close the quoting and continue as grammar.
+   * Doubling it is the standard escape inside a quoted SQL identifier and is
+   * what keeps the alias a NAME rather than a way into the statement:
+   *
+   * ```
+   * bucket"; DROP TABLE deal; --   →   "bucket""; DROP TABLE deal; --"
+   * ```
+   *
+   * one inert column name, which SQLite returns the value under verbatim.
+   * `String()` mirrors the sibling face, so a non-string a JS caller put in
+   * `alias` is escaped rather than concatenated.
+   *
+   * ⛔ NOT for column references — those keep {@link assertSafeIdentifier}.
+   */
+  private aliasIdentifierSql(alias: string): string {
+    return `"${String(alias).replace(/"/g, '""')}"`;
   }
 
   /**

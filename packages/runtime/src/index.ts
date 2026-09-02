@@ -59,6 +59,10 @@ export { MigrationRecoveryPlugin, describeInterruptedRun } from './migration-rec
 export { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 export type { DefaultDatasourceDefinition, DefaultDatasourcePluginOptions } from './default-datasource-plugin.js';
 export { AppPlugin, collectBundleHooks, collectBundleFunctions, collectBundleFunctionEntries, collectBundleActions } from './app-plugin.js';
+// #14094 — what a DECLARATIVE job's handler is invoked with. A job has no graph,
+// so unlike a flow `script` node it is given data reach (`ql`) instead of being a
+// pure value-returner whose I/O the surrounding graph performs.
+export type { JobHandlerContext } from './job-handler-context.js';
 export { SeedLoaderService } from './seed-loader.js';
 // Boot-summary seed outcome accumulator (#3415/#3430) — the single writer
 // contract shared by AppPlugin and the marketplace rehydrate/heal path.
