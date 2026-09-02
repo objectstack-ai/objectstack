@@ -2,7 +2,7 @@
 
 import { defineJob } from '@objectstack/spec';
 
-export { sweepProjectHealth, bindShowcaseJobRuntime, healthFor } from './sweep-project-health.js';
+export { sweepProjectHealth, healthFor } from './sweep-project-health.js';
 
 /**
  * Nightly job — recompute project health.
