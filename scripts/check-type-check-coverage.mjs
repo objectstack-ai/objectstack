@@ -928,6 +928,15 @@ const EXEMPT = {
 // "the repair is the same one spec took -- put the file in a tsc program", and
 // the entry goes when the program exists, not when the number reaches zero.
 //
+// `@objectstack/lint` (16) left this ledger under the same shape on 2026-09-02
+// (#14173, wired to this instrument per the triage ruling on that card): the
+// recorded 16 (TS7006 x11, TS2835 x5) was entirely a config-tier pile -- it
+// dissolves under `tsconfig.test.json`'s `bundler` resolution, the same effect
+// measured above -- and the 6 residual TS6059 that replace it in
+// `test-typecheck-debt.json` were never part of the 16 at all; this entry's own
+// prior note already excluded them ("never this package's debt ... reporting on
+// its own inherited rootDir").
+//
 // So the shrink-only guarantee did not loosen here; it moved to a strictly
 // sharper instrument, one that also reddens on a wholesale substitution of
 // error IDENTITY at a constant total, which a per-package integer cannot see.
@@ -1035,33 +1044,6 @@ const TEST_DEBT = {
       + '43-ceiling would have swallowed in silence. At 10 it goes red, which is the whole point of a '
       + 'ratchet. Re-measured 10 at 2bc187641, and the pristine tree at that commit reports the same 10, '
       + "so none of the -33 is this PR's doing.",
-  },
-  '@objectstack/lint': {
-    errors: 16,
-    note: 'TS7006 x11, TS2835 x5, re-tallied from tsc at the 16 below -- not the older '
-      + 'composition rescaled. Per file: src/validate-semantic-roles.test.ts x5, '
-      + 'src/validate-dashboard-action-refs.test.ts x4, '
-      + 'src/validate-filter-tokens.test.ts x3, src/validate-capability-references.test.ts x3, '
-      + 'src/validate-managed-api-methods.test.ts x1. The 5 TS2835 are one per file and all the same '
-      + "shape -- the test's own relative import of the module under test, missing its `.js`. "
-      + 'LOWERED 19 -> 16 in #10779, re-tallied rather than declared stale because the delta is exactly '
-      + 'attributable: the 3 that left are the TS6059 this itemisation used to list, all of them in '
-      + 'validate-translatable-sections.test.ts, which imports contact.object.ts, contact.view.ts and '
-      + 'system/translations/index.ts from examples/app-showcase -- outside this package entirely. They '
-      + 'were never this package\'s debt; they were the generated re-measure project reporting on its '
-      + 'own inherited `rootDir`, and no author here could have retired them by fixing lint. That file '
-      + 'held exactly those 3 and so leaves the per-file list altogether. '
-      + 'Measured 26 -> 30 (5ab08428, the +4 being TS6059, a file outside rootDir, a class the pre-#5278 '
-      + 'note did not list) -> 32 (e8db1a230), and RECORDED 42 was a bootstrap margin (+10 over that 32). '
-      + 'THE MARGIN IS GONE, and has been since #7888 / PR #8225 lowered 42 -> 20 against a measured 20 at '
-      + 'b5e09b21 -- that PR deliberately left this note describing the larger pile, because inventing a '
-      + 'composition for errors that are gone is the one thing this ledger forbids, so the tally above is '
-      + 'the first one taken at the size the entry actually is. Lowered 20 -> 19 at 585edf738 (#8728). '
-      + 'The -1 is attributed: #8515 / PR #8610 moved the translation-section-name-missing pins onto the '
-      + 'frozen src/showcase-shape.fixtures.ts snapshot and dropped the live `TaskViews` import, which is '
-      + 'the TS6059 that left -- the surviving three name exactly the three example files those tests '
-      + 'still import. One older claim is now false and is corrected rather than carried: '
-      + 'src/validate-visibility-predicates.test.ts held 10 of the 32 and reports none today.',
   },
   '@objectstack/formula': {
     errors: 17,
