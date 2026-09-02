@@ -1547,20 +1547,94 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
       expect(issue!.message).toContain('`notAKey`');
     });
 
-    it('points builder vocabulary (steps/connections/trigger) at the canonical keys', () => {
+    it('points builder vocabulary (steps/connections) at the canonical keys', () => {
       expect(unknownKeyIssue(FlowSchema, { ...minimalFlow, steps: [] })!.message)
         .toContain('`steps` → `nodes`');
       expect(unknownKeyIssue(FlowSchema, { ...minimalFlow, connections: [] })!.message)
         .toContain('`connections` → `edges`');
-      expect(unknownKeyIssue(FlowSchema, { ...minimalFlow, trigger: 'record_change' })!.message)
-        .toContain('`trigger` → `type`');
     });
 
-    it('points a top-level object binding at the START node config', () => {
-      for (const key of ['object', 'objectName']) {
-        const message = unknownKeyIssue(FlowSchema, { ...minimalFlow, [key]: 'task' })!.message;
+    // `trigger` and `triggerType` were ALIASES pointing at `type` — a rename no
+    // author can take: `type` is the flow KIND enum, so following it lands on
+    // `Invalid option: expected one of "autolaunched"|…` one round later with the
+    // binding still nowhere. They are `guidance` entries now, so the rejection
+    // says where the binding really lives instead of prescribing a name. Both
+    // directions are pinned: the prescription is present, AND the rename is gone.
+    it('sends a top-level `trigger` to the START node config, never to a `type` rename', () => {
+      const message = unknownKeyIssue(FlowSchema, {
+        ...minimalFlow,
+        trigger: { type: 'record_change', object: 'task', events: ['create'] },
+      })!.message;
+      expect(message).toContain('START node');
+      expect(message).toContain('`{ objectName, triggerType, condition }`');
+      expect(message, 'the prescription names a real `record-*` token').toContain('record-after-create');
+      expect(message, 'the rename an author cannot take is gone').not.toContain('`trigger` → `type`');
+    });
+
+    it('sends a top-level `triggerType` to the START node config, never to a `type` rename', () => {
+      const message = unknownKeyIssue(FlowSchema, {
+        ...minimalFlow,
+        triggerType: 'record-after-create',
+      })!.message;
+      expect(message).toContain('START node');
+      expect(message).toContain('`{ objectName, triggerType, condition }`');
+      expect(message, 'the rename an author cannot take is gone').not.toContain('`triggerType` → `type`');
+    });
+
+    // The alias table is probed case- and separator-insensitively, so removing
+    // the `triggertype` row takes every spelling of it with the canonical one.
+    // `guidance` is exact-spelling by design (case folding is the rename
+    // channel's job — `shared/suggestions.zod.ts`), so a non-canonical spelling
+    // now gets the bare rejection: no prescription, and — the point — no
+    // confidently wrong one either.
+    it('no spelling of the removed alias renames to `type` any more', () => {
+      const message = unknownKeyIssue(FlowSchema, {
+        ...minimalFlow,
+        triggertype: 'record-after-create',
+      })!.message;
+      expect(message).toContain('`triggertype`');
+      expect(message).not.toContain('→ `type`');
+    });
+
+    // Why both renames were dead ends, pinned so the guidance above cannot
+    // quietly turn into correct advice: `type` names the flow KIND and accepts
+    // no lifecycle-event token at all.
+    it('`type` accepts no `record-*` event token — the reason neither key renames to it', () => {
+      const result = FlowSchema.safeParse({ ...minimalFlow, type: 'record-after-create' });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues.find((i: { code: string }) => i.code === 'invalid_value');
+      expect(issue!.message).toContain('expected one of');
+      expect(issue!.message).not.toContain('record-');
+    });
+
+    it('points a top-level object/schedule binding at the START node config', () => {
+      const cases: Array<[string, unknown]> = [
+        ['object', 'task'],
+        ['objectName', 'task'],
+        ['schedule', '0 8 * * *'],
+      ];
+      for (const [key, value] of cases) {
+        const message = unknownKeyIssue(FlowSchema, { ...minimalFlow, [key]: value })!.message;
         expect(message, `\`${key}\` should point at the start node`).toContain('START node');
       }
+    });
+
+    // Positive control for the shape every one of those prescriptions points at:
+    // the trigger really does bind on the START node's `config`, and a flow that
+    // writes it there parses.
+    it('accepts the trigger bound on the START node config — the shape the guidance prescribes', () => {
+      const result = FlowSchema.safeParse({
+        ...minimalFlow,
+        type: 'record_change',
+        nodes: [
+          {
+            id: 'start', type: 'start', label: 'Start',
+            config: { objectName: 'task', triggerType: 'record-after-create' },
+          },
+          { id: 'end', type: 'end', label: 'End' },
+        ],
+      });
+      expect(result.success).toBe(true);
     });
   });
 
