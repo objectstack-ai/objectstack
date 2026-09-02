@@ -13,7 +13,6 @@ import {
   type ObjectGraph,
 } from './object-graph.js';
 import {
-  SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
   unprovisionedAnchorCause,
   unprovisionedAnchorHint,
@@ -54,13 +53,26 @@ import {
  * - `dashboard-filter-field-unknown` (#3365) — a dashboard-level filter
  *   (`dateRange` or a `globalFilters[]` entry) is wired into EVERY widget's
  *   analytics query (#2501), but its EFFECTIVE field (after any `filterBindings`
- *   re-target) does not exist on a bound widget's dataset object. The widget's
+ *   re-target) does not resolve on a bound widget's dataset object. The widget's
  *   query then references a non-existent column and crashes at render time
  *   (`no such column …`) — a build-decidable invariant that previously escaped
  *   the static gate and failed only when a user opened the dashboard. A widget
  *   opts out with `filterBindings: { <name>: false }` or re-targets to a real
  *   field. This is the same field-existence invariant ADR-0032 enforces for
  *   CEL formula / sharing-rule references, applied to dashboard filter fields.
+ *   Resolution is {@link resolveFieldPath}'s (#14275), so a DOTTED effective
+ *   field (`account.signed_at`) is walked hop by hop rather than skipped, and a
+ *   bare name is judged against the object's OWN injected columns rather than
+ *   the object-independent `SYSTEM_FIELDS` union — see "What #14275 closed"
+ *   below for why each half was a hole rather than a nicety.
+ * - `dashboard-filter-field-not-included` (#14275) — the effective field
+ *   RESOLVES, but its relationship prefix is not declared in the bound
+ *   dataset's `include`, so ADR-0021 compiles no join for it and the column is
+ *   out of the broadcast query's reach. The `include` half of the same two
+ *   clauses `widget-filter-field-not-included` applies to the widget's own
+ *   `filter`, at the position one level up — a separate id because the fix is a
+ *   different edit (declare the join, versus point the filter somewhere real)
+ *   and because the family keeps one id per class.
  *
  * Advisory rules — severity `warning`, build stays green:
  *
@@ -135,14 +147,40 @@ import {
  * are derived from `include`, and `assertDeclared` refuses an undeclared
  * relationship path). So a dotted key here is judged on the same two clauses
  * `validate-dataset-references.ts` applies one level down — existence, then
- * joinability — rather than skipped. That decision is deliberate and recorded
- * rather than implicit: `dashboard-filter-field-unknown` above SKIPS a dotted
- * field (`field.includes('.')`), which was correct when nothing in this package
- * could walk hops, and a third silent pass-through would have reproduced the
- * very card this rule closes. The runtime is NOT a backstop for it either —
- * `assertDeclared` runs over `dimensions` and `measures` only, never over
- * `runtimeFilter` — so nothing between the author and the empty tile asks this
- * question.
+ * joinability — rather than skipped. The runtime is NOT a backstop for it
+ * either — `assertDeclared` runs over `dimensions` and `measures` only, never
+ * over `runtimeFilter` — so nothing between the author and the empty tile asks
+ * this question.
+ *
+ * ### What #14275 closed, one position up
+ *
+ * `dashboard-filter-field-unknown` (a1) shipped with the two limitations the
+ * paragraph above used to record as deliberate, and #14275 closed both by
+ * migrating that branch onto this same seam:
+ *
+ *   1. it SKIPPED every dotted effective field (`if (field.includes('.'))
+ *      continue;`), which was accurate when nothing in this package could walk
+ *      hops and false once {@link resolveFieldPath} landed. The consequence was
+ *      the sharper one: a dashboard filter is broadcast to EVERY widget on the
+ *      board, so a single unjudged `filterBindings: { dateRange:
+ *      'account.signed_at' }` degraded the whole dashboard rather than one tile
+ *      — unjudged whether or not `account` existed, whether or not `signed_at`
+ *      existed on it, and whether or not `account` was in the dataset's
+ *      `include`;
+ *   2. it resolved bare names against the object-independent `SYSTEM_FIELDS`
+ *      union, which answers "could this be a system column ANYWHERE". The two
+ *      differ exactly where it matters: on `ownership: 'none'` the platform
+ *      injects no `owner_id`, so the union answered a real defect as
+ *      resolvable. Both positions now take skip 3 per object, through
+ *      {@link resolveFieldPath}'s use of `injectedColumnsFor`.
+ *
+ * The #8340 provenance question rides on the migrated branch unchanged, and is
+ * now GATED by the verdict's `injected` marker rather than by union membership:
+ * a leaf that resolved because it is injected is the only leaf whose anchor can
+ * be unprovisioned (an author-DECLARED column of the same name is the author's,
+ * #7859), and the marker states that fact where the flat union could not. It
+ * also travels: the anchor is looked up on the object the LEAF landed on, so a
+ * dotted filter path ending on an ADR-0015 `external` object is answered too.
  *
  * Resolution is {@link resolveFieldPath}'s and its `unknowable` verdicts are
  * never reported (ADR-0072 D1), so the three skips every field-existence rule
@@ -168,6 +206,11 @@ export const WIDGET_LEGACY_ANALYTICS_SHAPE = 'widget-legacy-analytics-shape';
 export const WIDGET_LEGACY_ANALYTICS_UNRENDERABLE = 'widget-legacy-analytics-unrenderable';
 export const DASHBOARD_FILTER_FIELD_UNKNOWN = 'dashboard-filter-field-unknown';
 export const DASHBOARD_FILTER_FIELD_UNPROVISIONED = 'dashboard-filter-field-unprovisioned';
+/**
+ * [#14275] A dashboard filter's effective field resolves, but its relationship
+ * prefix is not declared in the bound dataset's `include`.
+ */
+export const DASHBOARD_FILTER_FIELD_NOT_INCLUDED = 'dashboard-filter-field-not-included';
 /** [#14148] A key of the widget's OWN `filter` that resolves to no column. */
 export const WIDGET_FILTER_FIELD_UNKNOWN = 'widget-filter-field-unknown';
 /** [#14148] A widget filter key whose relationship prefix is not in `include`. */
@@ -310,9 +353,11 @@ const DATE_RANGE_FILTER_NAME = 'dateRange';
 /**
  * Default field of the built-in date range when `dateRange.field` is omitted.
  * MUST track objectui `dashboard-filters.ts` `DATE_RANGE_DEFAULT_FIELD` — the
- * runtime this check shadows. `created_at` is a registry-injected system field
- * (the package-shared `SYSTEM_FIELDS`, `system-fields.ts`), so a bare
- * `dateRange` never false-positives.
+ * runtime this check shadows. `created_at` is a registry-injected system field,
+ * resolved PER OBJECT through `injectedColumnsFor` (#14275), so a bare
+ * `dateRange` never false-positives on an object that gets the audit family —
+ * and IS reported on one that opts out of it (`systemFields: { audit: false }`),
+ * where the broadcast filter really does address a column that is not there.
  */
 const DATE_RANGE_DEFAULT_FIELD = 'created_at';
 
@@ -568,66 +613,134 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
       // author's own `filterBindings: { <name>: false }`, so no suppression needed.
       if (dashFilterDefs.length > 0) {
         const datasetObject = typeof dataset.object === 'string' ? dataset.object : undefined;
-        // Only judge when the bound object's fields are known in THIS stack; an
-        // object from another installed package is unknowable here — skip rather
-        // than false-positive (mirrors the measure-aggregate check above).
-        const objectFields = datasetObject ? objectFieldTypes.get(datasetObject) : undefined;
-        // [#8340] The provenance half of the same question, for THIS object.
-        const anchors = datasetObject ? unprovisionedAnchors.get(datasetObject) : undefined;
-        if (objectFields && datasetObject) {
+        // [#14275] Skips 1 and 2, taken once for the whole widget — exactly as
+        // the (a2) limb below does, off the SAME index. An object this stack
+        // does not define, or one with no readable field map, is unknowable
+        // here; resolving against it would turn one unjudgeable base binding
+        // into a finding per dashboard filter.
+        const base = datasetObject ? graph.get(datasetObject) : undefined;
+        if (datasetObject && base) {
+          // ADR-0021 joins ONLY what `include` declares, and the dashboard
+          // filter lands in the same `runtimeFilter` slot the widget's own
+          // filter does — so the second clause is the same clause.
+          const included = joinablePrefixes(dataset.include);
           for (const def of dashFilterDefs) {
             const eff = effectiveFilterField(w, def);
             if (!eff) continue; // opted out / not targeted → filter never applies
             const field = eff.field;
-            // A relationship path (`account.region`) is resolved by the query
-            // engine, not a base column, so it can't be checked here — skip it.
-            if (field.includes('.')) continue;
-            if (objectFields.has(field) || SYSTEM_FIELDS.has(field)) {
-              // The name RESOLVES — the existence error above is right to stay
-              // silent, and `SYSTEM_FIELDS` keeps that decision (#8340 adds a
-              // question, it does not replace the membership test). But a
-              // resolvable anchor on a federated object has no column behind
-              // it, so ANDing it into the widget's analytics query silently
-              // narrows the result to nothing instead of crashing. Warning,
-              // not error, on #4330's cost asymmetry: this pass cannot see the
-              // remote table, only that the PLATFORM provisions no storage.
-              if (anchors?.has(field)) {
+            // [#14275] The effective field is resolved on the object graph — a
+            // dotted `account.signed_at` hop by hop, a bare name against THIS
+            // object's authored + injected columns. Unjudgeable verdicts are
+            // never reported (ADR-0072 D1).
+            const verdict = resolveFieldPath(graph, datasetObject, field);
+            if (isUnjudgeable(verdict) || !verdict) continue;
+
+            // How this widget came to carry the filter — the half an author
+            // acts on, and the reason the two message shapes differ: an
+            // explicit `filterBindings` target is a typo they must fix, an
+            // inherited default is one they may opt out of.
+            const provenance = eff.explicit
+              ? `binds dashboard filter \`${def.name}\` to field \`${field}\` (via filterBindings), but `
+              : `inherits dashboard filter \`${def.name}(${field})\`, but `;
+
+            if (verdict.kind !== 'ok') {
+              // A DOTTED miss is reported through the shared account, which
+              // names WHICH hop failed — a bare "has no field `a.b`" would send
+              // the author looking for a column nobody wrote. A bare name keeps
+              // #3365's shipped wording verbatim: it is the whole existing
+              // population, and this PR narrows the accept set rather than
+              // re-wording what already fires.
+              const account = field.includes('.')
+                ? describeFieldPathVerdict(verdict, field, 'the effective field')
+                : undefined;
+              if (account) {
                 push({
-                  severity: 'warning',
-                  rule: DASHBOARD_FILTER_FIELD_UNPROVISIONED,
+                  severity: 'error',
+                  rule: DASHBOARD_FILTER_FIELD_UNKNOWN,
                   message:
-                    (eff.explicit
-                      ? `binds dashboard filter \`${def.name}\` to field \`${field}\` (via filterBindings), but `
-                      : `inherits dashboard filter \`${def.name}(${field})\`, but `) +
-                    `${unprovisionedAnchorCause(datasetObject, field)}. The filter is ANDed ` +
-                    `into this widget's analytics query (#2501), so it can never match a real value — ` +
-                    `on SQLite it silently degrades to constant-false and the widget renders empty ` +
-                    `(HTTP 200, zero rows, no error).`,
+                    `${provenance}${account.message} The filter is ANDed into EVERY bound ` +
+                    `widget's analytics query (#2501), so the query addresses a column that ` +
+                    `does not exist.`,
                   hint:
-                    `${unprovisionedAnchorHint(datasetObject, field)} A widget can also opt out ` +
-                    `with filterBindings: { ${def.name}: false }. Suppress with ` +
-                    `suppressWarnings: ['${DASHBOARD_FILTER_FIELD_UNPROVISIONED}'] if the remote schema ` +
-                    `resolves it some other way.`,
+                    `Point filterBindings: { ${def.name}: '<field>' } at a field that resolves on ` +
+                    `\`${datasetObject}\` — or at a \`relationship[.relationship].field\` path whose ` +
+                    `prefix is declared in dataset "${dsName}"'s \`include\` — or opt out with ` +
+                    `filterBindings: { ${def.name}: false }. ${account.detail}`,
                 });
+                continue;
               }
+              push({
+                severity: 'error',
+                rule: DASHBOARD_FILTER_FIELD_UNKNOWN,
+                message: eff.explicit
+                  ? `binds dashboard filter \`${def.name}\` to field \`${field}\` ` +
+                    `(via filterBindings), but object \`${datasetObject}\` (dataset "${dsName}") ` +
+                    `has no field \`${field}\`.`
+                  : `inherits dashboard filter \`${def.name}(${field})\`, but object ` +
+                    `\`${datasetObject}\` (dataset "${dsName}") has no field \`${field}\`.`,
+                hint: eff.explicit
+                  ? `Point filterBindings: { ${def.name}: '<field>' } at a field that exists on ` +
+                    `\`${datasetObject}\`, or opt out with filterBindings: { ${def.name}: false }.` +
+                    `${suggest(field, base.names)} Object fields: ${list(base.names)}.`
+                  : `Set filterBindings: { ${def.name}: false } on this widget to opt out, or ` +
+                    `re-target to an existing field with filterBindings: { ${def.name}: '<field>' }.` +
+                    `${suggest(field, base.names)} Object fields: ${list(base.names)}.`,
+              });
               continue;
             }
+
+            // [#14275] The field RESOLVES. Second clause: a dotted path is only
+            // in this query's reach if its relationship prefix is declared —
+            // `assertDeclared` never sees a `runtimeFilter`, so there is no
+            // runtime door in front of this one either.
+            const cut = field.lastIndexOf('.');
+            if (cut >= 0) {
+              const prefix = field.slice(0, cut);
+              if (!included.has(prefix)) {
+                push({
+                  severity: 'error',
+                  rule: DASHBOARD_FILTER_FIELD_NOT_INCLUDED,
+                  message:
+                    `${provenance}its relationship prefix "${prefix}" is not declared in dataset ` +
+                    `"${dsName}"'s \`include\` — and ADR-0021 joins ONLY declared paths, so no join ` +
+                    `is compiled and the column is out of this query's reach. The filter is ANDed ` +
+                    `into EVERY bound widget's analytics query (#2501), so the whole board renders ` +
+                    `empty, not one tile.`,
+                  hint:
+                    `Add "${prefix}" to dataset "${dsName}"'s include (declaring "a.b" implicitly ` +
+                    `includes "a"), filter on a field of "${datasetObject}" itself, or opt out with ` +
+                    `filterBindings: { ${def.name}: false }. Declared include paths: ` +
+                    `${included.size > 0 ? [...included].sort().join(', ') : '(none)'}.`,
+                });
+                continue;
+              }
+            }
+
+            // [#8340] The provenance half, gated by the verdict's `injected`
+            // marker (#14275): only a leaf that resolved BECAUSE it is injected
+            // can be an anchor with no storage — an author-declared column of
+            // the same name is one they vouch for (#7859). Looked up on the
+            // object the LEAF landed on, so a dotted path ending on an ADR-0015
+            // `external` object is answered too. Warning, not error, on #4330's
+            // cost asymmetry: this pass cannot see the remote table, only that
+            // the PLATFORM provisions no storage.
+            if (!verdict.injected) continue;
+            const leafObject = verdict.object;
+            const leafField = verdict.field;
+            if (!unprovisionedAnchors.get(leafObject)?.has(leafField)) continue;
             push({
-              severity: 'error',
-              rule: DASHBOARD_FILTER_FIELD_UNKNOWN,
-              message: eff.explicit
-                ? `binds dashboard filter \`${def.name}\` to field \`${field}\` ` +
-                  `(via filterBindings), but object \`${datasetObject}\` (dataset "${dsName}") ` +
-                  `has no field \`${field}\`.`
-                : `inherits dashboard filter \`${def.name}(${field})\`, but object ` +
-                  `\`${datasetObject}\` (dataset "${dsName}") has no field \`${field}\`.`,
-              hint: eff.explicit
-                ? `Point filterBindings: { ${def.name}: '<field>' } at a field that exists on ` +
-                  `\`${datasetObject}\`, or opt out with filterBindings: { ${def.name}: false }.` +
-                  `${suggest(field, objectFields.keys())} Object fields: ${list(objectFields.keys())}.`
-                : `Set filterBindings: { ${def.name}: false } on this widget to opt out, or ` +
-                  `re-target to an existing field with filterBindings: { ${def.name}: '<field>' }.` +
-                  `${suggest(field, objectFields.keys())} Object fields: ${list(objectFields.keys())}.`,
+              severity: 'warning',
+              rule: DASHBOARD_FILTER_FIELD_UNPROVISIONED,
+              message:
+                `${provenance}${unprovisionedAnchorCause(leafObject, leafField)}. The filter is ANDed ` +
+                `into this widget's analytics query (#2501), so it can never match a real value — ` +
+                `on SQLite it silently degrades to constant-false and the widget renders empty ` +
+                `(HTTP 200, zero rows, no error).`,
+              hint:
+                `${unprovisionedAnchorHint(leafObject, leafField)} A widget can also opt out ` +
+                `with filterBindings: { ${def.name}: false }. Suppress with ` +
+                `suppressWarnings: ['${DASHBOARD_FILTER_FIELD_UNPROVISIONED}'] if the remote schema ` +
+                `resolves it some other way.`,
             });
           }
         }

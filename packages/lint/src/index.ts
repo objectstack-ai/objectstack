@@ -24,6 +24,10 @@ export {
   WIDGET_LEGACY_ANALYTICS_UNRENDERABLE,
   DASHBOARD_FILTER_FIELD_UNKNOWN,
   DASHBOARD_FILTER_FIELD_UNPROVISIONED,
+  // [#14275] The `include` clause on a DASHBOARD-level filter's effective
+  // field, now that it is resolved on the object graph rather than skipped
+  // whenever it was dotted.
+  DASHBOARD_FILTER_FIELD_NOT_INCLUDED,
   // [#14148] The widget's OWN two references, at the same site: the keys of its
   // presentation-scope `filter` (resolved on the #14105 object-graph seam, with
   // the ADR-0021 `include` clause its `runtimeFilter` really is subject to) and

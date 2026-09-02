@@ -13,6 +13,7 @@ import {
   WIDGET_LEGACY_ANALYTICS_UNRENDERABLE,
   DASHBOARD_FILTER_FIELD_UNKNOWN,
   DASHBOARD_FILTER_FIELD_UNPROVISIONED,
+  DASHBOARD_FILTER_FIELD_NOT_INCLUDED,
   WIDGET_FILTER_FIELD_UNKNOWN,
   WIDGET_FILTER_FIELD_NOT_INCLUDED,
   WIDGET_SORTBY_UNSELECTED,
@@ -627,8 +628,20 @@ describe('validateWidgetBindings (dashboard-filter-field-unknown, issue #3365)',
     })))).toHaveLength(0);
   });
 
-  it('skips a relationship-path filter field (dotted paths are engine-resolved)', () => {
-    expect(only(validateWidgetBindings(stack({ dateRange: { field: 'account.region' } })))).toHaveLength(0);
+  it('RESOLVES a relationship-path filter field instead of skipping it (#14275)', () => {
+    // REWRITTEN, not deleted. This case pinned the branch's
+    // `if (field.includes('.')) continue;`, whose comment claimed a dotted path
+    // "can't be checked here". That was accurate when nothing in this package
+    // could walk hops and became false when `resolveFieldPath` landed
+    // (#14267 for #14105); the assertion kept passing precisely because the
+    // rule had stopped asking the question. `account` is not a field on
+    // `crm_account`, so the head hop is a real miss and is now named as one.
+    const findings = only(validateWidgetBindings(stack({ dateRange: { field: 'account.region' } })));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].message).toContain('account.region');
+    expect(findings[0].message).toContain('traverses "account"');
+    expect(findings[0].message).toContain('crm_account');
   });
 
   it('cannot judge — and never false-positives — when the object is not in the stack', () => {
@@ -765,6 +778,304 @@ describe('validateWidgetBindings (dashboard-filter-field-unprovisioned, issue #8
     delete (s as { objects?: unknown }).objects;
     expect(only(validateWidgetBindings(s))).toHaveLength(0);
   });
+
+  it('[#14275] the anchor is looked up on the object the LEAF landed on, not the base', () => {
+    // The #8340 question now rides the migrated branch, so it travels with the
+    // verdict: a DOTTED filter path ending on an ADR-0015 external object is
+    // answered, which the pre-#14275 branch could not do at all (it skipped
+    // every dotted field before reaching the provenance test).
+    const federated = {
+      objects: [
+        {
+          name: 'crm_order',
+          fields: [
+            { name: 'total', type: 'number' },
+            { name: 'customer', type: 'lookup', reference: 'ext_customer' },
+          ],
+        },
+        {
+          name: 'ext_customer',
+          external: { remoteName: 'customers' },
+          fields: [{ name: 'email', type: 'text' }],
+        },
+      ],
+      datasets: [{
+        name: 'order_metrics', object: 'crm_order', include: ['customer'],
+        measures: [{ name: 'order_count', aggregate: 'count' }],
+      }],
+      dashboards: [{
+        name: 'orders', label: 'Orders',
+        globalFilters: [{ field: 'customer.owner_id', type: 'select' }],
+        widgets: [{ id: 'total_orders', type: 'metric', dataset: 'order_metrics', values: ['order_count'] }],
+      }],
+    };
+    const findings = only(validateWidgetBindings(federated));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('warning');
+    // The cause names ext_customer — the LEAF's object — not crm_order.
+    expect(findings[0].message).toContain('ext_customer');
+    expect(findings[0].message).toContain('external object (ADR-0015)');
+    expect(unknownOnly(validateWidgetBindings(federated))).toHaveLength(0);
+  });
+});
+
+// ── [#14275] The DASHBOARD-level filter, on the object-graph seam ────────────
+
+/**
+ * The card's repro shape: a dashboard `dateRange` re-targeted onto a
+ * relationship path (`account.signed_at`), broadcast into a widget whose
+ * dataset joins `account`. Every knob the two gaps turn is exposed:
+ * `dash`/`widget` for the binding, `datasetOverrides` for the `include` clause,
+ * `objectOverrides` for the per-object injected set.
+ */
+function dashboardDottedStack(
+  dash: Record<string, unknown> = {},
+  widget: Record<string, unknown> = {},
+  datasetOverrides: Record<string, unknown> = {},
+  objectOverrides: Record<string, unknown> = {},
+) {
+  return {
+    objects: [
+      {
+        name: 'crm_deal',
+        fields: [
+          { name: 'stage', type: 'select' },
+          { name: 'amount', type: 'number' },
+          { name: 'account', type: 'lookup', reference: 'crm_account' },
+        ],
+        ...objectOverrides,
+      },
+      {
+        name: 'crm_account',
+        fields: [
+          { name: 'name', type: 'text' },
+          { name: 'signed_at', type: 'date' },
+        ],
+      },
+    ],
+    datasets: [{
+      name: 'deal_metrics',
+      object: 'crm_deal',
+      include: ['account'],
+      dimensions: [{ name: 'stage', field: 'stage' }],
+      measures: [{ name: 'deal_count', aggregate: 'count' }],
+      ...datasetOverrides,
+    }],
+    dashboards: [{
+      name: 'pipeline_health',
+      label: 'Pipeline',
+      dateRange: { field: 'account.signed_at', defaultRange: 'this_quarter' },
+      widgets: [{
+        id: 'open_deals', type: 'metric',
+        dataset: 'deal_metrics', values: ['deal_count'],
+        ...widget,
+      }],
+      ...dash,
+    }],
+  };
+}
+
+describe('dashboard-filter-field-unknown — gap 1: dotted paths are resolved (#14275)', () => {
+  const unknown = (fs: ReturnType<typeof validateWidgetBindings>) =>
+    fs.filter((f) => f.rule === DASHBOARD_FILTER_FIELD_UNKNOWN);
+
+  it('is silent on the clean shape — a dotted path through a declared include', () => {
+    expect(validateWidgetBindings(dashboardDottedStack())).toEqual([]);
+  });
+
+  it('errors when a HOP names nothing on the bound object', () => {
+    const findings = unknown(validateWidgetBindings(
+      dashboardDottedStack({ dateRange: { field: 'acount.signed_at' } }),
+    ));
+    expect(findings).toHaveLength(1);
+    const [f] = findings;
+    expect(f.severity).toBe('error');
+    // Names the dashboard, the widget, the filter, the path and WHICH hop failed.
+    expect(f.where).toBe('dashboard "pipeline_health" › widget "open_deals"');
+    expect(f.message).toContain('dateRange');
+    expect(f.message).toContain('traverses "acount"');
+    expect(f.message).toContain('crm_deal');
+    expect(f.message).toContain('Did you mean "account"?');
+    expect(f.path).toBe('dashboards[0].widgets[0]');
+  });
+
+  it('errors when the LEAF names nothing on the object the hop landed on', () => {
+    const findings = unknown(validateWidgetBindings(
+      dashboardDottedStack({ dateRange: { field: 'account.signd_at' } }),
+    ));
+    expect(findings).toHaveLength(1);
+    // The verdict travelled: the miss is reported against crm_ACCOUNT, the
+    // object the leaf lives on, not against the dataset's base object.
+    expect(findings[0].message).toContain('crm_account');
+    expect(findings[0].hint).toContain('signed_at');
+  });
+
+  it('errors when a hop is not a relationship at all', () => {
+    const findings = unknown(validateWidgetBindings(
+      dashboardDottedStack({ dateRange: { field: 'amount.total' } }),
+    ));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('not a relationship');
+  });
+
+  it('carries the explicit wording when filterBindings re-targets onto a bad path', () => {
+    const findings = unknown(validateWidgetBindings(dashboardDottedStack(
+      {},
+      { filterBindings: { dateRange: 'acount.signed_at' } },
+    )));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('via filterBindings');
+    expect(findings[0].message).toContain('acount.signed_at');
+  });
+
+  it('is silent when the widget opts a bad dotted filter out entirely', () => {
+    expect(validateWidgetBindings(dashboardDottedStack(
+      { dateRange: { field: 'acount.signed_at' } },
+      { filterBindings: { dateRange: false } },
+    ))).toEqual([]);
+  });
+
+  it('takes the injected-hop skip — a path THROUGH a registry column is unknowable', () => {
+    // `owner_id` is injected and IS a lookup at the registry, but its target is
+    // registry-owned and invisible here. Reporting it would be the false
+    // positive skip 3 exists to prevent (ADR-0072 D1).
+    expect(validateWidgetBindings(
+      dashboardDottedStack({ dateRange: { field: 'owner_id.name' } }),
+    )).toEqual([]);
+  });
+
+  it('takes skip 2 — an object with no readable field map is never reported', () => {
+    const s = dashboardDottedStack({ dateRange: { field: 'acount.signed_at' } });
+    delete (s.objects[0] as { fields?: unknown }).fields;
+    expect(unknown(validateWidgetBindings(s))).toHaveLength(0);
+  });
+});
+
+describe('dashboard-filter-field-not-included — the include clause (#14275)', () => {
+  const notIncluded = (fs: ReturnType<typeof validateWidgetBindings>) =>
+    fs.filter((f) => f.rule === DASHBOARD_FILTER_FIELD_NOT_INCLUDED);
+
+  it('errors when a RESOLVABLE dotted path traverses an undeclared relationship', () => {
+    const findings = notIncluded(validateWidgetBindings(
+      dashboardDottedStack({}, {}, { include: [] }),
+    ));
+    expect(findings).toHaveLength(1);
+    const [f] = findings;
+    expect(f.severity).toBe('error');
+    expect(f.message).toContain('account');
+    expect(f.message).toContain('deal_metrics');
+    // The consequence that makes this a p2 rather than the widget-level twin:
+    // the filter reaches every widget on the board.
+    expect(f.message).toContain('EVERY bound widget');
+    expect(f.hint).toContain('(none)');
+  });
+
+  it('is silent for a bare base column — it needs no join', () => {
+    expect(notIncluded(validateWidgetBindings(
+      dashboardDottedStack({ dateRange: { field: 'stage' } }, {}, { include: [] }),
+    ))).toHaveLength(0);
+  });
+
+  it('does not double-report: an unresolvable path yields the existence finding only', () => {
+    const all = validateWidgetBindings(
+      dashboardDottedStack({ dateRange: { field: 'account.signd_at' } }, {}, { include: [] }),
+    );
+    expect(all.filter((f) => f.rule === DASHBOARD_FILTER_FIELD_UNKNOWN)).toHaveLength(1);
+    expect(notIncluded(all)).toHaveLength(0);
+  });
+
+  it('honours the implicit-prefix rule — declaring "a.b" includes "a"', () => {
+    expect(notIncluded(validateWidgetBindings(
+      dashboardDottedStack({}, {}, { include: ['account.owner'] }),
+    ))).toHaveLength(0);
+  });
+
+  it('is NOT suppressible — it describes a query the analytics service cannot satisfy', () => {
+    expect(notIncluded(validateWidgetBindings(dashboardDottedStack(
+      {}, { suppressWarnings: [DASHBOARD_FILTER_FIELD_NOT_INCLUDED] }, { include: [] },
+    )))).toHaveLength(1);
+  });
+});
+
+describe('dashboard-filter-field-unknown — gap 2: the PER-OBJECT injected set (#14275)', () => {
+  const unknown = (fs: ReturnType<typeof validateWidgetBindings>) =>
+    fs.filter((f) => f.rule === DASHBOARD_FILTER_FIELD_UNKNOWN);
+
+  /** A bare `owner_id` dashboard filter, on the object knob that decides it. */
+  const ownerFilter = (objectOverrides: Record<string, unknown>) =>
+    dashboardDottedStack({ dateRange: undefined, globalFilters: [{ field: 'owner_id', type: 'select' }] },
+      {}, {}, objectOverrides);
+
+  it("reports owner_id on an `ownership: 'none'` object — the union answered this resolvable", () => {
+    // The card's gap 2, stated as its consequence: the platform injects NO
+    // `owner_id` here, so the broadcast filter emits `WHERE owner_id = …`
+    // against a table without that column. The object-independent
+    // `SYSTEM_FIELDS` union said "could be a system column anywhere" and the
+    // rule stayed silent; `injectedColumnsFor` answers per object.
+    const findings = unknown(validateWidgetBindings(ownerFilter({ ownership: 'none' })));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].message).toContain('owner_id');
+    expect(findings[0].message).toContain('crm_deal');
+  });
+
+  it('stays silent on the twin where the platform DOES inject it (mutation: drop `ownership`)', () => {
+    // Breaks the other half of the derivation — without it the test above
+    // would pass for a rule that simply flags every injected column.
+    expect(unknown(validateWidgetBindings(ownerFilter({})))).toHaveLength(0);
+  });
+
+  it("reports created_at on an object that opts out of the audit family", () => {
+    // The same gap on the built-in date range's DEFAULT field: a bare
+    // `dateRange` lands on `created_at`, which `systemFields: { audit: false }`
+    // withholds.
+    const s = dashboardDottedStack(
+      { dateRange: { defaultRange: 'this_month' } }, {}, {},
+      { systemFields: { audit: false } },
+    );
+    const findings = unknown(validateWidgetBindings(s));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('created_at');
+  });
+
+  it('stays silent on the same bare dateRange where the audit family IS injected', () => {
+    expect(unknown(validateWidgetBindings(
+      dashboardDottedStack({ dateRange: { defaultRange: 'this_month' } }),
+    ))).toHaveLength(0);
+  });
+});
+
+/**
+ * [#14275] Both new answers gate `validate` AND `build`, pinned end-to-end
+ * rather than inferred from the registry entry — `validateWidgetBindings` is
+ * `commands: ALL`, and nothing else in this file would notice if that were
+ * narrowed later. The dotted existence miss and the include miss are both
+ * error-tier, so they also join the #7529 runtime publish gate as members of
+ * the same "this board cannot render" reference-integrity class.
+ */
+describe('#14275 acceptance — the migrated branch gates `validate` AND `build`', () => {
+  const missing = dashboardDottedStack({ dateRange: { field: 'acount.signed_at' } });
+  const unjoined = dashboardDottedStack({}, {}, { include: [] });
+
+  for (const command of ['validate', 'build'] as const) {
+    it(`a dotted dashboard filter that does not resolve fails \`${command}\``, () => {
+      const { errors } = splitBySeverity(runAuthoringRules(command, { normalized: missing }));
+      expect(errors.map((f) => f.rule)).toContain(DASHBOARD_FILTER_FIELD_UNKNOWN);
+    });
+
+    it(`a resolvable-but-unjoined dotted dashboard filter fails \`${command}\``, () => {
+      const { errors } = splitBySeverity(runAuthoringRules(command, { normalized: unjoined }));
+      expect(errors.map((f) => f.rule)).toContain(DASHBOARD_FILTER_FIELD_NOT_INCLUDED);
+    });
+
+    it(`the clean shape passes \`${command}\``, () => {
+      const { errors } = splitBySeverity(runAuthoringRules(command, { normalized: dashboardDottedStack() }));
+      const mine = errors.filter((f) => [
+        DASHBOARD_FILTER_FIELD_UNKNOWN, DASHBOARD_FILTER_FIELD_NOT_INCLUDED,
+      ].includes(f.rule));
+      expect(mine).toEqual([]);
+    });
+  }
 });
 
 // ── [#14148] The widget's OWN filter keys and options.sortBy ─────────────────

@@ -451,12 +451,15 @@ const LEDGER: Record<string, LedgerRow> = {
       'prevent. The blank-column consequence belongs to the surface that RENDERS the anchor ' +
       '(validate-page-field-bindings, #8340), not to the bundle that names it.',
   },
-  'validate-widget-bindings.ts': {
-    kind: 'rule',
-    reach: ['direct'],
-    asksProvenance: true,
-    why: 'Blanket .has read site. Provenance wired by #8340.',
-  },
+  // [#14275] `validate-widget-bindings.ts` LEFT the population. Its one blanket
+  // `.has` read site was the `dashboard-filter-field-unknown` branch, which now
+  // resolves through `resolveFieldPath` and therefore through the PER-OBJECT
+  // `injectedColumnsFor` instead — the distinction this ledger's own header
+  // calls "the two differ exactly where it matters". Its #8116 obligation did
+  // not lapse with the row: the rule still asks the provenance question, now
+  // gated by the verdict's `injected` marker. Recorded here rather than by a
+  // silent deletion because a shrinking population is the one direction this
+  // census cannot distinguish from a broken analyzer.
 };
 
 // ── Fixtures: a module set whose right answer is known ────────────────────
