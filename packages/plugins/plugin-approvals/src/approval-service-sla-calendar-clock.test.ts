@@ -63,7 +63,11 @@ function makeEngine() {
   return {
     _tables: tables,
     async find(object: string, options?: any) {
-      return ensure(object).filter((r) => matches(r, options?.filter ?? options?.where));
+      const rows = ensure(object).filter((r) => matches(r, options?.filter ?? options?.where));
+      // Honour the caller's bound by presence, after the filter — the shape
+      // `check:objectql-double-limit` pins, so a `limit: 1` read cannot be
+      // silently answered with every row.
+      return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     async insert(object: string, data: Row) { ensure(object).push({ ...data }); return { ...data }; },
     async count(object: string) { return ensure(object).length; },
