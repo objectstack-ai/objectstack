@@ -1,4 +1,5 @@
-// The EXAMPLES-layer type-check program for @objectstack/plugin-auth (#10869).
+// The EXAMPLES-layer type-check program for @objectstack/plugin-auth (#10869),
+// WIDENED (#14386) to also carry this package's manifest authoring site.
 //
 // `packages/plugins/plugin-auth/examples/` held `basic-usage.ts` -- the file
 // `content/docs/permissions/authentication.mdx` publishes as "Basic Auth
@@ -17,6 +18,20 @@
 // would start shipping the example. This program emits nothing, so it can
 // neutralise `rootDir` without touching what ships.
 //
+// #14386 ADDED `objectstack.config.ts` (the package-ROOT manifest, `defineStack`
+// composing `./src/manifest`) to `include` below, joining `examples/**/*` in
+// this same sibling rather than opening a second one: it is a package-root file
+// for the identical reason `examples/` is -- `tsconfig.json`'s `include` is
+// `src/**/*`, which cannot match a root-level file either -- and this sibling
+// already neutralises `rootDir` to `.` for exactly that reason. Before this
+// change no tsc program read the manifest: `check:type-check-coverage`'s
+// `isUncheckedSourceCandidate` skips `depth === 0` by construction (the
+// package-root line), so `pnpm --filter @objectstack/plugin-auth typecheck`
+// exiting 0 carried no information about it, of the same shape #13284 found
+// and fixed in `packages/drivers/driver-memory` and `packages/plugins/
+// plugin-hono-server`. See `scripts/check-type-check-coverage.mjs`'s
+// `ROOT_SOURCE_FILES` for the declared allowlist this repairs against.
+//
 // STRICTNESS IS INHERITED and deliberately not relaxed: `strict`,
 // `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns` and the rest come
 // from the root config through `tsconfig.json`. The directory type-checks clean
@@ -27,10 +42,10 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
-    // `.` rather than the inherited `src`, because the file this program checks
-    // is the one outside `src`. Safe precisely because nothing is emitted from
-    // here -- see the header.
+    // `.` rather than the inherited `src`, because the files this program
+    // checks (`examples/**/*`, `objectstack.config.ts`) sit outside `src`.
+    // Safe precisely because nothing is emitted from here -- see the header.
     "rootDir": "."
   },
-  "include": ["examples/**/*"]
+  "include": ["examples/**/*", "objectstack.config.ts"]
 }
