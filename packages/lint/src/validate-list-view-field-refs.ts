@@ -96,11 +96,83 @@
  * The result is strictly WIDER than the card's suggestion ("skip dotted
  * paths, as the chart rule already does"): a dotted path whose head resolves
  * to nothing (`ownr.name`) is reported here, where a skip would have passed
- * it. What stays unreported is a dotted path whose head DOES resolve — a
- * separate, larger accept-set narrowing ("a list view compiles no joins, so
- * any dotted reference is refused at query time") whose failure mode is a LOUD
- * 400 rather than the silent-empty class this card gates. Filed as #14282
- * rather than folded in.
+ * it.
+ *
+ * ## [#14282] The SECOND finding class — a dotted reference the doors REFUSE
+ *
+ * #14107 left one half unreported: a dotted path whose head DOES resolve
+ * (`owner.name`, `title.x`). That is a larger accept-set narrowing whose
+ * failure mode is the OPPOSITE one — a loud `400 INVALID_FIELD` on the first
+ * fetch rather than the silent blank this rule's first class gates — so it
+ * was filed as #14282 and ruled there rather than folded in. This is that
+ * ruling, landed: {@link LIST_VIEW_FIELD_DOTTED}.
+ *
+ * The class is scoped by the DOOR, not by the position table. A list view
+ * compiles no joins, but that alone does not make every dotted binding a
+ * defect: some list-view positions are read CLIENT-SIDE out of the fetched
+ * row, and those walk a dotted path perfectly well when the payload carries
+ * an embedded record. So only the positions whose name reaches a query door
+ * are judged, and each is judged by the door's OWN verdict:
+ *
+ *  - **Projection** — `columns[]`. objectui's `ListView.tsx` builds the
+ *    `$select` projection out of `schema.columns` ("Build a `$select`
+ *    projection from the columns the listview actually shows"). Both doors
+ *    refuse a dotted entry UNCONDITIONALLY, with no carve-out:
+ *    `assertProjectionHasNoDottedPaths` filters `fields` on
+ *    `typeof f === 'string' && f.includes('.')` and throws
+ *    `INVALID_FIELD` / 400 (`packages/objectql/src/engine.ts`, #7589), and
+ *    `assertProjectionFieldsExist` answers the same at the REST ingress
+ *    (#7532). So every dotted column is reported, whatever its head's type.
+ *  - **Filter** — the view's own `filter`, its `tabs[].filter`, its
+ *    `userFilters.tabs[].filter`, and the two positions that DECLARE which
+ *    names the end user may filter on (`filterableFields`, spelled by the
+ *    spec as "bare field names enabled for end-user filtering", and
+ *    `userFilters.fields`; objectui folds the resulting conditions into the
+ *    fetched query through `buildEffectiveFilter`). Here the door does NOT
+ *    refuse everything: `assertFilterIsMaterializable` judges a dotted key
+ *    only when `classifyDottedFilterHead` classifies its head as `relation`,
+ *    `virtual` or `scalar`, and deliberately passes structured/JSON heads
+ *    (the #8371 ruling's carve-out — live on memory and mongodb), array
+ *    (`multiple: true`) heads, file heads and heads it cannot read. This rule
+ *    therefore asks that SAME classifier — imported, never re-listed — so the
+ *    linter cannot refuse at author time what the door serves at run time.
+ *
+ * Positions deliberately NOT in this class, each for a measured reason:
+ *
+ *  - **`gantt.quickFilters[].field`** — the card's own named exception, and
+ *    the measurement went the other way. The spec describes it as "Record
+ *    field / dot-path", and objectui's `ObjectGantt.tsx` applies these filters
+ *    IN MEMORY over the already-fetched rows ("Apply the active filters in
+ *    memory"), resolving each through a walker that splits on `.` and steps
+ *    through the record object (`resolveFilterKey`). No query door is
+ *    involved, so a dot-path here is served, not refused. Excluded, and
+ *    pinned.
+ *  - **`gantt.tooltipFields[]`** — the same measurement: read client-side
+ *    through `resolvePath(record, fieldName)`, which walks dots. Excluded.
+ *  - **Every renderer binding** (`kanban` / `calendar` / `timeline` /
+ *    `gallery` / `map` / `tree` scalars, `rowColor.field`, `hiddenFields`,
+ *    `fieldOrder`, `grouping.fields`, `columns[].summary.field`,
+ *    `columns[].prefix.field`). These reach no door this card measured. A
+ *    dotted name at one of them is very likely still wrong — the gantt
+ *    scalars, for instance, read `record[startDateField]` flat — but "likely
+ *    wrong" is not the verdict a gate may invent (ADR-0072 D1), and the
+ *    failure would be the SILENT class rather than this loud one. Recorded as
+ *    a follow-up rather than guessed at here.
+ *
+ * `sort[]` keeps its owner: `validate-sortable-fields.ts` records that it
+ * "deliberately does not add a third finding" for a dotted name because the
+ * dotted verdict is "a posture shared with the FILTER and PROJECTION axes".
+ * This card is that posture being ruled for the LIST-VIEW surface, on the two
+ * axes this rule owns; the sort axis is untouched, and no finding here
+ * duplicates one of its.
+ *
+ * A new rule id rather than a second use of the first one, per the family's
+ * own convention: `validate-sortable-fields` ships `sort-field-unknown` /
+ * `sort-field-unsortable` / `sort-field-unprovisioned`, and
+ * `validate-searchable-fields` and `validate-dataset-references` do the same
+ * — one id per finding CLASS, because `suppressWarnings: ['<rule-id>']` and
+ * Studio's renderer filter on that string and must be able to name one class
+ * without silencing the other.
  *
  * ## What this rule deliberately does NOT own
  *
@@ -137,6 +209,8 @@
  * at all, so none of its field names is resolvable here.
  */
 
+import { classifyDottedFilterHead } from '@objectstack/spec/data';
+
 import { walkFilterFieldKeys } from './filter-walk.js';
 import {
   describeFieldPathVerdict,
@@ -148,6 +222,21 @@ import {
 
 /** A list-view field reference that resolves to no field on the bound object. */
 export const LIST_VIEW_FIELD_UNKNOWN = 'list-view-field-unknown';
+
+/**
+ * [#14282] A list-view field reference written as a DOTTED path at a position
+ * whose name reaches a query door — where the door refuses it by name. See the
+ * second-class section on this module for the scope and the measurements.
+ */
+export const LIST_VIEW_FIELD_DOTTED = 'list-view-field-dotted';
+
+/**
+ * Which query door a position's written name reaches, for the #14282 verdict.
+ * `undefined` (the default for every position) means "no door this card
+ * measured" — the position is judged for head existence only, exactly as
+ * before.
+ */
+type DottedAxis = 'projection' | 'filter' | undefined;
 
 export type ListViewFieldRefSeverity = 'error' | 'warning';
 
@@ -284,6 +373,31 @@ const POSITIONS: Record<string, BlockPositions> = {
   },
 };
 
+/**
+ * [#14282] The positions whose written name reaches a query DOOR, and which
+ * door — the scope of {@link LIST_VIEW_FIELD_DOTTED}.
+ *
+ * Deliberately a SEPARATE table from {@link POSITIONS} rather than a third key
+ * on `BlockPositions`: `POSITIONS` is the surface map (read key-by-key against
+ * `ListViewShapeSchema`, and every field-naming key belongs in it), whereas
+ * this is the much smaller set of positions whose runtime destination was
+ * measured. Keeping them apart means a position added to the surface map does
+ * NOT silently acquire a dotted verdict nobody measured — it defaults to
+ * unjudged, the fail-open direction the seam and both doors document.
+ *
+ * `gantt.quickFilters` is the conspicuous absence and the card's named
+ * exception: measured client-side, it ACCEPTS a dot-path. See the module note.
+ */
+const DOTTED_AXIS: Record<string, Record<string, DottedAxis>> = {
+  '': { columns: 'projection', filterableFields: 'filter' },
+  userFilters: { fields: 'filter' },
+};
+
+/** The door a position reaches, or `undefined` (unjudged for dotted paths). */
+function dottedAxisAt(block: string, key: string): DottedAxis {
+  return DOTTED_AXIS[block]?.[key];
+}
+
 /** The nested field positions inside one `columns[]` entry record. */
 const COLUMN_ENTRY_POSITIONS: Array<{ block: string; key: string; severity: Sev }> = [
   // `summary` aggregates a column; a stale name aggregates nothing and the
@@ -296,6 +410,69 @@ const COLUMN_ENTRY_POSITIONS: Array<{ block: string; key: string; severity: Sev 
 const SILENT_EMPTY =
   'Nothing resolves the name at render time: the view renders successfully with a blank, ' +
   'empty or wrong result, and no gate reports the miss.';
+
+/**
+ * [#14282] The message and hint for a dotted reference at a position whose
+ * name reaches a query door, or `undefined` when the door itself leaves the
+ * path unjudged.
+ *
+ * The wording deliberately borrows the DOORS' own sentences ("no backend
+ * serves the path, so the predicate can only match zero records";
+ * "denormalise the value onto '<object>' … and name that"). One vocabulary
+ * across the doors is a stated value of both refusals — an author refused at
+ * author time and one refused at request time must not be sent two different
+ * ways about one string.
+ */
+function describeDottedRefusal(
+  axis: Exclude<DottedAxis, undefined>,
+  written: string,
+  head: string,
+  object: string,
+  meta: { type?: string; multiple?: boolean } | undefined,
+  subject: string,
+): { message: string; hint: string } | undefined {
+  const denormalise =
+    `Denormalise the value onto "${object}" (a stored field, written when the source changes) ` +
+    'and name that.';
+
+  if (axis === 'projection') {
+    // No classification: `assertProjectionHasNoDottedPaths` filters on
+    // `f.includes('.')` and refuses every dotted entry, whatever the head is.
+    return {
+      message:
+        `${subject} "${written}" is a dotted path. A list view declares no ADR-0021 \`include\`, ` +
+        `so it compiles no joins, and the columns are sent as the query's projection — where a ` +
+        `dotted entry is refused by name: \`assertProjectionHasNoDottedPaths\` on the engine ` +
+        `boundary and \`assertProjectionFieldsExist\` at the REST ingress, both ` +
+        `\`400 INVALID_FIELD\`. The view's FIRST fetch is refused, not rendered.`,
+      hint:
+        `Name a whole column of "${object}" — "${head}" — and read into its value in the client, ` +
+        `or read the related record with \`expand\`. ${denormalise}`,
+    };
+  }
+
+  // The FILTER door judges by head class and deliberately serves the rest.
+  const headClass = classifyDottedFilterHead(meta);
+  if (headClass === null) return undefined;
+  const type = meta?.type ? `\`${meta.type}\`` : 'an unreadable';
+  const because =
+    headClass === 'relation'
+      ? `whose head "${head}" is a ${type} field on object "${object}" — it stores the related ` +
+        "record's id, not an embedded document, and a list view compiles no joins to traverse it"
+      : headClass === 'virtual'
+        ? `whose head "${head}" is a ${type} field on object "${object}" — its value is computed ` +
+          'on read, so no driver materialises a column for the path to reach into'
+        : `whose head "${head}" is a ${type} field on object "${object}" that stores a single ` +
+          'scalar value — there is nothing beneath it for a path to reach';
+  return {
+    message:
+      `${subject} "${written}" is a dotted path ${because}. No backend serves the path, so the ` +
+      'predicate can only match zero records: the query is REFUSED rather than answered with an ' +
+      'empty list (`assertFilterIsMaterializable` and the REST ingress both answer ' +
+      '`400 INVALID_FIELD`).',
+    hint: `Filter on a column of "${object}" itself. ${denormalise}`,
+  };
+}
 
 /**
  * Validate every list view's field references against the object graph.
@@ -324,6 +501,7 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
     where: string,
     path: string,
     subject: string,
+    axis: DottedAxis = undefined,
   ): void => {
     const written = strName(raw);
     if (!written) return;
@@ -332,9 +510,41 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
     const verdict = resolveFieldPath(graph, object, head);
     if (isUnjudgeable(verdict) || !verdict) return;
     const account = describeFieldPathVerdict(verdict, head, subject);
-    if (!account) return;
-
     const dotted = head !== written;
+
+    if (!account) {
+      // The head resolves, so the FIRST class (#14107) has nothing to say.
+      // The SECOND class (#14282) does, at the positions whose name reaches a
+      // door — see the module note.
+      if (!dotted || !axis) return;
+      // `meta` is absent for a leaf resolved as a registry-injected column;
+      // the filter classifier answers `null` for it, which is the fail-open
+      // the seam documents. The projection door needs no head type at all.
+      const refusal = describeDottedRefusal(
+        axis,
+        written,
+        head,
+        object,
+        verdict.kind === 'ok' ? verdict.meta : undefined,
+        subject,
+      );
+      if (!refusal) return;
+      findings.push({
+        // Always `error`, and not the position's own tier: the family's
+        // severity line puts "refused outright" in the gating tier, and every
+        // position in `DOTTED_AXIS` is refused outright by its door. (It
+        // coincides with each of their declared tiers today; a position added
+        // to that table with a `warning` tier would need this re-read.)
+        severity: 'error',
+        rule: LIST_VIEW_FIELD_DOTTED,
+        where,
+        path,
+        message: refusal.message,
+        hint: refusal.hint,
+      });
+      return;
+    }
+
     findings.push({
       severity,
       rule: LIST_VIEW_FIELD_UNKNOWN,
@@ -387,22 +597,24 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
       for (const [key, severity] of Object.entries(spec.lists ?? {})) {
         const list = host[key];
         if (!Array.isArray(list)) continue;
+        const axis = dottedAxisAt(block, key);
         list.forEach((entry, i) => {
-          check(entry, bound, severity, hostWhere, `${hostPath}.${key}[${i}]`, `${key}[${i}]`);
+          check(entry, bound, severity, hostWhere, `${hostPath}.${key}[${i}]`, `${key}[${i}]`, axis);
         });
       }
 
       for (const [key, severity] of Object.entries(spec.entries ?? {})) {
         const list = host[key];
         if (!Array.isArray(list)) continue;
+        const axis = dottedAxisAt(block, key);
         list.forEach((entry, i) => {
           const entryPath = `${hostPath}.${key}[${i}]`;
           if (typeof entry === 'string') {
-            check(entry, bound, severity, hostWhere, entryPath, `${key}[${i}]`);
+            check(entry, bound, severity, hostWhere, entryPath, `${key}[${i}]`, axis);
             return;
           }
           if (!isRec(entry)) return;
-          check(entry.field, bound, severity, hostWhere, `${entryPath}.field`, `${key}[${i}].field`);
+          check(entry.field, bound, severity, hostWhere, `${entryPath}.field`, `${key}[${i}].field`, axis);
           // The nested positions a `columns[]` entry carries.
           if (block !== '' || key !== 'columns') return;
           for (const nested of COLUMN_ENTRY_POSITIONS) {
@@ -430,7 +642,7 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
     const checkFilter = (filter: unknown, filterWhere: string, filterPath: string): void => {
       if (filter === undefined || filter === null) return;
       walkFilterFieldKeys(filter, filterPath, ({ field, path: at }) => {
-        check(field, bound, 'error', filterWhere, at, 'filter key');
+        check(field, bound, 'error', filterWhere, at, 'filter key', 'filter');
       });
     };
 

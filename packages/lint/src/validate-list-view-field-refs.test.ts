@@ -15,6 +15,7 @@ import { validateReferenceIntegrity } from './reference-integrity-suite.js';
 import {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
+  LIST_VIEW_FIELD_DOTTED,
   type ListViewFieldRefFinding,
 } from './validate-list-view-field-refs.js';
 import { SORT_FIELD_UNKNOWN } from './validate-sortable-fields.js';
@@ -39,6 +40,12 @@ const OBJECTS = [
       { name: 'cover', type: 'image', label: 'Cover' },
       { name: 'parent', type: 'lookup', reference: 'duly_task', label: 'Parent' },
       { name: 'owner', type: 'lookup', reference: 'duly_person', label: 'Owner' },
+      // [#14282] The three head shapes the FILTER door treats differently.
+      // `payload` is the ruled carve-out (`STRUCTURED_JSON_TYPES`, live on
+      // memory and mongodb); `score` is virtual; `tags` is array-valued.
+      { name: 'payload', type: 'json', label: 'Payload' },
+      { name: 'score', type: 'formula', label: 'Score' },
+      { name: 'tags', type: 'text', multiple: true, label: 'Tags' },
     ],
   },
   {
@@ -297,30 +304,270 @@ describe('#14107 — the "did you mean" comes from the shared seam', () => {
 /**
  * The recorded dotted-path decision (see the rule's module docblock): the HEAD
  * segment is judged and relationship hops are NOT walked, because a list view
- * compiles no joins and all three runtime doors refuse a dotted reference.
- * Both halves are pinned — the half that reports, and the half that stays
- * deliberately silent — so a later "improvement" that starts walking hops has
- * to delete a test that says why.
+ * compiles no joins and the runtime doors refuse a dotted reference.
+ *
+ * ⚠️ This block used to pin BOTH halves — the half that reports, and a half
+ * that stayed deliberately silent (`owner.name` and `title.x` in `columns`
+ * passing clean). #14282 is the card that half was recorded for, and it ruled
+ * the other way: those two now report, as {@link LIST_VIEW_FIELD_DOTTED}. The
+ * cases were rewritten rather than deleted, so the pair still reads as one
+ * decision — what changed is which class each lands in, not whether the rule
+ * has an opinion. The `#14282` block below carries the new half in full.
  */
-describe('#14107 — dotted paths', () => {
+describe('#14107 — dotted paths, HEAD-segment resolution', () => {
   it('a dotted path whose HEAD resolves to nothing is reported', () => {
     const findings = validateListViewFieldRefs(stackWith(mutate({ columns: [{ field: 'ownr.name' }] })));
     expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(LIST_VIEW_FIELD_UNKNOWN);
     expect(findings[0].message).toContain('"ownr"');
     // The author reads back what they typed, not only the segment judged.
     expect(findings[0].message).toContain('ownr.name');
     expect(findings[0].message).toContain('compiles');
   });
 
-  it('a dotted path whose head resolves is left to the runtime doors', () => {
+  it('hops are still NOT walked — a bad LEAF under a good head is not judged as a leaf', () => {
+    // `owner` resolves, `duly_person` has no `nope`. Were hops walked, this
+    // would be a `field-unknown` on `duly_person`. It is not: the finding is
+    // the #14282 dotted class, which never mentions the leaf at all.
+    const findings = validateListViewFieldRefs(stackWith(mutate({ columns: [{ field: 'owner.nope' }] })));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(LIST_VIEW_FIELD_DOTTED);
+    expect(findings[0].message).not.toContain('duly_person');
+  });
+});
+
+/**
+ * [#14282] The SECOND finding class: a dotted reference at a position whose
+ * name reaches a query door, where that door refuses it by name.
+ *
+ * The scoping is by DOOR, not by position — see the rule's module note. So
+ * this block pins three things and not one: which positions report, which
+ * deliberately do not (the measured client-side ones, `gantt.quickFilters`
+ * first among them), and that the FILTER positions ask the same
+ * `classifyDottedFilterHead` the runtime door asks, rather than refusing what
+ * the door serves.
+ */
+describe('#14282 — a dotted reference the PROJECTION door refuses', () => {
+  it('a dotted `columns[].field` whose head resolves is now reported', () => {
     const findings = validateListViewFieldRefs(stackWith(mutate({ columns: [{ field: 'owner.name' }] })));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(LIST_VIEW_FIELD_DOTTED);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('views[0].list.columns[0].field');
+    expect(findings[0].message).toContain('owner.name');
+    expect(findings[0].message).toContain('assertProjectionHasNoDottedPaths');
+    expect(findings[0].hint).toContain('"owner"');
+  });
+
+  it('the bare-string `columns[]` spelling is judged too', () => {
+    const findings = validateListViewFieldRefs(stackWith(mutate({ columns: ['owner.name'] })));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(LIST_VIEW_FIELD_DOTTED);
+    expect(findings[0].path).toBe('views[0].list.columns[0]');
+  });
+
+  it('the projection door has NO head carve-out, so a scalar head reports too', () => {
+    // `title` is a text field. `assertProjectionHasNoDottedPaths` filters on
+    // `f.includes('.')` alone — the head's type never enters that door.
+    const findings = validateListViewFieldRefs(stackWith(mutate({ columns: [{ field: 'title.x' }] })));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(LIST_VIEW_FIELD_DOTTED);
+  });
+
+  it('a structured/JSON head is reported at a COLUMN even though the filter door serves it', () => {
+    // The #8371 carve-out is the FILTER door's, not the projection door's.
+    // Getting this wrong in either direction is the whole point of scoping the
+    // class by door rather than by "a list view compiles no joins".
+    const findings = validateListViewFieldRefs(stackWith(mutate({ columns: [{ field: 'payload.theme' }] })));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(LIST_VIEW_FIELD_DOTTED);
+  });
+
+  it('an undotted column is untouched by the new class', () => {
+    expect(validateListViewFieldRefs(stackWith(FULL_LIST_VIEW))).toEqual([]);
+  });
+});
+
+describe('#14282 — a dotted key the FILTER door refuses, and the ones it serves', () => {
+  const filterOn = (field: string): AnyRec => ({
+    filter: [{ field, operator: 'equals', value: 'x' }],
+  });
+
+  it('a relation head is refused — it stores an id, not an embedded document', () => {
+    const findings = validateListViewFieldRefs(stackWith(mutate(filterOn('owner.name'))));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(LIST_VIEW_FIELD_DOTTED);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('views[0].list.filter[0].field');
+    expect(findings[0].message).toContain('lookup');
+    expect(findings[0].message).toContain('can only match zero records');
+  });
+
+  it('a virtual head is refused — nothing materialises a column to reach into', () => {
+    const findings = validateListViewFieldRefs(stackWith(mutate(filterOn('score.x'))));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('computed');
+  });
+
+  it('a plain scalar head is refused — there is nothing beneath it', () => {
+    const findings = validateListViewFieldRefs(stackWith(mutate(filterOn('title.x'))));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('single scalar value');
+  });
+
+  it('⛔ a structured/JSON head is NOT refused — the #8371 ruling\'s carve-out', () => {
+    // Live on driver-memory and driver-mongodb (2 rows in the #8371
+    // measurement table). Refusing it at author time would delete a working
+    // capability on two of three backends — the exact fail-closed drift the
+    // shared classifier exists to prevent.
+    expect(validateListViewFieldRefs(stackWith(mutate(filterOn('payload.theme'))))).toEqual([]);
+  });
+
+  it('⛔ an array-valued head is NOT refused — a numeric-index path reaches it', () => {
+    expect(validateListViewFieldRefs(stackWith(mutate(filterOn('tags.0'))))).toEqual([]);
+  });
+
+  it('a registry-injected head is NOT refused at a filter — its type is invisible here', () => {
+    // `created_at` resolves through skip 3 with no readable type, and
+    // `classifyDottedFilterHead` answers `null` for an unreadable head.
+    expect(validateListViewFieldRefs(stackWith(mutate(filterOn('created_at.x'))))).toEqual([]);
+  });
+
+  it('the tab and user-filter tab presets are judged on the same axis', () => {
+    const findings = validateListViewFieldRefs(
+      stackWith(
+        mutate({
+          tabs: [{ name: 'mine', filter: [{ field: 'owner.name', operator: 'equals', value: 'x' }] }],
+          userFilters: {
+            fields: [{ field: 'status' }],
+            tabs: [{ name: 'open', filter: [{ field: 'parent.title', operator: 'equals', value: 'x' }] }],
+          },
+        }),
+      ),
+    );
+    expect(idsOf(findings).sort()).toEqual([
+      'views[0].list.tabs[0].filter[0].field',
+      'views[0].list.userFilters.tabs[0].filter[0].field',
+    ]);
+    expect(findings.every((f) => f.rule === LIST_VIEW_FIELD_DOTTED)).toBe(true);
+  });
+
+  it('the two positions that DECLARE end-user filterable names are judged', () => {
+    // objectui folds the resulting conditions into the fetched query
+    // (`buildEffectiveFilter`), so these names become filter keys.
+    const findings = validateListViewFieldRefs(
+      stackWith(
+        mutate({
+          filterableFields: ['owner.name'],
+          userFilters: { fields: [{ field: 'parent.title' }] },
+        }),
+      ),
+    );
+    expect(idsOf(findings).sort()).toEqual([
+      'views[0].list.filterableFields[0]',
+      'views[0].list.userFilters.fields[0].field',
+    ]);
+    expect(findings.every((f) => f.rule === LIST_VIEW_FIELD_DOTTED)).toBe(true);
+  });
+});
+
+describe('#14282 — the measured exclusions: positions read CLIENT-SIDE', () => {
+  it('⛔ `gantt.quickFilters[].field` accepts a dot-path — the card\'s named exception', () => {
+    // Measured, and it went the other way round from the rest of the card.
+    // The spec describes the position as "Record field / dot-path", and
+    // objectui's `ObjectGantt.tsx` applies these filters IN MEMORY over the
+    // already-fetched rows, resolving each through a walker that splits on `.`
+    // and steps through the record object (`resolveFilterKey`). No query door
+    // is involved, so nothing refuses it.
+    const findings = validateListViewFieldRefs(
+      stackWith(mutate({ gantt: { quickFilters: [{ field: 'owner.name' }] } })),
+    );
     expect(findings).toEqual([]);
   });
 
-  it('a dotted path through a non-relationship head is also left alone', () => {
-    // `title` is a text field; `title.x` is refused at query time, not here.
-    const findings = validateListViewFieldRefs(stackWith(mutate({ columns: [{ field: 'title.x' }] })));
+  it('the head of a gantt quick filter is STILL judged for existence (#14107 is untouched)', () => {
+    const findings = validateListViewFieldRefs(
+      stackWith(mutate({ gantt: { quickFilters: [{ field: 'ownr.name' }] } })),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(LIST_VIEW_FIELD_UNKNOWN);
+  });
+
+  it('⛔ `gantt.tooltipFields[]` accepts a dot-path — read through `resolvePath`', () => {
+    const findings = validateListViewFieldRefs(
+      stackWith(mutate({ gantt: { tooltipFields: ['owner.name', { field: 'parent.title' }] } })),
+    );
     expect(findings).toEqual([]);
+  });
+
+  it('⛔ renderer bindings reach no door this card measured, so they stay unjudged', () => {
+    // Very likely still wrong (the gantt scalars read `record[field]` flat),
+    // but "likely wrong" is not a verdict a gate may invent — and the failure
+    // would be the SILENT class, not this loud one. Recorded as a follow-up.
+    const findings = validateListViewFieldRefs(
+      stackWith(
+        mutate({
+          rowColor: { field: 'owner.name' },
+          kanban: { groupByField: 'owner.name' },
+          calendar: { titleField: 'owner.name' },
+          gallery: { coverField: 'owner.name' },
+          tree: { parentField: 'owner.name' },
+          grouping: { fields: [{ field: 'owner.name' }] },
+          hiddenFields: ['owner.name'],
+          fieldOrder: ['owner.name'],
+        }),
+      ),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it('a `columns[]` entry\'s nested summary/prefix are unjudged for dotted paths too', () => {
+    const findings = validateListViewFieldRefs(
+      stackWith(
+        mutate({
+          columns: [{ field: 'title', summary: { field: 'owner.name' }, prefix: { field: 'parent.title' } }],
+        }),
+      ),
+    );
+    expect(findings).toEqual([]);
+  });
+});
+
+describe('#14282 — the class does not disturb its neighbours', () => {
+  it('the skips still win over the dotted verdict', () => {
+    // An object this stack does not define: no graph, no verdict of any kind.
+    const stack = stackWith(
+      mutate({ data: { provider: 'object', object: 'sys_elsewhere' }, columns: [{ field: 'owner.name' }] }),
+    );
+    expect(validateListViewFieldRefs(stack)).toEqual([]);
+  });
+
+  it('`sort[]` keeps its owner — no dotted finding is minted for it here', () => {
+    const findings = validateListViewFieldRefs(
+      stackWith(mutate({ sort: [{ field: 'owner.name', order: 'asc' }] })),
+    );
+    expect(findings.filter((f) => f.rule === LIST_VIEW_FIELD_DOTTED)).toEqual([]);
+  });
+
+  it('the two classes carry DIFFERENT rule ids, so one can be suppressed alone', () => {
+    const findings = validateListViewFieldRefs(
+      stackWith(mutate({ columns: [{ field: 'ownr.name' }, { field: 'owner.name' }] })),
+    );
+    expect(findings.map((f) => f.rule)).toEqual([LIST_VIEW_FIELD_UNKNOWN, LIST_VIEW_FIELD_DOTTED]);
+  });
+
+  it('the dotted class gates `validate` and `build`, like the rest of the error tier', () => {
+    const stack = stackWith(mutate({ columns: [{ field: 'owner.name' }] }));
+    for (const command of ['validate', 'build'] as const) {
+      const { errors } = splitBySeverity(runAuthoringRules(command, { normalized: stack }));
+      expect(errors.map((e) => e.rule)).toContain(LIST_VIEW_FIELD_DOTTED);
+    }
+  });
+
+  it('the reference-integrity suite carries the new class too', () => {
+    const stack = stackWith(mutate({ columns: [{ field: 'owner.name' }] }));
+    const findings = validateReferenceIntegrity(stack);
+    expect(findings.some((f) => f.rule === LIST_VIEW_FIELD_DOTTED)).toBe(true);
   });
 });
 

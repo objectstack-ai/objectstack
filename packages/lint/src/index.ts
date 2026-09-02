@@ -435,9 +435,14 @@ export type {
 // timeline / gallery / map / tree blocks). Resolution goes through the shared
 // `object-graph.ts` seam (#14105/#14148), on the HEAD segment — see that
 // module's dotted-path note.
+// [#14282] The same rule's SECOND finding class: a dotted reference at a
+// position whose name reaches a query door (the `$select` projection, or the
+// compiled filter), where that door refuses it by name — the loud-failing half
+// #14107 recorded and left open.
 export {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
+  LIST_VIEW_FIELD_DOTTED,
 } from './validate-list-view-field-refs.js';
 export type {
   ListViewFieldRefFinding,

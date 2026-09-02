@@ -177,14 +177,21 @@ function countLines(text, offset) {
 /**
  * Every `file:line` anchor a docs page writes, in document order.
  *
+ * `start`/`end` are byte offsets of the anchor's code span **in `rawText`**, not in
+ * the blanked copy this walks: `blankFencedBlocks` and `blankFrontmatter` both
+ * preserve length, so the two agree offset for offset. They exist so a caller can
+ * REWRITE an anchor in place -- `blankAnchorLineNumbers` below is the one in-tree
+ * consumer -- without re-deriving spans through a second, divergent parser.
+ *
  * @param {string} rawText  The page source, frontmatter and fences included.
  * @returns {{ spelling: string, line: number, kind: 'full'|'continuation'|'range-end',
- *            raw: string, docLine: number }[]}
+ *            raw: string, docLine: number, start: number, end: number }[]}
  */
 export function extractLineAnchors(rawText) {
   const text = blankFencedBlocks(blankFrontmatter(rawText));
   const spans = extractCodeSpans(text);
-  /** @type {{ spelling: string, line: number, kind: string, raw: string, docLine: number }[]} */
+  /** @type {{ spelling: string, line: number, kind: string, raw: string, docLine: number,
+   *           start: number, end: number }[]} */
   const anchors = [];
   let currentFile = null;
   let previousSpan = null;
@@ -198,6 +205,8 @@ export function extractLineAnchors(rawText) {
         kind: 'full',
         raw: span.value,
         docLine: span.line,
+        start: span.start,
+        end: span.end,
       });
       previousSpan = span;
       continue;
@@ -210,6 +219,8 @@ export function extractLineAnchors(rawText) {
         kind: 'continuation',
         raw: span.value,
         docLine: span.line,
+        start: span.start,
+        end: span.end,
       });
       previousSpan = span;
       continue;
@@ -222,6 +233,8 @@ export function extractLineAnchors(rawText) {
         kind: 'range-end',
         raw: span.value,
         docLine: span.line,
+        start: span.start,
+        end: span.end,
       });
       previousSpan = span;
       continue;
@@ -235,6 +248,60 @@ export function extractLineAnchors(rawText) {
     previousSpan = span;
   }
   return anchors;
+}
+
+/**
+ * The same page with every anchor's LINE NUMBER replaced by `#`, and nothing else
+ * touched.
+ *
+ * ## What this is for, and why it lives here
+ *
+ * It answers one question: *do these two revisions of a page differ in anything
+ * but anchor line numbers?* Two texts that compare equal after this differ only in
+ * the half a generator re-derives -- `check-system-context-census.mjs --fix`
+ * rewrites exactly these numbers and nothing else -- so discarding either revision
+ * loses nothing a later regeneration cannot restore. Two texts that still differ
+ * carry a hand-written change, which no generator can restore, and discarding
+ * either one is a silent deletion.
+ *
+ * `scripts/git-merge-regen.mjs` is the consumer: the `merge=os-regen` driver keeps
+ * OURS whole and drops THEIRS whole, which is correct for a wholly generated file
+ * and destroys prose on a MIXED one. This function is how the driver tells those
+ * two cases apart before it defers.
+ *
+ * It is written here rather than in the driver because this module is already the
+ * ONE reader of these anchors (module header), and a second parser -- even a
+ * three-line regex -- is a second definition of "anchor" that would drift from the
+ * gate's. Measured on the corpus that motivated the module: a regex over
+ * `path.ts:NNNN` alone reads 24 of 25 revisions of `system-context.mdx` as
+ * prose-changing, because CONTINUATION and RANGE_END anchors are not that shape.
+ * The correct answer, using the walk below, is 1 of 25.
+ *
+ * ⚠️ NOT a general "is this page unchanged" test. It deliberately blinds itself to
+ * line numbers, so a caller that cares whether an anchor MOVED must compare the raw
+ * texts, or read the anchors themselves.
+ *
+ * @param {string} rawText  The page source, frontmatter and fences included.
+ * @returns {string}
+ */
+export function blankAnchorLineNumbers(rawText) {
+  const anchors = extractLineAnchors(rawText);
+  let out = '';
+  let cursor = 0;
+  for (const a of anchors) {
+    // Anchors arrive in document order and their spans never overlap, so a single
+    // forward pass is enough; a defensive skip keeps that assumption from silently
+    // corrupting the output if it ever stops holding.
+    if (a.start < cursor) continue;
+    out += rawText.slice(cursor, a.start);
+    // The LAST run of digits in the span is the line number in all three shapes --
+    // `path.ts:1234`, `:1234` and a bare `1234` -- and a path that itself carries
+    // digits (`0112-codes.ts:55`) keeps them, because the lookahead requires that
+    // nothing but non-digits follows.
+    out += rawText.slice(a.start, a.end).replace(/\d+(?=\D*$)/, '#');
+    cursor = a.end;
+  }
+  return out + rawText.slice(cursor);
 }
 
 /**
