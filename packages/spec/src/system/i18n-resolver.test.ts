@@ -2750,3 +2750,215 @@ describe('resolveFlowScreenTitle (#11287)', () => {
       .toBe('转化详情');
   });
 });
+
+/**
+ * Bulk-action defs on a list view (#14253, surface 1).
+ *
+ * A `bulkActionDefs` entry is part of the VIEW document, so it never reaches
+ * `translateAction` and no bundle group addressed it. Measured against a fully
+ * translated app, the selection bar read
+ * `已选择 1 项 · Complete · Skip · 清除` — two English words between two Chinese
+ * ones, which reads as a styling quirk rather than a missing translation.
+ *
+ * The fixture is DERIVED from `expandViewContainer`, not transcribed: the defs
+ * have to sit exactly where the serving path puts them (`config.bulkActionDefs`)
+ * or the pin describes a shape the runtime never produces — the #4854 lesson,
+ * one level in.
+ */
+describe('translateView — bulkActionDefs (#14253)', () => {
+  const container = {
+    listViews: {
+      open_duties: {
+        label: 'Open Duties',
+        type: 'grid' as const,
+        data: { provider: 'object' as const, object: 'duly_duty' },
+        columns: [{ field: 'name' }],
+        bulkActionDefs: [
+          {
+            name: 'complete',
+            label: 'Complete',
+            operation: 'update' as const,
+            patch: { status: 'done' },
+            confirmText: 'Mark the selected duties complete?',
+            confirmLabel: 'Complete them',
+            params: [
+              { name: 'note', type: 'text' as const, label: 'Completion note', help: 'Shown on the timeline', placeholder: 'Optional' },
+              // No `params.reason` entry in the bundle — the negative control.
+              { name: 'reason', type: 'text' as const, label: 'Reason' },
+            ],
+          },
+          {
+            name: 'skip',
+            label: 'Skip',
+            operation: 'update' as const,
+            patch: { status: 'skipped' },
+          },
+          // No bundle entry at all — must come back byte-identical.
+          {
+            name: 'archive',
+            label: 'Archive',
+            operation: 'delete' as const,
+          },
+        ],
+      },
+    },
+  };
+
+  const served = expandViewContainer('duly_duty', container);
+  const view = () => served.find((v) => v.name === 'duly_duty.open_duties')! as any;
+
+  const bundle: TranslationBundle = {
+    'zh-CN': {
+      objects: {
+        duly_duty: {
+          _views: {
+            open_duties: {
+              label: '待办任务',
+              bulkActions: {
+                complete: {
+                  label: '完成',
+                  confirmText: '确定要将所选任务标记为完成吗？',
+                  confirmLabel: '确认完成',
+                  params: {
+                    note: { label: '完成备注', help: '会显示在动态中', placeholder: '选填' },
+                  },
+                },
+                skip: { label: '跳过' },
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  it('composes the identity this test is pinned to — defs live under `config`', () => {
+    const item = view();
+    // The authored defs are NOT at the document's top level; `ViewItemSchema`
+    // and `expandViewContainer` both nest the whole ListView under `config`.
+    expect(item.bulkActionDefs).toBeUndefined();
+    expect(Array.isArray(item.config.bulkActionDefs)).toBe(true);
+    expect(item.config.bulkActionDefs.map((d: any) => d.name)).toEqual(['complete', 'skip', 'archive']);
+  });
+
+  it('translates the def label, confirm prompt and confirm button', () => {
+    const out = translateMetadataDocument('view', view(), bundle, { locale: 'zh-CN' }) as any;
+    const complete = out.config.bulkActionDefs.find((d: any) => d.name === 'complete');
+    expect(complete.label).toBe('完成');
+    expect(complete.confirmText).toBe('确定要将所选任务标记为完成吗？');
+    expect(complete.confirmLabel).toBe('确认完成');
+    // The def's non-copy keys ride through untouched.
+    expect(complete.operation).toBe('update');
+    expect(complete.patch).toEqual({ status: 'done' });
+  });
+
+  it('translates a param label / help / placeholder, keyed by param name', () => {
+    const out = translateMetadataDocument('view', view(), bundle, { locale: 'zh-CN' }) as any;
+    const complete = out.config.bulkActionDefs.find((d: any) => d.name === 'complete');
+    const note = complete.params.find((p: any) => p.name === 'note');
+    expect(note.label).toBe('完成备注');
+    // A bulk param spells its hint `help`, not `helpText` — the face follows
+    // `BulkActionParamSchema`, not the neighbouring action-param surface.
+    expect(note.help).toBe('会显示在动态中');
+    expect(note.placeholder).toBe('选填');
+    expect(note.type).toBe('text');
+  });
+
+  it('leaves an untranslated def, and an untranslated param, exactly as authored', () => {
+    const out = translateMetadataDocument('view', view(), bundle, { locale: 'zh-CN' }) as any;
+    const archive = out.config.bulkActionDefs.find((d: any) => d.name === 'archive');
+    expect(archive.label).toBe('Archive');
+    const reason = out.config.bulkActionDefs
+      .find((d: any) => d.name === 'complete').params.find((p: any) => p.name === 'reason');
+    expect(reason.label).toBe('Reason');
+    expect(reason.help).toBeUndefined();
+  });
+
+  it('translates the view label and the defs in one pass', () => {
+    const out = translateMetadataDocument('view', view(), bundle, { locale: 'zh-CN' }) as any;
+    expect(out.label).toBe('待办任务');
+    expect(out.config.bulkActionDefs.find((d: any) => d.name === 'skip').label).toBe('跳过');
+  });
+
+  it('does not mutate the input document', () => {
+    const item = view();
+    const before = JSON.parse(JSON.stringify(item.config.bulkActionDefs));
+    translateMetadataDocument('view', item, bundle, { locale: 'zh-CN' });
+    expect(item.config.bulkActionDefs).toEqual(before);
+  });
+
+  it('returns the SAME `config` reference when no def gained a translation', () => {
+    const item = view();
+    // A locale the bundle does not carry, with no `en` entry to fall back to.
+    const out = translateMetadataDocument('view', item, { 'ja-JP': {} }, { locale: 'ja-JP' }) as any;
+    expect(out.config).toBe(item.config);
+  });
+
+  it('applies the BCP-47 ladder and the fallback chain the rest of the surface uses', () => {
+    const out = translateMetadataDocument('view', view(), bundle, { locale: 'zh' }) as any;
+    expect(out.config.bulkActionDefs.find((d: any) => d.name === 'complete').label).toBe('完成');
+    const viaChain = translateMetadataDocument('view', view(), bundle, {
+      locale: 'fr-FR',
+      fallbackChain: ['zh-CN'],
+    }) as any;
+    expect(viaChain.config.bulkActionDefs.find((d: any) => d.name === 'skip').label).toBe('跳过');
+  });
+});
+
+describe('ObjectTranslationDataSchema — _views.<view>.bulkActions (#14253)', () => {
+  it('accepts the measured key face', () => {
+    const data = ObjectTranslationDataSchema.parse({
+      _views: {
+        open_duties: {
+          bulkActions: {
+            complete: {
+              label: '完成',
+              confirmText: '确定？',
+              confirmLabel: '确认',
+              params: { note: { label: '备注', help: '提示', placeholder: '选填' } },
+            },
+          },
+        },
+      },
+    });
+    expect(data._views?.open_duties.bulkActions?.complete.label).toBe('完成');
+    expect(data._views?.open_duties.bulkActions?.complete.params?.note.help).toBe('提示');
+  });
+
+  it('renames the authoring spelling `bulkActionDefs` onto the translation group', () => {
+    expect(() => ObjectTranslationDataSchema.parse({
+      _views: { open_duties: { bulkActionDefs: { complete: { label: '完成' } } } },
+    })).toThrow(/bulkActionDefs[\s\S]*bulkActions/);
+  });
+
+  it('renames `helpText` — the ACTION-param spelling — onto a bulk param\'s `help`', () => {
+    expect(() => ObjectTranslationDataSchema.parse({
+      _views: { open_duties: { bulkActions: { complete: { params: { note: { helpText: '提示' } } } } } },
+    })).toThrow(/helpText[\s\S]*help/);
+  });
+
+  it('refuses per-param `options` with the reason, not a rename', () => {
+    let message = '';
+    try {
+      ObjectTranslationDataSchema.parse({
+        _views: { open_duties: { bulkActions: { complete: { params: { note: { options: { a: 'A' } } } } } } },
+      });
+    } catch (err) {
+      message = String(err);
+    }
+    expect(message).toMatch(/unconstrained/);
+    expect(message).toMatch(/objects\.<object>\.fields\.<field>\.options/);
+  });
+
+  it('refuses `successMessage` on a def — it declares no success copy', () => {
+    expect(() => ObjectTranslationDataSchema.parse({
+      _views: { open_duties: { bulkActions: { complete: { successMessage: '完成了' } } } },
+    })).toThrow(/declares no success copy/);
+  });
+
+  it('points a `rowActions` author at the action document instead', () => {
+    expect(() => ObjectTranslationDataSchema.parse({
+      _views: { open_duties: { rowActions: { edit: { label: '编辑' } } } },
+    })).toThrow(/_actions\.<action_name>\.label/);
+  });
+});

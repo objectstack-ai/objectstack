@@ -27,6 +27,24 @@ const TRANSLATION_HISTORY =
   + 'loaded, and whatever it was meant to translate rendered in the source language with no '
   + 'diagnostic, indistinguishable from a translation nobody had written yet.';
 
+/**
+ * The measured exclusion on `objects.<o>._views.<v>.bulkActions.<def>.params.<p>`.
+ *
+ * Identical in kind to `FLOW_SCREEN_FIELD_NO_OPTIONS` below, and for the same
+ * measured reason rather than by symmetry: `BulkActionParamSchema.options[].value`
+ * is `z.union([z.string(), z.number(), z.boolean()])`, so an option map keyed by
+ * value — the shape `objects.<object>.fields.<field>.options` uses — cannot
+ * address `true` and `"true"` apart. There is no right key to send the author
+ * to, which is why this is `guidance` and not an alias.
+ */
+const BULK_PARAM_NO_OPTIONS =
+  'select-option labels are not translatable on a bulk-action param: '
+  + '`BulkActionParamSchema.options[].value` is unconstrained (numbers and booleans are legal), so an '
+  + 'option map keyed by value — the shape `objects.<object>.fields.<field>.options` uses — cannot '
+  + 'address them unambiguously. Point the param at a declared field (`type` + the object\'s own '
+  + 'options, which ARE translatable under `objects.<object>.fields.<field>.options`), or accept the '
+  + 'authored option labels.';
+
 // ────────────────────────────────────────────────────────────────────────────
 // Object-level Translation (per-object file)
 // ────────────────────────────────────────────────────────────────────────────
@@ -184,11 +202,26 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    *   objects.<object>._views.<view_name>.description
    *   objects.<object>._views.<view_name>.emptyState.title
    *   objects.<object>._views.<view_name>.emptyState.message
+   *   objects.<object>._views.<view_name>.bulkActions.<def_name>.*
    */
   _views: z.record(z.string(), strictObject({
     surface: 'this view translation',
     history: TRANSLATION_HISTORY,
-    aliases: { name: 'label', title: 'label', empty: 'emptyState', emptyMessage: 'emptyState' },
+    aliases: {
+      name: 'label', title: 'label', empty: 'emptyState', emptyMessage: 'emptyState',
+      // The authoring key is `bulkActionDefs`; the translation group drops the
+      // `Defs` suffix the way `_actions` drops nothing and `_tabs` drops
+      // `tabs[]`'s bracket — one address per surface, and the authoring
+      // spelling is the one an author reaches for first.
+      bulkActionDefs: 'bulkActions', bulkActionDef: 'bulkActions', bulk: 'bulkActions',
+    },
+    guidance: {
+      rowActions:
+        '`rowActions` names actions the OBJECT declares — a row-action label is translated where the '
+        + "action lives: 'objects.<object>._actions.<action_name>.label' (or 'globalActions.<name>.label' "
+        + 'for an object-less action). Only a `bulkActionDefs` entry, which is authored inside the view '
+        + "and is not an action document, is addressed here — under 'bulkActions'.",
+    },
   }, {
     label: z.string().optional().describe('Translated view label'),
     description: z.string().optional().describe('Translated view description'),
@@ -200,6 +233,98 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
       title: z.string().optional().describe('Translated empty-state title'),
       message: z.string().optional().describe('Translated empty-state message'),
     }).optional().describe('Translated empty-state copy shown when the view has no rows'),
+
+    /**
+     * Selection-bar copy for the view's `bulkActionDefs[]`, keyed by the def's
+     * `name` (`BulkActionDefSchema.name`, snake_case).
+     *
+     * **The hole this closes.** A bulk-action def is part of the VIEW document,
+     * not an action document, so it never reaches `translateAction` and no
+     * group addressed it: the selection bar rendered
+     * `已选择 1 项 · Complete · Skip · 清除` — two English words between two
+     * Chinese ones, on a fully translated screen. Not a drifted key; no key.
+     * The bar renders `def.label` verbatim (`resolveBulkActions` documents that
+     * an authored def is "left as-authored"), so the source-locale string was
+     * the only string there was.
+     *
+     * **Why this and not the `bulkActions: ['<name>']` promotion.** Naming a
+     * declared action instead DOES localize — that path runs through
+     * `translateAction` — but it is not the same capability: it dispatches the
+     * action once per selected record, where a def is one data-plane
+     * `updateMany`/`deleteMany` (or one `execution: 'aggregate'` call). Telling
+     * an author to trade N elevated dispatches for a translated label is a
+     * workaround, not a translation route.
+     *
+     * **Why a bundle key and not `I18nLabelSchema` on the def.** The def's
+     * `label` stays `z.string()` deliberately (`ui/bulk-action.zod.ts` module
+     * header): the def reaches the grid verbatim and the bar renders it as a
+     * React child, so an inline `{ en, zh-CN }` map would render as a blank
+     * cell rather than a parse error. Overlaying from the bundle in
+     * `translateView` keeps the wire value a plain string — the renderer's
+     * contract is untouched, and it is the same seat that already localizes the
+     * view's own `label`/`description`.
+     *
+     * **The key face is measured against `BulkActionDefSchema`, not mirrored
+     * from the report.** Every key below is copy the def actually declares:
+     * `label`, `confirmText`, `confirmLabel`, and per-param `label` / `help` /
+     * `placeholder`. Two deliberate exclusions carry `guidance` instead:
+     * `successMessage` (a def declares none — the run reports a per-record
+     * outcome summary the console words itself) and per-param `options`.
+     *
+     * ⚠️ `help`, not `helpText`. An ACTION param spells its hint `helpText`
+     * and a bulk param spells it `help` (`BulkActionParamSchema.help`) — the
+     * known divergence `ui/bulk-action.zod.ts` names. This face follows the
+     * authored key, and the neighbouring spelling is an alias rather than a
+     * second declared key, so one string keeps one address.
+     */
+    bulkActions: z.record(z.string(), strictObject({
+      surface: 'this bulk action translation',
+      history: TRANSLATION_HISTORY,
+      // Mirrors `BulkActionDefSchema`'s own alias table so an author's habits
+      // land on the same canonical key on both the authoring and the
+      // translation side.
+      aliases: {
+        name: 'label', title: 'label',
+        confirm: 'confirmText', confirmation: 'confirmText', confirmMessage: 'confirmText',
+        confirmButton: 'confirmLabel', confirmButtonLabel: 'confirmLabel', runLabel: 'confirmLabel',
+        parameters: 'params', args: 'params', inputs: 'params',
+      },
+      guidance: {
+        successMessage:
+          '`successMessage` is not part of the bulk-action translation surface — a `bulkActionDefs` '
+          + 'entry declares no success copy (`BulkActionDefSchema` has no such key). The run reports a '
+          + 'per-record outcome summary the console words from its own catalog. Translate the button '
+          + '(`label`), the confirmation prompt (`confirmText`) and the confirm button (`confirmLabel`).',
+        description:
+          '`description` is not part of the bulk-action translation surface — a def declares no '
+          + 'description. The explanatory sentence above the affected-record summary is `confirmText`.',
+        icon:
+          '`icon` is a Lucide icon name, not display copy — it is the same string in every locale. '
+          + 'Omit it here.',
+      },
+    }, {
+      label: z.string().optional().describe('Translated selection-bar button label (overlays `bulkActionDefs[].label`)'),
+      confirmText: z.string().optional().describe('Translated confirmation prompt shown above the affected-record summary'),
+      confirmLabel: z.string().optional().describe('Translated Confirm button label'),
+      params: z.record(z.string(), strictObject({
+        surface: 'this bulk action parameter translation',
+        history: TRANSLATION_HISTORY,
+        // `helpText` is the correct spelling on an ACTION param and `help` on a
+        // FIELD translation and a settings key; a BULK param declares `help`.
+        // Neighbouring-surface borrowing, which edit distance reads as a
+        // legitimate word rather than a slip.
+        aliases: { helpText: 'help', hint: 'help', tooltip: 'help', description: 'help', name: 'label', title: 'label' },
+        guidance: {
+          options: BULK_PARAM_NO_OPTIONS,
+          choices: BULK_PARAM_NO_OPTIONS,
+          values: BULK_PARAM_NO_OPTIONS,
+        },
+      }, {
+        label: z.string().optional().describe('Translated bulk-dialog field label'),
+        help: z.string().optional().describe('Translated help text under the field (the def spells this `help`, not `helpText`)'),
+        placeholder: z.string().optional().describe('Translated bulk-dialog field placeholder'),
+      })).optional().describe('Bulk-dialog parameter translations keyed by param name (`BulkActionParamSchema.name`)'),
+    })).optional().describe('Selection-bar translations keyed by bulk-action def name (`BulkActionDefSchema.name`)'),
   })).optional().describe('View translations keyed by view name'),
 
   /**

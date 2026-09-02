@@ -88,8 +88,39 @@ export interface ViewLike {
    * `data.object` for views that retarget another object. Read only as a last
    * resort — a default `form` config carries no `data` at all, which is why
    * top-level `object` is the load-bearing field.
+   *
+   * It is also where a list view's `bulkActionDefs[]` live — `ViewItemSchema`
+   * puts the whole `ListViewSchema` under `config`, and `expandViewContainer`
+   * does the same for a container-authored view, so `config.bulkActionDefs` is
+   * the ONE address a served def has. See {@link translateView}.
    */
-  config?: { data?: { object?: string } };
+  config?: { data?: { object?: string }; bulkActionDefs?: unknown; [key: string]: unknown };
+}
+
+/**
+ * Minimal bulk-action-def shape consumed by {@link translateView} —
+ * `BulkActionDefSchema` (`ui/bulk-action.zod.ts`) narrowed to the copy this
+ * resolver overlays.
+ */
+export interface BulkActionDefLike {
+  /** `BulkActionDefSchema.name` — the `bulkActions` key. */
+  name?: string;
+  label?: string;
+  confirmText?: string;
+  confirmLabel?: string;
+  params?: Array<BulkActionParamLike>;
+  [key: string]: unknown;
+}
+
+/** Minimal bulk-action param shape consumed by {@link translateView}. */
+export interface BulkActionParamLike {
+  /** `BulkActionParamSchema.name` — the `params` key. */
+  name?: string;
+  label?: string;
+  /** A bulk param spells its hint `help`; an ACTION param spells it `helpText`. */
+  help?: string;
+  placeholder?: string;
+  [key: string]: unknown;
 }
 
 /** Minimal action shape consumed by the action resolvers. */
@@ -518,11 +549,137 @@ export function resolveActionSuccess(
 }
 
 /**
+ * The `_views.<key>.bulkActions` node for one def, in one locale's data.
+ */
+function lookupBulkActionNode(
+  data: TranslationData | undefined,
+  objectName: string,
+  viewKey: string,
+  defName: string,
+): NonNullable<NonNullable<NonNullable<TranslationData['objects']>[string]['_views']>[string]['bulkActions']>[string] | undefined {
+  return data?.objects?.[objectName]?._views?.[viewKey]?.bulkActions?.[defName];
+}
+
+/**
+ * One string off a bulk-action def's translation node, across the locale chain.
+ * `undefined` when no locale carries it — the caller then leaves the authored
+ * value in place rather than overwriting it with a fallback.
+ */
+function lookupBulkActionText(
+  bundle: TranslationBundle | undefined,
+  objectName: string,
+  viewKey: string,
+  defName: string,
+  pick: (node: NonNullable<ReturnType<typeof lookupBulkActionNode>>) => unknown,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const node = lookupBulkActionNode(pickData(bundle, code), objectName, viewKey, defName);
+    if (!node) continue;
+    const value = pick(node);
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Overlay the bundle's `bulkActions` copy onto a list view's authored
+ * `bulkActionDefs[]`, returning the SAME array reference when nothing matched.
+ *
+ * Reference identity is load-bearing rather than tidy: `translateView` uses it
+ * to decide whether to rebuild `config` at all, so a view with no bulk
+ * translations comes back with its config object untouched.
+ */
+function translateBulkActionDefs(
+  defs: unknown,
+  bundle: TranslationBundle | undefined,
+  objectName: string,
+  viewKey: string,
+  opts?: ResolveOptions,
+): unknown {
+  if (!Array.isArray(defs) || !bundle) return defs;
+  let changed = false;
+  const next = defs.map((raw) => {
+    const def = raw as BulkActionDefLike;
+    if (!def || typeof def !== 'object' || typeof def.name !== 'string' || def.name.length === 0) {
+      return raw;
+    }
+    const defName = def.name;
+    const text = (pick: (node: NonNullable<ReturnType<typeof lookupBulkActionNode>>) => unknown) =>
+      lookupBulkActionText(bundle, objectName, viewKey, defName, pick, opts);
+
+    const label = text((n) => n.label);
+    const confirmText = text((n) => n.confirmText);
+    const confirmLabel = text((n) => n.confirmLabel);
+
+    let params = def.params;
+    if (Array.isArray(def.params)) {
+      let paramsChanged = false;
+      const nextParams = def.params.map((param) => {
+        if (!param || typeof param !== 'object' || typeof param.name !== 'string' || param.name.length === 0) {
+          return param;
+        }
+        const paramName = param.name;
+        const pLabel = text((n) => n.params?.[paramName]?.label);
+        const pHelp = text((n) => n.params?.[paramName]?.help);
+        const pPlaceholder = text((n) => n.params?.[paramName]?.placeholder);
+        if (pLabel === undefined && pHelp === undefined && pPlaceholder === undefined) return param;
+        paramsChanged = true;
+        return {
+          ...param,
+          ...(pLabel !== undefined ? { label: pLabel } : {}),
+          ...(pHelp !== undefined ? { help: pHelp } : {}),
+          ...(pPlaceholder !== undefined ? { placeholder: pPlaceholder } : {}),
+        };
+      });
+      if (paramsChanged) params = nextParams;
+    }
+
+    if (
+      label === undefined && confirmText === undefined && confirmLabel === undefined
+      && params === def.params
+    ) {
+      return raw;
+    }
+    changed = true;
+    return {
+      ...def,
+      ...(label !== undefined ? { label } : {}),
+      ...(confirmText !== undefined ? { confirmText } : {}),
+      ...(confirmLabel !== undefined ? { confirmLabel } : {}),
+      ...(params !== def.params ? { params } : {}),
+    };
+  });
+  return changed ? next : defs;
+}
+
+/**
  * Apply the active locale to a view metadata document by overwriting `label`
- * and `description` with translated values when available. The original
+ * and `description` with translated values when available, and overlaying the
+ * selection-bar copy of the view's `config.bulkActionDefs[]`. The original
  * document is not mutated; a shallow copy is returned. Useful for translating
  * metadata at the API boundary so any client (Studio, app-shell, plain HTTP)
  * receives already-localized labels.
+ *
+ * ## Why the bulk-action defs are translated HERE
+ *
+ * A `bulkActionDefs` entry is part of the VIEW document — it is not an action
+ * document, so it never reaches {@link translateAction} and nothing else in the
+ * pipeline sees it. Before this, a fully translated app still drew
+ * `已选择 1 项 · Complete · Skip · 清除` in the selection bar: the def's `label`
+ * is a plain `z.string()` that reaches the grid verbatim
+ * (`ui/bulk-action.zod.ts`'s module header explains why it must stay one), so
+ * the source-locale string was the only string there was.
+ *
+ * Overlaying at this boundary keeps the wire value a plain string — the
+ * renderer's contract is unchanged; only its content is now the caller's
+ * language.
+ *
+ * `config` is the one address a served def has: both `ViewItemSchema` and
+ * `expandViewContainer` put the whole `ListViewSchema` under `config`. The
+ * object is rebuilt only when a def actually gained a translation, so a view
+ * with none comes back with the very same `config` reference.
  */
 export function translateView<T extends ViewLike>(
   view: T,
@@ -531,7 +688,26 @@ export function translateView<T extends ViewLike>(
 ): T {
   const label = resolveViewLabel(bundle, view, opts);
   const description = resolveViewDescription(bundle, view, opts);
-  return { ...view, label, ...(description !== undefined ? { description } : {}) };
+
+  let config = view.config;
+  const objectName = viewObjectName(view);
+  if (config && typeof config === 'object' && bundle && objectName) {
+    const defs = translateBulkActionDefs(
+      config.bulkActionDefs,
+      bundle,
+      objectName,
+      viewTranslationKey(view, objectName),
+      opts,
+    );
+    if (defs !== config.bulkActionDefs) config = { ...config, bulkActionDefs: defs };
+  }
+
+  return {
+    ...view,
+    label,
+    ...(description !== undefined ? { description } : {}),
+    ...(config !== view.config ? { config } : {}),
+  };
 }
 
 /**
