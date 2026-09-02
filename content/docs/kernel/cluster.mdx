@@ -322,7 +322,44 @@ notification the cache compares the incoming version with the stored one:
 This eliminates a whole class of bugs where a slow-arriving "old"
 invalidation evicts a "newer" value the node has already learned about.
 
-### 6.2 The metadata change event
+### 6.2 The cluster-invalidation family
+
+Cross-node metadata invalidation is not one channel — it is a **family** of
+three independent PubSub lanes, late-bound by `MetadataClusterBridgePlugin`
+(`@objectstack/service-cluster`) at `kernel:ready`, one per state owner that
+goes stale when metadata changes on a different node:
+
+| Lane | Channel | Payload type | Package | Converges |
+|---|---|---|---|---|
+| 1 — metadata service cache | `metadata.changed` | `ClusterMetadataChangedPayload` | `@objectstack/metadata` | `MetadataManager`'s registry/list caches |
+| 2 — ObjectQL object registry | `metadata.mutated` (`METADATA_MUTATION_CLUSTER_CHANNEL`, #13331) | `ClusterMetadataMutationPayload` | `@objectstack/metadata-protocol` | ObjectQL's OBJECT registry, from a `sys_metadata` re-read |
+| 3 — ObjectQL driver registry | `datasource.mutated` (`DATASOURCE_MUTATION_CLUSTER_CHANNEL`, #13805) | `ClusterDatasourceMutationPayload` | `@objectstack/service-datasource` | ObjectQL's DRIVER registry, from a shared datasource-record re-read |
+
+Lanes 2 and 3 share one contract, stated once here rather than in each
+channel's own doc comment:
+
+- **Address-only signal.** No message body ever rides these channels — the
+  payload names only what changed (a metadata address, or a datasource
+  name), never the changed value.
+- **Receipt runs convergence, not trust.** A peer that receives a signal does
+  not apply the payload as content; it re-reads its OWN copy of the source of
+  truth (`sys_metadata` for lane 2, the shared datasource record for lane 3)
+  and converges its local registry from that read. A duplicate or re-ordered
+  delivery converges to the same state as a single one.
+- **`originNode` loopback suppression.** Every payload carries the publishing
+  node's id; a peer that receives its own `originNode` drops the message —
+  the write-through or pool rebuild already ran, synchronously, at the door
+  that persisted the change.
+- **At-most-once, bounded by boot rehydration.** No shipped `IPubSub` driver
+  exceeds at-most-once delivery (§4.2), so a lost message is not retried.
+  Each lane narrows the staleness window this always had — "until the next
+  full reload on restart" — to "one network hop"; it does not promise more.
+
+All three lanes skip their fan-out on the same condition — the in-process
+`memory` cluster driver, described for lane 1 immediately below, applies
+identically to lanes 2 and 3 (#14021).
+
+#### Lane 1 — `metadata.changed` (the metadata service cache)
 
 **Current behaviour.** Cross-node metadata invalidation already works, but
 not through any event bus (there isn't one — see §4). The metadata manager
@@ -381,6 +418,70 @@ and a `partitionKey` of `` `${type}:${name}` ``, the partition key would
 guarantee that two rapid updates to the same item are applied to every
 node's cache in order, and the at-least-once guarantee would let a briefly
 partitioned node catch up on reconnect.
+
+#### Lane 2 — `metadata.mutated` (the ObjectQL object registry)
+
+The metadata **protocol** (`@objectstack/metadata-protocol`) fans out on a
+second, independent channel — `METADATA_MUTATION_CLUSTER_CHANNEL =
+'metadata.mutated'` (#13331) — with payload type
+`ClusterMetadataMutationPayload`:
+
+```ts
+// packages/metadata-protocol/src/protocol.ts
+export interface ClusterMetadataMutationPayload {
+  originNode?: string;          // used for loopback suppression
+  event: MetadataMutationEvent; // address-only: type/name/state/org scope, no body
+}
+```
+
+This lane exists because lane 1 replays into the metadata **service**'s own
+caches, not into the ObjectQL **object registry** the runtime authoring path
+(`saveMetaItem` → `applyRegistryWriteThrough`) mutates behind the data plane.
+Without it, an object authored at runtime through `PUT /api/v1/meta/*`
+answers `OBJECT_NOT_FOUND` on every replica that did not perform the write,
+until restart — measured on a 3-replica EE deployment: 200 concurrent
+creates through the load balancer gave 67×201 / 133×404.
+
+On receipt, a peer suppresses its own `originNode`, then re-reads the row
+from its OWN `sys_metadata` and re-runs the registry write-through from that
+read (`applyRemoteMetadataMutation`) rather than applying the payload as
+content. Attached by `MetadataClusterBridgePlugin`'s protocol lane at
+`kernel:ready`, duck-typed against `protocol.attachMetadataMutationPubSub()`
+so this package takes no dependency on `@objectstack/metadata-protocol`.
+
+#### Lane 3 — `datasource.mutated` (the ObjectQL driver registry)
+
+The datasource admin service (`@objectstack/service-datasource`) fans out on
+a third channel — `DATASOURCE_MUTATION_CLUSTER_CHANNEL =
+'datasource.mutated'` (#13805) — with payload type
+`ClusterDatasourceMutationPayload`:
+
+```ts
+// packages/services/service-datasource/src/datasource-admin-service.ts
+export interface ClusterDatasourceMutationPayload {
+  originNode?: string; // used for loopback suppression
+  name: string;        // the datasource whose shared record was just written
+}
+```
+
+Lane 2's family, adopted by the driver registry: `registerPool` /
+`unregisterPool` mutate the ObjectQL DRIVER registry on the serving replica
+only, so before this channel a `DELETE /api/v1/datasources/:name` recovered
+`/api/v1/ready` on the one replica that served it, while every other replica
+kept the stuck driver until restart. Symmetric by construction — create,
+update and delete all publish this one shape, and a receiver cannot tell
+which it was without reading, which is the point.
+
+On receipt, a peer suppresses its own `originNode`, then re-reads the shared
+datasource record for `name` and converges its own pool from that read
+(builds what the read says should be live, rebuilds what changed, evicts
+what is gone); convergence for the same name is serialized so two signals in
+quick succession — a create chased by an update — apply in order. Attached
+by `MetadataClusterBridgePlugin`'s datasource lane at `kernel:ready`,
+duck-typed against `datasource-admin.attachDatasourceMutationPubSub()` so
+this package takes no dependency on `@objectstack/service-datasource`, and
+`@objectstack/objectql` — the driver registry's owner — is handed no bus at
+all; the admin service publishes on the write doors it already owns.
 
 ### 6.3 Reader contract
 
@@ -463,6 +564,13 @@ cluster.pubsub.subscribe('metadata.changed', (msg) => {
   }
 })
 ```
+
+> **Already covered?** The subscription above is for a cache that mirrors
+> the metadata **service**'s own state (lane 1, §6.2). If what you are
+> caching is ObjectQL's **object** or **driver** registry instead, check
+> §6.2 first — lanes 2 (`metadata.mutated`) and 3 (`datasource.mutated`)
+> already keep those registries converged across replicas, and a second
+> subscription would be redundant.
 
 A higher-level cache factory (with automatic version comparison) is part of
 the Phase 4 / §6 target design but is **not yet implemented**. No
