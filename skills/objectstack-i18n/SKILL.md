@@ -18,54 +18,6 @@ metadata:
 
 # Internationalization — ObjectStack I18n Protocol
 
-Expert instructions for designing internationalization (i18n) and localization (l10n)
-strategies using the ObjectStack specification. This skill covers translation bundle
-structures, locale configuration, object-first translation patterns, coverage detection,
-and integration with the I18nService.
-
----
-
-## When to Use This Skill
-
-- You are **configuring i18n** for a new ObjectStack project.
-- You need to **create translation bundles** for multiple locales.
-- You are designing **object-first translation structures** (per-object translation files).
-- You need to **detect missing translations** (`os i18n check` coverage analysis).
-- You are extending the service contract with **AI translation suggestions** (TMS / machine-translation integrations).
-- You are implementing **locale-specific formatting** (dates, numbers, currency).
-  Related: workspace regional defaults (`timezone`, `locale`, `currency`) live in the
-  tenant-scoped `localization` settings, are resolved onto each request's
-  `ExecutionContext`, and are exposed at `GET /api/v1/auth/me/localization`; a currency
-  field falls back to `localization.currency` when it omits its own (ADR-0053).
-- You need to understand **translation file organization strategies** (bundled, per_locale, per_namespace).
-
----
-
-## Core Concepts
-
-### Translation Architecture Overview
-
-1. **Runtime format — `objects.*` (`TranslationData`)**: each locale is authored as one
-   `TranslationData` value. All translatable content for an object (label, fields,
-   options, views, sections, tabs, actions) is grouped under `objects.{object_name}`,
-   with global groups (`apps`, `messages`, `globalActions`, `dashboards`, `pages`,
-   `flows`, `settings`, `metadataForms`, `settingsCommon`) at the top level.
-
-2. **Bundle registration**: per-locale files are assembled with
-   `defineTranslationBundle({ en, 'zh-CN': … })` into a `TranslationBundle`
-   (locale code → `TranslationData`) and registered via
-   `defineStack({ translations: [...] })`. This is the format the runtime resolvers,
-   `os i18n extract`, `os i18n check`, and the example apps all use.
-
-3. **Coverage detection**: `os i18n check` compares registered bundles against source
-   metadata to report missing keys per locale.
-
-4. **Runtime authoring — `TranslationItem`**: a `translation` metadata item authored
-   in the Studio / metadata API carries the **same** `objects.*` groups plus the
-   `locale` it translates. There is only one shape; see "Authoring at Runtime" below.
-
----
-
 ## Translation Configuration
 
 ### Stack-Level I18n Config
