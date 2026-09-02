@@ -1288,7 +1288,11 @@ function scanUncontainedLoopBodies(
               `${EMPTY_CATCH_REFUSALS} The minimal handler is ${MINIMAL_CATCH_SPELLING}. Measured: with it, all ` +
               `5 items are processed and the run completes. If this loop is MEANT to stop at the first failure, ` +
               `that is a legitimate reading and this stays a warning. ` +
-              `See content/docs/automation/flows.mdx §"Per-iteration containment". (#13681, #14394)`,
+              // The tracker ids stay OUT of the runtime string (`check:doc-authoring`):
+              // an author reading this hint cannot resolve `#NNNN`. The measurement
+              // and the ruling behind this rule are #13681 / #14394; the docblock on
+              // {@link FLOW_LOOP_BODY_UNCONTAINED} carries them for the reader who can.
+              `See content/docs/automation/flows.mdx §"Per-iteration containment".`,
             // Warning, not `error`: see the severity policy at the top of this
             // file. Fail-fast on the first bad row is a real intent this rule
             // cannot distinguish from an oversight.
@@ -1360,7 +1364,8 @@ function scanTryCatchWithoutCatch(
         `Add the handler: ${MINIMAL_CATCH_SPELLING}. ${EMPTY_CATCH_REFUSALS} If failing loudly really is the ` +
         `intent, a \`try_catch\` with only \`try\` (and optionally \`retry\`) is a legitimate retry-then-fail ` +
         `shape — this is a warning, not a gate. ` +
-        `See content/docs/automation/flows.mdx §"Per-iteration containment". (#13681, #14394)`,
+        // Tracker ids stay out of the runtime string — see the sibling rule above.
+        `See content/docs/automation/flows.mdx §"Per-iteration containment".`,
       // Warning, not `error`: retry-then-fail is a real reading of this shape.
       rule: FLOW_TRY_CATCH_WITHOUT_CATCH,
     });
