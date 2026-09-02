@@ -1343,9 +1343,12 @@ jobs:
       # own git repo and linked worktree under $TMPDIR, and both were re-run
       # from a primary checkout, a detached HEAD and a non-repo cwd with
       # identical results, so neither this checkout's depth nor its branch is an
-      # input. Needs `jq` and `git` and nothing else — no pnpm, no node, no
-      # build, no network (`jq` is in the runner image and is already relied on
-      # bare by cut-rc.yml and release.yml). ~2 s measured.
+      # input. This step itself needs only `jq` and `git` (both in the runner
+      # image; `jq` is already relied on bare by cut-rc.yml and release.yml),
+      # plus whatever each discovered matrix declares in its own header —
+      # discovery above is by glob, so a matrix needing more (node, pnpm, a
+      # built tree, a generator) must say so there; this comment is not the
+      # place to enumerate it.
       - name: Claude hook guard self-tests (worktree-first · stash ban)
         run: |
           # Tolerate-and-collect (#10814) — see the note above this step. Each

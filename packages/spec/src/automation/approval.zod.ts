@@ -620,7 +620,17 @@ export const ApprovalEscalationSchema = lazySchema(() => strictObject(
   // surface have always meant. Declared in DEFAULT_CHANGES_BY_MAJOR (17) and
   // the `approval-escalation-enabled-default-flip` semantic migration entry.
   enabled: z.boolean().default(true).describe('SLA escalation switch. Defaults to true: an escalation block carrying timeoutHours is live unless this is explicitly false — the feature-level switch is whether the escalation block exists at all'),
-  timeoutHours: z.number().min(1).describe('Hours before escalation triggers'),
+  /**
+   * Wall-clock SLA. The approvals service adds `timeoutHours` to the request's
+   * `created_at` as elapsed milliseconds (hours × 3_600_000), so the deadline
+   * does not skip nights, weekends or holidays — the platform ships no
+   * business-hours calendar to count against. The clock is named in the
+   * declaration's own contract text rather than in prose beside it, so the
+   * number cannot be read as working hours at authoring time. No `clock` key
+   * exists because only one clock exists: a key with a single legal value would
+   * be declared-but-inert (ADR-0049).
+   */
+  timeoutHours: z.number().min(1).describe('Calendar (wall-clock) hours before escalation triggers — nights, weekends and holidays count. The platform ships no business-hours calendar: a request opened at 17:00 on a Friday with timeoutHours 4 escalates at 21:00 that same Friday'),
   action: z.enum(['reassign', 'auto_approve', 'auto_reject', 'notify']).default('notify')
     .describe('Action on escalation timeout'),
   // Escalation hands the request to a position (the common case — e.g. an
@@ -711,11 +721,16 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
 
   /**
    * Threshold for `quorum` (total approvals required, M of N) and `per_group`
-   * (approvals required from EACH group). Defaults to 1. Clamped at runtime so
-   * it can never exceed the resolvable approver count (no deadlock).
+   * (approvals required from EACH group). Omitted, the threshold follows the
+   * behaviour rather than a fixed 1: `quorum` requires every resolvable
+   * approver, `per_group` requires one approval per group. Clamped at runtime
+   * so it can never exceed the resolvable approver count (no deadlock).
    */
   minApprovals: z.number().int().min(1).optional()
-    .describe('Approvals required — total (quorum) or per group (per_group). Default 1'),
+    .describe(
+      'Approvals required — total (quorum) or per group (per_group). '
+      + 'Omitted ⇒ all resolvable approvers for quorum, 1 per group for per_group',
+    ),
 
   /** Lock the triggering record from edits while this node is pending. */
   lockRecord: z.boolean().default(true).describe('Lock the record from editing while pending'),
