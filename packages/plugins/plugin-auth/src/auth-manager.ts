@@ -4552,11 +4552,19 @@ export class AuthManager {
    * localized `sys_email_template` rows can be selected at all.
    *
    * Maintainer ruling 2026-08-13: the recipient locale is the **deployment
-   * default**, read from `II18nService.getDefaultLocale()` and resolved at the
-   * plugin layer; `Accept-Language` is rejected (auth mail is frequently sent
-   * outside the triggering request — invitations, admin-initiated resets — and
-   * a per-device header is the wrong authority for it). AuthPlugin pushes the
-   * value on `kernel:ready`, exactly as it pushes {@link setDefaultSmsLocale}.
+   * default**, resolved at the plugin layer; `Accept-Language` is rejected
+   * (auth mail is frequently sent outside the triggering request —
+   * invitations, admin-initiated resets — and a per-device header is the wrong
+   * authority for it). AuthPlugin pushes the value on `kernel:ready`, exactly
+   * as it pushes {@link setDefaultSmsLocale}.
+   *
+   * #14319 — that "deployment default" is the workspace's declared language,
+   * `localization.locale` (ADR-0053), whenever the operator has explicitly set
+   * one; `II18nService.getDefaultLocale()` (the app artifact's build-time
+   * `i18n.defaultLocale`) stands underneath it. Email read only the build-time
+   * half before, so a workspace that switched to Chinese in Setup received
+   * Chinese auth SMS and English auth mail. The precedence lives in
+   * `AuthPlugin`; this setter stays a plain sink.
    *
    * Unset ⇒ nothing is named and `EmailService`'s ladder resolves its
    * documented `en-US` default, i.e. today's behaviour.
