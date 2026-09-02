@@ -505,6 +505,24 @@ const excerptLines = (r) => {
   return out;
 };
 
+/**
+ * The whole posted body, for assertions about the operative GUIDANCE PROSE
+ * (the timeout-vs-assertion rule, its named exception, and the boundary
+ * sentence) rather than the extracted excerpt.
+ *
+ * This deliberately does NOT go through `excerptLines`: that helper is
+ * scoped to code-fence content precisely so the comment's own explanatory
+ * prose -- which names both `FAIL` and `AssertionError` -- cannot satisfy an
+ * assertion about the EXTRACTION (see its docblock). The guidance prose
+ * lives outside every fence, so `excerptLines` cannot see it at all; going
+ * through it here would silently pass on a body that shipped `excerptLines`
+ * still finds the FAIL/reason pair, but with the guidance paragraph deleted.
+ * The question this accessor answers is different and does not have that
+ * failure mode: is the guidance text the workflow composes into every
+ * comment actually present in what it posted?
+ */
+const guidanceProse = (r) => postedBody(r);
+
 // ── Scenarios ───────────────────────────────────────────────────────────────
 
 const REFUSED = httpError(503, 'No server is currently available to service your request.');
@@ -547,11 +565,19 @@ function scenarios(root) {
       world: () => base(),
       check(r, t) {
         const lines = excerptLines(r);
+        const prose = guidanceProse(r);
         return [
           t(lines.some((l) => l.includes(`FAIL  ${KEY_A}`)), 'the FAIL line is excerpted'),
           t(lines.some((l) => l.startsWith('↳ 失败原因:') && l.includes('Error: Test timed out in 1ms.')),
             `the reason line is excerpted and labelled, got: ${JSON.stringify(lines)}`),
           t(!lines.some((l) => l.includes('AssertionError')), 'no assertion is reported for a timeout log'),
+          // ── operative guidance prose, read over the WHOLE posted body ──
+          t(prose.includes('负载/时序') && prose.includes('真实的行为改变'),
+            'the timeout-vs-assertion rule is present in the posted body: timeout -> load/timing, assertion -> real behaviour change'),
+          t(prose.includes('实验自身的有效性前提') && prose.includes('时长、一个时间戳、一个耗时计数'),
+            'the named exception is present in the posted body: an assertion about the experiment\'s own validity premise (a duration, a timestamp, an elapsed count) reads like a timeout'),
+          t(prose.includes('后者由别处管'),
+            'the boundary sentence is present in the posted body: this only changes how a red is read, not which tests may be re-queued'),
         ];
       },
     },
@@ -1212,6 +1238,33 @@ const MUTATIONS = [
     from: "  core.info('triage comment for this run already exists \u2014 skipping.');\n  return;",
     to: "  core.info('triage comment for this run already exists \u2014 skipping.');",
     expect: ['A5'],
+  },
+  {
+    id: 'M17',
+    what: 'the timeout-vs-assertion rule silently loses its "load/timing" half',
+    from: '\u8d1f\u8f7d/\u65f6\u5e8f',
+    to: '',
+    expect: ['E1'],
+    // A1 files an anchor from the same triage comment but never reads the
+    // guidance prose -- the control that proves this mutation is caught by
+    // the new prose assertion, not by every scenario reacting to any change.
+    keepGreen: ['A1'],
+  },
+  {
+    id: 'M18',
+    what: 'the named exception silently loses the phrase identifying its own object -- the experiment\'s own validity premise',
+    from: '\u5b9e\u9a8c\u81ea\u8eab\u7684\u6709\u6548\u6027\u524d\u63d0',
+    to: '',
+    expect: ['E1'],
+    keepGreen: ['A1'],
+  },
+  {
+    id: 'M19',
+    what: 'the boundary sentence -- this only changes how a red is read, not which tests may be re-queued -- silently drops',
+    from: '\u540e\u8005\u7531\u522b\u5904\u7ba1',
+    to: '',
+    expect: ['E1'],
+    keepGreen: ['A1'],
   },
 ];
 
