@@ -336,15 +336,64 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/metadata-protocol', '@objectstack/spec', '@objectstack/types',
   ],
   '@objectstack/platform-objects': ['@objectstack/metadata-core', '@objectstack/spec'],
+  // ── #14062 re-baseline, on the onboarding limb above ─────────────────────
+  //
+  // The director ruling of 2026-09-01 on #14062 (maintainer verbatim: 「同意」)
+  // onboarded all fourteen `packages/plugins/**` packages into the
+  // `check:test-typecheck` instrument, so thirteen packages' `typecheck`
+  // scripts began naming a `tsconfig.test.json` they had never named before
+  // (`plugin-security` already did, from #13176). That MOVES THE PROGRAM SET,
+  // which #11490 made a package's prerogative and which this doc-block's
+  // onboarding limb is exactly about.
+  //
+  // Condition 1 — every dep admitted below is annotated `via tsconfig.test.json`
+  // by this gate's own failure text, i.e. reached ONLY through the program this
+  // change onboarded. Not one of them is newly reached through a program that
+  // was already counted, and nothing here launders such a case.
+  //
+  // Condition 2 — the numbers, `--list` on the same checkout with the workspace
+  // closure built, before at `f7d92d364` and after on this branch:
+  //
+  //   before   96 programs / 77 packages, 54 entries, 242 package-dep pairs
+  //   after   109 programs / 77 packages, 55 entries, 269 package-dep pairs
+  //
+  // so +13 programs (the thirteen new `tsconfig.test.json`), +1 entry
+  // (`plugin-dev`, which had none) and +27 pairs — the ones marked below and
+  // nothing else. The other nine onboarded packages add ZERO pairs: their test
+  // files import no workspace dep their `tsconfig.json` did not already reach.
+  //
+  // Condition 3 — reviewed as a re-baseline. `paths` is not the tool here, by
+  // the doc-block's own measurement on PR #12570 rather than by preference.
+  // [#14062] The five deps after `@objectstack/core` arrive from
+  // `tsconfig.test.json`: 35 test files that NO tsc program compiled (the build
+  // config's `exclude` named `**/*.test.ts`), carrying 324 measured errors.
   '@objectstack/plugin-approvals': [
     '@objectstack/core', '@objectstack/formula', '@objectstack/spec', '@objectstack/types',
+    '@objectstack/driver-sql', '@objectstack/metadata-protocol', '@objectstack/objectql',
+    '@objectstack/service-automation', '@objectstack/trigger-record-change',
   ],
   '@objectstack/plugin-audit': ['@objectstack/core', '@objectstack/objectql', '@objectstack/spec'],
   // #11490 re-baseline: `@objectstack/plugin-hono-server` arrives from
   // `tsconfig.examples.json`.
+  // [#14062] The three deps after `@objectstack/types` arrive from
+  // `tsconfig.test.json`: 87 test files that NO tsc program compiled (the build
+  // config's `exclude` named `**/*.test.ts`), carrying 94 measured errors.
   '@objectstack/plugin-auth': [
     '@objectstack/core', '@objectstack/platform-objects', '@objectstack/plugin-hono-server',
     '@objectstack/rest', '@objectstack/spec', '@objectstack/types',
+    '@objectstack/driver-sql', '@objectstack/objectql', '@objectstack/plugin-security',
+  ],
+  // [#14062] A NEW entry, and the only one this re-baseline adds. Every dep
+  // arrives from `tsconfig.test.json`; this package's `tsconfig.json` reaches no
+  // workspace dependency through `dist/` at all, which is why it had no entry.
+  // Its 6 test files measure ZERO errors, so it carries no debt ledger — this
+  // registry records reachability, never debt, and the two are independent.
+  '@objectstack/plugin-dev': [
+    '@objectstack/core', '@objectstack/driver-memory', '@objectstack/objectql',
+    '@objectstack/plugin-auth', '@objectstack/plugin-hono-server', '@objectstack/plugin-security',
+    '@objectstack/rest', '@objectstack/runtime', '@objectstack/service-i18n',
+    '@objectstack/service-realtime', '@objectstack/service-storage', '@objectstack/spec',
+    '@objectstack/types',
   ],
   '@objectstack/plugin-email': [
     '@objectstack/core', '@objectstack/formula', '@objectstack/objectql', '@objectstack/platform-objects',
@@ -384,10 +433,24 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/spec',
   ],
   // #11490 re-baseline: a NEW entry — reached only through `tsconfig.scripts.json`.
-  '@objectstack/plugin-webhooks': ['@objectstack/spec'],
+  // [#14062] The five after `@objectstack/spec` arrive from `tsconfig.test.json`.
+  // ⚠️ Note the shape here, which differs from approvals/auth/sharing: this
+  // package's build config never excluded its tests, so `tsc --noEmit` already
+  // compiled all 11 of them (measured: 0 errors). What was missing was not a
+  // compile but this gate's SIGHT of it — the program set moved, and these five
+  // deps were always reached, by a program nobody had named.
+  '@objectstack/plugin-webhooks': [
+    '@objectstack/spec',
+    '@objectstack/core', '@objectstack/metadata-core', '@objectstack/objectql',
+    '@objectstack/platform-objects', '@objectstack/service-messaging',
+  ],
+  // [#14062] `@objectstack/driver-sql` arrives from `tsconfig.test.json`: 30 test
+  // files that NO tsc program compiled (the build config's `exclude` named
+  // `**/*.test.ts`), carrying 3 measured errors.
   '@objectstack/plugin-sharing': [
     '@objectstack/core', '@objectstack/formula', '@objectstack/metadata-core', '@objectstack/objectql',
     '@objectstack/platform-objects', '@objectstack/spec', '@objectstack/types',
+    '@objectstack/driver-sql',
   ],
   // #12542: `packages/rest` had NO tsc program compiling any of its 149 test
   // files, and its new `tsconfig.test.json` (the #5286 sibling route) is the

@@ -658,10 +658,6 @@ const DEBT = {
     errors: 3,
     note: 'all code-tier (TS2769/TS18046).',
   },
-  '@objectstack/knowledge-ragflow': {
-    errors: 4,
-    note: 'code-tier 3 (TS2353) + 1 config-tier (TS2550 lib).',
-  },
   '@objectstack/metadata': {
     errors: 89,
     note: 'code-tier 30 (TS2345 x30); config-tier 25 (TS2835 x25); noise 34 (TS7006 x33, TS6133). '
@@ -911,33 +907,31 @@ const EXEMPT = {
 // the graduation message no longer offers the exclusion route without its
 // precondition. Re-measure before relying on the split: it moves with every
 // import a test file gains.
+//
+// ── #14062: three plugin entries GRADUATED, and what replaced them ───────────
+//
+// `plugin-approvals` (345), `plugin-auth` (94) and `plugin-sharing` (3) left
+// this ledger on 2026-09-02, and `knowledge-ragflow` (4) left DEBT above in the
+// same change. ⛔ None of them was PAID DOWN — read that first, because a
+// deleted debt entry normally means the errors are gone and here it does not.
+//
+// The director ruling of 2026-09-01 on #14062 (maintainer verbatim: 「同意」)
+// onboarded all fourteen `packages/plugins/**` packages into the
+// `check:test-typecheck` instrument: each has a `tsconfig.test.json` its
+// `typecheck` script NAMES, so `hidesTests` is false for all of them and this
+// gate's per-PACKAGE approximation of the debt has nothing left to approximate.
+// The same errors are now held one level finer, per FILE and per SIGNATURE, in
+// each package's own `test-typecheck-debt.json` — 324 / 94 / 3 / 3 respectively
+// (approvals reads 324 rather than 345 because the test program uses vitest's
+// module semantics, which subtracts 21 config-tier diagnostics that were never
+// about the tests). That is the graduation this ledger's own message asks for:
+// "the repair is the same one spec took -- put the file in a tsc program", and
+// the entry goes when the program exists, not when the number reaches zero.
+//
+// So the shrink-only guarantee did not loosen here; it moved to a strictly
+// sharper instrument, one that also reddens on a wholesale substitution of
+// error IDENTITY at a constant total, which a per-package integer cannot see.
 const TEST_DEBT = {
-  '@objectstack/plugin-approvals': {
-    errors: 345,
-    note: 'TS2339 x296, TS2550 x20, TS2345 x16, TS18048 x10, plus 5 singletons (TS2554 x2, TS1470, '
-      + 'TS2352, TS6133). LOWERED 347 -> 345 at ead731756 (#12723), in a sweep that re-measured all 31 '
-      + 'ledger entries at once and found 4 of them carrying slack. The tally above was taken at 347 and '
-      + 'is NOT re-tallied here: that sweep measured per-entry TOTALS only, so the -2 is unattributed, '
-      + 'and an admitted gap beats an invented composition. '
-      + 'Lowered 348 -> 347 at 0e0bf8049 (#11497): tsc against that tree reports the '
-      + 'same seven codes at the same counts as the prior 348 composition, TO THE UNIT, minus the sole '
-      + 'TS2353 -- a fully attributable single-error retirement, not a rescale. '
-      + 'Was 547 (re-measured at 5ab08428, up from 467; TS2345 x213 then). '
-      + 'Lowered 547 -> 348 at b5e09b21 (#7888), and the -199 is ONE CLASS COLLAPSING rather than a '
-      + 'measured surface shrinking -- the distinction the surplus finding asked to be settled before a '
-      + 'gap this size was written in as a floor. Three readings say collapse: (a) TS2339 x296, TS2550 '
-      + 'x20 and TS18048 x10 are unchanged TO THE UNIT against the 547 composition and only TS2345 moved, '
-      + '213 -> 16 -- a program that had DEGRADED instead (an unresolved import turning a type into any) '
-      + 'would have wiped the 296 property errors first, since property access on any is legal; (b) all '
-      + '21 test files are on disk and all 21 are in the program (tsc --listFiles), none deleted, and the '
-      + 'package\'s other test files gained 406 lines and lost 204 over the window -- the set grew; (c) '
-      + 'src/approval-service.test.ts, which holds 273 of the 348 as it held 443 of the 547, is '
-      + 'BYTE-IDENTICAL between 5ab08428 and b5e09b21 (blob 3fc272f, 3335 lines both ends). Same bytes, '
-      + '170 fewer errors, so the repair landed in a producer\'s types and no assertion was deleted to '
-      + 'get it. The 16 TS2345 that survive are still reported against a fully-resolved approver-config '
-      + 'union, so that parameter type is still strict -- the 197 that went were repaired, not loosened '
-      + 'away. Still entirely test-only (src is clean), so nothing but this ledger has ever seen it.',
-  },
   '@objectstack/runtime': {
     errors: 206,
     note: 'TS18048 x91 (possibly-undefined), TS18046 x27, TS2339 x17, TS2493 x15, TS2835 x13, TS2345 x10, '
@@ -996,67 +990,6 @@ const TEST_DEBT = {
       + 'resolves, so budget for a repair being bigger than its TS2835 line suggests. '
       + 'RECORDED EXACTLY, no bootstrap margin: this layer has never been gated, so the first new error in '
       + 'it should go red rather than be absorbed.',
-  },
-  '@objectstack/plugin-auth': {
-    errors: 94,
-    note: 'LOWERED 97 -> 94 at ead731756 (#12723), in a sweep that re-measured all 31 ledger entries at '
-      + 'once. Everything below -- the tally, the per-file split, the 97 they sum to -- was taken at 97 '
-      + 'and is NOT re-tallied here: that sweep measured per-entry TOTALS only, so the -3 is unattributed. '
-      + 'RE-TALLIED from tsc at the 97 below (#10615), measured at cea8c7d867 with the workspace closure '
-      + 'built by the same command lint.yml runs before this gate, so the composition, the per-file split '
-      + 'and the total are ONE measurement rather than a rescale: TS2493 x36 (tuple index out of range), '
-      + 'TS18048 x24, TS2322 x11, TS2532 x9, TS2345 x4, TS2339 x3, TS2554 x3, TS2741 x3, TS7006 x2, '
-      + 'TS2769 x1, TS6133 x1 = 97, the number recorded at THAT time EXACTLY. The per-file split is '
-      + 'COMPLETE at this measurement rather than a top-four: '
-      + '43 in src/auth-manager.test.ts, 18 in src/admin-user-endpoints.test.ts, 12 in '
-      + 'src/auth-plugin.test.ts, 11 in src/admin-import-users.test.ts, 3 each in '
-      + 'src/objectql-adapter.test.ts and src/sso-client-secret-at-rest.test.ts, 2 each in '
-      + 'src/auth-manager.jwt-eddsa-fallback.test.ts and src/reconcile-membership.test.ts, 1 each in '
-      + 'src/better-auth-schema-parity.test.ts, src/last-admin-guard.test.ts and '
-      + 'src/oauth-provider-schema-parity.test.ts -- 11 files, summing to 97. '
-      + 'LOWERED 109 -> 97 here, and the -12 was MEASURED rather than subtracted, which is the whole point '
-      + 'of the card: it was filed naming a surplus of 11 (a 98) off PR #10614\'s head, a later sweep at '
-      + '3c6028f1b2 reported the surplus as 12, and 109 - 11 = 98 was the cheap wrong answer that looks '
-      + 'right. Cross-tabbing the recorded measurement against this one by file AND code attributes all 12: '
-      + '11 sit in ONE file, src/admin-import-users.test.ts (TS2339 5 -> 0, TS2493 13 -> 7), which is '
-      + '#10614 giving two engine doubles real typed parameters -- a zero-parameter mock has a zero-length '
-      + 'parameter tuple, so every call site reading `.mock.calls[0][1]` was a TS2493 and every '
-      + '`options?.where` off it a TS2339. The 12th is one TS2345 that left '
-      + 'src/auth-manager.test.ts(4086,46) after that PR (a vi.fn callback whose parameter tuple did not '
-      + 'match its consumer), over three commits that rewrote 204 lines of that file, and it is NOT '
-      + 'attributed further rather than guessed. '
-      + 'CORRECTION, recorded because re-deriving the whole split is what caught it: the card predicted '
-      + 'src/admin-import-users.test.ts AND src/admin-user-endpoints.test.ts as "exactly the two files '
-      + 'that moved". admin-user-endpoints holds 18 at BOTH ends and did not move at all. Patching the two '
-      + 'numbers a reader believes changed would have written a plausible and wrong split over a correct '
-      + 'total -- the one failure this ledger cannot see, since nothing but prose records a split. '
-      + 'ANCHOR, re-established BEFORE re-tallying rather than assumed: d5e7b9f5a1, the ref the 109 was '
-      + 'measured on, still measures 109 today -- and not only in total, which is what makes it an anchor '
-      + 'rather than a coincidence: the composition reproduces class for class (TS2493 x42, TS18048 x24, '
-      + 'TS2322 x11, TS2532 x9, TS2339 x8, TS2345 x5, TS2554 x3, TS2741 x3, TS7006 x2, TS2769 x1, '
-      + 'TS6133 x1) and the per-file split reproduces the 44/22/18/12 this note used to record. So the '
-      + 'measuring stick did not drift under the entry and 97 is comparable to 109. Worth the check: this '
-      + 'gate grew +1752/-81 over the same window and the re-measure path itself DID move -- '
-      + '`measureTestDebt` now asks `tscErrorCount` to drop TS6059 (#10779) and the `include` roots moved '
-      + 'into `includeRoot` (#10876) -- but neither reaches this package, whose output carries no TS6059 '
-      + 'and whose `include` root reads the same under an expression that is the old inline one verbatim. '
-      + 'NOT a graduation: 97 is not 0, so this entry stays and the package typecheck script is unchanged. '
-      + 'History, still true: measured 124 -> 129 (5ab08428, composition unchanged in shape) -> 131 '
-      + '(e8db1a230). Lowered 131 -> 111 at b16dcb45 (#7888); the intermediate 108 in that PR\'s first '
-      + 'commit was measured at b5e09b21 and was already stale when the merge queue built it -- the '
-      + 'package took +3 inside the hour, the same "a ledger number is a number about a moment" race that '
-      + 'kicked #5278 three times, so 111 was the merge-queue run\'s own re-measure on the ref that PR '
-      + 'actually landed on. Of the +2 that had made 131, half is a TS2554 in src/last-admin-guard.test.ts, '
-      + 'a file added by #5941 / PR #5993 (the break-glass delete guard); the other 1 landed in a file that '
-      + 'already existed and is not attributed further. Then 111 -> 110 in PR #10013 -- the number moved '
-      + 'and the note did not, which is how a composition written at 131 was still sitting over an entry '
-      + 'reading 110 -- and 110 -> 109 (#9694), where src/managed-extension-fields.test.ts stopped seeding '
-      + 'from `import.meta.url` (a meta-property module: NodeNext forbids in this CJS-typed package) and '
-      + 'now seeds from `__dirname`, which type-checks here AND is a spelling '
-      + 'check:cross-package-test-inputs resolves -- that gate publishes the current set verbatim in its '
-      + 'failure text, deliberately not restated as a count here because a count drifts silently (widened '
-      + 'twice, #8995 and #9763) -- so that file\'s repo-wide *.object.ts walk stays visible to the gate '
-      + 'holding plugin-auth\'s declared input radius. It contributes nothing to this pile any more.',
   },
   '@objectstack/mcp': {
     errors: 53,
@@ -1174,7 +1107,6 @@ const TEST_DEBT = {
       + 'not because anything was suppressed.',
   },
   '@objectstack/platform-objects': { errors: 3, note: 'TS2339 x2, TS7006 x1. Re-measured 3 at 5ab08428, exact.' },
-  '@objectstack/plugin-sharing': { errors: 3, note: 'TS6133 x2, TS18048 x1. Re-measured 3 at 5ab08428, exact.' },
   '@objectstack/service-sms': { errors: 1, note: 'TS2493 x1, in transports.test.ts. Re-measured 1 at 5ab08428 and still 1 at e8db1a230, after two more hidden test files: #5773 added sms-manifest-providers.contract.test.ts and #2814 / PR #6042 added sms-daily-quota.test.ts. The file count moved twice while the error count did not -- both new files are type-clean with the exclusion lifted.' },
   '@objectstack/connector-rest': { errors: 1, note: 'TS6133 x1. Re-measured 1 at 5ab08428, exact.' },
 };
