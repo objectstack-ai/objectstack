@@ -72,6 +72,8 @@ transforms — see objectstack-data), not an expression dialect.
 |:---|:---|
 | Current record field | `record.first_name` |
 | Previous record (update hooks, validation rules) | `previous.status` — §5 |
+| Master-detail line item's header | `parent.status` — cell `readonlyWhen` / `requiredWhen` |
+| Metadata-editing form row | `data` — the row under edit, repeater rows included |
 | Hook input payload | `input.amount` |
 | Identity context | `os.user.id`, `os.org.id`, `os.org.tier`, `os.env` |
 | Equality | `==` / `!=` |
@@ -144,7 +146,17 @@ resolves at runtime, and this table documents them all.
 | `addMonths(d, n)` | timestamp | Shift **any** date by `n` months; clamps to month-end (`addMonths(date('2026-01-31'), 1)` → Feb 28) |
 | `date(s)` / `datetime(s)` | timestamp | Parse an ISO date / date-time string to a timestamp |
 
-> **No date arithmetic.** Do NOT write `end - start`, `date + n`, or `today() + 30` — a date mixed with a number faults and the field silently nulls (the build rejects it); `end - start` does not fault, it yields a `duration` stored as `{}`. Use `daysBetween(start, end)` for a span in days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date. Inclusive day span: `daysBetween(record.start_date, record.end_date) + 1`. Tenure in years: `daysBetween(record.hire_date, today()) / 365`. For a genuine sub-day offset use `now() + duration("3h")` — the calendar-day helpers always land on UTC midnight.
+> **No date arithmetic.** A date mixed with a number faults and the build
+> rejects it; `end - start` does not fault — it yields a `duration` stored as
+> `{}`.
+
+| Want | Write — never `end - start`, `date + n`, `today() + 30` |
+|:---|:---|
+| Span in days | `daysBetween(start, end)` |
+| Inclusive span | `daysBetween(record.start_date, record.end_date) + 1` |
+| Shift a date | `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` |
+| Tenure in years | `daysBetween(record.hire_date, today()) / 365` |
+| Sub-day offset | `now() + duration("3h")` — the calendar helpers land on UTC midnight |
 
 **Numbers**
 
@@ -220,10 +232,13 @@ F`coalesce(record.cost, 0) > 0
 
 ✅
 
+<!-- os:check -->
 ```ts
-P`record.status == 'qualified'`
-P`record.amount > 10000 && record.region in ['us', 'eu']`
-P`!isBlank(record.po_number)`
+import { P } from '@objectstack/spec';
+
+P`record.status == 'qualified'`;
+P`record.amount > 10000 && record.region in ['us', 'eu']`;
+P`!isBlank(record.po_number)`;
 ```
 
 For field-level conditional rules, emit the canonical field properties:
@@ -325,7 +340,7 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 
 | Legacy | CEL |
 |:---|:---|
-| `bare_field` | `record.bare_field` |
+| `bare_field` | `record.bare_field` — except in a flow condition, below |
 | `OLD.x` | `previous.x` |
 | `NEW.x` | `record.x` |
 | `=` (comparison) | `==` |
@@ -347,6 +362,11 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 > hook condition on a `multi: true` predicate write, it is not; that
 > does not quietly skip the hook, it **fails the write**. On `after*` events it
 > IS bound, per matched row, on bulk and single-record writes alike.
+
+> ⚠️ **Flow conditions are the exception to row 1.** The automation engine
+> spreads the record's variables to top level, so a bare `status` resolves in a
+> flow start condition. `record.status` resolves there too and is the only
+> spelling valid on every other surface — prefer it.
 
 ---
 
@@ -370,6 +390,20 @@ to the envelope.
 | `Flow.decision` | `expression` / edge `condition` | cel (use `vars.<step>.<key>`) |
 | `Seed.records[*]` | any value | cel (via `cel\`\``) |
 | `audit` / `metrics` / `tracing` | `condition` / `successCriteria` | structured \| cel |
+
+⚠️ **A `formula` field is virtual — no driver materialises a column for it**, so
+`where`, `orderBy` and `searchableFields` naming one are refused
+`400 INVALID_FIELD` at both doors. It still READS correctly, which is why the
+refusal is needed: a `where` on one used to answer `200` with zero rows.
+Denormalise onto a stored field and query that. `summary` and `autonumber` have
+real columns and need no such care.
+
+⚠️ **A form-view `visibleWhen` is the one predicate here that faults OPEN.** It
+is CLIENT-SIDE only, and an unbound root falls back to `true`, so the control
+renders for everyone — never use one as access control; that is permission-set
+field-level security. Everywhere else on this table the opposite holds: an
+unevaluable `Hook` / `SharingRule` `condition` or validation predicate **aborts
+the write** (§5).
 
 View list filters are **not** a CEL surface — they are structured JSON filter
 rules (`ViewFilterRuleSchema`), so do not emit CEL there. For "last 30 days"
@@ -410,5 +444,7 @@ project). To check a *single* expression before saving it, call the
 
 ## See also
 
-- `node_modules/@objectstack/formula/` — engine + stdlib
-- `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — `Expression`, `ExpressionInput`, `cel` / `F` / `P`
+- [references/_index.md](./references/_index.md) — the Zod schemas behind every
+  surface above
+- `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — `Expression`,
+  `ExpressionInput`, `cel` / `F` / `P`
