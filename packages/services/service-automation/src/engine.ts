@@ -962,6 +962,38 @@ function isSuspendSignal(err: unknown): err is FlowSuspendSignal {
 class InputSchemaViolationError extends Error {}
 
 /**
+ * The refusal codes {@link AutomationEngine.resumeInternal} answers for a
+ * resume that NEVER RAN — the run is untouched, nothing executed, and the
+ * identical call succeeds once its cause is corrected or has passed (#14379).
+ *
+ * Read by the subflow delegation path, which forwards a parent's resume down
+ * to the child the parent is parked on: a child answering one of these has
+ * REFUSED, not failed, so the parent must answer the refusal rather than
+ * record a failure. The set is the PRODUCER's own vocabulary — the codes this
+ * file returns from that one method — which is why it is a closed list here
+ * and not a predicate over state (triage ruling 2026-09-02: branch on the
+ * child's `code`, ⛔ never on "is the child's suspension still live", a second
+ * store read whose answer can race and which infers intent from state).
+ *
+ * ⛔ `RUN_NOT_FOUND` is deliberately absent, though `resumeInternal` returns it
+ * too: it is the engine's terminal "this pause is gone for good" class (#8684)
+ * — no suspension, an unregistered flow, or a node edited away underneath a
+ * parked run — which a transport answers **404** and which no retry can fix.
+ * A child in that state can never continue, so its parent cannot either.
+ */
+const RETRYABLE_RESUME_REFUSAL_CODES: ReadonlySet<string> = new Set([
+    'INVALID_SCREEN_INPUT',
+    'INVALID_SIGNAL',
+    'RESUME_IN_PROGRESS',
+    'STORE_UNAVAILABLE',
+] satisfies ReadonlyArray<NonNullable<AutomationResult['code']>>);
+
+/** Whether an {@link AutomationResult} code names a resume that never ran. */
+function isRetryableResumeRefusal(code: AutomationResult['code']): boolean {
+    return code !== undefined && RETRYABLE_RESUME_REFUSAL_CODES.has(code);
+}
+
+/**
  * Marks a {@link ResumeSignal} the ENGINE built for its own continuations —
  * the subflow output mapping and the `map` item handoff. Module-private and
  * symbol-keyed, so it cannot arrive from a transport (no JSON body produces a
@@ -4816,6 +4848,39 @@ export class AutomationEngine implements IAutomationService {
                             durationMs: Date.now() - run.startTime,
                             screen: childRes.screen,
                         };
+                    }
+                    // [#14379] A child REFUSAL is not a child failure. The
+                    // codes in {@link RETRYABLE_RESUME_REFUSAL_CODES} are this
+                    // method's own answers for a resume that never ran: the
+                    // child's screen contract is checked BEFORE
+                    // `forgetSuspendedRun` precisely so "a rejected bag leaves
+                    // the pause live and the legitimate submission still lands"
+                    // (#4477), so the child is parked exactly where it was.
+                    //
+                    // Reading those as a terminal failure consumed the PARENT's
+                    // pause over a mistyped form field — and the screen-flow
+                    // path is where a caller holds ONE stable run id, the
+                    // parent's, and posts every wizard step to it. The run was
+                    // gone, the still-paused child orphaned with nothing left
+                    // to bubble into, the caller told `400 FLOW_FAILED` ("it
+                    // ran and was rejected") for something that never ran, and
+                    // their corrected retry on that same id answered
+                    // `RUN_NOT_FOUND`.
+                    //
+                    // The child's envelope is answered VERBATIM but for the
+                    // parent's `durationMs`. Propagating the `code` is half the
+                    // fix: a code-less envelope is exactly what forced the
+                    // transport onto `400 FLOW_FAILED`, and leaving both pauses
+                    // alive while still answering one repairs the state and
+                    // leaves the caller equally misled. The child's `error` is
+                    // the actionable half — `Screen field "kind" is required` —
+                    // where the failure text below names neither the problem
+                    // nor anything a caller can act on. Nothing else moves:
+                    // neither pause is consumed, and the parent's surfaced
+                    // screen needs no refresh because the child did not
+                    // advance.
+                    if (!childRes.success && isRetryableResumeRefusal(childRes.code)) {
+                        return { ...childRes, durationMs: Date.now() - run.startTime };
                     }
                     if (!childRes.success) {
                         const error = `subflow run '${childRunId}' (${childRun.flowName}) failed: ${childRes.error ?? 'unknown error'}`;
