@@ -2998,6 +2998,142 @@ function selfTest() {
     check('memberFormOn', label, line.trim(), want, memberFormOn(line, name));
   }
 
+  // ---- CONTAINER-QUALIFIED DATA-PROPERTY ANCHORS (option D, #13713) ---------
+  // The ruling of 2026-08-31 took option D as a project and ruled option B OUT — including
+  // as a fallback. These pins hold the three branches apart, and the (c) pins are the
+  // anti-B guard: they go red the moment an unmapped or ambiguous container starts
+  // dropping. `selfTestSurface` above is what every case here runs against, so each one
+  // states its own precondition instead of depending on today's generated artifacts.
+  //
+  // The DROP leg is a deliberate false negative, so it is pinned twice: once for the
+  // anchor it removes and once for the ledger entry that names the removal. A drop no
+  // field reports is one no reviewer can audit.
+  const authorableUseSite = [
+    'const DatasourceSchema = strictObject({',                 // maps to data/Datasource
+    '    managedBy: z.literal("system"),',                     // an authorable key NAME, not of THIS type
+    '});',
+  ].join('\n');
+  const unmappedUseSite = [
+    'const SysScimConnectionBinding = strictObject({',         // an internal type, in no shard
+    '    managedBy: z.literal("system"),',
+    '});',
+  ].join('\n');
+  const ambiguousSource = [
+    'const ListViewShapeSchema = strictObject({',              // a REAL collision in ui.json
+    '    userActions: strictObject({}),',
+    '});',
+  ].join('\n');
+  const datasourceDefSource = [
+    'export interface DatasourceSchema {',
+    '    schemaMode?: string;',
+    '}',
+  ].join('\n');
+  // The REAL declaration form of the second ruled true positive, transcribed from
+  // `packages/objectql/src/engine.ts` — used against the LIVE surface further down.
+  const datasourceDefSourceLive = [
+    'export interface DatasourceDef {',
+    '    schemaMode?: string;',
+    '}',
+  ].join('\n');
+  const methodOnMappedSource = [
+    'const ObjectSchemaBase = strictObject({',
+    '    resolveAffordances(input: unknown) {',                // a METHOD, not a data property
+    '        return input;',
+    '    },',
+    '});',
+  ].join('\n');
+
+  const qualificationCases = [
+    [authorableSource, 2, ['userActions'],
+      '(a) MINT — a data property of a container that maps to a spec type declaring it authorable'],
+    [datasourceDefSource, 2, ['schemaMode'],
+      '(a) MINT — the second ruled true positive, reached through the map rather than through case (c)'],
+    [authorableUseSite, 2, ['DatasourceSchema'],
+      '(b) DROP — an authorable key NAME on a mapped container that does not declare it (the SCIM use-site class) falls to the container branch, minting no property anchor'],
+    [unmappedUseSite, 2, ['managedBy'],
+      '(c) KEEP — ⛔ the SAME use site on an UNMAPPED container still mints. This is the anti-option-B pin: fail toward noise, never toward silence'],
+    [ambiguousSource, 2, ['userActions'],
+      '(c) KEEP — an AMBIGUOUS container (listed in a shard collision) is not an answer, so it changes nothing'],
+    [cacheStructSource, 5, ['organizationId'],
+      '(c) KEEP — the noisiest measured anchor stays, because no shard maps `MetaOverlayCacheKey`. The realised reduction is smaller than the projection for exactly this reason, and that is the ruled direction'],
+    [methodOnMappedSource, 2, ['resolveAffordances'],
+      'a METHOD of a mapped container is not the construct the ruling is about — untouched'],
+  ];
+  for (const [src, line, want, label] of qualificationCases) {
+    check('documentableDeclarationsAt.qualified', label, `line ${line}`, JSON.stringify(want), JSON.stringify([...anchorsAt(src, line)]));
+  }
+
+  // The DROP is published, with the spec key that failed to be authorable.
+  containerQualifiedDrops.clear();
+  anchorsAt(authorableUseSite, 2);
+  check('containerQualifiedDrops', 'a container-qualified drop names itself, its container and the key that was not authorable',
+    'one entry', 'managedBy (const object DatasourceSchema → data/Datasource:managedBy is not an authorable key)',
+    [...containerQualifiedDrops].join(' | '));
+  containerQualifiedDrops.clear();
+  anchorsAt(unmappedUseSite, 2);
+  check('containerQualifiedDrops', 'and a KEPT anchor is not reported as a drop — the ledger counts removals only',
+    'no entries', '', [...containerQualifiedDrops].join(' | '));
+  containerQualifiedDrops.clear();
+
+  // ⛔ THE DEGRADATION. `packages/spec` may be absent where this script runs, and an
+  // unreadable artifact must cost noise rather than silence: every container reads as
+  // UNMAPPED, so every case above collapses onto today's behaviour.
+  for (const [src, line, want, label] of [
+    [authorableUseSite, 2, ['managedBy'], 'the drop leg becomes a keep'],
+    [authorableSource, 2, ['userActions'], 'and the true positive is still minted'],
+  ]) {
+    check('documentableDeclarationsAt.unavailable', `no artifacts ⇒ pre-#13713 behaviour — ${label}`, `line ${line}`,
+      JSON.stringify(want), JSON.stringify([...anchorsAt(src, line, UNAVAILABLE_CONTAINER_SURFACE)]));
+  }
+  check('documentableDeclarationsAt.unavailable', 'and the degraded run reports no drops', 'no entries', '',
+    [...containerQualifiedDrops].join(' | '));
+
+  // The merge itself: three states, and only the resolved one may ever suppress an anchor.
+  const mergeSurface = buildContainerSurface(
+    [{ entries: { A: 'data/Object', C: 'ui/ListView' }, collisions: ['B'] },
+     { entries: { B: 'data/Object', C: 'data/Object' }, collisions: [] }],
+    ['data/Object:x'],
+  );
+  const mergeCases = [
+    ['A', 'data/Object', 'a name one shard maps resolves'],
+    ['B', null, 'a name a shard lists as a COLLISION is ambiguous — null, never a target'],
+    ['C', null, 'and so is a name two shards map to DIFFERENT types, collision list or not'],
+    ['D', undefined, 'a name no shard carries is UNMAPPED — distinct from ambiguous, and both keep'],
+  ];
+  for (const [name, want, label] of mergeCases) {
+    check('buildContainerSurface.resolve', label, name, String(want), String(mergeSurface.resolve(name)));
+  }
+  check('buildContainerSurface.isAuthorable', 'the authorable test is on the RESOLVED type plus the property', 'data/Object:x',
+    true, mergeSurface.isAuthorable('data/Object', 'x'));
+  check('buildContainerSurface.isAuthorable', 'and a property of the wrong type is not authorable by NAME alone — #12824 disproved discriminator 3', 'ui/ListView:x',
+    false, mergeSurface.isAuthorable('ui/ListView', 'x'));
+
+  // ---- the two ruled true positives, against the LIVE generated artifacts ----
+  // ⭐ Deliberately NOT fixtures. The ruling pins these two rows, and a fixture surface
+  // proves nothing about the map the tool actually reads: if `gen:declaration-map` or
+  // `gen:schema` stops emitting what this reads, the qualification silently reverts to
+  // pre-#13713 behaviour and no fixture pin would notice. These cases are what notice.
+  const live = liveContainerSurface();
+  check('liveContainerSurface', 'the generated artifacts are readable — a silent revert to pre-#13713 behaviour is itself the regression', 'available', true, live.available);
+  check('liveContainerSurface', 'ObjectSchemaBase resolves — the `userActions` pin runs through case (a)', 'data/Object', 'data/Object', String(live.resolve('ObjectSchemaBase')));
+  check('liveContainerSurface', 'and data/Object:userActions is authorable, which is what keeps that row', 'authorable', true, live.isAuthorable('data/Object', 'userActions'));
+  // ⚠️ HONEST NOTE, and it is the reconciliation this card owes its own projection:
+  // `schemaMode` is declared on `DatasourceDef`, an objectql-local interface that the
+  // generated map does NOT carry. So this pin survives through case (c) — the unmapped
+  // keep — and NOT through the authorable lookup. ⛔ Do not "fix" that by teaching this
+  // script a mapping: a missing entry is a spec-lane card. The line below states the
+  // absence as a fact so a future map that DOES carry it goes red here and is read
+  // deliberately rather than silently.
+  check('liveContainerSurface', 'DatasourceDef is NOT in the generated map — the schemaMode pin therefore survives via case (c), the unmapped keep', 'unmapped', 'undefined', String(live.resolve('DatasourceDef')));
+  check('liveContainerSurface', 'and data/Datasource:schemaMode IS authorable, so the pin also survives via case (a) the day the map carries its container', 'authorable', true, live.isAuthorable('data/Datasource', 'schemaMode'));
+  for (const [src, line, want, label] of [
+    [authorableSource, 2, ['userActions'], 'userActions at its declaration form still mints — ruled true positive 1'],
+    [datasourceDefSourceLive, 2, ['schemaMode'], 'schemaMode at its declaration form still mints — ruled true positive 2'],
+  ]) {
+    check('documentableDeclarationsAt.live', label, `line ${line}`, JSON.stringify(want), JSON.stringify([...anchorsAt(src, line, live)]));
+  }
+  containerQualifiedDrops.clear();
+
   // ⭐ THE INVARIANT THAT MAKES "零 recall 变化" A PROPERTY OF THE CODE. Provenance is a
   // parallel map, so the only way it could move the list is by introducing or withholding
   // a NAME. Both directions are pinned: its key set is exactly the anchor set, never a
