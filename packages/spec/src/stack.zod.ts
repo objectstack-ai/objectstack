@@ -1028,26 +1028,45 @@ function assembledPackageBodyShape(): Pick<typeof STACK_DEFINITION_COLLECTIONS_S
  */
 export type AssembledPackageBody =
   Omit<z.input<typeof ManifestSchema>, AssembledPackageBodyKey>
-  & Partial<{ [K in AssembledPackageBodyKey]: z.input<(typeof STACK_DEFINITION_COLLECTIONS_SHAPE)[K]> }>;
+  & Partial<Record<AssembledPackageBodyKey, unknown>>;
 
 /** Post-parse shape of {@link AssembledPackageBody} — defaults applied, transforms run (ADR-0122). */
 export type AssembledPackageBodyParsed =
   Omit<z.infer<typeof ManifestSchema>, AssembledPackageBodyKey>
-  & Partial<{ [K in AssembledPackageBodyKey]: z.infer<(typeof STACK_DEFINITION_COLLECTIONS_SHAPE)[K]> }>;
+  & Partial<Record<AssembledPackageBodyKey, unknown>>;
 
 /*
- * ANNOTATED, not inferred, and the annotation is derived rather than
- * transcribed (the two aliases above are mapped over the same key set the value
- * is built from). Inferring it emits the manifest and all ~35 collection
+ * ANNOTATED, not inferred, and the annotation is KEY-precise but
+ * ELEMENT-loose — both halves measured, neither a preference.
+ *
+ * Not inferred: inferring it emits the manifest and all ~35 collection
  * declarations a SECOND time inside `ObjectStackDefinitionSchema`'s own
  * inferred type, which `tsc` refuses to serialize at all:
  *
  *   TS7056: The inferred type of this node exceeds the maximum length the
  *           compiler will serialize. An explicit type annotation is needed.
  *
- * Measured on this change: the stack schema's `.d.ts` node was already near
- * that ceiling, and adding `packages`' expanded element type pushed it over.
- * The annotation keeps the declaration one named reference wide.
+ * Element-loose: the two aliases above name every collection KEY (the set is
+ * still derived from `COMPOSE_KEY_DISPOSITIONS`, see `AssembledPackageBodyKey`)
+ * but type each collection as `unknown` rather than mapping
+ * `z.input<(typeof STACK_DEFINITION_COLLECTIONS_SHAPE)[K]>` per key. The mapped
+ * form was tried first and measured on #14513: referencing the shape const from
+ * an EXPORTED type makes the declaration emit write `STACK_DEFINITION_COLLECTIONS_SHAPE`
+ * into `stack.zod-*.d.ts` a second time (21,443 lines beside the 42,449 the
+ * stack schema already occupies), and every consumer program then re-infers all
+ * ~35 collection input/output types once more — the `qa/http-conformance`
+ * type-check-debt re-measure went from green to out-of-memory at the 4096 MB
+ * ceiling `scripts/check-type-check-coverage.mjs` pins as CI's. With the keys
+ * held and the elements `unknown`, nothing here references the shape const, the
+ * second copy is not emitted, and the per-key inference does not run.
+ *
+ * What a consumer loses is only the STATIC element type of a collection inside
+ * an assembled body (`body.objects` is `unknown`, not `ObjectDefinition[]`); the
+ * RUNTIME schema below still carries every collection's full declaration, so a
+ * wrong-shaped body is refused exactly as before. Readers of assembled bodies
+ * (`compile.ts`, `artifact-packages.ts`) already treat them as records and
+ * narrow at the point of use; that is the honest shape for a payload whose
+ * collections are attributed per package only at composition time.
  */
 export const AssembledPackageBodySchema: z.ZodType<AssembledPackageBodyParsed, AssembledPackageBody> =
   lazySchema(() =>

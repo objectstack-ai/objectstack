@@ -240,7 +240,13 @@ describe("ADR-0130 D4 — `manifest: 'preserve'` assembles each input stack", ()
       'com.example.multi.orders',
       'com.example.multi.core',
     ]);
-    expect(parsed[1].manifest.objects?.map((o) => o.name)).toEqual(['crm_account']);
-    expect(parsed[0].manifest.objects?.map((o) => o.name)).toEqual(['crm_order']);
+    // Collections inside an assembled body are `unknown` at the TYPE level (see
+    // the note above `AssembledPackageBodySchema` — the element-precise alias
+    // OOM'd consumer type-checks); narrow at the point of use, as every reader
+    // of an assembled body does.
+    const objectNames = (objects: unknown): string[] | undefined =>
+      (objects as Array<{ name: string }> | undefined)?.map((o) => o.name);
+    expect(objectNames(parsed[1].manifest.objects)).toEqual(['crm_account']);
+    expect(objectNames(parsed[0].manifest.objects)).toEqual(['crm_order']);
   });
 });
