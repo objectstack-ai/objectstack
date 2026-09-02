@@ -57,6 +57,20 @@ vi.mock('./registry', async () => {
   return createRegistryModuleMock();
 });
 
+/**
+ * The double's `getObject`, typed.
+ *
+ * `createRegistryModuleMock` hands back a FUNCTION with the instance members
+ * assigned onto it (`Object.assign(SchemaRegistry, instance)`), so the mocked
+ * `getObject` is reachable off the imported binding at run time — but the
+ * binding's STATIC type is the real class, which declares `getObject` on
+ * instances only. Narrowed once here rather than cast at each call site, so
+ * `tsconfig.test.json` (which does compile this file — the package's plain
+ * `typecheck` excludes tests and would have said nothing) stays satisfied
+ * without an assertion in the middle of a test body.
+ */
+const registryDouble = SchemaRegistry as unknown as { getObject: ReturnType<typeof vi.fn> };
+
 type Row = Record<string, unknown>;
 
 /* --------------------------------------------------------------------------
@@ -162,7 +176,7 @@ function makeDriver(opts: DriverOpts = {}) {
 }
 
 function makeRig(opts: DriverOpts = {}, schema: unknown = SCHEMA) {
-  vi.mocked(SchemaRegistry.getObject).mockReturnValue(schema as any);
+  registryDouble.getObject.mockReturnValue(schema);
   const driver = makeDriver(opts);
   const engine = new ObjectQL();
   engine.registerDriver(driver, true);
@@ -355,10 +369,10 @@ describe('engine.insert — a driver unique violation is a DUPLICATE_RECORD enve
       // The first refusal is attributed to the number this insert issued, so the
       // engine re-seeds; the schema it re-reads no longer declares the field, so
       // `applyAutonumbers` issues nothing and the last-chance create runs.
-      vi.mocked(SchemaRegistry.getObject).mockReturnValue({
+      registryDouble.getObject.mockReturnValue({
         name: 'doc',
         fields: { title: { type: 'text' } },
-      } as any);
+      });
 
       const failure = await refusalOf(() => engine.insert('doc', { title: 't' }));
 
