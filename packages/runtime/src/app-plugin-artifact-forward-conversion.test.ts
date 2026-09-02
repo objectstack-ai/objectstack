@@ -146,7 +146,7 @@ async function readerDoor(): Promise<Registration[]> {
 /** Reader 2 — the real `AppPlugin` ADR-0057 block, capturing its writes in order. */
 async function readerBundle(): Promise<Registration[]> {
     const captured: Registration[] = [];
-    const plugin = new AppPlugin(bytes());
+    const plugin = new AppPlugin(bytes(), undefined, { securityMetadataRegistrar: 'artifact-door' });
     await plugin.start!(
         fakeCtx({
             registerInMemory: (type: string, name: string, item: unknown) => {

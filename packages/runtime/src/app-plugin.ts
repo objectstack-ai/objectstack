@@ -50,8 +50,34 @@ export interface AppPluginProjectContext {
 }
 
 /**
+ * Who registers the stack-declared SECURITY collections (`positions`,
+ * `permissions`, `capabilities`, `sharingRules`) into the metadata service on
+ * this boot — the ADR-0057 block in `AppPlugin.start()`.
+ *
+ * - `'app-plugin'` (default): this plugin registers them itself. Every
+ *   composition that has no artifact door is this shape — `new AppPlugin(config)`
+ *   over a `defineStack()` module (`os serve` / `os migrate` host configs, the
+ *   plain stacks in a config's `plugins[]`), `DevPlugin`, `@objectstack/verify`'s
+ *   `bootStack`, an embedder.
+ * - `'artifact-door'`: the composition ALSO runs `MetadataPlugin` with
+ *   `artifactSource` over the same artifact this bundle was read from, so the
+ *   artifact door (`packages/metadata/src/plugin.ts`, `ARTIFACT_FIELD_TO_TYPE`)
+ *   registers the strict-parsed, forward-converted, ADR-0010-stamped copy of
+ *   every item and this plugin leaves those four collections to it (#12892
+ *   step 2 — maintainer ruling 2026-08-29: the door owns the route).
+ *   `createStandaloneStack` is the composition that says so.
+ *
+ * ⛔ Declare `'artifact-door'` ONLY beside a `MetadataPlugin({ artifactSource })`
+ * reading the same artifact: a declared collection with zero registrars boots
+ * green and logs nothing (measured on #12892 step 1), and the default is the
+ * registering branch precisely so a composition that never heard of this option
+ * cannot lose a registrar.
+ */
+export type AppPluginSecurityMetadataRegistrar = 'app-plugin' | 'artifact-door';
+
+/**
  * AppPlugin
- * 
+ *
  * Adapts a generic App Bundle (Manifest + Runtime Code) into a Kernel Plugin.
  * 
  * Responsibilities:
@@ -107,15 +133,31 @@ export class AppPlugin implements Plugin {
      * it only writes when something calls it.
      */
     private readonly skipSeedData: boolean;
+    /**
+     * See {@link AppPluginSecurityMetadataRegistrar}. Public and readonly so a
+     * composition test can pin which registrar a boot shape declared.
+     */
+    readonly securityMetadataRegistrar: AppPluginSecurityMetadataRegistrar;
 
     constructor(
         bundle: any,
         projectContext?: AppPluginProjectContext,
-        opts: { skipSeedData?: boolean } = {},
+        opts: { skipSeedData?: boolean; securityMetadataRegistrar?: AppPluginSecurityMetadataRegistrar } = {},
     ) {
         this.bundle = bundle;
         this.projectContext = projectContext;
         this.skipSeedData = opts.skipSeedData ?? false;
+        // Refused loudly rather than defaulted: a misspelt registrar would
+        // otherwise fall through to whichever branch the typo happened to
+        // miss, and both branches are silent about what they did not do.
+        const registrar = opts.securityMetadataRegistrar ?? 'app-plugin';
+        if (registrar !== 'app-plugin' && registrar !== 'artifact-door') {
+            throw new Error(
+                `[AppPlugin] securityMetadataRegistrar '${String(registrar)}' is not one of `
+                + `'app-plugin' | 'artifact-door'`,
+            );
+        }
+        this.securityMetadataRegistrar = registrar;
         // Support both direct manifest (legacy) and Stack Definition (nested manifest)
         const sys = bundle?.manifest || bundle;
         const appId = sys?.id || sys?.name;
@@ -638,60 +680,46 @@ export class AppPlugin implements Plugin {
         // metadata registry so the boot seeders (plugin-security /
         // plugin-sharing) and runtime resolvers can read them via
         // `list('position'|'permission'|'capability'|'sharing_rule')`.
-        // Without this, bootStack's metadata service holds only objects (the
-        // artifact loader that registers these runs only in compiled serve.ts),
-        // leaving the declarations decorative.
+        // Without this, a code-defined stack's metadata service holds only
+        // objects, leaving the declarations decorative.
+        //
+        // [#12892 step 2] ONE registrar per boot path. On an ARTIFACT boot
+        // (`createStandaloneStack`, which composes `MetadataPlugin` with
+        // `artifactSource` over the very artifact this bundle was read from)
+        // the artifact door — `MetadataPlugin._parseAndRegisterArtifact`,
+        // `ARTIFACT_FIELD_TO_TYPE` in packages/metadata/src/plugin.ts — reads
+        // the same bytes, replays the versioned ADR-0087 forward conversion,
+        // STRICT-PARSES the definition (schema defaults, ADR-0122 input
+        // transforms) and stamps the ADR-0010 provenance envelope, and since
+        // #12892 step 1 it reaches all four of these collections. This block
+        // used to register a second, unparsed copy of every item on that same
+        // boot, and because it ran LAST its copy won: a sharing rule's
+        // `condition` was a STRING here and `{ dialect, source }` on the
+        // door's copy, a capability carried no `scope` default and no
+        // `_packageVersion`, and which shape a consumer read depended on
+        // registration order (pinned in
+        // app-plugin-artifact-forward-conversion.test.ts). Maintainer ruling
+        // (2026-08-29, #12892): the door owns the route; two permanent writers
+        // with matched shapes was refused as an end state. So the composition
+        // that runs the door declares it — `securityMetadataRegistrar:
+        // 'artifact-door'` — and this block leaves the four collections to it.
+        // Every composition without a door (`new AppPlugin(config)` over a
+        // `defineStack()` module in `os serve` / `os migrate`, `DevPlugin`,
+        // `@objectstack/verify`'s `bootStack`, an embedder) keeps registering
+        // exactly as before under the default `'app-plugin'`.
+        //
+        // The discriminator is DECLARED at the composition site rather than
+        // inferred here — from a marker on the bundle, or from whether the
+        // metadata service already holds the door's items — on purpose: a
+        // parsed bundle carries no provenance, and a registry read during
+        // `start()` would turn on start ORDER, the very dependence this
+        // removes. The default is the registering branch, so a composition
+        // that never heard of the option cannot lose a registrar.
         try {
             const metadata = ctx.getService('metadata') as
                 | { registerInMemory?: (t: string, n: string, d: unknown) => void }
                 | undefined;
             if (typeof metadata?.registerInMemory === 'function') {
-                const rawSecurityBundle: any = this.bundle.manifest
-                    ? { ...this.bundle.manifest, ...this.bundle }
-                    : this.bundle;
-                // [#12844] Same bytes, same conversion policy — one funnel.
-                //
-                // On an artifact boot these declarations reach the metadata
-                // registry through TWO independent readers: the artifact door
-                // (`MetadataPlugin._parseAndRegisterArtifact`), which since
-                // #12772 replays the versioned ADR-0087 forward conversion
-                // over the definition before its strict parse, and this block,
-                // which received the same JSON from `loadArtifactBundle` (no
-                // validation, no conversion). Reading it raw here made
-                // "artifact metadata is converted at ingestion" only half
-                // true: the two copies of the same permission set differed,
-                // and which one a consumer saw depended on registration order
-                // and read path. Nothing read the difference when this was
-                // filed — the retired keys involved gate nothing BY THE
-                // DEFINITION of their retirement — but that is a property of
-                // those keys, not of this path: the next retired key whose
-                // value a consumer does read would diverge silently at
-                // registration and explode at whatever seam re-validates
-                // (e.g. a Studio re-save through `saveMetaItem`, which rejects
-                // with the current schema).
-                //
-                // So this reader consumes the door's OWN policy function
-                // rather than a second opinion about it — the whole
-                // definition, exactly as the door converts it, so no
-                // conversion-specific knowledge leaks in here (the
-                // `roles` -> `positions` entry rewrites a COLLECTION KEY, not
-                // an item, and a projection would silently miss it).
-                //
-                // Not surfaced operator-visibly: on an artifact boot the door
-                // already prints one deduped summary per conversion for these
-                // very bytes, and a second copy of it would double the boot
-                // log without adding a fact. `debug` keeps it diagnosable.
-                const forwardConverted = applyArtifactForwardConversions(rawSecurityBundle);
-                if (forwardConverted.notices.length > 0) {
-                    ctx.logger.debug('[AppPlugin] applied ADR-0087 forward conversion to stack-declared security metadata', {
-                        appId,
-                        verdict: forwardConverted.verdict,
-                        authoredFloor: forwardConverted.authoredFloor,
-                        runtimeSpecVersion: forwardConverted.runtimeSpecVersion,
-                        notices: forwardConverted.notices.length,
-                    });
-                }
-                const securityBundle: any = forwardConverted.definition;
                 const SECURITY_FIELDS: Array<[string, string]> = [
                     ['positions', 'position'],
                     ['permissions', 'permission'],
@@ -714,18 +742,68 @@ export class AppPlugin implements Plugin {
                     // fourth attempt at a key the schema does not declare fails
                     // in CI instead of sitting here inert.
                 ];
-                let count = 0;
-                for (const [field, type] of SECURITY_FIELDS) {
-                    const arr = securityBundle?.[field];
-                    if (!Array.isArray(arr)) continue;
-                    for (const item of arr) {
-                        if (!item?.name) continue;
-                        metadata.registerInMemory(type, item.name, item);
-                        count += 1;
+                if (this.securityMetadataRegistrar === 'artifact-door') {
+                    // Not surfaced operator-visibly: the door prints its own
+                    // `Artifact metadata loaded` summary for these very bytes,
+                    // and a second line per boot would add no fact. `debug`
+                    // keeps "who registered this collection?" answerable from
+                    // the boot log.
+                    ctx.logger.debug(
+                        '[AppPlugin] artifact boot — stack-declared security metadata is registered by the artifact door (MetadataPlugin), not here',
+                        {
+                            appId,
+                            registrar: this.securityMetadataRegistrar,
+                            collections: SECURITY_FIELDS.map(([field]) => field),
+                        },
+                    );
+                } else {
+                    const rawSecurityBundle: any = this.bundle.manifest
+                        ? { ...this.bundle.manifest, ...this.bundle }
+                        : this.bundle;
+                    // [#12844] Same bytes, same conversion policy — one funnel.
+                    //
+                    // A `defineStack()` module can declare an `engines.protocol`
+                    // floor below the installed spec exactly as a compiled
+                    // artifact can, so this reader consumes the door's OWN
+                    // policy function rather than a second opinion about it —
+                    // the whole definition, exactly as the door converts it, so
+                    // no conversion-specific knowledge leaks in here (the
+                    // `roles` -> `positions` entry rewrites a COLLECTION KEY,
+                    // not an item, and a projection would silently miss it).
+                    // Reading the bytes raw here is what made "metadata is
+                    // converted at ingestion" only half true: a retired key
+                    // whose value a consumer reads would diverge silently at
+                    // registration and explode at whatever seam re-validates
+                    // (a Studio re-save through `saveMetaItem`, which rejects
+                    // with the current schema).
+                    //
+                    // `debug`, not `info`: boot logs are long already, and the
+                    // conversion notice is a fact about the AUTHORED floor, not
+                    // a degradation.
+                    const forwardConverted = applyArtifactForwardConversions(rawSecurityBundle);
+                    if (forwardConverted.notices.length > 0) {
+                        ctx.logger.debug('[AppPlugin] applied ADR-0087 forward conversion to stack-declared security metadata', {
+                            appId,
+                            verdict: forwardConverted.verdict,
+                            authoredFloor: forwardConverted.authoredFloor,
+                            runtimeSpecVersion: forwardConverted.runtimeSpecVersion,
+                            notices: forwardConverted.notices.length,
+                        });
                     }
-                }
-                if (count > 0) {
-                    ctx.logger.info('Registered stack-declared security metadata', { appId, count });
+                    const securityBundle: any = forwardConverted.definition;
+                    let count = 0;
+                    for (const [field, type] of SECURITY_FIELDS) {
+                        const arr = securityBundle?.[field];
+                        if (!Array.isArray(arr)) continue;
+                        for (const item of arr) {
+                            if (!item?.name) continue;
+                            metadata.registerInMemory(type, item.name, item);
+                            count += 1;
+                        }
+                    }
+                    if (count > 0) {
+                        ctx.logger.info('Registered stack-declared security metadata', { appId, count });
+                    }
                 }
             }
         } catch (err) {
