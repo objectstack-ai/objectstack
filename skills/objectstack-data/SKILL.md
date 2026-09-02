@@ -3,13 +3,14 @@ name: objectstack-data
 description: >
   Design ObjectStack data schemas — objects, fields, field conditional
   rules, relationships, validations, indexes, lifecycle hooks, permissions,
-  row-level security —
-  and the seeds (`defineSeed()`) that load fixtures and
-  reference data alongside them. Use when the user is creating or
-  modifying `*.object.ts` / `*.seed.ts` files, picking field types,
-  modelling relationships, writing `beforeInsert`/`afterUpdate` hooks,
-  configuring per-object access control, or authoring bootstrap / demo
-  data. Use for `visibleWhen` / `readonlyWhen` / `requiredWhen` rules that
+  row-level security, data `lifecycle` retention/TTL/rotation, metadata
+  `protection` locks, and external / federated datasources
+  (`defineDatasource`) — and the seeds (`defineSeed()`) that load fixtures
+  and reference data alongside them. Use when the user is creating or
+  modifying `*.object.ts` files or `src/data/*.ts` seed modules, picking
+  field types, modelling relationships, writing `beforeInsert`/`afterUpdate`
+  hooks, configuring per-object access control, pointing an object at an
+  existing external database, or authoring bootstrap / demo data. Use for `visibleWhen` / `readonlyWhen` / `requiredWhen` rules that
   belong on fields. Do not use for querying data (see objectstack-query) or for
   plugin / kernel hooks (see objectstack-platform). CEL expressions in
   formulas / validations / sharing rules / dynamic seed values: load
@@ -25,12 +26,6 @@ metadata:
 
 # Data Modeling — ObjectStack Data Protocol
 
-Expert instructions for designing business data schemas using the ObjectStack
-specification. This skill covers Object definitions, Field type selection,
-relationship modelling, validation rules, index strategy, and lifecycle hooks.
-
----
-
 ## Skill Boundaries
 
 | Need | Use instead |
@@ -39,18 +34,6 @@ relationship modelling, validation rules, index strategy, and lifecycle hooks.
 | Define REST API endpoints or auth | **objectstack-api** |
 | Build views, dashboards, or apps | **objectstack-ui** |
 | Create a plugin or register services | **objectstack-platform** |
-
----
-
-## When to Use This Skill
-
-- You are creating a **new business object** (e.g., `account`, `project_task`)
-- You need to **choose the right field type** from the 49 supported types
-- You are configuring **lookup / master-detail relationships** between objects
-- You need to add **validation rules** (cross-field, state machine, format, etc.)
-- You are optimising **query performance with indexes**
-- You are extending an existing object with new fields or capabilities
-- You need to **implement data lifecycle hooks** for business logic
 
 ---
 
@@ -67,13 +50,27 @@ database table and exposes automatic CRUD APIs.
 |:---------|:-------|:-----------|:------------|
 | `name`   | string | `snake_case` | Immutable machine identifier (`/^[a-z_][a-z0-9_]*$/`) |
 | `fields` | map    | keys in `snake_case` | Field definitions |
+| `sharingModel` | enum | one of the four below | Org-wide default record visibility (OWD). Zod marks it optional, but **a publish with no authored `sharingModel` is refused** with the 422 lint envelope `security-owd-unset` — absence is not a decision (maintainer ruling 2026-08-13). Author it on every object |
+
+**`sharingModel` — the four canonical values** (ADR-0090 D4; legacy aliases
+removed). A *custom* object that omits it resolves to `private` at runtime, but
+the publish door rejects it before that:
+
+| Value | Who can read / write |
+|:--|:--|
+| `private` | owner only (widen with sharing rules, RLS, or `readScope`/`writeScope`) |
+| `public_read` | everyone reads; the owner writes |
+| `public_read_write` | everyone reads and writes |
+| `controlled_by_parent` | inherited from the master record (`master_detail` children) |
 
 **Important optional properties:**
 
 | Property | Default | Description |
 |:---------|:--------|:------------|
 | `label` | Auto from `name` | Human-readable singular label |
-| `pluralLabel` | — | Plural form (e.g., "Accounts") |
+| `pluralLabel` | — | Plural form (e.g., "Accounts") — on 31/31 objects in the reference apps; author it alongside `label` |
+| `icon` | — | Icon name for nav, list headers and lookup pickers — on 31/31 objects in the reference apps |
+| `highlightFields` | derived | Ordered field keys used as a record's compact face: the columns a **related list** renders on the parent's detail page, and what a lookup picker shows. Declare it on the CHILD object (see [Relationships](./rules/relationships.md)) |
 | `namespace` | — | **Not a schema key** — `ObjectSchema.create()` rejects unknown keys, so authoring it is a build error. Embed the prefix directly in `name` instead (e.g. `name: 'crm_account'`) |
 | `datasource` | `'default'` | Target datasource ID for virtualized data |
 | `nameField` | derived (e.g. `'name'`/`'title'`) | **Canonical** record-title field — the stored field used as the record's display name. Use a single text/email field, or a formula field (`returnType: 'text'`) for a composite title |
@@ -159,31 +156,9 @@ fresh as whatever writes it. Cover both write paths:
 Rows written by a path that bypasses hooks (bulk import, direct SQL) need a
 one-off backfill. See [Lifecycle Hooks](./references/data-hooks.md).
 
-**The errors an author sees for the dotted path** (grep either back to here).
-`os validate` → `searchable-field-unknown`:
-
-```text
-searchableFields entry "project_id.name" is not a field on object "task". The
-declaration is stale: searching it can never match, and the engine silently
-drops it — leaving a narrower search than declared, or the auto-default set once
-every entry is dropped.
-
-hint: 'search' scans this object's own columns, so a related record's column
-cannot be a search target — expand the relation and search the related object,
-or copy the value onto a stored text field here. Clients echo this declaration
-verbatim as the '$searchFields' override, so a stale entry becomes a 400
-INVALID_FIELD on list search, not just a quietly narrowed one.
-```
-
-A request carrying the dotted path is `400 INVALID_FIELD`:
-
-```text
-Unknown field 'project_id.name' on object 'task'. '$searchFields' narrows which
-columns 'search' scans, so a name the object does not declare cannot narrow
-anything — and the engine used to drop it and scan the default columns instead,
-answering a NARROWER search with a WIDER one. 'search' scans this object's own
-columns; a related record's column cannot be a search target.
-```
+Both spellings are refused loudly: `os validate` reports
+`searchable-field-unknown`, and a request naming the dotted path is `400
+INVALID_FIELD`. Each message carries its own prescription.
 
 Cross-object search paths are rejected by design, not pending. Do not invent a
 per-project convention for this — the mirror field is the answer.
@@ -329,7 +304,11 @@ import { ObjectSchema } from '@objectstack/spec/data';
 export default ObjectSchema.create({
   name: 'support_case',
   label: 'Support Case',
-  sharingModel: 'private',
+  pluralLabel: 'Support Cases',
+  description: 'A customer-reported issue tracked to resolution.',
+  icon: 'life-buoy',
+  sharingModel: 'private',                 // required in practice — see above
+  highlightFields: ['subject', 'status', 'priority'],
   enable: {
     trackHistory: true,
     feeds: true,
@@ -371,12 +350,11 @@ export default ObjectSchema.create({
       message: 'Invalid status transition.',
     },
   ],
-  indexes: [
-    { fields: ['status', 'priority'] },
-    { fields: ['account'] },
-  ],
 });
 ```
+
+Declared `indexes` are a separate decision — see
+[Index Strategy](./rules/indexing.md).
 
 ---
 
@@ -390,16 +368,26 @@ schema, and the **database column wins at write time**:
 | Change | Existing DB on restart |
 |--------|------------------------|
 | add object / field / index | ✅ applied automatically (additive) |
-| `required: true → false` (relax `NOT NULL`) | dev auto-heals (`autoMigrate:'safe'`); otherwise `os migrate apply` |
+| `storage: { notNull: true }` removed (relax `NOT NULL`) | ⚠️ **never auto-applied** — the drift is `category: 'needs_confirm'` (`relax_not_null`), so `os migrate apply` confirms it. Relaxing `required` alone changes no column |
 | `unique` re-scoped global → per-tenant | dev auto-heals; otherwise `os migrate apply` (`replace_unique_index`) |
 | type / length change, drop field, rename | `os migrate apply` (`--allow-destructive` for drops / tightenings) |
 | declared index removed, or its columns changed | `os migrate apply` (`--allow-destructive` when it drops, or rebuilds as `UNIQUE`) |
 
-Tell-tale: `/meta` reports a field optional but a write still 400s
-`"<field> is required"` — that is a stale `NOT NULL` column (physical drift),
-**not** a validator bug. `os dev` reconciles loosening automatically; otherwise
-`os migrate plan` to preview and `os migrate apply` to reconcile. CLI details:
-see **objectstack-platform**.
+**`required` is not the `NOT NULL` dial (ADR-0113).** `required` is the
+**write contract** — the engine refuses an insert that omits the value — and it
+implies nothing about the column. The physical constraint is a separate explicit
+opt-in, `storage: { notNull: true }`, and it is what drift detection compares
+against. So tightening `required` on a deployed object is safe (existing null
+rows stay readable), while declaring `storage.notNull` over null rows is a
+destructive migration. The two cannot be combined with `requiredWhen` — a
+conditional contract cannot be an unconditional column constraint.
+
+Tell-tale: `/meta` reports a field optional (no `required`, no `storage.notNull`)
+but writes that omit it fail with a **raw driver error** rather than a clean
+validation 400 — that is a stale `NOT NULL` column, not a validator bug. Run
+`os migrate plan` to preview and `os migrate apply` to reconcile, or ratify the
+column by declaring `storage: { notNull: true }`. CLI details: see
+**objectstack-platform**.
 
 ---
 
@@ -536,48 +524,17 @@ contract**, and the canonical patterns.
 
 ---
 
-## CRM Schema Blueprint (Production Pattern)
-
-Mirror these CRM-style patterns when designing enterprise metadata objects:
-
-| Pattern | Typical Location | Implementation Cue |
-|:--|:--|:--|
-| Object layout via field groups | `src/objects/*.object.ts` | Use `fieldGroups[]` + per-field `group` for deterministic form structure |
-| Capability gating | `src/objects/*.object.ts` | Use `enable` flags (`trackHistory`, `apiMethods`, `files`, `feeds`, `activities`) per object |
-| Index + validation pairing | `src/objects/*.object.ts` | Keep `indexes[]` aligned to common filters and enforce invariants with `validations[]` |
-| Relationship constraints | `src/objects/*.object.ts` | Use `lookup` + `lookupFilters` (`[{ field, operator, value }]`) for constrained child selection |
-| Lifecycle automation | `src/objects/*.hook.ts` | Use a lifecycle **hook** (authored with `defineHook()`, registered via `defineStack({ hooks })` or the `*.hook.ts` convention scan) or a top-level `record_change` flow for field updates triggered by record changes. There is **no** object-level `workflows[]` field — authoring one is a build error. |
-| State transitions | `src/objects/*.object.ts` | Prefer explicit `state_machine` validation rules (one per state field) — there is **no** separate `stateMachines` map |
-
-For metadata authoring, keep expressions in CEL (`P\`...\``, `F\`...\``,
-`cel\`...\``) and avoid legacy formula-string syntax.
-
 ---
 
 ## Object Extension Model
 
-When extending an object you do not own, author an extension with
-`defineObjectExtension()` and register it on the stack's `objectExtensions`
-array:
-
-```typescript
-import { defineObjectExtension } from '@objectstack/spec';
-
-export const accountExtension = defineObjectExtension({
-  extend: 'account',           // target object name
-  fields: { custom_score: { type: 'number' } },
-  priority: 300,               // higher = applied later
-});
-
-// objectstack.config.ts
-// defineStack({ objectExtensions: [accountExtension], ... })
-```
-
-- `priority` controls merge order (default `200`; range `0–999`)
-- Extensions can add fields, validations, and indexes — but cannot remove them
-- Do **not** author `ownership: 'extend'` on an object schema — the object-level
-  `ownership` property is the *record-ownership* enum
-  (`'user' | 'business_unit' | 'org' | 'none'`), unrelated to extensions
+To add fields/validations/indexes to an object you do not own, author
+`defineObjectExtension({ extend, fields, priority })` and register it on
+`defineStack({ objectExtensions: [...] })`. `priority` sets merge order (default
+`200`, range `0–999`); an extension can add but never remove. ⛔ Not the same key
+as object-level `ownership` (the record-ownership enum
+`'user' | 'business_unit' | 'org' | 'none'`). Schema:
+`node_modules/@objectstack/spec/src/data/object.zod.ts` (`ObjectExtensionSchema`).
 
 ---
 
@@ -648,43 +605,17 @@ is `active: false`; the validity window has passed; `organization_id` mismatch.
 `GET /api/v1/security/explain?object=&operation=&userId=` answers from the
 enforcing code path (explaining another user needs `manage_users`).
 
-### Access depth (scope-depth) — the ERP "see my unit / my unit and below" axis
+### Access depth (`readScope` / `writeScope`)
 
-For owner-scoped (`private`) objects, a per-object grant on a permission set can
-carry **`readScope` / `writeScope`** that *widens the owner-match declaratively* —
-the ERP "my own / my reports / my unit / my unit and below / whole org" axis
-(ADR-0057 D1). It saves hand-writing one RLS policy per object.
-
-```typescript
-// in a permission set's `objects` map
-objects: {
-  account: {
-    allowRead: true, allowEdit: true,
-    readScope: 'unit_and_below',  // see accounts owned by my BU + descendant BUs
-    writeScope: 'own',            // but only edit my own
-  },
-}
-```
-
-| Scope | Who you can see / write |
-|:--|:--|
-| `own` | `owner == me` (baseline; unset = this) |
-| `own_and_reports` | me + everyone below me on the `sys_user.manager_id` chain |
-| `unit` | owners in my business unit (`sys_business_unit`) |
-| `unit_and_below` | my BU + all descendant BUs (BFS) |
-| `org` | the whole tenant (≈ `viewAllRecords` / `modifyAllRecords`) |
-
-Resolves at request time into an `owner_id IN (…)` set and AND-injects like RLS
-(no compiler change; ADR-0055). Sharing rules still widen on top.
-
-> ⚠️ **Open-core boundary (ADR-0016).** `own` and `org` work in open-source. The
-> **hierarchy-relative** scopes — `own_and_reports` / `unit` / `unit_and_below` —
-> need the **paid** `@objectstack/security-enterprise` plugin (BU-subtree +
-> manager-chain resolver). Without it they **fail closed to `own`** (never
-> fail-open), and `defineStack` errors if a grant uses one without
-> `requires: ['hierarchy-security']`. In an open-source app, author `own` / `org`
-> + explicit sharing rules; reach for `unit*` only when the enterprise plugin is
-> present.
+On an owner-scoped (`private`) object, a per-object grant in a permission set may
+carry `readScope` / `writeScope` to widen the owner match declaratively instead of
+hand-writing an RLS policy (ADR-0057 D1): `own` (default) · `own_and_reports` ·
+`unit` · `unit_and_below` · `org`. It resolves at request time into an
+`owner_id IN (…)` set and AND-injects like RLS. ⚠️ Open-core boundary (ADR-0016):
+only `own` and `org` work in open source — the hierarchy-relative three need the
+paid `@objectstack/security-enterprise` plugin, **fail closed to `own`** without
+it, and `defineStack` errors unless the grant declares
+`requires: ['hierarchy-security']`. Schema: `PermissionSetSchema.objects.*`.
 
 ### Row-Level Security (RLS)
 
@@ -738,16 +669,10 @@ A legacy SQL-style `=` / `IN (...)` predicate still compiles via a **deprecated*
   is the declarative way to set the org-wide default — prefer those over
   hand-written policies for the common cases.
 
-> **Removed:** a former object-level `rls` config (`RLSConfigSchema`, a free-form
-> CEL `predicate` on the object) was **removed** from the spec (ADR-0056 D8,
-> "design+enforce or remove"). Permission-set `rowLevelSecurity` policies are the
-> only RLS surface — author them as shown above.
-
 ### Sensitive fields — `secret` type + `requiredPermissions`
 
-The former `encryptionConfig` field key was **pruned from `FieldSchema`** — it
-had no runtime consumer. `maskingRule` is **live** (plugin-security's
-FieldMasker enforces it). The real channels are:
+`maskingRule` is **live** (plugin-security's FieldMasker enforces it). The real
+channels are:
 
 **Encrypted-at-rest values — `type: 'secret'` (ADR-0100).** For reversible
 machine credentials (DB passwords, API keys, tokens): the engine encrypts the
@@ -793,9 +718,6 @@ tenancy: {
 }
 ```
 
-- The former `shared` / `isolated` / `hybrid` mode key (`tenancy.strategy`) was
-  **retired** — an unknown `tenancy` key is now a loud parse error with
-  upgrade guidance, never silently stripped.
 - **Database-per-tenant isolation is not object metadata** — it is an
   environment/deployment choice (each environment carries its own database URL).
 - Platform/env-global objects declare `tenancy: { enabled: false }` to opt out
@@ -888,101 +810,30 @@ unknown keys are rejected.
 | `no-delete` | ✅ | ❌ | Tenant may customize fields but the object itself must exist |
 | `full` | ❌ | ❌ | Core admin UI / platform identity (e.g. `sys_user`, `app/setup`) |
 
-### Example — fully locked platform object
+### Example
 
-```ts
+```typescript
 // src/objects/sys-user.object.ts
 import { ObjectSchema } from '@objectstack/spec/data';
 
 export const SysUserObject = ObjectSchema.create({
   name: 'sys_user',
   label: 'User',
+  sharingModel: 'public_read',
   protection: {
     lock: 'full',
     reason: 'Core identity object — see ADR-0010.',
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
-  fields: { /* ... */ },
+  fields: { username: { type: 'text', required: true } },
 });
 ```
-
-### Example — schema-locked but deletable
-
-```ts
-// src/objects/sys-role.object.ts
-import { ObjectSchema } from '@objectstack/spec/data';
-
-export const SysRoleObject = ObjectSchema.create({
-  name: 'sys_role',
-  label: 'Role',
-  protection: {
-    lock: 'no-overlay',
-    reason: 'RBAC schema is platform-defined — see ADR-0010.',
-    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
-  },
-  fields: { /* ... */ },
-});
-```
-
-### Example — locking a shipped app
 
 The same block works on non-object metadata (apps, views, dashboards, flows,
-agents, tools, skills, reports, email-templates):
-
-```ts
-// src/apps/setup.app.ts
-import { defineApp } from '@objectstack/spec';
-
-export const SetupApp = defineApp({
-  name: 'setup',
-  label: 'Setup',
-  protection: {
-    lock: 'full',
-    reason: 'Core admin UI shipped by @objectstack/platform-objects — see ADR-0010.',
-    docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
-  },
-  // ...
-});
-```
-
-### Enforcement
-
-- **REST**: `PUT /api/v1/meta/:type/:name` and `DELETE` return `403 item_locked`
-  for any operation the lock forbids. Layered-read endpoints
-  (`GET ?layers=true`) include `lock`, `lockReason`, `lockDocsUrl`, `lockSource`,
-  and `packageId` so Studio can render the banner.
-- **Studio**: `ResourceEditPage` renders a banner with the lock reason and the
-  "View docs" link (from `docsUrl`); edit + delete buttons are hidden according
-  to the lock.
-- **Package vs Artifact source**: `_lockSource: 'package'` when the lock comes
-  from a code-shipped schema, `'artifact'` when set by a workspace artifact.
-  Artifact locks override package locks (workspace wins).
-
-### Authoring guidance
-
-- Default to **no `protection` block** for tenant-authored metadata.
-- Use `full` for anything Studio editing would break at runtime (core identity,
-  platform admin UIs, system flows).
-- Use `no-overlay` for schemas that platform owns but a tenant may legitimately
-  not need (then they can delete it).
-- Always include `reason` — it is the only thing the end-user sees first.
-- Prefer pointing `docsUrl` to an ADR or onboarding doc, not a marketing page.
-
----
-
-## Advanced Features Checklist
-
-| Feature | When to Consider |
-|:--------|:-----------------|
-| `tenancy` | Multi-tenant SaaS — `{ enabled: true, tenantField: 'tenant_id' }` row-level isolation (DB-per-tenant is an environment/deployment choice, not object metadata) |
-| `lifecycle` | Append-only / high-write-rate objects — retention / rotation / archival contract; see [rules/lifecycle.md](./rules/lifecycle.md) |
-| per-field `trackHistory` | Render a field's value changes as human-readable activity-timeline entries (pair with `enable.trackHistory`, ADR-0052 §5b) |
-
-> The former `softDelete` / `versioning` object keys were **removed** from the
-> spec (ADR-0049 enforce-or-remove) — authoring them is now a build
-> error with upgrade guidance. `partitioning` / `cdc` were never schema keys,
-> and the `encryptionConfig` field key was pruned (see
-> [Sensitive fields](#sensitive-fields--secret-type--requiredpermissions)).
+agents, tools, skills, reports, email-templates). Enforcement: `PUT`/`DELETE` on
+`/api/v1/meta/:type/:name` return `403 item_locked`, and an artifact lock
+overrides a package lock. Default to **no** `protection` block for
+tenant-authored metadata.
 
 ---
 
@@ -1125,13 +976,12 @@ changes must produce byte-identical `dist/objectstack.json`. CEL + pinned
 | Scope demo data with `env: ['dev','test']` | Keep noise out of prod |
 | Order seeds parent → child in the exported array | References resolve at load time |
 | Use `replace` only on cache/lookup tables, with comments | Data-loss footgun |
-| One `{object}.seed.ts` file per object | Readability at scale |
 
 ---
 
 ## Linting & Generation Quality
 
-`objectstack lint` checks the data model against the conventions in this skill —
+`os lint` checks the data model against the conventions in this skill —
 not just naming/labels but the relationship/master-detail/roll-up patterns. Run
 it after authoring or generating metadata. Severities: `error` (structural,
 fails the command), `warning` (likely-wrong choice), `suggestion` (nudge).
@@ -1149,6 +999,10 @@ Data-model rules (in addition to naming/label/i18n):
 | `rollup/missing-summary` | suggestion | a parent of numeric master_detail children with no roll-up `summary` |
 | `field/select-missing-options` | warning | a `select`/`multiselect`/`radio` with no `options` (or options source) |
 | `object/missing-name-field` | suggestion | an object with no `nameField` (ADR-0079's canonical title pointer) and no name-like field (`name`/`title`/`subject`/`label`/`full_name`/`display_name`/`code`) |
+| `security-owd-unset` | error | an object published with no authored `sharingModel` (422 lint envelope; absence is not a decision) |
+| `security-owd-alias` | error | a legacy OWD spelling instead of the canonical four (ADR-0090 D4) |
+| `security-external-wider-than-internal` | error | `externalSharingModel` wider than `sharingModel` (ADR-0090 D11) |
+| `security-master-detail-ungranted` | warning | a `master_detail` child whose master carries no matching grant |
 
 > **`code` counts for R9, but is NOT a title-derivation key.** R9's name-like
 > list above is the *looser* of two "name-like" sets, and the difference is
@@ -1167,17 +1021,13 @@ Data-model rules (in addition to naming/label/i18n):
 These same rules are the **rubric for AI-generated metadata** — a generation is
 "good" exactly when it is schema-valid and lint-clean:
 
-- `objectstack lint --score` — print a 0–100 metadata-quality score (+ letter
+- `os lint --score` — print a 0–100 metadata-quality score (+ letter
   grade and severity breakdown) for the current project. Schema errors and lint
   errors weigh most; suggestions barely move it.
-- `objectstack lint --eval` — run the generation eval over a bundled golden
+- `os lint --eval` — run the generation eval over a bundled golden
   corpus (invoice+lines, project+tasks, blog+comments, expense+lines,
   account+contacts) offline; each case must clear the pass bar (`--eval-min`,
   default 75). Deterministic, no API key.
-- `objectstack lint --eval --generator ./gen.mjs` — **live** eval: the module
-  default-exports `(prompt, id) => stack`; wire it to your agent /
-  `AIService.generateObject<SolutionBlueprint>` (+ blueprint→metadata expansion)
-  to benchmark a real model against the same rubric.
 
 When generating object metadata, target a lint-clean model: master_detail (with
 `required` + `deleteBehavior` + `inlineEdit` for line items), roll-up summaries
