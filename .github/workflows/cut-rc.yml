@@ -866,11 +866,11 @@ jobs:
           echo "@objectstack/cli@$(jq -r '.version' packages/cli/package.json) is on main at ${LOCAL}."
 
       # Pre-publish gate #2035, kept in step with release.yml's publish job rather
-      # than dropped for speed. In pre mode (which the guard step proved is active,
-      # so ALWAYS on this lane) the #3600 amendment makes it advisory: a major
-      # train exists to ship deliberate surface removals, and a migrated hotcrm
-      # cannot exist until the rc artifacts it would migrate against are published.
-      # It reports; it cannot block.
+      # than dropped for speed. This step is advisory by construction — it has no
+      # BLOCKING switch — because this lane only ever runs in pre mode (the guard
+      # step above proved it active). It reports; it cannot block. For why the
+      # equivalent gate in release.yml is currently advisory too, and what re-arms
+      # it, see that step's own comment.
       - name: Downstream backward-compat smoke (live hotcrm, advisory in pre mode)
         if: ${{ !inputs.dry_run }}
         env:
@@ -879,7 +879,7 @@ jobs:
           if bash scripts/downstream-smoke.sh; then
             echo "::notice::hotcrm@${HOTCRM_REF} is still compatible with the pre-release train."
           else
-            echo "::warning::hotcrm@${HOTCRM_REF} is incompatible with the pre-release train — expected for this window's deliberate removals. Ship a migrated hotcrm release and bump HOTCRM_REF in release.yml before 'changeset pre exit' re-arms that gate."
+            echo "::warning::hotcrm@${HOTCRM_REF} is incompatible with the pre-release train — expected for this window's deliberate removals. Ship a migrated hotcrm release, bump it, and set BLOCKING=1 in .github/workflows/release.yml to re-arm this gate."
           fi
 
       # ────────────────────────────────────────────────────────────────────────
