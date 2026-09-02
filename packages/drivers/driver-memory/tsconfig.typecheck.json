@@ -1,0 +1,41 @@
+// The MANIFEST-layer type-check program for @objectstack/driver-memory (#13284).
+//
+// `objectstack.config.ts` sits at the PACKAGE ROOT and declares this driver's
+// plugin manifest, annotated `ObjectStackManifest`. Until this file existed no
+// tsc program read a line of it: `tsconfig.json` selects `src/**/*`, and that
+// glob cannot match a root-level file. The annotation was therefore decorative
+// -- the file imported the type from `@objectstack/spec/system`, an entry that
+// does not export it, and `pnpm --filter @objectstack/driver-memory typecheck`
+// still exited 0. A wrong key or a wrong import here cost nothing at author
+// time, which is the whole defect: the ADR-0049 manifest retirements
+// (#11332 / #10724 / #4914) lean on the `retiredKey()` DOUBLE channel -- tsc
+// (input typed `never`) plus parse -- and the tsc half was blind at the only
+// two places in this repo where a plugin manifest is authored in TypeScript.
+//
+// A SIBLING rather than a wider `include` on `tsconfig.json`, the distinction
+// #5475 drew for `packages/spec` and #10756 for `packages/objectql/scripts`:
+// that config EMITS (`rootDir: "./src"`, `outDir: "./dist"`, and `dev` runs
+// `tsc -w` through it), so widening it to reach the package root would put the
+// manifest in front of the emit -- measured, that is exactly TS6059 ("File
+// ... is not under 'rootDir' ... 'rootDir' is expected to contain all source
+// files"), and it fires under `--noEmit` too. This program emits nothing, so
+// it can neutralise `rootDir` without touching what ships. `tsup` builds
+// `src/index.ts` and `files` publishes `dist` only, so nothing about the
+// published package moves.
+//
+// STRICTNESS IS INHERITED and deliberately not relaxed: `strict`,
+// `esModuleInterop`, `forceConsistentCasingInFileNames` and the rest come from
+// the root config through `tsconfig.json`. The manifest type-checks clean
+// under them -- it enters with ZERO recorded debt, and there is no ledger here
+// to record any in.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // `.` rather than the inherited `src`, because the file this program checks
+    // is the one outside `src`. Safe precisely because nothing is emitted from
+    // here -- see the header.
+    "rootDir": "."
+  },
+  "include": ["objectstack.config.ts"]
+}

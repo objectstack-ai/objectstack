@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ObjectStackManifest } from '@objectstack/spec/system';
+import type { ObjectStackManifest } from '@objectstack/spec/kernel';
 
 /**
  * In-Memory Driver Plugin Manifest
