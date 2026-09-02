@@ -41,14 +41,30 @@
  * either. A double for the registry cannot see this defect at all: the defect
  * is what the real registry stores.
  *
- * ## Ablation, direction predicted before running
+ * ## Ablation — predicted 1 red / 3 green, MEASURED 2 red / 2 green
  *
- * Restore the raw spread in `app-plugin.ts`
- * (`const servicePayload = this.bundle.manifest ? { ...this.bundle.manifest,
- * ...this.bundle } : this.bundle;`) and the serialization pins go RED with
- * `Converting circular structure to JSON` — the production envelope verbatim.
- * The control-kernel pins that assert the DECLARATIVE half stay green: the raw
- * spread never touched those keys.
+ * Restoring the raw spread in `app-plugin.ts` (`const servicePayload =
+ * this.bundle.manifest ? { ...this.bundle.manifest, ...this.bundle } :
+ * this.bundle;`) turns BOTH kernel-boot tests red, and the two direct
+ * `withoutRuntimePluginInstances` tests stay green — they never go through the
+ * register seam, so they are the deliberate control.
+ *
+ * The prediction was wrong by one and the correction is worth stating: the
+ * byte-identity test was expected to survive, because the raw spread does not
+ * touch a declarative key. It fails anyway, and for the right reason — its
+ * comparison is `JSON.stringify(record.manifest)`, and on the unfixed side
+ * that expression THROWS rather than returning a different string. Both
+ * failures carry the production envelope verbatim:
+ *
+ *   TypeError: Converting circular structure to JSON
+ *       --> starting at object with constructor 'EngineHoldingPlugin'
+ *       |     property 'connectors' -> object with constructor 'Array'
+ *       |     index 0 -> object with constructor 'Object'
+ *       --- property 'owner' closes the circle
+ *
+ * Both the mutated module and this file live in `packages/runtime/src` and
+ * resolve through vitest's in-package transform, so no `dist` leg participates
+ * and neither ablation leg needs a rebuild.
  */
 
 import { describe, it, expect } from 'vitest';
