@@ -119,7 +119,7 @@ const RULE = 'kpi_sheet_to_market_unit';
 describe('#14547 — an org-stamped rule against a SEEDED business unit', () => {
   let engine: ReturnType<typeof makeEngine>;
   let rules: SharingRuleService;
-  let warn: ReturnType<typeof vi.fn>;
+  let warn: ReturnType<typeof vi.fn<(msg: any, ...rest: any[]) => void>>;
 
   /** Who currently holds a rule-materialised grant on `recordId`. */
   const granteesOf = (recordId: string): string[] =>

@@ -225,8 +225,14 @@ describe('BusinessUnitGraphService — org scoping (#3807)', () => {
       { id: 'bu_root', organization_id: 'org_a', active: true },
       { id: 'bu_child', parent_business_unit_id: 'bu_root', organization_id: 'org_a', active: true },
     ];
+    // [#14547] The MEMBER rows now carry the organization too. This fixture
+    // used to leave them org-less and pass anyway, because the member read was
+    // unscoped — the very gap #14547 closed. Stamping them is not a workaround
+    // for the new screen: an org-scoped unit whose members were written by the
+    // same org-scoped API calls is what this test was always describing.
+    const members: MemberRow[] = SEEDED_MEMBERS.map((m) => ({ ...m, organization_id: 'org_a' }));
     const g = new BusinessUnitGraphService({
-      engine: makeEngine(units, SEEDED_MEMBERS),
+      engine: makeEngine(units, members),
       organizationId: 'org_a',
     });
     expect((await g.expandUsers('bu_root')).sort()).toEqual(['u_child', 'u_root']);

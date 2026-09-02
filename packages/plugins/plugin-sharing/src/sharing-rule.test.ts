@@ -170,11 +170,15 @@ describe('BusinessUnitGraphService (recursive sys_business_unit)', () => {
       // Foreign tenant — must not leak
       { id: 'foreign',        name: 'Foreign',        parent_business_unit_id: 'emea',         organization_id: 'org2', active: true },
     ];
+    // [#14547] Membership rows carry the tenant too. They used to be org-less
+    // here and still expanded, because the member read had no organization
+    // predicate at all — the gap #14547 closed. These units are org1's, written
+    // by org1's API calls, so their memberships are org1's.
     engine._tables.sys_business_unit_member = [
-      { id: 'dm1', business_unit_id: 'emea_sales_uk',  user_id: 'alice' },
-      { id: 'dm2', business_unit_id: 'emea_sales',     user_id: 'bob' },
-      { id: 'dm3', business_unit_id: 'emea_marketing', user_id: 'carol' },
-      { id: 'dm4', business_unit_id: 'emea_legacy',    user_id: 'ghost' },
+      { id: 'dm1', business_unit_id: 'emea_sales_uk',  user_id: 'alice', organization_id: 'org1' },
+      { id: 'dm2', business_unit_id: 'emea_sales',     user_id: 'bob',   organization_id: 'org1' },
+      { id: 'dm3', business_unit_id: 'emea_marketing', user_id: 'carol', organization_id: 'org1' },
+      { id: 'dm4', business_unit_id: 'emea_legacy',    user_id: 'ghost', organization_id: 'org1' },
     ];
   });
 
@@ -247,9 +251,10 @@ describe('SharingRuleService', () => {
       { id: 'emea_sales',    name: 'EMEA Sales',    parent_business_unit_id: null,         organization_id: 'org1', active: true },
       { id: 'emea_sales_uk', name: 'EMEA Sales UK', parent_business_unit_id: 'emea_sales', organization_id: 'org1', active: true },
     ];
+    // [#14547] Org-stamped for the same reason as the fixture above.
     engine._tables.sys_business_unit_member = [
-      { id: 'dm1', business_unit_id: 'emea_sales',    user_id: 'alice' },
-      { id: 'dm2', business_unit_id: 'emea_sales_uk', user_id: 'bob' },
+      { id: 'dm1', business_unit_id: 'emea_sales',    user_id: 'alice', organization_id: 'org1' },
+      { id: 'dm2', business_unit_id: 'emea_sales_uk', user_id: 'bob',   organization_id: 'org1' },
     ];
     sharing = new SharingService({ engine: engine as any });
     rules = new SharingRuleService({ engine: engine as any, sharing });

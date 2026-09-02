@@ -2697,6 +2697,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-sharing/src/bu-rule-tenant-screen.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/bu-rule-tenant-screen.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-sharing/src/bu-tree-recompute.test.ts",
       "verb": "delete",
       "pinned": 1
