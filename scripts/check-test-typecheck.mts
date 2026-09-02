@@ -516,7 +516,7 @@ function runTsc(): string {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-test-typecheck self-test reached its verdict';
 
-function selfTest(): void {
+function selfTest(): string {
   // The two REAL signatures from the ablation that produced #13470: `packages/
   // rest`'s two call sites passed a bad request AND a bad response, tsc showed
   // only the request error, and PR #13466's repair uncovered the response one.
