@@ -616,9 +616,11 @@ describe('Door 2 lowers FilterArray to FilterCondition before the driver (#5158)
     ['$lte: null', { amount: { $lte: null } }],
     ['lowered array form, ">="', [['amount', '>=', null]]],
   ])('a null ordering comparand is refused on EVERY verb before any driver call — %s', async (_l, where) => {
-    await expect(engine.find('deal', { where } as any))
+    // `asFilterArrayQuery`: the array-form case makes `where` off-contract by
+    // declaration (see the helper's note), and the spelling names that.
+    await expect(engine.find('deal', asFilterArrayQuery(where)))
       .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
-    await expect(engine.findOne('deal', { where } as any))
+    await expect(engine.findOne('deal', asFilterArrayQuery(where)))
       .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
     await expect(engine.count('deal', { where } as unknown as EngineCountOptions))
       .rejects.toMatchObject({ status: 400, code: 'INVALID_FILTER' });
