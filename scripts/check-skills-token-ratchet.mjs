@@ -438,7 +438,6 @@ export const CEILINGS = new Map([
 
   // the remaining skills' eval notes
   ['skills/objectstack-ai/evals/README.md', 315],
-  ['skills/objectstack-i18n/evals/README.md', 411],
 ]);
 
 /**
