@@ -534,7 +534,10 @@ describe('#13079 §4 — the four end in `unwrapResponse`; `analytics.queryDatas
 
     it('is served BARE by @objectstack/rest and still reads `res.json()` — there is no envelope to strip', () => {
         const body = methodSource(src, 'analytics', 'queryDataset');
-        expect(body).toMatch(/analytics\/dataset\/query/);
+        // The CODE spelling: the prefix comes from `getRoute('analytics')`, the
+        // literal `analytics/dataset/query` only ever lived in the docblock.
+        expect(body).toMatch(/getRoute\('analytics'\)/);
+        expect(body).toMatch(/\$\{route\}\/dataset\/query`/);
         expect(body).toMatch(/return res\.json\(\);/);
         expect(body).not.toMatch(/unwrapResponse/);
         // Its sibling `query` dials the dispatcher route; these are two dialects.
