@@ -1,0 +1,54 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    // `lib` and `types` are here as a CONSEQUENCE of the `paths` block below,
+    // not as a preference — the same correction `packages/qa/downstream-contract`
+    // made for the same reason. Putting `packages/spec/src` into this program
+    // means tsc now checks spec's own source files, which are written against
+    // spec's own environment (`packages/spec/tsconfig.json`: `lib` ES + DOM +
+    // DOM.Iterable, `types` node). Without them the first run reported two
+    // `TS2591: Cannot find name 'process'` in `spec/src/shared/lazy-schema.ts`
+    // — a verdict about THIS package's compiler environment, not about the
+    // fixture. Mirroring spec's own environment keeps every red here
+    // attributable to this app's own metadata.
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "skipLibCheck": true,
+    // `outDir` / `rootDir` are absent and `noEmit` is set as a CONSEQUENCE of
+    // the `paths` block below — the same correction examples/app-crm and
+    // examples/app-showcase made for the same reason. tsc emits nothing for
+    // this app either way (`typecheck` is `tsc --noEmit`; the app is BUILT by
+    // the ObjectStack CLI, not by tsc), but an emit-shaped config still
+    // enforces the output-tree rules: `rootDir` is inferred from the `include`
+    // roots, so spec's source — pulled in by an import, never a root —
+    // produced a wall of `TS6059: File '.../packages/spec/src/...' is not
+    // under 'rootDir'` that would drown any real error this typecheck exists
+    // to print.
+    "noEmit": true,
+    //
+    // Without this rule `@objectstack/spec` resolves through the workspace
+    // link to `packages/spec/dist/*.d.ts` — a BUILD ARTIFACT — so
+    // `tsc --noEmit` would grade this project against whatever was last built
+    // rather than against the source in this checkout, and the dangerous
+    // direction is SILENT: a `dist` merely BEHIND the source type-checks GREEN
+    // against old declarations. This app is the fixture for a brand-new spec
+    // surface (ADR-0130 D4's `packages[]`), which makes that exactly the
+    // reading it must not be able to give. `pnpm check:type-source-resolution`
+    // is the gate; it wants the `paths` rule, not a registry entry.
+    //
+    // Two keys, and the star follows a separator: a tsconfig `paths` key
+    // without a star is an EXACT match, and the `@objectstack/spec*` spelling
+    // would fold every subpath onto the root target and type-check green
+    // against the wrong module.
+    "paths": {
+      "@objectstack/spec": ["../../packages/spec/src/index.ts"],
+      "@objectstack/spec/*": ["../../packages/spec/src/*/index.ts"]
+    }
+  },
+  "include": ["src/**/*", "objectstack.config.ts"]
+}

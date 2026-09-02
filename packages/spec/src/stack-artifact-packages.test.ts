@@ -202,7 +202,10 @@ describe('ADR-0130 D4 — `packages` carries N manifests', () => {
 
     expect(result.success).toBe(true);
     if (!result.success) return;
-    expect(result.data.packages?.[0].manifest.engines?.protocol).toBe('>=18 <19');
+    // An assembled body is `Record<string, unknown>` at the type level (see the
+    // note above `AssembledPackageBodySchema`); narrow at the point of use.
+    const body = result.data.packages?.[0].manifest as { engines?: { protocol?: string } } | undefined;
+    expect(body?.engines?.protocol).toBe('>=18 <19');
   });
 });
 
