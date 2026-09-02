@@ -30,21 +30,7 @@ metadata:
 
 # Upgrading an ObjectStack metadata project across a protocol major
 
-This skill turns one session into an **upgrade agent** working on somebody
-else's metadata project. It has one job: take a project authored against
-protocol `N` and leave it authored against the current major, with the change
-**proved** rather than asserted.
-
 > **preflight → mechanical chain → semantic residue → acceptance report**
-
-The upgrade is deliberately split into three layers, and the split is the whole
-design. Two of them are not yours.
-
-| Layer | Who owns it | What it is |
-|:--|:--|:--|
-| **1 · Mechanical** | The CLI. **You invoke it, you never re-implement it.** | `os migrate meta` replays the ADR-0087 conversion chain: deterministic, idempotent, fixture-tested, per-hop attributable. |
-| **2 · Semantic residue** | **You, with the project's owner.** | Everything a conversion cannot express: intent choices, custom code calling retired APIs, prose that still teaches the old shape. |
-| **3 · Acceptance** | The gates. | Typed + parse-gated metadata, a green `validate`, and a report a human can read. |
 
 ## ⛔ The boundary — read this before the first command
 
@@ -68,6 +54,9 @@ important paragraph in this skill.
 plus the report is the machine criterion. Absent either, the status is
 *in progress*, whatever the diff looks like.
 
+**One `conversionId` per commit**, where the project's review culture allows it.
+The id is the commit's subject line and its justification.
+
 ---
 
 ## Quickstart
@@ -85,7 +74,6 @@ os migrate meta --from 16 --out .upgrade/migrated.stack.json
 
 # 2 · semantic residue — harvest the prescriptions, then work each item
 node -e "console.log(require('fs').readFileSync(require.resolve('@objectstack/spec/package.json').replace('package.json','spec-changes.json'),'utf8'))" > .upgrade/spec-changes.json
-grep -rho '\[REMOVED\][^"]*' node_modules/@objectstack/spec/json-schema/ | sort -u > .upgrade/tombstones.txt
 
 # 3 · acceptance — all four, not three
 os validate                      # green (compare against validate-before.txt)
@@ -127,7 +115,7 @@ mkdir -p .upgrade         # every artifact this skill produces lands here
 ```
 
 The `.upgrade/` directory is the deliverable's workspace: the machine outputs
-(`migrate.json`, `migrated.stack.json`, `spec-changes.json`, `tombstones.txt`)
+(`migrate.json`, `migrated.stack.json`, `spec-changes.json`, `retired-names.txt`)
 and the human output (`REPORT.md`). Keeping them in the repo for the review, and
 deleting them on merge, is the usual arrangement — decide it with the owner.
 
@@ -166,21 +154,15 @@ it prints:
 loaded stack *in memory* and reports the diff. The only file it writes is
 `--out`, a JSON snapshot.
 
-This is deliberate: rewriting a TypeScript config through an AST is lossy — it
-drops comments, reorders keys, and cannot see values that come from imports or
-expressions. So the mechanical layer gives you a **provably valid target** and
-the **attributed list of edits**, and porting those edits into the project's own
-sources is yours. Work from the printed list, one `conversionId` at a time; use
-`--out` as the oracle you diff against, never as the file you ship.
+Porting the printed edits into the project's own sources is yours. Work from
+that list, one `conversionId` at a time; use `--out` as the oracle you diff
+against, never as the file you ship.
 
 ```bash
 os migrate meta --from 16 --out .upgrade/migrated.stack.json
 # then, after porting the edits into the real sources:
 os migrate meta --from 17 --out .upgrade/recheck.json   # should apply 0 changes
 ```
-
-That last line is the cheapest possible proof that the port is complete: replay
-the chain from the *target* major and it must find nothing to do.
 
 ### Stored rows: rehydration replays the same conversions
 
@@ -191,13 +173,9 @@ chain over a single item **including entries retired from the load path**. A row
 written under protocol 16 therefore rehydrates in its protocol-17 shape without
 anybody editing it.
 
-What that does and does not mean:
-
-- **You do not hand-edit `sys_metadata`.** Ever. A row at rest has no author to
-  ask, so the replay is unconditional and complete by design.
-- **The rows on disk stay in their old shape** until something rewrites them.
-  Rehydration is a read-time projection.
-- To make it durable, run the stored pass — read-only by default:
+Rehydration is a read-time projection: the rows on disk keep their old shape,
+and you never hand-edit `sys_metadata`. To make it durable, run the stored pass
+— read-only by default:
 
   ```bash
   os migrate meta --stored                     # preview, writes nothing
@@ -211,20 +189,14 @@ What that does and does not mean:
 
 ### Data migrations are not metadata migrations
 
-When the chain crosses into a major carrying per-deployment data gates, the
-command ends by naming them — for the 16 → 17 crossing, and only when the
-project's own metadata declares the field classes each gate is about:
+When the chain crosses into a major carrying per-deployment data gates, the run
+ends by naming each one, what staying un-run costs, and that `--apply` is the
+only writing mode. Read that output rather than re-deriving it. What it cannot
+tell you is whether they have *run*: that happens against each deployment's own
+database, and nothing in the metadata upgrade observes it.
 
-| Command | What staying un-run costs |
-|:--|:--|
-| `os migrate files-to-references` | Media values only warn instead of being enforced, and released files are never collected. |
-| `os migrate value-shapes` | Stored reference and structured-JSON values are not checked against their field contracts; a malformed value only warns. |
-
-Both are dry-run by default; `--apply` is the only writing mode. They run
-**against each deployment's database**, once per deployment, and nothing in the
-metadata upgrade can run them or tell whether they have run. Not running them is
-safe — enforcement simply stays off. Carry them into the report as *pending*, by
-name, so a gate nobody was told about is not served by nobody.
+⛔ **Carry every gate the run printed into the report as `pending`, by name.** A
+gate nobody was told about is served by nobody.
 
 ---
 
@@ -516,52 +488,31 @@ _N sites, M conversions. Ported into sources from `os migrate meta --out`._
 - <retired surface the project never used>  — no occurrences.
 ```
 
-Section 5 earns its place: "we looked and it was not there" is a finding, and
-without it the next reader cannot tell a surface that was checked from one that
-was missed.
-
 <a id="reverse-check"></a>
 
 ### 3.5 Prove the gate is real, do not assume it
 
-Before you report the parse gate as acceptance evidence, make it fire once.
-Take a value the chain *would* have converted, put it back after migrating, and
-parse:
+Make the parse gate fire once before you report it as evidence: take a value the
+chain *would* have converted, put it back after migrating, and parse it.
 
 ```bash
 # a stack that still carries a retired key, fed straight to the schema
 os validate .upgrade/residue-probe.config.mjs
 ```
 
-Predict the direction **before** you run it. There are three real outcomes and
-you must say which you expect:
+Write the probe as a **plain data literal** — ⛔ no `define*` call. `os validate`
+loads the config without authored-source mode, and every `define*` helper is a
+`Schema.parse()`, so a probe written the way a real config is written throws
+*inside the load* and never reaches the gate you are trying to prove.
 
-1. **Rejected with the prescription** — a tombstoned key. This is what a
-   tombstone looks like when it works:
+Predict the outcome **before** you run it, then record which one you actually
+got — "it passed" is a different fact in every row:
 
-   ```
-   ✗ connectors.0.fieldMappings.0.transform
-     invalid_type: `FieldMapping.transform` … was removed in @objectstack/spec
-     17.0.0 (ADR-0049) … Delete the key. The transform pipeline that IS
-     enforced is the import mapping's … Run `os migrate meta --from 16` to
-     list the mechanical edits for existing sources; apply them by hand.
-     expected: never
-   ```
-
-   Note what the error is not: not "unrecognized key", not a deprecation label.
-   The fix-it text *is* the error.
-
-2. **Accepted, and the chain rewrites it** — a conversion with a live load-path
-   acceptance window. Your evidence for that key is the chain's diff, not the
-   parse gate.
-
-3. **Accepted, and the chain still rewrites it** — a migration-chain-only
-   conversion (§3.3). `validate` cannot see this class at all; only the replay
-   can.
-
-Record which one you actually got. A check whose expected direction you did not
-state in advance proves nothing, and "it passed" is a different fact in each of
-the three cases.
+| Outcome | What it means | Your acceptance evidence |
+|:--|:--|:--|
+| Rejected, error carries the fix-it text | A tombstoned key. Not "unrecognized key", not a deprecation label — the prescription *is* the error. | The refusal itself, quoted. |
+| Accepted, and the chain rewrites it | A conversion with a live load-path acceptance window. | The chain's diff — not the parse gate. |
+| Accepted, and `validate` stays green | A migration-chain-only conversion ([3.3](#33-validate)). | Only the replay from the target major sees this class. |
 
 ---
 
@@ -615,28 +566,9 @@ export const SupportBot = defineAgent({
 | `--apply` refused / stored-only flag rejected | `--apply`, `--yes`, `--force`, `--type`, `--database-url` mean something only with `--stored`. | Add `--stored`, or drop the flag; the authored-source chain has nothing to write to. |
 | `MigrationFloorError` | `--from` is older than the chain's support floor. | Upgrade to the floor by an older route first; the floor is a release-policy boundary, not an oversight. |
 
-## Guardrails (binding)
-
-1. **Run the chain first, always.** It is the only source of an attributed,
-   schema-proved diff.
-2. **One conversion id per commit**, where the project's review culture allows
-   it. The `conversionId` is the commit's subject line and its justification.
-3. **No tolerant reads, ever** — not in the metadata, not in the project's code.
-   A retirement that gets re-admitted at the consumer is a defect that moved
-   into a repo with no gate over it.
-4. **Ask about intent, decide about mechanics.** The split in
-   [2.4](#decide-alone-or-ask) is the contract with the project's owner.
-5. **The report is a deliverable, not a summary.** No report, not done.
-6. **Never leave a pending per-deployment data migration unnamed.** A gate
-   nobody was told about is served by nobody.
-
 ## Cross-skill routing
 
 - Authoring the corrected metadata — load the domain skill for the shape you are
-  fixing (**data**, **ui**, **automation**, **ai**, **api**, **i18n**).
-- Any CEL predicate you rewrite while resolving a residue item — load
-  **formula**.
+  fixing (**data**, **ui**, **automation**, **ai**, **api**, **i18n**); each one
+  routes on to **formula** for any CEL you rewrite.
 - Runtime, plugin, and CLI questions the upgrade turns up — load **platform**.
-- This skill covers the **consumption** side of a retirement. Designing one
-  inside the ObjectStack platform repo is a different job with its own internal
-  playbook, and it is not this one.
