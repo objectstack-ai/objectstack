@@ -28,14 +28,16 @@
  * first — `resolveRouteActionDeclaration`) is documented on the collection,
  * not changed.
  *
- * One carve-out inside row (c), measured against the #7397 vacuity guard in
- * `stack-inline-action-crossref.test.ts`: `mergeActionsIntoObjects` copies a
- * bound standalone action into its object's `actions` on the way OUT of
- * `defineStack`, so a built stack fed back in carries that action in both
- * positions, byte-identical. That echo is one declaration seen twice — the
- * runtime, too, skips a standalone whose object-embedded key is already
- * registered — and it is absorbed; an embedded twin that differs in any field
- * is the authored collision and stays refused.
+ * Every site counts — byte-identical twins included. `mergeActionsIntoObjects`
+ * APPENDS a bound standalone action into its object's `actions` on the way OUT
+ * of `defineStack`, so an identical pair in both positions becomes TWO embedded
+ * entries under one key in the shipped artifact: the runtime's
+ * `collectActionDeclarations` pushes every embedded entry (it dedupes only a
+ * standalone against an embedded one), MCP `listActions` lists both, and
+ * bare-name `resolveActionByName` refuses the ambiguity. A built stack fed
+ * back into `defineStack` therefore carries every bound action twice and is
+ * refused — the #7397 vacuity guard in `stack-inline-action-crossref.test.ts`
+ * feeds the merged SHAPE authored directly instead of a re-fed build.
  *
  * Message shape is contract (one condition ⇒ one wording), so the refusal
  * cases pin the full line — the key, and where each declaration was written —
@@ -75,7 +77,7 @@ const ENVELOPE_ONE = 'defineStack cross-reference validation failed (1 issue):';
 const TAIL =
   'The runtime registers and dispatches every action under this one exact-string key, ' +
   'so only one of these handlers is reachable and the other declaration is a dead button. ' +
-  'Rename one of them within this scope, or bind one to a different object.';
+  'Rename one of them within this scope, bind one to a different object, or remove the duplicate.';
 
 describe('defineStack - duplicate scope-qualified action key', () => {
   it('(a) refuses two standalone globals sharing a name, naming the global key and both origins', () => {
@@ -165,7 +167,7 @@ describe('defineStack - duplicate scope-qualified action key', () => {
   });
 });
 
-describe('defineStack - the cross-scope pair stays accepted (two keys, documented precedence)', () => {
+describe('defineStack - the cross-scope pair stays accepted (two keys, documented precedence); every same-key site counts', () => {
   it('(x) accepts one global and one object-bound action sharing a name, and emits both keys', () => {
     const out = defineStack({
       manifest,
@@ -192,34 +194,30 @@ describe('defineStack - the cross-scope pair stays accepted (two keys, documente
     expect((item?.actions ?? []).map((a) => a.name)).toEqual(['dup_y']);
   });
 
-  it("absorbs the merge's echo: a built stack (bound action copied into its object) re-enters defineStack clean", () => {
-    const built = defineStack({
-      manifest,
-      objects: [probeItem],
-      actions: [act('echo_one', { objectName: 'probe_item' }), act('echo_two', { objectName: 'probe_item' })],
-    });
-    const item = (built.objects ?? []).find((o) => o.name === 'probe_item');
-    expect((item?.actions ?? []).map((a) => a.name)).toEqual(['echo_one', 'echo_two']);
-    expect(refusal(built)).toBeNull();
-  });
-
-  it('absorbs a hand-written embedded copy only when it is identical to the bound standalone', () => {
+  it('refuses an identical hand-written embedded copy of a bound standalone — the identical case is a delete, not a rename', () => {
     const bound = act('twin', { objectName: 'probe_item' });
-    expect(refusal({
+    const identical = refusal({
       manifest,
       objects: [{ ...probeItem, actions: [{ ...bound }] }],
       actions: [bound],
-    })).toBeNull();
-    // One field apart (a different label) and it is two declarations again.
-    const msg = refusal({
+    });
+    expect(identical).toContain(ENVELOPE_ONE);
+    expect(identical).toContain(
+      "  ✗ Action key 'probe_item:twin' is declared twice: " +
+        "stack.actions[0] (objectName 'probe_item') and " +
+        "objects['probe_item'].actions[0] (embedded on the object). " +
+        TAIL,
+    );
+    // One field apart (a different label) is refused the same way.
+    const differing = refusal({
       manifest,
       objects: [{ ...probeItem, actions: [{ ...bound, label: 'Twin (embedded)' }] }],
       actions: [bound],
     });
-    expect(msg).toContain("  ✗ Action key 'probe_item:twin' is declared twice: ");
+    expect(differing).toContain("  ✗ Action key 'probe_item:twin' is declared twice: ");
   });
 
-  it('names only the distinct declarations when an echo sits beside a real collision', () => {
+  it('counts an identical copy beside a differing twin as three declarations', () => {
     const bound = act('mixed', { objectName: 'probe_item' });
     const msg = refusal({
       manifest,
@@ -228,10 +226,29 @@ describe('defineStack - the cross-scope pair stays accepted (two keys, documente
     });
     expect(msg).toContain(ENVELOPE_ONE);
     expect(msg).toContain(
-      "  ✗ Action key 'probe_item:mixed' is declared twice: " +
-        "stack.actions[0] (objectName 'probe_item') and " +
+      "  ✗ Action key 'probe_item:mixed' is declared 3 times: " +
+        "stack.actions[0] (objectName 'probe_item'), " +
+        "objects['probe_item'].actions[0] (embedded on the object) and " +
         "objects['probe_item'].actions[1] (embedded on the object). ",
     );
+  });
+
+  it("refuses a built stack fed back in: the merge's echo of each bound action is two entries under one key", () => {
+    const built = defineStack({
+      manifest,
+      objects: [probeItem],
+      actions: [act('echo_one', { objectName: 'probe_item' }), act('echo_two', { objectName: 'probe_item' })],
+    });
+    const item = (built.objects ?? []).find((o) => o.name === 'probe_item');
+    expect((item?.actions ?? []).map((a) => a.name)).toEqual(['echo_one', 'echo_two']);
+    const msg = refusal(built);
+    expect(msg).toContain('defineStack cross-reference validation failed (2 issues):');
+    expect(msg).toContain(
+      "  ✗ Action key 'probe_item:echo_one' is declared twice: " +
+        "stack.actions[0] (objectName 'probe_item') and " +
+        "objects['probe_item'].actions[0] (embedded on the object). ",
+    );
+    expect(msg).toContain("  ✗ Action key 'probe_item:echo_two' is declared twice: ");
   });
 
   it('accepts the same name bound to two different objects — two keys', () => {
