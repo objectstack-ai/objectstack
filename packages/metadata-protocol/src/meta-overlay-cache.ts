@@ -76,9 +76,9 @@
  *     With one attached, the bridge's own receipt path bumps the LOCAL epoch —
  *     `authz-invalidation-bridge.ts` calls `epoch.bump('remote')` for the
  *     authorization cache, and `protocol.ts`'s `applyRemoteMetadataMutation`
- *     calls {@link bumpWriteEpoch}`(engine, 'remote')` for THIS one, after its
- *     registry converges and before local listeners run (#13609, ruling A′,
- *     2026-09-03) — so cross-node convergence narrows for free for both.
+ *     calls {@link bumpWriteEpoch} for THIS one, after its registry converges
+ *     and before local listeners run (#13609, ruling A′, 2026-09-03) — so
+ *     cross-node convergence narrows for free for both.
  *     ⚠️ Before that fix, the metadata bridge converged the registry but never
  *     bumped this cache, so a read landing inside the residue window fed the
  *     untimed registry a row this cache should already have retired — see
