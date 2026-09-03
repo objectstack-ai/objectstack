@@ -127,24 +127,44 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             expect((result.item as any).label).toBe('Env Default');
         });
 
+        // [#14683] Re-spelled from `app` to `view`, the READ-side twin of the
+        // `[#6190]` re-spelling three cases up — same reason, one verb over.
+        // `getMetaItems` now resolves its own read scope through
+        // `organizationIdForMetaRead`, so an `organizationId` handed in for a
+        // type the registry declares NON-overridable is gated to `undefined`
+        // and the org partition is never queried. `app` rolled back to
+        // `allowOrgOverride: false` in #6483, so on `app` this case was
+        // asserting a union the platform must NOT perform: the org rows it
+        // seeded are the pre-#6190 phantoms `loadMetaFromDb` walks past, and
+        // reading them back is the resurrection #14683 closes.
+        //
+        // The CLAIM is unchanged and is what this case still pins — env-wide
+        // and org rows union, org winning on collision. It just has to be
+        // measured on a type that has an org partition to union.
+        //
+        // ⚠️ Its two `getMetaItem` (SINGULAR) siblings above keep `app`
+        // deliberately: that verb is untouched here. It takes one type per
+        // request, so a caller CAN be right about its scope, and its REST door
+        // already gates before calling. Only the LIST verb, which callers
+        // sweep across many types with one organization, moved.
         it('getMetaItems unions env-wide and org-specific rows (org wins on collision)', async () => {
             mockEngine.find.mockImplementation((_table: string, opts: any) => {
                 if (opts?.where?.organization_id === 'org_alpha') {
                     return Promise.resolve([
-                        { type: 'app', name: 'shared', state: 'active', metadata: JSON.stringify({ name: 'shared', label: 'Org Alpha' }) },
-                        { type: 'app', name: 'alpha_only', state: 'active', metadata: JSON.stringify({ name: 'alpha_only', label: 'Alpha Only' }) },
+                        { type: 'view', name: 'shared', state: 'active', metadata: JSON.stringify({ name: 'shared', label: 'Org Alpha' }) },
+                        { type: 'view', name: 'alpha_only', state: 'active', metadata: JSON.stringify({ name: 'alpha_only', label: 'Alpha Only' }) },
                     ]);
                 }
                 if (opts?.where?.organization_id === null) {
                     return Promise.resolve([
-                        { type: 'app', name: 'shared', state: 'active', metadata: JSON.stringify({ name: 'shared', label: 'Env Default' }) },
-                        { type: 'app', name: 'env_only', state: 'active', metadata: JSON.stringify({ name: 'env_only', label: 'Env Only' }) },
+                        { type: 'view', name: 'shared', state: 'active', metadata: JSON.stringify({ name: 'shared', label: 'Env Default' }) },
+                        { type: 'view', name: 'env_only', state: 'active', metadata: JSON.stringify({ name: 'env_only', label: 'Env Only' }) },
                     ]);
                 }
                 return Promise.resolve([]);
             });
             const result = await protocol.getMetaItems({
-                type: 'app', organizationId: 'org_alpha',
+                type: 'view', organizationId: 'org_alpha',
             });
             const names = (result.items as any[]).map((i) => i.name).sort();
             expect(names).toEqual(['alpha_only', 'env_only', 'shared']);

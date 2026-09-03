@@ -542,6 +542,28 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'only 6 errors over 2 files, which makes it MORE exposed to the failure this row prevents '
       + 'rather than less.',
   },
+  // ── #14504: `packages/runtime`'s starting ledger, same instrument ───────────
+  //
+  // The sixth row this manifest adds for the mechanism, and the largest ledger
+  // in the family: 191 errors over 27 of the package's 214 test files. Size is
+  // the reason to read this row rather than skim it — a recomputation on a
+  // half-merged tree writes a number nobody measured, and at 191 nobody would
+  // spot the difference by eye. The package's `TEST_DEBT` entry in
+  // `scripts/check-type-check-coverage.mjs` graduated in the same change, so
+  // this file is now the ONLY record of that population anywhere in the tree.
+  {
+    path: 'packages/runtime/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/runtime',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it: the half-merged tree is not the tree whose type errors this file records, so a file '
+      + 'that GAINED errors would enter the ledger as merge noise instead of as red. This is the '
+      + 'BIGGEST ledger in the family (191 errors over 27 files), which makes the failure this row '
+      + 'prevents both more likely and harder to see: at that size a recomputed number reads as '
+      + 'plausible, and the per-signature keys underneath it would be silently rewritten with it.',
+  },
   {
     path: 'packages/sdui-parser/objectui-lockstep.json',
     gen: 'gen:sdui-lockstep',

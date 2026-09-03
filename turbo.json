@@ -356,7 +356,10 @@
         "!coverage/**",
         "!.turbo/**",
         "$TURBO_ROOT$/content/docs/protocol/objectql/state-machine.mdx",
-        "$TURBO_ROOT$/skills/objectstack-automation/SKILL.md"
+        "$TURBO_ROOT$/skills/objectstack-automation/SKILL.md",
+        "$TURBO_ROOT$/content/**",
+        "$TURBO_ROOT$/docs/**",
+        "$TURBO_ROOT$/skills/**"
       ]
     },
     "@objectstack/formula#test": {
