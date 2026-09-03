@@ -16,11 +16,20 @@ import {
   isExitSignal,
   errorCodeFields,
 } from '../../utils/format.js';
-import { computeI18nCoverage } from '../../utils/i18n-coverage.js';
+import { computeI18nCoverage, COVERAGE_SURFACE_PHRASE } from '../../utils/i18n-coverage.js';
 
 export default class I18nCheck extends Command {
+  // The parenthetical is the WHOLE taxonomy, derived from the detector's own
+  // source-kind union (`COVERAGE_SURFACE_PHRASE`), never a hand-typed sample.
+  // It used to name five kinds of fifteen, and a sample that size reads as a
+  // scope statement rather than an illustration: a reader who wanted app
+  // navigation or dashboard widgets checked was told this command does objects
+  // and fields, so they skipped the gate or went looking for a second tool that
+  // does not exist. Deriving it means the two cannot drift again — a new union
+  // member fails to compile until it is named, and is published here in the
+  // same edit. ⛔ Never re-inline this as a literal list.
   static override description =
-    'Detect missing translation keys (object/field/option/view/action labels) across all configured locales';
+    `Detect missing translation keys for every translatable surface (${COVERAGE_SURFACE_PHRASE}) across all configured locales`;
 
   static override examples = [
     '$ os i18n check',
