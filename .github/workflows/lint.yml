@@ -1963,9 +1963,12 @@ jobs:
       # exact block green, because "has a value" and "the key is present" type
       # identically. Both `skills/**` sites shipped to customers.
       #
-      # Table-driven by the #13582 triage ruling, carrying the `$exists` family
-      # ONLY — each further word (the retired `$regex` spelling, #13532's
-      # `visibleWhen` claims) pays its own baseline on its own card.
+      # Table-driven by the #13582 triage ruling. #13582 shipped the `$exists`
+      # family alone; #13745 added the `(NoSQL)` portability gloss, the retired
+      # `$regex` spelling and #13532's `visibleWhen` claims, each with its own
+      # legitimate-usage survey. Each further word pays its own baseline on its
+      # own card, and the gate's `--self-test` pins the shipped row set as an
+      # exact enumeration.
       #
       # It lives in this job for the reason every other docs guard does
       # (`check:doc-anchors`, `check:docs-audit-scope`, `check:role-word` above):
