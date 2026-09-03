@@ -60,6 +60,15 @@ const result = EqualityOperatorSchema.parse(data);
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **$field** | `string` | ✅ | Field Reference/Column Name |
+| **addDays** | `integer \| { $field: string }` | optional | Whole-day offset added to the referenced column before comparing: an integer literal of any sign (negative subtracts; whole days only), or a `{ $field }` reference to a numeric column. A NULL offset column contributes zero days; a NULL referenced column makes the comparison false rather than NULL, so it stays false under $not. Compiles on SQL push-down between two temporal columns of the same class (date/date, datetime/datetime) and evaluates identically in memory (#14104). |
+
+### Nested Shape: `FieldReference.addDays`
+
+A `{ $field }` reference to the numeric column holding the day offset
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **$field** | `string` | ✅ | Numeric column whose value is the number of days to add |
 
 
 ---
