@@ -663,6 +663,16 @@ const ROOT_PROGRAM_COUPLED_SCRIPT = 'scripts/check-test-typecheck.mts';
 // already itemised its own tiers with confidence: a tier split read off an
 // unrepaired config is a guess about what is UNDER it, and the only honest way
 // to size the code tier is to fix the config and look.
+//
+// `@objectstack/service-cluster` GRADUATED from this ledger (#14181; entry: 1
+// raw, repaired to 0). Its single TS2322 was the very shape the paragraph above
+// itemises for `metadata` -- `(m) => received.push(m.payload)` in a slot typed
+// `void | Promise<void>` -- caught here in the package's own CONTRACT witness.
+// It is worth a line because this package reached the ledger by a different road
+// than the rest: it had NO `typecheck` script at all, so its build config never
+// ran even though that config DOES include the tests. Repaired by the #5286
+// route -- a `tsconfig.test.json` over the test layer, named by a new `typecheck`
+// script -- so the entry is deleted rather than lowered.
 const DEBT = {
   '@objectstack/cloud-connection': {
     errors: 13,
@@ -689,10 +699,6 @@ const DEBT = {
       + 'entry is the specimen #5278 cites for composition drift and has now drifted BOTH ways -- 2 -> 5 '
       + 'by acquiring a second file, then 5 -> 3 by graduating the first -- so re-read what the pile is '
       + 'made of before sizing it, never just the number.',
-  },
-  '@objectstack/service-cluster': {
-    errors: 1,
-    note: 'code-tier 1 (TS2322).',
   },
   '@objectstack/service-knowledge': {
     errors: 10,

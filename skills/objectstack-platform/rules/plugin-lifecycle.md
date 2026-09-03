@@ -45,7 +45,7 @@ export interface Plugin {
   version?: string;
 
   /** Plugin type */
-  type?: string;  // standard|ui|driver|server|app|theme|agent|objectql
+  type?: PluginType;  // closed set exported by @objectstack/core
 
   /** Plugins that must init before this one */
   dependencies?: string[];

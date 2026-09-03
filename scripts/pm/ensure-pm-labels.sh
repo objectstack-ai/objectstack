@@ -228,6 +228,25 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # OPPOSITE of the state model (SKILL.md: 插队 is ORDERING, explicitly not an
   # exemption), on a surface that is read by hovering.
   gh label create priority:p0         -R "$R" -c b60205 -d "Queue-jump: outranks batch and breaks the round — never exempts claiming or same-file serial" 2>/dev/null || true
+  # tracking marks a generated/standing anchor issue, never dispatchable
+  # work, and is load-bearing twice over: it is what the half-state-patrol
+  # (and release-coverage-patrol) workflow's ANCHOR_ISSUE lookup finds the
+  # anchor by in whichever repo it is installed in, and it is an
+  # H13_EXEMPT_LABELS member in scripts/pm/check-half-states.mjs, so it is
+  # what stops the anchor itself from appearing as a finding in the very
+  # sweep it hosts. Same five-repo loop as priority:p0 above, on the rule
+  # stated beside it, quoted rather than paraphrased: "It is in this
+  # five-repo loop because that sweep is repo-parameterized (PM_SWEEP_REPO)
+  # and grading is a five-repo triage duty — the same reasoning as
+  # pm:retriage below." For tracking the repo-parameterized sweep is
+  # check-half-states.mjs's H13 check rather than triage grading, but the
+  # test it applies is the same one: a label belongs in this loop when the
+  # sweep reads it in every repo the sweep itself runs in, and H13 runs in
+  # all five. Measured 2026-09-03: objectstack and objectui both carry a
+  # live `tracking` object with GitHub's default colour `ededed` and an
+  # empty description — the same drift the priority:p0 comment above
+  # records for objectui.
+  gh label create tracking            -R "$R" -c cfd3d7 -d "Generated anchor/tracker issue — not dispatchable; exempt from the half-state sweep's findings" 2>/dev/null || true
   # pm:blocking is a derived CACHE, never hand state (maintainer opinion
   # 2026-08-13, superseding the earlier derived-only-no-stored-label ruling):
   # the triage sweep writes/removes it from the Blocked-by: reverse index, and

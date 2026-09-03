@@ -23,7 +23,7 @@ describe('defineCluster(memory) smoke', () => {
 
         // Round-trip through all four.
         const received: unknown[] = [];
-        cluster.pubsub.subscribe('e', (m) => received.push(m.payload));
+        cluster.pubsub.subscribe('e', (m) => { received.push(m.payload); });
         await cluster.pubsub.publish('e', 'hi');
         expect(received).toEqual(['hi']);
 
