@@ -562,11 +562,13 @@ let selfTestReachedVerdict = false;
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  // ⛔ NOT today's count. One case per `ALLOW` entry (2 today) plus the one
-  // structural case, and `ALLOW` is a shrink-only exemption list — an exemption
-  // that stops exempting anything is meant to be deleted (see the comment over
-  // the declaration). Pinned instead: the structural case ran AND at least one
-  // exemption was actually audited.
+  // ⛔ NOT today's count. This battery runs one case per exemption row (2 today)
+  // plus the one structural case, and that list is meant to LOSE rows — an
+  // exemption that no longer exempts anything is dead weight, as the comment
+  // over its declaration says. A floor at 3 would redden a legitimate deletion
+  // and train the next author to edit the floor, which is the one habit these
+  // floors exist to prevent. Pinned instead is the part that does not move with
+  // the list: the structural case ran AND at least one row was actually audited.
   'Every exemption carries its reason.': 2,
   'POSITIVE CONTROL, on the REAL repo.': 5,
   'The two ALLOW steps are separable, which is what makes them assertable.': 1,
