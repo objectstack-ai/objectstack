@@ -1,6 +1,6 @@
 # Test-run log volume census — both channels, all 72 packages
 
-**Measured on `origin/main` `PLACEHOLDER_SHA`, 2026-09-03.** Instrument:
+**Measured on `origin/main` `b1d49b394`, 2026-09-03T11:41 UTC.** Instrument:
 `scripts/qa/log-volume-census.mjs` (this document states nothing the instrument
 cannot be re-run to produce).
 
@@ -12,9 +12,16 @@ stating before any number:
 > a test run writes — hold across the other 67 packages?
 
 **Answer: no, and not in the direction the phrasing suggests.** Across all 72
-packages the structured logger is not ~45% of the output. It is
-`PLACEHOLDER_SHARE`% — and the reason is that the *other* half moved. See
-[The answer](#the-answer).
+packages the structured logger is **77.1%** of the output (61,980 of 80,401
+lines) — not lower than the five-suite reading, higher. The other 67 packages
+are not what moved it: two commits that landed on `main` in the three days
+between the earlier reading and this one already took the *original five*
+suites from ~45% to ~87% structured on their own, by cutting a debug-only
+`console.log` population out of four of them. Extending to all 72 packages
+pulls that back down to 77.1%, not because the extra 67 reverse the direction,
+but because they are collectively a smaller, more console-leaning slice of
+total volume than the five heaviest suites already were. See
+[The answer](#the-answer) for the arithmetic.
 
 ## What is NOT claimed here
 
@@ -232,13 +239,7 @@ instrument drift.
 
 ## The census
 
-**IN PROGRESS — 68/72 measured, this is a checkpoint commit, not the
-final reading.** Continuing under the shared verify lock with tighter
-per-batch budgets so the lock cycles for other agents on this container;
-the ledger this table is generated from is
-`/tmp/os-log-volume-census/ledger.json`, one row per package written the
-moment that package finishes, so no completed measurement is lost if this
-run is interrupted.
+**All 72/72 packages measured.**
 
 | package | console | structured | reporter | total | exit |
 |---|---:|---:|---:|---:|---|
@@ -309,28 +310,92 @@ run is interrupted.
 | `packages/services/service-sms` | 0 | 0 | 13 | 13 | ok |
 | `packages/services/service-storage` | 113 | 218 | 13 | 344 | ok |
 | `packages/spec` | 15 | 0 | 17 | 32 | ok |
-| `packages/triggers/trigger-api` | — | — | — | — | **NOT MEASURED** |
-| `packages/triggers/trigger-record-change` | — | — | — | — | **NOT MEASURED** |
-| `packages/triggers/trigger-schedule` | — | — | — | — | **NOT MEASURED** |
-| `packages/types` | — | — | — | — | **NOT MEASURED** |
+| `packages/triggers/trigger-api` | 0 | 0 | 13 | 13 | ok |
+| `packages/triggers/trigger-record-change` | 401 | 0 | 13 | 414 | ok |
+| `packages/triggers/trigger-schedule` | 0 | 0 | 13 | 13 | ok |
+| `packages/types` | 1 | 0 | 13 | 14 | ok |
 | `packages/verify` | 221 | 3,171 | 13 | 3,405 | ok |
-| **total, 68/72 suites measured** | **17,026** | **61,980** | **941** | **79,947** | |
+| **total, 72/72 suites measured** | **17,428** | **61,980** | **993** | **80,401** | |
 
-structured share of total (structured / (structured+console+reporter)): 77.5%
+structured share of total, structured / (structured+console+reporter) —
+comparable to the 5-suite framing, whose own `console` already absorbed what
+this instrument tracks separately as `reporter`: **77.1%**
 
-structured share of console+structured (comparable to the 5-suite framing): 78.4%
+structured share of console+structured alone, reporter set aside: 78.1%
 
-measured: 68/72 — NOT MEASURED (4): `packages/triggers/trigger-api`, `packages/triggers/trigger-record-change`, `packages/triggers/trigger-schedule`, `packages/types`
+measured: 72/72
 
 non-zero exit: 0
 
 ## The answer
 
-Not yet — see "IN PROGRESS" above. Provisional read at 68/72 (do not cite):
-structured share of console+structured is ~78%, nowhere near the
-five-suite ~45%, in the direction the earlier reading's own explanation
-predicts (see "What is NOT claimed here" / the five-suite table above): most
-of the *unmeasured* population never boots a kernel at all, so it was always
-going to skew toward `console`-only or near-silent, not toward more structured
-share. The final numbers replace this paragraph once all 72 (or a declared
-NOT-MEASURED-with-reason subset) are in.
+**No — the ratio does not hold, and it moved in the opposite direction from
+the one "the other 67 packages are noisier" would predict.**
+
+All 72 packages, all green (exit 0), totals from the ledger:
+
+| | console | structured | reporter | total |
+|---|---:|---:|---:|---:|
+| **all 72 packages** | 17,428 | 61,980 | 993 | 80,401 |
+
+- **structured share of total** (the metric comparable to the earlier
+  reading's own convention, where `console + structured == total` with no
+  separate reporter bucket — i.e. `structured / (structured + console +
+  reporter)`): **77.1%**.
+- **structured share of console+structured alone** (reporter's own ~1% of
+  total set aside): 78.1%. The two are close because `reporter` is a small,
+  closed vocabulary (993 of 80,401 lines, 1.2%) — see Method.
+
+**Why it moved this far, decomposed:**
+
+1. **The original five suites, re-measured on today's tree, are already at
+   86.6% structured** (48,426 structured / 55,925 console+structured — from
+   the "Reproduction" table above), not ~45%. Two commits explain essentially
+   all of that move: `b79ddf17d` (#13985) and `5e2c04da7` (#14016) each
+   declared `OS_REGISTRY_LOG=warn` in a suite's vitest harness, cutting a
+   `[Registry]` debug-`console.log` population that had been the majority of
+   `console` output in dogfood, objectql, runtime and verify. `packages/rest`
+   — the one suite of the five nothing touched — moved only +5.8% on
+   `console`, which is what makes the other four attributable to those two
+   commits rather than to this instrument reading differently than the
+   original one did.
+2. **Extending to the other 67 packages pulls the number back down, from
+   86.6% to 77.1%, but not remotely far enough to reverse it.** Those 67
+   packages contribute 24,396 of the 80,401 total lines (30.3%) — collectively
+   a minority of test-run volume — and most of them are near-silent either
+   way: **35 of the 72 packages write fewer than 30 lines total**, and **22
+   of the 72 write exactly 13** — the reporter's own fixed banner with
+   nothing else at all (a package whose suite has no tests that emit
+   anything, structured or console). Structured lines require a kernel boot
+   (`ObjectLogger`'s INFO-level startup chatter); a package whose suite never
+   constructs one — most of `packages/services/*`, `packages/triggers/*`,
+   `packages/drivers/*` (besides `driver-memory`), and several thin
+   `plugins/*` — writes at or near zero of both.
+3. **The marginal 67 packages' own structured share is 57.7%** (13,554
+   structured / 23,483 console+structured among just that group) — lower
+   than the reproduced five-suite figure, higher than the original ~45%
+   reading. The largest genuinely console-**majority** contributors outside
+   the original five (`console > structured`, sorted by `console`):
+   `packages/plugin-auth` (2,678 console / 2,149 structured — its own suite
+   boots a kernel and logs per-request auth denials), `packages/plugin-sharing`
+   (633 / 149), `examples/app-todo` (482 / 0), `packages/plugin-approvals`
+   (428 / 300) and `packages/trigger-record-change` (401 / 0). `packages/cli`
+   has the second-highest raw `console` count outside the original five
+   (1,608) but is itself majority-**structured** (4,926) — it belongs to the
+   `console`-heavy-in-absolute-terms group, not the console-majority one.
+
+**Reading the two effects together:** the five-suite figure this card cited
+(~45%) was a snapshot from *before* #13985/#14016 landed. Re-running the same
+five suites today already answers most of the question — the ratio was never
+stable at 45%, because the population it measured moved out from under it in
+three days. The extension to all 72 packages is the second, smaller
+correction, and it is a real one: the untouched 67 packages are more
+console-leaning on average (57.7%) than the five heaviest suites (86.6%), so a
+full-repo reading is not simply "the five-suite number, unchanged." But at no
+point does the combined population cross back toward parity, let alone toward
+`console` being the majority — it stays firmly structured-dominated (77.1%)
+throughout.
+
+**No seam was added.** Per triage's ruling, this document is the measurement
+only; which of the two candidate seams (if either) to build is triage's call,
+made with this table in hand.
