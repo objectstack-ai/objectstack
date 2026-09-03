@@ -1033,9 +1033,62 @@ function missingRootsMessage(missing) {
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'The ratchet-remedy authority convention (#8435)': 4,
+  'The green body reports what was READ (#9910)': 5,
+  'A missing ROOT is REFUSED, per root (#9932)': 8,
+  'The dispatch-gates declaration (#9964\'s pattern)': 4,
+  'The vendor-wire fence exemption (#10533)': 6,
+  'Every way the MARKING could stop bounding the exemption': 15,
+  'The diagnostics name the path that now exists': 8,
+  'The exemption at the PROGRAM level': 6,
+  'The generated-region exemption (#13586)': 7,
+  'Direction of error: every malformed pair fails CLOSED and LOUD': 18,
+  'The exemption at the PROGRAM level (2)': 6,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 11;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   const expect = (label, cond) => {
+    registerCase();
     if (!cond) failures.push(label);
   };
 
@@ -1049,6 +1102,7 @@ function selfTest() {
   // keep (2) green with the convention gone. (4) is this gate's own hazard:
   // both directions of its ratchet are spelled `--update`, and marking the
   // improvement path maintainer-only would teach the opposite of the rule.
+  battery('The ratchet-remedy authority convention (#8435)');
   const real = newUseMessage('content/docs/example.mdx', 2);
   expect('#8435 — the ratchet-offer DETECTOR still matches the NEW-use message (else the check '
     + 'below is vacuous)',
@@ -1090,6 +1144,7 @@ function selfTest() {
   // corpus moves. ⛔ Do not "refresh" them to match a live scan — that would
   // turn a closed fixture into a figure the tree can falsify, which is the
   // very defect the comment sites above were cleaned of.
+  battery('The green body reports what was READ (#9910)');
   const SCANNED = [{ root: 'content/docs', files: 179 }, { root: 'skills', files: 36 }];
   const DEAD_SCAN = [{ root: 'content/docs', files: 0 }, { root: 'skills', files: 0 }];
   const PAID_OFF = {};
@@ -1151,6 +1206,7 @@ function selfTest() {
   //
   // Fixture roots, not real ones: these names appear nowhere else in this file,
   // so `includes()` below cannot pass on incidental prose.
+  battery('A missing ROOT is REFUSED, per root (#9932)');
   const PRESENT_ROOT = 'alpha/one';
   const ABSENT_ROOT = 'bravo-two';
   expect('#9932 — with NO root present, every one of them is reported (the total-scan case, '
@@ -1258,6 +1314,7 @@ function selfTest() {
   // the brief. The coupling is derived from ROOTS on both sides rather than
   // re-spelled, so widening or renaming a root cannot leave the declaration
   // describing the old population.
+  battery('The dispatch-gates declaration (#9964\'s pattern)');
   const separatorless = ROOTS.filter((r) => !r.includes('/'));
   expect('the declaration exists for every ROOT the hint extractor cannot see (a root with no '
     + 'path separator is refused as too generic, so it needs the subtree spelling)',
@@ -1284,6 +1341,7 @@ function selfTest() {
   //
   // Fixtures differ from each other in exactly ONE line wherever possible, so a
   // failure names the property and not the fixture.
+  battery('The vendor-wire fence exemption (#10533)');
   const VW_MDX = markerFor('.mdx', 'better-auth');
   const VW_MD = markerFor('.md', 'better-auth');
   /** Counted occurrences — what the ratchet actually compares against. */
@@ -1351,6 +1409,7 @@ function selfTest() {
   // ignored. (b) is the half that matters: a marker that silently checks nothing
   // reads as intentional, and its author meets a "count grew" verdict naming
   // neither the marker nor the reason it did not take.
+  battery('Every way the MARKING could stop bounding the exemption');
   const nearMisses = [
     ['a blank line between marker and fence', FENCED.replace(`${VW_MDX}\n`, `${VW_MDX}\n\n`)],
     ['the .md spelling in an .mdx file', FENCED.replace(VW_MDX, VW_MD)],
@@ -1419,6 +1478,7 @@ function selfTest() {
   // ratchet with a vendor payload had no discoverable remedy, and the only one
   // named was the maintainer's. Derived from the constants, so renaming the
   // token cannot leave a message pointing at a marker nothing recognises.
+  battery('The diagnostics name the path that now exists');
   const grew = grewMessage('content/docs/example.mdx', 4, 5);
   const newUse = newUseMessage('content/docs/example.mdx', 2);
   expect('#10533 — BOTH refusal messages name the vendor-wire marker (the count-GREW one is how '
@@ -1462,6 +1522,7 @@ function selfTest() {
   // Both fixture files live in the SAME root on purpose: it is the extension,
   // not the root, that selects the marker syntax, and a tree that put each
   // spelling in its "own" root would pass just as well under a root-keyed table.
+  battery('The exemption at the PROGRAM level');
   const vwSandbox = mkdtempSync(join(tmpdir(), 'check-role-word-vendorwire-'));
   try {
     const [root] = ROOTS;
@@ -1540,6 +1601,7 @@ function selfTest() {
   // path SEPARATOR on purpose: a path-shaped literal here would feed the
   // dispatch-gates hint extractor described at the top of this file a population
   // this gate does not read.
+  battery('The generated-region exemption (#13586)');
   const GEN_BEGIN = '{/* BEGIN GENERATED: census (gen-census.mjs) — DO NOT EDIT */}';
   const GEN_END = '{/* END GENERATED: census */}';
   const GEN_BEGIN_MD = '<!-- BEGIN GENERATED: census (gen-census.mjs) — DO NOT EDIT -->';
@@ -1639,6 +1701,7 @@ function selfTest() {
   // a ratchet into a suggestion, so each fixture must (a) exempt NOTHING and
   // (b) be REPORTED — never silently ignored, which reads as intentional while
   // checking nothing.
+  battery('Direction of error: every malformed pair fails CLOSED and LOUD');
   const UNTERMINATED = REGION.replace(`${GEN_END}\n`, '');
   const untermReport = analyzeGeneratedRegions(UNTERMINATED, '.mdx');
   expect('#13586 (D) — a BEGIN with no matching END exempts NOTHING and is REPORTED (honouring '
@@ -1766,6 +1829,7 @@ function selfTest() {
   // Everything above drives predicates. A predicate the program never consults
   // would satisfy all of it, so these build real trees and read a child
   // process's real exit status, never a pipe's.
+  battery('The exemption at the PROGRAM level (2)');
   const genSandbox = mkdtempSync(join(tmpdir(), 'check-role-word-generated-'));
   try {
     const [root] = ROOTS;
@@ -1824,6 +1888,51 @@ function selfTest() {
     rmSync(genSandbox, { recursive: true, force: true });
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-role-word --self-test: ${failures.length} failure(s).\n`);
