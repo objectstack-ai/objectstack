@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { z } from 'zod';
+import { CronExpressionInputSchema } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { EmbeddingModelSchema, VectorStoreSchema } from './embedding.zod';
 
@@ -25,12 +26,30 @@ export const KnowledgeRefreshPolicySchema = lazySchema(() => z.object({
    */
   onRecordChange: z.boolean().default(true).optional(),
   /**
-   * Cron expression (5-field) for periodic full reindex. Optional.
+   * Cron-dialect expression for a periodic full reindex. Optional.
+   *
+   * `CronExpressionInputSchema` — the shared cron-dialect input the other
+   * cron-shaped fields carry (`api/export.zod.ts`, `automation/execution.zod.ts`,
+   * `integration/connector.zod.ts`). A bare string is shorthand for
+   * `{ dialect: 'cron', source }`; the parse enforces a non-empty string or an
+   * expression envelope and normalizes to the envelope. It does NOT judge cron
+   * syntax: that verdict is the `cron` dialect engine's (`@objectstack/formula`
+   * cron-engine — 5- or 6-field, or an `@yearly`…`@reboot` alias) when the
+   * expression is evaluated, so the describe below promises exactly what the
+   * parse enforces (ADR-0049 declared = enforced; #14825).
+   *
    * `service-knowledge` does not schedule the cron itself — it merely
    * surfaces the value so an automation flow / external scheduler can
    * trigger `reindexSource`.
    */
-  cron: z.string().optional(),
+  cron: CronExpressionInputSchema.optional().describe(
+    'Cron-dialect expression for a periodic full reindex. A bare string is shorthand for '
+    + '`{ dialect: \'cron\', source }`; the parse enforces a non-empty string or an expression '
+    + 'envelope and normalizes to the envelope — cron syntax (5- or 6-field, or an `@` alias) is '
+    + 'the `cron` dialect engine\'s verdict when the expression is evaluated, not checked here. '
+    + '`service-knowledge` does not schedule it: the value is surfaced so an automation flow / '
+    + 'external scheduler can trigger `reindexSource`.',
+  ),
 }));
 
 /** Source backed by an ObjectQL object — each record becomes a document. */
@@ -116,8 +135,12 @@ export const KnowledgeSourceSchema = lazySchema(() => z.object({
 }));
 
 export type KnowledgeRefreshPolicy = z.input<typeof KnowledgeRefreshPolicySchema>;
+/** Post-parse shape of {@link KnowledgeRefreshPolicy} — defaults applied, transforms run (ADR-0122): `cron` is the `{ dialect: 'cron', source }` envelope. */
+export type KnowledgeRefreshPolicyParsed = z.infer<typeof KnowledgeRefreshPolicySchema>;
 export type ObjectKnowledgeSource = z.input<typeof ObjectKnowledgeSourceSchema>;
 export type FileKnowledgeSource = z.input<typeof FileKnowledgeSourceSchema>;
 export type HttpKnowledgeSource = z.input<typeof HttpKnowledgeSourceSchema>;
 export type KnowledgeSourceKind = z.input<typeof KnowledgeSourceKindSchema>;
 export type KnowledgeSource = z.input<typeof KnowledgeSourceSchema>;
+/** Post-parse shape of {@link KnowledgeSource} — defaults applied, transforms run (ADR-0122): `refresh.cron` is the cron envelope. */
+export type KnowledgeSourceParsed = z.infer<typeof KnowledgeSourceSchema>;
