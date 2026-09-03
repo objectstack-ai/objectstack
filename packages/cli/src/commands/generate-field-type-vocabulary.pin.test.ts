@@ -69,11 +69,36 @@
  * is the only mechanism, which is why the totality assertion lives here rather
  * than being left to the compiler.
  *
- * ⚠️ What is NOT asserted, and why the difference is the point: that a mapping
- * is CORRECT. This pin measures presence, not the value — a wrong-but-present
- * entry is a different defect (`autonumber: 'SERIAL'` against a runtime that
- * writes a rendered string, `formula` given a column the runtime never
- * creates), filed separately rather than pinned here on a guess.
+ * ## The #14828 half: the VALUE, for the classes whose answer is derivable
+ *
+ * #13871 and #14657 both measured PRESENCE only, and said so: "a
+ * wrong-but-present entry is a different defect (`autonumber: 'SERIAL'` against
+ * a runtime that writes a rendered string, `formula` given a column the runtime
+ * never creates), filed separately rather than pinned here on a guess." That
+ * card is #14828, and this is where its rule lands — as the triage note said it
+ * should, because a FOURTH hand-carried table of right answers would be the
+ * same defect one file over.
+ *
+ * So nothing below transcribes a value. Each rule is one of:
+ *
+ *   - a SPEC CLASS the driver derives its own behaviour from (`MULTI_OPTION_TYPES`,
+ *     `STRUCTURED_JSON_TYPES`, `REFERENCE_VALUE_TYPES` — imported, swept, never
+ *     listed here), asserted against what the generators actually EMIT;
+ *   - the DRIVER'S OWN SOURCE, read where it lives, for the questions the spec
+ *     does not answer — which types are virtual, and what a reference column's
+ *     physical shape is. ⛔ The driver is the authority for which column
+ *     exists; the spec's `isMultiValueField` is the ADR-0104 D1 VALUE contract
+ *     and answers a different question (#14829's pin argues this in full);
+ *   - or the file's INTERNAL agreement — an array-typed answer in
+ *     `FIELD_TYPE_MAP` and a scalar column in `FIELD_TYPE_SQL_MAP` is a
+ *     contradiction whoever is right, and `autonumber` was exactly that.
+ *
+ * ⚠️ Still NOT asserted, deliberately: the FILE_REFERENCE_TYPES family. Those
+ * five ARE in the driver's `JSON_COLUMN_TYPES` today while this generator gives
+ * them a varchar — but that is #14657's ADR-0104 D3 answer against a driver
+ * that is still pre-D3, i.e. a decision about which side moves, not a wrong
+ * value to correct. It is recorded below as a measured divergence so it cannot
+ * be mistaken for coverage, and filed rather than fixed here.
  *
  * The runtime fallbacks (`|| 'unknown'`, `|| 'TEXT'`, `default:`) stay and are
  * NOT dead: they answer a `type` string that is not a `FieldType` at all, which
@@ -96,8 +121,16 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { FieldType } from '@objectstack/spec/data';
+import {
+  FieldType,
+  FILE_REFERENCE_TYPES,
+  MULTI_OPTION_TYPES,
+  REFERENCE_VALUE_TYPES,
+  STRUCTURED_JSON_TYPES,
+} from '@objectstack/spec/data';
 import { describe, expect, it } from 'vitest';
+
+import { generateMigrationSql, generateMigrationTs, generateTypesFromConfig } from './generate.js';
 
 const GENERATE_TS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'generate.ts');
 const SOURCE = fs.readFileSync(GENERATE_TS, 'utf8');
@@ -105,8 +138,17 @@ const SOURCE = fs.readFileSync(GENERATE_TS, 'utf8');
 /** The authority. Imported from the package that owns it, never transcribed. */
 const REAL_FIELD_TYPES: ReadonlySet<string> = new Set(FieldType.options);
 
-/** `const NAME: Record<string, string> = {` at top level — the lookup tables. */
-const LOOKUP_TABLE_DECL = /^const (\w+): Record<string, string> = \{$/gm;
+/**
+ * `const NAME: Record<string, VALUE> = {` at top level — the lookup tables.
+ *
+ * `VALUE` is captured rather than fixed because `FIELD_TYPE_SQL_MAP` answers
+ * `string | null` since #14828: `null` is the VIRTUAL answer (no column at
+ * all), carried in the table so the two migration generators cannot disagree
+ * about which fields materialise. The terminator each table must carry is
+ * DERIVED from its own declared value type below, so widening one table cannot
+ * quietly loosen the other's compile-time totality guarantee.
+ */
+const LOOKUP_TABLE_DECL = /^const (\w+): Record<string, (string(?: \| null)?)> = \{$/gm;
 
 /** The one field-type switch in the migration (typescript) generator. */
 const FIELD_TYPE_SWITCH = /switch \(fType\)/g;
@@ -115,17 +157,26 @@ function lookupTableNames(): string[] {
   return [...SOURCE.matchAll(LOOKUP_TABLE_DECL)].map((m) => m[1]);
 }
 
+/** The value type one lookup table declares — `string`, or `string | null`. */
+function lookupTableValueType(name: string): string {
+  const decl = [...SOURCE.matchAll(LOOKUP_TABLE_DECL)].find((m) => m[1] === name);
+  if (!decl) throw new Error(`lookup table not found in generate.ts: ${name}`);
+  return decl[2];
+}
+
 /**
  * The terminator every lookup table must carry — the type-level half of the
  * #14657 totality rule. Required rather than tolerated: if someone deletes the
  * annotation, extraction fails loudly here instead of the compiler silently
  * stopping to check.
  */
-const TABLE_TERMINATOR = '} satisfies Record<FieldType, string>;';
+function tableTerminator(name: string): string {
+  return `} satisfies Record<FieldType, ${lookupTableValueType(name)}>;`;
+}
 
 /** The keys of one top-level `Record<string, string>` table, in source order. */
 function lookupTableKeys(name: string): string[] {
-  const declaration = `const ${name}: Record<string, string> = {`;
+  const declaration = `const ${name}: Record<string, ${lookupTableValueType(name)}> = {`;
   const start = SOURCE.indexOf(declaration);
   if (start < 0) throw new Error(`lookup table not found in generate.ts: ${name}`);
   // Bound the table at ITS OWN closing line — the first line starting with `}`
@@ -137,9 +188,9 @@ function lookupTableKeys(name: string): string[] {
   if (closing < 0) throw new Error(`unterminated lookup table in generate.ts: ${name}`);
   const end = start + closing;
   const closingLine = SOURCE.slice(end + 1, SOURCE.indexOf('\n', end + 1));
-  if (closingLine !== TABLE_TERMINATOR) {
+  if (closingLine !== tableTerminator(name)) {
     throw new Error(
-      `${name} in generate.ts must be closed by \`${TABLE_TERMINATOR}\`, but it is closed by ` +
+      `${name} in generate.ts must be closed by \`${tableTerminator(name)}\`, but it is closed by ` +
       `\`${closingLine}\`. That annotation is the type-level half of the #14657 rule that every ` +
       'FieldType member has an entry: without it, adding a field type to the spec stops being a ' +
       'compile error here and goes back to silently generating `unknown` / a TEXT column.',
@@ -238,15 +289,292 @@ describe('generate.ts field-type vocabularies (#13871)', () => {
     // this assertion is the readable statement of a rule already enforced.
     for (const table of ['FIELD_TYPE_MAP', 'FIELD_TYPE_SQL_MAP'] as const) {
       expect(
-        SOURCE.includes(`const ${table}: Record<string, string> = {`),
+        SOURCE.includes(`const ${table}: Record<string, ${lookupTableValueType(table)}> = {`),
         `${table} declaration moved`,
       ).toBe(true);
       expect(() => lookupTableKeys(table)).not.toThrow();
+      expect(SOURCE.includes(tableTerminator(table)), `${table} terminator moved`).toBe(true);
     }
     expect(
-      SOURCE.match(/^\} satisfies Record<FieldType, string>;$/gm),
+      SOURCE.match(/^\} satisfies Record<FieldType, string(?: \| null)?>;$/gm),
       'both FIELD_TYPE_MAP and FIELD_TYPE_SQL_MAP must close with the satisfies annotation ' +
       'that makes an unmapped FieldType member a compile error',
     ).toHaveLength(2);
+  });
+});
+
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * #14828 — the VALUES, derived from the platform rather than retyped here
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** `packages/drivers/driver-sql/src` — declared for `@objectstack/cli#test` in `turbo.json`. */
+const DRIVER_SQL_SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../drivers/driver-sql/src');
+const SQL_DRIVER_SOURCE = fs.readFileSync(path.join(DRIVER_SQL_SRC, 'sql-driver.ts'), 'utf8');
+const SCHEMA_DRIFT_SOURCE = fs.readFileSync(path.join(DRIVER_SQL_SRC, 'schema-drift.ts'), 'utf8');
+
+/**
+ * The body of `SqlDriver.createColumn`'s `switch (type)` — THE authority on
+ * which physical column a field type gets.
+ *
+ * Source-read rather than driven, for the reason #14829's pin already states:
+ * `createColumn` is `protected` and needs a knex table builder, so exercising
+ * it would mean a live driver and a built `dist`. What has to be pinned is its
+ * DECISION, and that is legible in the source.
+ */
+function createColumnSwitch(): string {
+  const start = SQL_DRIVER_SOURCE.indexOf('protected createColumn(');
+  if (start < 0) throw new Error('createColumn moved or was renamed in driver-sql');
+  const switchAt = SQL_DRIVER_SOURCE.indexOf('switch (type)', start);
+  if (switchAt < 0) throw new Error('the per-type switch inside createColumn moved');
+  const end = SQL_DRIVER_SOURCE.indexOf('\n    if (col) {', switchAt);
+  if (end < 0) throw new Error("could not bound createColumn's switch in driver-sql");
+  return SQL_DRIVER_SOURCE.slice(switchAt, end);
+}
+
+/**
+ * The arm `createColumn` runs for one field type — from its `case` label to the
+ * `break;` / `return;` that ends the arm — or `null` when the type has no case
+ * at all and therefore takes the catch-all. `null` is a real answer here, which
+ * is why the control below asserts a type that DOES have one.
+ */
+function createColumnArm(type: string): string | null {
+  const body = createColumnSwitch();
+  const at = body.indexOf(`case '${type}':`);
+  if (at < 0) return null;
+  const arm = body.slice(at).match(/^[\s\S]*?(?:break;|return;)/);
+  if (!arm) throw new Error(`unterminated createColumn arm for '${type}' in driver-sql`);
+  return arm[0];
+}
+
+/** `createColumn`'s catch-all — where an un-cased type lands. */
+function createColumnDefaultArm(): string {
+  const body = createColumnSwitch();
+  const at = body.indexOf('default:');
+  if (at < 0) throw new Error("createColumn's catch-all moved in driver-sql");
+  return body.slice(at);
+}
+
+/** One object carrying one field of every real `FieldType` member. */
+function probeConfig(): Record<string, unknown> {
+  const fields: Record<string, Record<string, unknown>> = {};
+  for (const type of REAL_FIELD_TYPES) fields[`f_${type}`] = { type };
+  return { objects: { probe: { name: 'probe', label: 'Probe', fields } } };
+}
+
+const TYPES_OUT = generateTypesFromConfig(probeConfig());
+const SQL_OUT = generateMigrationSql(probeConfig());
+const TS_OUT = generateMigrationTs(probeConfig());
+
+/** The SQL column type one field type contributes, or `null` when it emits none. */
+function sqlColumn(type: string): string | null {
+  const m = SQL_OUT.match(new RegExp(`^ {2}"f_${type}" (.+?),?$`, 'm'));
+  return m ? m[1] : null;
+}
+
+/** The `table.x('f_type')` call one field type contributes, or `null` for none. */
+function tsColumn(type: string): string | null {
+  const m = TS_OUT.match(new RegExp(`^ {4}(table\\.\\w+\\('f_${type}'\\)).*$`, 'm'));
+  return m ? m[1] : null;
+}
+
+/** The declared property type one field type contributes to the generated interface. */
+function tsInterfaceType(type: string): string {
+  const m = TYPES_OUT.match(new RegExp(`^ {2}f_${type}\\??: (.+);$`, 'm'));
+  if (!m) throw new Error(`no interface member emitted for ${type}`);
+  return m[1];
+}
+
+/** How THIS generator spells a JSON column — read from its own `json` answer. */
+const JSON_SQL = sqlColumn('json');
+const JSON_TS_METHOD = 'table.jsonb';
+
+describe('#14828 — the SQL answers are the platform’s, not this file’s inventions', () => {
+  it('control — the driver source really loaded and its switch was really found', () => {
+    expect(SQL_DRIVER_SOURCE.length).toBeGreaterThan(10_000);
+    expect(SCHEMA_DRIFT_SOURCE.length).toBeGreaterThan(10_000);
+    const body = createColumnSwitch();
+    expect(body.length).toBeGreaterThan(1_000);
+    // The extractor discriminates: a type WITH an arm returns one, and that arm
+    // really is the type's own. Without this, `null` for every type would make
+    // the catch-all assertions below pass while measuring nothing.
+    expect(createColumnArm('boolean')).toContain('table.boolean(name)');
+    expect(createColumnArm('lookup')).not.toBeNull();
+    expect(createColumnArm('this_is_not_a_field_type')).toBeNull();
+  });
+
+  it('control — all three generators really emitted for the whole probe', () => {
+    expect(TYPES_OUT).toContain('export interface ProbeRecord {');
+    expect(SQL_OUT).toContain('CREATE TABLE IF NOT EXISTS "probe" (');
+    expect(TS_OUT).toContain("await db.schema.createTable('probe'");
+    expect(REAL_FIELD_TYPES.size).toBeGreaterThan(40);
+    // Every member reached the TYPES output; the migration outputs are checked
+    // per rule below, because one member deliberately emits no column at all.
+    for (const type of REAL_FIELD_TYPES) expect(() => tsInterfaceType(type)).not.toThrow();
+    expect(JSON_SQL, "this generator's own JSON spelling").toBe('JSONB');
+  });
+
+  // ── Rule 1: the virtual type materialises no column, on the driver's say-so ──
+  //
+  // The spec has no class for this: `COMPUTED_VALUE_TYPES` holds `formula`,
+  // `summary` AND `autonumber`, and the latter two DO get columns. Which types
+  // are virtual is the driver's answer alone, so it is read from the driver.
+
+  it('driver-sql answers `formula` with no column at all', () => {
+    const arm = createColumnArm('formula');
+    expect(arm, 'formula lost its arm in createColumn').not.toBeNull();
+    expect(arm, 'createColumn no longer returns without emitting for `formula`').toMatch(/return;$/);
+    expect(arm).toContain('Virtual');
+    // The second statement of the same rule, in the differ.
+    const at = SCHEMA_DRIFT_SOURCE.indexOf('export function fieldHasColumn(');
+    expect(at, 'fieldHasColumn moved or was renamed in driver-sql').toBeGreaterThan(0);
+    expect(SCHEMA_DRIFT_SOURCE.slice(at, at + 200)).toContain("!== 'formula'");
+  });
+
+  it('neither migration generator emits a column for a virtual field', () => {
+    expect(
+      sqlColumn('formula'),
+      'os generate migration --format sql created a column for a `formula` field. The runtime ' +
+      'never writes it: driver-sql answers `case ‘formula’: return; // Virtual — no column`, ' +
+      'and schema-drift’s `fieldHasColumn` answers false for it.',
+    ).toBeNull();
+    expect(
+      tsColumn('formula'),
+      'os generate migration (typescript) created a column for a `formula` field — see above.',
+    ).toBeNull();
+    // Anti-vacuity: the readers are not simply blind. A sibling in the SAME
+    // output still resolves, so "no column" is a measurement, not a miss.
+    expect(sqlColumn('text')).not.toBeNull();
+    expect(tsColumn('text')).not.toBeNull();
+    // And a formula field is still part of the RECORD — only of no column.
+    expect(tsInterfaceType('formula')).toBe('unknown');
+  });
+
+  // ── Rule 2: the JSON classes take the JSON column ────────────────────────
+  //
+  // Swept from the two spec classes the driver seeds `JSON_COLUMN_TYPES` from,
+  // imported and never listed here. FILE_REFERENCE_TYPES is the third seed and
+  // is deliberately NOT swept — see the recorded divergence below.
+
+  const JSON_CLASS_TYPES = [...MULTI_OPTION_TYPES, ...STRUCTURED_JSON_TYPES];
+
+  it('control — the JSON value classes really loaded', () => {
+    expect(JSON_CLASS_TYPES.length).toBeGreaterThanOrEqual(9);
+    expect(MULTI_OPTION_TYPES.has('multiselect')).toBe(true);
+    expect(STRUCTURED_JSON_TYPES.has('vector')).toBe(true);
+    // The discriminating half: a type OUTSIDE these classes must not be JSON,
+    // or "JSONB everywhere" would satisfy the sweep below.
+    expect(MULTI_OPTION_TYPES.has('text') || STRUCTURED_JSON_TYPES.has('text')).toBe(false);
+    expect(sqlColumn('text')).not.toBe(JSON_SQL);
+    expect(tsColumn('text')).not.toContain(JSON_TS_METHOD);
+  });
+
+  for (const type of JSON_CLASS_TYPES) {
+    it(`${type} takes a JSON column in both migration generators`, () => {
+      expect(
+        sqlColumn(type),
+        `${type} is in the spec class driver-sql seeds JSON_COLUMN_TYPES from, so the runtime ` +
+        'stores it in a JSON column and this generator must emit one too.',
+      ).toBe(JSON_SQL);
+      expect(tsColumn(type)).toBe(`${JSON_TS_METHOD}('f_${type}')`);
+    });
+  }
+
+  // ── Rule 3: one reference class, one column shape ────────────────────────
+
+  it('driver-sql gives a reference column the default string column, not a uuid', () => {
+    const arm = createColumnArm('lookup');
+    expect(arm).toContain('table.string(name)');
+    expect(arm, 'driver-sql does not give a lookup a uuid column').not.toContain('table.uuid(');
+    // `master_detail` is not cased at all — it lands in the catch-all, which
+    // routes by JSON membership and otherwise spells the same call.
+    expect(createColumnArm('master_detail')).toBeNull();
+    expect(createColumnDefaultArm()).toContain('JSON_COLUMN_TYPES.has(type) ? this.jsonColumn(table, name) : table.string(name)');
+    expect(REFERENCE_VALUE_TYPES.has('master_detail')).toBe(true);
+    expect(MULTI_OPTION_TYPES.has('master_detail') || STRUCTURED_JSON_TYPES.has('master_detail')).toBe(false);
+  });
+
+  it('every REFERENCE_VALUE_TYPES member takes one and the same column', () => {
+    expect(REFERENCE_VALUE_TYPES.size).toBeGreaterThanOrEqual(4);
+    const answers = new Set([...REFERENCE_VALUE_TYPES].map((t) => sqlColumn(t)));
+    expect(
+      [...answers],
+      'the reference types disagree about their column width. A reference column holds the ' +
+      "TARGET's `id`, which driver-sql emits as `table.string('id').primary()` — one shape for " +
+      'the whole class, never a per-type guess.',
+    ).toHaveLength(1);
+    for (const type of REFERENCE_VALUE_TYPES) {
+      expect(sqlColumn(type)).toMatch(/^VARCHAR\(\d+\)$/);
+      expect(
+        tsColumn(type),
+        `os generate migration (typescript) gave a ${type} column something other than a string ` +
+        'column. A platform id is 26 characters (driver-sql spells one out in its lookup arm), ' +
+        'so a `uuid` column refuses it outright on Postgres with 22P02.',
+      ).toBe(`table.string('f_${type}')`);
+    }
+    // The width is knex's default for a bare `table.string(name)`, which is the
+    // call driver-sql makes for the id column itself.
+    expect(SQL_DRIVER_SOURCE).toContain("table.string('id').primary();");
+    expect(sqlColumn('lookup')).toBe('VARCHAR(255)');
+  });
+
+  // ── Rule 4: the file's own vocabularies may not contradict each other ────
+  //
+  // `autonumber` was exactly this: `FIELD_TYPE_MAP` said `string` and
+  // `FIELD_TYPE_SQL_MAP` said `SERIAL`. No outside authority is needed to call
+  // that wrong, and the same rule catches an array-typed member given a scalar
+  // column, which is how `multiselect` and `vector` read before this card.
+
+  it('a member typed as an ARRAY on the record takes a JSON column', () => {
+    const arrayTyped = [...REAL_FIELD_TYPES].filter((t) => tsInterfaceType(t).endsWith('[]'));
+    expect(arrayTyped.length, 'no array-typed members found — the reader is broken').toBeGreaterThanOrEqual(5);
+    for (const type of arrayTyped) {
+      expect(sqlColumn(type), `${type} is an array on the record but a scalar column`).toBe(JSON_SQL);
+      expect(tsColumn(type)).toBe(`${JSON_TS_METHOD}('f_${type}')`);
+    }
+    // Anti-vacuity: a scalar member is NOT array-typed and does NOT take JSON.
+    expect(arrayTyped).not.toContain('text');
+  });
+
+  it('a member typed as a STRING on the record takes a character column', () => {
+    const stringTyped = [...REAL_FIELD_TYPES].filter((t) => tsInterfaceType(t) === 'string');
+    expect(stringTyped.length).toBeGreaterThanOrEqual(10);
+    expect(stringTyped, 'autonumber is a rendered string on the record').toContain('autonumber');
+    for (const type of stringTyped) {
+      expect(
+        sqlColumn(type),
+        `${type} is a string on the record but its column is not a character type. ` +
+        'That is the within-file contradiction #14828 was filed for: `autonumber` carried ' +
+        "`string` in FIELD_TYPE_MAP and `SERIAL` — an integer column — in FIELD_TYPE_SQL_MAP, " +
+        'so the runtime’s rendered `INV-0001` met a Postgres `22P02 invalid input syntax for ' +
+        'type integer` on the first write.',
+      ).toMatch(/^(VARCHAR\(\d+\)|TEXT)$/);
+    }
+    // The driver's own answer for the headline member, read where it lives.
+    const arm = createColumnArm('autonumber');
+    expect(arm).toContain('table.string(name)');
+    expect(tsColumn('autonumber')).toBe("table.string('f_autonumber')");
+  });
+
+  // ── Recorded divergence, NOT coverage: FILE_REFERENCE_TYPES (#15041) ─────
+  //
+  // These five are in driver-sql's `JSON_COLUMN_TYPES` (it spreads the class by
+  // name) while this generator gives them a varchar. Unlike the five rows above
+  // that is not a wrong value but two ADR-0104 positions: the driver is pre-D3
+  // (the stored value may still be an inline metadata OBJECT) and #14657 chose
+  // the post-D3 answer (an opaque `sys_file` id STRING). Which side moves is
+  // #15041's question. Asserted here only so the disagreement cannot change
+  // shape unnoticed, and so no reader mistakes this file for having ruled on it.
+  it('#15041 record — the file family diverges from the driver, deliberately unresolved', () => {
+    expect(FILE_REFERENCE_TYPES.size).toBe(5);
+    expect(
+      SQL_DRIVER_SOURCE,
+      'driver-sql no longer seeds JSON_COLUMN_TYPES from FILE_REFERENCE_TYPES — re-read #15041, ' +
+      'the divergence this records may have been resolved from the other side.',
+    ).toContain('...STRUCTURED_JSON_TYPES, ...FILE_REFERENCE_TYPES, ...MULTI_OPTION_TYPES,');
+    for (const type of FILE_REFERENCE_TYPES) {
+      expect(sqlColumn(type)).toBe('VARCHAR(2048)');
+      expect(tsColumn(type)).toBe(`table.string('f_${type}')`);
+    }
   });
 });
