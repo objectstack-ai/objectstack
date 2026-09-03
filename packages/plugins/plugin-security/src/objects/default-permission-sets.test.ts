@@ -46,17 +46,25 @@ describe('BETTER_AUTH_MANAGED_OBJECTS ↔ schemas (drift pin, #3325)', () => {
 });
 
 /**
- * [#8053] The single, deliberate exception to the blanket managed-object edit
- * deny: `member_default` may EDIT `sys_api_key`, so a member can revoke their
- * own personal key. Bounded elsewhere and not by the permission-set boolean —
- * the `sys_api_key_self` RLS carve-out decides which rows, ADR-0092 D2's column
- * whitelist (`revoked` alone) decides which fields.
+ * The deliberate exceptions to the blanket managed-object edit deny. Both are
+ * on `member_default`, both are self-service, and neither is bounded by the
+ * permission-set boolean it sits on:
  *
- * Encoded as an exact (set, object) pair rather than by loosening the loop, so
- * a second entry — or the same one on another set — still fails this pin. The
+ *  - [#8053] `sys_api_key` — a member may revoke their OWN personal key. The
+ *    `sys_api_key_self` RLS carve-out decides which rows; ADR-0092 D2's column
+ *    whitelist (`revoked` alone) decides which fields.
+ *  - [#14959, maintainer ruling 2026-09-03] `sys_user` — a member may edit
+ *    their OWN profile row. The `sys_user_self` RLS carve-out decides which
+ *    rows; ADR-0092 D2's column whitelist (`SYS_USER_PROFILE_EDIT_FIELDS` —
+ *    `name`, `image`, `locale`) decides which fields. The ruling amended
+ *    ADR-0092 D5, whose original text said self-service stays on better-auth
+ *    `/update-user` and that no RLS self-row EDIT carve-out would be built.
+ *
+ * Encoded as exact (set, object) pairs rather than by loosening the loop, so a
+ * third entry — or either of these on another set — still fails this pin. The
  * create/delete/read axes are NOT excepted and are still asserted below.
  */
-const EDIT_EXCEPTIONS = new Set(['member_default::sys_api_key']);
+const EDIT_EXCEPTIONS = new Set(['member_default::sys_api_key', 'member_default::sys_user']);
 
 describe('default permission sets carry the managed denies (static baseline)', () => {
   it('each write-granting target set denies create/edit/delete on every managed object', () => {
@@ -76,23 +84,47 @@ describe('default permission sets carry the managed denies (static baseline)', (
     }
   });
 
-  it('the edit exception is exactly one (set, object) pair, and it is the API-key one', () => {
+  it('the edit exceptions are exactly the two self-service pairs, and each rides its own row scope', () => {
     // The exception list is itself pinned: a future widening has to edit THIS
     // assertion, which is the moment someone is asked whether the new pair
     // really rides an owner-scoping RLS policy and a column whitelist the way
-    // `sys_api_key` does. Without this, `EDIT_EXCEPTIONS` could grow silently.
-    expect([...EDIT_EXCEPTIONS]).toEqual(['member_default::sys_api_key']);
+    // these two do. Without this, `EDIT_EXCEPTIONS` could grow silently.
+    expect([...EDIT_EXCEPTIONS]).toEqual([
+      'member_default::sys_api_key',
+      'member_default::sys_user',
+    ]);
 
     const member = setByName('member_default');
-    expect(member.objects.sys_api_key.allowEdit).toBe(true);
-    // The owner scoping the grant leans on must exist, or the edit bit is
-    // table-wide on a credential table.
-    const selfPolicy = (member.rowLevelSecurity ?? []).find(
-      (p: any) => p.object === 'sys_api_key' && p.name === 'sys_api_key_self',
+
+    // The owner scoping each grant leans on must exist, or the edit bit is
+    // table-wide on an identity table. `operation` must reach the WRITE class:
+    // a `select`-only carve-out contributes nothing to the by-id write
+    // pre-image check, which is where the row scope is actually enforced.
+    const scopes: Array<[string, string, string]> = [
+      ['sys_api_key', 'sys_api_key_self', 'user_id == current_user.id'],
+      ['sys_user', 'sys_user_self', 'id == current_user.id'],
+    ];
+    for (const [object, policyName, predicate] of scopes) {
+      expect(member.objects[object].allowEdit, `${object} allowEdit`).toBe(true);
+      const selfPolicy = (member.rowLevelSecurity ?? []).find(
+        (p: any) => p.object === object && p.name === policyName,
+      );
+      expect(selfPolicy, `member_default must keep the ${policyName} RLS carve-out`).toBeTruthy();
+      expect(selfPolicy.using).toBe(predicate);
+      expect(['all', 'update'], `${policyName} operation`).toContain(selfPolicy.operation);
+    }
+
+    // [#14959] The other `sys_user` policy in this set is the org-peer
+    // VISIBILITY scope, and it must stay read-only. Applicable policies
+    // OR-combine, so an `all` here would compose an update filter of
+    // `id == me OR id IN <every user in my org>` — i.e. the edit bit above
+    // would reach every colleague's profile row. Pinned next to the grant it
+    // bounds, because the two lines are 100+ apart in the source.
+    const orgPeers = (member.rowLevelSecurity ?? []).find(
+      (p: any) => p.object === 'sys_user' && p.name === 'sys_user_org_members',
     );
-    expect(selfPolicy, 'member_default must keep the sys_api_key_self RLS carve-out').toBeTruthy();
-    expect(selfPolicy.using).toBe('user_id == current_user.id');
-    expect(['all', 'update']).toContain(selfPolicy.operation);
+    expect(orgPeers, 'member_default must keep sys_user_org_members').toBeTruthy();
+    expect(orgPeers.operation, 'org-peer visibility must not become a write scope').toBe('select');
   });
 
   it('admin_full_access keeps its bare wildcard (zero per-object entries) — admin rescue path', () => {
