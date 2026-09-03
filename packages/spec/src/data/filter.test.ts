@@ -1775,6 +1775,9 @@ describe('FieldReferenceSchema.addDays (#14104)', () => {
       expect(issue?.path).toEqual(['addDays']);
       expect(issue?.message.startsWith('addDays must be a whole number of days, and 1.5 is not an integer.')).toBe(true);
       expect(issue?.message).toContain('negative value subtracts');
+      // The refusal is printed AT the author, who has no tracker: no issue id in it.
+      expect(issue?.message).not.toMatch(/#\d{3,}/);
+      expect(FieldReferenceSchema.shape.addDays.description).not.toMatch(/#\d{3,}/);
     });
 
     it('a string: a number is a number, and "5 days" is not a grammar this filter has', () => {

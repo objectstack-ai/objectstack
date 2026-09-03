@@ -150,7 +150,7 @@ function addDaysOffsetMessage(input: unknown): string {
   const prescription =
     'addDays is an integer literal of any sign (a negative value subtracts; whole days only, no '
     + 'other unit) or a nested { "$field": "numeric_column" } reference. A NULL offset column '
-    + 'contributes zero days; a NULL referenced column makes the comparison false (#14104).';
+    + 'contributes zero days; a NULL referenced column makes the comparison false.';
   if (typeof input === 'number') {
     return `addDays must be a whole number of days, and ${String(input)} is not an integer. ${prescription}`;
   }
@@ -193,7 +193,7 @@ export const FieldReferenceSchema = lazySchema(() => z.object({
     + 'column. A NULL offset column contributes zero days; a NULL referenced column makes the '
     + 'comparison false rather than NULL, so it stays false under $not. Compiles on SQL '
     + 'push-down between two temporal columns of the same class (date/date, datetime/datetime) '
-    + 'and evaluates identically in memory (#14104).',
+    + 'and evaluates identically in memory.',
   ),
 }));
 
@@ -237,7 +237,7 @@ export const EqualityOperatorSchema = lazySchema(() => z.object({
  * docblock.
  */
 const ORDERING_COMPARAND_DESCRIPTION =
-  'Comparand is a number, a Date, a string, or a { $field } reference (optionally carrying a whole-day addDays offset, #14104). '
+  'Comparand is a number, a Date, a string, or a { $field } reference (optionally carrying a whole-day addDays offset). '
   + 'STRING is the form the platform itself produces: the date-macro resolver '
   + 'returns only strings ("{current_year_start}" -> "2026-01-01"), and the '
   + 'guaranteed spellings are an ISO calendar day (YYYY-MM-DD), a UTC ISO-8601 '

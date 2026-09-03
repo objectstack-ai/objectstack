@@ -708,7 +708,7 @@ const OFFSET_EXPECTATIONS: ReadonlyArray<{
     name: 'positive control — the bare reference, no offset, on this fixture',
     build: (target, base) => ({ [target]: { $lte: { $field: base } } }),
     expected: ['3', '9'],
-    note: 'The #5222 arm, unchanged by this card: if this moves, the harness moved rather than the offset.',
+    note: 'The bare cross-field arm, unchanged by the offset: if this moves, the harness moved rather than the offset.',
   },
 
   // ── The other five operators, with the column offset ──────────────────────
@@ -771,7 +771,7 @@ const OFFSET_EXPECTATIONS: ReadonlyArray<{
     name: '$not of $lte with a COLUMN offset — the "late or no deadline" set',
     build: (target, base) => ({ $not: { [target]: { $lte: shifted(base, GRACE) } } }),
     expected: ['1', '4', '5', '6', '7', '8', '9'],
-    note: 'The complement of {2, 3} over all nine rows. Rows 6 and 7 are re-admitted: the comparison was FALSE for them, not NULL, so `NOT` makes it true — the same shape #5146 pinned for literal leaves.',
+    note: 'The complement of {2, 3} over all nine rows. Rows 6 and 7 are re-admitted: the comparison was FALSE for them, not NULL, so `NOT` makes it true — the same shape the NULL-safe `$not` rewrite pins for literal leaves.',
   },
   {
     name: '$not of $eq with a COLUMN offset',
