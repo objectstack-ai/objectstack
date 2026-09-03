@@ -557,3 +557,346 @@ export const CROSS_FIELD_OPERAND_NAMES: readonly string[] = [
   'budget.nested',
   'no_such_column',
 ];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// [#14104] `addDays` — a whole-day offset on the referenced column
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The ruling (2026-09-02, option A): `FieldReferenceSchema` gains `addDays`,
+// an integer literal of any sign or a nested `{ $field }` reference to a
+// numeric column, so a dataset measure can say "completed by its deadline,
+// where the deadline is a stored date plus a grace period held in another
+// column" — `completed_at <= due_date + grace_days`. The NULL semantics are
+// stated in words and pinned here on BOTH paths, in the shape #5146 used for
+// `$not`: a NULL offset column contributes ZERO days; a NULL referenced
+// column makes the comparison FALSE for every operator (`$ne` included), so
+// `$not` re-admits it.
+//
+// A second fixture rather than more columns on the first: the offset arm's
+// truth table has THREE inputs (target, referenced base, offset) and the
+// interesting cells are the NULL arrangements of each, which the six-row
+// fixture above cannot carry without disturbing every expectation it pins.
+// Two temporal pairs — a `date` pair and a `datetime` pair on the same
+// calendar days at a fixed time of day — so every case below expects the SAME
+// id set whichever pair it names: a class-dependent answer (a `date()` that
+// dropped the time, a `strftime` that changed the text shape) shows up as a
+// diff between two otherwise identical cases.
+
+/** One offset-fixture row. Every nullable column is genuinely nullable in the DDL. */
+export interface CrossFieldOffsetRow {
+  id: string;
+  /** Calendar-date pair (`YYYY-MM-DD` on both paths). */
+  completed_on: string | null;
+  due_on: string | null;
+  /** Instant pair — the same calendar days at 12:00:00.000Z. */
+  completed_at: string | null;
+  due_at: string | null;
+  /** The offset column: whole days of grace, NULL for "no grace". */
+  grace_days: number | null;
+  /** Non-temporal columns — referenced ONLY by the refusal cases. */
+  title: string | null;
+  amount: number | null;
+  budget: number | null;
+  start_time: string | null;
+  end_time: string | null;
+  organization_id: string;
+}
+
+export const CROSS_FIELD_OFFSET_OBJECT_FIELDS: Record<string, Record<string, unknown>> = {
+  id: { type: 'text', name: 'id' },
+  completed_on: { type: 'date', name: 'completed_on' },
+  due_on: { type: 'date', name: 'due_on' },
+  completed_at: { type: 'datetime', name: 'completed_at' },
+  due_at: { type: 'datetime', name: 'due_at' },
+  grace_days: { type: 'number', name: 'grace_days' },
+  title: { type: 'text', name: 'title' },
+  amount: { type: 'number', name: 'amount' },
+  budget: { type: 'number', name: 'budget' },
+  start_time: { type: 'time', name: 'start_time' },
+  end_time: { type: 'time', name: 'end_time' },
+  organization_id: { type: 'text', name: 'organization_id' },
+};
+
+const noon = (day: string | null): string | null => (day === null ? null : `${day}T12:00:00.000Z`);
+
+/**
+ * The offset fixture. `completed` is the TARGET, `due` the referenced BASE,
+ * `grace_days` the OFFSET; March 2026 throughout, so `-3` from the 1st crosses
+ * a month boundary (February has 28 days in 2026).
+ *
+ * | id | completed | due   | grace | due + grace | reading                                   |
+ * |----|-----------|-------|-------|-------------|-------------------------------------------|
+ * | 1  | 03-05     | 03-01 | 2     | 03-03       | late by two days                          |
+ * | 2  | 03-03     | 03-01 | 2     | 03-03       | on the last day of grace (equality)       |
+ * | 3  | 03-01     | 03-05 | 0     | 03-05       | early; zero grace                          |
+ * | 4  | 03-05     | 03-01 | NULL  | 03-01       | NULL grace = zero days: late              |
+ * | 5  | NULL      | 03-01 | 2     | 03-03       | never completed, deadline exists          |
+ * | 6  | 03-05     | NULL  | 2     | —           | NO DEADLINE: every comparison is false    |
+ * | 7  | NULL      | NULL  | NULL  | —           | nothing at all                            |
+ * | 8  | 03-10     | 03-01 | -3    | 02-26       | negative grace tightens the deadline      |
+ * | 9  | 02-27     | 03-01 | -3    | 02-26       | inside the plain due date, outside -3     |
+ */
+const OFFSET_DAYS: ReadonlyArray<Omit<CrossFieldOffsetRow, 'completed_at' | 'due_at'>> = [
+  { id: '1', completed_on: '2026-03-05', due_on: '2026-03-01', grace_days: 2,    title: 'a', amount: 10,   budget: 5,    start_time: '09:00:00', end_time: '17:00:00', organization_id: 'o1' },
+  { id: '2', completed_on: '2026-03-03', due_on: '2026-03-01', grace_days: 2,    title: 'b', amount: 3,    budget: 5,    start_time: '09:00:00', end_time: '17:00:00', organization_id: 'o1' },
+  { id: '3', completed_on: '2026-03-01', due_on: '2026-03-05', grace_days: 0,    title: 'c', amount: 7,    budget: 7,    start_time: '09:00:00', end_time: '17:00:00', organization_id: 'o1' },
+  { id: '4', completed_on: '2026-03-05', due_on: '2026-03-01', grace_days: null, title: 'd', amount: null, budget: 5,    start_time: null,       end_time: '17:00:00', organization_id: 'o1' },
+  { id: '5', completed_on: null,         due_on: '2026-03-01', grace_days: 2,    title: 'e', amount: 10,   budget: null, start_time: '09:00:00', end_time: null,       organization_id: 'o1' },
+  { id: '6', completed_on: '2026-03-05', due_on: null,         grace_days: 2,    title: 'f', amount: null, budget: null, start_time: null,       end_time: null,       organization_id: 'o1' },
+  { id: '7', completed_on: null,         due_on: null,         grace_days: null, title: null, amount: 1,   budget: 1,    start_time: '09:00:00', end_time: '09:00:00', organization_id: 'o1' },
+  { id: '8', completed_on: '2026-03-10', due_on: '2026-03-01', grace_days: -3,   title: 'h', amount: 2,    budget: 1,    start_time: '09:00:00', end_time: '17:00:00', organization_id: 'o1' },
+  { id: '9', completed_on: '2026-02-27', due_on: '2026-03-01', grace_days: -3,   title: 'i', amount: 2,    budget: 1,    start_time: '09:00:00', end_time: '17:00:00', organization_id: 'o1' },
+];
+
+export const CROSS_FIELD_OFFSET_ROWS: readonly CrossFieldOffsetRow[] = OFFSET_DAYS.map((row) => ({
+  ...row,
+  completed_at: noon(row.completed_on),
+  due_at: noon(row.due_on),
+}));
+
+const OFFSET_PAIRS: ReadonlyArray<{ label: string; target: string; base: string }> = [
+  { label: 'date', target: 'completed_on', base: 'due_on' },
+  { label: 'datetime', target: 'completed_at', base: 'due_at' },
+];
+
+/** `{ $field: base, addDays: offset }` — the shape the ruling spelled. */
+const shifted = (base: string, offset: unknown) => ({ $field: base, addDays: offset });
+const GRACE = { $field: 'grace_days' } as const;
+
+/**
+ * The offset expectations, per operator and offset spelling. Each entry is
+ * generated for BOTH temporal pairs (`completed_on`/`due_on` and
+ * `completed_at`/`due_at`) so the class-independence claim is total, the
+ * discipline {@link CROSS_FIELD_CASES} keeps for its three pairs.
+ *
+ * Rows 6 and 7 (no deadline) are in NO positive set and in EVERY `$not` set —
+ * that pair of facts is the NULL-base ruling. Row 4 (NULL grace) sits wherever
+ * a zero offset would put it — that is the NULL-offset ruling.
+ */
+const OFFSET_EXPECTATIONS: ReadonlyArray<{
+  name: string;
+  build: (target: string, base: string) => unknown;
+  expected: string[];
+  note?: string;
+}> = [
+  // ── The ruling's driving shape: on time, with a column offset ─────────────
+  {
+    name: '$lte with a COLUMN offset — completed <= due + grace_days',
+    build: (target, base) => ({ [target]: { $lte: shifted(base, GRACE) } }),
+    expected: ['2', '3'],
+    note: 'The `duly` shape. Row 2 lands exactly on the last day of grace (equality inside `<=`); row 4 has NULL grace and reads as zero days, so its 03-05 completion is late against 03-01; rows 6 and 7 have no deadline and are FALSE; row 9 was inside its plain due date but a -3 grace pulls the deadline back to 02-26.',
+  },
+  {
+    name: '$lte with a LITERAL offset of 5 days',
+    build: (target, base) => ({ [target]: { $lte: shifted(base, 5) } }),
+    expected: ['1', '2', '3', '4', '9'],
+    note: 'A literal binds where the column would be. Rows 5, 6, 7 stay out (NULL on a side); row 8 (03-10) misses 03-06.',
+  },
+  {
+    name: '$lte with a NEGATIVE literal offset (-1) — the only subtraction there is',
+    build: (target, base) => ({ [target]: { $lte: shifted(base, -1) } }),
+    expected: ['3', '9'],
+    note: 'No `subDays`: a negative integer subtracts. Row 9 (02-27) is on or before 02-28; row 2 (03-03) is not.',
+  },
+  {
+    name: '$lte with a literal offset of 0 — the offset-free control',
+    build: (target, base) => ({ [target]: { $lte: shifted(base, 0) } }),
+    expected: ['3', '9'],
+    note: 'Must equal the bare `{ $field }` case below on every non-NULL row: zero days is no shift. (The NULL rows agree too for an ORDERING; only `$eq`/`$ne` read the NULL rows differently between the bare and the offset arm.)',
+  },
+  {
+    name: 'positive control — the bare reference, no offset, on this fixture',
+    build: (target, base) => ({ [target]: { $lte: { $field: base } } }),
+    expected: ['3', '9'],
+    note: 'The #5222 arm, unchanged by this card: if this moves, the harness moved rather than the offset.',
+  },
+
+  // ── The other five operators, with the column offset ──────────────────────
+  {
+    name: '$lt with a COLUMN offset',
+    build: (target, base) => ({ [target]: { $lt: shifted(base, GRACE) } }),
+    expected: ['3'],
+    note: 'Row 2 sits exactly on the deadline and drops out of the strict form.',
+  },
+  {
+    name: '$gt with a COLUMN offset — late',
+    build: (target, base) => ({ [target]: { $gt: shifted(base, GRACE) } }),
+    expected: ['1', '4', '8', '9'],
+    note: 'The "late" count of the issue. Row 4 is late because NULL grace is zero grace; row 9 is late because negative grace moved the deadline to 02-26.',
+  },
+  {
+    name: '$gte with a COLUMN offset',
+    build: (target, base) => ({ [target]: { $gte: shifted(base, GRACE) } }),
+    expected: ['1', '2', '4', '8', '9'],
+  },
+  {
+    name: '$eq with a COLUMN offset — completed on the last day of grace exactly',
+    build: (target, base) => ({ [target]: { $eq: shifted(base, GRACE) } }),
+    expected: ['2'],
+    note: 'THE cell that separates the offset arm from the bare one: row 7 (everything NULL) MATCHES a bare `$eq: { $field }` (both-NULL agree) and must NOT match here — a NULL deadline makes the comparison false, by the ruling, rather than NULL-equals-NULL by SQL.',
+  },
+  {
+    name: '$ne with a COLUMN offset',
+    build: (target, base) => ({ [target]: { $ne: shifted(base, GRACE) } }),
+    expected: ['1', '3', '4', '5', '8', '9'],
+    note: 'NOT the complement of `$eq`: rows 6 and 7 have no deadline and are false on BOTH polarities. Row 5 (never completed, deadline exists) IS in the set — the target keeps its ordinary reading, `null != deadline`.',
+  },
+  {
+    name: '$eq with a LITERAL offset of 2',
+    build: (target, base) => ({ [target]: { $eq: shifted(base, 2) } }),
+    expected: ['2'],
+  },
+  {
+    name: '$ne with a LITERAL offset of 2',
+    build: (target, base) => ({ [target]: { $ne: shifted(base, 2) } }),
+    expected: ['1', '3', '4', '5', '8', '9'],
+  },
+
+  // ── The NULL-base ruling, stated on its own — target and base swapped ──────
+  {
+    name: 'a NULL referenced column is FALSE even when the target has a value (roles swapped)',
+    build: (target, base) => ({ [base]: { $lte: shifted(target, 10) } }),
+    expected: ['1', '2', '3', '4', '8', '9'],
+    note: '`due <= completed + 10`. Rows 5 and 7 have no `completed` (the referenced base now) and are false; row 6 has no `due` (the target) and fails the ordering as any NULL target does.',
+  },
+  {
+    name: '$ne against a NULL referenced column is FALSE too, while a NULL target satisfies it (roles swapped)',
+    build: (target, base) => ({ [base]: { $ne: shifted(target, 10) } }),
+    expected: ['1', '2', '3', '4', '6', '8', '9'],
+    note: 'Row 6 (NULL target `due`, real base `completed`) is IN — `null != deadline` — and rows 5 and 7 (NULL base) are OUT. The asymmetry is the ruling, not an accident of three-valued logic.',
+  },
+
+  // ── `$not` — the predicate is total, so the negation is its exact complement ─
+  {
+    name: '$not of $lte with a COLUMN offset — the "late or no deadline" set',
+    build: (target, base) => ({ $not: { [target]: { $lte: shifted(base, GRACE) } } }),
+    expected: ['1', '4', '5', '6', '7', '8', '9'],
+    note: 'The complement of {2, 3} over all nine rows. Rows 6 and 7 are re-admitted: the comparison was FALSE for them, not NULL, so `NOT` makes it true — the same shape #5146 pinned for literal leaves.',
+  },
+  {
+    name: '$not of $eq with a COLUMN offset',
+    build: (target, base) => ({ $not: { [target]: { $eq: shifted(base, GRACE) } } }),
+    expected: ['1', '3', '4', '5', '6', '7', '8', '9'],
+  },
+  {
+    name: '$not of $ne with a COLUMN offset — re-admits exactly the no-deadline rows and the equal one',
+    build: (target, base) => ({ $not: { [target]: { $ne: shifted(base, GRACE) } } }),
+    expected: ['2', '6', '7'],
+    note: 'A guard that made a NULL base NULL (rather than FALSE) would lose rows 6 and 7 here under `NOT`; a guard hoisted above the leaf would lose them the other way.',
+  },
+
+  // ── Combinators ───────────────────────────────────────────────────────────
+  {
+    name: '$or of an offset comparison and a literal null predicate',
+    build: (target, base) => ({ $or: [{ [target]: { $lte: shifted(base, GRACE) } }, { [target]: null }] }),
+    expected: ['2', '3', '5', '7'],
+  },
+  {
+    name: 'an offset comparison ANDs with a literal predicate on the offset column',
+    build: (target, base) => ({ [target]: { $lte: shifted(base, GRACE) }, grace_days: { $gt: 0 } }),
+    expected: ['2'],
+    note: 'Row 3 is on time but has zero grace; the conjunction drops it. Everything inside one filter object ANDs.',
+  },
+  {
+    name: 'an offset comparison two combinators deep',
+    build: (target, base) => ({
+      $and: [{ $or: [{ [target]: { $gt: shifted(base, GRACE) } }, { [target]: null }] }, { $not: { grace_days: null } }],
+    }),
+    expected: ['1', '5', '8', '9'],
+    note: 'Late (1, 4, 8, 9) or never completed (5, 7), minus the NULL-grace rows (4, 7).',
+  },
+];
+
+export const CROSS_FIELD_OFFSET_CASES: readonly CrossFieldCase[] = OFFSET_PAIRS.flatMap(({ label, target, base }) =>
+  OFFSET_EXPECTATIONS.map(({ name, build, expected, note }) => ({
+    name: `[addDays] ${name} — on the ${label} pair (${target} / ${base})`,
+    filter: build(target, base),
+    expected,
+    note,
+  })),
+);
+
+/**
+ * The offset refusal arm. Every entry must throw `INVALID_FILTER` / 400 on
+ * both SQL drivers, operands withheld from the caller, the naming half in the
+ * server log — exactly {@link CROSS_FIELD_REFUSALS}' contract. The offset
+ * rides the four #5222 rulings (same-table, declared-only, tenant column
+ * forbidden, comparison class) and adds two of its own: day arithmetic applies
+ * to a `date` or `datetime` column only, and the offset column is numeric.
+ */
+export const CROSS_FIELD_OFFSET_REFUSALS: readonly CrossFieldRefusalCase[] = [
+  {
+    name: '[addDays] an offset on a NUMERIC pair is refused — day arithmetic has no meaning on a number',
+    filter: { amount: { $gt: shifted('budget', 1) } },
+    diagnosticIncludes: ['addDays', 'date or datetime'],
+  },
+  {
+    name: '[addDays] an offset on a TIME pair is refused — a wall clock has no calendar day to shift',
+    filter: { start_time: { $lte: shifted('end_time', 1) } },
+    diagnosticIncludes: ['addDays', 'date or datetime'],
+  },
+  {
+    name: '[addDays] a date target against a datetime base is still a cross-class refusal',
+    filter: { completed_on: { $lte: shifted('due_at', 1) } },
+    diagnosticIncludes: ['stored as'],
+    note: 'The class rule is checked BEFORE the offset is read: the offset never widens what compiles.',
+  },
+  {
+    name: '[addDays] a TEXT offset column is refused',
+    filter: { completed_on: { $lte: shifted('due_on', { $field: 'title' }) } },
+    diagnosticIncludes: ['addDays', 'not a numeric column'],
+  },
+  {
+    name: '[addDays] a DOTTED offset path is refused — same-table columns only, on the offset too',
+    filter: { completed_on: { $lte: shifted('due_on', { $field: 'duty.grace_days' }) } },
+    diagnosticIncludes: ['addDays', 'dotted path'],
+    note: 'The memory evaluator WALKS `duty.grace_days`; SQL push-down refuses it under the 2026-08-06 same-table ruling, loudly — the same deliberate asymmetry the bare reference has.',
+  },
+  {
+    name: '[addDays] an undeclared offset column is refused at compile time',
+    filter: { completed_on: { $lte: shifted('due_on', { $field: 'no_such_offset' }) } },
+    diagnosticIncludes: ['addDays', 'not a declared field'],
+  },
+  {
+    name: '[addDays] the tenant-isolation column is refused as the offset',
+    filter: { completed_on: { $lte: shifted('due_on', { $field: 'organization_id' }) } },
+    diagnosticIncludes: ['tenant-isolation column'],
+    note: 'A third position for the same privilege-escalation surface; closed like the other two.',
+  },
+  {
+    name: '[addDays] a fractional literal is refused — whole days only',
+    filter: { completed_on: { $lte: shifted('due_on', 1.5) } },
+    diagnosticIncludes: ['addDays', 'not an integer'],
+  },
+  {
+    name: '[addDays] a string literal is refused — a number is a number',
+    filter: { completed_on: { $lte: shifted('due_on', '5') } },
+    diagnosticIncludes: ['addDays', 'neither an integer'],
+  },
+  {
+    name: '[addDays] an offset object without $field is refused',
+    filter: { completed_on: { $lte: shifted('due_on', { days: 5 }) } },
+    diagnosticIncludes: ['addDays', 'neither an integer'],
+  },
+];
+
+/**
+ * [#7929] The operand names the offset refusals can put in a diagnostic — the
+ * caller-visible message must contain none of them (see
+ * {@link CROSS_FIELD_OPERAND_NAMES} for why `id` is absent).
+ */
+export const CROSS_FIELD_OFFSET_OPERAND_NAMES: readonly string[] = [
+  'completed_on',
+  'due_on',
+  'completed_at',
+  'due_at',
+  'grace_days',
+  'title',
+  'amount',
+  'budget',
+  'start_time',
+  'end_time',
+  'organization_id',
+  'duty.grace_days',
+  'no_such_offset',
+];
