@@ -5,9 +5,11 @@ import {
   validateActionParams,
   ACTION_PARAM_BUILTIN_KEYS,
   ActionSessionSchema,
+  type ActionEngineFacade,
   type ActionSession,
   type ResolvedActionParam,
 } from './action-params.zod';
+import type { FilterCondition } from '../data/filter.zod';
 import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 
 const codes = (issues: ReturnType<typeof validateActionParams>) => issues.map((i) => i.code).sort();
@@ -390,5 +392,74 @@ describe('#5779 — ActionSession `positions` canonical + `roles` deprecated ali
     expect(entry!.reason).toMatch(/deprecation window/);
     expect(entry!.reason).toMatch(/#5613/);
     expect(entry!.acceptanceCriteria).toMatch(/ctx\.session\.positions/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #14175 — `ActionEngineFacade.find` takes a FILTER, never an ObjectQL envelope
+// ---------------------------------------------------------------------------
+
+type Eq< A, B > = (< T >() => T extends A ? 1 : 2) extends (< T >() => T extends B ? 1 : 2) ? true : false;
+type Assert< T extends true > = T;
+
+describe('#14175 — ActionEngineFacade.find takes a FILTER (the `where` half), never an ObjectQL envelope', () => {
+  // The declared slot, read off the interface — not a retyped copy of it, so a
+  // re-widening back to an open record, or a rename of the type behind it,
+  // fails HERE rather than in the first consumer to notice.
+  type FindFilter = Parameters<ActionEngineFacade['find']>[1];
+
+  it('types the second parameter as the published `FilterCondition` (the tsc channel)', () => {
+    // `Eq` is the strict mutual-assignability test, so `Record<string, unknown>`
+    // — the type this slot carried before, and the one it must not drift back
+    // to — does not satisfy it (measured: the same `Assert` against
+    // `Record<string, unknown>` is a TS2344).
+    type _slotIsFilterCondition = Assert<Eq<FindFilter, FilterCondition>>;
+
+    const filter: FindFilter = { position_code: 'qa_lead', active: true };
+    expect(Object.keys(filter)).toEqual(['position_code', 'active']);
+  });
+
+  it('positive control — every shape a handler legitimately passes compiles, the empty filter included', () => {
+    const implicitEquality: FindFilter = { status: 'completed' };
+    const explicitOperator: FindFilter = { position_code: { $in: ['qa_lead', 'qa_manager'] }, active: true };
+    const logical: FindFilter = {
+      $and: [{ active: true }, { $or: [{ tier: 'a' }, { tier: 'b' }] }],
+      $not: { archived: true },
+    };
+    // The runtime passes THIS one through unwrapped — the unfiltered read, and
+    // the one call that kept working in the reporting app under either belief.
+    const unfiltered: FindFilter = {};
+
+    expect([implicitEquality, explicitOperator, logical, unfiltered].every((f) => typeof f === 'object')).toBe(true);
+  });
+
+  it('refuses at compile time what `FilterCondition` refuses — a primitive and a mistyped logical operator', () => {
+    // Each `@ts-expect-error` is itself checked: if the type ever ADMITS one of
+    // these, the directive goes unused and `tsc -p tsconfig.test.json` reds.
+    // @ts-expect-error — a filter is an object; a bare string is not a `where` half.
+    const primitive: FindFilter = 'position_code = qa_lead';
+    // @ts-expect-error — `$and` is `FilterCondition[]`; a string is refused.
+    const andNotArray: FindFilter = { $and: 'active' };
+    // @ts-expect-error — `$or` is `FilterCondition[]`; a bare object is refused.
+    const orNotArray: FindFilter = { $or: { active: true } };
+    // @ts-expect-error — `$not` is a `FilterCondition`; a string is refused.
+    const notNotFilter: FindFilter = { $not: 'archived' };
+
+    expect([primitive, andNotArray, orNotArray, notNotFilter]).toHaveLength(4);
+  });
+
+  it('MEASURED GAP — the exact envelope mistake still compiles; the doc comment, not the type, is the contract', () => {
+    // `FilterCondition`'s string index signature is what lets a field NAME be a
+    // key, and `where` is a string — so the shape that returned `[]` in silence
+    // in the reporting app (`{ where: { position_code: 'qa_lead' } }`) is
+    // admitted by the type, one level down too. This pin RECORDS that
+    // measurement rather than hiding it: a later narrowing that refuses `where`
+    // at the top level turns it red on purpose, so the member's "does NOT
+    // refuse `{ where: … }`" sentence is updated with the type instead of
+    // drifting from it.
+    const envelope: FindFilter = { where: { position_code: 'qa_lead' } };
+    const nested: FindFilter = { where: { where: { position_code: 'qa_lead' } } };
+
+    expect('where' in envelope && 'where' in nested).toBe(true);
   });
 });
