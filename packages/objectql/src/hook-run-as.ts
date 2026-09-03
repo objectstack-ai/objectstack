@@ -46,7 +46,12 @@
  * never touches `opCtx.context`, only the api object the handler is handed.
  */
 
-import type { IScopedContext, IScopedObjectRepository } from '@objectstack/spec/contracts';
+import type {
+  EngineTransactionInfo,
+  EngineTransactionOptions,
+  IScopedContext,
+  IScopedObjectRepository,
+} from '@objectstack/spec/contracts';
 
 /** The declared values, in the schema's order. */
 export const HOOK_RUN_AS_VALUES = ['system', 'user', 'inherit'] as const;
@@ -135,7 +140,10 @@ export class UnscopedHookApi implements IScopedContext {
     throw new HookUnscopedDataAccessError(this.ref);
   }
 
-  transaction<T>(_callback: (tx: IScopedContext) => Promise<T>): Promise<T> {
+  transaction<T>(
+    _callback: (trxCtx: IScopedContext, info: EngineTransactionInfo) => Promise<T>,
+    _opts?: EngineTransactionOptions,
+  ): Promise<T> {
     return Promise.reject(new HookUnscopedDataAccessError(this.ref));
   }
 }
