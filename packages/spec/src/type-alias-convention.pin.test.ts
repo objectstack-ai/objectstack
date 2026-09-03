@@ -546,7 +546,6 @@ export type Iso186 = Assert<Eq< z.input< typeof M31.RealtimeEventSchema >, z.inf
 
 // api/rest-server.zod.ts
 export type Iso187 = Assert<Eq< z.input< typeof M32.CrudOperation >, z.infer< typeof M32.CrudOperation > >>;
-export type Iso188 = Assert<Eq< z.input< typeof M32.CrudEndpointPatternSchema >, z.infer< typeof M32.CrudEndpointPatternSchema > >>;
 export type Iso189 = Assert<Eq< z.input< typeof M32.GeneratedEndpointSchema >, z.infer< typeof M32.GeneratedEndpointSchema > >>;
 export type Iso190 = Assert<Eq< z.input< typeof M32.EndpointRegistrySchema >, z.infer< typeof M32.EndpointRegistrySchema > >>;
 

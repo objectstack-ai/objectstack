@@ -46,17 +46,17 @@
         },
         "upsertMany": {
           "status": "dead",
-          "verifiedAt": "2026-09-02",
-          "evidenceScope": "in-repo",
-          "note": "0 read sites at 2514d49f3. Its three siblings each gate a route mount; this one gates nothing, because there is no upsertMany route to gate — the switch was declared for a batch operation that was never built (`this.protocol` has createManyData / updateManyData / deleteManyData and no upsert counterpart). `operations.upsertMany: false` therefore disables nothing and `true` enables nothing."
+          "verifiedAt": "2026-09-03",
+          "evidenceScope": "cross-repo",
+          "note": "REMOVED 2026-09-03 (#14691) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error). No source is stripped by a conversion: a RestServerConfig is plugin TS configuration, never a stack collection member or a sys_metadata row (the `RestServerConfig.openApi31` precedent, #4579), so the D3 entry `rest-server-config-dead-keys-retired` carries the prescription. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); there is no `POST /data/:object/upsertMany` and no protocol member behind it (createManyData / updateManyData / deleteManyData only); upsert is an operation TYPE of the generic `POST /data/:object/batch` endpoint (`BatchOperationType` 'upsert', keyed by `externalId`), which `enableBatchEndpoint` gates. Pre-retirement census note: 0 read sites at 2514d49f3. Its three siblings each gate a route mount; this one gates nothing, because there is no upsertMany route to gate — the switch was declared for a batch operation that was never built (`this.protocol` has createManyData / updateManyData / deleteManyData and no upsert counterpart). `operations.upsertMany: false` therefore disables nothing and `true` enables nothing. Scope widened 2026-09-03: in-repo census at 2514d49f3 (0 read sites) + objectui @d4c6a86 clean + cloud @9b6abe0f2fd5 clean STRUCTURALLY (#14796: cloud never authors a `RestServerConfig`), so `evidenceScope` is `cross-repo`."
         }
       }
     },
     "defaultAtomic": {
       "status": "dead",
-      "verifiedAt": "2026-09-02",
-      "evidenceScope": "in-repo",
-      "note": "0 read sites at 2514d49f3. Repo-wide there are no reads outside packages/spec and rest-server.ts either. The key is normalized into `this.config.batch.defaultAtomic` and no batch handler consults it, so `batch.defaultAtomic: false` changes no batch's transaction mode. A switch whose describe() promises a transaction default while the transaction default is decided elsewhere is the false-compliance shape this ledger exists to surface, which is why it is recorded rather than left to a reader's grep."
+      "verifiedAt": "2026-09-03",
+      "evidenceScope": "cross-repo",
+      "note": "REMOVED 2026-09-03 (#14691) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error). No source is stripped by a conversion: a RestServerConfig is plugin TS configuration, never a stack collection member or a sys_metadata row (the `RestServerConfig.openApi31` precedent, #4579), so the D3 entry `rest-server-config-dead-keys-retired` carries the prescription. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); atomicity is decided per request by `options.atomic` in the batch body (`BatchOptionsSchema`, ADR-0119 D4 — opt-in, default false, deliberately aligned to what every caller already got); a server-side default that flipped it silently would change the failure semantics of callers who send nothing, the move ADR-0119 D4 refused, which is why this family resolved to REMOVE rather than ENFORCE. Pre-retirement census note: 0 read sites at 2514d49f3. Repo-wide there are no reads outside packages/spec and rest-server.ts either. The key is normalized into `this.config.batch.defaultAtomic` and no batch handler consults it, so `batch.defaultAtomic: false` changes no batch's transaction mode. A switch whose describe() promises a transaction default while the transaction default is decided elsewhere is the false-compliance shape this ledger exists to surface, which is why it is recorded rather than left to a reader's grep. Scope widened 2026-09-03: in-repo census at 2514d49f3 (0 read sites) + objectui @d4c6a86 clean + cloud @9b6abe0f2fd5 clean STRUCTURALLY (#14796: cloud never authors a `RestServerConfig`), so `evidenceScope` is `cross-repo`."
     }
   }
 }

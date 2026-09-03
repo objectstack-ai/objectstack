@@ -71,7 +71,7 @@ import { refuseRepeatedQueryParams, assertFilterParamSuppliedOnce } from './quer
 // ignored filter is the one wrong answer a caller cannot detect.
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import type { DirectMountedRoute, MountedRouteSource } from './direct-mount.js';
-import { RestServerConfig, RestApiConfig, CrudEndpointsConfigParsed, RouteGenerationConfigParsed } from '@objectstack/spec/api';
+import { RestServerConfig, RestApiConfig } from '@objectstack/spec/api';
 // [#11683] The catalog's own floor for "a required `code` and no more specific
 // one" — see its use in `registerSharingEndpoints`, where the nested ADR-0112
 // envelope declares `code` REQUIRED while the flat classification it re-dresses
@@ -745,14 +745,11 @@ type NormalizedRestServerConfig = {
             delete: boolean;
             list: boolean;
         };
-        patterns: CrudEndpointsConfigParsed['patterns'];
         dataPrefix: string;
-        objectParamStyle: 'path' | 'query';
     };
     metadata: {
         prefix: string;
         enableCache: boolean;
-        cacheTtl: number;
         /**
          * [ADR-0106 D8] Per-caller FLS masking of served object schemas.
          * Default **on**; `false` opts a deployment out of the metadata-plane
@@ -763,7 +760,6 @@ type NormalizedRestServerConfig = {
             types: boolean;
             items: boolean;
             item: boolean;
-            schema: boolean;
         };
     };
     batch: {
@@ -773,16 +769,18 @@ type NormalizedRestServerConfig = {
             createMany: boolean;
             updateMany: boolean;
             deleteMany: boolean;
-            upsertMany: boolean;
         };
-        defaultAtomic: boolean;
     };
-    routes: {
-        includeObjects: string[] | undefined;
-        excludeObjects: string[] | undefined;
-        nameTransform: 'none' | 'plural' | 'kebab-case' | 'camelCase';
-        overrides: RouteGenerationConfigParsed['overrides'];
-    };
+    /**
+     * [#14691] Every key of `RouteGenerationConfigSchema` is a `retiredKey()`
+     * tombstone (ADR-0049 enforce-or-remove — nothing here ever read
+     * `includeObjects` / `excludeObjects` / `nameTransform` / `overrides`; the
+     * #14369 census). The sub-object is still PARSED, so an authored key is
+     * refused at construction with its prescription rather than stripped, but
+     * nothing is threaded: per-object exposure is the object's own
+     * `enable.apiEnabled` / `enable.apiMethods`, enforced by `enforceApiAccess`.
+     */
+    routes: Record<string, never>;
 };
 
 /**
@@ -882,7 +880,7 @@ function parseDeclaredSubConfig<T extends z.ZodType>(
  * - Metadata API endpoints (/meta)
  * - Batch operation endpoints (/batch, /createMany, /updateMany, /deleteMany)
  * - Discovery endpoint
- * - Configurable path prefixes and patterns
+ * - Configurable path prefixes
  * 
  * @example
  * const restServer = new RestServer(httpServer, protocolProvider, {
@@ -3569,14 +3567,15 @@ export class RestServer {
                     delete: crud.operations?.delete ?? true,
                     list: crud.operations?.list ?? true,
                 },
-                patterns: crud.patterns,
+                // `patterns` / `objectParamStyle` are tombstones since #14691 —
+                // refused by the parse above, never threaded.
                 dataPrefix: crud.dataPrefix,
-                objectParamStyle: crud.objectParamStyle,
             },
             metadata: {
                 prefix: metadata.prefix,
                 enableCache: metadata.enableCache,
-                cacheTtl: metadata.cacheTtl,
+                // `cacheTtl` is a tombstone since #14691 (`enableCache` selects the
+                // protocol's cached read path, which takes no TTL).
                 // [ADR-0106 D8] Default ON — masking is the platform default and
                 // ships with the current major. The key has a declared seat
                 // (`MetadataEndpointsConfigSchema.maskObjectFields` in
@@ -3592,7 +3591,8 @@ export class RestServer {
                     types: metadata.endpoints?.types ?? true,
                     items: metadata.endpoints?.items ?? true,
                     item: metadata.endpoints?.item ?? true,
-                    schema: metadata.endpoints?.schema ?? true,
+                    // `schema` is a tombstone since #14691: it gated a route that
+                    // does not exist.
                 },
             },
             batch: {
@@ -3603,16 +3603,16 @@ export class RestServer {
                     createMany: batch.operations?.createMany ?? true,
                     updateMany: batch.operations?.updateMany ?? true,
                     deleteMany: batch.operations?.deleteMany ?? true,
-                    upsertMany: batch.operations?.upsertMany ?? true,
+                    // `upsertMany` is a tombstone since #14691: there is no upsertMany
+                    // route to gate (upsert is an operation type of the generic batch
+                    // endpoint). So is `defaultAtomic`: atomicity is the per-request
+                    // `options.atomic` (ADR-0119 D4).
                 },
-                defaultAtomic: batch.defaultAtomic,
             },
-            routes: {
-                includeObjects: routes.includeObjects,
-                excludeObjects: routes.excludeObjects,
-                nameTransform: routes.nameTransform,
-                overrides: routes.overrides,
-            },
+            // [#14691] Parsed for the refusal, threaded as nothing — every key of
+            // the sub-object is a tombstone (see the type above). `routes` is kept
+            // as a key so the normalized shape still has one seat per sub-object.
+            routes: routes as Record<string, never>,
         };
     }
     

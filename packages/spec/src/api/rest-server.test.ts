@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   RestApiConfigSchema,
   CrudOperation,
-  CrudEndpointPatternSchema,
   CrudEndpointsConfigSchema,
   MetadataEndpointsConfigSchema,
   BatchEndpointsConfigSchema,
@@ -196,36 +195,17 @@ describe('CrudOperation', () => {
   });
 });
 
-describe('CrudEndpointPatternSchema', () => {
-  it('should accept basic pattern', () => {
-    const pattern = CrudEndpointPatternSchema.parse({
-      method: 'GET',
-      path: '/data/{object}',
-    });
-
-    expect(pattern.method).toBe('GET');
-    expect(pattern.path).toBe('/data/{object}');
-  });
-
-  it('should accept pattern with documentation', () => {
-    const pattern = CrudEndpointPatternSchema.parse({
-      method: 'POST',
-      path: '/data/{object}',
-      summary: 'Create record',
-      description: 'Creates a new record in the specified object',
-    });
-
-    expect(pattern.summary).toBe('Create record');
-    expect(pattern.description).toBeDefined();
-  });
-});
+// `CrudEndpointPatternSchema` tests were removed with the schema (#14691, ADR-0049
+// enforce-or-remove): its only consumer, `crud.patterns`, is tombstoned below.
 
 describe('CrudEndpointsConfigSchema', () => {
   it('should accept default config', () => {
     const config = CrudEndpointsConfigSchema.parse({});
 
     expect(config.dataPrefix).toBe('/data');
-    expect(config.objectParamStyle).toBe('path');
+    // `objectParamStyle` is a tombstone since #14691: the parsed output carries
+    // no default for it any more.
+    expect(config).not.toHaveProperty('objectParamStyle');
   });
 
   it('should accept custom operations config', () => {
@@ -242,15 +222,12 @@ describe('CrudEndpointsConfigSchema', () => {
     expect(config.operations?.delete).toBe(false);
   });
 
-  it('should accept custom patterns', () => {
-    const config = CrudEndpointsConfigSchema.parse({
+  it('[#14691] REJECTS `patterns` with the retirement prescription — the key never customized a route', () => {
+    expect(() => CrudEndpointsConfigSchema.parse({
       patterns: {
         create: { method: 'POST', path: '/objects/{object}' },
-        read: { method: 'GET', path: '/objects/{object}/:id' },
       },
-    });
-
-    expect(config.patterns?.create.path).toBe('/objects/{object}');
+    })).toThrow(/`crud\.patterns` was removed.*never read it.*Delete the key.*declarative `api` endpoint/s);
   });
 
   it('should accept custom data prefix', () => {
@@ -261,12 +238,22 @@ describe('CrudEndpointsConfigSchema', () => {
     expect(config.dataPrefix).toBe('/objects');
   });
 
-  it('should accept query param style', () => {
-    const config = CrudEndpointsConfigSchema.parse({
-      objectParamStyle: 'query',
-    });
+  it('[#14691] REJECTS `objectParamStyle` — both former enum values, with the prescription', () => {
+    for (const objectParamStyle of ['path', 'query']) {
+      expect(() => CrudEndpointsConfigSchema.parse({ objectParamStyle }), objectParamStyle)
+        .toThrow(/`crud\.objectParamStyle` was removed.*path segment.*Delete the key/s);
+    }
+  });
 
-    expect(config.objectParamStyle).toBe('query');
+  it('[#14691] the tombstones reject one key each, not the config — every live key still parses', () => {
+    const config = CrudEndpointsConfigSchema.parse({
+      operations: { list: false },
+      dataPrefix: '/records',
+    });
+    expect(config.dataPrefix).toBe('/records');
+    expect(config.operations?.list).toBe(false);
+    expect(config).not.toHaveProperty('patterns');
+    expect(config).not.toHaveProperty('objectParamStyle');
   });
 });
 
@@ -276,7 +263,8 @@ describe('MetadataEndpointsConfigSchema', () => {
 
     expect(config.prefix).toBe('/meta');
     expect(config.enableCache).toBe(true);
-    expect(config.cacheTtl).toBe(3600);
+    // `cacheTtl` is a tombstone since #14691: no default is materialized.
+    expect(config).not.toHaveProperty('cacheTtl');
   });
 
   it('should accept custom prefix', () => {
@@ -287,27 +275,37 @@ describe('MetadataEndpointsConfigSchema', () => {
     expect(config.prefix).toBe('/metadata');
   });
 
-  it('should accept cache config', () => {
+  it('should accept the cache switch', () => {
     const config = MetadataEndpointsConfigSchema.parse({
       enableCache: false,
-      cacheTtl: 7200,
     });
 
     expect(config.enableCache).toBe(false);
-    expect(config.cacheTtl).toBe(7200);
   });
 
-  it('should accept endpoints config', () => {
+  it('[#14691] REJECTS `cacheTtl` — including the negative value the old contract accepted', () => {
+    for (const cacheTtl of [7200, 0, -1]) {
+      expect(() => MetadataEndpointsConfigSchema.parse({ cacheTtl }), String(cacheTtl))
+        .toThrow(/`metadata\.cacheTtl` was removed.*takes no TTL.*Delete the key/s);
+    }
+  });
+
+  it('should accept endpoints config — the three switches that gate real mounts', () => {
     const config = MetadataEndpointsConfigSchema.parse({
       endpoints: {
         types: true,
         items: true,
-        item: true,
-        schema: false,
+        item: false,
       },
     });
 
-    expect(config.endpoints?.schema).toBe(false);
+    expect(config.endpoints?.item).toBe(false);
+    expect(config.endpoints).not.toHaveProperty('schema');
+  });
+
+  it('[#14691] REJECTS `endpoints.schema` — it gated a route that does not exist', () => {
+    expect(() => MetadataEndpointsConfigSchema.parse({ endpoints: { schema: false } }))
+      .toThrow(/`metadata\.endpoints\.schema` was removed.*does not exist.*Delete the key/s);
   });
 
   it('[ADR-0106 D8] maskObjectFields defaults to true — the mask is ON unless opted out', () => {
@@ -366,7 +364,8 @@ describe('BatchEndpointsConfigSchema', () => {
 
     expect(config.maxBatchSize).toBe(200);
     expect(config.enableBatchEndpoint).toBe(true);
-    expect(config.defaultAtomic).toBe(true);
+    // `defaultAtomic` is a tombstone since #14691: no default is materialized.
+    expect(config).not.toHaveProperty('defaultAtomic');
   });
 
   it('should accept custom max batch size', () => {
@@ -387,87 +386,60 @@ describe('BatchEndpointsConfigSchema', () => {
     })).toThrow();
   });
 
-  it('should accept operations config', () => {
+  it('should accept operations config — the three switches that gate real mounts', () => {
     const config = BatchEndpointsConfigSchema.parse({
       operations: {
         createMany: true,
         updateMany: true,
         deleteMany: false,
-        upsertMany: true,
       },
     });
 
     expect(config.operations?.deleteMany).toBe(false);
+    expect(config.operations).not.toHaveProperty('upsertMany');
   });
 
-  it('should accept non-atomic mode', () => {
-    const config = BatchEndpointsConfigSchema.parse({
-      defaultAtomic: false,
-    });
+  it('[#14691] REJECTS `operations.upsertMany` — it gated a route that was never built', () => {
+    expect(() => BatchEndpointsConfigSchema.parse({ operations: { upsertMany: false } }))
+      .toThrow(/`batch\.operations\.upsertMany` was removed.*never built.*Delete the key.*'upsert'/s);
+  });
 
-    expect(config.defaultAtomic).toBe(false);
+  it('[#14691] REJECTS `defaultAtomic` — atomicity is the per-request `options.atomic`', () => {
+    for (const defaultAtomic of [true, false]) {
+      expect(() => BatchEndpointsConfigSchema.parse({ defaultAtomic }), String(defaultAtomic))
+        .toThrow(/`batch\.defaultAtomic` was removed.*options\.atomic.*Delete the key/s);
+    }
   });
 });
 
 describe('RouteGenerationConfigSchema', () => {
-  it('should accept minimal config', () => {
+  it('should accept the empty sub-object — and materialize nothing, every key being a tombstone (#14691)', () => {
     const config = RouteGenerationConfigSchema.parse({});
 
-    expect(config.nameTransform).toBe('none');
+    expect(config).toEqual({});
   });
 
-  it('should accept include objects', () => {
-    const config = RouteGenerationConfigSchema.parse({
-      includeObjects: ['account', 'contact', 'opportunity'],
-    });
-
-    expect(config.includeObjects).toHaveLength(3);
+  it('[#14691] REJECTS `includeObjects` / `excludeObjects` — the object declares its own exposure', () => {
+    expect(() => RouteGenerationConfigSchema.parse({ includeObjects: ['account', 'contact'] }))
+      .toThrow(/`routes\.includeObjects` was removed.*Delete the key.*enable\.apiEnabled.*enable\.apiMethods/s);
+    expect(() => RouteGenerationConfigSchema.parse({ excludeObjects: ['system_log'] }))
+      .toThrow(/`routes\.excludeObjects` was removed.*Delete the key.*enable\.apiEnabled.*enable\.apiMethods/s);
   });
 
-  it('should accept exclude objects', () => {
-    const config = RouteGenerationConfigSchema.parse({
-      excludeObjects: ['system_log', 'audit_trail'],
-    });
-
-    expect(config.excludeObjects).toHaveLength(2);
+  it('[#14691] REJECTS `nameTransform` — every former enum value, `none` included', () => {
+    for (const nameTransform of ['none', 'plural', 'kebab-case', 'camelCase']) {
+      expect(() => RouteGenerationConfigSchema.parse({ nameTransform }), nameTransform)
+        .toThrow(/`routes\.nameTransform` was removed.*canonical id.*Delete the key/s);
+    }
   });
 
-  it('should accept name transform', () => {
-    const transforms = ['none', 'plural', 'kebab-case', 'camelCase'] as const;
-    
-    transforms.forEach(transform => {
-      const config = RouteGenerationConfigSchema.parse({
-        nameTransform: transform,
-      });
-      expect(config.nameTransform).toBe(transform);
-    });
-  });
-
-  it('should accept overrides', () => {
-    const config = RouteGenerationConfigSchema.parse({
+  it('[#14691] REJECTS `overrides` — the per-object record turned nothing on or off', () => {
+    expect(() => RouteGenerationConfigSchema.parse({
       overrides: {
-        account: {
-          enabled: true,
-          basePath: '/accounts',
-        },
-        contact: {
-          enabled: false,
-        },
-        task: {
-          operations: {
-            create: true,
-            read: true,
-            update: true,
-            delete: false,
-            list: true,
-          },
-        },
+        account: { enabled: true, basePath: '/accounts' },
+        contact: { enabled: false },
       },
-    });
-
-    expect(config.overrides?.account?.basePath).toBe('/accounts');
-    expect(config.overrides?.contact?.enabled).toBe(false);
-    expect(config.overrides?.task?.operations?.delete).toBe(false);
+    })).toThrow(/`routes\.overrides` was removed.*Delete the key.*enable\.apiEnabled.*crud\.dataPrefix/s);
   });
 });
 
@@ -504,16 +476,24 @@ describe('RestServerConfigSchema', () => {
       batch: {
         maxBatchSize: 200,
       },
-      routes: {
-        excludeObjects: ['system_log'],
-      },
+      routes: {},
     });
 
     expect(config.api?.version).toBe('v1');
     expect(config.crud?.dataPrefix).toBe('/data');
     expect(config.metadata?.prefix).toBe('/meta');
     expect(config.batch?.maxBatchSize).toBe(200);
-    expect(config.routes?.excludeObjects).toContain('system_log');
+    expect(config.routes).toEqual({});
+  });
+
+  it('[#14691] a retired sub-object key is refused THROUGH the whole config, with its own prescription', () => {
+    // The tombstones live on the sub-schemas; this pins that composing them
+    // under `RestServerConfigSchema` changes nothing — the same authored key is
+    // refused at the whole-config parse with the same string.
+    expect(() => RestServerConfigSchema.parse({ routes: { excludeObjects: ['system_log'] } }))
+      .toThrow(/`routes\.excludeObjects` was removed.*Delete the key/s);
+    expect(() => RestServerConfigSchema.parse({ crud: { patterns: {} } }))
+      .toThrow(/`crud\.patterns` was removed.*Delete the key/s);
   });
 });
 
@@ -719,20 +699,15 @@ describe('Integration Tests', () => {
           createMany: true,
           updateMany: true,
           deleteMany: true,
-          upsertMany: true,
         },
-        defaultAtomic: true,
       },
-      routes: {
-        excludeObjects: ['system_log'],
-        nameTransform: 'none',
-      },
+      routes: {},
     };
 
     const result = RestServerConfigSchema.parse(serverConfig);
     expect(result.api?.version).toBe('v1');
     expect(result.crud?.dataPrefix).toBe('/data');
-    expect(result.metadata?.cacheTtl).toBe(3600);
+    expect(result.metadata?.enableCache).toBe(true);
     expect(result.batch?.maxBatchSize).toBe(200);
   });
 });
@@ -774,7 +749,7 @@ describe('[#4579] `RestServerConfig.openApi31` retirement', () => {
       crud: { dataPrefix: '/data' },
       metadata: { prefix: '/meta' },
       batch: { maxBatchSize: 200 },
-      routes: { excludeObjects: ['system_log'] },
+      routes: {},
     });
     expect(parsed.api?.version).toBe('v1');
     expect(parsed.crud?.dataPrefix).toBe('/data');
