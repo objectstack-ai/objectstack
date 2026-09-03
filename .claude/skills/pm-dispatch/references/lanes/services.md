@@ -18,8 +18,6 @@
   —— 单独的绿不是证据。
 - **安全族卡的披露纪律**:复现配方不落任何公开面(卡、PR、评论);证据以抽象描述
   或私有通道承载。
-- 门禁读数不轻信聚合:`check:type-check-debt` 可以在包级 typecheck 绿时红;
-  `check:i18n` 以「PREREQUISITE NOT MET — workspace CLI 未 build」退 3 不是漂移。
 
 ## 席内判断
 
