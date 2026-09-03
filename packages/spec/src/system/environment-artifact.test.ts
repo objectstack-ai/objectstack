@@ -278,6 +278,12 @@ describe('grantedPermissions — install-time granted set per plugin manifest `i
     expect(Object.keys(parsed.grantedPermissions ?? {})).toEqual(['@acme/plugin-crm', '@acme/plugin-reports']);
   });
 
+  it('pure control: with no grantedPermissions present at all, an unknown top-level sibling is stripped (green before and after this key; red only if the door goes passthrough)', () => {
+    const parsed = EnvironmentArtifactSchema.parse({ ...wireMinimal, notAnEnvelopeKey: { anything: 1 } });
+    expect(parsed).not.toHaveProperty('notAnEnvelopeKey');
+    expect(Object.keys(parsed).sort()).toEqual(['checksum', 'commitId', 'environmentId', 'metadata', 'schemaVersion']);
+  });
+
   it('positive control: an unknown top-level sibling is STILL stripped — the door admits the declared key, not everything', () => {
     const parsed = EnvironmentArtifactSchema.parse({
       ...wireMinimal,
