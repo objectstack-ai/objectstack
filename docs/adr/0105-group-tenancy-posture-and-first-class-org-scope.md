@@ -1,6 +1,6 @@
 # ADR-0105: Group Tenancy Posture — Organization Scope as a First-Class Authorization Dimension
 
-**Status**: Accepted (2026-07-27; proposed 2026-07-25) — Phase 0/1 implemented (#3559). Amended 2026-07-27: **D12 correction** — `group` posture activation is entitled, not open (#3570; see the D12 Amendment). Phase 2 **D8** and **D9** implemented 2026-07-28 — D8: #3645 (host seam) → #3663 (placement engine) → #3674 (`/security/my-delegable-scope`) → #3695 (issuer-grant resolution) → #3722 (`delegated_admin` + invitation role cap, #3697) → #3767 (`sys_member` governed), console objectui#2868/#2891, e2e cloud#886; the membership-role channel D8's placement replaces is closed by [ADR-0108](./0108-membership-grade-is-not-a-capability-channel.md). D9: #3824 + #3873 (see the D9 amendment below). D10 stays reserved pending its follow-up ADR; D13 not started
+**Status**: Accepted (2026-07-27; proposed 2026-07-25) — Phase 0/1 implemented (#3559). Amended 2026-07-27: **D12 correction** — `group` posture activation is entitled, not open (#3570; see the D12 Amendment). Phase 2 **D8** and **D9** implemented 2026-07-28 — D8: #3645 (host seam) → #3663 (placement engine) → #3674 (`/security/my-delegable-scope`) → #3695 (issuer-grant resolution) → #3722 (`delegated_admin` + invitation role cap, #3697) → #3767 (`sys_member` governed), console objectui#2868/#2891, e2e cloud#886; the membership-role channel D8's placement replaces is closed by [ADR-0108](./0108-membership-grade-is-not-a-capability-channel.md). D9: #3824 + #3873 (see the D9 amendment below). D10 **withdrawn** 2026-09-04 by maintainer ruling (「不考虑集团级模板行，作废相关需求」「不考虑 分层主数据」; recorded in [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D12 — see the note under D10); D13 not started
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove), [ADR-0057](./0057-erp-authorization-core-business-units-and-scope-depth.md) (business units + scope depth), [ADR-0066](./0066-unified-authorization-model.md) (unified authz, superuser bypass), [ADR-0086](./0086-authz-metadata-config-boundary-and-cross-package-composition.md), [ADR-0090](./0090-permission-model-v2-concept-convergence.md) (permission set / position / business unit), [ADR-0091](./0091-grant-lifecycle-and-recertification.md) (validity windows), [ADR-0092](./0092-sys-user-profile-field-delegation.md) (identity write guard + field whitelist), [ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md) (tenancy service), [ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md) (tenant Layer 0, posture ladder), [ADR-0103](./0103-managedby-write-policy-and-engine-write-guard.md); cloud ADR-0016 (open/paid boundary: 强制免费、治理收费), cloud ADR-0081 (`@objectstack/organizations`)
 **Tracking**: #3541 (P0 findings F1/F2 became #3539/#3540, closed by #3559); cloud-side tracking cloud #874
@@ -305,6 +305,8 @@ linked to the template, with a resolution rule (org override wins). Mechanics
 policies: 集团统管 / 分级 / 自由) to be detailed in a follow-up ADR; this ADR
 reserves the concept and its place in Phase 2.
 
+*Withdrawn 2026-09-04.* Maintainer ruling, verbatim and untranslated: 「不考虑集团级模板行，作废相关需求」 and 「不考虑 分层主数据」. No follow-up ADR will be drafted; group-level template rows shared down an organization tree are not a platform concept. Recorded in [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D12, which also states the consequence: a template row "platform-global or group-org-owned, read-shared" would need either a NULL owner — a state ADR-0131 removes — or a tree-derived one, which D6 keeps out of visibility. The `group` posture keeps exactly one kind of cross-organization visibility, membership union (D2).
+
 **D11 — Enforce-or-remove cleanup (ADR-0049 debts on the org axis).**
 - `PermissionSet.contextVariables`: **remove** from the spec (no consumer;
   its use cases are covered by `rlsMembership` and literal predicates).
@@ -410,7 +412,7 @@ environment).
   three-plants-one-group dogfood — plant admins configure process data
   mutually invisibly, group reads all plants on one screen, zero custom
   security code.
-- **Phase 2 (group product depth)**: D8, D9, D10, "all my organizations"
+- **Phase 2 (group product depth)**: D8, D9, D10 (withdrawn 2026-09-04), "all my organizations"
   console affordances, D13 promotion tool.
 - **Phase 3 (governance, commercial)**: SoD constraints, certification
   campaigns over ADR-0091 validity/recert data, deny/muting layer (ADR-0066
