@@ -54,27 +54,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import {
-  SysUser,
-  SysSession,
-  SysAccount,
-  SysVerification,
-  SysOrganization,
-  SysMember,
-  SysInvitation,
-  SysTeam,
-  SysTeamMember,
-  SysScimConnectionBinding,
-  SysScimConnectionCredential,
-  SysScimGroup,
-  SysScimGroupMember,
-  SysScimIdentityTombstone,
-  SysScimProjectionGrant,
-  SysScimSubject,
-  SysScimUser,
-  SysJwks,
-} from '@objectstack/platform-objects';
 import { AuthManager } from './auth-manager.js';
+import { authIdentityObjects } from './manifest.js';
 import { createTenancyService } from './tenancy-service.js';
 import { inScimRequestScope, mintScimConnectionCredential } from './scim-connection-service.js';
 
@@ -92,26 +73,12 @@ const SYSTEM = { context: { isSystem: true } } as const;
 /** The identity objects a SCIM provisioning request touches. */
 const IDENTITY_OBJECTS = ['sys_user', 'sys_scim_subject', 'sys_scim_user'] as const;
 
-const AUTH_OBJECTS = [
-  SysUser,
-  SysSession,
-  SysAccount,
-  SysVerification,
-  SysOrganization,
-  SysMember,
-  SysInvitation,
-  SysTeam,
-  SysTeamMember,
-  SysScimConnectionBinding,
-  SysScimConnectionCredential,
-  SysScimGroup,
-  SysScimGroupMember,
-  SysScimIdentityTombstone,
-  SysScimProjectionGrant,
-  SysScimSubject,
-  SysScimUser,
-  SysJwks,
-];
+/**
+ * The objects a deployment that mounts plugin-auth registers, imported from the
+ * plugin's own manifest rather than re-spelled here, so this harness cannot
+ * drift from what `auth-plugin.ts` registers at runtime (#14615).
+ */
+const AUTH_OBJECTS = authIdentityObjects;
 
 const engines: ObjectQL[] = [];
 afterEach(async () => {
