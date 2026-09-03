@@ -62,9 +62,12 @@ single reader would not have covered.
 5. **Reconcile `coverage.json` centrally** (a single writer): un-waive any kind a hunter
    proved has a stock fixture, map new items to their kinds, pin `enumSource` on any new
    variants matrix.
-6. **Validate** `node scripts/check-platform-checklist.mjs` until green, then land the
-   run record under `runs/` and surface product defects / docs drift to the maintainer
-   in `FOLLOW-UPS.md`.
+6. **Validate** `node scripts/check-platform-checklist.mjs` until green, then surface
+   product defects / docs drift to the maintainer in `FOLLOW-UPS.md` — with the authored
+   items and the reconciled `coverage.json`, that register is the sweep's whole durable
+   output. A sweep files **no run record**: that artifact belongs to `checklist-test`,
+   and it never lands under `runs/` (git-ignored) but as one `qa-run` GitHub issue —
+   [runs/README.md](./runs/README.md), body contract in [RUNNER.md](./RUNNER.md).
 
 ## Discipline that made the 2026-08 sweep trustworthy
 
