@@ -281,7 +281,6 @@ function resolveToken(token: string, variables: VariableMap, context: Automation
         return JSON.stringify(String(val));
     });
     try {
-        // eslint-disable-next-line @typescript-eslint/no-implied-eval, no-new-func
         const fn = new Function(...KNOWN_EXPRESSION_FUNCTION_NAMES, `"use strict"; return (${safe});`);
         return fn(...KNOWN_EXPRESSION_FUNCTION_NAMES.map((n) => KNOWN_EXPRESSION_FUNCTIONS[n]));
     } catch (err) {

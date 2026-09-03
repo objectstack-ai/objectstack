@@ -236,7 +236,6 @@ function installWebContainerRequestStatePolyfill(): void {
   if (!g[sym].context) g[sym].context = {};
   if (!g[sym].context.requestStateAsyncStorage) {
     g[sym].context.requestStateAsyncStorage = new WebContainerRequestStateAsyncLocalStorage();
-    // eslint-disable-next-line no-console
     console.warn(
       '[AuthManager] WebContainer detected: installed synchronous request-state polyfill ' +
         '(node:async_hooks AsyncLocalStorage does not propagate context across await in WebContainer).',
@@ -5135,7 +5134,7 @@ export class AuthManager {
    * generated docs and the #13816 refusal all asserted the ban.
    *
    * This method restores declared = enforced by routing the state to the
-   * platform's OWN ban write (`admin-ban-endpoints.ts`):
+   * platform's OWN ban write (`user-ban-write.ts`):
    *
    *  - `active: false` on a row that is not banned ⇒ `applyUserBan` with
    *    `SCIM_DEACTIVATION_BAN_REASON` and no expiry. The vendor's
@@ -5164,8 +5163,14 @@ export class AuthManager {
    * A consequence worth stating: on 1.7.2 a SCIM `DELETE /Users/{id}` no
    * longer deletes the better-auth user (the vendor tombstones the source);
    * it leaves the user with no active source, so this callback disables the
-   * account. Re-provisioning through the tombstone re-links the same user,
-   * the state turns active, and the SCIM ban is lifted by the second bullet.
+   * account — by the SAME branch as `active: false`, including over an
+   * administrator's timed ban, whose `banExpires` a DELETE therefore clears
+   * too: a deprovision cannot be outlived by an expiry the administrator set.
+   * For the same reason a DELETE is judged by the `beforeUpdate` guard below
+   * and never by any `beforeDelete` — deleting the last administrator through
+   * SCIM is refused exactly as deactivating them is. Re-provisioning through
+   * the tombstone re-links the same user, the state turns active, and the
+   * SCIM ban is lifted by the second bullet.
    *
    * The break-glass last-administrator guard (ADR-0024 D5.2, #5892) is an
    * ENGINE `beforeUpdate` hook on `sys_user`, so it judges this write exactly

@@ -4328,7 +4328,6 @@ export class RestServer {
     private async loadOpenApiSpec(): Promise<any | null> {
         if (this._openApiSpecCache !== undefined) return this._openApiSpecCache;
         try {
-            // eslint-disable-next-line @typescript-eslint/ban-ts-comment
             // @ts-ignore — node built-in, no @types/node in this package
             const mod: any = await import('module');
             const requireFn = mod.createRequire((import.meta as any).url);
