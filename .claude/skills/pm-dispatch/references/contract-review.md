@@ -36,6 +36,10 @@
   隔离的 fable 复核子代理**出第二意见,只喂卡片、既有裁决与 PR 本体,⛔ 不喂派发令与
   派发席自己的结论(污染即失独立性);简报写成**对抗性**(找拒绝理由)。未达档席 ⛔ 不凭
   自述复核,恒走本路径;子代理裁决按转录核验采信(下节),逐字采纳或整体作废。
+- **裁决载独立性对(机读,C4 行比对)**（2026-09-01 裁定 A、2026-09-02 裁定读法 a):产出 diff
+  的身份写 `Implemented-by:` —— `mode:subagent` dev 记其分支(`claude/issue-…`,子代理无自有
+  session),`mode:remote` dev 记 session id;`Reviewed-by:` = 出裁决席位的 session。两者同
+  session ⇒ 报 SELF-REVIEW,⛔ 不作独立复核;两行皆无的历史裁决恒静默(⛔ 缺失永不转红)。
 - **放行 = 清标即落地**（2026-08-25 裁定）:PASS ⇒ 同席同笔剥标(双载体),
   清标评论引 2026-08-31 裁定作 provenance,按
   `landing-operations.md` 走落地前检 → 转 ready → 挂 auto-merge/入队;轮报设**复审清单**专

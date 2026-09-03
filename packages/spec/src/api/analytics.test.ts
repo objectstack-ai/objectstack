@@ -205,6 +205,31 @@ describe('AnalyticsResultResponseSchema', () => {
     expect(resp.data.fields[2].format).toBe('0.0%');
   });
 
+  // #14492 — the built-in aggregate discriminator rides the same channel, and
+  // it is the CLOSED `AggregationFunction` vocabulary: a spelling outside it is
+  // refused at the member, not stripped or passed through.
+  it('should preserve fields[].builtinAggregate and refuse a spelling outside the closed enum', () => {
+    const resp = AnalyticsResultResponseSchema.parse({
+      success: true,
+      data: {
+        rows: [{ status: 'active', count: 3 }],
+        fields: [
+          { name: 'status', type: 'string', label: 'Status' },
+          { name: 'count', type: 'number', builtinAggregate: 'count' },
+        ],
+      },
+    });
+    expect(resp.data.fields[1].builtinAggregate).toBe('count');
+    expect(resp.data.fields[0].builtinAggregate).toBeUndefined();
+
+    const bad = AnalyticsResultResponseSchema.safeParse({
+      success: true,
+      data: { rows: [], fields: [{ name: 'count', type: 'number', builtinAggregate: 'total' }] },
+    });
+    expect(bad.success).toBe(false);
+    expect(bad.success ? [] : bad.error.issues.map((i) => i.path.join('.'))).toContain('data.fields.0.builtinAggregate');
+  });
+
   it('should preserve totals — the marginal-aggregate channel, grand total included', () => {
     const resp = AnalyticsResultResponseSchema.parse({
       success: true,

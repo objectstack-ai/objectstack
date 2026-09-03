@@ -391,6 +391,27 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // One file, not `packages/create-objectstack/**`: the test reads that
       // template and nothing else across the boundary.
       'packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml',
+      // The two files that hold the COLUMN authority the CLI's migration
+      // generators mirror, READ by
+      // src/commands/generate-multiple-json-column.pin.test.ts (#14829). That
+      // pin asserts a `multiple: true` field gets a JSON column from both
+      // `os generate migration` formats because `SqlDriver.createColumn`
+      // short-circuits on the flag ABOVE its per-type switch, and
+      // `fieldHasColumn` mirrors that decision for the drift differ. Source-read
+      // rather than imported: `createColumn` is `protected` and needs a knex
+      // table builder, so driving it would mean a live driver and a built
+      // `dist`, while the SHAPE of its decision — flag first, type second — is
+      // exactly what has to stay true and is legible in the source.
+      //
+      // The declaration is the whole point of the pin, not paperwork around it:
+      // if the driver moves that rule and cli's suite does not re-run, the two
+      // sides drift again in silence, which is the #14829 defect returning by
+      // the cache. Two files rather than `packages/drivers/driver-sql/src/**`:
+      // the pin reads these two and nothing else across the boundary, and that
+      // package's `src` is edited often enough that the subtree glob would put
+      // cli's whole suite on every driver commit.
+      'packages/drivers/driver-sql/src/sql-driver.ts',
+      'packages/drivers/driver-sql/src/schema-drift.ts',
     ],
   },
   '@objectstack/client': {

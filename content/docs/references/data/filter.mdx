@@ -135,8 +135,8 @@ Type: `[FilterArray](#filterarray)[]`
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **$null** | `boolean` | optional |  |
-| **$exists** | `boolean` | optional |  |
+| **$null** | `boolean` | optional | Is-null check. `true` matches rows where the field is null, `false` matches rows where it is not null. Lowered to `IS NULL` (true) / `IS NOT NULL` (false) on the SQL family and to `{ field: null }` (true) / `{ $ne: null }` (false) on MongoDB. |
+| **$exists** | `boolean` | optional | Has-a-value check — the exact inverse of `$null`. `true` matches rows where the field holds a value (`!= null`), `false` matches rows where it holds none. Portable across every backend the platform ships: lowered to `IS NOT NULL` (true) / `IS NULL` (false) on the SQL family and to `{ $ne: null }` (true) / `{ $eq: null }` (false) on MongoDB. |
 
 
 ---

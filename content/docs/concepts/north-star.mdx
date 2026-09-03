@@ -73,6 +73,10 @@ The artifact contains:
   serialization
 - `metadata` — the compiled `ObjectStackDefinition` itself
 - optional `builtAt` / `builtWith` provenance
+- optional `grantedPermissions` — the install-time GRANTED permission set per
+  plugin, keyed by the plugin manifest `id`; consent state the control plane
+  re-emits on each assembly (absent = no consent record, `{}` = consented to
+  nothing), sitting beside `metadata` and outside the `checksum` digest
 
 The artifact is enough to describe what the runtime should load. It is not
 enough to deploy by itself; the host still supplies deployment config.

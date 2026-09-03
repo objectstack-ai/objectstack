@@ -313,5 +313,22 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'sequence that never identifies a record), write `unique: false` explicitly; to keep '
         + 'what the schema now does for you, change nothing. Nothing moves for any other type.',
     },
+    {
+      key: 'ai/KnowledgeSource:refresh',
+      from: '{}',
+      to: '(none)',
+      reason:
+        'The runtime default did NOT move: a knowledge source that omits `refresh` still parses to '
+        + '`refresh: {}` — measured with `KnowledgeSourceSchema.parse` on a minimal source at the '
+        + 'base and after the change, byte-identical. What vanished is the `default` keyword in '
+        + 'the PUBLISHED JSON Schema. Typing `KnowledgeRefreshPolicy.cron` with the shared cron '
+        + 'dialect (`CronExpressionInputSchema`, #14825) puts a transform inside the object that '
+        + '`refresh` defaults to, so `ai/KnowledgeSource` now publishes as the input shape, and '
+        + "zod's input-mode projection carries no `default` for a `.default()` whose object holds a "
+        + 'transform (isolated: the same wrapper around a transform-free object keeps it). Nothing '
+        + 'deployed changes behaviour; the consumer affected is one outside this repo who reads '
+        + "the published JSON Schema's `default` himself — the `refresh` description now states "
+        + 'the materialized default in words, the `data/Field:unique` precedent.',
+    },
   ],
 };

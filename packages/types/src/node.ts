@@ -761,20 +761,76 @@ function hasInvalidExportsSubpathSegments(subpath: string): boolean {
 }
 
 /**
+ * Declaration values whose grammar is `<protocol>:<name>[@<range>]` — the two
+ * spellings in which a host DECLARES that a key is an alias for a package with
+ * a different name (#14278).
+ *
+ * `npm:` always names a package: `npm:bar@1`, `npm:@acme/x@^2`, or `npm:bar`
+ * with no range at all. `workspace:` names one ONLY in its aliased form
+ * (`workspace:bar@*`) — a bare `workspace:*` / `workspace:^1.2.3` is a RANGE,
+ * so the key stays the name. Everything else — a plain range, `link:`,
+ * `file:`, a git or tarball URL — carries no package name to expect: those
+ * name a LOCATION or a version, and the manifest name they install under is
+ * not derivable from the declaration at all.
+ */
+const ALIAS_DECLARATION_PROTOCOLS = [
+  { prefix: 'npm:', rangeRequired: false },
+  { prefix: 'workspace:', rangeRequired: true },
+] as const;
+
+/**
+ * The manifest `name` the host's own declaration says
+ * `<hostRoot>/node_modules/<key>` must carry — the key itself for an ordinary
+ * dependency, the ALIASED package's name for `"foo": "npm:bar@1"` (#14278).
+ *
+ * ⚠️ This moves the finder's EXPECTATION, never its strictness. The
+ * manifest-name check is what keeps the fallback strictly tighter than the CJS
+ * resolution it backs up (#14041's property, #4719's gate): a finder that
+ * accepted a directory without confirming it holds the declared package would
+ * be a looser finder, and loosening it would trade a confidently-wrong remedy
+ * for a wrong LOAD — the worse direction. So the expectation is still authored
+ * by the host, read out of the same `package.json` the declaration gate reads;
+ * only the sentence it spells changes, from "the key" to "what the host says
+ * the key is an alias for". An aliased install pointing at one package still
+ * refuses a directory holding another.
+ *
+ * Anything that does not parse as a bare package name yields no expectation to
+ * move to, so the key stays and the pre-#14278 refusal is kept: a `workspace:`
+ * range, an alias value carrying a subpath, a malformed value. Deliberate —
+ * {@link packageNameFromSpecifier} is the one authority on what a package name
+ * is here, and its own documentation blesses the aliased declaration shape.
+ */
+function declaredManifestName(declaration: HostDeclaration): string {
+  const { packageName, specifier } = declaration;
+  if (specifier === undefined) return packageName;
+  const protocol = ALIAS_DECLARATION_PROTOCOLS.find((p) => specifier.indexOf(p.prefix) === 0);
+  if (protocol === undefined) return packageName;
+  const value = specifier.slice(protocol.prefix.length);
+  // `<name>@<range>`: the LAST `@` separates them, so a scoped name's own
+  // leading `@` (index 0) is never mistaken for the separator.
+  const at = value.lastIndexOf('@');
+  if (at <= 0 && protocol.rangeRequired) return packageName;
+  const name = at > 0 ? value.slice(0, at) : value;
+  return packageNameFromSpecifier(name) === name ? name : packageName;
+}
+
+/**
  * The one directory the fallback finder consults, verified to hold the
- * declared package (a `package.json` whose `name` matches) and then
+ * declared package (a `package.json` whose `name` is the one
+ * {@link declaredManifestName} reads out of the host's declaration) and then
  * realpath'd — under pnpm the link target is
  * `.pnpm/<pkg>@<version>/node_modules/<pkg>`, the directory the package's own
  * transitive imports resolve against, exactly as the CJS resolver's realpath
  * answer behaves on the succeeding path.
  */
-function hostInstalledPackageDir(packageName: string, hostRoot: string): string | undefined {
+function hostInstalledPackageDir(declaration: HostDeclaration): string | undefined {
+  const { packageName, hostRoot } = declaration;
   const linked = join(hostRoot, 'node_modules', ...packageName.split('/'));
   try {
     const manifest = JSON.parse(readFileSync(join(linked, 'package.json'), 'utf8')) as {
       name?: unknown;
     };
-    if (manifest.name !== packageName) return undefined;
+    if (manifest.name !== declaredManifestName(declaration)) return undefined;
   } catch {
     return undefined;
   }
@@ -790,10 +846,10 @@ function hostInstalledPackageDir(packageName: string, hostRoot: string): string 
 /** The #14041 fallback: see the section note above for the shape and the split. */
 function declaredCjsResolveFallback(
   specifier: string,
-  packageName: string,
-  hostRoot: string,
+  declaration: HostDeclaration,
 ): DeclaredCjsResolveFallback {
-  const packageDir = hostInstalledPackageDir(packageName, hostRoot);
+  const { packageName } = declaration;
+  const packageDir = hostInstalledPackageDir(declaration);
   if (packageDir === undefined) return { outcome: 'absent' };
 
   let exportsField: unknown;
@@ -977,7 +1033,7 @@ export function createHostImporter(
         // anything — this catch was a hard failure before, so the fallback is
         // strictly additive — and when it cannot help either, report the kind
         // the walk actually measured (see the #14041 section note).
-        const fallback = declaredCjsResolveFallback(pkg, declaration.packageName, hostRoot);
+        const fallback = declaredCjsResolveFallback(pkg, declaration);
         if (fallback.outcome === 'entry') {
           return import(pathToFileURL(fallback.entry).href);
         }

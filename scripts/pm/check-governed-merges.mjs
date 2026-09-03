@@ -3,7 +3,7 @@
 
 /**
  * check-governed-merges — report-only post-merge audit of the governed
- * surfaces (#9495), across the four governed repos (#9619), plus the
+ * surfaces (#9495), across the five governed repos (#9619, #14867), plus the
  * pre-arm `--test` predicate every seat runs before flipping ready (#9550).
  * Enumerates the PRs that MERGED into `main` since a given date/ref whose diff
  * touched a governed surface, with merge attribution, for the PM round report
@@ -11,7 +11,7 @@
  * completed sweep exits 0 whether it found 0 or 40 entries; non-zero exits
  * classify the ENVIRONMENT, not the tree).
  *
- *   node scripts/pm/check-governed-merges.mjs                  # sweep, last 24h, all four repos
+ *   node scripts/pm/check-governed-merges.mjs                  # sweep, last 24h, all five repos
  *   node scripts/pm/check-governed-merges.mjs --since 7d       # or 36h, or ISO date
  *   node scripts/pm/check-governed-merges.mjs --since-ref v5.0.0-rc.3       # topological, exact
  *   node scripts/pm/check-governed-merges.mjs --since-ref objectstack=<tip> --since-ref objectui=<tip>
@@ -216,14 +216,32 @@
  * giving the guard job dependencies, which is a CI-cost decision no ruling
  * covers; it is filed rather than taken.
  *
- * ## The governed REPOS (maintainer 「同意」 2026-08-18, wired here by #9619)
+ * ## The governed REPOS (maintainer 「同意」 2026-08-18, wired here by #9619;
+ * ## `hotcrm` added by the 2026-09-03 ruling on #14867)
  *
  * The same day, asked whether the rule reaches the sibling repos — 「任何对
  * agents.md 等文件的修改…包括 objectui cloud仓库」 — the maintainer answered
  * 「同意」. So the surface register above is REPO-AGNOSTIC: the same five
- * globs are governed in `objectstack`, `objectui`, `cloud` and `objectos`,
- * and this sweep covers all four in one invocation regardless of the working
- * directory it is run from.
+ * surface globs are governed in `objectstack`, `objectui`, `cloud`,
+ * `objectos` and `hotcrm`, and this sweep covers all five repos in one
+ * invocation regardless of the working directory it is run from.
+ *
+ * ⚠️ The 2026-08-18 quotation above names two sibling repos and the register
+ * below holds five, so read that quote as the repos IN VIEW that day — an
+ * enumeration, never an exclusion, and never the register. The definition it
+ * states (agent instruction files, judged the same across repos) already
+ * covered `hotcrm`, a repo agents edit daily; only the CONFIGURATION lagged,
+ * and it lagged in the direction that reads as safety. Measured cost of the
+ * lag, #14867: the `repo:hotcrm` seat treated that repo's `AGENTS.md` chain
+ * as governed and paid for hand-merges on it, while this sweep printed no row
+ * for hotcrm at all — and a repo that produces NO ROW is indistinguishable in
+ * this output from a repo that swept clean. That is the #4690 rule failing one
+ * level up: a configured repo that cannot be read is loudly UNAUDITED, but an
+ * unconfigured repo is silent, so absence of coverage can only be made loud by
+ * configuring the repo. Ruled 2026-09-03 (#14867, sibling #14881 ruled with
+ * it), maintainer verbatim 「其他同意」 adopting 纳入 — `GOVERNED_REPOS` gains
+ * `hotcrm`, and every "CLEAN WINDOW" this sweep published before that date is
+ * re-read as "clean over the FOUR repos then configured".
  *
  * ⚠️ Until #9619 that was not true, and the gap was not theoretical: run from
  * the objectui checkout the sweep still enumerated objectstack PRs, so a
@@ -266,7 +284,7 @@
  * asks whether the floor predates the window rather than whether the clone is
  * shallow, so a shallow container with enough depth — the common case, since
  * the default window is 24h — still sweeps exactly as before, with no fetch.
- * Deepening is never done here: this sweep reads four checkouts it does not
+ * Deepening is never done here: this sweep reads five checkouts it does not
  * own, so the remedy is printed as a command for the operator to run.
  *
  * ## And a DEAD MIRROR is the same fact again, in the direction that reads as
@@ -287,12 +305,17 @@
  * `git fetch origin main` in the surviving local clone answered
  * `fatal: repository ... not found`; `objectos`, `hotcrm`, `objectui` and
  * `objectstack` all resolved in the same batch, so this was a scope change for
- * one repo and not a broken channel. Wherever that clone survives, this sweep
+ * one repo and not a broken channel. (⚠️ Read that batch with its date: on
+ * 2026-08-30 `hotcrm` was probed BY HAND, as a control this sweep had no row
+ * for — it was not configured here until the 2026-09-03 ruling above. The
+ * reading stands as measured; what changed is that those four names are now
+ * four of the five repos this sweep audits itself.) Wherever that clone
+ * survives, this sweep
  * printed `✓ audited objectstack-ai/cloud — tip 15f55df2d ... 0 mainline
  * commit(s) in window` and exited 0 — and would have printed it FOREVER, since
  * the row's own prescribed remedy (`git fetch origin main`) is exactly the
  * command that 404s. The control had not degraded; it had been silently
- * switched off for one of the four repos it covers while continuing to print a
+ * switched off for one of the repos it covers while continuing to print a
  * tick for it.
  *
  * So reachability is a MEASURED PRECONDITION, asked of every governed repo in
@@ -418,7 +441,8 @@
  *      resolves, and `--since-ref <repoId>=<ref>` pins one repo (repeatable).
  *      A repo no ref resolves in falls back to the date window below, and its
  *      report line SAYS which repos got which window — one repo's ref silently
- *      dating four repos' windows is the same class of bug as the one above.
+ *      dating every other repo's window is the same class of bug as the one
+ *      above.
  *      Recording the previous round's tip is the CALLER's obligation (this
  *      script keeps no state), so every sweep prints the `--since-ref` line to
  *      use next round. Bonus property: for a topological window the #9902
@@ -619,6 +643,56 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { historyHorizon } from './git-history.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
+
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the governed predicate: the 2026-08-18 unified list, exactly': 8,
+  'the dispatch-gates declaration (#9979)': 8,
+  'since parsing': 4,
+  'the window: landing order, not committer dates (#12633)': 15,
+  'since-ref is topological (#12633 route B)': 7,
+  '#13424: every ref resolves in ITS OWN repo, never only in self': 8,
+  'the words an operator reads about the window': 4,
+  'classification + replay fixtures': 11,
+  'multi-repo scope (#9619)': 17,
+  'remote reachability + mirror freshness (#13307)': 12,
+  'the REAL prober, on real git fixtures (#13307)': 11,
+  '#13836, the shallow-clone path, both directions': 6,
+  'sweep-code provenance (#13307 reopen)': 5,
+  'the report words an operator reads': 6,
+  'an unreachable remote never renders as a clean window (#13307)': 9,
+  'a truncated history is UNAUDITED, not a clean sweep (#9902)': 11,
+  'attribution: the channel chain and its named fallback (#9619)': 19,
+  'the attribution column\'s THIRD case (#12645)': 13,
+  'the --test pre-arm predicate (#9550)': 31,
+  'the generator co-edit fence (#11084), pinned in BOTH directions': 10,
+  'the #11705 generator-owned rows inside `skills/**`': 23,
+  '#11705 end to end, against the REAL generator': 7,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 22;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 const scriptPath = fileURLToPath(import.meta.url);
 const scriptDir = dirname(scriptPath);
@@ -824,7 +898,9 @@ export function applyGeneratedExceptions(verdict, provenanceByPath = new Map()) 
 }
 
 /**
- * The four repos the 2026-08-18 cross-repo extension governs. `id` doubles as
+ * The five governed repos: the four the 2026-08-18 cross-repo extension named,
+ * plus `hotcrm`, added by the 2026-09-03 ruling on #14867 (「其他同意」 → 纳入)
+ * because the definition's own terms already covered it. `id` doubles as
  * the sibling directory name beside this checkout — the layout every session
  * container uses — and `--repo-root <id>=<path>` overrides it for any other
  * layout. A checkout whose `origin` remote is not `slug` is treated as ABSENT
@@ -835,6 +911,7 @@ export const GOVERNED_REPOS = Object.freeze([
   Object.freeze({ id: 'objectui', slug: 'objectstack-ai/objectui', what: 'the UI repo (live skills/** tree)' }),
   Object.freeze({ id: 'cloud', slug: 'objectstack-ai/cloud', what: 'the cloud repo' }),
   Object.freeze({ id: 'objectos', slug: 'objectstack-ai/objectos', what: 'the objectos repo' }),
+  Object.freeze({ id: 'hotcrm', slug: 'objectstack-ai/hotcrm', what: 'the hotcrm exemplar app repo (#14867, ruled 2026-09-03)' }),
 ]);
 
 export const SELF_REPO_ID = 'objectstack';
@@ -974,7 +1051,7 @@ export function classifyCommit({ sha, date, subject }, changedPaths, repo = null
 
 /**
  * The pre-arm answer, as data. Pure and repo-agnostic — the register is the
- * same in all four governed repos, so a seat can run this from anywhere with
+ * same in all five governed repos, so a seat can run this from anywhere with
  * the file list of any PR in any of them.
  */
 export function testVerdict(paths) {
@@ -2302,9 +2379,23 @@ const REGISTER_SAMPLES = {
 const SELF_TEST_VERDICT = 'check-governed-merges self-test reached its verdict';
 
 async function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
   let checked = 0;
   const failures = [];
   const assert = (name, cond, detail) => {
+    registerCase();
     checked++;
     if (!cond) failures.push(`${name}: ${detail ?? ''}`);
   };
@@ -2314,6 +2405,7 @@ async function selfTest() {
   const dateWindowFor = (iso) => resolveWindow({ sinceArg: iso });
 
   // ── the governed predicate: the 2026-08-18 unified list, exactly ──────────
+  battery('the governed predicate: the 2026-08-18 unified list, exactly');
   const ids = (paths) => governedPathsIn(paths).map((s) => s.id);
   assert('all-five-surfaces-declared-in-order', GOVERNED_SURFACES.map((s) => s.id).join(',') === 'adr,claude-tree,skills-catalog,agents-md,claude-md', GOVERNED_SURFACES.map((s) => s.id).join(','));
   assert('adr-prefix', ids(['docs/adr/0001-x.md']).join() === 'adr');
@@ -2332,6 +2424,7 @@ async function selfTest() {
   // tool entirely, so a wrong or missing entry runs perfectly green here and
   // shows up only as a dev dispatched on a root-file card who is not told that
   // the card is GOVERNED.
+  battery('the dispatch-gates declaration (#9979)');
   const rootExacts = GOVERNED_SURFACES.filter((s) => s.exact).map((s) => s.exact);
   assert('every-exact-root-row-declares-a-watch-hint', rootExacts.every((f) => ROOT_FILE_WATCH_HINTS.includes(`${f}/**`)), JSON.stringify(rootExacts));
   assert('the-declaration-names-no-file-this-register-does-not-govern', ROOT_FILE_WATCH_HINTS.every((h) => rootExacts.includes(h.replace(/\/\*+$/, ''))), JSON.stringify(ROOT_FILE_WATCH_HINTS));
@@ -2349,6 +2442,7 @@ async function selfTest() {
   assert('no-pr-in-subject', pullNumberFromSubject('chore: direct push') === null);
 
   // ── --since parsing ───────────────────────────────────────────────────────
+  battery('since parsing');
   const now = new Date('2026-08-18T12:00:00Z');
   assert('since-hours', parseSince('24h', now) === '2026-08-17T12:00:00.000Z');
   assert('since-days', parseSince('7d', now) === '2026-08-11T12:00:00.000Z');
@@ -2364,6 +2458,7 @@ async function selfTest() {
   // The old semantics dropped it and printed a clean window; the assertions
   // below pin BOTH halves of the replacement — that it is listed, and that a
   // skew the budget cannot cover reads as INCOMPLETE rather than as absent.
+  battery('the window: landing order, not committer dates (#12633)');
   const ROUND_TIP_DATE = '2026-08-14T05:55:02Z';
   const qs7Governed = { sha: '01a7337fc0'.padEnd(40, '0'), date: '2026-08-14T05:40:28Z', subject: 'docs(adr): kernel object ownership (#8620)' };
   // Newest first, as `git log --first-parent` prints it. `qs7Governed` sits
@@ -2439,6 +2534,7 @@ async function selfTest() {
     rootStop.anchorAtEdge === false, JSON.stringify(rootStop.floorIso));
 
   // ── --since-ref is topological (#12633 route B) ───────────────────────────
+  battery('since-ref is topological (#12633 route B)');
   const refDates = { 'v5.0.0-rc.3': '2026-08-14T05:55:02Z', deadbee: '2026-08-13T00:00:00Z' };
   const topo = resolveWindow({ sinceRefArgs: ['v5.0.0-rc.3'], resolveRefDate: (r) => refDates[r] ?? null });
   assert('a-bare---since-ref-is-a-TOPOLOGICAL-window', topo.mode === 'topological' && topo.bareRef === 'v5.0.0-rc.3', JSON.stringify(topo));
@@ -2461,6 +2557,7 @@ async function selfTest() {
   // the self checkout about a sibling's tip. The control below is the old
   // self-only resolver, verbatim in behaviour: it still errors, which is what
   // proves the fix moved the question and not the failure.
+  battery('#13424: every ref resolves in ITS OWN repo, never only in self');
   const uiOnly = resolveWindow({
     sinceRefArgs: ['objectui=uitip000000'],
     resolveRefDate: (r, repoId) => (repoId === 'objectui' && r === 'uitip000000' ? '2026-08-14T05:55:02Z' : null),
@@ -2512,6 +2609,7 @@ async function selfTest() {
     fellBack.mode === 'date' && /does not resolve in this checkout/.test(fellBack.fellBack), JSON.stringify(fellBack.fellBack));
 
   // ── the words an operator reads about the window ─────────────────────────
+  battery('the words an operator reads about the window');
   const dateWords = describeWindow(budgeted);
   assert('the-date-window-line-states-the-budget-it-subtracted-and-both-boundaries',
     dateWords.includes('3600 s') && dateWords.includes(budgeted.requestedIso) && dateWords.includes('2026-08-14T04:55:02.000Z'), dateWords);
@@ -2525,6 +2623,7 @@ async function selfTest() {
     edgeWords.includes('3600 s') && /COMPLIANCE/.test(edgeWords) && edgeWords.includes('--since-ref'), edgeWords);
 
   // ── classification + replay fixtures ─────────────────────────────────────
+  battery('classification + replay fixtures');
   assert('ungoverned-commit-classifies-null', classifyCommit({ sha: 'a'.repeat(40), date: '2026-08-18T00:00:00Z', subject: 'fix: x (#1)' }, ['packages/spec/src/index.ts']) === null);
   for (const replay of REPLAYS) {
     const entry = classifyCommit({ sha: 'b'.repeat(40), date: '2026-08-18T00:00:00Z', subject: replay.subject }, replay.files);
@@ -2542,7 +2641,16 @@ async function selfTest() {
   assert('exit-test-not-governed-is-0', EXIT_TEST_NOT_GOVERNED === 0);
 
   // ── multi-repo scope (#9619) ──────────────────────────────────────────────
-  assert('four-governed-repos-declared', GOVERNED_REPOS.map((r) => r.id).join(',') === 'objectstack,objectui,cloud,objectos', GOVERNED_REPOS.map((r) => r.id).join(','));
+  battery('multi-repo scope (#9619)');
+  assert('five-governed-repos-declared', GOVERNED_REPOS.map((r) => r.id).join(',') === 'objectstack,objectui,cloud,objectos,hotcrm', GOVERNED_REPOS.map((r) => r.id).join(','));
+  // #14867: hotcrm pinned by SLUG as well as id. The defect this closes is not
+  // a wrong row — it is NO row: an unconfigured repo prints nothing at all, so
+  // a later removal would restore a silence indistinguishable from a clean
+  // sweep. Pinned separately from the ordered-ids assertion above so a removal
+  // reds a check that NAMES hotcrm rather than one that reads as a reordering.
+  assert('hotcrm-is-a-governed-repo-with-its-slug (#14867)',
+    GOVERNED_REPOS.some((r) => r.id === 'hotcrm' && r.slug === 'objectstack-ai/hotcrm'),
+    JSON.stringify(GOVERNED_REPOS.map((r) => `${r.id}=${r.slug}`)));
   assert('slug-from-https-remote', slugFromRemote('https://github.com/objectstack-ai/objectui') === 'objectstack-ai/objectui');
   assert('slug-from-ssh-remote-with-suffix', slugFromRemote('git@github.com:objectstack-ai/cloud.git') === 'objectstack-ai/cloud');
   assert('slug-from-nonsense-is-null', slugFromRemote('/some/local/path') === null);
@@ -2556,7 +2664,16 @@ async function selfTest() {
   };
   const resolved = resolveRepoCheckouts({ selfRoot: '/w/objectstack', siblingDir: '/w', probe: (p) => layout[p] ?? { exists: false, slug: null } });
   const byId = Object.fromEntries(resolved.map((r) => [r.id, r]));
-  assert('all-four-repos-are-resolved-not-just-the-self-repo', resolved.length === 4);
+  assert('all-five-repos-are-resolved-not-just-the-self-repo', resolved.length === 5);
+  // /w/hotcrm is absent from the layout too, so this fixture also pins the
+  // property #14867 bought: a governed repo with no checkout is UNAUDITED and
+  // says so, where an unconfigured repo said nothing.
+  // ⚠️ Read defensively. `assert` COLLECTS failures and prints them at the
+  // end, so a throw here aborts the run before the two pins that NAME hotcrm
+  // are ever printed — measured on the #14867 ablation: dropping the register
+  // entry turned three named red lines into one TypeError stack.
+  assert('a-configured-repo-with-no-checkout-is-UNAUDITED-never-silent',
+    byId.hotcrm?.status === 'unaudited' && /no git checkout at \/w\/hotcrm/.test(String(byId.hotcrm?.reason)), JSON.stringify(byId.hotcrm ?? null));
   assert('the-self-repo-is-audited-from-the-scripts-own-root-not-cwd', byId.objectstack.status === 'audited' && byId.objectstack.path === '/w/objectstack');
   assert('a-sibling-checkout-beside-it-is-audited', byId.objectui.status === 'audited' && byId.objectos.status === 'audited');
   assert('an-absent-checkout-is-UNAUDITED-never-clean', byId.cloud.status === 'unaudited' && /no git checkout at \/w\/cloud/.test(byId.cloud.reason), JSON.stringify(byId.cloud));
@@ -2603,6 +2720,7 @@ async function selfTest() {
   // The leg that answers "is this checkout a live mirror at all". Every branch
   // is pinned because the defect it replaces was a row every clause of which
   // was literally TRUE about the local snapshot.
+  battery('remote reachability + mirror freshness (#13307)');
   assert('a-remote-tracking-ref-splits-into-remote-and-branch', JSON.stringify(remoteRefParts('origin/main')) === '{"remote":"origin","branch":"main"}', JSON.stringify(remoteRefParts('origin/main')));
   assert('a-ref-that-names-no-remote-does-not-parse', remoteRefParts('main') === null && remoteRefParts('') === null && remoteRefParts(null) === null);
 
@@ -2666,6 +2784,7 @@ async function selfTest() {
   // actually reads the world. These fixtures are local bare repos over the
   // FILE transport: real `git ls-remote`, no network, ~1 s, so `--self-test`
   // stays offline exactly as its usage line claims.
+  battery('the REAL prober, on real git fixtures (#13307)');
   const fxRoot = mkdtempSync(join(tmpdir(), 'governed-merges-remote-'));
   try {
     const g = (cwd, ...rest) =>
@@ -2788,6 +2907,7 @@ async function selfTest() {
     // one (its row names the floor it was swept against); one whose floor sits
     // inside the window refuses with the precondition NAMED in the footer, so
     // a dropped repo needs no cross-run footer diffing to attribute.
+  battery('#13836, the shallow-clone path, both directions');
     const coShallowCovered = join(fxRoot, 'co-shallow-covered');
     const coShallowInside = join(fxRoot, 'co-shallow-inside');
     g(fxRoot, 'clone', '-q', '--depth', '2', `file://${bareLive}`, coShallowCovered);
@@ -2879,6 +2999,7 @@ async function selfTest() {
   // reads are asserted against THIS repo — direction-agnostically, because a
   // dev iterating on this very file legitimately runs it with uncommitted
   // edits, and that state must render as the loud mismatch, not as a red pin.
+  battery('sweep-code provenance (#13307 reopen)');
   const blobA = 'a'.repeat(40);
   const blobB = 'b'.repeat(40);
   const matchLine = describeSweepCode({ head: 'abc1234', blob: blobA, headBlob: blobA, error: null });
@@ -2901,6 +3022,7 @@ async function selfTest() {
   assert('the-report-head-carries-the-sweep-code-line-when-a-reading-is-supplied', withCode.includes('sweep code: HEAD abc1234'), withCode);
 
   // ── the report words an operator reads ────────────────────────────────────
+  battery('the report words an operator reads');
   const allAudited = resolved.map((r) => ({ ...r, status: 'audited', reason: null, tip: { sha: 'c'.repeat(40), date: '2026-08-18T00:00:00Z' }, scanned: 3 }));
   const clean = renderReport({ window: dateWindowFor('2026-08-17T00:00:00Z'), repos: allAudited, scanned: 12, entries: [], lookups: 0 });
   assert('clean-window-says-clean-and-costs-zero-lookups', clean.includes('clean window') && clean.includes('0 API lookup(s)'), clean);
@@ -2920,6 +3042,7 @@ async function selfTest() {
   // that sameness IS the fix: no second mechanism was introduced, so this row
   // cannot drift away from the #4690 rule the others obey. Assert on the TICK
   // (the phrase "NOT a clean window" contains "clean window").
+  battery('an unreachable remote never renders as a clean window (#13307)');
   const deadMirror = renderReport({
     window: dateWindowFor('2026-08-17T00:00:00Z'),
     repos: [
@@ -2994,6 +3117,7 @@ async function selfTest() {
   // `✅ clean window` over ~40 governed merges that GitHub lists for the same
   // window. The tick is what a maintainer reads, so the assertions below are
   // on the tick and on the direction the reason names, not on the phrase.
+  battery('a truncated history is UNAUDITED, not a clean sweep (#9902)');
   const truncated = truncatedHorizonReason({
     ref: 'origin/main',
     horizon: {
@@ -3037,6 +3161,7 @@ async function selfTest() {
   assert('the-violation-contract-is-stated-on-every-sweep', clean.includes('violation signal') && loud.includes('violation signal'));
 
   // ── attribution: the channel chain and its named fallback (#9619) ─────────
+  battery('attribution: the channel chain and its named fallback (#9619)');
   const anonOnly = attributionChannels({});
   assert('with-no-token-anonymous-REST-is-still-tried', anonOnly.length === 1 && anonOnly[0].id === 'anonymous', JSON.stringify(anonOnly.map((c) => c.id)));
   const both = attributionChannels({ GITHUB_TOKEN: 'x' });
@@ -3085,6 +3210,7 @@ async function selfTest() {
   // the loudest line the sweep prints — is case 3, and it used to render
   // case 2's words with zero channels tried. All three are pinned as a set,
   // because the defect was a two-way split covering three facts.
+  battery('the attribution column\'s THIRD case (#12645)');
   const notLookedUp = renderReport({ window: dateWindowFor('2026-08-13T00:00:00Z'), repos: allAudited, scanned: 3, entries: [noPr], lookups: 0 });
   assert('a-pr-less-entry-is-NOT-LOOKED-UP-not-a-failed-lookup', notLookedUp.includes('merged_by NOT LOOKED UP') && !notLookedUp.includes('every channel failed'), notLookedUp);
   assert('and-it-says-WHY-nothing-was-queried', notLookedUp.includes('no PR number in the subject') && notLookedUp.includes('not a channel failure'), notLookedUp);
@@ -3116,6 +3242,7 @@ async function selfTest() {
       === 'merged_by x @ y (via env-token)');
 
   // ── the --test pre-arm predicate (#9550) ──────────────────────────────────
+  battery('the --test pre-arm predicate (#9550)');
   const governedCase = testVerdict(['AGENTS.md']);
   assert('--test-on-the-#9527-file-list-answers-GOVERNED', governedCase.governed === true && governedCase.hitPaths.join() === 'AGENTS.md', JSON.stringify(governedCase));
   assert('--test-governed-renders-the-no-flip-no-enqueue-no-arm-instruction', renderTestVerdict(governedCase).includes('GOVERNED') && renderTestVerdict(governedCase).includes('arms auto-merge'), renderTestVerdict(governedCase));
@@ -3226,6 +3353,7 @@ async function selfTest() {
   // The fence decides whether `--test` recomputes at all, so a bug in either
   // direction is load-bearing: too loose re-opens the self-certification, too
   // tight would break the ruled pure-regeneration lift.
+  battery('the generator co-edit fence (#11084), pinned in BOTH directions');
   const fenceRow = GENERATED_SURFACE_EXCEPTIONS.find((e) => e.id === 'spec-skill-refs');
   const fencePrefix = fenceRow.trustedGeneratorPrefixes[0];
   // Direction A — co-edit: the generator is touched, so no recompute happens
@@ -3279,6 +3407,7 @@ async function selfTest() {
   // reproducible from its generator, proven per file. Two halves, both the
   // generator's own answer — it declared the path among its outputs, and its
   // `--check` reported no drift — and every other input fails closed.
+  battery('the #11705 generator-owned rows inside `skills/**`');
   const skillRefs = GENERATED_SURFACE_EXCEPTIONS.find((e) => e.id === 'spec-skill-refs');
   const reactBlocks = GENERATED_SURFACE_EXCEPTIONS.find((e) => e.id === 'spec-react-blocks');
   const genIndex = REGISTER_SAMPLES['spec-skill-refs'];
@@ -3385,6 +3514,7 @@ async function selfTest() {
   // to a temp file. Both branches assert; a missing toolchain is the merge-group
   // guard job's real environment, where fail-closed is the correct answer, so
   // it is pinned rather than skipped.
+  battery('#11705 end to end, against the REAL generator');
   const liveRun = runSinkGenerator(resolve(scriptDir, '..', '..'), skillRefs);
   let liveNote;
   if (Array.isArray(liveRun.outputs) && liveRun.outputs.length > 0) {
@@ -3414,12 +3544,56 @@ async function selfTest() {
     rejectedRender.includes('GOVERNED') && rejectedRender.includes('did NOT lift') && rejectedRender.includes('differs (fixture)'), rejectedRender);
   assert('a-verdict-without-exceptions-renders-exactly-as-before', renderExceptionLines(testVerdict(['AGENTS.md'])) === '' && !renderTestVerdict(testVerdict(['AGENTS.md'])).includes('#9866'));
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => { failures.push(message); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
+
   if (failures.length > 0) {
     console.error(`✗ check-governed-merges --self-test — ${failures.length} failure(s)\n`);
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes).\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes).\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
 }
