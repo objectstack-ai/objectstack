@@ -147,6 +147,19 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
         // Sink for THIS attempt's partial steps, filled by `runRegion` only if
         // the attempt throws (#7546).
         const attemptSteps: StepLogEntry[] = [];
+        // #14948 review — the run-wide `$error` this attempt STARTS with. The
+        // engine rewrites `$error` (a fresh object, see engine.ts's
+        // `executeNode`) only when a failing node RETURNS `{ success: false }`,
+        // or when it THROWS through a node that has its OWN `fault` edge — and
+        // a node inside this region's synthetic sub-flow never has one (the
+        // sub-flow carries only the region's own edges). So a node that FAILS
+        // BY THROWING (a `timeoutMs` firing, a dying nested container, a
+        // thrown guard) leaves `$error` exactly as an EARLIER failure left it.
+        // Without this identity check, that earlier failure's `code` (e.g. a
+        // sibling row's `DUPLICATE_RECORD`) leaks onto an unrelated later
+        // failure's binding — a store failure misread as a duplicate through
+        // the very door this card exists to close.
+        const errorBefore = variables.get('$error');
         try {
           // #1479: surface the successful try region's steps.
           const trySteps = await engine.runRegion(
@@ -171,8 +184,12 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
         } catch (err) {
           lastError = err instanceof Error ? err.message : String(err);
           const innerError = variables.get('$error');
+          // Only a `$error` that actually CHANGED (identity, not content —
+          // two failures can legitimately share a message) belongs to THIS
+          // attempt's failure; one that is `===` `errorBefore` is stale
+          // carry-over from whatever failed earlier in the run.
           lastErrorCode =
-            innerError && typeof innerError === 'object' && 'code' in innerError
+            innerError !== errorBefore && innerError && typeof innerError === 'object' && 'code' in innerError
               ? ((innerError as { code?: unknown }).code as string | undefined)
               : undefined;
           failedAttemptSteps.push(...attemptSteps);
