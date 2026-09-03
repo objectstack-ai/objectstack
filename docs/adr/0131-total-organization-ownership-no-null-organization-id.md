@@ -388,15 +388,25 @@ whole-item, `(organization, name, locale)`, *Reset to default* deletes it — ne
 
 Rows that belong to the deployment and not to an organization live in objects **without** the column
 (D1): the environment metadata ledger and its family (`sys_metadata`, `sys_metadata_audit`,
-`sys_metadata_commit`, `sys_metadata_history`, `sys_metadata_activation`, environment-level
-`sys_view_definition` — D6), operational plumbing (`sys_job`, `sys_job_run`, `sys_job_queue`,
-`sys_flow_dispatch`, `sys_http_delivery`, `sys_migration`, `sys_migration_journal`, and the
-recipient-anchored notification/inbox family where `user_id` is the anchor), the audit ledger
+`sys_metadata_commit`, `sys_metadata_history`, environment-level `sys_view_definition` — D6;
+`sys_metadata_activation` is reverted before 17.3 and does not return), operational plumbing whose
+rows no writer attributes to an organization (`sys_job`, `sys_job_run`, `sys_job_queue`,
+`sys_flow_dispatch`, `sys_migration`, `sys_migration_journal`), the audit ledger
 (`sys_audit_log`, whose rows may concern deployment-level actions — the organization an audit row is
 *about* becomes a plain attribution field under a name the tenant-field resolver does not claim, never
 the tenancy anchor; cloud's `tenant_id` rule already reads it this way), and deployment-level runtime
 settings — `sys_setting`'s global rung leaves the tenant-scoped table for configuration or a
 tenant-less object. Such objects are governed by object permission, not by the wall.
+
+⚠️ **Membership in this list is decided by the writer, not by the object's name.** The read-side ledger
+grouped `sys_http_delivery`, `sys_inbox_message`, `sys_notification*` and `sys_email` as "plumbing"; the
+tree has since decided otherwise for each — #13565 stamps `sys_http_delivery` from the webhook's
+organization *because* `redeliver()` walls by tenant, #11741 widened `SendEmailInput` so `sys_email` is
+stamped at its producers (#11303 Decision 2), and the notification family is recipient-anchored in
+cloud's reading. An object whose writer attributes rows to an organization is tenant data and keeps the
+column (NOT NULL, D3); an object no writer attributes is deployment-level and loses it. The C7
+inventory records the verdict per object with the writer fact as its citation — this record names only
+the objects whose verdict the tree already states.
 
 The #12699 deployment declaration becomes **total**: an object a deployment declares platform-global
 gets **no organization column on that deployment** (the injected-columns plan reads the declaration),
