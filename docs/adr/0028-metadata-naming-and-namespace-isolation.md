@@ -63,16 +63,16 @@ unmanaged for everything except objects.
 
 | Area | Finding | Location |
 |:--|:--|:--|
-| Prefix enforcement | `validateNamespacePrefix()` iterates **only `config.objects`** (`if (!ns || !config.objects) return`). The other ~23 collections are unchecked. | `spec/src/stack.zod.ts:459` |
-| Authoring style | Object names are the **hand-written full literal** `crm_account`; docs explicitly forbid a `ns('task')` helper. | `spec/src/kernel/manifest.zod.ts:28-76` |
-| Storage chokepoint | `StorageNameMapping.resolveTableName({name})` already exists, but is a **pass-through** (`todo_task → todo_task`, strips legacy `__`). Every SQL driver routes table names through it. | `spec/src/system/constants/system-names.ts:169`; `driver-sql/src/sql-driver.ts:610,1028` |
+| Prefix enforcement | `validateNamespacePrefix()` iterates **only `config.objects`** (`if (!ns || !config.objects) return`). The other ~23 collections are unchecked. | `packages/spec/src/stack.zod.ts#validateNamespacePrefix` |
+| Authoring style | Object names are the **hand-written full literal** `crm_account`; docs explicitly forbid a `ns('task')` helper. | `packages/spec/src/kernel/manifest.zod.ts` |
+| Storage chokepoint | `StorageNameMapping.resolveTableName({name})` already exists, but is a **pass-through** (`todo_task → todo_task`, strips legacy `__`). Every SQL driver routes table names through it. | `packages/spec/src/system/constants/system-names.ts#StorageNameMapping`; `packages/drivers/driver-sql/src/sql-driver.ts` |
 | Object identity | `MetaRef = (org, type, name)` and `SchemaRegistry` already model ownership + namespace. | `metadata-core/src/types.ts`; `objectql/src/registry.ts` |
-| Ownership model | `own`/`extend` fully implemented: one owner enforced (`throw`), extenders merge by `priority` (owner 100, extender 200). **No package actually extends a `sys_` object today.** | `objectql/src/registry.ts:406-518`; `object.zod.ts:856-897` |
-| Connector collisions | Re-registering a connector name only `logger.warn('… replaced')` then overwrites — **silent last-wins**. | `services/service-automation/src/engine.ts:441` |
+| Ownership model | `own`/`extend` fully implemented: one owner enforced (`throw`), extenders merge by `priority` (owner 100, extender 200). **No package actually extends a `sys_` object today.** | `packages/objectql/src/registry.ts`; `packages/spec/src/data/object.zod.ts` |
+| Connector collisions | Re-registering a connector name only `logger.warn('… replaced')` then overwrites — **silent last-wins**. | `packages/services/service-automation/src/engine.ts` |
 | API routes | Route conflict detection exists with 4 strategies, but matches routes by **exact string** (`:id` vs `:userId` not detected). | `core/src/api-registry.ts` |
-| Kernel namespace | `sys` is a **shared** namespace co-claimed by ~14 packages (`namespaceRegistry: Map<ns, Set<pkgId>>`); `RESERVED_NAMESPACES = {'base','system'}` does **not** include `sys`. | `objectql/src/registry.ts:13,346-389` |
+| Kernel namespace | `sys` is a **shared** namespace co-claimed by ~14 packages (`namespaceRegistry: Map<ns, Set<pkgId>>`); `RESERVED_NAMESPACES = {'base','system'}` does **not** include `sys`. | `packages/objectql/src/registry.ts#RESERVED_NAMESPACES` |
 | Kernel definitions | All `sys_*` objects are in fact **defined centrally in `platform-objects`**, even though `plugin-auth`/`service-job`/`service-settings` manifests each declare `namespace:'sys'` — ownership *declaration* is split from *definition*. | `platform-objects/src/**` |
-| Boundary enforcement | "Apps may reference `sys_*` but never define them" is **documented intent only** — no validator enforces it; the `sys_` check only *exempts*, it does not *forbid*. | `manifest.zod.ts:66-70` |
+| Boundary enforcement | "Apps may reference `sys_*` but never define them" is **documented intent only** — no validator enforces it; the `sys_` check only *exempts*, it does not *forbid*. | `packages/spec/src/kernel/manifest.zod.ts` |
 | Kernel cross-refs | ~60 lookup fields across identity/audit/security/metadata/system (and `service-ai`'s `ai_conversations.user_id`) point at the **hub objects `sys_user` / `sys_organization`**. | scan, see §"Why unified" |
 
 ### How mainstream metadata/low-code platforms name things
@@ -240,7 +240,7 @@ reference target. It is:
   packages claiming the same namespace** — already modeled by
   `NamespaceConflictError`. Catches binary artifacts that bypass `defineStack`.
 - **Runtime registries** unify their duplicate semantics: the connector registry
-  stops silently overwriting (`engine.ts:441`) and uses the same conflict policy
+  stops silently overwriting (`packages/services/service-automation/src/engine.ts`) and uses the same conflict policy
   as objects/routes.
 
 ---

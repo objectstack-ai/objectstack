@@ -27,7 +27,7 @@ The platform is not launched; there is no production approval data and no legacy
 ADR-0018 §Context argued — correctly — that *multiple authoring paradigms are fine; multiple execution vocabularies are not*. Approval is where that line is currently crossed at the **engine** level, not just the vocabulary level:
 
 - `@objectstack/plugin-approvals` is ~1500 LOC of runtime: an 816-line `approval-service.ts` state machine, a **313-line parallel `action-executor.ts`**, 250-line lifecycle hooks, and a 128-line plugin.
-- The contract is explicit that this is a separate engine: [`spec/contracts/approval-service.ts:11`](../../packages/spec/src/contracts/approval-service.ts#L11) — *"Sits on top of (but does not depend on) `IWorkflowService` … driven by humans rather than transition rules."*
+- The contract is explicit that this is a separate engine: [`packages/spec/src/contracts/approval-service.ts`](../../packages/spec/src/contracts/approval-service.ts) — *"Sits on top of (but does not depend on) `IWorkflowService` … driven by humans rather than transition rules."*
 - The parallel `action-executor.ts` re-implements `field_update` / `inbox_notify` / `webhook` and carries the **same** `connector_action` / `script` / `email_alert` "unimplemented, logged + skipped" stubs that ADR-0018 set out to retire.
 - It has its **own** ADR-0009 execution pinning (`process_hash` → `getByHash`), parallel to Flow's.
 - It registers its own lifecycle hooks: `afterInsert` auto-trigger, `beforeUpdate` record-lock ([`plugin-approvals/src/lifecycle-hooks.ts`](../../packages/plugins/plugin-approvals/src/lifecycle-hooks.ts)).
@@ -68,7 +68,7 @@ There is **one** execution loop: the Flow engine. The engine core owns a generic
 The Approval node is registered through the **ADR-0018 open registry** (`registerNodeExecutor`), by a slimmed-down approval plugin — **not** baked into `service-automation` core. Rationale:
 
 - It is the ADR-0018 thesis applied to ourselves: the engine is the substrate, capabilities are contributed nodes.
-- **Layering.** Approver resolution depends on the org / sharing model — `sys_team`, `sys_department` (recursive BFS), `sys_user.manager_id`, `sys_department_member` ([`plugin-approvals/src/approval-service.ts:175`](../../packages/plugins/plugin-approvals/src/approval-service.ts#L175)). The Flow engine core must **not** depend on the org model; the approval plugin may. So approval cannot live in core.
+- **Layering.** Approver resolution depends on the org / sharing model — `sys_team`, `sys_department` (recursive BFS), `sys_user.manager_id`, `sys_department_member` ([`packages/plugins/plugin-approvals/src/approval-service.ts#sys_team`](../../packages/plugins/plugin-approvals/src/approval-service.ts)). The Flow engine core must **not** depend on the org model; the approval plugin may. So approval cannot live in core.
 - `service-automation` stays lean; approval becomes a well-behaved node provider that rides the engine instead of a parallel engine.
 
 ### D3 — Deprecate `ApprovalProcessSchema` as a top-level authoring type; re-home its concepts

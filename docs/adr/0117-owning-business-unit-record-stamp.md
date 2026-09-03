@@ -22,13 +22,13 @@
 - `owner_id` —— 人。由 registry 按 `ownership` 轴自动注入
   （`packages/objectql/src/registry.ts` `applySystemFields`），SecurityPlugin 在插入时
   盖章，改动受 `allowTransfer` / `modifyAllRecords` 约束。
-- `organization_id` —— 租户墙。列无条件注入（`registry.ts:305-313`，除显式
+- `organization_id` —— 租户墙。列无条件注入（`packages/objectql/src/registry.ts#organization_id`，除显式
   `systemFields.tenant === false` / `tenancy.enabled === false` 外），值由多组织运行时
   权威盖章。
 
 **中间的一层——"这条记录属于哪个部门 / 哪个法人"——不存在。** 它今天是从所有者
 *推导*的：层级深度档位（`unit` / `unit_and_below` / `own_and_reports`）最终编译成
-`owner_id IN (…)`（`packages/plugins/plugin-sharing/src/sharing-service.ts:47,151,214`），
+`owner_id IN (…)`（`packages/plugins/plugin-sharing/src/sharing-service.ts#owner_id`），
 即"这条记录归属于当前在该组织单元里的某个人"。
 
 ### 这个推导带来三个问题
@@ -44,7 +44,7 @@
 
 - **Dataverse**：每条记录带 `owningbusinessunit`，与 `ownerid` 并存；表分
   User/Team-owned 与 Organization-owned 两类——与本仓既有的
-  `ownership: 'user' | 'org' | 'none'`（`packages/spec/src/data/object.zod.ts:818`）
+  `ownership: 'user' | 'org' | 'none'`（`packages/spec/src/data/object.zod.ts#ownership`）
   同构。
 - **SAP**：凭证同时携带成本中心与公司代码，法定报表按公司代码出。
 
@@ -52,10 +52,10 @@
 
 | 部件 | 位置 |
 |---|---|
-| 记录归属轴声明 `ownership` | `packages/spec/src/data/object.zod.ts:800-823` |
+| 记录归属轴声明 `ownership` | `packages/spec/src/data/object.zod.ts#ownership` |
 | 系统字段注入管线 `applySystemFields` | `packages/objectql/src/registry.ts` |
-| BU 树与子树遍历 | `packages/platform-objects/src/identity/sys-business-unit.object.ts:127`、`packages/plugins/plugin-sharing/src/business-unit-graph.ts` |
-| 用户主 BU 投影（**注意：这是用户属性，不是记录戳**） | `packages/platform-objects/src/identity/sys-user.object.ts:690`、`plugin-sharing/src/primary-bu-projection.ts` |
+| BU 树与子树遍历 | `packages/platform-objects/src/identity/sys-business-unit.object.ts`、`packages/plugins/plugin-sharing/src/business-unit-graph.ts` |
+| 用户主 BU 投影（**注意：这是用户属性，不是记录戳**） | `packages/platform-objects/src/identity/sys-user.object.ts`、`plugin-sharing/src/primary-bu-projection.ts` |
 | 私有+层级对象必须带 org 列的门 | EE `hierarchy/tenant-scope-gate.ts` |
 
 ## 决策
@@ -121,7 +121,7 @@ company 祖先。本 ADR **提供框架侧解析helper，不新增物化列**。
 现契约只能表达所有者集合：
 
 ```ts
-// packages/spec/src/contracts/sharing-service.ts:315-320
+// packages/spec/src/contracts/sharing-service.ts#resolveOwnerIds
 resolveOwnerIds(ctx, scope): Promise<string[]>
 ```
 
@@ -135,7 +135,7 @@ type ScopeResolution =
 resolveScope(ctx, scope): Promise<ScopeResolution>
 ```
 
-`sharing-service.ts:47` 的 `OWNER_FIELD` 硬编码随之解除。这是**破坏性契约变更**，
+`packages/plugins/plugin-sharing/src/sharing-service.ts#OWNER_FIELD` 的 `OWNER_FIELD` 硬编码随之解除。这是**破坏性契约变更**，
 唯一实现方是企业版层级解析器，需与其同步发布。收益：谓词从"数千用户"缩短为
 "几十个 BU"，归属漂移消除，且为公司轴（`organization_id`）留出同形位置。
 

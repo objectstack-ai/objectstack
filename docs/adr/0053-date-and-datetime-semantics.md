@@ -16,9 +16,9 @@ timestamp** — an *instant*. That is the textbook "date-as-instant" mistake, an
 it produces two failures:
 
 1. **Silent equality miss.** The write path stores the full timestamp
-   (`formatInput` does not normalize — `sql-driver.ts:1967`), but the filter path
+   (`formatInput` does not normalize — `packages/drivers/driver-sql/src/sql-driver.ts#formatInput`), but the filter path
    normalizes the query value to `YYYY-MM-DD` (`coerceFilterValue` —
-   `sql-driver.ts:1543`). So `date == <date-only>` compares
+   `packages/drivers/driver-sql/src/sql-driver.ts#coerceFilterValue`). So `date == <date-only>` compares
    `"2026-08-15T17:24Z"` against `"2026-08-15"` → never equal. Range filters
    (`$gte`/`$lt`) only work by accident of lexicographic ISO ordering.
 2. **Off-by-one across timezones.** A date stored as UTC-midnight
@@ -27,8 +27,8 @@ it produces two failures:
    timezone-naive string and never converting it to an instant.
 
 A third, related defect: `daysFromNow(n)`/`daysAgo(n)` keep the current
-**wall-clock time** (`addDaysUtc` — `stdlib.ts:36`), unlike `today()` which
-truncates to UTC midnight (`startOfDayUtc` — `stdlib.ts:19`). And `today()`
+**wall-clock time** (`addDaysUtc` — `packages/formula/src/stdlib.ts#addDaysUtc`), unlike `today()` which
+truncates to UTC midnight (`startOfDayUtc` — `packages/formula/src/stdlib.ts#startOfDayUtc`). And `today()`
 is computed in **UTC**, not the user/org timezone, even though a
 `sys-user-preference.timezone` exists but is never read by the engine.
 
@@ -54,10 +54,10 @@ is computed in **UTC**, not the user/org timezone, even though a
 
 | Layer | Treatment of `Field.date` | Evidence |
 |-------|---------------------------|----------|
-| Column | `date` → `table.date()` (SQLite has no real DATE type — TEXT affinity) | `sql-driver.ts:1816` |
-| **Write** | **no normalization** — the JS `Date` is stored verbatim, keeping its time | `formatInput`, `sql-driver.ts:1967` |
+| Column | `date` → `table.date()` (SQLite has no real DATE type — TEXT affinity) | `packages/drivers/driver-sql/src/sql-driver.ts` |
+| **Write** | **no normalization** — the JS `Date` is stored verbatim, keeping its time | `formatInput`, `packages/drivers/driver-sql/src/sql-driver.ts#formatInput` |
 | Read | no normalization — returns the stored string with its time | empirical: `dev.db` holds `"2026-07-15T17:24:56.533Z"` |
-| **Filter** | **normalizes the query value to `YYYY-MM-DD`** (date-only string compare) | `coerceFilterValue`, `sql-driver.ts:1543-1554` |
+| **Filter** | **normalizes the query value to `YYYY-MM-DD`** (date-only string compare) | `coerceFilterValue`, `packages/drivers/driver-sql/src/sql-driver.ts#coerceFilterValue` |
 | Formula | the stored string is hydrated to a `Date` (date-only → UTC midnight) and compared against the time-function `Date` | `applyFormulaPlan` (`engine.ts`), `hydrateOverloadStrings` (`cel-engine.ts`) |
 
 The write/filter mismatch is the proximate cause: the filter layer already
@@ -65,9 +65,9 @@ The write/filter mismatch is the proximate cause: the filter layer already
 
 ### The time functions disagree with each other
 
-- `today()` → start-of-day **UTC** (`startOfDayUtc`, `stdlib.ts:19,57`).
+- `today()` → start-of-day **UTC** (`startOfDayUtc`, `packages/formula/src/stdlib.ts#startOfDayUtc`).
 - `daysFromNow(n)`/`daysAgo(n)` → `now() ± n*24h`, **keeping wall-clock time**
-  (`addDaysUtc`, `stdlib.ts:36`). Two calls a minute apart differ.
+  (`addDaysUtc`, `packages/formula/src/stdlib.ts#addDaysUtc`). Two calls a minute apart differ.
 - CEL's only temporal type is `google.protobuf.Timestamp` (a UTC instant) —
   there is no `PlainDate`. So a date field flowing into CEL is forced into an
   instant, which is exactly what we want to avoid.
@@ -107,7 +107,7 @@ between them is precisely "does this concept depend on a timezone?"
    lexicographically = chronologically, so range comparisons stay correct.
    `today()`/`daysFromNow()` used against a date field are compared date-only.
 4. **No change to `Field.datetime`** — it keeps full-instant semantics
-   (`datetimeFields`, stored as UTC ms — `sql-driver.ts:1500`).
+   (`datetimeFields`, stored as UTC ms — `packages/drivers/driver-sql/src/sql-driver.ts#datetimeFields`).
 
 After Phase 1, `date == daysFromNow(n)` works (both sides are the same calendar
 day), `$in` of dates works, and the day-window range pattern keeps working. The
@@ -262,7 +262,7 @@ consistent with all three boundaries (CEL hydration, driver filter, Phase-1 stor
 > UTC-midnight-hydrated field — the silent-miss bug returns.
 
 Bonus: making `daysFromNow(n)`/`daysAgo(n)` compute `calendarDay ± n → UTC-midnight`
-**also fixes the "keeps wall-clock time" defect** (`stdlib.ts:36`) for free. The
+**also fixes the "keeps wall-clock time" defect** (`packages/formula/src/stdlib.ts#addDaysUtc`) for free. The
 `now() + duration("Nh")` escape hatch remains for genuine sub-day instants.
 
 **D2 — tz-aware analytics buckets in-memory (JS), uniformly; do not emit
@@ -346,14 +346,14 @@ paths are byte-for-byte today's behavior — the safe default and the rollback t
 
 ADR-0053 fixed the `date`-as-string-vs-instant family (#1874) on the driver CRUD
 path, and Phase 1 explicitly left `Field.datetime` stored as UTC epoch ms
-(`sql-driver.ts:1500`, decision step 4). But analytics has a **second filter
+(`packages/drivers/driver-sql/src/sql-driver.ts#datetimeFields`, decision step 4). But analytics has a **second filter
 surface that never touches that coercion**: `NativeSQLStrategy` builds raw SQL and
 runs it via `engine.execute`, bypassing the driver's dialect-aware
-`coerceFilterValue` (`sql-driver.ts:1543`). `buildFilterClause` emits
+`coerceFilterValue` (`packages/drivers/driver-sql/src/sql-driver.ts#coerceFilterValue`). `buildFilterClause` emits
 `${col} <op> $N` and binds the comparand directly
-(`native-sql-strategy.ts:385-425`); the only type recovery was
+(`packages/services/service-analytics/src/strategies/native-sql-strategy.ts`); the only type recovery was
 `coerceFilterValueForSql`, which re-derives a type by **regex on the value's
-shape** — no schema type, no date branch (`filter-normalizer.ts:127-140`).
+shape** — no schema type, no date branch (`packages/services/service-analytics/src/strategies/filter-normalizer.ts`).
 
 So a dashboard relative-date token resolved to an ISO string (`"2025-06-18"`),
 filtered against a `Field.datetime` column stored as an INTEGER epoch on SQLite,
@@ -373,8 +373,8 @@ reach. The first increment — commit `6f4cf856e` (branch
 `fix/analytics-datetime-epoch-filter`) — exposes the driver's coercion to
 analytics via a new `StrategyContext.coerceTemporalFilterValue(object, field,
 value)` hook delegating to the driver, applied across `gte/lte/gt/lt/equals`,
-`in/notIn`, and the `dateRange`/timeDimension path (`native-sql-strategy.ts:371`,
-`:88-106`). SQLite `datetime` → epoch ms; `date` text and native-timestamp
+`in/notIn`, and the `dateRange`/timeDimension path (`packages/services/service-analytics/src/strategies/native-sql-strategy.ts`,
+`packages/services/service-analytics/src/strategies/native-sql-strategy.ts`). SQLite `datetime` → epoch ms; `date` text and native-timestamp
 dialects (Postgres/MySQL) pass through unchanged. **Record this PR as ledger
 evidence** — the same enforce-resolution pattern D3 uses for the dead schedule
 fields.
