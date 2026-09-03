@@ -66,7 +66,6 @@ export class RedisPubSub implements IPubSub {
         this.onError =
             opts.onError ??
             ((err, channel) => {
-                // eslint-disable-next-line no-console
                 console.error(`[RedisPubSub] handler error on "${channel}":`, err);
             });
 

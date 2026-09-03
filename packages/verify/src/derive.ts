@@ -18,7 +18,6 @@
 // What it still can't satisfy (required-reference cycles, external/missing targets)
 // is reported `blocked` with a precise reason — the gate stays honest.
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 const COMPUTED = new Set(['formula', 'summary', 'autonumber', 'rollup', 'vector']);
 const RELATIONAL = new Set(['lookup', 'master_detail', 'master-detail', 'masterdetail', 'tree']);

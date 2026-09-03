@@ -102,7 +102,6 @@ export function exportContentDisposition(
       `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
   const asciiBase = objectName.replace(/[^A-Za-z0-9_.-]/g, '_') || 'export';
   // Keep unicode letters (CJK labels) but drop filesystem-hostile characters.
-  // eslint-disable-next-line no-control-regex
   const utf8Base = String(label ?? '')
     .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '_')
     .replace(/^[\s._-]+|[\s._-]+$/g, '')
