@@ -232,7 +232,7 @@ instrument drift.
 
 ## The census
 
-**IN PROGRESS — 55/72 measured, this is a checkpoint commit, not the
+**IN PROGRESS — 68/72 measured, this is a checkpoint commit, not the
 final reading.** Continuing under the shared verify lock with tighter
 per-batch budgets so the lock cycles for other agents on this container;
 the ledger this table is generated from is
@@ -296,38 +296,38 @@ run is interrupted.
 | `packages/services/service-automation` | 333 | 607 | 13 | 953 | ok |
 | `packages/services/service-cache` | 0 | 0 | 13 | 13 | ok |
 | `packages/services/service-cluster` | 5 | 0 | 13 | 18 | ok |
-| `packages/services/service-cluster-redis` | — | — | — | — | **NOT MEASURED** |
-| `packages/services/service-datasource` | — | — | — | — | **NOT MEASURED** |
-| `packages/services/service-i18n` | — | — | — | — | **NOT MEASURED** |
-| `packages/services/service-job` | — | — | — | — | **NOT MEASURED** |
-| `packages/services/service-knowledge` | — | — | — | — | **NOT MEASURED** |
-| `packages/services/service-messaging` | — | — | — | — | **NOT MEASURED** |
-| `packages/services/service-package` | — | — | — | — | **NOT MEASURED** |
-| `packages/services/service-queue` | — | — | — | — | **NOT MEASURED** |
-| `packages/services/service-realtime` | — | — | — | — | **NOT MEASURED** |
-| `packages/services/service-settings` | — | — | — | — | **NOT MEASURED** |
-| `packages/services/service-sms` | — | — | — | — | **NOT MEASURED** |
-| `packages/services/service-storage` | — | — | — | — | **NOT MEASURED** |
-| `packages/spec` | — | — | — | — | **NOT MEASURED** |
+| `packages/services/service-cluster-redis` | 9 | 0 | 13 | 22 | ok |
+| `packages/services/service-datasource` | 24 | 16 | 15 | 55 | ok |
+| `packages/services/service-i18n` | 4 | 0 | 13 | 17 | ok |
+| `packages/services/service-job` | 0 | 0 | 13 | 13 | ok |
+| `packages/services/service-knowledge` | 0 | 32 | 13 | 45 | ok |
+| `packages/services/service-messaging` | 242 | 380 | 13 | 635 | ok |
+| `packages/services/service-package` | 6 | 0 | 13 | 19 | ok |
+| `packages/services/service-queue` | 0 | 0 | 13 | 13 | ok |
+| `packages/services/service-realtime` | 0 | 0 | 13 | 13 | ok |
+| `packages/services/service-settings` | 115 | 341 | 13 | 469 | ok |
+| `packages/services/service-sms` | 0 | 0 | 13 | 13 | ok |
+| `packages/services/service-storage` | 113 | 218 | 13 | 344 | ok |
+| `packages/spec` | 15 | 0 | 17 | 32 | ok |
 | `packages/triggers/trigger-api` | — | — | — | — | **NOT MEASURED** |
 | `packages/triggers/trigger-record-change` | — | — | — | — | **NOT MEASURED** |
 | `packages/triggers/trigger-schedule` | — | — | — | — | **NOT MEASURED** |
 | `packages/types` | — | — | — | — | **NOT MEASURED** |
 | `packages/verify` | 221 | 3,171 | 13 | 3,405 | ok |
-| **total, 55/72 suites measured** | **16,498** | **60,993** | **766** | **78,257** | |
+| **total, 68/72 suites measured** | **17,026** | **61,980** | **941** | **79,947** | |
 
-structured share of total (structured / (structured+console+reporter)): 77.9%
+structured share of total (structured / (structured+console+reporter)): 77.5%
 
-structured share of console+structured (comparable to the 5-suite framing): 78.7%
+structured share of console+structured (comparable to the 5-suite framing): 78.4%
 
-measured: 55/72 — NOT MEASURED (17): `packages/services/service-cluster-redis`, `packages/services/service-datasource`, `packages/services/service-i18n`, `packages/services/service-job`, `packages/services/service-knowledge`, `packages/services/service-messaging`, `packages/services/service-package`, `packages/services/service-queue`, `packages/services/service-realtime`, `packages/services/service-settings`, `packages/services/service-sms`, `packages/services/service-storage`, `packages/spec`, `packages/triggers/trigger-api`, `packages/triggers/trigger-record-change`, `packages/triggers/trigger-schedule`, `packages/types`
+measured: 68/72 — NOT MEASURED (4): `packages/triggers/trigger-api`, `packages/triggers/trigger-record-change`, `packages/triggers/trigger-schedule`, `packages/types`
 
 non-zero exit: 0
 
 ## The answer
 
-Not yet — see "IN PROGRESS" above. Provisional read at 55/72 (do not cite):
-structured share of console+structured is ~79%, nowhere near the
+Not yet — see "IN PROGRESS" above. Provisional read at 68/72 (do not cite):
+structured share of console+structured is ~78%, nowhere near the
 five-suite ~45%, in the direction the earlier reading's own explanation
 predicts (see "What is NOT claimed here" / the five-suite table above): most
 of the *unmeasured* population never boots a kernel at all, so it was always
