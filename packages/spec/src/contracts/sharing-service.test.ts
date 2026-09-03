@@ -63,11 +63,30 @@ describe('Sharing Service Contract — recipient vocabularies (#4539)', () => {
       'position',
       'unit_and_subordinates',
       'business_unit',
+      // [#14103] the record-relative recipient — a user-typed field on the
+      // matched record; per-record expansion is the services half (#15072).
+      'field',
     ]);
     const ruleRecipient: SharingRuleRecipientType = 'queue';
     // @ts-expect-error `queue` is reserved to the runtime rule contract — not authorable
     const notAuthorable: (typeof ShareRecipientType.options)[number] = 'queue';
     expect(ruleRecipient).toBe(notAuthorable);
+  });
+
+  it('the stored-row union is exactly the authoring enum plus the reserved `queue` (#14103)', () => {
+    // `plugin-sharing`'s declared-rule bootstrap copies `sharedWith.type` onto
+    // `sys_sharing_rule.recipient_type` member-for-member (an unmapped value is
+    // skipped with a warning), so a member added to one list and not the other
+    // is a rule that parses and is never seeded — the ADR-0078 shape. Pinned at
+    // the TYPE level so the drift is a compile error, not a runtime surprise.
+    type Authorable = (typeof ShareRecipientType.options)[number];
+    const inStep: Assert<Eq<Exclude<SharingRuleRecipientType, 'queue'>, Authorable>> = true;
+    expect(inStep).toBe(true);
+    // And at the VALUE level: every authorable member is assignable to the
+    // stored-row union (a runtime list, so a reader sees the members).
+    const stored: SharingRuleRecipientType[] = [...ShareRecipientType.options, 'queue'];
+    expect(stored).toHaveLength(ShareRecipientType.options.length + 1);
+    expect(stored).toContain('field');
   });
 });
 
