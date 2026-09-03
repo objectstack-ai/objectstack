@@ -132,6 +132,31 @@ const SYSTEM_SCOPED = 'com.objectstack.setup';
 /** Studio-created database base: installed, never booted, scope-less. */
 const DB_BASE = 'com.acme.mybase';
 
+
+/**
+ * Seat a value on every DECLARED-BUT-UNSET field of a record.
+ *
+ * `installPackage` leaves the optional lifecycle fields as own properties
+ * holding `undefined`, and {@link definedKeys} — correctly — cannot see a key
+ * the wire could never carry. The consequence was MEASURED, and it is the
+ * reason this helper exists: over a bare install the coverage assertion below
+ * observed only 4 of the record's 12 declared fields, and deleting
+ * `installedVersion` from the door's allowlist left this gate GREEN. A gate
+ * blind to two thirds of the surface it names is the defect it was written to
+ * catch, one level up.
+ *
+ * The fill is DERIVED from the record's own key set — every own key whose value
+ * is `undefined` gets one — so this is still not a hand-written list of field
+ * names, and a field added to the record tomorrow is seated without an edit
+ * here. The values are deliberately meaningless: this gate compares KEY SETS,
+ * and what each field must CONTAIN is pinned by that field's own tests.
+ */
+function seatDeclaredFields(record: Record<string, unknown>): void {
+    for (const k of Object.keys(record)) {
+        if (record[k] === undefined) record[k] = `__seated__${k}`;
+    }
+}
+
 /**
  * A registry in the showcase's shape, built through the REAL
  * `SchemaRegistry.installPackage` — so the records under test are the records
@@ -168,6 +193,12 @@ function realRegistry(): SchemaRegistry {
     registry.installPackage({
         id: DB_BASE, name: 'My Base', namespace: 'mybase', version: '1.0.0', type: 'app',
     } as never);
+
+    // Every declared field carries a value from here on — see
+    // `seatDeclaredFields` for the measurement that made this necessary.
+    for (const id of [CODE_PROJECT, SYSTEM_SCOPED, DB_BASE]) {
+        seatDeclaredFields(registry.getPackage(id) as unknown as Record<string, unknown>);
+    }
 
     return registry;
 }
@@ -259,8 +290,17 @@ describe('GATE: runtime /packages carries every declared and stamped key', () =>
         // record that already carried `writable` would make the stamp
         // measurement below read a field this door never computed.
         const registry = realRegistry();
+        // Every declared slot on the record must be OBSERVABLE, or the coverage
+        // assertion silently shrinks to whatever the fixture happened to
+        // populate. Measured before `seatDeclaredFields` existed: 8 of 12
+        // declared fields sat at `undefined`, and deleting one of them from the
+        // allowlist left this gate green. Stated as a property of the record —
+        // never as a count.
+        const record = registry.getPackage(CODE_PROJECT) as unknown as Record<string, unknown>;
+        const unobservable = Object.keys(record).filter((k) => record[k] === undefined);
+        expect(unobservable, 'declared fields the fixture leaves unobservable').toEqual([]);
+
         const keys = recordKeysOf(registry, CODE_PROJECT);
-        expect(keys.size).toBeGreaterThan(3);
         expect(keys.has('manifest')).toBe(true);
         expect(keys.has('status')).toBe(true);
         for (const stamp of DOOR_COMPUTED_STAMPS) expect(keys.has(stamp)).toBe(false);
