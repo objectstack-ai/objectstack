@@ -572,6 +572,7 @@ export const AssignmentExpressionValueSchema = ExpressionSchema
   });
 
 export type AssignmentExpressionValue = z.input<typeof AssignmentExpressionValueSchema>;
+export type AssignmentExpressionValueParsed = z.infer<typeof AssignmentExpressionValueSchema>;
 
 /**
  * What an assignment value may be (#14149) — the two authoring forms, plus
@@ -632,6 +633,7 @@ export const AssignmentValueSchema = z.unknown()
   });
 
 export type AssignmentValue = z.input<typeof AssignmentValueSchema>;
+export type AssignmentValueParsed = z.infer<typeof AssignmentValueSchema>;
 
 /** What the refusal of the legacy `assignments: [{ variable, value }]` array says. */
 export const ASSIGNMENT_ARRAY_FORM_PRESCRIPTION =
