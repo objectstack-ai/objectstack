@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { ObjectStackDefinitionSchema } from '../stack.zod';
+import { PluginPermissionsSchema } from '../kernel/manifest.zod';
 
 /**
  * # Environment Artifact Envelope
@@ -32,6 +33,13 @@ import { ObjectStackDefinitionSchema } from '../stack.zod';
  *   `checksum`.
  * - **Deployment Config (NOT in this schema):** business DB coordinates,
  *   credentials, environment identity, secrets. Injected at runtime.
+ * - **Consent state (this schema, `grantedPermissions`, #14865):** the
+ *   install-time GRANTED permission set per plugin, keyed by the plugin
+ *   manifest `id` — written by the control plane at consent-compile time,
+ *   read by the loader at materialize time. Control-plane state re-emitted
+ *   on every artifact assembly, not compiled metadata: it sits beside
+ *   `metadata`, outside the `checksum` digest. Absent ≠ `{}` — see the
+ *   key's docblock.
  *
  * See {@link content/docs/concepts/north-star.mdx} §6.3 for the
  * runtime-inputs boundary.
@@ -115,6 +123,61 @@ export const EnvironmentArtifactSchema = lazySchema(() => z.object({
    * This is the direct output of `objectstack compile`.
    */
   metadata: ObjectStackDefinitionSchema,
+
+  /**
+   * Install-time GRANTED permission set, per plugin, keyed by the plugin
+   * manifest `id` (#14865 — the artifact-contract half of #11333 option A
+   * and the #13457 batch ruling; ADR-0025 §3.5 step 2).
+   *
+   * - **Producer:** the cloud control plane's consent-compile step. The
+   *   install-consent flow persists the consented four-class set
+   *   `{ services, hooks, network, fs }` on
+   *   `sys_package_installation.granted_permissions`; when the control plane
+   *   assembles this envelope it copies that set here, one entry per
+   *   consent-bearing package, so the environment-local carrier ships it and
+   *   no runtime path ever reads `sys_package_installation` (ADR-0003 /
+   *   cloud ADR-0007).
+   * - **Consumer:** the materialize-time loader, which hands each entry to
+   *   `PluginPermissionEnforcer.registerGrantedPermissions(pluginName, granted)`
+   *   (`packages/core/src/security/plugin-permission-enforcer.ts`) so a
+   *   third-party plugin runs under exactly the surface the installer
+   *   consented to — independent of what its manifest *requested*
+   *   (`ManifestSchema.permissions`).
+   *
+   * **Absent ≠ `{}`.** The key ABSENT means no consent record exists for
+   * this environment (first-party / pure-metadata packages; an artifact
+   * assembled before consent existed). An EMPTY map `{}` — or a per-plugin
+   * entry `{}` — is a consent record that consented to NOTHING. Cloud writes
+   * that distinction and the loader decides on it, so this key carries no
+   * `.default({})` and never may: `{}` round-trips as `{}`, absence
+   * round-trips as absence (pinned next to this file).
+   *
+   * **Key = the plugin manifest `id`**, NOT the control-plane `package_id` —
+   * the manifest `id` is the identity the enforcer is queried with
+   * (`AppPlugin` derives the kernel plugin name from `bundle.manifest.id`);
+   * keying by `package_id` would need a second name→package resolution path.
+   * Documented assumption, and the residual risk this contract accepts: a
+   * package whose manifest `id` differs from its `package_id` is keyed by
+   * the manifest `id` here, and a producer that keys such an entry by
+   * `package_id` instead writes an entry the enforcer is never queried for —
+   * the consented set then silently fails to bind to that plugin. This
+   * schema cannot tell the two spellings apart; the producer owns it.
+   *
+   * Value shape is `PluginPermissionsSchema` (`kernel/manifest.zod.ts`,
+   * `.strict()`) — the same declaration the manifest's *requested* set uses,
+   * so granted ⊆ requested is expressible key-for-key, and an unknown
+   * permission class is refused at the artifact door rather than granted
+   * silently. Sits beside `metadata`, outside the `checksum` digest (which
+   * covers the `metadata` block only).
+   */
+  grantedPermissions: z.record(z.string(), PluginPermissionsSchema).optional()
+    .describe(
+      'Install-time GRANTED permission set per plugin, keyed by the plugin manifest `id` '
+      + '(not the control-plane `package_id`). Written by the cloud control plane at consent-compile '
+      + 'time from `sys_package_installation.granted_permissions`; consumed by the materialize-time '
+      + 'loader via `PluginPermissionEnforcer.registerGrantedPermissions`. Absent = no consent record; '
+      + '`{}` = consent-bearing and consented to nothing — the two are never collapsed.',
+    ),
 
   // ── Retired v0 keys (#4740, ADR-0049) ──────────────────────────────
   // Declared-but-never-implemented in the pre-convergence ./system shape.
