@@ -72,10 +72,17 @@
  *     this cache synchronously, in-process, before the next read.
  *  2. **TTL** — `OS_METADATA_OVERLAY_CACHE_TTL_MS`, default 30s, `0` = off.
  *     The residual bound, covering only what the epoch cannot see: a PEER
- *     node's write on a deployment with no `authz.invalidated` bridge attached.
- *     With that bridge, a peer's hint bumps the LOCAL epoch
- *     (`authz-invalidation-bridge.ts` calls `epoch.bump('remote')`), so
- *     cross-node convergence narrows for free.
+ *     node's write on a deployment with no cluster bridge attached at all.
+ *     With one attached, the bridge's own receipt path bumps the LOCAL epoch —
+ *     `authz-invalidation-bridge.ts` calls `epoch.bump('remote')` for the
+ *     authorization cache, and `protocol.ts`'s `applyRemoteMetadataMutation`
+ *     calls {@link bumpWriteEpoch}`(engine, 'remote')` for THIS one, after its
+ *     registry converges and before local listeners run (#13609, ruling A′,
+ *     2026-09-03) — so cross-node convergence narrows for free for both.
+ *     ⚠️ Before that fix, the metadata bridge converged the registry but never
+ *     bumped this cache, so a read landing inside the residue window fed the
+ *     untimed registry a row this cache should already have retired — see
+ *     `protocol.datasource-delete-prolongation.test.ts` for the measurement.
  *
  * ⚠️ **`metadata.changed` is NOT a trigger here, and #11633 §4's expectation
  * that it would be does not survive measurement.** That channel is published by
@@ -192,13 +199,29 @@ export function metaOverlayCacheTtlMs(
   return Math.floor(parsed);
 }
 
+/** The structural shape read off `engine.writeEpoch`, once validated. */
+interface WriteEpochSeam {
+  readonly current: number;
+  bump(reason: string): number;
+}
+
 /**
- * The engine's current write epoch, or `undefined` when this engine carries no
- * such seam. Mirrors `isWriteEpochLike` from `@objectstack/objectql` rather
- * than importing it — see the header for why that import is unavailable in this
- * direction.
+ * `engine.writeEpoch`, validated against the full `{ current, bump, subscribe
+ * }` surface — or `undefined` when the engine carries no such seam, or only a
+ * partial one. Mirrors `isWriteEpochLike` from `@objectstack/objectql` rather
+ * than importing it (see this file's header for why that import is
+ * unavailable in this direction): both {@link readWriteEpoch} and
+ * {@link bumpWriteEpoch} resolve through here, so the two never drift on what
+ * counts as a real seam.
+ *
+ * ⚠️ The whole surface is checked, `subscribe` included, even though neither
+ * caller uses it: a `{ current, bump }` pair with no `subscribe` is not this
+ * engine's real epoch either (see `readWriteEpoch accepts the full surface and
+ * refuses every partial one` in this package's test file), and checking less
+ * here would silently let such a shape through one call path and not the
+ * other.
  */
-export function readWriteEpoch(engine: unknown): number | undefined {
+function resolveWriteEpochSeam(engine: unknown): WriteEpochSeam | undefined {
   if (!engine || typeof engine !== 'object') return undefined;
   const epoch = (engine as { writeEpoch?: unknown }).writeEpoch;
   if (!epoch || typeof epoch !== 'object') return undefined;
@@ -210,7 +233,41 @@ export function readWriteEpoch(engine: unknown): number | undefined {
   ) {
     return undefined;
   }
-  return seam.current;
+  return seam as unknown as WriteEpochSeam;
+}
+
+/**
+ * The engine's current write epoch, or `undefined` when this engine carries no
+ * such seam.
+ */
+export function readWriteEpoch(engine: unknown): number | undefined {
+  return resolveWriteEpochSeam(engine)?.current;
+}
+
+/**
+ * [#13609] Bump the engine's write epoch from OUTSIDE this engine's own write
+ * path — the structural sibling to {@link readWriteEpoch}, spelled the same
+ * way and for the same reason: `@objectstack/metadata-protocol` must not
+ * import `@objectstack/objectql`, so the epoch's real type
+ * (`WriteEpochLike`/`AuthzInvalidationReason`) is never named here, only its
+ * shape.
+ *
+ * The call this exists for is `protocol.ts`'s `applyRemoteMetadataMutation`,
+ * mirroring `authz-invalidation-bridge.ts`'s `epoch.bump('remote')` on the
+ * IDENTICAL substrate (#11968) — that bridge already retires this package's
+ * sibling cache (the authorization one) the moment a peer's hint converges;
+ * this is the metadata cluster channel getting the same bump the authz
+ * channel already had. See this module's header, "Invalidation" ①, for why a
+ * PEER's mutation does not otherwise move this replica's epoch at all.
+ *
+ * A no-op — declining exactly like {@link readWriteEpoch} — when this engine
+ * exposes no write-epoch seam, or only a partial one.
+ *
+ * @returns the epoch's new value, or `undefined` when there was no seam to
+ * bump.
+ */
+export function bumpWriteEpoch(engine: unknown, reason: string): number | undefined {
+  return resolveWriteEpochSeam(engine)?.bump(reason);
 }
 
 /**
