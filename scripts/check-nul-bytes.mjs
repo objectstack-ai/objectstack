@@ -264,6 +264,8 @@
 // on purpose. Extraction failure is RED, never a silent skip -- the class
 // vanishing from a self-scan command is the same defect as it drifting.
 
+// dispatch-gates: whole-tree-population -- the scan set is `git ls-files` PLUS `git ls-files --others --exclude-standard`, so every tracked and every untracked-not-ignored file in the repo is read; the literals below name this gate's own artifacts, never its population.
+
 import { execFileSync } from 'node:child_process';
 import { lstatSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
