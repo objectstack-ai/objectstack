@@ -84,7 +84,8 @@ carries `SKILL.md` alone — `gen:skill-refs` only visits skills listed in its
 - **Short object names** (`account`, `task`); no `namespace`, no `tableName`.
 - **CEL for all expressions** — predicates, conditions, schedules. Use the
   `F\`\``, `P\`\``, `cel\`\``, `cron\`\``, `tmpl\`\`` tagged templates from
-  `@objectstack/spec`. Legacy `OLD` / `NEW` evaluate to `null` since M9.5.
+  `@objectstack/spec`. Legacy `OLD` / `NEW` are not CEL — use
+  `previous.` / `record.`.
 - **v5.0 vocabulary** — runtime workspace is `environment`, not `project`.
 - **Singular metadata type names** (`agent`, `view`, `flow`, …); REST resource
   collections are plural (`/api/v1/ai/agents`).
@@ -102,10 +103,14 @@ A few common decision points where the right skill isn't obvious:
   **automation** (screen flows). Static record / list / dashboard surfaces are
   **ui**.
 - **Any CEL expression** — load **objectstack-formula** alongside the host
-  skill (data validations, automation guards, UI visibility, AI tool params).
+  skill (data validations, automation guards, UI visibility).
 - **Kernel / plugin events vs. data lifecycle** — `PluginContext` lifecycle and
   `EventBus` belong to **objectstack-platform**; record-level hooks belong to
   **objectstack-data**.
+- **Labels vs. bundles** — a `label` you want translated is **objectstack-i18n**.
+- **Upgrade vs. platform** — a protocol-major move is **objectstack-upgrade**.
+- **Rendering this metadata** — the consuming UI is
+  [objectui `skills/objectui/`](https://github.com/objectstack-ai/objectui).
 
 ---
 
