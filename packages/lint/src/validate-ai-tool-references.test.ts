@@ -124,6 +124,22 @@ describe('validate-ai-tool-references', () => {
     expect(findings[0].message).toContain('Did you mean "action_triage_case"?');
   });
 
+  // #14577 — the `action_<name>` prefix pre-pass stays rule-local (it is
+  // knowledge about ADR-0109's materialised family, not something the shared
+  // helper should know), but a miss now falls through to `suggestName`
+  // (#14268) instead of a private Levenshtein copy. This case has no
+  // `action_`-prefixed match at all, so it pins that the fallback still fires
+  // — via containment, the class the private copy could not reach.
+  it('falls through to suggestName (containment) when the prefix pre-pass misses', () => {
+    const stack = {
+      tools: [{ name: 'search_knowledge_base', label: 'Search KB', description: 'x' }],
+      skills: [{ name: 's', tools: ['knowledge_base'] }],
+    };
+    const findings = validateAiToolReferences(stack);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('Did you mean "search_knowledge_base"?');
+  });
+
   it('resolves trailing-wildcard families against the universe', () => {
     const withActions = {
       objects: [{ name: 'crm_case', actions: [exposed('triage_case', 'flow')] }],

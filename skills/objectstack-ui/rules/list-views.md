@@ -92,7 +92,7 @@ columns: [
 ```typescript
 filter: [
   { field: 'status', operator: 'not_equals', value: 'closed' },
-  { field: 'assigned_to', operator: 'equals', value: '$currentUser' },
+  { field: 'assigned_to', operator: 'equals', value: '{current_user_id}' },
 ]
 ```
 
@@ -100,7 +100,7 @@ Common operators: `equals`, `not_equals`, `contains`, `starts_with`,
 `greater_than`, `less_than`, `is_empty`, `is_not_empty`, `in`, `not_in`,
 `this_week`, `this_month`, `this_quarter`, `last_n_days`.
 
-> **`$currentUser`** is a runtime variable — the logged-in user's ID.
+> **`{current_user_id}`** resolves to the signed-in user's id.
 
 ### End-User Quick Filters (`userFilters`, ADR-0047)
 
