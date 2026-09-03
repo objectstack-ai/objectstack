@@ -279,25 +279,25 @@ inversion is needed — the organization only has to exist before a person acts.
 An organization has no rows until it authors something. A fresh deployment with ten organizations
 has **no catalog tables at all** and empty assignment tables until an admin assigns someone.
 
-### D4 — Declared items are referenced by name; resolution is registry-first
+### D4 — Catalog items are referenced by name; resolution reads the registry
 
 [ADR-0129](./0129-object-name-is-the-canonical-id.md) made the object `name` the canonical id; this
-record extends the principle to catalog items. A declared position or permission set has no row id,
-so every reference to a catalog item — `sys_user_position`, `sys_position_permission_set`, sharing
-recipients, grants — names it by its machine name, which is already unique per organization and,
-for declared names, reserved across the deployment (an organization may not create an item whose
-name a declaration holds; the uniqueness check spans registry and rows).
+record extends the principle to catalog items. A position or permission set has no row id, so every
+reference to one — `sys_user_position`, `sys_user_permission_set`, sharing-rule recipients, grants —
+names it by its machine name. The namespace is the environment registry's: code-declared and
+environment-authored items share it, and Studio refuses a name a managed package holds.
 
-Resolution is **registry first (both provenances — code-declared and environment-authored), then the
-caller's organization's rows**. `resolve-authz-context.ts` already looks positions up by name
-(`grants.positions`); the change is where it looks first. A name
-that resolves nowhere — a declaration removed or renamed in code — **fails closed** for that reference
-and is **reported at boot** per organization, by name. This is loud where today's behaviour is a
-zombie: a seeded mirror of a removed declaration stays in the table and keeps granting.
+Resolution reads the **registry** — one source, both provenances. `resolve-authz-context.ts` already
+looks positions up by name (`grants.positions`); the change is that the lookup is a registry read
+instead of a table read, and the position → permission-set binding is read from the position's
+definition instead of a junction table. A name that resolves nowhere — a declaration removed or renamed
+in code — **fails closed** for that reference and is **reported at boot** per organization, by name.
+This is loud where today's behaviour is a zombie: a seeded mirror of a removed declaration stays in the
+table and keeps granting.
 
-The registry and the organization's rows are **disjoint sets unioned by name**, not two definitions
-of one item merged field by field. That distinction is what keeps the read-time-merge failures of the
-overlay model (§5) out of this design.
+Because the catalog has one home (D3), nothing is merged at selection time: a picker lists the
+registry, an assignment names one of its entries. The read-time-merge failures of the overlay model
+(§5) cannot arise.
 
 ### D5 — Platform standing is configuration, or a Default-Organization row under `single`
 
