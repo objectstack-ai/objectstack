@@ -13,7 +13,10 @@ principle 「或者说我们数据库中，不应该有允许 org_id 为空的�
 group-level template rows 「不考虑集团级模板行，作废相关需求」「不考虑 分层主数据」; the posture that
 breaks every remaining tie: 「我们现在创业阶段，应该定一套最稳定可靠的方案，而不是盲目追求功能。」; and the
 provenance rule for editing: 「可以先约定代码推送过来的元数据就只能在代码中修改。studio 界面上配置的元数据，
-保存在库中，可以在界面上修改，包括 ../cloud build agent 构建的元数据，因为也是保存在库中，可以在界面上修改。」
+保存在库中，可以在界面上修改，包括 ../cloud build agent 构建的元数据，因为也是保存在库中，可以在界面上修改。」;
+and the sealing ruling that fixes D6: 「你这么说还不如先完全封死。flow 也先不让改。然后软件包应该有两种安装方式，
+有一种是模版形式直接进库，那就是所有都可以修改。但是单库多租户禁止安装这种模版软件包；有一种是受管软件包，什么都以
+软件包中的为准，就是不让改。」
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (the metadata overlay — its
 environment layer is re-keyed by D6), [ADR-0049](./0049-no-unenforced-security-properties.md)
 (enforce or remove — the posture of D13), [ADR-0066](./0066-unified-authorization-model.md) D2
@@ -70,13 +73,15 @@ The obvious repair — give the platform's rows an owner — was drafted and rej
 "platform organization", a concept that is an organization for the database and not for anyone
 else. The maintainer's model is simpler and this record adopts it whole:
 
-1. **Metadata is the registry, and the registry has two provenances.** Code-declared metadata —
-   objects, fields, views, and equally positions, permission sets, capabilities, declared sharing
-   rules, email and notification templates — is edited **in code only** and is **never materialized
-   as rows**; there is nothing to seed, per tenant or otherwise. Metadata authored at runtime in
-   Studio or by the cloud build agent is **saved in the database and edited in the UI**; it is the
-   environment's, not any organization's, and its ledger carries **no organization column**. Both
-   provenances are cross-tenant by nature: every organization runs the same schema.
+1. **Metadata is the registry, and the registry has two provenances.** A **managed** package —
+   objects, fields, views, and equally positions, permission sets, capabilities, sharing rules,
+   templates, flows — is code: edited **in code only**, changed by publishing a new version, **never
+   materialized as rows**, and **sealed** at runtime (no overlay, no disable, no clone). Metadata
+   authored at runtime — in Studio, by the cloud build agent, or by installing a **template** package
+   (a one-time copy into the database) — is **saved in the database and edited in the UI**; it is the
+   environment's, not any organization's, and its ledger carries **no organization column**. Template
+   packages are **refused on shared-DB multi-tenant deployments**. Both provenances are cross-tenant
+   by nature: every organization runs the same schema.
 2. **A row with an organization column exists only when an organization authored it** — a position an
    admin created in Setup, a set they cloned, an assignment they made. Every such row carries its
    organization, NOT NULL. Registry items are referenced **by name**, the way ADR-0129 already treats
@@ -86,10 +91,10 @@ else. The maintainer's model is simpler and this record adopts it whole:
 
 Consequences: NULL has nothing left to mean (D1); the driver's NULL arm and Layer 0's strict
 equality stop disagreeing because there is one predicate (D8); a forgotten stamp is a refused write
-(D9); the seeders, the per-organization catalog machinery and the #13491 ledger retire (D13); runtime
-editing of declared templates stays **closed** until an organization asks, and opens — if ever — as
-copy-on-write, never as a seed (D6). Startup posture throughout: the stable answer, not the
-feature-complete one.
+(D9); the seeders, the per-organization catalog machinery and the #13491 ledger retire (D13);
+customization of managed content is **sealed** — ADR-0126's overlay and disable + clone regimes are
+paused, and ADR-0005's per-organization overlay axis is retired, so `sys_metadata` needs no split (D6).
+Startup posture throughout: the stable answer, not the feature-complete one.
 
 ---
 
@@ -221,6 +226,10 @@ Environment metadata belongs to the deployment, not to an organization: its ledg
 organization column** (D6/D7), and writing it requires the metadata-authoring capability
 (`manage_metadata` / `studio.access`), which `organization_admin` deliberately does not hold.
 
+A package reaches a deployment in one of **two install modes** (D6): **managed** — registered as code,
+sealed, upgradeable; or **template** — copied once into the environment ledger as environment
+metadata, fully editable, no upgrade channel, refused on shared-DB multi-tenant postures.
+
 This retires: `bootstrapBuiltinRoles`, `bootstrapDeclaredPositions`, `bootstrapDeclaredPermissions`,
 `bootstrapDeclaredSharingRules`, `bootstrapSystemCapabilities`, `bootstrapPlatformAdmin`'s
 `defaultPermissionSets` materialization, `bootstrapDeclaredEmailTemplates`, `seedTemplates`, the
@@ -276,56 +285,61 @@ with a NULL organization, writes it **owned by the Default Organization** instea
 posture no grant row is written (unchanged). `reportLegacyPlatformAdminGrant` and the legacy unscoped
 anchor retire with D13. No NULL grant row is ever produced.
 
-### D6 — Editability follows provenance; the environment ledger has no organization column
+### D6 — Managed is sealed; template is copied in and fully editable; the environment ledger has no organization column
 
-**Code-provenance metadata is edited in code.** No runtime door edits a declared item — not Setup, not
-Studio, not the data API. The catalog's customization path is the 2026-08-24 one, **clone** (create an
-org-owned row from a declaration, D3), and the environment's is **author** (create environment
-metadata in Studio, below).
+**Two install modes, and the mode is the whole customization story.**
 
-**Environment-provenance metadata is edited in the UI.** What Studio or the cloud build agent wrote
-into `sys_metadata` is theirs to change there, on every posture, by anyone holding the
+- **Managed** (default). The package is registered into the registry as code. Nothing in it is
+  editable at runtime — not in Setup, not in Studio, not through the data or metadata API — and
+  nothing in it can be switched off or cloned-with-linkage either: [ADR-0126](./0126-packaged-metadata-customization-model.md)'s
+  Regime O (overlay) and Regime C (disable + clone) are **paused for managed content, packaged flows
+  included** (verbatim: 「先完全封死。flow 也先不让改」). To change a managed item, the vendor publishes a
+  new version and upgrades flow to the base untouched. Regime E (extend) stands, because an extension
+  is itself a package. Managed is the **only** mode a shared-DB multi-tenant deployment (`group` /
+  `isolated`) accepts.
+- **Template.** The package's metadata is copied **once** into the environment definition ledger as
+  environment-provenance items — from then on it is the environment's own metadata, editable in Studio
+  like anything authored there, with no upgrade channel (a later version is a new import, refused where
+  names collide; provenance is recorded for information only). ⛔ **Refused on `group` / `isolated`**
+  with a message naming the posture: a template import would hand every tenant an editable shared
+  schema. Under `single` it is how a customer takes an app and makes it theirs.
+
+Creating one's own item — a new permission set, position, view, flow — in Setup (organization-owned,
+D3) or Studio (environment-owned) is ordinary authoring, not customization of a managed item;
+pre-filling the form from a managed item is a UI convenience that records no linkage.
+
+**Code-provenance metadata is edited in code.** No runtime door edits a managed item.
+
+**Environment-provenance metadata is edited in the UI.** What Studio, the cloud build agent or a
+template install wrote into `sys_metadata` is the environment's to change there, by anyone holding the
 metadata-authoring capability. This is [ADR-0005](./0005-metadata-customization-overlay.md)'s
-environment layer, kept — and re-homed: **`sys_metadata` is the environment definition ledger and
-carries no organization column** (D1/D7). It holds every type not `allowOrgOverride` and the
-environment-level rows of the five overridable types. Per-organization overlays of those five
-presentational types (`view`, `dashboard`, `report`, `translation`, `email_template`) are
-organization-authored D3 rows and live in their **own** org-owned object, not beside environment rows
-in a nullable column. ADR-0005 is amended accordingly; its "no overlay row = the registry" reading and
-its overlay-wins resolution are unchanged. Under `single` the split is invisible in behaviour (one
-environment, one organization); under a wall it is what makes environment metadata deployment-level
-without an owner and organization overlays walled without a NULL arm.
+environment layer, kept — and made the **whole** ledger: **`sys_metadata` is the environment definition
+ledger and carries no organization column** (D1/D7).
 
-**How code-declared metadata is customized without being edited** is not new: it is
-[ADR-0126](./0126-packaged-metadata-customization-model.md)'s three regimes, first landed for packaged
-flows, restated here against the two provenances so no card re-derives them. The maintainer's phrasing
-of the requirement — 「代码中定义的元数据运行时不可修改，要修改就软件包重新发版本；不想用的可以停用；想改的可以复制一个
-重新改」 — is the model exactly:
+**ADR-0005's per-organization overlay axis is retired for now.** The five `allowOrgOverride` types
+(`view`, `dashboard`, `report`, `translation`, `email_template`) were the only reason `sys_metadata`
+carried an organization. With managed content sealed and template content environment-owned there is
+no per-organization metadata left to hold: under `single` the organization *is* the environment; under
+a wall no metadata is editable at all. So there is **no split and no second object** — org-scoped
+metadata writes are refused (the existing identity pin flips from "exactly five types accepted" to
+"none"), and the environment layer is the ledger. ADR-0005 is amended (status note); its "no overlay
+row = the registry" reading and its layered resolution (environment → code) are unchanged. If a
+measured pull for per-organization presentational overlays returns, it comes back as an org-owned
+overlay object holding D3 rows — never as a nullable column on the environment ledger.
 
-| Regime (ADR-0126 §3) | What the user does | What is written, and by whom | Under this record |
-|:--|:--|:--|:--|
-| **O — overlay** (`view`, `dashboard`, `report`, `translation`, `email_template`) | copy a shipped view or dashboard and change the copy | a **whole-item** overlay row keyed by the same name — organization-authored (Setup, org admin) or environment-authored (Studio, metadata author) | the org row is a D3 row in the overlay object; the environment row is Studio-provenance in the environment ledger (D6). Overlay wins whole; the code item is untouched |
-| **C — disable + clone** (`flow`, `permission`, `action`; pre-charted `tool`, `skill`, `position`) | switch a shipped flow off; or clone it as a sibling under a **new name** and change the clone | disable = one `active` bit in the activation ledger, **no clone required**; clone = a whole-definition copy with no linkage to the base (ADR-0126 amendment ruling 2) | the ledger row is environment-level and the ledger carries **no organization column** (D7 — this amends ADR-0126 D3's "org column reserved, written NULL": a reserved nullable column is the shape D1 forbids; per-organization activation, when a customer asks, is a **separate org-owned object**, refused per trigger type exactly as ADR-0126 D3 pre-charts). The clone is Studio-provenance (environment ledger) or a D3 org row, by who authored it |
-| **E — extend** (`object`, `app`) | add fields, validations, navigation | a package | unchanged; packages are code |
-| **outside / unassigned** | — | — | unchanged (ADR-0126 §3 lists them so silence reads as decided) |
+**What this does to ADR-0126.** Its three regimes were the answer to "how is packaged metadata
+customized without being edited"; the maintainer's answer is now "it is not — pick the install mode".
+Regime O and Regime C are paused for managed content; the activation ledger (`sys_metadata_activation`,
+first consumer packaged flows, #11665) has no writer while the door is sealed and is removed at protocol
+18 unless a measured pull returns (D13, [ADR-0049](./0049-no-unenforced-security-properties.md));
+ADR-0126 D3's "org column reserved, written NULL" on that ledger is withdrawn — a reserved nullable
+tenant column is the shape D1 forbids. Regime E stands. ADR-0126 carries the amendment note.
 
-Two consequences the table makes explicit. **A disable switch for a view or dashboard does not exist
-today** — Regime O has overlay but no `active` bit; "I do not want this dashboard" is expressed by
-overlaying it or by not binding it in navigation (Regime E). Admitting `view` / `dashboard` into the
-disable half is a one-row change to ADR-0126 §3 that the generic ledger already supports; under the
-startup posture it waits for a measured pull (§6 Q6). And **no regime edits the code item**: the base
-stays what the package shipped, upgrades reach it untouched, and every customization is either a shadow
-(O), a switch (C-disable), a sibling (C-clone) or a package (E).
-
-**Organization-level editing of declared templates stays closed.** Templates are the one class where
-runtime editing by an *organization* is a stated requirement; the maintainer's startup posture is to
-not open that door until an organization asks: `sendTemplate` resolves the registry (code-declared or
-Studio-authored); no per-organization template row exists. If and when the door opens, it opens as
-**copy-on-write**, never as a seed: the editor pre-fills the registry template; *Save* writes one row
-owned by that organization; resolution becomes `(organization, name, locale)` with the org row winning
-**whole** (no field-level merge); *Reset to default* deletes the row; a registry template removed
-leaves an orphan override that the boot report names. The same shape serves any other class that later
-earns an organization-level door.
+**Templates** follow the same two modes: a managed template renders from the registry and is immutable;
+a Studio-authored or template-installed template is environment metadata, editable in Studio. There is
+no per-organization template override (the door the maintainer chose not to open: 「我宁可先不让他编辑」).
+If a measured organization-level pull ever returns, it opens as **copy-on-write** — one org-owned row,
+whole-item, `(organization, name, locale)`, *Reset to default* deletes it — never as a seed.
 
 ### D7 — Deployment-level state has no organization column; the UI never merges sources server-side
 
@@ -424,7 +438,9 @@ equivalent; the seeders and projector of D2; `per-organization-catalog.ts` inclu
 `meta-write-org-scope.ts`'s NULL layer, `bootstrap-system-capabilities.ts`; the email-template seed
 and `email-template-provenance.ts`; the `__global__` sentinel and ADR-0120 D3's `COALESCE`;
 `platform-object-tenancy.ts` and `isPlatformObjectOutOfTenantAuditScope`; #12699's stand-down
-semantics (replaced by D7's no-column). Each retirement of an authorable shape is an
+semantics (replaced by D7's no-column); ADR-0005's org-scoped write path for the five tier-A types;
+the packaged-flow disable/clone door and `sys_metadata_activation` (unless a measured pull has
+returned by then). Each retirement of an authorable shape is an
 [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) entry.
 
 ### D14 — Staging
@@ -478,14 +494,19 @@ refusal, mirror deletion, arm removal, retirements (D1/D9/D10/D13), in the stagi
   tenant-threaded reads, plus the store helpers — from row lookup to registry-first lookup.
 - **Setup, Studio and pickers change** (D7): Setup drops the declared rows it used to list, gains
   *Clone from package*; pickers read two sources. No server-side merge is built.
-- **Organization-level template editing is unavailable** until an organization asks (D6); existing
-  customized template rows need a ruling (§6 Q1). Studio-authored templates remain editable in Studio.
+- **Organization-level template editing is unavailable** (D6); existing customized template rows
+  need a ruling (§6 Q1). Studio-authored and template-installed templates remain editable in Studio.
 - **Deployment-level settings leave `sys_setting`** (D7): configuration or a tenant-less object.
-- **The metadata ledger splits** (D6): `sys_metadata` loses its organization column and becomes the
-  environment definition ledger; per-organization overlays of the five presentational types move to
-  an org-owned object. This touches the layered read in `metadata-protocol` (`getMetaItem`),
-  `meta-write-org-scope.ts`, the ADR-0094 write-through, the ADR-0126 activation ledger, and
-  `sys-metadata-repository.ts` — the largest single item in the plan, and the reason C5 is its own card.
+- **`sys_metadata` loses its organization column and ADR-0005's per-organization overlay axis is
+  retired** (D6): org-scoped writes of the five tier-A types are refused; the identity pin, the layered
+  read in `metadata-protocol` (`getMetaItem`), `meta-write-org-scope.ts`, the ADR-0094 write-through and
+  `sys-metadata-repository.ts` all simplify. A live feature is switched off; the maintainer confirms it
+  in §6 Q6.
+- **Managed content is sealed** (D6): ADR-0126's disable/clone machinery for packaged flows (#11665)
+  goes dormant behind a refused door and the activation ledger is removed at protocol 18 unless a pull
+  returns; recently landed work is retired rather than kept inert.
+- **The template install mode is new work** (D6): a manifest declaration of permitted modes, a
+  one-time importer into the environment ledger, and the posture refusal on `group` / `isolated`.
 - Tests pinning NULL semantics and seeded rows are rewritten (`deal_p1`, `sql-driver-tenant-scope`,
   `memory-tenancy-guard`, `rule-criteria-org-scope`, `per-organization-catalog`,
   `bootstrap-declared-email-templates`, cloud's `unscoped-control-plane-tenant-wall`).
@@ -512,6 +533,7 @@ refusal, mirror deletion, arm removal, retirements (D1/D9/D10/D13), in the stagi
 | **Read-time overlay of code and database metadata for the same item** (the maintainer's prior platform; ADR-0005's mechanism) | Field-level precedence ambiguity, silent drift on upgrade, no way to delete a code item from the database, merged lists that re-implement search/sort/paging. D4 avoids it by keeping the sets disjoint and unioned by name; D7 avoids it by never merging lists server-side. |
 | **A string sentinel (`__global__`) as owner** | Breaks the FK to `sys_organization`; every layer special-cases it forever (ADR-0120 D3's COALESCE is the running cost). |
 | **Declare a legitimately org-less write per call** (#13636 option B, draft PR #14923) | Makes NULL a *declared* state instead of removing it; every future writer of a conditionally-scoped object must know to declare; the column stays nullable, so the constraint D1 wants can never land. Superseded by taking the column off the objects whose rows are legitimately org-less (§1.6). |
+| **Keep ADR-0126's overlay and disable + clone regimes live for managed content** | Each regime is a per-type customization mechanism with its own ledger, walls and UI; under the startup posture the maintainer chose one switch (the install mode) over three mechanisms. Regime E stays because it costs nothing (a package). Paused, not rejected: the regimes return only on a measured pull, and never through a nullable tenant column. |
 
 ---
 
@@ -526,15 +548,15 @@ refusal, mirror deletion, arm removal, retirements (D1/D9/D10/D13), in the stagi
    `sys_platform_setting` object? Proposed: configuration for infrastructure values, a tenant-less
    object only for values an operator must change without a restart.
 4. **Staging** (D14): confirm the 17.x / protocol 18 boundary aligned with ADR-0120 D7.
-5. **The metadata ledger split** (D6): one object losing its column plus a new org-owned overlay
-   object is the shape this record proposes; the alternative — keep one `sys_metadata` and make the
-   five overridable types the only rows with an organization — cannot satisfy D1 (a nullable column).
-   Confirm the split, or rule that per-organization overlays are retired for now (startup posture),
-   which would make `sys_metadata` tenant-less with no second object.
-6. **A disable switch for views and dashboards** (D6, ADR-0126 §3): Regime O has no `active` bit
-   today. Admit `view` / `dashboard` into the disable half now (one row in ADR-0126 §3; the ledger is
-   generic), or wait for a measured pull? Proposed: wait — overlay and navigation already express
-   "not wanted" without a new switch.
+5. **Who chooses the install mode** (D6): proposed — the package **declares** the modes it permits
+   (`installModes: ['managed'] | ['managed','template'] | ['template']`, default `['managed']`), the
+   installer picks one at install time, and a shared-DB multi-tenant deployment refuses `template`
+   whatever the package permits. Confirm, or name a different rule.
+6. **Retiring ADR-0005's per-organization overlay axis** (D6): it follows from the sealing ruling and
+   removes the need to split `sys_metadata`, but it switches off a live feature (org-scoped writes of
+   the five tier-A types, pinned by identity). Confirm.
+7. **The activation ledger and the flow disable/clone door** (#11665, landed): seal the door now and
+   remove the ledger at protocol 18 unless a pull returns (proposed), or remove both now?
 
 ---
 
@@ -566,7 +588,8 @@ One epic tracks the family. Phases 1–3 are additive (17.x); phase 4 is protoco
 | C2 | Registry-first catalog resolution; references by name (id→name columns + rewrite); dangling-name boot report; cross-source uniqueness | D2, D4 | ADR merge |
 | C3 | Retire the seeders and the per-organization catalog machinery; built-ins and audience anchors as declared metadata; platform-admin grant row owned by the Default Organization | D2, D5, D13 | C1, C2 |
 | C4 | Templates: `sendTemplate` resolves the registry; seed and provenance stamp retired; door closed; customized-rows ruling applied | D6, D10 | ADR merge (+ §6 Q1) |
-| C5 | Metadata ledger split: `sys_metadata` family tenant-less (environment definitions, UI-editable by metadata authors); per-organization overlays of the five presentational types in an org-owned object; `sys_metadata_activation` without the reserved column; ADR-0005 and ADR-0126 D3 amended | D6, D7 | C1 |
+| C5 | `sys_metadata` family tenant-less (environment definitions, UI-editable by metadata authors); per-organization overlay axis retired (org-scoped writes of the five tier-A types refused); managed content sealed (ADR-0126 O/C doors refused, activation ledger dormant); ADR-0005 and ADR-0126 amended | D6, D7 | C1 |
+| C12 | Template install mode: manifest `installModes`, one-time import into the environment ledger with provenance, refusal on `group` / `isolated`, CLI + marketplace surfaces | D6 | C5 |
 | C6 | Deployment-level state has no column: settings global rung leaves `sys_setting`; plumbing objects drop the column; #12699 declaration made total | D7 | ADR merge (+ §6 Q3) |
 | C7 | Inventory + migration: four fates, id→name rewrite verified before mirror deletion, per-table boot report | D10 | C2, C3, C4, C5, C6 |
 | C8 | One predicate; NOT NULL per cleared table; every-posture refusal; both arms and the ledger retired — protocol 18 | D1, D8, D9, D13, D14 | C7 |
