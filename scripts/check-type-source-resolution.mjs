@@ -161,6 +161,45 @@ import { configsNamedByTypecheck, selfTest as typecheckConfigsSelfTest } from '.
 import { tmpdir } from 'node:os';
 import process from 'node:process';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the defect is caught': 4,
+  'THE TRAP: `@fx/spec*`, star not after a separator': 2,
+  'a rule that matches nothing is not coverage': 2,
+  'the CORRECT spellings must stay quiet': 6,
+  'false positives': 3,
+  'fail-closed': 2,
+  '#11490: the population is per PROGRAM': 6,
+  'the registry, audited in BOTH directions': 10,
+  'census guard: sibling-config discovery going quiet is INVISIBLE': 14,
+  'the import clause is bounded to ONE statement (#12555)': 8,
+  'the declaration must still BE the workspace (#11510)': 22,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 11;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 
@@ -1782,9 +1821,23 @@ function buildFixtureTree() {
 const SELF_TEST_VERDICT = 'check-type-source-resolution self-test reached its verdict';
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
   const root = buildFixtureTree();
   const problems = [];
   const expect = (condition, message) => {
+    registerCase();
     if (!condition) problems.push(message);
   };
   const has = (failures, needle) => failures.some((f) => f.includes(needle));
@@ -1794,6 +1847,7 @@ function selfTest() {
     const bare = check(root, {});
 
     // ── the defect is caught ──────────────────────────────────────────────
+  battery('the defect is caught');
     expect(reported(bare, 'packages/violator'), 'a package with no `paths` at all was not reported');
     expect(
       reported(bare, 'packages/type-only'),
@@ -1805,6 +1859,7 @@ function selfTest() {
     // ── THE TRAP: `@fx/spec*`, star not after a separator ─────────────────
     // Every specifier in this fixture lands under `src/`, so "did it reach
     // source" says yes. The gate must still refuse the spelling.
+  battery('THE TRAP: `@fx/spec*`, star not after a separator');
     expect(reported(bare, 'packages/star-trap'), 'the `@pkg*` trap (star not preceded by a separator) was NOT flagged');
     expect(
       has(bare.failures, '@fx/spec-tools'),
@@ -1812,10 +1867,12 @@ function selfTest() {
     );
 
     // ── a rule that matches nothing is not coverage ───────────────────────
+  battery('a rule that matches nothing is not coverage');
     expect(reported(bare, 'packages/missing-target'), 'a `paths` target that does not exist was accepted as a rule');
     expect(has(bare.failures, 'does not exist'), 'the missing-target diagnostic did not say the target is missing');
 
     // ── the CORRECT spellings must stay quiet ─────────────────────────────
+  battery('the CORRECT spellings must stay quiet');
     expect(!reported(bare, 'packages/compliant'), 'the two-rule compliant config was reported');
     expect(!reported(bare, 'packages/jsonc'), 'a CORRECT config was reported because its comments were not stripped');
     expect(!reported(bare, 'packages/inherits'), 'a correct `paths` block inherited through `extends` was not seen');
@@ -1830,6 +1887,7 @@ function selfTest() {
     );
 
     // ── false positives ───────────────────────────────────────────────────
+  battery('false positives');
     expect(!reported(bare, 'packages/no-workspace-dep'), 'a package with no workspace dep at all was flagged');
     expect(!reported(bare, 'packages/consumes-source'), 'a dep whose types already point at source was flagged');
     expect(
@@ -1838,6 +1896,7 @@ function selfTest() {
     );
 
     // ── fail-closed ───────────────────────────────────────────────────────
+  battery('fail-closed');
     expect(reported(bare, 'packages/unparseable'), 'an unparseable tsconfig was read as resolving nothing');
     expect(has(bare.failures, 'cannot be read'), 'an unparseable tsconfig did not fail as unreadable');
 
@@ -1848,6 +1907,7 @@ function selfTest() {
     // import were REPORTED through the build config and SILENT through the
     // prescribed sibling, so what has to hold is that the two spellings now
     // report the SAME THING.
+  battery('#11490: the population is per PROGRAM');
     expect(
       reported(bare, 'packages/sibling-config'),
       'an exposure reachable only through the sibling `tsconfig.test.json` this repo PRESCRIBES was not '
@@ -1879,6 +1939,7 @@ function selfTest() {
     );
 
     // ── the registry, audited in BOTH directions ──────────────────────────
+  battery('the registry, audited in BOTH directions');
     const measuredNames = {
       '@fx/violator': ['@fx/spec'],
       '@fx/type-only': ['@fx/spec'],
@@ -1964,6 +2025,7 @@ function selfTest() {
     // line nobody has ever seen fire. Same shape as (17) minus the `typecheck`
     // script that names the sibling — which is also exactly what the whole
     // widening looks like after a regression.
+  battery('census guard: sibling-config discovery going quiet is INVISIBLE');
     const singleProgram = join(tmpdir(), `os-type-source-resolution-single-${process.pid}`);
     rmSync(singleProgram, { recursive: true, force: true });
     mkdirSync(join(singleProgram, 'packages'), { recursive: true });
@@ -2031,6 +2093,7 @@ function selfTest() {
     // a false GREEN on an axis whose whole job is fail-closed, so it is pinned
     // just as hard. A detector that silently stops matching reports a spotless
     // repo.
+  battery('the import clause is bounded to ONE statement (#12555)');
     const typeSpecs = (code) => [...new Set(extractTypeImports(code))].sort();
     const tA = typeSpecs("import 'pkg/kernel';\nconst x = 1;\n");
     const tB = typeSpecs("import 'pkg/kernel';\nimport { X } from 'other';\n");
@@ -2088,6 +2151,7 @@ function selfTest() {
     // #11190 measurement that made consolidation safe in the first place. So
     // the declaration stays and the live parse becomes its CHECK, in both
     // directions, the shape check-published-files.mjs already uses.
+  battery('the declaration must still BE the workspace (#11510)');
     const declaredParents = WORKSPACE_PARENT_GLOBS.map((g) => g.replace(/\/\*+$/, ''));
     const liveParents = readWorkspaceGlobs(REPO_ROOT)
       .filter((g) => !isExclusionGlob(g))
@@ -2111,6 +2175,50 @@ function selfTest() {
     for (const failure of workspaceEnumeratorSelfTest({ root: REPO_ROOT })) expect(false, failure);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => { problems.push(message); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
   }
 
   if (problems.length > 0) {
