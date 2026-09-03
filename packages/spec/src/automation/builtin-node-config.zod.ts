@@ -5,8 +5,9 @@
  *
  * Config contracts for the remaining flat builtins — the CRUD quartet
  * (`get_record` / `create_record` / `update_record` / `delete_record`),
- * `screen`, and `map` (#4045). Sibling of `io-node-config.zod.ts`
- * (notify / http) and `control-flow.zod.ts` (loop / parallel / try_catch).
+ * `screen`, `map` (#4045) and, since #14149, `assignment`'s value contract.
+ * Sibling of `io-node-config.zod.ts` (notify / http) and `control-flow.zod.ts`
+ * (loop / parallel / try_catch).
  *
  * ## Provenance — written from the executors, not from the forms
  *
@@ -56,11 +57,15 @@
  * a default flips, while its PROSE does not, so the prose is copied to the new
  * door rather than left behind at the old one.
  *
+ * `assignment` is described by its VALUES, not by a key set (#14149): the
+ * canonical `assignments` map's keys are the author's variable names, and with
+ * no `assignments` wrapper the TOP-LEVEL config keys are (logic-nodes.ts), so
+ * `AssignmentConfigSchema` below declares one key and an open catchall and puts
+ * the contract on what a value may be. The form↔Zod ledger test still pins the
+ * descriptor's free-form `assignments` map as the openness it is; that pin and
+ * this contract describe the same surface from the two sides.
+ *
  * Deliberately absent:
- *  - `assignment` — its config cannot be described by a fixed key set: with no
- *    `assignments` wrapper the TOP-LEVEL config keys ARE the author's variable
- *    names (logic-nodes.ts). The ledger test pins that exemption with its
- *    reason instead of pretending a shape.
  *  - `decision` / `script` / `subflow` / `wait` / `connector_action` — the
  *    descriptor-schemaless class (config-schemas.test.ts). `wait` and
  *    `connector_action` keep their contracts in FlowNodeSchema's sibling
@@ -72,8 +77,10 @@
  */
 
 import { z } from 'zod';
+import { ExpressionSchema } from '../shared/expression.zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
+import { isExpressionEnvelopeShaped } from './flow-node-expression-paths';
 
 /** What a rejected key on these contracts silently did before #4001 批 9. */
 const BUILTIN_NODE_CONFIG_HISTORY =
@@ -513,3 +520,147 @@ export const MapConfigSchema = lazySchema(() => strictObject({
 
 export type MapConfig = z.input<typeof MapConfigSchema>;
 export type MapConfigParsed = z.infer<typeof MapConfigSchema>;
+
+// ─── assignment ──────────────────────────────────────────────────────
+
+/**
+ * The one sentence a refused envelope leads with — the same words for every
+ * way an envelope can be malformed, so an author (or an agent reading the
+ * issue) learns the rule before the detail.
+ */
+export const ASSIGNMENT_VALUE_ENVELOPE_REFUSAL =
+  'An assignment value carrying a `dialect` key is read as an expression envelope, and this one is not a valid '
+  + 'CEL value envelope.';
+
+/**
+ * The expression form of an assignment value — `ExpressionSchema`'s
+ * `{ dialect: 'cel', source }` envelope, narrowed to the one dialect the
+ * expression engine evaluates to a value (#14149, maintainer ruling
+ * 2026-09-02: option A, the rendering half).
+ *
+ * The envelope is the spelling `shared/expression.zod.ts` already defines and
+ * `validateExpression` already reads — not a second one. Only the dialect is
+ * narrowed: `validateExpression('value', …)` refuses a `template` or `cron`
+ * envelope in a value slot ("expected a CEL expression but got a … dialect"),
+ * so the contract refuses it here, at authoring, with the same verdict.
+ *
+ * A bare string is deliberately NOT accepted as CEL shorthand the way
+ * `ExpressionInputSchema` accepts it elsewhere: in an assignment value a plain
+ * string has always meant `{token}` flow interpolation, and that meaning is
+ * kept. The envelope is the only CEL spelling in this slot — which is exactly
+ * what lets the two forms coexist without a mode switch.
+ */
+export const AssignmentExpressionValueSchema = lazySchema(() => ExpressionSchema
+  .refine((e) => e.dialect === 'cel', {
+    path: ['dialect'],
+    message:
+      'An assignment value envelope is evaluated by the expression engine to a value, which only the `cel` dialect '
+      + 'does — `template` and `cron` envelopes have no meaning here. For text with holes write a plain string '
+      + '(`{token}` flow interpolation); for a computed value write `{ dialect: \'cel\', source: \'…\' }`.',
+  })
+  .meta({
+    description:
+      'CEL value envelope `{ dialect: \'cel\', source }` — evaluated by the expression engine to the value the '
+      + 'variable takes; the whole CEL stdlib (`joinNonEmpty`, …) is reachable',
+  }));
+
+export type AssignmentExpressionValue = z.input<typeof AssignmentExpressionValueSchema>;
+
+/**
+ * What an assignment value may be (#14149) — the two authoring forms, plus
+ * literals:
+ *
+ *  - a **string** — `{token}` flow interpolation, resolved by `interpolate()`
+ *    against the live variables (a sole token keeps the token's type: `'{rows}'`
+ *    assigns the array); text with no tokens is the literal text;
+ *  - a **CEL value envelope** — {@link AssignmentExpressionValueSchema},
+ *    evaluated by the expression engine to a value, so the declared stdlib is
+ *    authorable from metadata: `joinNonEmpty(rows.map(r, r.subject), "\n")`
+ *    builds a digest body from a list;
+ *  - any other JSON value — a number, boolean, `null`, array or plain object
+ *    — assigned as a literal (strings inside it still interpolate).
+ *
+ * The forms are told apart by SHAPE, never by a mode key: an object that names
+ * a `dialect` is an envelope ({@link isExpressionEnvelopeShaped}) and must be a
+ * valid one, everything else is what it always was. That is the preservation
+ * half of the contract — every value that parsed before #14149 still parses,
+ * and the only newly refused shape is a malformed envelope (`{ dialect: 'cel' }`
+ * with no `source`, an empty `source`, a non-`cel` dialect), which used to be
+ * stored verbatim as a literal object and then rendered by `notify` as JSON.
+ *
+ * `.meta({ xExpression: 'value' })` is the declaration channel the expression
+ * ledger reads for this slot (`FLOW_NODE_EXPRESSION_PATHS`'s `assignment`
+ * entry, `flow-node-expression-paths.ts`): the marker rides `z.toJSONSchema`
+ * onto the map's `additionalProperties`, where a ratchet walking that position
+ * derives the ledger path `assignments.*`. objectui's inspector reads
+ * `xExpression` on string properties only, so the marker changes no editor —
+ * the keyValue widget stores an envelope typed as JSON in the value cell.
+ */
+export const AssignmentValueSchema = lazySchema(() => z.unknown()
+  .superRefine((value, ctx) => {
+    if (!isExpressionEnvelopeShaped(value)) return;
+    const result = AssignmentExpressionValueSchema.safeParse(value);
+    if (result.success) return;
+    for (const issue of result.error.issues) {
+      const where = issue.path.length > 0 ? `\`${issue.path.map(String).join('.')}\`: ` : '';
+      ctx.addIssue({
+        code: 'custom',
+        path: issue.path,
+        message: `${ASSIGNMENT_VALUE_ENVELOPE_REFUSAL} ${where}${issue.message}`,
+      });
+    }
+  })
+  .meta({
+    description:
+      'Value the variable takes: a string (`{token}` flow interpolation — a sole token keeps its type), a CEL value '
+      + 'envelope `{ dialect: \'cel\', source }` evaluated by the expression engine (the CEL stdlib such as '
+      + '`joinNonEmpty` is reachable), or any other literal',
+    xExpression: 'value',
+  }));
+
+export type AssignmentValue = z.input<typeof AssignmentValueSchema>;
+
+/**
+ * `assignment` node config — what the executor reads (logic-nodes.ts), from
+ * the value side (#14149).
+ *
+ * The canonical shape is the `assignments` map the descriptor and the Studio
+ * keyValue editor declare: `{ assignments: { <variable>: <value> } }`. Its
+ * keys are the author's variable names, so no fixed key set can describe it —
+ * the contract is on the VALUES ({@link AssignmentValueSchema}), and the
+ * expression ledger names the slot as `assignments.*`.
+ *
+ * Two legacy shapes the executor still normalizes are read-compatibility, not
+ * contract: the bare `{ <variable>: <value> }` config (no wrapper — the
+ * catchall here accepts it as-is, values untyped, envelope-shaped objects
+ * included as the literals they always were) and the
+ * `assignments: [{ variable, value }]` array, refused below with the map as
+ * the prescription. Neither is offered for new authoring; the envelope form
+ * is a feature of the canonical map only, so a flow that never used it is
+ * unaffected in every shape.
+ *
+ * Not strict: an `assignment` node is exempt from `registerFlow()`'s
+ * undeclared-key walk by design (its top-level keys may be variables), and a
+ * closed shape here would contradict the descriptor's `additionalProperties:
+ * true` the form↔Zod ledger pins.
+ */
+export const AssignmentConfigSchema = lazySchema(() => z.object({
+  /** Variable name → value; the canonical authoring surface. */
+  assignments: z.record(z.string().min(1), AssignmentValueSchema).optional()
+    .describe('Variables to set: each key is a variable name, each value a `{token}` template, a CEL value envelope, or a literal'),
+})
+  .catchall(z.unknown())
+  .superRefine((config, ctx) => {
+    if (!Array.isArray(config.assignments)) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['assignments'],
+      message:
+        '`assignments` is a map of variable name → value (`{ assignments: { total: \'{amount}\' } }`). The array form '
+        + '`[{ variable, value }]` is a legacy shape the executor still reads but this contract does not describe — '
+        + 'write the map, which is also the only shape that accepts a CEL value envelope.',
+    });
+  }));
+
+export type AssignmentConfig = z.input<typeof AssignmentConfigSchema>;
+export type AssignmentConfigParsed = z.infer<typeof AssignmentConfigSchema>;

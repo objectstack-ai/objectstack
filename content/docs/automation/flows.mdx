@@ -176,6 +176,47 @@ or missing-`required` violation (#4277). A node type that publishes no
 }
 ```
 
+**Assignment (set variables):**
+
+```typescript
+{
+  id: 'build_digest',
+  type: 'assignment',
+  label: 'Build digest',
+  config: {
+    assignments: {
+      // `{token}` flow interpolation — a sole token keeps the token's type,
+      // text with holes stays text
+      owner_name: '{manager.name}',
+      // CEL value envelope — evaluated by the expression engine to a value, so
+      // the declared CEL stdlib is reachable from metadata: one line per task
+      digest: { dialect: 'cel', source: 'joinNonEmpty(overdue_tasks.map(t, t.subject), "\\n")' },
+    },
+  },
+}
+```
+
+A value's **shape** selects its form — there is no mode key. A plain string is
+always `{token}` interpolation (a bare `a + b` is the literal text `a + b`, not
+CEL); an object that names a `dialect` is an expression envelope and must be a
+valid `cel` one — a missing or empty `source`, or a `template` / `cron`
+dialect, is refused at the variable's path. Numbers, booleans, arrays and plain
+objects are assigned as literals. A later `notify` node renders the variable as
+any other: `message: '{digest}'`.
+
+<Callout type="warn" title="The contract landed first; the executor half follows">
+
+The envelope form is what `@objectstack/spec` declares — the expression
+ledger's `value` role and `AssignmentConfigSchema`, the half ruled in
+[#14149]. Until the matching `@objectstack/service-automation` change lands,
+the built-in `assignment` executor still writes an envelope object into the
+variable verbatim and `notify` renders it as JSON. For a digest body today,
+call a registered function from a `script` node.
+
+[#14149]: https://github.com/objectstack-ai/objectstack/issues/14149
+
+</Callout>
+
 **Create Record:**
 
 ```typescript
