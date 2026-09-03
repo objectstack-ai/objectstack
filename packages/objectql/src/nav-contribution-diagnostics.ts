@@ -55,12 +55,27 @@
  * `metadata-protocol/src/build-probes.ts`), which is also what lets one stream
  * carry the runtime and the build finding.
  *
- * ⛔ So: no `ERROR_CODE_LEDGER` registration and no `UNREGISTERED_CODE_SITES`
- * row. `check:dispatcher-error-vocabulary` delegates a lowercase literal in an
- * object-literal `code:` position to `check:error-code-casing`, which owns the
- * D6/D6b/D6c discrimination through its `EXEMPT_FILES` list — this file is
- * registered there with that reason, the same way `build-probes.ts` and
- * `metadata-diagnostics.ts` are.
+ * ⛔ So: **no `ERROR_CODE_LEDGER` registration.** What it does need is a
+ * CLASSIFICATION row, and which gate wants one was measured rather than
+ * assumed — the first guess was wrong in a way worth recording.
+ *
+ * `check:dispatcher-error-vocabulary` delegates a lowercase literal in an
+ * object-literal `code:` position to `check:error-code-casing`, whose
+ * `EXEMPT_FILES` list carries the D6/D6b/D6c discrimination for
+ * `build-probes.ts` and `metadata-diagnostics.ts`. That delegation does NOT
+ * reach this file: the code is exported as a named constant and REFERENCED at
+ * the stamp (`code: NAV_CONTRIBUTION_GROUP_MISSING`), which is the
+ * `objlitconst` shape, and every lowercase pattern that gate delegates needs a
+ * quoted literal beside the token. So `check:error-code-casing` passes this
+ * file with no entry — it never sees the value — and
+ * `check:dispatcher-error-vocabulary` is the gate that reports it.
+ *
+ * ⇒ The row lives in `packages/runtime/src/dispatcher-error-vocabulary.ts`,
+ * verdict `foreign-vocabulary`, door `none`, carrying the four-test D6c
+ * argument above. ⛔ Do not add this file to `EXEMPT_FILES`: that list exempts
+ * files from a gate this one does not trip, so an entry there would assert a
+ * discrimination nothing is making and hide the real row's absence if it were
+ * ever deleted.
  */
 
 /**

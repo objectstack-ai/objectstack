@@ -318,9 +318,10 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
         verdict: 'foreign-vocabulary',
         why:
             'ADR-0112 D6c by name, on all four of its tests: it ships as PAYLOAD of a success (carried on ' +
-            'the served app, and on `os build --json` under `navigationGroupDiagnostics`, from runs that ' +
-            'exit 0), it describes an ARTIFACT rather than a request (which app, which package, which ' +
-            'group id), its severity is `warning` and cannot be anything else, and no path routes it to ' +
+            'the served app, and in the `warnings` list of `os build --json` AND `os validate --json`, ' +
+            'from runs that exit 0), it describes an ARTIFACT rather than a request (which app, which ' +
+            'package, which group id), its severity is `warning` and cannot be anything else, and no ' +
+            'path routes it to ' +
             '`error.code` — the producer is a read-time FOLD (`applyNavContributions`) and a compile ' +
             'step, neither of which throws. The card that added it added the diagnostic and ' +
             'deliberately added NO refusal: the contribution is still relocated to the app\'s top ' +

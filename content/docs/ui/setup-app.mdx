@@ -96,11 +96,13 @@ carried on the app itself, readable as
 `registry.getAppNavDiagnostics(appName)`, and it is raised once per distinct
 mis-aim rather than once per read of the app.
 
-`os build` answers the same question at compile time whenever the contributing
-package and the target app are composed into one artifact, printing the finding
-and carrying it in `--json` under `navigationGroupDiagnostics` (an empty array
-when every contribution resolved). It **reports** there; it does not fail the
-build.
+`os build` **and `os validate`** answer the same question at compile time
+whenever the contributing package and the target app are composed into one
+artifact. Both print the finding and both carry it in `--json` under the
+existing `warnings` key, beside the authoring-rule advisories and the
+capability hints — the payload is deliberately closed, so a new class of
+finding fills a declared key rather than adding one. They **report** there;
+neither fails the build.
 
 ⚠️ The anchor id is the whole contract between a shell and its contributors,
 and a contributor cannot see the shell's ids at authoring time. A typo

@@ -33,12 +33,13 @@ app, the missing group id and the relocated items:
   the fold runs on every read of the app, and a line printed per request is as
   unreadable as one never printed. A deployment that asks for `silent` still
   gets silence, and still keeps the record.
-- **At build time.** `os build` answers the same question over a composed
-  artifact, through the same predicate, and reports the same finding where an
-  author sees it first — in the text output and in `--json` under
-  `navigationGroupDiagnostics`. A contribution aimed at an app no package in
-  the artifact ships is not reported: contributing into an app another artifact
-  installs is the supported case, and is why the merge is a fold.
+- **At authoring time.** `os build` and `os validate` answer the same question
+  over a composed artifact, through the same predicate, and report the same
+  finding where an author sees it first — in the text output and in `--json`
+  under the existing `warnings` key, beside the authoring-rule advisories and
+  capability hints. A contribution aimed at an app no package in the artifact
+  ships is not reported: contributing into an app another artifact installs is
+  the supported case, and is why the merge is a fold.
 
 **Nothing is refused.** No new failure, no ordering constraint, no change to
 what installs or to what `os build` accepts — a diagnostic was added and a
