@@ -49,7 +49,7 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * than imported because `@objectstack/plugin-sharing` is a **dev** dependency
  * of this package: importing it here would invert the dependency direction to
  * make one boolean read shared. The two spellings are held equal by the pins
- * in `share-links-probe-policy-gate.test.ts` on this side and
+ * in `share-links-enforcement-context.test.ts` on this side and
  * `share-link-eligibility.test.ts` on the other, which assert the SAME
  * observable answer on both surfaces rather than trusting the copy.
  *
