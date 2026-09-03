@@ -102,6 +102,9 @@ export class HookUnscopedDataAccessError extends Error {
   readonly object?: string;
   readonly event?: string;
 
+  // The message carries ADR-0049 — customer-resolvable — and NOT the tracker ids
+  // (#3760, #14010): those live in this file's header, where a reader who can
+  // resolve them is already looking (`check:doc-authoring`).
   constructor(ref: HookRunAsRef) {
     const where = [
       `hook '${ref.hook}'`,
@@ -116,7 +119,7 @@ export class HookUnscopedDataAccessError extends Error {
         `than restricted to a user. Declare \`runAs: 'system'\` on the hook to make the elevation ` +
         `explicit and intended, or arrange for the trigger to supply a user (a write made with a system ` +
         `context carries none). Branch on \`code === '${HOOK_UNSCOPED_DATA_ACCESS_CODE}'\` (ADR-0112) ` +
-        `to detect this. (ADR-0049, #3760, #14010)`,
+        `to detect this. (ADR-0049)`,
     );
     this.hook = ref.hook;
     if (ref.object !== undefined) this.object = ref.object;

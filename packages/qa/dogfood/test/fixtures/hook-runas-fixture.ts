@@ -90,7 +90,7 @@ export const hookRunAsFixtureStack = defineStack({
     type: 'app',
     name: 'Hook runAs Fixture',
     description:
-      'A computed column protected by field-level editable:false and maintained by a hook — the #14010 symptom.',
+      'A computed column protected by field-level editable:false and maintained by a hook.',
   },
   objects: [HookRunAsAccount, HookRunAsRating, HookRunAsLegacyRating],
   hooks: [
@@ -104,7 +104,7 @@ export const hookRunAsFixtureStack = defineStack({
     },
     {
       name: 'stamp_grade_undeclared',
-      label: 'Stamp the computed grade (no runAs — the pre-#14010 behaviour)',
+      label: 'Stamp the computed grade (no runAs — the pre-runAs behaviour)',
       object: 'hookrunas_legacy_rating',
       events: ['afterInsert'],
       handler: async (ctx: any) => {

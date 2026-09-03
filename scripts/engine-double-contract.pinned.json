@@ -1677,6 +1677,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/hook-run-as.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/hook-run-as.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/layered-overlay-integration.test.ts",
       "verb": "delete",
       "pinned": 1

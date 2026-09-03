@@ -43,6 +43,8 @@ import {
   HOOK_UNSCOPED_DATA_ACCESS_STATUS,
   hookRunAs,
 } from './hook-run-as.js';
+import { assertEngineDeleteDispatch } from './engine-delete-dispatch.js';
+import { assertEngineUpdateDispatch } from './engine-update-dispatch.js';
 import type { Hook, HookContext } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 
@@ -70,9 +72,20 @@ function recordingEngine() {
   const engine: any = {
     seen,
     async insert(_o: string, _d: unknown, options: any) { seen.push({ method: 'insert', context: options?.context }); return { id: 'r1' }; },
-    async update(_o: string, _d: unknown, options: any) { seen.push({ method: 'update', context: options?.context }); return { id: 'r1' }; },
+    // The shared dispatch predicates, so this double can never be LOOSER than
+    // ObjectQL itself about which write shapes it accepts
+    // (`check:engine-double-contract`).
+    async update(_o: string, _d: unknown, options: any) {
+      assertEngineUpdateDispatch(options);
+      seen.push({ method: 'update', context: options?.context });
+      return { id: 'r1' };
+    },
     async find(_o: string, query: any) { seen.push({ method: 'find', context: query?.context }); return []; },
-    async delete(_o: string, options: any) { seen.push({ method: 'delete', context: options?.context }); return true; },
+    async delete(_o: string, options: any) {
+      assertEngineDeleteDispatch(options);
+      seen.push({ method: 'delete', context: options?.context });
+      return true;
+    },
   };
   return engine;
 }
