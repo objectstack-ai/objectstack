@@ -378,7 +378,8 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * delete, not a rename). An embedded action is keyed by the object it is
    * written ON — the declaration-resolution key `collectActionDeclarations` /
    * `resolveRouteActionDeclaration` use — not by its own `objectName` (the
-   * registration key `collectBundleActions` / `actionObjectKey` read). One
+   * registration key `collectBundleActions` / `standaloneActionOwnerKey` read).
+   * One
    * global and one object-bound action MAY share a `name`: they occupy two
    * keys, and a by-name reader on the object's route resolves the object's own
    * `actions` (embedded, or merged in from here) before a standalone global
@@ -1570,8 +1571,9 @@ function joinDeclarationOrigins(origins: readonly string[]): string {
  * `object` alias is already canonicalized) or global; an embedded action is
  * scoped by the object it is written on, whatever its own `objectName` says —
  * that is how `collectActionDeclarations` and `resolveRouteActionDeclaration`
- * key it. (The runtime's REGISTRATION key — `collectBundleActions` /
- * `actionObjectKey` — reads the action's own `objectName` instead; the walk
+ * key it. (The REGISTRATION key — `collectBundleActions` /
+ * `standaloneActionOwnerKey` — reads the action's own `objectName` instead; the
+ * walk
  * deliberately follows the resolution side, where the by-name collision the
  * card describes happens.)
  *
