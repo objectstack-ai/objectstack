@@ -36,33 +36,69 @@ import { bareDateRangePresetComparandMessage, isDateRangePresetName } from './da
  * // user.id = order.owner_id
  * { "$eq": { "$field": "order.owner_id" } }
  *
- * ## Execution support (#5041)
+ * @example
+ * // completed_at <= due_date + duty.grace_days  (#14104)
+ * { "$lte": { "$field": "due_date", "addDays": { "$field": "duty.grace_days" } } }
+ *
+ * ## Execution support (#5041 → #5222 → #14104)
  *
  * This shape is declared here and really is produced — `compileCelToFilter`
  * (`@objectstack/formula`) emits `{ $field: path }` for a field-to-field
- * comparison in a CEL permission/RLS rule. Its execution support is NOT
- * uniform across evaluation paths, and a producer must know which path its
- * filter will run on:
+ * comparison in a CEL permission/RLS rule — and it is EXECUTED on both
+ * evaluation paths, held to the same rows by a shared conformance corpus
+ * (`@objectstack/driver-sql`, `cross-field-conformance-cases.ts`):
  *
  * - **In-memory evaluation — supported, in SCALAR positions only.**
  *   `matchesFilter` (`@objectstack/formula`, `matches-filter.ts`) resolves the
  *   reference against the record, dot-paths included, when the reference is the
  *   WHOLE comparand. It does **not** descend into a list — see the LIST
  *   positions carve-out below.
- * - **SQL push-down — refused, loudly.** `@objectstack/driver-sql` (and
- *   `driver-sqlite-wasm`, which inherits its filter compiler) does not compile
- *   a field reference to a column-to-column comparison. Rather than bind the
- *   reference object as a literal value — which produced a bare driver
- *   `TypeError` outside the ADR-0112 envelope, and, inside an `$in`/`$between`
- *   list, a silent zero-row answer — the driver rejects the filter with
- *   `INVALID_FILTER` (HTTP 400) naming the field, the operator and the
- *   reference.
+ * - **SQL push-down — compiled, since PR #7582 (#5222).** `@objectstack/driver-sql`
+ *   (and `driver-sqlite-wasm`, which inherits its filter compiler) compiles the
+ *   reference to a SAME-TABLE column-to-column comparison when it is the whole
+ *   comparand of one of the six scalar comparison operators
+ *   (`$eq`/`$ne`/`$gt`/`$gte`/`$lt`/`$lte`), written TOTAL across NULLs so the
+ *   answer is the memory evaluator's row for row. The maintainer's 2026-08-06
+ *   rulings bound what compiles: same-table columns only (a dotted path is
+ *   refused — no JOIN planning, no alias contract), declared columns only, the
+ *   tenant-isolation column on neither side, and the same comparison class on
+ *   both sides. Every position outside that boundary is refused with
+ *   `INVALID_FILTER` (HTTP 400), never bound as a literal.
  *
- * The declaration is deliberately retained: the shape has a real producer and
- * a real implementation, so it is not a dead key. Compiling it to SQL
- * column-to-column comparison is tracked as its own capability in #5222, where
- * the two open semantic questions ride with it — dot-path relation references,
- * and the validation boundary for the referenced column name.
+ * ## `addDays` — a whole-day offset on the referenced column (#14104, ruled 2026-09-02)
+ *
+ * A dataset measure could not express "completed by its deadline, where the
+ * deadline is a stored date plus a grace period held in another column" — the
+ * filter grammar had no date arithmetic, and `{N_days_ago}` is anchored to NOW,
+ * never to a column. The ruling put the offset ON the reference: `addDays` is
+ * either an INTEGER literal of any sign (a negative value subtracts; there is no
+ * `subDays`, and no other unit — whole days only) or a nested `{ $field }`
+ * reference to a numeric column (dot-path allowed exactly as `$field` allows it;
+ * SQL push-down applies the same same-table rule to it). Options B (a derived
+ * date-difference measure) and C (a computed dimension) were not taken.
+ *
+ * The NULL semantics are stated here, and pinned, rather than inherited from
+ * SQL three-valued logic — the shape #5146 used for `$not`:
+ *
+ * - **A NULL offset column contributes ZERO days.** `due_date + NULL` is
+ *   `due_date`, not NULL: a duty without a grace period has a deadline.
+ * - **A NULL referenced column makes the comparison FALSE**, whatever the
+ *   operator — `$ne` included. No deadline is never "on time" and never "late";
+ *   the row is simply outside the predicate, so `$not` re-admits it (the
+ *   predicate is total, and its negation is its exact complement).
+ * - The target column keeps its ordinary NULL reading: a NULL target fails the
+ *   orderings and `$eq`, and satisfies `$ne` when the offset deadline exists.
+ *
+ * Both paths add the offset to the referenced column's value — a `date` column
+ * stays a calendar day, a `datetime` column keeps its time of day — and both
+ * truncate a fractional offset value toward zero (the schema admits only an
+ * integer literal; a column's value is whatever is stored). SQL push-down
+ * compiles it only between two temporal columns of the SAME class (`date` with
+ * `date`, `datetime` with `datetime`) against a numeric offset column, and
+ * refuses everything else loudly. The offset compiles on every dialect the
+ * `$field` compiler covers (SQLite, PostgreSQL, MySQL); the memory evaluator
+ * matches; the shared corpus carries the literal, column, negative, NULL-offset,
+ * NULL-base and `$not`-wrapped rows on both.
  *
  * ## LIST positions are NOT part of this declaration (#7596, ruled 2026-08-11)
  *
@@ -90,16 +126,89 @@ import { bareDateRangePresetComparandMessage, isDateRangePresetName } from './da
  * consumers, and per-member OR-expansion carries NULL and type-affinity
  * questions #5222 declined to guess at. The positions now refuse at the SCHEMA
  * door too, with a message naming the working alternative — see
- * {@link SetOperatorSchema} and {@link RangeOperatorSchema}.
+ * {@link SetOperatorSchema} and {@link RangeOperatorSchema}. `addDays` adds no
+ * position: a reference carrying it is legal exactly where a bare one is.
  *
  * @see https://github.com/objectstack-ai/objectstack/issues/5041 (refusal)
- * @see https://github.com/objectstack-ai/objectstack/issues/5222 (SQL support)
+ * @see https://github.com/objectstack-ai/objectstack/issues/5222 (SQL support, landed in PR #7582)
  * @see https://github.com/objectstack-ai/objectstack/issues/7596 (list positions removed)
+ * @see https://github.com/objectstack-ai/objectstack/issues/14104 (addDays offset)
  */
 import { lazySchema } from '../shared/lazy-schema';
+
+/**
+ * [#14104] The author-facing refusal for an `addDays` value that is neither an
+ * integer literal nor a `{ $field }` reference. One builder, three inputs the
+ * ruling does not admit: a fractional number (whole days only — there is no
+ * finer unit), a string (a number is a number, not `'5'`, and `'5 days'` is not
+ * a grammar this filter has), and an object that is not a reference (an
+ * `addDays` object means "read the days from this column", so it must carry
+ * `$field`). The first sentence names the specific defect; the rest names what
+ * works instead, so the refusal is actionable from the message alone.
+ */
+function addDaysOffsetMessage(input: unknown): string {
+  const prescription =
+    'addDays is an integer literal of any sign (a negative value subtracts; whole days only, no '
+    + 'other unit) or a nested { "$field": "numeric_column" } reference. A NULL offset column '
+    + 'contributes zero days; a NULL referenced column makes the comparison false (#14104).';
+  if (typeof input === 'number') {
+    return `addDays must be a whole number of days, and ${String(input)} is not an integer. ${prescription}`;
+  }
+  if (typeof input === 'string') {
+    return `addDays must be an integer or a { "$field" } reference, not the string ${JSON.stringify(input)}. ${prescription}`;
+  }
+  if (input !== null && typeof input === 'object' && !Array.isArray(input)) {
+    const ref = (input as Record<string, unknown>).$field;
+    const defect = ref === undefined
+      ? 'this object has no $field'
+      : `its $field is ${typeof ref === 'string' ? 'a string' : `not a string (${JSON.stringify(ref)})`}`;
+    return `addDays as an object must be a { "$field": "numeric_column" } reference, and ${defect}. ${prescription}`;
+  }
+  return `addDays must be an integer or a { "$field" } reference. ${prescription}`;
+}
+
+/**
+ * [#14104] The offset's nested reference. Deliberately its OWN object rather
+ * than `FieldReferenceSchema` again: an offset on an offset has no ruled
+ * meaning, so the nested shape carries `$field` and nothing else.
+ */
+const AddDaysReferenceSchema = z.object({
+  $field: z.string().describe('Numeric column whose value is the number of days to add'),
+}).describe('A { $field } reference to the numeric column holding the day offset');
+
 export const FieldReferenceSchema = lazySchema(() => z.object({
-  $field: z.string().describe('Field Reference/Column Name')
+  $field: z.string().describe('Field Reference/Column Name'),
+  /**
+   * [#14104] Whole-day offset added to the referenced column before the
+   * comparison — an integer literal (negative subtracts) or a `{ $field }`
+   * reference to a numeric column. NULL semantics: a NULL offset column adds
+   * zero days; a NULL referenced column makes the comparison false. See the
+   * schema docblock above.
+   */
+  addDays: z.union([z.number().int(), AddDaysReferenceSchema], {
+    error: (issue) => addDaysOffsetMessage(issue.input),
+  }).optional().describe(
+    'Whole-day offset added to the referenced column before comparing: an integer literal of '
+    + 'any sign (negative subtracts; whole days only), or a { $field } reference to a numeric '
+    + 'column. A NULL offset column contributes zero days; a NULL referenced column makes the '
+    + 'comparison false rather than NULL, so it stays false under $not. Compiles on SQL '
+    + 'push-down between two temporal columns of the same class (date/date, datetime/datetime) '
+    + 'and evaluates identically in memory (#14104).',
+  ),
 }));
+
+/**
+ * [#14104] The message a scalar-comparison slot answers when a `{ $field }`
+ * reference fails ITS OWN schema — so the operator door repeats the pointed
+ * `addDays` sentence instead of zod's generic union text. `null` — not a
+ * reference — is answered by the caller before this is consulted.
+ */
+function fieldReferenceIssueMessage(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  if (typeof (input as Record<string, unknown>).$field !== 'string') return undefined;
+  const result = FieldReferenceSchema.safeParse(input);
+  return result.success ? undefined : result.error.issues[0]?.message;
+}
 
 export type FieldReference = z.input<typeof FieldReferenceSchema>;
 
@@ -128,7 +237,7 @@ export const EqualityOperatorSchema = lazySchema(() => z.object({
  * docblock.
  */
 const ORDERING_COMPARAND_DESCRIPTION =
-  'Comparand is a number, a Date, a string, or a { $field } reference. '
+  'Comparand is a number, a Date, a string, or a { $field } reference (optionally carrying a whole-day addDays offset, #14104). '
   + 'STRING is the form the platform itself produces: the date-macro resolver '
   + 'returns only strings ("{current_year_start}" -> "2026-01-01"), and the '
   + 'guaranteed spellings are an ISO calendar day (YYYY-MM-DD), a UTC ISO-8601 '
@@ -260,7 +369,12 @@ function nullOrderingComparandMessage(op: string): string {
  */
 const orderingComparandSchema = (op: '$gt' | '$gte' | '$lt' | '$lte', label: string) =>
   z.union([z.number(), z.date(), z.string(), FieldReferenceSchema], {
-    error: (issue) => (issue.input === null ? nullOrderingComparandMessage(op) : undefined),
+    // [#14080] null gets the pointed null sentence; [#14104] a `{ $field }`
+    // that fails its own schema (a bad `addDays`) gets the reference's own
+    // first sentence, so the author is told at the operator door too.
+    error: (issue) => (
+      issue.input === null ? nullOrderingComparandMessage(op) : fieldReferenceIssueMessage(issue.input)
+    ),
   }).optional().describe(`${label}. ${ORDERING_COMPARAND_DESCRIPTION}`);
 
 export const ComparisonOperatorSchema = lazySchema(() => z.object({
