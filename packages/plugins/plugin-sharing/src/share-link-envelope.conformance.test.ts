@@ -90,6 +90,26 @@ function mount(overrides: {
 
   const engine = {
     find: vi.fn(async () => [{ id: 'acc_1', name: 'Acme', ssn: '123-45-6789' }]),
+    // [#14637] The probe above the row arms reads the object's STANDING
+    // `publicSharing` policy before it answers from the row, so an engine that
+    // cannot answer `getSchema` refuses every arm with the generic 404 —
+    // correctly, and fail-closed. This double therefore has to DECLARE the
+    // block for the object its probe rows name, or the 401 / 410 refusals the
+    // envelope cases below drive are simply not reachable. That is a fixture
+    // declaration, not a relaxation: the gated behaviour itself is pinned in
+    // `share-link-eligibility.test.ts`, and this module's subject is the
+    // ENVELOPE each refusal is written in.
+    getSchema: vi.fn((name: string) =>
+      name === 'crm_account'
+        ? {
+            name,
+            publicSharing: {
+              enabled: true,
+              allowedAudiences: ['link_only', 'signed_in'],
+              allowedPermissions: ['view'],
+            },
+          }
+        : undefined),
     insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
     ...(overrides.engine ?? {}),
   } as unknown as SharingEngine;
@@ -337,7 +357,7 @@ describe('share-link envelope (#3983) — error bodies', () => {
       run: async () => drive(
         mount({
           service: { resolveToken: vi.fn(async () => null) },
-          engine: { find: vi.fn(async () => [{ token: 'tok_abcdefgh', password_hash: 'h', revoked_at: null, expires_at: null }]) },
+          engine: { find: vi.fn(async () => [{ token: 'tok_abcdefgh', object_name: 'crm_account', password_hash: 'h', revoked_at: null, expires_at: null }]) },
         }).http,
         `GET ${B}/:token/resolve`,
         { params: { token: 'tok_abcdefgh' } },
@@ -350,7 +370,7 @@ describe('share-link envelope (#3983) — error bodies', () => {
       run: async () => drive(
         mount({
           service: { resolveToken: vi.fn(async () => null) },
-          engine: { find: vi.fn(async () => [{ token: 'tok_abcdefgh', password_hash: 'h', revoked_at: null, expires_at: null }]) },
+          engine: { find: vi.fn(async () => [{ token: 'tok_abcdefgh', object_name: 'crm_account', password_hash: 'h', revoked_at: null, expires_at: null }]) },
         }).http,
         `GET ${B}/:token/resolve`,
         { params: { token: 'tok_abcdefgh' }, query: { password: 'nope' } },
@@ -364,7 +384,7 @@ describe('share-link envelope (#3983) — error bodies', () => {
         mount({
           userId: undefined,
           service: { resolveToken: vi.fn(async () => null) },
-          engine: { find: vi.fn(async () => [{ token: 'tok_abcdefgh', audience: 'signed_in', revoked_at: null, expires_at: null }]) },
+          engine: { find: vi.fn(async () => [{ token: 'tok_abcdefgh', object_name: 'crm_account', audience: 'signed_in', revoked_at: null, expires_at: null }]) },
         }).http,
         `GET ${B}/:token/resolve`,
         { params: { token: 'tok_abcdefgh' } },
@@ -377,7 +397,7 @@ describe('share-link envelope (#3983) — error bodies', () => {
       run: async () => drive(
         mount({
           service: { resolveToken: vi.fn(async () => null) },
-          engine: { find: vi.fn(async () => [{ token: 'tok_abcdefgh', revoked_at: '2026-01-02T00:00:00.000Z' }]) },
+          engine: { find: vi.fn(async () => [{ token: 'tok_abcdefgh', object_name: 'crm_account', revoked_at: '2026-01-02T00:00:00.000Z' }]) },
         }).http,
         `GET ${B}/:token/resolve`,
         { params: { token: 'tok_abcdefgh' } },

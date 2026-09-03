@@ -77,8 +77,11 @@ export const MANAGED_EXTENSION_FIELDS: Readonly<Record<string, ReadonlySet<strin
     // auth-manager.ts: better-auth SELECTs explicit columns, so an env that
     // has not run schema-sync would break getSession). Declared here so the
     // D7 collision guard proves better-auth's user schema owns no `locale`
-    // at the pinned version. NOT generically editable: the ADR-0092 D2
-    // profile whitelist stays {name, image} until a ruling widens it.
+    // at the pinned version — and that proof is exactly what a widening
+    // needed, since a generically-writable column colliding with better-auth's
+    // own surface is how ownership transfers silently on a library bump.
+    // Generically editable since the 2026-09-03 ruling: see the editable map
+    // below.
     'locale',
   ]),
   sys_organization: new Set([
@@ -143,8 +146,24 @@ export const MANAGED_EXTENSION_FIELDS: Readonly<Record<string, ReadonlySet<strin
  * / `ai_access` stay admin-surface-only (ADR-0092 D1's tier table), and
  * `primary_business_unit_id` is a projection plugin-sharing maintains — a hand
  * edit would be overwritten on the next reconcile.
+ *
+ * ⚠️ `sys_user` is the ONE object here whose entry does not itself register a
+ * whitelist. `auth-plugin.ts` skips it in the registration loop and registers
+ * `SYS_USER_PROFILE_EDIT_FIELDS` (`sys-user-writable-fields.ts`) instead,
+ * because that table is tiered
+ * (form vs. import) and this map is not. So the entry below is a DECLARATION
+ * that must agree with the tiered constant, not a second opening — and
+ * `managed-extension-fields.test.ts` pins it as a subset of the registered
+ * whitelist, which is the direction that matters: a name here that the guard
+ * never admits is a declared-but-unenforced write, the exact ADR-0049 shape.
  */
 export const MANAGED_EXTENSION_EDITABLE_FIELDS: Readonly<Record<string, ReadonlySet<string>>> = {
+  // [2026-09-03 ruling, option B] The user's own notification language. The
+  // whole of `sys_user`'s editable extension surface: `manager_id`,
+  // `ai_access` and `primary_business_unit_id` stay admin-surface-only, and
+  // this entry does not change that. Registered through
+  // `SYS_USER_PROFILE_EDIT_FIELDS` — see the warning above.
+  sys_user: new Set(['locale']),
   sys_organization: new Set([
     'require_mfa',
     'parent_organization_id',

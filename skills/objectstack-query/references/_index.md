@@ -11,7 +11,7 @@ from `node_modules` — there is no local copy in the skill bundle.
 
 - `node_modules/@objectstack/spec/src/data/date-macros.zod.ts` — Date Macro Tokens — the declarative placeholders the UI substitutes
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
-- `node_modules/@objectstack/spec/src/data/query.zod.ts` — Sort Node
+- `node_modules/@objectstack/spec/src/data/query.zod.ts` — QueryAST — Abstract Syntax Tree for data queries.
 
 ## Transitive dependencies
 

@@ -228,6 +228,7 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
   `origin/main` 是共享指针,别的 agent 一次 fetch 就推进它:`git reset --soft origin/main` 把你分支点
   之后**他人已合并的文件**整批 stage 成你的(实测一次四个 agent 的合并文件,commit 前才逮
   住)。「我从哪开始」的 reset/diff/log/rebase 一律锚基本规则 1 记录的 `"$BASE"`。
+- **`log -S/--follow/blame` 判日期或先后前**,先 `git rev-parse --is-shallow-repository`,true 就加深申报。
 - **要做反向验证(「回退修复,看诊断变化」)?先 commit 修复。** 已 commit,恢复只是
   `git checkout <your-branch> -- <path>`;对着未提交的编辑, `git checkout origin/main -- <path>` 不留任何恢
   复点 —— 工作树曾是唯一副本,而丢弃它是一次正常、无声、exit-0 的操作(恢复机制与字
@@ -299,7 +300,6 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
 - 实现满足 issue 的验收判据。
 - 测试:新增/更新覆盖;跑受影响包的 `pnpm test` / `pnpm typecheck`,为报告留真实输出 (范围
   按「本地验证范围」圈定)。
-- 用户可见的改动加 changeset。
 - 用 `git push -u origin claude/issue-<n>-<slug>` 推上去(网络失败退避重试)。
 - **Draft** PR 指向 `main`,正文首行 `Fixes #<n>` —— **合并不应关卡时用 `Part of #<n>`**(你只实现
   了可执行的那一半;说明留下的是哪一半)。⛔ 永不 `Fixes` 一张还在决策箱的卡 —— 合并
