@@ -14,8 +14,10 @@
  *     no template row resolves (fresh env, missing table, exotic locale).
  *
  * The recipient locale is the DEPLOYMENT default (`localization.locale`
- * setting) — `sys_user` carries no per-user locale yet; when it grows one,
- * resolution should prefer it (tracked in #2815).
+ * setting). `sys_user.locale` exists since #13881 (ruling 2026-09-01) and
+ * the messaging channels read it per recipient; the auth OTP/invite texts
+ * here do not read it yet — adopting it is its own card, and until then the
+ * deployment default is the correct behaviour here, not an accident.
  *
  * Red line unchanged: the OTP code appears only in the rendered body handed
  * to the SMS service — never in logs or error messages.

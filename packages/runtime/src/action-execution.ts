@@ -638,7 +638,7 @@ export function seedFlowActionParams(_deps: ActionExecutionDeps,
 
     if (rowId != null) {
         const keys = new Set<string>(['recordId']);
-        if (objectName && objectName !== 'global') {
+        if (objectName && objectName !== GLOBAL_ACTION_OBJECT_KEY) {
             keys.add(`${objectName.replace(/_([a-z])/g, (_m: string, c: string) => c.toUpperCase())}Id`);
         }
         if (typeof action?.recordIdParam === 'string' && action.recordIdParam) {
@@ -1013,7 +1013,7 @@ export function enforceActionParams(deps: ActionExecutionDeps,
     if (!laxActionParams()) {
         return `Invalid action params: ${summary}`;
     }
-    const key = `${where.objectName ?? 'global'}/${where.actionName ?? action?.name ?? 'action'}`;
+    const key = `${where.objectName ?? GLOBAL_ACTION_OBJECT_KEY}/${where.actionName ?? action?.name ?? 'action'}`;
     warnActionParamsOnce(
         key,
         `[action-params] ${key}: ${summary} — accepted because ` +
@@ -1487,7 +1487,7 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
  *     engine executes since #2608 (`resyncAuthoredActions`) but that never
  *     appear inside any object definition. Their owning object follows the
  *     same convention as the engine registration key (`objectName` field,
- *     legacy `object` field, else the `'global'` wildcard).
+ *     legacy `object` field, else the object-less `GLOBAL_ACTION_OBJECT_KEY`).
  *
  * On a key clash (`objectName:name`) the object-embedded declaration wins,
  * mirroring the execution layer's artifact-wins rule — `resyncAuthoredActions`

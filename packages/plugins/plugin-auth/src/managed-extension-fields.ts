@@ -70,6 +70,16 @@ export const MANAGED_EXTENSION_FIELDS: Readonly<Record<string, ReadonlySet<strin
     // does upsert it runs under a system context off its own field list
     // (`SYS_USER_IMPORT_UPDATE_FIELDS`), not off this map.
     'source',
+    // #13881 — the user's own notification language (maintainer ruling
+    // 2026-09-01), read per recipient by service-messaging after fan-out.
+    // better-auth neither reads nor writes it, and it is deliberately NOT a
+    // better-auth `additionalFields` entry (the `ai_access` note in
+    // auth-manager.ts: better-auth SELECTs explicit columns, so an env that
+    // has not run schema-sync would break getSession). Declared here so the
+    // D7 collision guard proves better-auth's user schema owns no `locale`
+    // at the pinned version. NOT generically editable: the ADR-0092 D2
+    // profile whitelist stays {name, image} until a ruling widens it.
+    'locale',
   ]),
   sys_organization: new Set([
     // ADR-0069 D3 — per-org MFA tightening above the global floor.

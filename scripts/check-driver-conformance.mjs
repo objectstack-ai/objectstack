@@ -1581,9 +1581,62 @@ function report() {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-driver-conformance self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'CONSUMED — what counts as coverage': 33,
+  'Reverse proof for the dead-root hard error (#4930), made permanent.': 10,
+  'The ratchet-remedy authority convention (#8435)': 3,
+  'The dispatch-gates declaration (#10840)': 6,
+  'The comment mask, as THIS gate uses it.': 2,
+  'dialectStance: what a suite SAYS it runs on.': 6,
+  'discoverDialectTestkit + dialectAudit, over a synthetic tree.': 14,
+  'MATRIXED, both directions, over the same synthetic tree.': 13,
+  'coveringFiles returns ALL of them, which is what the axis needs.': 2,
+  'The #8435 authority convention, for the dialect ledger\'s own offer.': 3,
+  'The real tree: the axis is WIRED IN, not merely defined.': 6,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 11;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   const expect = (label, cond) => {
+    registerCase();
     if (!cond) failures.push(label);
   };
 
@@ -1600,6 +1653,7 @@ function selfTest() {
    * superseded rule as text is what lets both pins stay falsifiable against the
    * thing they are actually about.
    */
+  battery('CONSUMED — what counts as coverage');
   const roamingRule = (symbol) =>
     new RegExp(`import[\\s\\S]*?\\b${symbol}\\b[\\s\\S]*?from\\s+['"]@objectstack/spec/data['"]`);
 
@@ -1885,6 +1939,7 @@ function selfTest() {
   // gate whose failure mode is discovering an empty axis. So break a root the way
   // a rename breaks it, require red naming that root and not the survivor, then
   // restore it and require green again. Red-then-green, in the same run, every run.
+  battery('Reverse proof for the dead-root hard error (#4930), made permanent.');
   const tmpRoots = join(ROOT, 'node_modules', '.check-driver-conformance-selftest-roots');
   try {
     mkdirSync(join(tmpRoots, 'live'), { recursive: true });
@@ -1948,6 +2003,7 @@ function selfTest() {
   //
   // (3) is what makes (2) worth having: without it, a predicate that approves
   // everything would keep this block green while the convention is gone.
+  battery('The ratchet-remedy authority convention (#8435)');
   const consumed = consumedMessage('driver-example', {
     marker: 'PAGINATION_CASES',
     what: 'a sorted paged read is a partition',
@@ -1989,6 +2045,7 @@ function selfTest() {
   // the brief. Both halves are DERIVED from DRIVERS_DIR rather than re-spelled,
   // so moving the driver tree cannot leave the declaration describing the old
   // location -- the failure mode a hand-kept copy has.
+  battery('The dispatch-gates declaration (#10840)');
   const driversRel = DRIVERS_DIR.slice(ROOT.length + 1);
   expect('the declaration names the driver subtree this gate actually walks, derived from '
     + 'DRIVERS_DIR rather than re-spelled beside it',
@@ -2030,12 +2087,14 @@ function selfTest() {
   // What IS asserted here is that this gate routes through it at all: the two
   // cases below are the ones a private `stripComments` got wrong, so they name
   // the failure family rather than re-deriving the fix.
+  battery('The comment mask, as THIS gate uses it.');
   expect('a comment cannot declare anything', !stripComments('const a = 1; // DIALECT_CELLS\n').includes('DIALECT_CELLS'));
   expect('and a quote inside a regex character class does not swallow the code after it (the '
     + 'phantom-string family, which is why this gate uses the shared mask rather than its own)',
     stripComments('function f(s) { return /[\'"]/.test(s); }\nconst KEEP = 1;\n').includes('KEEP'));
 
   // -- dialectStance: what a suite SAYS it runs on. --
+  battery('dialectStance: what a suite SAYS it runs on.');
   const KIT_SPEC = './kit.testkit.js';
   expect('iterating the cell list is the matrix stance',
     dialectStance("import { DIALECT_CELLS } from './kit.testkit.js';\nfor (const c of DIALECT_CELLS) {}\n", KIT_SPEC) === 'matrix');
@@ -2075,6 +2134,7 @@ function selfTest() {
   }
 
   // -- discoverDialectTestkit + dialectAudit, over a synthetic tree. --
+  battery('discoverDialectTestkit + dialectAudit, over a synthetic tree.');
   const tmpDialect = join(ROOT, 'node_modules', '.check-driver-conformance-selftest-dialect');
   try {
     const dsrc = (d) => join(tmpDialect, d, 'src');
@@ -2155,6 +2215,7 @@ function selfTest() {
     // The direction that matters: a suite can satisfy DIALECTED completely and
     // still leave D-A3 enforced nowhere. This is the tree #12136 promotes the
     // invariant against.
+    battery('MATRIXED, both directions, over the same synthetic tree.');
     const honestlyNarrow = drive([[cellFile, ['PAGINATION_CASES']]], []);
     expect('#12136 — a named-cell suite states a stance, so DIALECTED is satisfied',
       !honestlyNarrow.errs.some((e) => e.startsWith('DIALECTED:')));
@@ -2206,6 +2267,7 @@ function selfTest() {
   }
 
   // -- coveringFiles returns ALL of them, which is what the axis needs. --
+  battery('coveringFiles returns ALL of them, which is what the axis needs.');
   const tmpMulti = join(ROOT, 'node_modules', '.check-driver-conformance-selftest-covering');
   try {
     mkdirSync(join(tmpMulti, 'src'), { recursive: true });
@@ -2222,6 +2284,7 @@ function selfTest() {
   }
 
   // -- The #8435 authority convention, for the dialect ledger's own offer. --
+  battery('The #8435 authority convention, for the dialect ledger\'s own offer.');
   const dialected = dialectedMessage(
     'driver-example', 'packages/drivers/driver-example/src/a.test.ts', ['PAGINATION_CASES'],
     { specifier: './kit.testkit.js', cellIds: ['sqlite', 'pg'] },
@@ -2248,6 +2311,7 @@ function selfTest() {
   }
 
   // -- The real tree: the axis is WIRED IN, not merely defined. --
+  battery('The real tree: the axis is WIRED IN, not merely defined.');
   const liveKit = discoverDialectTestkit(join(DRIVERS_DIR, 'driver-sql'));
   expect('driver-sql is discovered as dialect-capable from disk', liveKit !== null);
   expect('and D-A3\'s two minimum dialects are both cells of it ("SQLite, Postgres at minimum")',
@@ -2281,6 +2345,51 @@ function selfTest() {
       !live.errors.some((e) => e.startsWith('MATRIXED:')) && errs.length === 0);
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-driver-conformance --self-test: ${failures.length} failure(s).\n`);

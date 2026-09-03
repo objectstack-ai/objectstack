@@ -704,11 +704,70 @@ function fixtureRepo(files) {
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the table itself': 2,
+  '⭐ the pattern is not vacuous, and it is not greedy': 38,
+  '⭐ and the probes are real shell, not plausible-looking text': 19,
+  'E1: full-line comments are prose, trailing comments are not': 3,
+  'E2: variables are read through a sigil, and a guarded read is the fix': 8,
+  'E3: a builtin only executes in command position': 11,
+  'the near-neighbours that are NOT bash 4, so must never redden': 8,
+  '⭐ a COVERAGE FLOOR: deleting a row must redden this self-test': 7,
+  '⭐ the two `case` terminators stay DISJOINT': 2,
+  '⭐ the `-v` unary: three spellings, one release, one bracket trap': 21,
+  '⭐ the 3.2 replacements the new rows point at must stay GREEN': 7,
+  'E2 again, for the row the sweep added': 6,
+  'population membership': 5,
+  '⭐ the declaration, and the two obligations it makes unreachable': 5,
+  '⭐ end to end, through the real discovery path': 5,
+  '⭐ the instrument is real: the flagged construct really does break': 4,
+  'the real tree': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 17;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const SELF = fileURLToPath(import.meta.url);
   let failed = 0;
   let cases = 0;
   const t = (label, ok, detail = '') => {
+    registerCase();
     cases += 1;
     if (ok) {
       console.log(`  ✓ ${label}`);
@@ -722,6 +781,7 @@ function selfTest() {
   console.log('check-bash32-floor --self-test\n');
 
   // --- the table itself ----------------------------------------------------
+  battery('the table itself');
   t('every construct has a unique id', new Set(CONSTRUCTS.map((c) => c.id)).size === CONSTRUCTS.length);
   t(
     'every construct declares kind, version, breakage and a fix',
@@ -741,6 +801,7 @@ function selfTest() {
   // So every row is driven in both directions against a real instance of the
   // construct it claims to describe, and against the 3.2 spelling that replaces
   // it — which must stay green, or the gate would refuse its own remedy.
+  battery('⭐ the pattern is not vacuous, and it is not greedy');
   for (const c of CONSTRUCTS) {
     t(`${c.id}: the pattern matches a real \`${c.probe}\``, ids(c.probe).includes(c.id), `got ${JSON.stringify(ids(c.probe))}`);
     t(
@@ -754,12 +815,14 @@ function selfTest() {
   //
   // `bash -n` parses without executing. A probe that does not parse would prove
   // only that the regex matches a typo.
+  battery('⭐ and the probes are real shell, not plausible-looking text');
   for (const c of CONSTRUCTS) {
     const parse = spawnSync('bash', ['-n'], { input: `${c.probe}\n`, encoding: 'utf8' });
     t(`${c.id}: the probe is shell this host can parse`, parse.status === 0, (parse.stderr || '').trim());
   }
 
   // --- E1: full-line comments are prose, trailing comments are not ---------
+  battery('E1: full-line comments are prose, trailing comments are not');
   t('E1 a full-line comment naming a construct is exempt', ids('   # no mapfile here, ever').length === 0);
   t('E1 a comment naming EPOCHSECONDS is exempt', ids('# EPOCHSECONDS is bash 5').length === 0);
   t(
@@ -768,6 +831,7 @@ function selfTest() {
   );
 
   // --- E2: variables are read through a sigil, and a guarded read is the fix
+  battery('E2: variables are read through a sigil, and a guarded read is the fix');
   t('E2 `$EPOCHSECONDS` is an unguarded read → RED', ids('now=$EPOCHSECONDS').includes('epoch-vars'));
   t('E2 `${EPOCHSECONDS}` is an unguarded read → RED', ids('now=${EPOCHSECONDS}').includes('epoch-vars'));
   t('E2 `${EPOCHSECONDS:-}` is the repair → green', !ids('now="${EPOCHSECONDS:-}"').includes('epoch-vars'));
@@ -784,6 +848,7 @@ function selfTest() {
   );
 
   // --- E3: a builtin only executes in command position ----------------------
+  battery('E3: a builtin only executes in command position');
   t('E3 at the start of a line → RED', ids('  mapfile -t x < f').includes('mapfile'));
   t('E3 after a pipe → RED', ids('printf a | readarray -t x').includes('mapfile'));
   t('E3 after `&&` → RED', ids('cd "$d" && mapfile -t x < f').includes('mapfile'));
@@ -806,6 +871,7 @@ function selfTest() {
   );
 
   // --- the near-neighbours that are NOT bash 4, so must never redden --------
+  battery('the near-neighbours that are NOT bash 4, so must never redden');
   t('3.2-legal `&>` (non-append) is not flagged', ids('echo hi &> /dev/null').length === 0);
   t('3.2-legal `declare -a` / `-r` / `-i` are not flagged', ids('declare -ari x=1').length === 0);
   t('3.2-legal `${x//,/ }` is not flagged', ids('echo "${x//,/ }"').length === 0);
@@ -830,6 +896,7 @@ function selfTest() {
   // on a row that already existed, so deleting the row is not the only way to
   // lose them: narrowing its pattern back to the `[[` spelling would too, and
   // that is a one-character edit no row count would notice.
+  battery('⭐ a COVERAGE FLOOR: deleting a row must redden this self-test');
   for (const [label, line] of [
     ['&>> (append-both)', 'exec "$@" &>> "$logfile"'],
     ['|& (pipe-both)', 'make build |& tee build.log'],
@@ -849,6 +916,7 @@ function selfTest() {
   // repair. Pinned in BOTH directions: a one-sided pin passes with the
   // lookbehind deleted, because `;&` matching `;;&` is invisible from the
   // `;&`-only side.
+  battery('⭐ the two `case` terminators stay DISJOINT');
   t(
     '`;;&` is the case-fallthrough row ALONE',
     ids('case x in x) echo a ;;& *) echo b ;; esac').join() === 'case-fallthrough',
@@ -871,6 +939,7 @@ function selfTest() {
   // ⚠️ Every positive pins the ARRIVAL, not the departure. `length > 0` is
   // satisfied by a row that reports these lines under the WRONG id and prints
   // the wrong remedy, and "no longer the empty result" is not the claim here.
+  battery('⭐ the `-v` unary: three spellings, one release, one bracket trap');
   for (const [label, line] of [
     ['[[ -v name ]]', '[[ -v name ]] && echo yes'],
     ['[ -v name ]', '[ -v name ] && echo yes'],
@@ -940,6 +1009,7 @@ function selfTest() {
   // The load-bearing half. A `|&` pattern that also matched `2>&1 |` would red
   // every correct pipeline in the repo — the gate refusing its own remedy — and
   // the failure text tells operators to write exactly that.
+  battery('⭐ the 3.2 replacements the new rows point at must stay GREEN');
   t('`2>&1 |`, the replacement `|&` is a synonym FOR, is not flagged', ids('echo a 2>&1 | cat').length === 0);
   t('an ordinary pipe is not flagged', ids('grep -c . f | wc -l').length === 0);
   t('an ordinary background `&` is not flagged', ids('long_job &').length === 0);
@@ -953,6 +1023,7 @@ function selfTest() {
   t('a `for` over an explicit list is not flagged', ids('for i in 0 10 20; do echo "$i"; done').length === 0);
 
   // --- E2 again, for the row the sweep added --------------------------------
+  battery('E2 again, for the row the sweep added');
   t('E2 `$BASHPID` is an unguarded read → RED', ids('p=$BASHPID').includes('bashpid'));
   t('E2 `${BASHPID}` is an unguarded read → RED', ids('p=${BASHPID}').includes('bashpid'));
   t('E2 `${BASHPID:-$$}` is the repair → green', !ids('p="${BASHPID:-$$}"').includes('bashpid'));
@@ -961,6 +1032,7 @@ function selfTest() {
   t('and `$$` — the 3.2 spelling — is not flagged', ids('p=$$').length === 0);
 
   // --- population membership -----------------------------------------------
+  battery('population membership');
   t('a .sh name is shell', isShell('scripts/x.sh', 'echo hi').by === 'extension');
   t(
     'a shebang-only script is shell — the half a *.sh glob misses',
@@ -977,6 +1049,7 @@ function selfTest() {
   // spelled as SOURCE LITERALS so the extractor can see them at all — an
   // assembled root is invisible to it, which is the same blind spot wearing a
   // template string.
+  battery('⭐ the declaration, and the two obligations it makes unreachable');
   const ownSource = readFileSync(SELF, 'utf8');
   t('every declared root is a subtree glob', POPULATION_ROOTS.every((r) => r.endsWith('/**')));
   t('every declared root carries a separator, so none is a bare root', POPULATION_ROOTS.every((r) => r.includes('/')));
@@ -997,6 +1070,7 @@ function selfTest() {
   );
 
   // --- ⭐ end to end, through the real discovery path -----------------------
+  battery('⭐ end to end, through the real discovery path');
   const bad = {};
   for (const c of CONSTRUCTS) bad[`scripts/bad-${c.id}.sh`] = `#!/usr/bin/env bash\n${c.probe}\n`;
   const badRepo = fixtureRepo(bad);
@@ -1040,6 +1114,7 @@ function selfTest() {
   // R7a's shape, and for R7a's reason: without this the leg below could pass by
   // proving nothing. `BASH_ENV` is sourced by every non-interactive bash, so the
   // child inherits the disabling — measured BOTH ways on a probe first.
+  battery('⭐ the instrument is real: the flagged construct really does break');
   const simDir = mkdtempSync(join(tmpdir(), 'bash32-sim-'));
   const noBash4 = join(simDir, 'no-bash4-builtins.sh');
   writeFileSync(noBash4, 'enable -n mapfile readarray 2> /dev/null\n');
@@ -1083,6 +1158,7 @@ function selfTest() {
   for (const d of [badRepo, cleanRepo, emptyRepo, simDir]) rmSync(d, { recursive: true, force: true });
 
   // --- the real tree -------------------------------------------------------
+  battery('the real tree');
   const live = scanTree(REPO_ROOT);
   t(
     'real-tree discovery finds shell to scan (a gate over nothing is not green)',
@@ -1099,6 +1175,52 @@ function selfTest() {
     + `${live.byShebang} by shebang alone — ${live.findings.length} finding(s)`,
   );
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+      failed += 1;
+      console.error(`  FAIL ${message}`);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failed > 0) {
     console.error(`\n✗ check-bash32-floor self-test failed (${failed} of ${cases} case(s)).`);
     process.exit(1);

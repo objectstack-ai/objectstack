@@ -212,6 +212,50 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'and one in RC pre-mode': 15,
+  '#6099: the `minor` + prose-annotation family': 17,
+  'end-to-end through the shell driver': 5,
+  'an unwalkable range: REFUSE, loudly (#14178)': 1,
+  'the INITIAL pin still degrades, and says so': 1,
+  '#6175: a range whose `to` endpoint is a RELEASE COMMIT': 8,
+  '#6174: the undeclared commits are NAMED, not only counted': 12,
+  '#6494: the ADR-0087 disposition scaffold': 5,
+  '#6494 THE ROUND TRIP, through the REAL gate': 4,
+  '#7004: the frontmatter shapes the old entry anchor hid': 7,
+  '#7044: WHERE the fence is allowed to start': 7,
+  '#9408: WALK COMPLETENESS, not object presence': 12,
+  '#9408 through the shell driver: REFUSE, and say WHICH failure': 6,
+  '#14178: an ABSENT endpoint is the same failure, one step earlier': 9,
+  '#10495: is the revision being PINNED actually on objectui main?': 16,
+  'R7: the bash 3.2 floor': 5,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 16;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
 
@@ -1269,8 +1313,22 @@ function main(argv) {
 // ---------------------------------------------------------------------------
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   const check = (name, cond, detail = '') => {
+    registerCase();
     if (cond) {
       console.log(`  ✓ ${name}`);
     } else {
@@ -1343,6 +1401,7 @@ function selfTest() {
     const fwPlain = join(tmp, 'fw-plain');
     mkdirSync(join(fwPlain, '.changeset'), { recursive: true });
     // --- and one in RC pre-mode ---
+    battery('and one in RC pre-mode');
     const fwPre = join(tmp, 'fw-pre');
     mkdirSync(join(fwPre, '.changeset'), { recursive: true });
     writeFileSync(join(fwPre, '.changeset', 'pre.json'), '{"mode":"pre","tag":"rc"}\n');
@@ -1448,6 +1507,7 @@ function selfTest() {
     // WHERE the author put the annotation — one leads with it, one buries it in
     // the last paragraph — and a criterion that reads only the first paragraph
     // (which is all `summary` is) catches the first and misses the second.
+    battery('#6099: the `minor` + prose-annotation family');
     const ui2 = join(tmp, 'objectui-annotated');
     mkdirSync(join(ui2, '.changeset'), { recursive: true });
     const g2 = (...args) => git(ui2, args);
@@ -1647,6 +1707,7 @@ function selfTest() {
     );
 
     // --- end-to-end through the shell driver -------------------------------
+    battery('end-to-end through the shell driver');
     const fwRun = join(tmp, 'fw-run');
     mkdirSync(join(fwRun, 'scripts'), { recursive: true });
     mkdirSync(join(fwRun, '.changeset'), { recursive: true });
@@ -1694,6 +1755,7 @@ function selfTest() {
     // CHANGELOG from a level objectui declared. What the case still asserts is
     // the half that mattered — the failure is loud, named, and takes the
     // operator to a remedy — plus the #10797 invariant the refusal now owes.
+    battery('an unwalkable range: REFUSE, loudly (#14178)');
     const fwDegraded = join(tmp, 'fw-unwalkable');
     mkdirSync(join(fwDegraded, 'scripts'), { recursive: true });
     mkdirSync(join(fwDegraded, '.changeset'), { recursive: true });
@@ -1722,6 +1784,7 @@ function selfTest() {
     // removed ones had: there is no previous SHA, hence no range, hence no
     // remedy to name and nothing being guessed about a walk. A refusal here
     // would make the first-ever pin impossible to write.
+    battery('the INITIAL pin still degrades, and says so');
     const fwInitial = join(tmp, 'fw-initial-pin');
     mkdirSync(join(fwInitial, 'scripts'), { recursive: true });
     mkdirSync(join(fwInitial, '.changeset'), { recursive: true });
@@ -1750,6 +1813,7 @@ function selfTest() {
     // consumes the changesets it ships, so every changeset added in the range
     // is gone at `to` and every read falls back. Its own repo on purpose: the
     // #4731 / #6099 fixtures above pin exact counts and must not shift under it.
+    battery('#6175: a range whose `to` endpoint is a RELEASE COMMIT');
     const ui3 = join(tmp, 'objectui-released');
     mkdirSync(join(ui3, '.changeset'), { recursive: true });
     const g3 = (...args) => git(ui3, args);
@@ -1885,6 +1949,7 @@ function selfTest() {
     // The row count here is deliberately > 1 so "the list agrees with the count"
     // is a real claim, and the cap can be made to fire without touching `max`
     // anywhere else.
+    battery('#6174: the undeclared commits are NAMED, not only counted');
     const SUBJECT_3518 =
       'fix(form): bind `previous` for field rules and stop resubmitting read-only fields (#3518)';
 
@@ -2093,6 +2158,7 @@ function selfTest() {
     // importing it would RUN the gate. The copy is belt-and-braces — the REAL
     // gate binary judges a real artifact in the round trip below, and that, not
     // this regex, is the authority on what the marker means.
+    battery('#6494: the ADR-0087 disposition scaffold');
     const markersIn = (text) =>
       [...text.matchAll(/<!--\s*adr-0087\s*:\s*([\s\S]*?)-->/g)].map((m) =>
         m[1].replace(/\s+/g, ' ').trim(),
@@ -2171,6 +2237,7 @@ function selfTest() {
     // A throwaway repo carrying the gate's required inputs (#4690: it refuses to
     // report a verdict without them) plus a COPY of the gate, so its REPO_ROOT
     // resolves here — the same idiom the bump-objectui.sh run above uses.
+    battery('#6494 THE ROUND TRIP, through the REAL gate');
     const gateRepo = join(tmp, 'fw-gate');
     mkdirSync(gateRepo, { recursive: true });
     const gg = (...args) => git(gateRepo, args);
@@ -2304,6 +2371,7 @@ function selfTest() {
     // Predicted direction on reverse verification: restoring the old anchor
     // (`([A-Za-z]+)\s*$`) turns C1-C5 red (packages goes `{}`) and C6 red in the
     // other direction (a phantom package named `# note`).
+    battery('#7004: the frontmatter shapes the old entry anchor hid');
     const pkgsOf = (block) => JSON.stringify(parseChangeset(`---\n${block}\n---\n\nsummary\n`).packages);
     check('#7004 C1 a trailing YAML comment still declares its package', pkgsOf('"@object-ui/layout": major # keep') === '{"@object-ui/layout":"major"}', pkgsOf('"@object-ui/layout": major # keep'));
     check('#7004 C2 a trailing comment after a tab', pkgsOf('"@object-ui/layout": minor\t# keep') === '{"@object-ui/layout":"minor"}', pkgsOf('"@object-ui/layout": minor\t# keep'));
@@ -2345,6 +2413,7 @@ function selfTest() {
     // the summary text. D6/D7 are the controls and stay green in both worlds,
     // which is what makes D1-D5 statements about the preamble rather than about
     // a fixture that parses as nothing either way.
+    battery('#7044: WHERE the fence is allowed to start');
     const CS_MAJOR = '---\n"@object-ui/layout": major\n---\n\nDrop PageNodeRenderer.\n';
     const parsedPkgs = (text) => JSON.stringify(parseChangeset(text).packages);
     check('#7044 D1 one leading blank line before the fence', parsedPkgs('\n' + CS_MAJOR) === '{"@object-ui/layout":"major"}', parsedPkgs('\n' + CS_MAJOR));
@@ -2392,6 +2461,7 @@ function selfTest() {
     // boundary AT `from`, hence outside the range, must also walk completely
     // (C7). C7 is the false positive that `--is-shallow-repository` alone would
     // produce, and the reason the invariant is positional rather than a flag.
+    battery('#9408: WALK COMPLETENESS, not object presence');
     const ui6 = join(tmp, 'objectui-truncated');
     mkdirSync(join(ui6, '.changeset'), { recursive: true });
     const g6 = (...args) => git(ui6, args);
@@ -2581,6 +2651,7 @@ function selfTest() {
     // (`patch`) into published CHANGELOG text, and no record beats a wrong one.
     // What survives unchanged is everything that made the old artifact readable
     // — WHICH failure this was, and the remedy — now said in a refusal.
+    battery('#9408 through the shell driver: REFUSE, and say WHICH failure');
     const fwTrunc = join(tmp, 'fw-truncated');
     mkdirSync(join(fwTrunc, 'scripts'), { recursive: true });
     mkdirSync(join(fwTrunc, '.changeset'), { recursive: true });
@@ -2686,6 +2757,7 @@ function selfTest() {
     // deepens and derives the COMPLETE record, asserted equal to the record the
     // same range yields in a full clone. A guard that refused everything would
     // pass every refusal case here and fail that one.
+    battery('#14178: an ABSENT endpoint is the same failure, one step earlier');
     const uiUp = join(tmp, 'objectui-upstream');
     mkdirSync(join(uiUp, '.changeset'), { recursive: true });
     const gUp = (...args) => git(uiUp, args);
@@ -2905,6 +2977,7 @@ function selfTest() {
     // every case below asserts what it SAYS, and that it still exits 0 and
     // still writes the pin. Three answers are pinned, never two — "cannot
     // answer" must not borrow the wording of either verdict.
+    battery('#10495: is the revision being PINNED actually on objectui main?');
     const mkFramework = (name, pinSha) => {
       const dir = join(tmp, name);
       mkdirSync(join(dir, 'scripts'), { recursive: true });
@@ -3149,6 +3222,7 @@ function selfTest() {
     // Both halves are needed and they catch different things: the static scan
     // sees parse-level constructs that `enable -n` cannot simulate, and the
     // simulated run proves the real code path completes without the builtins.
+    battery('R7: the bash 3.2 floor');
     const bash4Constructs = new RegExp(
       [
         'exec\\s+\\{[A-Za-z_]', // bash 4.1 fd auto-allocation
@@ -3293,6 +3367,51 @@ function selfTest() {
     rmSync(tmp, { recursive: true, force: true });
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     console.error(`\n⛔ objectui-changeset-digest --self-test: ${failures.length} failure(s)`);
     for (const f of failures) console.error(`   - ${f}`);

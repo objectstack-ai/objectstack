@@ -292,10 +292,60 @@ function main() {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'sync-docs-image-tags self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'Control A: a STALE corpus is brought to the target': 9,
+  'Control B: a CLEAN corpus is left BYTE-IDENTICAL, unwritten': 6,
+  'Control C: selectivity ON ONE LINE': 2,
+  'Control D: two pins on ONE line, of DIFFERENT lengths': 2,
+  'Control E: the gate\'s verdicts the rewrite CANNOT fix': 2,
+  'Control F: the expectation refuses to be unusable': 1,
+  'Control G: the suffix invariant on the SHARED pattern list': 10,
+  'Control H: the shared surface list is the gate\'s, not a copy': 3,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 8;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   let checked = 0;
   const assert = (condition, message) => {
+    registerCase();
     checked++;
     if (!condition) failures.push(message);
   };
@@ -313,6 +363,7 @@ function selfTest() {
     // ── Control A: a STALE corpus is brought to the target ──────────────────
     //
     // Every pattern, plus the two mis-pins a prefix-only comparison would miss.
+    battery('Control A: a STALE corpus is brought to the target');
     const staleBody = [
       '# Deploy',
       '',
@@ -394,6 +445,7 @@ function selfTest() {
     // The over-eagerness control. Every shape that must never move is here: the
     // documented tag SCHEME, rolling tags, the placeholder, an interpolation, and
     // version-shaped historical prose.
+    battery('Control B: a CLEAN corpus is left BYTE-IDENTICAL, unwritten');
     const cleanBody = [
       '# Tags',
       '',
@@ -453,6 +505,7 @@ function selfTest() {
     // A stale pin sharing a line with a rolling tag and a historical fact: only the
     // concrete anchored pin moves. This is the assertion that would catch a rewriter
     // that fell back to a global string replace of the old version.
+    battery('Control C: selectivity ON ONE LINE');
     write(
       'mixed/one-line.md',
       'Was ghcr.io/objectstack-ai/objectstack:16.0.0 (see :latest, :17.0) — spec 16.0.0 removed it.\n',
@@ -478,6 +531,7 @@ function selfTest() {
     // rewrite whose replacement changes length corrupts every later pin on the line.
     // The target here is one character LONGER than the first tag, so a wrong order
     // does not merely misplace the text, it produces visibly broken output.
+    battery('Control D: two pins on ONE line, of DIFFERENT lengths');
     write(
       'mixed/two-pins.md',
       'ghcr.io/objectstack-ai/objectstack:16.0.0 then ghcr.io/objectstack-ai/objectstack:9.9.9 end\n',
@@ -503,6 +557,7 @@ function selfTest() {
     // A surface that stopped pinning anything, and one that is gone. Neither is
     // repairable by rewriting, and both must survive as findings rather than being
     // quietly passed over at the one moment CI is not watching.
+    battery('Control E: the gate\'s verdicts the rewrite CANNOT fix');
     write('rot/rotted.md', 'FROM ghcr.io/objectstack-ai/objectstack:latest\n');
     const rot = syncSurfaces({
       surfaces: [{ file: 'rot/rotted.md', why: 'fixture' }, { file: 'rot/gone.md', why: 'fixture' }],
@@ -521,6 +576,7 @@ function selfTest() {
     // The catastrophic over-eager case: rewriting every doc pin to `workspace:*` or to
     // `undefined`. loadExpectedVersion is imported from the gate precisely so this
     // refusal is the same refusal, not a second implementation of it.
+    battery('Control F: the expectation refuses to be unusable');
     write('bad/pkg.json', '{"version":"workspace:*"}');
     let threw = false;
     try {
@@ -535,6 +591,7 @@ function selfTest() {
     // "Swap the tail" is only safe while every PATTERN captures its tag as a suffix.
     // That is a property of a list this file does not own, so it is asserted against
     // the real PATTERNS rather than trusted.
+    battery('Control G: the suffix invariant on the SHARED pattern list');
     for (const pattern of PATTERNS) {
       const sample = { 'image-tag': 'ghcr.io/objectstack-ai/objectstack:16.0.0', 'build-arg': 'OS_CLI_VERSION=16.0.0', 'npm-pin': '@objectstack/cli@16.0.0' }[pattern.name];
       assert(
@@ -560,6 +617,7 @@ function selfTest() {
     assert(suffixThrew, 'replacementFor REFUSES a match whose capture is not a suffix rather than corrupting the line');
 
     // ── Control H: the shared surface list is the gate's, not a copy ────────
+    battery('Control H: the shared surface list is the gate\'s, not a copy');
     assert(
       Array.isArray(SURFACES) && SURFACES.length > 0 && SURFACES.every((surface) => typeof surface.file === 'string'),
       'SURFACES is imported from check-docs-image-tag.mjs and non-empty — the rewriter and the gate read ONE list',
@@ -573,6 +631,51 @@ function selfTest() {
     rmSync(dir, { recursive: true, force: true });
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     console.error(`✗ sync-docs-image-tags --self-test — ${failures.length} failure(s)\n`);
     for (const failure of failures) console.error(`  • ${failure}`);

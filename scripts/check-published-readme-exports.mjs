@@ -2073,15 +2073,81 @@ function run({ unreadReport: wantsUnreadReport = false } = {}) {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-published-readme-exports self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'readFences: which blocks are code, and which lines survive': 1,
+  'the three MEASURED prose false positives': 1,
+  'bash fences: an install line is not an import': 1,
+  'the `diff` migration fence, verbatim from packages/objectql': 1,
+  'clause shapes': 7,
+  'multi-line clauses, and two statements that must not merge': 2,
+  'call sites: only import-bound receivers': 2,
+  'the adversarial position (#9610), which the fixture above cannot reach': 2,
+  'receivers the fence BUILDS from an import-bound name (#9870)': 5,
+  'the blind spot the GREEN line now has to state': 4,
+  'specifier splitting': 3,
+  'exports-map resolution, both shapes this repo writes': 4,
+  '`files` matcher': 4,
+  'END TO END, both directions, on the shape #9532 measured': 4,
+  'the supply end, all three arms': 5,
+  'the consume end, on the shape measured in the tree': 3,
+  'the population, MEASURED off a fixture rather than typed': 2,
+  'the header: the line where this half was invisible': 1,
+  'END TO END on the #9870 shape: the receiver is never import-bound': 5,
+  'THE NAMESPACE BRANCH (#10367)': 10,
+  '⭐ `--unread-report`: `NOT read:` DECOMPOSED, AND THE CHECKSUM (#10815)': 4,
+  'THE POPULATION AXIS, and the third refusal on it (#9911)': 7,
+  'THE FOURTH STATE ON THAT AXIS (#10417)': 4,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 23;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   const eq = (label, actual, expected) => {
+    registerCase();
     const a = JSON.stringify(actual);
     const e = JSON.stringify(expected);
     if (a !== e) failures.push(`${label}\n      expected ${e}\n      actual   ${a}`);
   };
 
   // -- readFences: which blocks are code, and which lines survive -------------
+  battery('readFences: which blocks are code, and which lines survive');
   const fenceDoc = [
     'prose before',
     '```bash',
@@ -2104,6 +2170,7 @@ function selfTest() {
   );
 
   // -- the three MEASURED prose false positives -------------------------------
+  battery('the three MEASURED prose false positives');
   const prose = [
     '- ❌ You only need the schemas — import [`@objectstack/spec`](../spec) alone.',
     '- ❌ You only need a REST client — import [`@objectstack/client`](../client).',
@@ -2112,6 +2179,7 @@ function selfTest() {
   eq('extractImports — prose mentioning `import` is never a claim', extractImports(prose), []);
 
   // -- bash fences: an install line is not an import --------------------------
+  battery('bash fences: an install line is not an import');
   eq(
     'extractImports — a bash fence is not scanned',
     extractImports('```bash\nimport from @objectstack/spec\n```'),
@@ -2119,6 +2187,7 @@ function selfTest() {
   );
 
   // -- the `diff` migration fence, verbatim from packages/objectql -------------
+  battery('the `diff` migration fence, verbatim from packages/objectql');
   const diffFence = [
     '```diff',
     "- import { ObjectQL, SchemaRegistry } from '@objectql/core';",
@@ -2132,6 +2201,7 @@ function selfTest() {
   );
 
   // -- clause shapes -----------------------------------------------------------
+  battery('clause shapes');
   eq('parseImportClause — named', parseImportClause('{ A, B }').named, [
     { imported: 'A', local: 'A' },
     { imported: 'B', local: 'B' },
@@ -2155,6 +2225,7 @@ function selfTest() {
   });
 
   // -- multi-line clauses, and two statements that must not merge --------------
+  battery('multi-line clauses, and two statements that must not merge');
   const multi = ['```ts', 'import {', '  Alpha,', '  Beta,', "} from '@objectstack/spec';", '```'].join('\n');
   eq(
     'extractImports — multi-line clause',
@@ -2174,6 +2245,7 @@ function selfTest() {
   );
 
   // -- call sites: only import-bound receivers ---------------------------------
+  battery('call sites: only import-bound receivers');
   const calls = [
     '```typescript',
     "import { ServiceAnalytics } from '@objectstack/service-analytics';",
@@ -2202,6 +2274,7 @@ function selfTest() {
   // receiver starts at the character immediately after a DISCARDED `X.y(` match,
   // with nothing separating them. It is also the house spelling of the six READMEs
   // this gate exists for, so it is the likeliest wrong rewrite of any of them.
+  battery('the adversarial position (#9610), which the fixture above cannot reach');
   const nestedReceiver = [
     '```typescript',
     "import { CacheServicePlugin } from '@objectstack/service-cache';",
@@ -2238,6 +2311,7 @@ function selfTest() {
   // documents sat on receivers with no type the gate could reach, against EIGHT
   // it was checking. 109 of the 262 are built out of a name the fence DID
   // import, and those are the ones these bindings reach.
+  battery('receivers the fence BUILDS from an import-bound name (#9870)');
   const derivedDoc = [
     '```typescript',
     "import { ObjectKernel } from '@objectstack/core';",
@@ -2292,6 +2366,7 @@ function selfTest() {
   );
 
   // -- the blind spot the GREEN line now has to state ---------------------------
+  battery('the blind spot the GREEN line now has to state');
   const unreadDoc = [
     '```typescript',
     "import { ObjectKernel } from '@objectstack/core';",
@@ -2348,6 +2423,7 @@ function selfTest() {
   );
 
   // -- specifier splitting ------------------------------------------------------
+  battery('specifier splitting');
   eq('splitSpecifier — scoped root', splitSpecifier('@objectstack/spec'), {
     name: '@objectstack/spec',
     subpath: '.',
@@ -2359,6 +2435,7 @@ function selfTest() {
   eq('splitSpecifier — relative is not a package', splitSpecifier('./local.js'), null);
 
   // -- exports-map resolution, both shapes this repo writes ---------------------
+  battery('exports-map resolution, both shapes this repo writes');
   const flat = { exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } } };
   eq('resolveTypesEntry — flat `types` condition', resolveTypesEntry(flat, '.'), {
     entry: './dist/index.d.ts',
@@ -2384,6 +2461,7 @@ function selfTest() {
   });
 
   // -- `files` matcher -----------------------------------------------------------
+  battery('`files` matcher');
   eq('filesMatcher — a directory entry takes everything beneath it', filesMatcher('dist')('dist/index.js'), true);
   eq('filesMatcher — README.md', filesMatcher('README.md')('README.md'), true);
   eq('filesMatcher — near-miss', filesMatcher('README.md')('docs/README.md'), false);
@@ -2396,6 +2474,7 @@ function selfTest() {
   // (`defineStack().validate`). Collapsing them would let an instance-method
   // fixture pass against the static surface — the exact confusion #9870's
   // widening exists to avoid.
+  battery('END TO END, both directions, on the shape #9532 measured');
   const fakeSymbol = (members, derived = {}) => ({
     __members: new Set(members),
     __instance: new Set(derived.instance ?? []),
@@ -2511,6 +2590,7 @@ function selfTest() {
   // its least-tested end, and the fake resolver alone can only ever reach one.
 
   // -- the supply end, all three arms ------------------------------------------
+  battery('the supply end, all three arms');
   eq('preTypeTarget — a workspace member defers to type resolution', preTypeTarget('@objectstack/spec', true), undefined);
   eq('preTypeTarget — ours by scope, in no directory of this repo', preTypeTarget('@objectstack/plugin-org-scoping', false), {
     unresolvable: true,
@@ -2533,6 +2613,7 @@ function selfTest() {
   // `@objectstack/trigger-schedule`. The worst instance of the class and the one
   // that makes the case for it: a package misnaming ITSELF, on the page npm
   // renders for it, green through every run this gate has ever made.
+  battery('the consume end, on the shape measured in the tree');
   const resolveWithScope = (name) => {
     const hit = resolveFake(name);
     if (hit) return hit;
@@ -2615,6 +2696,7 @@ function selfTest() {
   // Same discipline as the `reachedTargets` pins below: a hand-written
   // `ownScope: 3` would pin the refusal's arithmetic while proving nothing about
   // the scan that produces the number.
+  battery('the population, MEASURED off a fixture rather than typed');
   const scopeMix = [
     {
       pkg: '@fixture/alpha',
@@ -2684,6 +2766,7 @@ function selfTest() {
   // specifiers it could not place. Pinned as a resolved/total PAIR, so a
   // recogniser that stops matching shows up as a denominator that fell rather
   // than as a defect count that stayed at zero.
+  battery('the header: the line where this half was invisible');
   const head = headerLine({ documents: 60, members: 77, importStatements: 214, typeEntries: 49, ownScope: 200, unresolvable: 5 });
   eq(
     'headerLine — the scoped population is printed as resolved/total, beside the older counts',
@@ -2705,6 +2788,7 @@ function selfTest() {
   // sibling READMEs spell the same step `await kernel.bootstrap()`. No import
   // claim is wrong there, so the import half is silent by construction; before
   // this widening the call site was one of the 262 nobody read.
+  battery('END TO END on the #9870 shape: the receiver is never import-bound');
   const derivedInstance = {
     pkg: '@objectstack/kernel',
     file: 'packages/kernel/README.md',
@@ -2808,6 +2892,7 @@ function selfTest() {
   // must be silent, `spec.defineNothing` is not and must be reported. A fixture
   // that only checked for the absence of findings would pass just as happily on
   // the dead branch, where nothing is bound and nothing is read.
+  battery('THE NAMESPACE BRANCH (#10367)');
   const namespaceCalls = {
     pkg: '@objectstack/spec',
     file: 'packages/spec/README.md',
@@ -3002,6 +3087,7 @@ function selfTest() {
   // It is pinned in both directions over a fixture for the same reason the
   // namespace branch is (#10367) — the coverage is real at a tree population
   // of 0.
+  battery('⭐ `--unread-report`: `NOT read:` DECOMPOSED, AND THE CHECKSUM (#10815)');
   const unreadHeavy = {
     pkg: '@objectstack/spec',
     file: 'packages/spec/README.md',
@@ -3153,6 +3239,7 @@ function selfTest() {
   // function `run()` calls. A hand-written `targets: 0` would pin the refusal's
   // arithmetic while proving nothing about the scan that produces the zero,
   // which is the very species of vacuity this card is about.
+  battery('THE POPULATION AXIS, and the third refusal on it (#9911)');
   const nothingResolves = [
     {
       pkg: '@fixture/alpha',
@@ -3275,6 +3362,7 @@ function selfTest() {
   // `analyzeDocument` the run calls. A hand-written `symbolChecks: 0` would pin
   // the refusal's arithmetic and prove nothing about the scan that produces the
   // zero — the species of vacuity this whole axis exists to refuse.
+  battery('THE FOURTH STATE ON THAT AXIS (#10417)');
   const bindsNothing = [
     {
       pkg: '@objectstack/spec',
@@ -3458,6 +3546,51 @@ function selfTest() {
   // its own (#11510); every gate that consolidated onto it folds in its checks.
   failures.push(...workspaceEnumeratorSelfTest({ root: ROOT }));
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length > 0) {
     console.error(`✗ check:published-readme-exports --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
