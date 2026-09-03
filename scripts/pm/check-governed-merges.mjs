@@ -2595,8 +2595,12 @@ async function selfTest() {
   // /w/hotcrm is absent from the layout too, so this fixture also pins the
   // property #14867 bought: a governed repo with no checkout is UNAUDITED and
   // says so, where an unconfigured repo said nothing.
+  // ⚠️ Read defensively. `assert` COLLECTS failures and prints them at the
+  // end, so a throw here aborts the run before the two pins that NAME hotcrm
+  // are ever printed — measured on the #14867 ablation: dropping the register
+  // entry turned three named red lines into one TypeError stack.
   assert('a-configured-repo-with-no-checkout-is-UNAUDITED-never-silent',
-    byId.hotcrm.status === 'unaudited' && /no git checkout at \/w\/hotcrm/.test(byId.hotcrm.reason), JSON.stringify(byId.hotcrm));
+    byId.hotcrm?.status === 'unaudited' && /no git checkout at \/w\/hotcrm/.test(String(byId.hotcrm?.reason)), JSON.stringify(byId.hotcrm ?? null));
   assert('the-self-repo-is-audited-from-the-scripts-own-root-not-cwd', byId.objectstack.status === 'audited' && byId.objectstack.path === '/w/objectstack');
   assert('a-sibling-checkout-beside-it-is-audited', byId.objectui.status === 'audited' && byId.objectos.status === 'audited');
   assert('an-absent-checkout-is-UNAUDITED-never-clean', byId.cloud.status === 'unaudited' && /no git checkout at \/w\/cloud/.test(byId.cloud.reason), JSON.stringify(byId.cloud));
