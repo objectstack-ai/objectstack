@@ -422,12 +422,59 @@ const DIFF_CASES = (() => {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-slot-lookup-ratchet self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '1. The rule, in both directions, over synthetic sources.': 26,
+  '2. The grandfathering channel, as a synthetic witness pair.': 10,
+  '3. The ratchet comparison, in both directions.': 6,
+  '4. Both refusals, in both directions.': 5,
+  '5. The counter and the rule cannot disagree.': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 5;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 async function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
-  const assert = (cond, msg) => { if (!cond) failures.push(msg); };
+  const assert = (cond, msg) => { registerCase(); if (!cond) failures.push(msg); };
 
   /** Lint one fixture through a chosen config and COUNT it the way the gate does. */
   const hitsUnder = async (config, code, filePath = FIXTURE_FILE) => {
+    registerCase();
     const eslint = new ESLint({
       cwd: repoRoot,
       overrideConfigFile: true,
@@ -453,6 +500,7 @@ async function selfTest() {
   // The config is the REAL one from eslint.config.mjs with the baseline's
   // grandfathering lifted — the same construction `measure()` runs — so these
   // cases move with the rule and cannot be satisfied by a re-implementation.
+  battery('1. The rule, in both directions, over synthetic sources.');
   const baseline = JSON.parse(readFileSync(resolve(repoRoot, BASELINE_PATH), 'utf8'));
   const measuring = measuringConfig(new Set(Object.keys(baseline)));
 
@@ -470,6 +518,7 @@ async function selfTest() {
   // whole gate is built around — an ignored file is ignored COMPLETELY — so it
   // is proved rather than assumed, and proved in a way that survives the
   // baseline shrinking to zero entries.
+  battery('2. The grandfathering channel, as a synthetic witness pair.');
   {
     const code = "const s = ctx.getService<any>('data');";
     const withEntry = eslintConfig.map((entry) =>
@@ -509,6 +558,7 @@ async function selfTest() {
   }
 
   // ── 3. The ratchet comparison, in both directions. ────────────────────────
+  battery('3. The ratchet comparison, in both directions.');
   for (const [name, input, expected] of DIFF_CASES) {
     const got = diffRatchet(input).length;
     assert(got === expected, `diffRatchet: ${name} — expected ${expected} error(s), got ${got}`);
@@ -519,6 +569,7 @@ async function selfTest() {
   // Neither is reachable from a tree where the rule is healthy, so a green
   // production run says nothing about either — they are the strictest case of
   // the argument in this file's header.
+  battery('4. Both refusals, in both directions.');
   {
     assert(ruleBlockProblem(eslintConfig) === null, 'the live config must carry the slot-lookup rule');
     const renamed = eslintConfig.map((entry) =>
@@ -554,6 +605,7 @@ async function selfTest() {
   //
   // `countRuleHits` matches on the exact message, which is what lets four
   // report shapes be counted by a gate that knows of none of them.
+  battery('5. The counter and the rule cannot disagree.');
   assert(
     countRuleHits([{ message: SLOT_LOOKUP_ANY_MESSAGE }, { message: 'something else' }]) === 1,
     'the counter must match the rule message exactly',
@@ -565,6 +617,51 @@ async function selfTest() {
     'message must still be told where a legitimate `any` is declared',
   );
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length > 0) {
     console.error(`✗ check-slot-lookup-ratchet --self-test: ${failures.length} failure(s).\n`);
     for (const f of failures) console.error(`  • ${f}`);

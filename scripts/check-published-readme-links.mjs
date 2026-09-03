@@ -731,9 +731,61 @@ async function run() {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-published-readme-links self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'extractLinks: discrimination': 7,
+  'extractLinks: the CommonMark autolink': 11,
+  'classify: every bucket, both directions': 14,
+  'absoluteRemedy: both dead spellings, and the refusal': 6,
+  'canonicalDocsUrl: the host swap, both directions': 7,
+  'resolveDocsPage: the pageCandidates subtlety': 7,
+  'checkDocument, against a real temp tree': 29,
+  'Assertion 5 -- observed FAILING, then observed SILENT': 23,
+  'the autolink reaches the assertions, not just the extractor': 9,
+  'the empty-scan guard is real, not decorative': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 10;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   const ok = (label, cond) => {
+    registerCase();
     if (!cond) failures.push(label);
   };
 
@@ -756,6 +808,7 @@ function selfTest() {
   };
 
   // ---- extractLinks: discrimination -------------------------------------
+  battery('extractLinks: discrimination');
   const doc = [
     'Prose [a](/content/docs/x.mdx) here.',
     '',
@@ -798,6 +851,7 @@ function selfTest() {
   // ACCEPT pins below are the population and the REJECT pins are the price:
   // widening a recognizer is only safe if what it newly claims is exactly the
   // links and nothing else that wears angle brackets.
+  battery('extractLinks: the CommonMark autolink');
   ok('extractLinks reads a bare autolink', dests.includes('https://objectstack.ai/docs/autolinked'));
   ok('extractLinks reads a mailto autolink', dests.includes('mailto:hi@objectstack.ai'));
   ok(
@@ -835,6 +889,7 @@ function selfTest() {
   ok('extractLinks finds exactly the eight PROSE destinations', links.length === 8);
 
   // ---- classify: every bucket, both directions --------------------------
+  battery('classify: every bucket, both directions');
   ok('classify: root-relative', classify('/content/docs/a.mdx') === 'root-relative');
   ok('classify: root-relative (site route)', classify('/docs/a') === 'root-relative');
   ok('classify: relative is NOT root-relative', classify('../../spec/src/automation/') === 'relative');
@@ -859,6 +914,7 @@ function selfTest() {
   );
 
   // ---- absoluteRemedy: both dead spellings, and the refusal -------------
+  battery('absoluteRemedy: both dead spellings, and the refusal');
   ok(
     'remedy: /content/docs/*.mdx -> absolute route',
     absoluteRemedy('/content/docs/automation/flows.mdx')
@@ -890,6 +946,7 @@ function selfTest() {
   );
 
   // ---- canonicalDocsUrl: the host swap, both directions -----------------
+  battery('canonicalDocsUrl: the host swap, both directions');
   ok(
     'canonical: an alias is rewritten, path and fragment carried',
     canonicalDocsUrl('https://docs.objectstack.ai/docs/a/b#c')
@@ -912,6 +969,7 @@ function selfTest() {
   ok('canonical: SILENT on a relative destination', canonicalDocsUrl('../sibling/README.md') === null);
 
   // ---- resolveDocsPage: the pageCandidates subtlety ---------------------
+  battery('resolveDocsPage: the pageCandidates subtlety');
   ok('resolve: a page file', fixtureResolve('/docs/automation/flows') === 'automation/flows.mdx');
   ok('resolve: a directory WITH an index', fixtureResolve('/docs/automation') === 'automation/index.mdx');
   ok('resolve: the .md extension too', fixtureResolve('/docs/legacy-md-page') === 'legacy-md-page.md');
@@ -924,6 +982,7 @@ function selfTest() {
   // The resolution limbs read the filesystem, so they are exercised against the
   // REAL content root with links known to exist / not exist there. Using the
   // real tree keeps the self-test honest about the resolver it actually ships.
+  battery('checkDocument, against a real temp tree');
   const table = [['/docs/guides/:path*', '/docs']];
   // The fixture sits where a published README actually sits. Assertion 5
   // resolves against the DOCUMENT's directory, so depth is load-bearing: at
@@ -1041,6 +1100,7 @@ function selfTest() {
   // Real paths in the real tree, for the same reason assertions 3 and 4 use the
   // real content root: it keeps the self-test honest about the resolver that
   // actually ships.
+  battery('Assertion 5 -- observed FAILING, then observed SILENT');
   const a5 = runDoc('See [Guide](../../MINI_KERNEL_GUIDE.md).');
   ok(
     'A5 FAILS on a relative target that is not in the tree',
@@ -1141,6 +1201,7 @@ function selfTest() {
   // text. Pinned in the direction that is actually true, so a later author does
   // not read the missing A1 pin as a hole and "fix" it by dropping the scheme
   // requirement -- which would start claiming every HTML tag in the tree.
+  battery('the autolink reaches the assertions, not just the extractor');
   const auto1 = runDoc('Docs: </content/docs/automation/flows.mdx>');
   ok(
     'a root-relative path in angle brackets is NOT an autolink (no scheme)',
@@ -1190,9 +1251,55 @@ function selfTest() {
   ok('bracket-wearing non-links yield no links at all', autoNone.stats.links === 0);
 
   // ---- the empty-scan guard is real, not decorative ---------------------
+  battery('the empty-scan guard is real, not decorative');
   const empty = runDoc('No links here at all.\n\n```ts\nconst x = 1;\n```\n');
   ok('a document with no links yields no findings and no links', empty.stats.links === 0 && empty.findings.length === 0);
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length > 0) {
     console.error(`✗ check:published-readme-links --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  ${f}`);
