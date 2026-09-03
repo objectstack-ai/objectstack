@@ -27,17 +27,24 @@ function delivery(over: Partial<Delivery['notification']> = {}, recipient = 'use
     };
 }
 
-/** Fake data engine: user id → phone_number, and template lookups. */
-function fakeData(opts: { users?: Record<string, string>; templates?: any[] } = {}) {
+/** A `sys_user` row as the channel reads it: number plus (#13881) the user's own locale. */
+type FakeUser = string | { phone_number: string; locale?: unknown };
+
+/** Fake data engine: user id → phone_number (+ locale), and template lookups. */
+function fakeData(opts: { users?: Record<string, FakeUser>; templates?: any[] } = {}) {
     const users = opts.users ?? { user_1: '+8613800000000' };
     const templates = opts.templates ?? [];
+    const findOnes: Array<{ object: string; query: any }> = [];
     return {
+        findOnes,
         async findOne(object: string, query: any) {
             assertEngineFindOnePredicate(object, query);
+            findOnes.push({ object, query });
             const w = query?.where ?? {};
             if (object === 'sys_user') {
-                const phone = users[String(w.id)];
-                return phone ? { phone_number: phone } : null;
+                const user = users[String(w.id)];
+                if (!user) return null;
+                return typeof user === 'string' ? { phone_number: user } : { ...user };
             }
             if (object === 'sys_notification_template') {
                 return templates.find((t) => t.topic === w.topic && t.channel === w.channel && t.locale === w.locale && t.is_active) ?? null;
@@ -104,6 +111,69 @@ describe('sms channel', () => {
         const ch = channel(() => sms.service, data);
         await ch.send(silentCtx(), delivery());
         expect(sms.sent[0].body).toBe('Won: Deal closed');
+    });
+
+    // ── #13881 — per-recipient locale, the same chain the email channel
+    // resolves (`recipient-locale.ts`): the recipient's own `sys_user.locale`,
+    // else the deployment default, read off the SAME row as the number.
+    describe('per-recipient locale (#13881)', () => {
+        const rows = [
+            { topic: 'deal.won', channel: 'sms', locale: 'en', is_active: true, subject: 'Won', body: 'Won: {{ payload.title }}', format: 'text' },
+            { topic: 'deal.won', channel: 'sms', locale: 'zh', is_active: true, subject: '成交', body: '成交: {{ payload.title }}', format: 'text' },
+            { topic: 'deal.won', channel: 'sms', locale: 'ja-JP', is_active: true, subject: '成約', body: '成約: {{ payload.title }}', format: 'text' },
+        ];
+
+        it("rung 1: the recipient's own sys_user.locale picks the row (zh-CN walks the store ladder to `zh`)", async () => {
+            const sms = fakeSms();
+            const data = fakeData({ users: { user_1: { phone_number: '+8613800000000', locale: 'zh-CN' } }, templates: rows });
+            const ch = createSmsChannel({ getSms: () => sms.service, getData: () => data, store: new NotificationTemplateStore({ getData: () => data }), getDefaultTemplateLocale: () => 'ja-JP' });
+            await ch.send(silentCtx(), delivery());
+            expect(sms.sent[0].body).toBe('成交: Deal closed');
+            // One row read, both columns — no second read point.
+            const userReads = data.findOnes.filter((q) => q.object === 'sys_user');
+            expect(userReads).toHaveLength(1);
+            expect(userReads[0].query).toEqual({ where: { id: 'user_1' }, fields: ['phone_number', 'locale'] });
+        });
+
+        it('rung 2: a recipient without one falls to the deployment default', async () => {
+            const sms = fakeSms();
+            const data = fakeData({ users: { user_1: { phone_number: '+8613800000000' } }, templates: rows });
+            const ch = createSmsChannel({ getSms: () => sms.service, getData: () => data, store: new NotificationTemplateStore({ getData: () => data }), getDefaultTemplateLocale: () => 'ja-JP' });
+            await ch.send(silentCtx(), delivery());
+            expect(sms.sent[0].body).toBe('成約: Deal closed');
+        });
+
+        it('dead-letter pin: the literal "undefined" falls to the deployment default; nothing named lands on the `en` floor', async () => {
+            const sms = fakeSms();
+            const data = fakeData({ users: { user_1: { phone_number: '+8613800000000', locale: 'undefined' } }, templates: rows });
+            await createSmsChannel({ getSms: () => sms.service, getData: () => data, store: new NotificationTemplateStore({ getData: () => data }), getDefaultTemplateLocale: () => 'ja-JP' }).send(silentCtx(), delivery());
+            expect(sms.sent[0].body).toBe('成約: Deal closed');
+            await channel(() => sms.service, data).send(silentCtx(), delivery());
+            expect(sms.sent[1].body).toBe('Won: Deal closed');
+        });
+
+        it('a producer-set payload.locale is NOT consulted', async () => {
+            const sms = fakeSms();
+            const data = fakeData({ users: { user_1: { phone_number: '+8613800000000', locale: 'zh-CN' } }, templates: rows });
+            await channel(() => sms.service, data).send(silentCtx(), delivery({ payload: { title: 'Deal closed', body: 'Acme signed', locale: 'ja-JP' } }));
+            expect(sms.sent[0].body).toBe('成交: Deal closed');
+        });
+
+        it('a failing locale read costs the language, never the delivery (ruling item 3)', async () => {
+            const sms = fakeSms();
+            const base = fakeData({ users: { user_1: { phone_number: '+8613800000000', locale: 'zh-CN' } }, templates: rows });
+            const data = {
+                ...base,
+                async findOne(object: string, query: any) {
+                    if (object === 'sys_user' && (query?.fields ?? []).includes('locale')) throw new Error("Unknown field 'locale'");
+                    return base.findOne(object, query);
+                },
+            };
+            const r = await createSmsChannel({ getSms: () => sms.service, getData: () => data, store: new NotificationTemplateStore({ getData: () => data }), getDefaultTemplateLocale: () => 'ja-JP' }).send(silentCtx(), delivery());
+            expect(r.ok).toBe(true);
+            expect(sms.sent[0].to).toBe('+8613800000000');
+            expect(sms.sent[0].body).toBe('成約: Deal closed');
+        });
     });
 
     it('accepts a phone-shaped recipient verbatim (no user lookup)', async () => {

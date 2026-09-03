@@ -27,17 +27,24 @@ function delivery(over: Partial<Delivery['notification']> = {}, recipient = 'use
     };
 }
 
-/** Fake data engine: user id → email, and template lookups. */
-function fakeData(opts: { users?: Record<string, string>; templates?: any[] } = {}) {
+/** A `sys_user` row as the channel reads it: address plus (#13881) the user's own locale. */
+type FakeUser = string | { email: string; locale?: unknown };
+
+/** Fake data engine: user id → email (+ locale), and template lookups. */
+function fakeData(opts: { users?: Record<string, FakeUser>; templates?: any[] } = {}) {
     const users = opts.users ?? { user_1: 'ada@example.com' };
     const templates = opts.templates ?? [];
+    const findOnes: Array<{ object: string; query: any }> = [];
     return {
+        findOnes,
         async findOne(object: string, query: any) {
             assertEngineFindOnePredicate(object, query);
+            findOnes.push({ object, query });
             const w = query?.where ?? {};
             if (object === 'sys_user') {
-                const email = users[String(w.id)];
-                return email ? { email } : null;
+                const user = users[String(w.id)];
+                if (!user) return null;
+                return typeof user === 'string' ? { email: user } : { ...user };
             }
             if (object === 'sys_notification_template') {
                 return templates.find((t) => t.topic === w.topic && t.channel === w.channel && t.locale === w.locale && t.is_active) ?? null;
@@ -192,7 +199,11 @@ describe('email channel', () => {
             expect(email.sent).toHaveLength(0);
         });
 
-        it('a producer-supplied payload.locale wins over the deployment default', async () => {
+        it('a producer-set payload.locale is NOT consulted — the recipient chain decides (#13881)', async () => {
+            // Until the 2026-09-01 ruling this pin read the other way: the
+            // producer's single pre-fan-out value won over the deployment
+            // default. The ruling retired that value; the recipient's own
+            // column and the deployment default are the whole chain now.
             const email = fakeTemplateEmail();
             const data = fakeData({ users: { user_1: 'ada@example.com' } });
             const ch = createEmailChannel({
@@ -202,7 +213,7 @@ describe('email channel', () => {
                 getDefaultTemplateLocale: () => 'ja-JP',
             });
             await ch.send(silentCtx(), templateDelivery({ template: 'crm.large_deal_won', locale: 'es-ES' }));
-            expect(email.templated[0].locale).toBe('es-ES');
+            expect(email.templated[0].locale).toBe('ja-JP');
         });
 
         it('with no deployment default, no locale is passed — sendTemplate resolves its documented en-US default', async () => {
@@ -277,6 +288,197 @@ describe('email channel', () => {
             expect(r.ok).toBe(true);
             expect(email.templated).toHaveLength(0);
             expect(email.sent[0]).toEqual({ to: 'ada@example.com', subject: 'Deal closed', text: 'Acme signed' });
+        });
+    });
+
+    // ── #13881 — the recipient locale is resolved PER RECIPIENT, after
+    // fan-out. Maintainer ruling 2026-09-01: 「解析链 = 收件人 `locale` → 部署
+    // 默认,缺失恒回退,⛔ 任何路径不得死信」. Every pin below asserts WHICH row
+    // was picked for WHICH recipient (identity, not "old assertion gone"),
+    // and the dead-letter pin refuses the literal "undefined" shape hotcrm
+    // measured. The chain itself lives in `recipient-locale.ts` and is pinned
+    // there; this block pins what the email channel does with it, on BOTH
+    // arms (the notify `template` path and the sys_notification_template path).
+    describe('per-recipient locale (#13881)', () => {
+        function templateEmail() {
+            const templated: any[] = [];
+            return {
+                templated,
+                service: {
+                    async send() { return { id: 'email_row_1' }; },
+                    async sendTemplate(input: any) { templated.push(input); return { id: 'email_row_9', status: 'sent' }; },
+                },
+            };
+        }
+        const templated = (recipient = 'user_1') => delivery({
+            title: 'deal.won',
+            body: '',
+            payload: { template: 'crm.large_deal_won', templateData: { dealName: 'Acme' } },
+        }, recipient);
+        function build(data: any, email: any, deploymentDefault?: string) {
+            return createEmailChannel({
+                getEmail: () => email.service,
+                getData: () => data,
+                store: new NotificationTemplateStore({ getData: () => data }),
+                ...(deploymentDefault !== undefined ? { getDefaultTemplateLocale: () => deploymentDefault } : {}),
+            });
+        }
+
+        it("rung 1: the recipient's own sys_user.locale picks the row, over the deployment default", async () => {
+            const email = templateEmail();
+            const data = fakeData({ users: { user_1: { email: 'ada@example.com', locale: 'zh-CN' } } });
+            const r = await build(data, email, 'ja-JP').send(silentCtx(), templated());
+            expect(r.ok).toBe(true);
+            // Identity pin: the exact input the email service received.
+            expect(email.templated).toEqual([{
+                template: 'crm.large_deal_won',
+                to: 'ada@example.com',
+                data: { dealName: 'Acme' },
+                locale: 'zh-CN',
+            }]);
+        });
+
+        it('two recipients of ONE notification receive different rows — resolved after fan-out, not once for all', async () => {
+            // The hotcrm pull: 4 published languages, every recipient got the
+            // deployment default. Same notification, two deliveries, two rows.
+            const email = templateEmail();
+            const data = fakeData({ users: {
+                ada: { email: 'ada@example.com', locale: 'zh-CN' },
+                eve: { email: 'eve@example.com', locale: 'es-ES' },
+            } });
+            const ch = build(data, email, 'ja-JP');
+            await ch.send(silentCtx(), templated('ada'));
+            await ch.send(silentCtx(), templated('eve'));
+            expect(email.templated.map((t) => [t.to, t.locale])).toEqual([
+                ['ada@example.com', 'zh-CN'],
+                ['eve@example.com', 'es-ES'],
+            ]);
+        });
+
+        it('rung 2: a recipient without a locale falls to the deployment default', async () => {
+            const email = templateEmail();
+            const data = fakeData({ users: { user_1: { email: 'ada@example.com' } } });
+            await build(data, email, 'ja-JP').send(silentCtx(), templated());
+            expect(email.templated[0].locale).toBe('ja-JP');
+        });
+
+        it.each([
+            ['NULL', null],
+            ['empty string', ''],
+            ['whitespace', '   '],
+            ['the literal "undefined"', 'undefined'],
+            ['the literal "null"', 'null'],
+            ['a non-string', 42],
+            ['a malformed tag', 'not a locale!!'],
+        ])('dead-letter pin: a recipient locale of %s resolves to the deployment default and never reaches the lookup', async (_label, raw) => {
+            // hotcrm's measured dead-letter: `${pref?.value}` → "undefined" →
+            // TEMPLATE_NOT_FOUND (permanent) for every user without a row.
+            // Any of these shapes in the column must fall back, not fail.
+            const email = templateEmail();
+            const data = fakeData({ users: { user_1: { email: 'ada@example.com', locale: raw } } });
+            const r = await build(data, email, 'ja-JP').send(silentCtx(), templated());
+            expect(r.ok).toBe(true);
+            expect(email.templated).toHaveLength(1);
+            expect(email.templated[0].locale).toBe('ja-JP');
+            expect(email.templated[0].locale).not.toBe('undefined');
+        });
+
+        it('nothing named anywhere ⇒ no `locale` key at all — sendTemplate resolves its documented en-US default', async () => {
+            const email = templateEmail();
+            const data = fakeData({ users: { user_1: { email: 'ada@example.com', locale: 'undefined' } } });
+            const r = await build(data, email).send(silentCtx(), templated());
+            expect(r.ok).toBe(true);
+            expect(Object.prototype.hasOwnProperty.call(email.templated[0], 'locale')).toBe(false);
+        });
+
+        it('a literal email address has no row to read — the deployment default is its whole chain', async () => {
+            const email = templateEmail();
+            const data = fakeData({ users: {} });
+            await build(data, email, 'ja-JP').send(silentCtx(), templated('bob@example.com'));
+            expect(email.templated[0]).toMatchObject({ to: 'bob@example.com', locale: 'ja-JP' });
+            expect(data.findOnes.filter((q) => q.object === 'sys_user')).toHaveLength(0);
+        });
+
+        it('reads the locale off the SAME sys_user row as the address — one query per recipient, no second read point', async () => {
+            const email = templateEmail();
+            const data = fakeData({ users: { user_1: { email: 'ada@example.com', locale: 'zh-CN' } } });
+            await build(data, email, 'ja-JP').send(silentCtx(), templated());
+            const userReads = data.findOnes.filter((q) => q.object === 'sys_user');
+            expect(userReads).toHaveLength(1);
+            expect(userReads[0].query).toEqual({ where: { id: 'user_1' }, fields: ['email', 'locale'] });
+        });
+
+        it('a locale read that fails costs the language, never the delivery (ruling item 3)', async () => {
+            // A `userObject` override without the column: the projection
+            // throws, the channel retries address-only and falls to the
+            // deployment default. ok:true, one send, no dead letter.
+            const email = templateEmail();
+            const base = fakeData({ users: { user_1: { email: 'ada@example.com', locale: 'zh-CN' } } });
+            const data = {
+                ...base,
+                async findOne(object: string, query: any) {
+                    if (object === 'sys_user' && (query?.fields ?? []).includes('locale')) {
+                        throw new Error("Unknown field 'locale' on object 'sys_user'");
+                    }
+                    return base.findOne(object, query);
+                },
+            };
+            const warned: string[] = [];
+            const ctx = { logger: { info: () => {}, warn: (m: string) => { warned.push(m); }, error: () => {} } };
+            const r = await build(data, email, 'ja-JP').send(ctx, templated());
+            expect(r.ok).toBe(true);
+            expect(email.templated).toEqual([{
+                template: 'crm.large_deal_won',
+                to: 'ada@example.com',
+                data: { dealName: 'Acme' },
+                locale: 'ja-JP',
+            }]);
+            expect(warned.some((m) => /retrying address-only/.test(m))).toBe(true);
+        });
+
+        it('the sys_notification_template arm uses the SAME resolution: the recipient\'s row picks the (topic, email, locale) row', async () => {
+            const email = fakeEmail();
+            const data = fakeData({
+                users: {
+                    ada: { email: 'ada@example.com', locale: 'zh-CN' },
+                    bob: { email: 'bob@example.com' },
+                },
+                templates: [
+                    { topic: 'deal.won', channel: 'email', locale: 'en', is_active: true, subject: 'Won {{ payload.title }}', body: 'en body', format: 'text' },
+                    { topic: 'deal.won', channel: 'email', locale: 'zh-CN', is_active: true, subject: '成交 {{ payload.title }}', body: 'zh body', format: 'text' },
+                    { topic: 'deal.won', channel: 'email', locale: 'ja-JP', is_active: true, subject: '成約 {{ payload.title }}', body: 'ja body', format: 'text' },
+                ],
+            });
+            const ch = build(data, email, 'ja-JP');
+            await ch.send(silentCtx(), delivery({}, 'ada'));
+            await ch.send(silentCtx(), delivery({}, 'bob'));
+            expect(email.sent.map((s) => [s.to, s.subject])).toEqual([
+                ['ada@example.com', '成交 Deal closed'],   // her own locale
+                ['bob@example.com', '成約 Deal closed'],   // no locale ⇒ deployment default
+            ]);
+        });
+
+        it('the sys_notification_template arm still lands on the store\'s `en` floor when nothing is named', async () => {
+            const email = fakeEmail();
+            const data = fakeData({
+                users: { user_1: { email: 'ada@example.com', locale: 'undefined' } },
+                templates: [{ topic: 'deal.won', channel: 'email', locale: 'en', is_active: true, subject: 'Won {{ payload.title }}', body: 'en body', format: 'text' }],
+            });
+            await build(data, email).send(silentCtx(), delivery());
+            expect(email.sent[0].subject).toBe('Won Deal closed');
+        });
+
+        it('a producer-set payload.locale does not select the sys_notification_template row either', async () => {
+            const email = fakeEmail();
+            const data = fakeData({
+                users: { user_1: { email: 'ada@example.com', locale: 'zh-CN' } },
+                templates: [
+                    { topic: 'deal.won', channel: 'email', locale: 'zh-CN', is_active: true, subject: '成交', body: 'zh', format: 'text' },
+                    { topic: 'deal.won', channel: 'email', locale: 'es-ES', is_active: true, subject: 'Ganado', body: 'es', format: 'text' },
+                ],
+            });
+            await build(data, email).send(silentCtx(), delivery({ payload: { title: 'x', body: 'y', locale: 'es-ES' } }));
+            expect(email.sent[0].subject).toBe('成交');
         });
     });
 

@@ -196,7 +196,7 @@ describe('inbox channel', () => {
             };
         }
 
-        const templateDelivery = (locale?: string) => delivery({
+        const templateDelivery = () => delivery({
             // The emit-time degraded fallback (title=topic, body='') that the
             // renderer must REPLACE.
             title: 'deal.won',
@@ -204,16 +204,23 @@ describe('inbox channel', () => {
             payload: {
                 template: 'deal.won_email',
                 templateData: { deal: 'Acme' },
-                ...(locale ? { locale } : {}),
             },
         });
 
+        /**
+         * #13881 — the recipient's own `sys_user.locale`, answered off the
+         * row the channel reads on the template path. `undefined` ⇒ the user
+         * row exists but carries no locale.
+         */
+        const userWithLocale = (locale: unknown) => (obj: string, query: any) =>
+            obj === 'sys_user' && query?.where?.id === 'user_1' ? { locale } : null;
+
         it('renders title/body_md through renderTemplate: subject → title, text → body_md', async () => {
-            const data = fakeData();
+            const data = fakeData(undefined, userWithLocale('zh-CN'));
             const r = fakeRenderer();
             const ch = createInboxChannel({ getData: () => data.engine, getEmail: () => r.email });
 
-            const result = await ch.send(silentCtx(), templateDelivery('zh-CN'));
+            const result = await ch.send(silentCtx(), templateDelivery());
 
             expect(result.ok).toBe(true);
             expect(r.calls).toEqual([{
@@ -225,8 +232,8 @@ describe('inbox channel', () => {
             expect(data.inserts[0].row.body_md).toBe('text body');
         });
 
-        it('falls back to the deployment default locale when the payload names none', async () => {
-            const data = fakeData();
+        it('falls back to the deployment default locale when the recipient has none (#13881 rung 2)', async () => {
+            const data = fakeData(undefined, userWithLocale(undefined));
             const r = fakeRenderer();
             const ch = createInboxChannel({
                 getData: () => data.engine,
@@ -237,6 +244,84 @@ describe('inbox channel', () => {
             await ch.send(silentCtx(), templateDelivery());
 
             expect(r.calls[0].locale).toBe('ja-JP');
+            // The locale was read off the recipient's own row — the same
+            // chain the email channel resolves — and only on this path.
+            expect(data.findOnes.filter((q) => q.object === 'sys_user')).toEqual([
+                { object: 'sys_user', query: { where: { id: 'user_1' }, fields: ['locale'] } },
+            ]);
+        });
+
+        it("the recipient's own sys_user.locale outranks the deployment default (#13881 rung 1)", async () => {
+            const data = fakeData(undefined, userWithLocale('es-ES'));
+            const r = fakeRenderer();
+            const ch = createInboxChannel({
+                getData: () => data.engine,
+                getEmail: () => r.email,
+                getDefaultTemplateLocale: () => 'ja-JP',
+            });
+
+            const result = await ch.send(silentCtx(), templateDelivery());
+
+            expect(result.ok).toBe(true);
+            expect(r.calls[0].locale).toBe('es-ES');
+            expect(data.inserts[0].row.title).toBe('[es-ES] subject for deal.won_email');
+        });
+
+        it('a producer-set payload.locale is NOT consulted (#13881 retired the pre-fan-out single value)', async () => {
+            const data = fakeData(undefined, userWithLocale('zh-CN'));
+            const r = fakeRenderer();
+            const ch = createInboxChannel({ getData: () => data.engine, getEmail: () => r.email });
+
+            await ch.send(silentCtx(), delivery({
+                title: 'deal.won',
+                body: '',
+                payload: { template: 'deal.won_email', templateData: { deal: 'Acme' }, locale: 'es-ES' },
+            }));
+
+            expect(r.calls[0].locale).toBe('zh-CN');
+        });
+
+        it('dead-letter pin: the literal "undefined" in the column falls to the deployment default, never through', async () => {
+            const data = fakeData(undefined, userWithLocale('undefined'));
+            const r = fakeRenderer();
+            const ch = createInboxChannel({
+                getData: () => data.engine,
+                getEmail: () => r.email,
+                getDefaultTemplateLocale: () => 'ja-JP',
+            });
+
+            const result = await ch.send(silentCtx(), templateDelivery());
+
+            expect(result.ok).toBe(true);
+            expect(r.calls[0].locale).toBe('ja-JP');
+        });
+
+        it('a failing locale read costs the language, never the delivery (ruling item 3)', async () => {
+            const data = fakeData(undefined, (obj: string) => {
+                if (obj === 'sys_user') throw new Error("Unknown field 'locale' on object 'sys_user'");
+                return null;
+            });
+            const r = fakeRenderer();
+            const ch = createInboxChannel({
+                getData: () => data.engine,
+                getEmail: () => r.email,
+                getDefaultTemplateLocale: () => 'ja-JP',
+            });
+
+            const result = await ch.send(silentCtx(), templateDelivery());
+
+            expect(result.ok).toBe(true);
+            expect(r.calls[0].locale).toBe('ja-JP');
+            expect(data.inserts).toHaveLength(1);
+        });
+
+        it('the inline (non-template) path never reads the recipient row — no localized row to pick', async () => {
+            const data = fakeData(undefined, userWithLocale('zh-CN'));
+            const ch = createInboxChannel({ getData: () => data.engine });
+
+            await ch.send(silentCtx(), delivery());
+
+            expect(data.findOnes.filter((q) => q.object === 'sys_user')).toHaveLength(0);
         });
 
         it('fails LOUDLY (TEMPLATE_UNSUPPORTED) when no email service is registered', async () => {
