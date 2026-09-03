@@ -35,7 +35,7 @@ interface AutomationTriggerRegistry {
  */
 export class ScheduleTriggerPlugin implements Plugin {
     name = 'com.objectstack.trigger.schedule';
-    type = 'standard';
+    type = 'standard' as const;
     version = '7.3.0';
     dependencies = ['com.objectstack.service.job'];
 

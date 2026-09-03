@@ -918,6 +918,181 @@ describe('[#13608] publicSharing.eligibility is enforced again at REDEMPTION', (
 });
 
 /**
+ * [#14033] The PARENT switch is a standing policy too.
+ *
+ * `publicSharing.enabled` governed MINTING only: `getPolicy()` collapsed to an
+ * empty policy when the block was off, and `resolveToken` read nothing off
+ * `policy.enabled`. So the platform held this shape — the predicate INSIDE
+ * the block was re-evaluated at every redemption (#13608, above) while turning
+ * the ENTIRE block off did not stop a single existing link. Maintainer ruling
+ * of 2026-09-01 (quoted verbatim in `share-link-service.test.ts`'s reversal
+ * register): the switch is a standing policy held at every redemption,
+ * retroactively; a link minted through the system / `permissive` bypass is
+ * governed the same way; and with the block off nothing inside it is
+ * evaluated at all, while with it on the sibling keys keep their
+ * redemption-time behaviour.
+ *
+ * These pins use the real driver and the real public route: "no record read"
+ * is measured off the engine's call log, the refusal shape is measured at the
+ * seam an anonymous holder actually reaches, and the reason is read off the
+ * server-side log — the only place the ruling leaves it, exactly as for the
+ * eligibility refusal above.
+ */
+describe('[#14033] publicSharing.enabled is a standing policy — the switch is held at redemption', () => {
+  /** A token minted while the block is ON and `a_ok` qualifies — the pre-condition of every case below. */
+  async function mint(service: ShareLinkService, recordId = 'a_ok') {
+    const link = await service.createLink(
+      { object: 'article', recordId, audience: 'public', permission: 'view' },
+      CALLER,
+    );
+    expect(link.token).toBeTruthy();
+    return link;
+  }
+
+  /** The switch, thrown from OUTSIDE the token's life: the object's declared block, `enabled: false`. */
+  const switchOff = (schemas: Record<string, any>) => {
+    schemas.article = { ...ARTICLE, publicSharing: { ...ARTICLE.publicSharing, enabled: false } };
+  };
+  const switchOn = (schemas: Record<string, any>) => { schemas.article = ARTICLE; };
+
+  /** The row as the table holds it now — usage counters included. */
+  async function linkRow(driver: SqlDriver, id: string): Promise<any> {
+    const rows = await driver.find('sys_share_link', {} as DriverQuery);
+    return rows.find((r: any) => r.id === id);
+  }
+
+  it('THE REPRO — an ELIGIBLE record on a switched-off block is refused, with no record read and no usage stamp', async () => {
+    const { driver, service, schemas, findCalls } = await boot();
+    const link = await mint(service);
+
+    switchOff(schemas);
+    findCalls.length = 0;
+
+    // `a_ok` is published + public: no eligibility refusal is available here,
+    // so this `null` can only have come from the switch.
+    expect(await service.resolveToken(link.token, {})).toBeNull();
+
+    // Refused before the record probe — the token lookup was the only read.
+    expect(findCalls.map((c) => c.object)).toEqual(['sys_share_link']);
+    // …and before the usage stamp.
+    const row = await linkRow(driver, link.id);
+    expect(row.use_count ?? 0).toBe(0);
+    expect(row.last_used_at ?? null).toBeNull();
+  });
+
+  /**
+   * The HTTP seam, driven end-to-end on the real service through the real
+   * route, with the route's SECURE default context — every request below is
+   * anonymous. Same reading as the #13608 pin above, for the same reason: the
+   * switched-off link lands in the generic "invalid / expired / revoked"
+   * answer, byte-for-byte what a token that NEVER EXISTED gets — not the 410
+   * bucket, which would confirm the token was real, and not a 422 naming the
+   * policy, which is what letting `SHARING_NOT_ENABLED` escape would produce.
+   */
+  it('at the HTTP seam an anonymous caller cannot tell a switched-off link from an unknown token', async () => {
+    const { service, engine, schemas } = await boot();
+    const live = await mint(service);
+    const revoked = await mint(service);
+    await service.revokeLink(revoked.token, { isSystem: true } as any);
+
+    const resolve = mountResolveRoute(service, engine);
+
+    // Before the switch: the link serves the record.
+    expect((await resolve(live.token)).status).toBe(200);
+
+    switchOff(schemas);
+
+    const switchedOff = await resolve(live.token);
+    const unknown = await resolve('zzzzzzzzzzzzzzzzzzzzzz');
+    const revokedAnswer = await resolve(revoked.token);
+
+    expect(switchedOff).toEqual(unknown);
+    expect(switchedOff.status).toBe(404);
+    expect(switchedOff.body?.error?.code).toBe('INVALID_OR_EXPIRED');
+    // Nothing about the policy or the switch reaches the wire.
+    const wire = JSON.stringify(switchedOff.body).toLowerCase();
+    expect(wire).not.toContain('enabled');
+    expect(wire).not.toContain('publicsharing');
+    expect(wire).not.toContain('sharing_not_enabled');
+
+    // The pre-existing revoked bucket, recorded as measured: a DIFFERENT
+    // status, and this change does not move it.
+    expect(revokedAnswer.status).toBe(410);
+    expect(revokedAnswer.body?.error?.code).toBe('EXPIRED_OR_REVOKED');
+  });
+
+  it('the reason a switched-off link died is written to the server-side log, and only there', async () => {
+    const logged: LoggedRefusal[] = [];
+    const { service, schemas } = await boot(ARTICLE, {
+      logger: { warn: (msg, meta) => { logged.push({ msg, meta }); } },
+    });
+    const link = await mint(service);
+    switchOff(schemas);
+
+    expect(await service.resolveToken(link.token, {})).toBeNull();
+
+    expect(logged).toHaveLength(1);
+    expect(logged[0].msg).toContain('publicSharing.enabled');
+    expect(logged[0].meta?.reason).toBe('SHARING_NOT_ENABLED');
+    expect(logged[0].meta?.link).toBe(link.id);
+    expect(logged[0].meta?.object).toBe('article');
+    expect(logged[0].meta?.record).toBe('a_ok');
+  });
+
+  /**
+   * Ruling point 4, both halves on ONE token. OFF: the switch refuses before
+   * anything inside the block is evaluated — the record is not even read, so
+   * the predicate that WOULD refuse it never runs. ON again: the same token is
+   * judged by the predicate once more, and refused by IT; when the record
+   * qualifies again the token serves. A standing policy, not a revocation.
+   */
+  it('OFF: nothing inside the block is evaluated; ON again: the eligibility re-check resumes on the same token', async () => {
+    const logged: LoggedRefusal[] = [];
+    const { driver, service, schemas, findCalls } = await boot(ARTICLE, {
+      logger: { warn: (msg, meta) => { logged.push({ msg, meta }); } },
+    });
+    const link = await mint(service);
+
+    // Reclassify the record so the predicate would refuse it — THEN switch off.
+    await driver.update('article', 'a_ok', { audience: 'internal' });
+    switchOff(schemas);
+    findCalls.length = 0;
+
+    expect(await service.resolveToken(link.token, {})).toBeNull();
+    expect(findCalls.map((c) => c.object)).toEqual(['sys_share_link']);
+    expect(logged.map((l) => l.meta?.reason)).toEqual(['SHARING_NOT_ENABLED']);
+
+    switchOn(schemas);
+    expect(await service.resolveToken(link.token, {})).toBeNull();
+    expect(logged.map((l) => l.meta?.reason)).toEqual(['SHARING_NOT_ENABLED', 'RECORD_NOT_ELIGIBLE']);
+
+    await driver.update('article', 'a_ok', { audience: 'public' });
+    expect(await service.resolveToken(link.token, {})).not.toBeNull();
+  });
+
+  /**
+   * Ruling point 3 on the real driver: the `permissive` bypass still MINTS on
+   * a switched-off block (ledger row 37's path — the ruling governs
+   * redemption, not minting), and the result is refused at redemption by the
+   * bypassing service and the ordinary one alike.
+   */
+  it('a link minted through the `permissive` bypass on a switched-off block is refused at redemption', async () => {
+    const off = { ...ARTICLE, publicSharing: { ...ARTICLE.publicSharing, enabled: false } };
+    const { service, engine } = await boot(off);
+    const bypass = new ShareLinkService({ engine: engine as any, permissive: true });
+
+    const link = await bypass.createLink(
+      { object: 'article', recordId: 'a_ok', audience: 'public', permission: 'view' },
+      CALLER,
+    );
+    expect(link.token).toBeTruthy();
+
+    expect(await bypass.resolveToken(link.token, {})).toBeNull();
+    expect(await service.resolveToken(link.token, {})).toBeNull();
+  });
+});
+
+/**
  * [#13608] Mount the real PUBLIC resolve route on the real service.
  *
  * Only the verbs `registerShareLinkRoutes` calls are implemented, and the

@@ -381,6 +381,71 @@ export { isExtractConfigPath, isMetadataFormModulePath };
 
 const ROOT = new URL('../..', import.meta.url).pathname;
 
+// ── The source maskers are memoised, because discovery masks each file ~12x ──
+//
+// PROFILED, not guessed. `discoverFamilies` hands the SAME source string to six
+// analysers in one pass of its per-family loop — `extractWatchHints`,
+// `readProgramTargetsInSource`, `payloadEnvDependence`, `firstPartyImportTargets`,
+// `spawnedProgramTargets` and `packageManifestTargets` — and every one of them
+// re-derives the masked body from scratch, two of them twice (they mask, then
+// hand the masked text to `anchoredReadTargets`, which masks again). One source
+// therefore pays `maskComments` about seven times and `maskSelfTests` about five,
+// per discovery, for bytes that cannot have changed in between.
+//
+// The cost that buys: a V8 CPU profile of ONE `discoverFamilies()` call on this
+// tree — 201 families, 196 distinct gate sources, 11.8 MB of them — spent 14.3 s,
+// of which `maskSelfTests` was 4.5 s of self time (31.7%) and the `maskComments`
+// inside those six analysers most of another 5.2 s. That is the largest single
+// entry in the profile, and all of it above the first pass is repetition.
+//
+// So the maskers are memoised on their INPUT STRING. Both are pure functions of
+// that string, and JavaScript strings are immutable, so a memo is
+// observationally identical to calling through: same bytes in, same bytes out,
+// and no caller can edit the shared result under another. ⛔ This changes
+// nothing about WHAT is masked, scanned or discovered — it is the same
+// derivation run once instead of a dozen times, which is the only kind of
+// speed-up this tool may take.
+//
+// The bound is in BYTES rather than entries because the corpora these run over
+// differ by three orders of magnitude: the gate set is ~12 MB and fits whole, so
+// repeated discoveries in one process reuse it, while a tracked-corpus sweep
+// would otherwise grow the cache without limit. Eviction is oldest-first, and a
+// miss after eviction is a recomputation — never a different answer.
+const MASK_MEMO_BYTE_BUDGET = 32 * 1024 * 1024;
+
+function memoiseMask(compute) {
+  const cache = new Map();
+  let bytes = 0;
+  return (source) => {
+    // A non-string argument is passed straight through: today's behaviour is
+    // whatever the masker does with it, and a memo must not be the thing that
+    // decides otherwise.
+    if (typeof source !== 'string') return compute(source);
+    const hit = cache.get(source);
+    if (hit !== undefined) return hit;
+    const value = compute(source);
+    cache.set(source, value);
+    bytes += source.length + value.length;
+    // `Map` iterates in insertion order, so the first key is the oldest.
+    while (bytes > MASK_MEMO_BYTE_BUDGET && cache.size > 1) {
+      const oldest = cache.keys().next().value;
+      bytes -= oldest.length + cache.get(oldest).length;
+      cache.delete(oldest);
+    }
+    return value;
+  };
+}
+
+/** `maskComments`, memoised — see the block above. */
+const maskedComments = memoiseMask((source) => maskComments(source));
+
+/**
+ * `maskSelfTests(maskComments(source))`, memoised — see the block above. It
+ * composes through `maskedComments` rather than calling `maskComments` again, so
+ * the comment mask is derived once for the callers that want each half.
+ */
+const maskedModuleBody = memoiseMask((source) => maskSelfTests(maskedComments(source)));
+
 // ── What a gate that IMPORTS this module inherits (#11556) ─────────────────
 //
 // This module is importable and is NOT a discovered gate file — `check:pm-dispatch-gates`
@@ -1538,7 +1603,7 @@ const PAYLOAD_ENV_ACCESS = new RegExp(
  * the difference between classifying a gate and classifying its docblock.
  */
 export function payloadEnvDependence(scriptSource) {
-  const body = maskSelfTests(maskComments(String(scriptSource)));
+  const body = maskedModuleBody(String(scriptSource));
   return PAYLOAD_ENV_ACCESS.test(body) ? WORKFLOW_PAYLOAD_ENV : null;
 }
 
@@ -2366,7 +2431,7 @@ export const COMPOUND_ANCHOR_KEYS = new Map(
  */
 export function compoundAnchorDecls(source) {
   const scan = scanSource(source);
-  const decommented = maskComments(source);
+  const decommented = maskedComments(source);
   const out = [];
   for (const m of decommented.matchAll(SELF_TEST_DECL)) {
     if (scan.comment[m.index] || scan.literal[m.index]) continue;
@@ -2959,7 +3024,7 @@ export function packageRootAnchoredHint(hint, base, tree, files) {
  * have to remember to do it.
  */
 export function extractWatchHints(scriptSource, scriptPath = null, { tree = null } = {}) {
-  const moduleBody = maskSelfTests(maskComments(scriptSource));
+  const moduleBody = maskedModuleBody(scriptSource);
   const hints = new Set();
   for (const m of moduleBody.matchAll(/['"`]([^'"`\n]{2,120})['"`]/g)) {
     const raw = m[1];
@@ -3175,7 +3240,7 @@ export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}
   // The same masking hint extraction uses, for the same reason: an import
   // written out in a docblock, or one inside a self-test fixture, is a
   // specifier this script NAMES rather than one it loads.
-  const body = maskSelfTests(maskComments(String(source)));
+  const body = maskedModuleBody(String(source));
   const specifiers = new Set();
   for (const m of body.matchAll(IMPORT_FROM_SPECIFIER)) specifiers.add(m[2]);
   for (const m of body.matchAll(SIDE_EFFECT_IMPORT)) specifiers.add(m[2]);
@@ -5234,7 +5299,7 @@ function combineReadings(readings, name) {
  * own repo-relative path — the anchor spellings resolve against it.
  */
 export function scratchDirSitesInSource(rel, source) {
-  const masked = maskComments(String(source));
+  const masked = maskedComments(String(source));
   // A call spelled inside a STRING is a fixture, not a call — this module's own
   // self-test plants fixture sources as string literals, and read as code they
   // reported four sites in a file that creates none of them. Comments are
@@ -5394,7 +5459,7 @@ export function readProgramTargetsInSource(rel, source, isTracked) {
 
 /** Every TRACKED file the source opens at a path anchored to its own location. */
 export function anchoredReadTargets(rel, source, isTracked) {
-  const masked = maskComments(String(source));
+  const masked = maskedComments(String(source));
   const { literal } = scanSource(masked);
   const ctx = {
     fileSegs: rel.split('/'),
@@ -5533,7 +5598,7 @@ export function spawnedProgramTargets(rel, source, isTracked) {
   // follow inherits a POPULATION, and a spawn written inside a self-test body
   // is a fixture the self-test drives rather than the gate's work. The read
   // scan next door wants the opposite from the same bytes, and says so.
-  const masked = maskSelfTests(maskComments(String(source)));
+  const masked = maskedModuleBody(String(source));
   const { literal } = scanSource(masked);
   const ctx = {
     fileSegs: rel.split('/'),
@@ -5717,7 +5782,7 @@ const PACKAGE_MANIFEST_TARGET = /(?:^|\/)package\.json$/;
 const MANIFEST_EXPORTS_READ = /(?<!\bmodule)\.exports\b|\[\s*(['"`])exports\1\s*\]|\bexports\s*[:?]/;
 
 export function packageManifestTargets(rel, source, isTracked) {
-  const masked = maskSelfTests(maskComments(String(source)));
+  const masked = maskedModuleBody(String(source));
   if (!MANIFEST_EXPORTS_READ.test(masked)) return [];
   return anchoredReadTargets(rel, masked, isTracked).filter((t) => PACKAGE_MANIFEST_TARGET.test(t));
 }
@@ -6635,7 +6700,7 @@ export function stampsAnErrorCodeLiteral(path, readSource = readTrackedSource) {
   // Comments are masked for the reason the gate masks them: a code DISCUSSED in
   // prose is not a code stamped in source. This narrows nothing the gate would
   // have reported, so it costs no recall in the expensive direction.
-  const masked = maskComments(source);
+  const masked = maskedComments(source);
   return CODE_STAMP_POSITION.test(masked) || CODE_CONSTANT_BINDING.test(masked);
 }
 
@@ -7483,7 +7548,7 @@ export function pendingChangesetFamilies(entries, matchedChecks, probe = CHANGES
 export function pendingChangesetLines(pending, probe = CHANGESET_PROBE_PATH) {
   if (pending.length === 0) return [];
   const lines = [
-    `Once a changeset exists, ${pending.length} more famil(ies) apply — write one unless this card is docs-only:`,
+    `Once a changeset exists, ${pending.length} more famil(ies) apply — write one unless this card publishes nothing from any released package (then the skip-changeset label instead, per the os-dev clause):`,
   ];
   for (const { entry, hits } of [...pending].sort((a, b) => a.check.localeCompare(b.check))) {
     const via = hits.map((h) => `${h.via} '${h.hint}'`).join('; ');
@@ -7870,6 +7935,26 @@ export function residueLines(
 // ---------------------------------------------------------------------------
 
 /**
+ * The single source of truth for the model tier the PM lane's governance
+ * reads — clause ②'s CONTRACT-REVIEW tier: the tier a card that changes
+ * contract accept/reject behaviour or widens the public surface must be
+ * dispatched at, and the tier the `needs:contract-review` re-review sub-round
+ * must itself be running at (its opening self-check reads this). Declared HERE
+ * and only here, as a constant, so a model upgrade is a one-line change in one
+ * file — the clause-① mandate rows below read it, the self-test compares
+ * against it, and the PM skill's prose names it, so the model id is spelled as
+ * a VALUE on this one line and nowhere else across `scripts/pm/**` and
+ * `.claude/skills/pm-dispatch/**` (a second value site is what let this
+ * constant drift from the served tier unnoticed). The comparison against the
+ * served tier is EXACT, never a family or prefix floor — widening a governance
+ * gate's accept set is the maintainer's decision, not a refresh-time
+ * convenience. The review label deliberately names WHAT is reviewed, never a
+ * model (maintainer, 2026-08-16: 「needs:fable-review 这个标签不好,下次模型升级怎么办」).
+ * Rulebook: `.claude/skills/pm-dispatch/SKILL.md` 「入队与落地」 — the clause-② gate and the `needs:contract-review` review-chain bullets.
+ */
+export const CONTRACT_REVIEW_TIER = 'claude-fable-5-1';
+
+/**
  * The globs that MANDATE a model tier for any card whose file surface touches
  * them, as DATA. This is the one list in this file besides CHANGE_KIND_GATES,
  * and it is here for the same reason: it is enumerable, so a guard can hold it.
@@ -7902,7 +7987,7 @@ export function residueLines(
  * about paths:
  *
  *   - clause ①, encoded below: a card editing the PM lane's PROTOCOL-SEMANTIC
- *     surfaces is `claude-fable-5` — the pm-dispatch SKILL.md main file, every
+ *     surfaces is `CONTRACT_REVIEW_TIER` — the pm-dispatch SKILL.md main file, every
  *     file carrying an enforced copy of the decision frame (the COPIES table
  *     of check:skill-frame-sync), and the dev-agent definition. Narrowed from
  *     "the whole skill tree, references included" by the maintainer's
@@ -7912,7 +7997,7 @@ export function residueLines(
  *     file-surface predicate, and exactly what this script takes as argv;
  *   - clause ②, NOT encoded and deliberately not: a card that changes contract
  *     accept/reject behaviour or widens the public surface is also
- *     `claude-fable-5`. That is judged from the card's CONTENT — what the change
+ *     `CONTRACT_REVIEW_TIER`. That is judged from the card's CONTENT — what the change
  *     does to the contract — and a path cannot answer it. An ordinary-looking
  *     surface (one package's source file) is the NORMAL shape of a clause-②
  *     card. The closest a path can honestly get is SUSPICION:
@@ -7996,34 +8081,20 @@ export function residueLines(
 export const MANDATORY_TIER_GLOBS = [
   {
     glob: '.claude/skills/pm-dispatch/SKILL.md',
-    tier: 'claude-fable-5',
+    tier: CONTRACT_REVIEW_TIER,
     why: 'clause ① of the model-tiering ruling (narrowed to protocol semantics, 2026-08-20): the PM dispatch skill MAIN file is the lane\'s own operating protocol and a wrong edit propagates to every later dispatch — references/** dropped out of the path mandate that day',
   },
   {
     glob: '.claude/agents/os-dev.md',
-    tier: 'claude-fable-5',
+    tier: CONTRACT_REVIEW_TIER,
     why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and it carries an enforced copy of the decision frame',
   },
   {
     glob: 'skills/objectstack-pm-dispatch/SKILL.md',
-    tier: 'claude-fable-5',
+    tier: CONTRACT_REVIEW_TIER,
     why: 'clause ① (2026-08-20 narrowing): the published PM skill carries two enforced copies of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
   },
 ];
-
-/**
- * Clause ②'s single source of truth for the CONTRACT-REVIEW tier: the tier a
- * card that changes contract accept/reject behaviour or widens the public
- * surface must be dispatched at, and the tier the `needs:contract-review`
- * re-review sub-round must itself be running at (its opening self-check reads
- * this). Declared HERE and only here, as a constant, so a model upgrade is a
- * one-line change in one file. The review label deliberately names WHAT is
- * reviewed, never a model (maintainer, 2026-08-16: 「needs:fable-review 这个标
- * 签不好,下次模型升级怎么办」), and the PM skill's prose points at this
- * constant instead of spelling a model name.
- * Rulebook: `.claude/skills/pm-dispatch/SKILL.md` 「入队与落地」 — the clause-② gate and the `needs:contract-review` review-chain bullets.
- */
-export const CONTRACT_REVIEW_TIER = 'claude-fable-5';
 
 /**
  * The globs that make a surface a clause-② SUSPECT — a HINT, never a verdict.
@@ -12085,20 +12156,34 @@ function selfTest() {
       JSON.stringify({ verdict: verdict?.verdict, hints: entry?.hints }),
     );
     // The ablation, run in-place: strip the declared SUBTREE from the live hint
-    // set and the verdict must fall back to what it was before this landed.
+    // set and the verdict must fall back to NOT MATCHED — that is the whole
+    // claim, since a brand-new file is nameable only through the subtree half.
     // Without it the case above could pass through any hint that happened to
     // cover the probe, and the reader could not tell which half was load-bearing.
+    //
+    // WHICH not-matched verdict it lands on is not fixed, and pinning one
+    // spelling was a latent trap: for `check:entry-guard` the residual depends
+    // on whether its KNOWN_IMPORT_UNSAFE roster still contributes path literals
+    // as hints — `silent` while it held entries, `undetermined` once it emptied
+    // and the stripped hint set is bare. That ledger is ⛔ SHRINK-ONLY and
+    // reaching zero is its GOAL, so the day it emptied this case went red over
+    // a gate that had not changed at all. Either verdict proves the subtree
+    // hint is the load-bearing half, so both are accepted — spelled as an
+    // explicit pair rather than `!== 'matched'`, so a NEW verdict value added
+    // later cannot slip through here as a pass.
     const undeclared = entry ? { ...entry, hints: entry.hints.filter((h) => !h.includes('/*')) } : null;
+    const residual = undeclared ? classifyEntry(undeclared, [unwrittenScript]).verdict : null;
     t(
-      `…and it is the subtree declaration doing it: strip it and ${gate} goes back to silent`,
+      `…and it is the subtree declaration doing it: strip it and ${gate} goes back to NOT MATCHED`,
       // The length check is what stops this passing VACUOUSLY. With no subtree
-      // hint to remove, `undeclared` is the entry itself and `silent === silent`
-      // reads as a pass — measured, on the ablation run that removed both
-      // declarations: this case stayed green while the two above went red.
+      // hint to remove, `undeclared` is the entry itself and a not-matched
+      // verdict compared against itself reads as a pass — measured, on the
+      // ablation run that removed both declarations: this case stayed green
+      // while the two above went red.
       Boolean(undeclared) &&
         undeclared.hints.length < entry.hints.length &&
-        classifyEntry(undeclared, [unwrittenScript]).verdict === 'silent',
-      JSON.stringify({ before: entry?.hints?.length, after: undeclared?.hints?.length }),
+        ['silent', 'undetermined'].includes(residual),
+      JSON.stringify({ before: entry?.hints?.length, after: undeclared?.hints?.length, residual }),
     );
   }
 
@@ -15212,7 +15297,7 @@ function selfTest() {
   t('and its provenance says so, rather than claiming a source literal', csTriggered[0]?.hits?.[0]?.via?.startsWith('CI trigger in') === true);
   // Rendering.
   const pendingOut = pendingChangesetLines(pending);
-  t('the section heading counts the families and carries the docs-only escape', /^Once a changeset exists, 2 more famil\(ies\) apply — write one unless this card is docs-only:$/.test(pendingOut[0]));
+  t('the section heading counts the families and carries the publishes-nothing escape, stated as the os-dev clause states it', /^Once a changeset exists, 2 more famil\(ies\) apply — write one unless this card publishes nothing from any released package \(then the skip-changeset label instead, per the os-dev clause\):$/.test(pendingOut[0]));
   t('every row is a RUNNABLE invocation, the same as the matched list', pendingOut.filter((l) => l.startsWith('  - ')).every((l) => l.startsWith('  - pnpm ') || l.startsWith('  - node ')));
   t('every row prints the hypothetical path it would match, so the lead cannot read as a real one', pendingOut.filter((l) => l.startsWith('  - ')).every((l) => l.includes(CHANGESET_PROBE_PATH)));
   t('the section says out loud that it is not a fourth bucket', pendingOut.some((l) => l.includes('NOT a fourth bucket')));
@@ -15233,12 +15318,12 @@ function selfTest() {
   // mandate, and the ordinary surface that must NOT be mandated (a tool that
   // mandates everything is ignored, which loses the guardrail by the other road).
   const fableOf = (paths) => deriveTier(paths);
-  t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === 'claude-fable-5');
-  t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === 'claude-fable-5');
-  t('the published PM skill (two enforced frame copies) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === 'claude-fable-5');
+  t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
+  t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === CONTRACT_REVIEW_TIER);
+  t('the published PM skill (two enforced frame copies) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).mandatory === false);
   const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/agents/os-dev.md']);
-  t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === 'claude-fable-5');
+  t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === CONTRACT_REVIEW_TIER);
   t('the mixed verdict reports the offending path, not just the verdict', mixed.hits.length === 1 && mixed.hits[0].path.endsWith('.claude/agents/os-dev.md'));
   t('an ordinary surface carries no path-derived mandate', fableOf(['packages/spec/src/data/filter.zod.ts']).mandatory === false);
   t("this tool's own file is not mandatory — the card that added this section reads itself correctly", fableOf(['scripts/pm/dispatch-gates.mjs']).mandatory === false);
@@ -15251,7 +15336,7 @@ function selfTest() {
   // The rendering is where the invariant is actually delivered: the claim
   // comment quotes THESE lines.
   const mandLines = tierLines(mixed).join('\n');
-  t('the mandatory rendering names the tier', mandLines.includes('claude-fable-5'));
+  t('the mandatory rendering names the tier', mandLines.includes(CONTRACT_REVIEW_TIER));
   t('the mandatory rendering says MANDATORY in a word a reader cannot skim past', mandLines.includes('MANDATORY'));
   t('the mandatory rendering shows its provenance — the path and the glob that covered it', mandLines.includes("- .claude/agents/os-dev.md ⇢ '.claude/agents/os-dev.md'"));
   t('the mandatory rendering names every sanctioned exit, so a downgrade needs a stated reason', mandLines.includes('quota exemption') && mandLines.includes('opus, never lower') && mandLines.includes('one-line-class') && mandLines.includes('proactive low-headroom'));
@@ -15272,7 +15357,7 @@ function selfTest() {
   let ambiguityRefused = false;
   try {
     deriveTier(['.claude/skills/pm-dispatch/SKILL.md'], [
-      { glob: '.claude/skills/pm-dispatch/**', tier: 'claude-fable-5', why: 'a' },
+      { glob: '.claude/skills/pm-dispatch/**', tier: CONTRACT_REVIEW_TIER, why: 'a' },
       { glob: '.claude/skills/**', tier: 'opus', why: 'b' },
     ]);
   } catch {
@@ -15310,7 +15395,7 @@ function selfTest() {
     /* frameFiles stays empty and the cases below fail loudly */
   }
   t('the frame-sync COPIES table is readable and non-empty, so the pin below is not vacuous', frameProbe.status === 0 && Array.isArray(frameFiles) && frameFiles.length > 0);
-  t(`every frame-sync-enforced copy is fable-mandated (unmandated: ${frameFiles.filter((f) => !deriveTier([f]).mandatory).join(', ') || 'none'})`, frameFiles.length > 0 && frameFiles.every((f) => deriveTier([f]).tier === 'claude-fable-5'));
+  t(`every frame-sync-enforced copy is fable-mandated (unmandated: ${frameFiles.filter((f) => !deriveTier([f]).mandatory).join(', ') || 'none'})`, frameFiles.length > 0 && frameFiles.every((f) => deriveTier([f]).tier === CONTRACT_REVIEW_TIER));
   t('the SKILL.md main file and the dev-agent definition are declared in their own right, not only via the frame table', MANDATORY_TIER_GLOBS.some((g) => g.glob === '.claude/skills/pm-dispatch/SKILL.md') && MANDATORY_TIER_GLOBS.some((g) => g.glob === '.claude/agents/os-dev.md'));
 
   // ── Clause-② suspicion (the enqueue-gate card): hit / no hit / wording ────
@@ -15341,6 +15426,105 @@ function selfTest() {
   t(`every declared suspect glob names a path this tree really has (dead: ${deadSuspects.map((g) => g.glob).join(', ') || 'none'})`, deadSuspects.length === 0);
   t('the suspect table is not empty and every entry carries its reason', SUSPECT_TIER_GLOBS.length > 0 && SUSPECT_TIER_GLOBS.every((g) => g.glob && g.why));
   t('the contract-review tier constant is a non-empty model id — the single source the PM skill points at', typeof CONTRACT_REVIEW_TIER === 'string' && CONTRACT_REVIEW_TIER.length > 0);
+
+  // ── The tier constant's ONE-VALUE-SITE promise (#14616) ───────────────────
+  //
+  // The PM skill promises 「档位单源 … 模型升级只改一行一个文件」, and until this
+  // case that promise was held by a `git grep` someone remembers to run. The
+  // drift it exists against is measured rather than feared: the value was
+  // spelled in SIXTEEN places across these same two roots — prose, mandate
+  // rows, header comments, self-test fixtures — while the promise above read
+  // as true, and a promise held by hand is what one model refresh erases.
+  //
+  // What is counted is the constant's OWN VALUE, read from the constant at run
+  // time. Never a second literal — that spelling would BE the site the case
+  // exists to forbid — and never a family or prefix pattern: a prefix scan
+  // would be a family floor the human floor has not granted, and would itself
+  // be a second spelling of the model family inside this tool, i.e. the defect
+  // recreated by its own guard. One consequence is deliberate: the verbatim
+  // maintainer rulings quoted in the skill's main file and in its dispatch
+  // runbook name the model FAMILY as prose, not as this value, so an
+  // exact-value scan does not reach them — and it must not be widened until it
+  // would, because a gate that can demand edits to a maintainer's recorded
+  // words is the wrong gate.
+  //
+  // Both roots are DERIVED, not spelled: the skill tree is the directory of the
+  // mandate glob naming its main file, and the tool tree is this module's own
+  // directory. The population therefore follows a rename instead of rotting,
+  // and no fresh path literal enters this file's own watch-hint set — measured
+  // over its own source, 23 hints before this case and 23 after (`maskSelfTests`
+  // blanks this body, which is what makes a fixture path here inert at all).
+  //
+  // The walk takes its base directory as an argument, so the same code can be
+  // pointed at a scratch copy of the population to prove it reds; a second
+  // spelling anywhere under the roots is reported as `file:line`, never as a
+  // bare count a reader cannot act on.
+  const tierValueSites = (base, roots, value) => {
+    const sites = [];
+    const perRoot = [];
+    for (const root of roots) {
+      // An empty root would join to `base` and walk the whole tree — the one
+      // way this case could turn a rename into a pass instead of a red.
+      if (!root || root === '.') {
+        sites.push('(a scan root derives from a mandate glob that is no longer in the table)');
+        perRoot.push(0);
+        continue;
+      }
+      let scanned = 0;
+      const stack = [root];
+      while (stack.length > 0) {
+        const rel = stack.pop();
+        const abs = join(base, rel);
+        if (!existsSync(abs)) {
+          sites.push(`${rel} (MISSING)`);
+          continue;
+        }
+        if (statSync(abs).isDirectory()) {
+          for (const name of readdirSync(abs)) stack.push(join(rel, name));
+          continue;
+        }
+        scanned += 1;
+        readFileSync(abs, 'utf8')
+          .split('\n')
+          .forEach((text, i) => {
+            for (let at = text.indexOf(value); at >= 0; at = text.indexOf(value, at + value.length)) {
+              sites.push(`${rel}:${i + 1}`);
+            }
+          });
+      }
+      perRoot.push(scanned);
+    }
+    return { sites, perRoot };
+  };
+  // `relative` from `node:path` is SHADOWED inside this function — a fixture
+  // string a few thousand lines up binds that name — so the repo-relative
+  // spelling comes from ROOT, the prefix every sibling case here already joins
+  // against. A prefix that stops holding yields an empty root, which the walk
+  // above reports rather than turning into a pass.
+  const tierOwnAbs = fileURLToPath(import.meta.url);
+  const tierOwnRel = tierOwnAbs.startsWith(ROOT) ? tierOwnAbs.slice(ROOT.length) : '';
+  // The definition line is FOUND, not remembered: the one line carrying both
+  // the constant's name and its value. A line number in a case name that has
+  // to be maintained by hand is the same species of promise as the one this
+  // case replaces.
+  const tierDefLine =
+    readFileSync(new URL(import.meta.url), 'utf8')
+      .split('\n')
+      .findIndex((l) => l.includes('CONTRACT_REVIEW_TIER') && l.includes(CONTRACT_REVIEW_TIER)) + 1;
+  const tierRoots = [
+    dirname(MANDATORY_TIER_GLOBS.find((g) => g.glob === '.claude/skills/pm-dispatch/SKILL.md')?.glob ?? ''),
+    dirname(tierOwnRel),
+  ];
+  const tierScan = tierValueSites(ROOT, tierRoots, CONTRACT_REVIEW_TIER);
+  t(
+    `the tier constant's VALUE is spelled in exactly ONE site under ${tierRoots.join(' + ')} — ` +
+      `${tierScan.perRoot.join('+')} files read, the definition at ${tierOwnRel}:${tierDefLine} the only one allowed ` +
+      `(found: ${tierScan.sites.join(', ') || 'NOTHING — this scan reached no occurrence at all'})`,
+    tierDefLine > 0 &&
+      tierScan.perRoot.every((n) => n > 0) &&
+      tierScan.sites.length === 1 &&
+      tierScan.sites[0] === `${tierOwnRel}:${tierDefLine}`,
+  );
 
   // ── The change set derived from git (#9320) ───────────────────────────────
   //

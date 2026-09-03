@@ -9,6 +9,9 @@ import {
   // source for why this ONE property is tested off the ledger.
   checkItemAgainstWarnMap,
   getNested,
+  // #14057 coverage seam — the statuses the shipped ledgers actually carry, so
+  // the coverage pin below is derived from the ledgers rather than hand-listed.
+  shippedLedgerStatuses,
 } from './lint-liveness-properties.js';
 
 /**
@@ -933,7 +936,7 @@ describe('the array fan-out, against a synthetic warn map (#10262)', () => {
 // seam (#10262) — exactly the kind of verdict-level testing that seam exists
 // for; the PLANNED branch is pinned against BOTH the real ledgers (so it stays
 // a contract test) and a synthetic no-hint entry (to pin the DEFAULT wording).
-describe('dead / experimental / planned verdicts are distinct, and unknown statuses fail loud (#11384)', () => {
+describe('dead / experimental / planned / live-elsewhere verdicts are distinct, and unknown statuses fail loud (#11384, #14057)', () => {
   const oneEntry = (entry: Record<string, unknown>) => new Map([['gizmo', entry]]);
 
   // ── REAL LEDGER: the three rows the card captured ──────────────────────
@@ -1017,6 +1020,100 @@ describe('dead / experimental / planned verdicts are distinct, and unknown statu
     expect(findings[0].hint).not.toContain('Remove it');
   });
 
+  // ── #14057: `live-elsewhere`, the fifth verdict — and the one whose wrong
+  // branch is the most expensive. #13483 added the status to the ledger and
+  // migrated `manifest.runtime` onto it (dead here by measurement, enforced by
+  // the cloud marketplace publish gate); `describe()` was not taught it, so the
+  // day any such row opts into `authorWarn` the author got a CRASH instead of
+  // the advisory finding — and the `dead` fallthrough it replaced would have
+  // been worse than the crash: "Remove it" about a key that is a live gate's
+  // input. ────────────────────────────────────────────────────────────────
+  it('SYNTHETIC: a live-elsewhere entry gets its OWN rule id and a keep-it hint — never the dead branch', () => {
+    const findings = checkItemAgainstWarnMap(
+      'gadget',
+      { name: 'g1', gizmo: 'x' },
+      "gadget 'g1'",
+      oneEntry({ status: 'live-elsewhere', authorWarn: true }),
+    );
+    expect(findings).toHaveLength(1);
+    const [f] = findings;
+    expect(f.rule).toBe('liveness-live-elsewhere-property');
+    expect(f.rule).not.toBe('liveness-dead-property');
+    // The message must not read as a dead verdict...
+    expect(f.message).toContain('is enforced in a sibling repo');
+    expect(f.message).not.toContain('liveness: dead');
+    expect(f.message).not.toContain('has no runtime effect');
+    // ...and the default hint must point at the enforcer, not at a delete key.
+    expect(f.hint).not.toContain('Remove it');
+    expect(f.hint.toLowerCase()).toContain('keep it');
+    expect(f.hint).toContain('evidence');
+  });
+
+  it('SYNTHETIC: live-elsewhere keeps the shared hint precedence — authorHint over note over the default', () => {
+    const hintOf = (entry: Record<string, unknown>) =>
+      checkItemAgainstWarnMap('gadget', { name: 'g1', gizmo: 'x' }, "gadget 'g1'", oneEntry(entry))[0].hint;
+    expect(hintOf({ status: 'live-elsewhere', authorWarn: true, authorHint: 'H', note: 'N' })).toBe('H');
+    expect(hintOf({ status: 'live-elsewhere', authorWarn: true, note: 'N' })).toBe('N');
+    expect(hintOf({ status: 'live-elsewhere', authorWarn: true })).toContain('sibling repo');
+  });
+
+  // NEGATIVE CONTROL, on the REAL ledger, through the production path. The card
+  // is a fuse, not a fire: `shouldWarn()` gates entry to `describe()`, and the
+  // shipped `manifest.runtime` row does not carry `authorWarn`, so nothing
+  // reaches the new branch today. This pin holds that reading honest in both
+  // directions — if the row ever opts in, this goes red and the reviewer should
+  // UPDATE THIS PIN (the branch above is what makes that flip safe), never
+  // remove the branch.
+  //
+  // Anti-vacuity: `authorWarnedProperties('manifest')` would also be empty if
+  // the ledger were unreadable, so the guard is that `shippedLedgerStatuses()`
+  // sees `live-elsewhere` at all — the ONE row carrying it lives in that very
+  // file, so seeing the status proves the file was read.
+  it('REAL LEDGER: the live-elsewhere row exists and does NOT warn yet (the fuse, unlit)', () => {
+    expect(shippedLedgerStatuses().has('live-elsewhere')).toBe(true);
+    expect(authorWarnedProperties('manifest').has('runtime')).toBe(false);
+  });
+
+  // ── COVERAGE (#14057): describe() answers for every status the ledgers ship.
+  //
+  // Patching one status is what let this card repeat #11384 — so the pin is
+  // derived from the shipped rows rather than from a list somebody has to
+  // remember to edit. A sixth status appearing in any ledger fails HERE, by
+  // name, instead of waiting for an author to trip the sentinel throw.
+  //
+  // `live` is the one member that must NOT get a branch, and the source header
+  // says why: an entry only reaches `describe()` once `shouldWarn()` has said
+  // yes, so "`live` can in principle arrive here too (an entry marked
+  // `authorWarn: true` on a `live` row would be a ledger authoring mistake, not
+  // a user error)". A mistake in our own shipped data is exactly what the
+  // sentinel is for, so `live` is asserted LOUD here rather than handled.
+  it('COVERAGE: every status the shipped ledgers carry is answered by describe() — or is loud by design', () => {
+    const statuses = [...shippedLedgerStatuses()].sort();
+    // Anti-vacuity: an unreadable ledger dir returns the empty set, which would
+    // pass every assertion below without measuring anything.
+    expect(statuses.length).toBeGreaterThanOrEqual(4);
+    expect(statuses).toContain('live-elsewhere');
+
+    const rulesByStatus = new Map<string, string>();
+    for (const status of statuses) {
+      const run = () =>
+        checkItemAgainstWarnMap('gadget', { name: 'g1', gizmo: 'x' }, "gadget 'g1'", oneEntry({ status, authorWarn: true }));
+      if (status === 'live') {
+        expect(run).toThrow(/live/);
+        continue;
+      }
+      const findings = run();
+      expect(findings, `status ${status} produced no finding`).toHaveLength(1);
+      expect(findings[0].rule, `status ${status} has no rule id of its own`).toMatch(/^liveness-[a-z-]+-property$/);
+      expect(findings[0].hint.length, `status ${status} has an empty hint`).toBeGreaterThan(0);
+      rulesByStatus.set(status, findings[0].rule);
+    }
+
+    // #11384's lesson as an assertion: verdicts imply different author actions,
+    // so no two of them may share a rule id.
+    expect(new Set(rulesByStatus.values()).size).toBe(rulesByStatus.size);
+  });
+
   // ── SYNTHETIC: the unknown-status boundary — loud, never silently `dead` ──
   it('SYNTHETIC: an unrecognised status fails LOUD, naming the status, instead of silently grading as dead', () => {
     expect(() =>
@@ -1027,6 +1124,16 @@ describe('dead / experimental / planned verdicts are distinct, and unknown statu
         oneEntry({ status: 'quantum', authorWarn: true }),
       ),
     ).toThrow(/quantum/);
+    // The message enumerates what describe() DOES know — #14057 is what happens
+    // when that list falls behind the branches, so pin them equal.
+    expect(() =>
+      checkItemAgainstWarnMap(
+        'gadget',
+        { name: 'g1', gizmo: 'x' },
+        "gadget 'g1'",
+        oneEntry({ status: 'quantum', authorWarn: true }),
+      ),
+    ).toThrow(/'experimental' \| 'planned' \| 'dead' \| 'live-elsewhere'/);
   });
 
   it('SYNTHETIC: a `live` row mistakenly marked authorWarn also fails LOUD rather than being graded dead', () => {

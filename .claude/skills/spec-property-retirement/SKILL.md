@@ -51,6 +51,12 @@ preview renderer 不算消费者)与 AGENTS.md §"Touched `packages/spec`?"(八�
       的键,就**吸收**它:把改名折进删除,删掉改名条目。二者复合后效果不可观测,而
       conversion 表的 fixture 不相交契约(§3)会因叠放而失败。先例:
       `agent.knowledge` 在发布前吞掉了 `topics`→`sources` 改名。
+- [ ] **台账判它 `live-elsewhere` 吗?** 本仓实测无消费者、姊妹仓真在强制执行的
+      键 —— **永不是删除候选**。单读 `dead` 会批准一次删除,而它删掉的是姊妹仓某
+      道门的输入。该核的不是删除面,是它的佐证纪律:外仓指针、
+      `evidenceScope: "cross-repo"`、带日期的 `verifiedAt`、180 天过期 —— 四条由
+      `packages/spec/scripts/liveness/elsewhere.mts` 执行,出处见 README 的
+      `live-elsewhere` 一节。
 
 ## 1. 裁判是构建,不是台账
 
@@ -78,7 +84,7 @@ dead(「两个仓都没有 form 路径的读者」),而删除打断了 `gen:sche
 | Schema | 路线 | 机制 |
 |---|---|---|
 | **非 `.strict()`** | `retiredKey()` 墓碑 | `packages/spec/src/shared/retired-key.ts` 的 `retiredKey(guidance)` —— `z.never({ error: () => guidance }).optional()`。两个通道:`tsc`(输入类型 `never`)与 parse(处方本身,不是 "unrecognized key")。 |
-| **`.strict()`** | 删键 + guidance map | 从 shape 里删除;向某个 `*_RETIRED_KEY_GUIDANCE` record 加条目,由传给 `z.object(shape, { error: … }).strict()` 的 `z.core.$ZodErrorMap` 消费。参考:`packages/spec/src/ai/tool.zod.ts:29-93,180`。object 顶层键另见 `object.zod.ts` 的 `UNKNOWN_KEY_GUIDANCE`。 |
+| **`.strict()`** | 删键 + guidance map | 从 shape 里删除;向该 schema 的 `*_RETIRED_KEY_GUIDANCE` 加条目,由 `strictObject()` 的 `guidance:` 槽消费(`shared/strict-object.ts`;整族一条走 `guidanceSets`)。样板 `ai/tool.zod.ts`,审计 `shared/alias-integrity.test.ts`。⛔ 别再手写 `$ZodErrorMap`。 |
 | **没人 parse 它** | 都不用 | 没人能收到的处方是噪音。有意删掉 baseline 行并在 changeset 里写明 —— 先例 #3896 与 #4834(PR #4878),都在 kernel plugin-runtime 家族。家族删除后幸存的解释块在 `packages/spec/src/kernel/index.ts`(搜 `plugin-runtime.zod`)。 |
 
 永不从非 strict schema 上裸删一个键:zod 会静默剥掉它,你只是用一个静默 no-op 换了
@@ -100,7 +106,7 @@ liveness 门禁走的是 **schema 的 shape**,逐个属性去
 - 删掉**墓碑**键的行,报 **UNCLASSIFIED**(#3896 清扫一次 14 个 —— 本节就是防它);
 - 留着 **strict 删除**键的行,报 **ORPHAN** 行。
 
-orphan 这条腿是新的(`scripts/liveness/orphans.mts`)。它落地之前这个方向从不失败
+orphan 这条腿是新的(`packages/spec/scripts/liveness/orphans.mts`)。它落地之前这个方向从不失败
 —— 门禁走 schema 再查行,键已离开 shape 的行根本不会被问到,原地腐烂。report 的
 `aria`/`performance` 行就这样比它们的键多活了一整个 release,靠有人恰好读到那个文件
 才手工删掉。你撞上 orphan 报错而属性确实还可编写时,要修的是 **walk**,不是行:
@@ -142,7 +148,7 @@ ratchet(#2978)会先开火,要求你**有意删除**对应的 manifest key;删�
 
 ### guidance 字符串怎么写
 
-五条惯例,树上 ~28 个墓碑全部遵守:
+五条惯例,树上每个墓碑都遵守 —— 逐点判定归下面那个 pin 测试,不归这段散文:
 
 1. 反引号包着的**全限定**键打头 —— `` `flow.errorHandling.fallbackNodeId` ``,不是裸尾段。
 2. `was removed in @objectstack/spec <version> (#issue[, ADR-XXXX Dn])`。
@@ -258,7 +264,7 @@ conversion 是消费者跟的。两个都要写。
 - [ ] **i18n bundle** —— 剪掉表单输入会改变抽取出的标签:`pnpm i18n:extract` 重新生
       成 `packages/platform-objects/src/apps/translations/*.metadata-forms.generated.ts`
       (merge 模式;退役是纯删除)。由 `pnpm check:i18n` 把门。
-- [ ] **CLI advisory lint** —— `packages/cli/src/utils/lint-liveness-properties.ts`
+- [ ] **CLI advisory lint** —— `packages/lint/src/lint-liveness-properties.ts`
       是台账驱动的,退役键会自动停止告警;更新它的**测试**去断言 non-warn(「strict
       parse 现在接管它们」)。
 - [ ] **Pin 测试** —— 一条阴性,断言处方本身
@@ -279,8 +285,9 @@ conversion 是消费者跟的。两个都要写。
 - [ ] **Changeset** —— `@objectstack/spec` 用 `major`。AGENTS.md:breaking
       changeset 必须带 FROM → TO 映射与一行修复;它作为 npm 包里的 `CHANGELOG.md`
       发出,是升级中的 agent 撞上墓碑报错后 grep 的东西。
-      `.changeset/tool-inert-keys-removed.md` 是样板 —— 抄它的 "The retirement
-      kit:" 段。
+      样板是任一条活着的 `.changeset/*-retired.md` —— 抄它的 "The retirement
+      kit:" 段。⚠ 并带上 ADR-0087 处置标记(AGENTS.md 的 changeset 一节;
+      `pnpm check:adr-0087-registration` 把门)—— 退役正是它点名的那一类。
 - [ ] **`check:generated` 明确不跑的源码审计 —— 整组跑,永不单点。** 它的输出会点名
       它们;陷阱是跑了五个漏了第六个。咬退役的是 `check:variant-docs`:删掉一个
       discriminated union 会孤儿化它的 variant/doc-ledger 条目,本地跳过则只在 CI
@@ -300,38 +307,27 @@ conversion 与测试都改了 —— 但 release-notes 行与台账 README 行�
 ## 5. 把门禁跑到真能失败
 
 ```bash
-cd packages/spec && pnpm build          # REQUIRED first — see the dist trap below
-for c in check:liveness check:empty-state check:authorable-surface check:docs \
-         check:api-surface check:spec-changes check:upgrade-guide \
-         check:skill-refs check:skill-docs check:skill-examples; do
-  pnpm -s "$c" >/dev/null 2>&1; e=$?     # capture BEFORE anything else runs
-  printf '%-28s %s\n' "$c" "$( [ $e -eq 0 ] && echo PASS || echo FAIL )"
-done
-cd ../.. && pnpm check:i18n && pnpm --filter @objectstack/spec test
+pnpm --filter @objectstack/spec build            # REQUIRED first — 见 §6 的 dist 陷阱
+pnpm --filter @objectstack/spec check:generated  # 一条命令跑齐,首个失败不挡住其余
+pnpm check:i18n && pnpm --filter @objectstack/spec test
 ```
 
-`check:liveness`、`check:empty-state`、`check:skill-examples` 没有生成器 —— 那里的
-失败是真发现,不是过期产物。
+⛔ 永不手搓一份 `check:*` 名单逐个跑:手工配对是 AGENTS.md 明禁的,而一条命令一次
+报全部过期产物,正是 CI 做不到的事。`check:generated` 的输出会点名它**不**跑的五个
+纯源码审计 —— `check:liveness`、`check:empty-state`、`check:skill-examples`、
+`check:exported-any`、`check:dual-source-exports` —— 它们没有生成器,那里的失败是
+真发现、不是过期产物,按 §4 那一行整组另跑。
 
 ## 6. 各费过一轮红构建的陷阱
 
-- **过期 `dist`(一条工作线上 5+ 次假警报)。** 包从 `dist` 加载。改了 `src` 之后本
-  地套件红,通常是 dist 旧了,不是你改坏了 —— `check:api-surface` 读
-  `dist/*.d.ts`,会报幻影 "breaking removals"。相信任何本地红之前、去立「main 坏
-  了」的单之前,先 `pnpm turbo run build --filter=<pkg>...`。
-- **`| tail -1` 吃掉退出码。** 门禁的管道接上 `tail`,报的是管道的状态,失败的门读
-  成绿。显式抓 `exit=$?`(上面的循环就是)。一次 liveness 失败曾藏在这后面。
+⚠️ 四个陷阱不写在这里,因为它们对每个 dev 都成立、锚点在别处:过期 `dist` 的假
+红、管道吃掉退出码、串行门禁互相遮蔽、`--check` 是门而裸模式重写。锚点是 AGENTS.md
+的「Touched `packages/spec`?」一节与 `.claude/agents/os-dev.md` 的「本地验证范围」;
+⛔ 这里不留第二份拷贝。
+
 - **截断的 grep 漏掉编写者。** `| head -8` 藏掉了 `SKILL.md` 的 `defineSkill` 示
   例;`examples/` 有三处 `template: true`,不是一处。先按上下文找文件,再进文件里
   grep 键 —— 且把 `tsc` 和门禁当权威清扫器。
-- **串行门禁互相遮蔽。** `Check Generated Artifacts` 与 `TypeScript Type Check` 各
-  自按序跑门、停在第一个失败。提前把全部重新生成;不要一次红构建迭代一个。
-- **绿 CI 可能是休眠的门。** `check-generated` 在 `ci.yml` 里跑在 `paths` 过滤器后
-  面;路径不在过滤器里,门恰好对打破它的那些 PR 沉默(过滤器整体携带
-  `packages/spec/src/**` 就是这个原因)。你新增生成产物或某产物的新输入,同一个 PR
-  里把路径加上。
 - **只改 conversion 的 `summary` 也会过期。** 那个字符串被逐字抄进
   `spec-changes.json` 的 `to` 字段与 upgrade guide 的表行,所以纯散文改动也要
   `gen:spec-changes` + `gen:upgrade-guide`,和任何别的改动一样。
-- **`--check` 模式是门;裸模式重写。** `gen:*` 修文件,`check:*` 是同一脚本断言它已
-  提交。永不靠手改生成文件去「修」一个 `check:*` 失败。

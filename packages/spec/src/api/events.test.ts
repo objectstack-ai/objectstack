@@ -239,4 +239,67 @@ describe('DataEventSchema', () => {
     expect(event.before).toEqual({ name: 'Old Name' });
     expect(event.after).toEqual({ name: 'New Name' });
   });
+
+  // The tenant term — the contract half of closing the webhook fan-out's
+  // cross-organization delivery. Both directions are pinned so
+  // "declared = enforced" is a measurement rather than a sentence: the key is
+  // optional and NOTHING else — no default fabricates a tenant, absence has
+  // exactly one spelling, and a value that is not a non-empty string is
+  // refused at the path a producer can act on. `BulkDataEventSchema` is
+  // deliberately untouched here: a predicate write's affected set is a
+  // separate contract with its own tenant question (recorded on the change
+  // that adds this member), so nothing below pins that schema either way.
+  describe('organizationId', () => {
+    const base = {
+      id: '4b4720e8-97c3-4a12-9b70-b70a3d2314a6',
+      type: 'data.record.created',
+      object: 'account',
+      recordId: 'rec_1',
+      timestamp: '2026-09-02T00:00:00.000Z',
+    } as const;
+
+    it('parses without the key and does not fabricate one (single posture: no wall, no organization)', () => {
+      const event = DataEventSchema.parse(base);
+      expect(Object.prototype.hasOwnProperty.call(event, 'organizationId')).toBe(false);
+      expect(event.organizationId).toBeUndefined();
+    });
+
+    it('parses with the key and carries it through verbatim', () => {
+      const event = DataEventSchema.parse({ ...base, organizationId: 'org_jia' });
+      expect(event.organizationId).toBe('org_jia');
+    });
+
+    it('refuses a non-string value with invalid_type at ["organizationId"]', () => {
+      const result = DataEventSchema.safeParse({ ...base, organizationId: 42 });
+      expect(result.success).toBe(false);
+      if (result.success) throw new Error('unreachable');
+      expect(result.error.issues).toEqual([
+        expect.objectContaining({ code: 'invalid_type', expected: 'string', path: ['organizationId'] }),
+      ]);
+    });
+
+    it('refuses null — absence has exactly one spelling, the missing key', () => {
+      const result = DataEventSchema.safeParse({ ...base, organizationId: null });
+      expect(result.success).toBe(false);
+      if (result.success) throw new Error('unreachable');
+      expect(result.error.issues).toEqual([
+        expect.objectContaining({ code: 'invalid_type', expected: 'string', path: ['organizationId'] }),
+      ]);
+    });
+
+    it('refuses the empty string — "no organization" is never spelled ""', () => {
+      const result = DataEventSchema.safeParse({ ...base, organizationId: '' });
+      expect(result.success).toBe(false);
+      if (result.success) throw new Error('unreachable');
+      expect(result.error.issues).toEqual([
+        expect.objectContaining({ code: 'too_small', minimum: 1, path: ['organizationId'] }),
+      ]);
+    });
+
+    it('is the only member added — every pre-existing member is still declared', () => {
+      expect(Object.keys(DataEventSchema.shape).sort()).toEqual([
+        'after', 'before', 'changes', 'id', 'object', 'organizationId', 'recordId', 'timestamp', 'type', 'userId',
+      ]);
+    });
+  });
 });

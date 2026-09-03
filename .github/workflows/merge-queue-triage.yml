@@ -550,6 +550,13 @@ jobs:
             };
 
             const ANCHOR_LABEL = 'finding';
+            // The anchor's IDENTITY label, and the only label the lookup keys on.
+            // `finding` is a TRIAGE-STATE label: first-touch grading takes it off by
+            // definition, so a lookup keyed on `finding` stops seeing an anchor the
+            // moment a human triages it and files a fresh one on the next ejection.
+            // This label is the machine's, is never graded off, and is what keeps
+            // the anchor findable for the rest of its life, open or closed.
+            const ANCHOR_IDENTITY_LABEL = 'queue-flake-anchor';
             const MAX_ANCHOR_PAGES = 3;
             const anchorNotes = [];
             for (const a of aggregated.slice(0, 3)) {
@@ -557,6 +564,104 @@ jobs:
               // Stable across refreshes — the victim count lives in the body, so
               // a growing count cannot make the anchor unfindable by title.
               const title = `Queue-flake anchor: ${a.key}`;
+
+              // ── Anchor lookup ─────────────────────────────────────────────
+              // The anchor's identity is the FILE KEY, carried by the body marker
+              // with the exact title as a second way in (a body is the one channel
+              // GitHub is known to rewrite). It is NOT the `finding` label and NOT
+              // `open`:
+              //   - `finding` comes off the moment the anchor is graded, which is
+              //     what first-touch grading MEANS. Keying on it made a properly
+              //     triaged anchor invisible and turned every further ejection into
+              //     a new anchor.
+              //   - a CLOSED anchor is still evidence about this key: closed as a
+              //     duplicate says the conversation moved; closed on its own merits
+              //     says the next ejection is a REGRESSION, not a continuation.
+              const isThisAnchor = (i) => !i.pull_request
+                && (String(i.body ?? '').includes(anchorMarker) || i.title === title);
+              const labelNames = (i) => (i.labels ?? []).map((l) => (typeof l === 'string' ? l : l?.name));
+
+              // The passes, in order. `firstMatchWins` says whether a pass may stop
+              // at its first hit: the identity pass may NOT, because the resolution
+              // order below needs this key's CLOSED anchors as well as its open one.
+              // `adopts` marks the transitional pass — a bounded scan of OPEN issues
+              // that finds anchors filed before the identity label existed (a graded
+              // one carries neither label) and puts the identity label on them, so
+              // the first pass owns them from the next ejection on.
+              const ANCHOR_QUERIES = [
+                { state: 'all', labels: ANCHOR_IDENTITY_LABEL, firstMatchWins: false, adopts: false },
+                { state: 'open', firstMatchWins: true, adopts: true },
+              ];
+
+              const candidates = [];
+              let adopted = null;
+              let scanComplete = true;
+              let refusal = null;
+              for (const [qi, q] of ANCHOR_QUERIES.entries()) {
+                // A later pass is skipped only once an OPEN anchor is in hand.
+                // Closed candidates are not enough to stop: a key can have a
+                // labelled closed duplicate and an UNLABELLED open survivor at the
+                // same time — that is exactly what a half-migrated key looks like
+                // — and stopping there would read the survivor as absent.
+                if (candidates.some((i) => i.state !== 'closed')) break;
+                const { firstMatchWins = false, adopts = false, ...params } = q;
+                const found = [];
+                let complete = true;
+                try {
+                  for (let p = 1; p <= MAX_ANCHOR_PAGES; p++) {
+                    const res = await github.rest.issues.listForRepo({
+                      owner, repo, ...params,
+                      sort: 'created', direction: 'desc', per_page: 100, page: p,
+                    });
+                    found.push(...res.data.filter(isThisAnchor));
+                    if ((firstMatchWins && found.length > 0) || res.data.length < 100) break;
+                    if (p === MAX_ANCHOR_PAGES) complete = false;
+                  }
+                } catch (error) {
+                  complete = false;
+                  refusal = describe(error);
+                }
+                // Completeness is the IDENTITY pass's argument — it is the bounded,
+                // label-keyed one. A truncated adoption pass is a missed migration,
+                // not an unestablished absence, and must not block a first anchor.
+                if (qi === 0) scanComplete = complete;
+                if (adopts && found.length > 0) adopted = found[0];
+                for (const i of found) {
+                  if (!candidates.some((c) => c.number === i.number)) candidates.push(i);
+                }
+              }
+
+              if (adopted && !labelNames(adopted).includes(ANCHOR_IDENTITY_LABEL)) {
+                try {
+                  await github.rest.issues.addLabels({
+                    owner, repo, issue_number: adopted.number, labels: [ANCHOR_IDENTITY_LABEL],
+                  });
+                } catch (error) {
+                  core.warning(`Could not put the identity label on the existing anchor #${adopted.number} for ${a.key} (${describe(error)}); it is refreshed anyway and adoption retries next run.`,
+                    { title: 'Queue-signature anchor not adopted' });
+                }
+              }
+
+              // Resolution order. OPEN beats closed, and the OLDEST open anchor
+              // beats a newer one: that is the issue the duplicates were closed
+              // against.
+              const openAnchors = candidates.filter((i) => i.state !== 'closed')
+                .sort((x, y) => x.number - y.number);
+              const closedAnchors = candidates.filter((i) => i.state === 'closed')
+                .sort((x, y) => y.number - x.number);
+              const existing = openAnchors[0] ?? null;
+              const closedAsDuplicate = !existing && closedAnchors[0]?.state_reason === 'duplicate'
+                ? closedAnchors[0]
+                : null;
+              // A closed anchor that was NOT closed as a duplicate is a RESOLVED
+              // one: the flake was answered once and this key is ejecting PRs
+              // again. A new anchor is legitimate there, but it has to say which
+              // issue it regressed from or the previous answer is lost.
+              const resolvedBefore = closedAnchors.find((i) => i.state_reason !== 'duplicate') ?? null;
+              const priorAnchor = resolvedBefore && (!existing || existing.number > resolvedBefore.number)
+                ? resolvedBefore
+                : null;
+
               const prRows = [...a.prs.entries()].sort((x, y) => x[0] - y[0]).map(([pr, runs]) => {
                 const s = a.stackOf.get(pr);
                 const cell = !s || s.size < 2
@@ -572,6 +677,13 @@ jobs:
                 'that conversation; it is refreshed by the merge-queue-triage workflow on every',
                 'further ejection.',
                 '',
+                ...(priorAnchor
+                  ? [
+                    `⚠️ 同签名的上一个汇总 issue #${priorAnchor.number} 已经关闭（不是作为重复关闭的），`,
+                    '之后这个文件又开始弹出 PR ⇒ 这是一次**回归**，上一轮的结论在那张 issue 里。',
+                    '',
+                  ]
+                  : []),
                 '| PR | stack | queue build |',
                 '|---|---|---|',
                 ...prRows,
@@ -616,29 +728,6 @@ jobs:
                 anchorMarker,
               ].join('\n');
 
-              let existing = null;
-              let scanComplete = true;
-              let refusal = null;
-              try {
-                for (let p = 1; p <= MAX_ANCHOR_PAGES; p++) {
-                  const res = await github.rest.issues.listForRepo({
-                    owner, repo, state: 'open', labels: ANCHOR_LABEL,
-                    sort: 'created', direction: 'desc', per_page: 100, page: p,
-                  });
-                  // Identity is the body marker; the exact title is a second
-                  // way in, because a body is the one channel GitHub is known
-                  // to rewrite and an anchor that cannot be found is an anchor
-                  // that gets duplicated.
-                  existing = res.data.find((i) => !i.pull_request
-                    && (String(i.body ?? '').includes(anchorMarker) || i.title === title)) ?? null;
-                  if (existing || res.data.length < 100) break;
-                  if (p === MAX_ANCHOR_PAGES) scanComplete = false;
-                }
-              } catch (error) {
-                scanComplete = false;
-                refusal = describe(error);
-              }
-
               if (existing) {
                 try {
                   await github.rest.issues.update({
@@ -664,11 +753,25 @@ jobs:
                 continue;
               }
 
+              if (closedAsDuplicate) {
+                // The newest anchor for this key was closed AS A DUPLICATE and no
+                // open anchor is left. Filing a fresh one here is exactly what
+                // feeds the loop — it would be closed as a duplicate in turn.
+                // GitHub's issue payload does not carry a duplicate's TARGET (only
+                // `state_reason: duplicate`), so the canonical cannot be followed
+                // from here; this says where the conversation was sent instead of
+                // guessing at a new home for it.
+                anchorNotes.push(`- \`${a.key}\` — ${victimPhrase(a)}。⚠️ 同签名的汇总 issue #${closedAsDuplicate.number} 已作为**重复**关闭，且没有仍然打开的同签名汇总 issue ⇒ 本次不新建（新建只会再被判重）。请到它指向的那张 issue 上谈，或重开 #${closedAsDuplicate.number}。`);
+                core.warning(`The newest anchor for ${a.key} (#${closedAsDuplicate.number}) was closed as a duplicate and no open anchor is left; not filing another one.`,
+                  { title: 'Queue-signature anchor not created' });
+                continue;
+              }
+
               try {
                 const created = await github.rest.issues.create({
-                  owner, repo, title, body, labels: [ANCHOR_LABEL],
+                  owner, repo, title, body, labels: [ANCHOR_LABEL, ANCHOR_IDENTITY_LABEL],
                 });
-                anchorNotes.push(`- \`${a.key}\` — ${victimPhrase(a)}。汇总 issue：#${created.data.number}（新建）`);
+                anchorNotes.push(`- \`${a.key}\` — ${victimPhrase(a)}。汇总 issue：#${created.data.number}（${priorAnchor ? `新建，回归自已关闭的 #${priorAnchor.number}` : '新建'}）`);
               } catch (error) {
                 anchorNotes.push(`- \`${a.key}\` — ${victimPhrase(a)}。⚠️ 汇总 issue 新建失败（${describe(error)}），上面的名单就是全部事实。`);
                 core.warning(`Could not file the anchor issue for ${a.key} (${describe(error)}).`,

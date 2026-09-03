@@ -1,0 +1,70 @@
+{
+  "type": "metadata_endpoints",
+  "_note": "MetadataEndpointsConfigSchema — packages/spec/src/api/rest-server.zod.ts#MetadataEndpointsConfigSchema, the `metadata` sub-object of RestServerConfig. It is not a metadata type, not a request body and not a manifest: it is part of the REST server's CONSTRUCTION ARGUMENT, so no registry has ever held it and no ratchet rooted in one could ask who reads it. The ledger governs it through the gate's SPEC_ONLY_SCHEMAS override, the same route `query` / `qa` / `manifest` take; check-liveness.mts carries the rationale, including why the four sub-objects are rooted separately instead of the whole RestServerConfigSchema (the walk drills one level, and rooting on the whole config would leave `metadata.endpoints.schema` and `batch.operations.upsertMany` with no row of their own). Seeded 2026-09-02 from the census filed with #14369, which is the second half of #11984's measurement: that PR made RestServer.normalizeConfig PARSE and CONSUME this sub-object instead of casting it. That settles accept/reject — an out-of-enum or out-of-range value is now refused at construction instead of sitting in the normalized config as if it were declared — and that is ALL it settles. Executing a declared contract does not give a key a consumer, which is exactly the distinction this file records. Mixed: `prefix`, `enableCache`, `maskObjectFields` and three of the four `endpoints.*` switches are read; `cacheTtl` and `endpoints.schema` are not. This file RECORDS status; it decides nothing. The enforce-or-remove call per dead key (ADR-0049) is a follow-up on the human floor — the enforce route is a feature per key, and for a key that is published in an `@example` or in the generated reference docs the remove route is a capability retirement, not a tidy-up. Census method and scope, re-run at 2514d49f3 (2026-09-02): read sites in packages/rest/src non-test sources, excluding NormalizedRestServerConfig's type declaration and normalizeConfig itself (a key the normalizer writes into its own output is not thereby read); comments excluded; plus a repo-wide grep outside packages/spec and rest-server.ts, which finds only changesets, the generated reference docs and the #11984 refusal tests. objectui @d4c6a86 is clean (0 hits for every key here). The closed cloud runtime was not reachable from the measuring container, so the declared scope stays in-repo rather than claiming a sweep that was not run. AUTHOR-WARN CHANNEL: none exists for this type, and no entry here is marked `authorWarn` for that reason (`_authorWarnSkipped`). The CLI lint (packages/lint/src/lint-liveness-properties.ts) walks stack COLLECTIONS — `stack.flows`, `stack.views`, … — and a RestServerConfig is not part of a stack at all: it is the argument a host passes when it constructs the server. Marking an entry `authorWarn` here would produce a warning nothing can emit, which is the same silent no-op this ledger exists to catch, so the dead entries below carry their correction in `note` and the construction-time parse (#11984) is what actually reaches the author — for accept/reject, which is a different question from liveness.",
+  "props": {
+    "prefix": {
+      "status": "live",
+      "verifiedAt": "2026-09-02",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/rest/src/rest-server.ts#registerMetadataEndpointsInner (`const metaPath = \\`${basePath}${metadata.prefix}\\`` — the base every metadata route is mounted under, and the string the _migrate-stored audit line reports); also packages/rest/src/rest-server.ts#registerDiscoveryEndpoints (advertises it as `routes.metadata`)",
+      "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+      "note": "Live in the same strong sense as `crud.dataPrefix`: it moves the mounted paths and the advertised discovery document together."
+    },
+    "enableCache": {
+      "status": "live",
+      "verifiedAt": "2026-09-02",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/rest/src/rest-server.ts#registerMetadataEndpointsInner (`if (metadata.enableCache && p.getMetaItemCached ...)` selects the cached read path; the uncached branch is the default when it is false)",
+      "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+      "note": "The key selects between two real read paths, so authoring it changes behaviour rather than only a header."
+    },
+    "cacheTtl": {
+      "status": "dead",
+      "verifiedAt": "2026-09-02",
+      "evidenceScope": "in-repo",
+      "note": "0 read sites at 2514d49f3. `enableCache` is live and `cacheTtl` is not: the cached branch delegates to the protocol's own `getMetaItemCached`, which does not take a TTL from this config, and no ETag / Cache-Control / Last-Modified header is built from this value anywhere. `metadata.cacheTtl: 60` changes no header and no cache lifetime. Travelling with this row rather than as a separate defect (triage ruling, 2026-09-02): the schema declares `z.number().int()` with no lower bound, so a NEGATIVE TTL is accepted — #11984 pins `-1` as accepted precisely because that is what the contract says. If this key survives its enforce-or-remove call, that bound is part of enforcing it; if it goes, the pin goes with it. Either way it is one key's story, not two."
+    },
+    "maskObjectFields": {
+      "status": "live",
+      "verifiedAt": "2026-09-02",
+      "evidenceScope": "in-repo",
+      "evidence": "packages/rest/src/rest-server.ts#resolveObjectMasker (`if (metaType !== 'object' || !this.config.metadata.maskObjectFields)` — false serves the full object schema to every authenticated caller, ADR-0106 D8)",
+      "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+      "note": "Security-shaped and genuinely enforced: the opt-out reaches the masker, and `isObjectSchemaMaskingEnabled` also honours the OS_ALLOW_UNMASKED_OBJECT_METADATA deployment escape hatch that the runtime /metadata dispatcher shares."
+    },
+    "endpoints": {
+      "children": {
+        "types": {
+          "status": "live",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/rest/src/rest-server.ts#registerMetadataEndpointsInner (`if (metadata.endpoints.types !== false)` gates the GET /meta route mount)",
+          "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+          "note": "Read as `!== false`, so an author who omits the key gets the route; setting it false removes the mount."
+        },
+        "items": {
+          "status": "live",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/rest/src/rest-server.ts#registerMetadataEndpointsInner (`if (metadata.endpoints.items !== false)` gates four separate list-of-type route mounts)",
+          "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+          "note": "Same `!== false` shape as `types`."
+        },
+        "item": {
+          "status": "live",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "evidence": "packages/rest/src/rest-server.ts#registerMetadataEndpointsInner (`if (metadata.endpoints.item !== false)` gates the GET /meta/:type/:name route mount)",
+          "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
+          "note": "Same `!== false` shape as `types`."
+        },
+        "schema": {
+          "status": "dead",
+          "verifiedAt": "2026-09-02",
+          "evidenceScope": "in-repo",
+          "note": "0 read sites at 2514d49f3. The odd one out of the four: its three siblings each gate a route mount and this one gates nothing, because the route its describe() names — `GET /meta/:type/:name/schema` — does not exist. packages/rest/src mounts no path ending in `/schema` at all, so `endpoints.schema: false` removes nothing and `true` adds nothing; the switch was declared for a route that was never built, the same shape as `batch.operations.upsertMany`. This is also the sharpest case in the family for why this container may not carry one blanket verdict: three live members and one dead one under a single `endpoints` key would have hidden exactly this."
+        }
+      }
+    }
+  }
+}

@@ -51,7 +51,7 @@ export class RealtimeServicePlugin implements Plugin {
    */
   providesServices = ['realtime'];
   version = '1.0.0';
-  type = 'standard';
+  type = 'standard' as const;
   dependencies = ['com.objectstack.engine.objectql'];
 
   private readonly options: RealtimeServicePluginOptions;

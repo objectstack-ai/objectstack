@@ -293,6 +293,7 @@
     "kernel/Manifest:id",
     "kernel/Manifest:integrity",
     "kernel/Manifest:loading [RETIRED]",
+    "kernel/Manifest:main",
     "kernel/Manifest:name",
     "kernel/Manifest:namespace",
     "kernel/Manifest:navigationContributions",

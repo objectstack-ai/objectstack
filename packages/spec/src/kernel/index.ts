@@ -67,8 +67,10 @@ export * from './plugin-loading.zod';
 // PluginPerformanceMonitoringSchema + every type alias) was REMOVED per ADR-0049
 // enforce-or-remove (#4914), together with the `Manifest.loading` key that was
 // its only carrier — that key is now a `retiredKey()` tombstone in
-// `manifest.zod.ts`, because `ManifestSchema` is not `.strict()` and a plain
-// deletion would strip it in silence.
+// `manifest.zod.ts`: when it landed `ManifestSchema` was not `.strict()` and a
+// plain deletion would have stripped it in silence; the surface has since been
+// closed (`strictObject`), and the tombstone stays because it types the key
+// `never` and carries the prescription a bare unknown-key refusal would not.
 //
 // The block declared a full loading policy — lazy/eager strategy, preloading,
 // code splitting, dynamic import, initialization, dependency resolution, hot

@@ -90,6 +90,56 @@ export function createPackagesDomain(deps: DomainHandlerDeps): DomainRoute {
  * primitives the deployment supports, and (b) nothing is written or deleted
  * before the refusal — "delete first, refuse second" is the worst shape here.
  */
+/**
+ * The fields an installed-package RECORD is declared to carry
+ * (`InstalledPackageSchema`, `@objectstack/spec/kernel` — that schema is the
+ * authority; this list mirrors it and is deliberately not derived from it, so
+ * adding a field to the schema is a decision to publish it here, not an
+ * automatic one).
+ */
+const INSTALLED_PACKAGE_RESPONSE_FIELDS = [
+    'manifest',
+    'status',
+    'enabled',
+    'installedAt',
+    'updatedAt',
+    'installedVersion',
+    'previousVersion',
+    'statusChangedAt',
+    'errorMessage',
+    'settings',
+    'upgradeHistory',
+    'registeredNamespaces',
+] as const;
+
+/**
+ * Project a registry item onto the declared record fields before it goes on the
+ * wire — the second half of the `500 Converting circular structure to JSON`
+ * repair, and defence in depth rather than the fix.
+ *
+ * The fix is at the PRODUCER: `SchemaRegistry.installPackage` now stores a
+ * serializable projection of the manifest, so this door has nothing
+ * unserializable to hand out. What this adds is the failure MODE for the next
+ * time: an undeclared member appearing on the registry item — a live handle, a
+ * back-reference — degrades to a field this response never mentions, instead of
+ * failing the whole read with a 500. `{ ...pkg }` had the opposite property:
+ * ONE bad member on ONE package took out the entire list for every caller,
+ * which is exactly how a stock showcase boot answered 500 on `GET /packages`
+ * while Studio asked for it three times per open.
+ *
+ * Undefined fields are omitted rather than serialised as explicit `undefined`,
+ * so the response bytes are unchanged for every record that was already fine.
+ */
+function toPackageResponse(pkg: unknown): unknown {
+    if (pkg === null || typeof pkg !== 'object') return pkg;
+    const src = pkg as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const field of INSTALLED_PACKAGE_RESPONSE_FIELDS) {
+        if (src[field] !== undefined) out[field] = src[field];
+    }
+    return out;
+}
+
 function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolContext): HttpDispatcherResult | null {
     const ec: any = context?.executionContext;
     if (!ec?.isSystem && !new Set<string>(ec?.systemPermissions ?? []).has('manage_metadata')) {
@@ -307,7 +357,19 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // [#14375] Every row carries the server's own writability verdict
             // (see `withWritableVerdict`) — copies, so the registry records the
             // filters above selected stay untouched.
-            const rows = packages.map((p: any) => withWritableVerdict(qlService, p));
+            //
+            // [#14309] ORDER IS LOAD-BEARING: project FIRST, stamp the verdict
+            // onto the projection SECOND. `toPackageResponse` is an allowlist of
+            // the DECLARED record fields, and `writable` is not one of them — it
+            // is this door's own computed answer. Stamped first, the projection
+            // would delete it, and the deletion would be silent: a 200 with the
+            // field simply absent. `withWritableVerdict` reads only
+            // `manifest.id`, which the projection keeps, so it is indifferent to
+            // running second. Pinned in `packages-serializable-response.test.ts`
+            // so a future reorder is a red test rather than a missing field.
+            const rows = packages.map(
+                (p: any) => withWritableVerdict(qlService, toPackageResponse(p) as any),
+            );
             return { handled: true, response: deps.success({ packages: rows, total: rows.length }) };
         }
 
@@ -883,8 +945,12 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const id = decodeURIComponent(parts[0]);
             const pkg = registry.getPackage(id);
             if (!pkg) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
-            // [#14375] Same verdict, same predicate as the list door.
-            return { handled: true, response: deps.success(withWritableVerdict(qlService, pkg)) };
+            // [#14375] Same verdict, same predicate as the list door — and
+            // [#14309] the same project-then-stamp order, for the same reason.
+            return {
+                handled: true,
+                response: deps.success(withWritableVerdict(qlService, toPackageResponse(pkg) as any)),
+            };
         }
 
         // PATCH /packages/:id → edit the manifest (name / description /

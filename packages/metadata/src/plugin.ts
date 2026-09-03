@@ -3,6 +3,15 @@
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { Plugin, PluginContext } from '@objectstack/core';
+// ADR-0130 D4/D5 — the ONE reader of a release artifact's `packages[]`.
+// It lives in `@objectstack/core` rather than in the load path that first
+// needed it because `@objectstack/objectql` depends on THIS package, so the
+// artifact door could not import it from there; hosting it in a package both
+// readers already depend on adds no edge to the graph. Reused, never
+// re-derived: it is the ordering (D5) AND the entry gate, so a second read of
+// `packages[]` here would make the two readers disagree about which artifacts
+// are loadable at all.
+import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/core';
 import { NodeMetadataManager } from './node-metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
@@ -262,7 +271,7 @@ export interface MetadataPluginOptions {
 
 export class MetadataPlugin implements Plugin {
     name = 'com.objectstack.metadata';
-    type = 'standard';
+    type = 'standard' as const;
     version = '1.0.0';
     /**
      * Services init() UNCONDITIONALLY registers (ADR-0116, #4131) — lets the
@@ -931,9 +940,165 @@ export class MetadataPlugin implements Plugin {
         const manifestVersion =
             (metadata as any)?.manifest?.version ?? (metadata as any)?.version ?? undefined;
 
+        // ── ADR-0130 D4, at the metadata door: read BOTH shapes, and attribute
+        //    every item to the body it was FOUND in ───────────────────────────
+        //
+        // `packages` ABSENT → the artifact itself IS the one package's body and
+        // `manifest.id` is its owner (D7). That is the branch every artifact
+        // built to date takes and it must not move: the loop below runs exactly
+        // once, over `metadata`, stamped with the two ids computed above.
+        //
+        // `packages` PRESENT → the artifact carries N assembled package bodies,
+        // each `{ ...manifest, ...collections }` (`AssembledPackageBodySchema`),
+        // whose collections are declared by the same shape the top level parses
+        // against. Measured, not assumed: every live `ARTIFACT_FIELD_TO_TYPE`
+        // key is a member of that schema, so iterating bodies loses no
+        // collection. Registering from the BODY is what gives each item the id
+        // of the package that owns it. Before this, the flattened top level was
+        // the only thing read here and every item took the ARTIFACT's
+        // `manifest.id` — which for a composed artifact is one arbitrary
+        // member's id (`selectManifest`'s `'last'` pick). So a two-package
+        // artifact registered the module's object under the app's id, the
+        // registry owned the same object under the module's, and the platform
+        // held two answers to "who owns this": the layers door said one, the
+        // item door and `GET /api/v1/packages` said the other, and the list
+        // door — keyed `${packageId}${name}` — served the object TWICE (#14599).
+        //
+        // ⛔ The owner is read off the body the item was found in — never
+        // reverse-derived by matching a top-level item's name against a
+        // name-to-package index. Such an index is a SECOND resolution path for
+        // metadata identity, which is the road #14512's triage rejected by name
+        // (its option C) precisely because a dangling one fails silently.
+        //
+        // Ordering AND the entry gate both come from `resolveArtifactPackageOrder`
+        // (`@objectstack/core`) — the same call `ObjectQLPlugin` makes on the
+        // same artifact, reused rather than re-derived (D5). Two readers of one
+        // `packages[]` that sorted or validated differently would disagree about
+        // which artifacts load at all, not merely about the order. It returns
+        // `[artifact]` for the absent branch, which is what lets both branches
+        // share the one loop.
+        const carriesPackages = Array.isArray((metadata as any)?.packages);
+        const bodies = resolveArtifactPackageOrder(metadata) as Record<string, unknown>[];
+
+        // Which `(type, name)` slots a package body claimed. Read only by the
+        // residual sweep below, to tell "the flattened top level repeats what a
+        // package already owns" (the normal case, and the duplicate this fixes)
+        // from "the top level carries something no package declares".
+        const ownedByPackage = new Map<string, Set<string>>();
+        const claim = (type: string, name: string): void => {
+            let names = ownedByPackage.get(type);
+            if (!names) ownedByPackage.set(type, names = new Set<string>());
+            names.add(name);
+        };
+        const claimed = (type: string, name: string): boolean =>
+            ownedByPackage.get(type)?.has(name) === true;
+
+        let totalRegistered = 0;
+        for (const body of bodies) {
+            totalRegistered += await this._registerArtifactBodyCollections(
+                ctx,
+                memLoader,
+                body,
+                carriesPackages
+                    // `registerApp` keys an installed package on `id || name`
+                    // and `artifactPackageId` is that ONE spelling, imported
+                    // from the module that also ordered these bodies. Reading
+                    // the id any other way here is how a door and
+                    // `GET /api/v1/packages` come to name different owners.
+                    ? {
+                        packageId: artifactPackageId(body),
+                        packageVersion: (body as any)?.version ?? undefined,
+                    }
+                    // Unchanged single-package branch — the same two values
+                    // this method has always stamped (D7).
+                    : { packageId: manifestPackageId, packageVersion: manifestVersion },
+                { claim: carriesPackages ? claim : undefined },
+            );
+        }
+
+        if (carriesPackages) {
+            // The residual sweep, and why it registers nothing for a normally
+            // composed artifact: `composeStacks(…, { manifest: 'preserve' })`
+            // is ADDITIVE — it emits the flattened top level AND `packages[]`
+            // from the same inputs — so every top-level item is already owned
+            // above and this pass is a no-op. (Whether the producer should keep
+            // emitting that half at all is #14512's decision, not this door's.)
+            //
+            // It exists because `packages` is a `concat` key: an artifact
+            // composed from one stack that already carried `packages` and one
+            // that did not has top-level collections no package body repeats.
+            // Dropping those would take metadata a booted instance can see
+            // today off every door — a silent regression in the name of fixing
+            // a duplicate. Such an item falls back to the artifact's own
+            // identity because nothing better exists, and it is logged, because
+            // it means the artifact's two halves disagree.
+            const residual = await this._registerArtifactBodyCollections(
+                ctx,
+                memLoader,
+                metadata,
+                { packageId: manifestPackageId, packageVersion: manifestVersion },
+                { skip: claimed },
+            );
+            totalRegistered += residual;
+            if (residual > 0) {
+                ctx.logger.warn(
+                    `[MetadataPlugin] artifact '${label}' carries ${residual} top-level metadata item(s) that `
+                    + `none of its ${bodies.length} package bodies declare. They were registered under the `
+                    + `artifact's own manifest id ('${manifestPackageId ?? '<none>'}') because no package in the `
+                    + 'artifact claims them, so every door will report that id as their owner. Rebuild the '
+                    + 'artifact so each collection it ships is carried by the package that owns it.',
+                );
+            }
+        }
+
+        this.manager.registerLoader(memLoader);
+        ctx.logger.info('[MetadataPlugin] Artifact metadata loaded', { source: label, totalRegistered });
+        return totalRegistered;
+    }
+
+
+    /**
+     * Register ONE artifact body's collections into the MetadataManager.
+     *
+     * A "body" is either the whole artifact (the single-package branch, where
+     * the artifact and its one package are the same object) or one entry of
+     * `packages[]` (ADR-0130 D4), which is an assembled
+     * `{ ...manifest, ...collections }` payload carrying the same collection
+     * keys the top level does. The loop is identical for both — that is the
+     * point: there is one ingestion of a collection here, not one per shape.
+     *
+     * @param provenance - The `(packageId, packageVersion)` every item found in
+     *   this body is stamped with (ADR-0010 §3.7, via `applyProtection`). It is
+     *   the body's OWN identity, never the enclosing artifact's, which is what
+     *   makes a multi-package artifact's items agree with the registry and with
+     *   `GET /api/v1/packages` about who owns them.
+     * @param slots.claim - Called with every `(type, name)` this pass
+     *   registered. Passed when reading package bodies; the residual sweep uses
+     *   what it recorded.
+     * @param slots.skip - Consulted before registering each `(type, name)`.
+     *   Passed ONLY by the residual sweep, so a package body's copy is never
+     *   overwritten by the flattened top-level copy of the same definition —
+     *   the overwrite that re-attributed the item to the artifact's manifest.
+     *   ⛔ It is never passed while reading the bodies themselves: two items of
+     *   one name inside one body still register as they always have (last
+     *   wins), because suppressing that would be a behaviour change on the
+     *   single-package branch D7 pins.
+     * @returns How many items this body registered.
+     */
+    private async _registerArtifactBodyCollections(
+        ctx: PluginContext,
+        memLoader: MemoryLoader,
+        body: Record<string, unknown>,
+        provenance: { packageId?: string; packageVersion?: string },
+        slots: {
+            claim?: (type: string, name: string) => void;
+            skip?: (type: string, name: string) => boolean;
+        } = {},
+    ): Promise<number> {
+        const { packageId, packageVersion } = provenance;
         let totalRegistered = 0;
         for (const [field, metaType] of Object.entries(ARTIFACT_FIELD_TO_TYPE)) {
-            const items = (metadata as any)[field];
+            const items = (body as any)[field];
             if (!Array.isArray(items) || items.length === 0) continue;
             for (const item of items) {
                 // Expand aggregated view containers into independent ViewItems
@@ -950,24 +1115,30 @@ export class MetadataPlugin implements Plugin {
                     // `getViewsByObject()` had nothing to expand.
                     const viewObject = deriveViewContainerObject(item);
                     if (!viewObject) continue;
+                    // Residual sweep only: a package body already registered this
+                    // container, so the flattened copy is the duplicate, not a
+                    // second definition.
+                    if (slots.skip?.('view', viewObject)) continue;
                     applyProtection(item as any, {
-                        packageId: manifestPackageId,
-                        packageVersion: manifestVersion,
+                        packageId: packageId,
+                        packageVersion: packageVersion,
                     });
                     await memLoader.save('view', viewObject, item);
                     await this.manager.register('view', viewObject, item, { notify: false });
                     totalRegistered++;
+                    slots.claim?.('view', viewObject);
                     for (const vi of expandViewContainer(viewObject, item)) {
                         for (const w of vi._diagnostics?.warnings ?? []) {
                             ctx.logger.warn(`[MetadataPlugin] View expansion warning for '${vi.name}': ${w.message}`);
                         }
                         applyProtection(vi as any, {
-                            packageId: manifestPackageId,
-                            packageVersion: manifestVersion,
+                            packageId: packageId,
+                            packageVersion: packageVersion,
                         });
                         await memLoader.save('view', vi.name, vi);
                         await this.manager.register('view', vi.name, vi, { notify: false });
                         totalRegistered++;
+                        slots.claim?.('view', vi.name);
                     }
                     continue;
                 }
@@ -998,22 +1169,23 @@ export class MetadataPlugin implements Plugin {
                     }
                 }
                 if (!name) continue;
+                // Residual sweep only — see the call site: this slot is already
+                // owned by one of the artifact's package bodies.
+                if (slots.skip?.(metaType, name)) continue;
                 // ADR-0010 §3.7 — translate the author-facing
                 // `protection` block into the private `_lock` envelope
                 // and stamp package provenance in one call. Strips the
                 // public block so it never lands in sys_metadata.
                 applyProtection(item as any, {
-                    packageId: manifestPackageId,
-                    packageVersion: manifestVersion,
+                    packageId: packageId,
+                    packageVersion: packageVersion,
                 });
                 await memLoader.save(metaType, name, item);
                 await this.manager.register(metaType, name, item, { notify: false });
                 totalRegistered++;
+                slots.claim?.(metaType, name);
             }
         }
-
-        this.manager.registerLoader(memLoader);
-        ctx.logger.info('[MetadataPlugin] Artifact metadata loaded', { source: label, totalRegistered });
         return totalRegistered;
     }
 

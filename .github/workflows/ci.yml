@@ -187,6 +187,18 @@ jobs:
               # the same suite declares are covered by entries the core filter
               # already carries).
               - 'sdui.manifest.json'
+              # @objectstack/rest's meta-state-route-doc-spelling test discovers
+              # its population instead of listing it (#14561): it asks git for
+              # the authored-prose corpus under content/, docs/ and skills/ and
+              # judges every file that mentions the route. Verbatim per that
+              # declaration. `content/**` and `skills/**` above already cover
+              # two of the three roots; this is the third, and the FIRST entry
+              # to open the `docs/` root that the WIDTH note above records as
+              # declined — declined then because no declaration reached past
+              # `docs/audits/...`, and reached now because one does. The
+              # narrower audits entry is left as the package that declared it
+              # spelled it, exactly as the two narrower `skills/` entries were.
+              - 'docs/**'
 
   test:
     # Sharded 6-way BY PACKAGE: a core-touching PR ran the affected suite
@@ -599,8 +611,23 @@ jobs:
       # be the job's LAST TWO steps, because anything after them can fail the
       # job while the credential already counts as a pass (#6082). Adding an
       # upload here is fine; moving it below them is not.
+      #
+      # continue-on-error: this upload is diagnostics-only (`if: always()` and
+      # `if-no-files-found: ignore` already say so), but being unguarded still
+      # put it on the shard's pass/fail path: a failed *finalize* aborts the
+      # job before the attestation pair below ever runs, so a platform-side
+      # fault here evicted a fully green shard from the merge queue (#14469 —
+      # FinalizeArtifact 403 on a 313-byte upload, content already stored).
+      # The attestation pair is untouched by this flag and remains the
+      # fail-closed credential exactly as before — it still runs, still has
+      # no `continue-on-error`, and still must succeed (#6082 unweakened).
+      # ⛔ Do not add continue-on-error, a retry, or an `if:` to the
+      # attestation pair below to "match" this step — that pair is the
+      # credential, not diagnostics, and check:shard-attestation pins its
+      # unguarded shape statically.
       - name: Publish this shard's turbo run summary
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: test-core-run-summary-${{ matrix.shard }}-of-6

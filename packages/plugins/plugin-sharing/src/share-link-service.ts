@@ -100,17 +100,17 @@ function getPolicy(schema: any): {
       enabled: false,
       allowedAudiences: [],
       allowedPermissions: [],
-      // [#13856] The declared redaction set is read REGARDLESS of `enabled`.
-      // This branch used to return `redactFields: []`, so a link minted while
-      // the object was opted IN and redeemed after it was opted OUT kept
-      // resolving AND started serving the very fields the object declares
-      // redacted — turning the feature off WIDENED what the anonymous
-      // endpoint serves. Opting out gates MINTING (`createLink`'s 422 reads
-      // `enabled`, not this list) and whatever #14033 rules for standing
-      // links; it must never strip the object's declared redactions from
-      // tokens that still serve. An object with no `publicSharing` block at
-      // all keeps `[]` — nothing declared, nothing redacted — exactly as
-      // before.
+      // [#13856 -> #14033] The declared redaction set is read REGARDLESS of
+      // `enabled` — DEFENCE IN DEPTH, not a live read. #13856: this branch
+      // returned `[]`, so opting an object OUT WIDENED what an already-minted
+      // token served (fail-open). #14033 then made `enabled` a standing
+      // policy — `resolveToken`'s gate returns `null` before the only reader
+      // of this list (the union below) and `createLink` never reads it, so
+      // nothing reaches this today and the sibling keys are MOOT. But moot is
+      // not "must not be read": #14581 measured that collapsing this back to
+      // `[]` leaves the whole package suite green, so NO pin would catch a
+      // regression of that gate — this is what fails CLOSED behind it. An
+      // object with no `publicSharing` block keeps `[]`, exactly as before.
       redactFields: Array.isArray(raw?.redactFields) ? (raw.redactFields as string[]) : [],
     };
   }
@@ -341,9 +341,18 @@ export interface ShareLinkServiceOptions {
   /** Companion verifier — must accept hashes produced by `hashPassword`. */
   verifyPassword?: (plain: string, hash: string) => Promise<boolean>;
   /**
-   * Bypass the per-object opt-in check (useful when the schema scan is
-   * happening after `start`). When omitted, calls against an object
-   * without `publicSharing.enabled=true` are rejected with 422.
+   * Bypass the per-object opt-in check at MINT (useful when the schema scan
+   * is happening after `start`). When omitted, `createLink` against an object
+   * without `publicSharing.enabled=true` is rejected with 422.
+   *
+   * [#14033] Mint ONLY. `publicSharing.enabled` is a standing policy held
+   * again at every redemption, and `resolveToken` reads the object's CURRENT
+   * block regardless of how a row was minted: a link minted under this bypass
+   * while the block is off does not resolve until the block is enabled. So
+   * during a late schema scan the option helps MINTING, not serving: an object
+   * the engine cannot return a schema for is `enabled: false` by `getPolicy`'s
+   * definition (the same definition `createLink` uses), and redemption refuses
+   * until the schema resolves and the block is enabled.
    */
   permissive?: boolean;
   /**
@@ -639,7 +648,66 @@ export class ShareLinkService implements IShareLinkService {
     // computed from it below, unchanged.
     const schema = this.engine.getSchema?.(row.object_name);
     const policy = getPolicy(schema);
-    const eligibility = policy.enabled ? policy.eligibility : undefined;
+
+    // [#14033] `publicSharing.enabled` is a STANDING policy — held here, at
+    // every redemption, not only at mint.
+    //
+    // ## Why the parent switch is held at redemption
+    //
+    // `createLink` reads `policy.enabled` (422 `SHARING_NOT_ENABLED`) and
+    // nothing here did. So the predicate INSIDE the block (`eligibility`,
+    // below) was re-evaluated on every redemption while turning the WHOLE
+    // block off stopped no link already handed out: an author who wanted
+    // anonymous serving to stop had to narrow the predicate rather than switch
+    // the feature off — the opposite of what the surface reads like. Measured
+    // before it was changed: a token minted while the block was on kept
+    // serving the record in full after the block was turned off. The
+    // maintainer ruled (2026-09-01, on #14033) that the switch is a standing
+    // policy: re-read on every redemption, a block that is off stops every
+    // existing token on it — retroactively, on deploy, as #13608 was — and
+    // re-enabling the block restores them. Not a revocation: no row moves.
+    //
+    // ## What the gate does NOT ask
+    //
+    // How the link was minted. A token minted under a system context or the
+    // `permissive` bypass (system-context ledger row 37) carries no mark of
+    // it, and the ruling's point 3 says that is right: redemption is an
+    // anonymous act and is not exempted by how the row got there. So this
+    // reads the CURRENT block and nothing else. An absent block is the same
+    // switch at its default (`enabled` defaults to false) and refuses too.
+    //
+    // ## Placement, and what "off" switches off
+    //
+    // AFTER the cheap in-memory gates (a revoked or expired token still pays
+    // no schema read) and BEFORE the record probe and the usage stamp: a
+    // switched-off link reads no record and bumps no counter. Ruling point 4:
+    // with the switch off nothing inside the block is evaluated — the
+    // predicate is not run, the redaction set is never computed — and with it
+    // on, the sibling keys keep exactly the redemption-time behaviour below.
+    //
+    // ## The refusal is the same `null`, and the reason goes to the log
+    //
+    // Same family as `stillEligible`: for a caller who may hold nothing but a
+    // token, a distinguishable "sharing is off for this object" is an
+    // existence oracle, so the answer is the one revoked / expired / unknown /
+    // ineligible already give (over HTTP the generic 404). The readable
+    // reason is written to the server-side log through the GUARANTEED `warn`
+    // member — the caller was answered, so this is not a degradation and not
+    // an `error`; it is the sink shape the eligibility refusal already uses.
+    if (!policy.enabled) {
+      this.logger?.warn?.(
+        '[share-link] redemption refused — publicSharing.enabled is not true on the object '
+          + '(the block is switched off; its links resolve again once it is re-enabled)',
+        {
+          link: row.id,
+          object: row.object_name,
+          record: row.record_id,
+          reason: 'SHARING_NOT_ENABLED',
+        },
+      );
+      return null;
+    }
+    const eligibility = policy.eligibility;
 
     // [#5190] Does the shared RECORD still exist? A share link is an
     // identity-less CAPABILITY token: whoever holds it has the access, no

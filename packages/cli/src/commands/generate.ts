@@ -33,6 +33,20 @@ const GENERATORS: Record<string, {
   object: {
     description: 'Business data object',
     defaultDir: 'src/objects',
+    /**
+     * Carries an AUTHORED `sharingModel` (#14336).
+     *
+     * Unlike the other three repairs on that card this one is not shape drift:
+     * the object parsed fine and was refused one layer later, by
+     * `security-owd-unset` — an author-time ERROR rule saying the org-wide
+     * default must be a decision rather than an accident. So the scaffold
+     * handed the author a file their own `os validate` rejected.
+     *
+     * The value is NOT a fresh decision taken here. #9666 took it once for the
+     * `os init` templates, and this emits the SAME value with the same
+     * explanation, so the two doors an author can arrive through agree. If
+     * that template's value ever moves, this one moves with it.
+     */
     generate: (name: string) => `import * as Data from '@objectstack/spec/data';
 
 /**
@@ -54,6 +68,13 @@ const ${toCamelCase(name)}: Data.Object = {
       label: 'Description',
     },
   },
+  // Org-wide default (OWD): who can see records they don't own. 'private' is
+  // owner-only until access is widened by a permission grant or a sharing
+  // rule. Declaring it is required, deliberately: \`objectstack build\`
+  // refuses an object that declares no OWD, so the baseline is always an
+  // authored decision rather than an accident. The other values, and how to
+  // widen access safely: https://objectstack.ai/docs/permissions/sharing-rules
+  sharingModel: 'private',
 };
 
 export default ${toCamelCase(name)};
@@ -63,33 +84,66 @@ export default ${toCamelCase(name)};
   view: {
     description: 'List or form view',
     defaultDir: 'src/views',
+    /**
+     * A view CONTAINER — which is what a `view` artifact is (#14336).
+     *
+     * `ViewSchema` is `.strict()` and its view slots are `list` / `form` /
+     * `listViews` / `formViews`; `type` and `objectName` belong to a single
+     * VIEW, not to the container holding it. The template used to write both
+     * spellings at once: a flat list view's keys on the container AND a `list`
+     * block. `defineView` has guarded the flat shape since the container was
+     * introduced, and for a reason worth restating — a flat view parses to an
+     * EMPTY container, so zero views register and the Console renders nothing.
+     *
+     * `pageSize` moved too: it is `PaginationConfigSchema`'s key, reached
+     * through the list view's `pagination`, not a key on the list view itself.
+     *
+     * The object binding is `object` — the key `getViewsByObject()` reads and
+     * the one a stack-level `views: [...]` entry needs to say which object its
+     * views belong to. `objectName` is the spelling on the QUERY surface.
+     */
     generate: (name: string) => `import * as UI from '@objectstack/spec/ui';
 
 /**
- * ${toTitleCase(name)} List View
+ * ${toTitleCase(name)} Views
  */
-const ${toCamelCase(name)}ListView: UI.View = {
-  name: '${toSnakeCase(name)}_list',
-  label: '${toTitleCase(name)} List',
-  type: 'list',
-  objectName: '${toSnakeCase(name)}',
+const ${toCamelCase(name)}Views: UI.View = {
+  name: '${toSnakeCase(name)}',
+  label: '${toTitleCase(name)}',
+  object: '${toSnakeCase(name)}',
   list: {
     type: 'grid',
     columns: [
       { field: 'name', width: 200 },
     ],
     sort: [{ field: 'name', order: 'asc' }],
-    pageSize: 25,
+    pagination: { pageSize: 25 },
   },
 };
 
-export default ${toCamelCase(name)}ListView;
+export default ${toCamelCase(name)}Views;
 `,
   },
 
   action: {
     description: 'Button or batch action',
     defaultDir: 'src/actions',
+    /**
+     * `type` comes from `ActionType` — `script | url | modal | flow | api |
+     * form` — and the handler binding is the single `target` slot (#14336).
+     *
+     * The template used to write `type: 'custom'`, which is not a member, plus
+     * a `handler: { type, target }` block, which is not an Action key: the
+     * `execute`/`handler` second slot was removed in protocol 17 precisely so
+     * no consumer has two places to disagree about. What that block was trying
+     * to express is exactly `type: 'flow'` with `target` naming the flow, so
+     * that is what it now says — and it targets the name `os g flow NAME`
+     * writes, so the two scaffolds compose.
+     *
+     * `target` is REQUIRED for every type but `script`, enforced by
+     * `ActionSchema`'s own refinement, so this cannot drift back to an action
+     * bound to nothing.
+     */
     generate: (name: string) => `import * as UI from '@objectstack/spec/ui';
 
 /**
@@ -98,12 +152,9 @@ export default ${toCamelCase(name)}ListView;
 const ${toCamelCase(name)}Action: UI.Action = {
   name: '${toSnakeCase(name)}',
   label: '${toTitleCase(name)}',
-  type: 'custom',
+  type: 'flow',
   objectName: '${toSnakeCase(name)}',
-  handler: {
-    type: 'flow',
-    target: '${toSnakeCase(name)}_flow',
-  },
+  target: '${toSnakeCase(name)}_flow',
 };
 
 export default ${toCamelCase(name)}Action;
@@ -198,6 +249,19 @@ export default ${toCamelCase(name)}Dashboard;
   app: {
     description: 'Application navigation',
     defaultDir: 'src/apps',
+    /**
+     * `AppSchema.navigation` is an ARRAY of nav items (#14336).
+     *
+     * The template used to write `{ type: 'sidebar', items: [] }`. There is no
+     * `sidebar` wrapper on the authoring surface: the array IS the sidebar
+     * tree, and it nests through `type: 'group'` items carrying `children`.
+     *
+     * It scaffolds one real entry rather than an empty array, because the
+     * entry shape is the thing an author copies to add the second one — and
+     * because an app with no navigation renders a shell with nothing in it.
+     * The entry points at the object `os g object NAME` writes, so the two
+     * scaffolds compose.
+     */
     generate: (name: string) => `import * as UI from '@objectstack/spec/ui';
 
 /**
@@ -206,10 +270,14 @@ export default ${toCamelCase(name)}Dashboard;
 const ${toCamelCase(name)}App: UI.App = {
   name: '${toSnakeCase(name)}_app',
   label: '${toTitleCase(name)}',
-  navigation: {
-    type: 'sidebar',
-    items: [],
-  },
+  navigation: [
+    {
+      id: '${toSnakeCase(name)}_nav',
+      type: 'object',
+      label: '${toTitleCase(name)}s',
+      objectName: '${toSnakeCase(name)}',
+    },
+  ],
 };
 
 export default ${toCamelCase(name)}App;
@@ -384,6 +452,22 @@ function toSnakeCase(str: string): string {
 
 // ─── Field Type Mapping ─────────────────────────────────────────────
 
+/**
+ * The TypeScript type each authored field type generates (#13871).
+ *
+ * Every key here MUST be a member of the `FieldType` enum in
+ * `@objectstack/spec/data` — that enum is the only statement of which field
+ * types exist, and a key outside it describes nothing. This table used to carry
+ * six that never existed anywhere (`integer`, `slug`, `uuid`, `ip_address`,
+ * `geo_point`, `encrypted`): invented here, mirrored into the migration
+ * codegen below, and readable as an acceptance surface the platform cannot
+ * honour. `generate-field-type-vocabulary.pin.test.ts` now fails on any such
+ * key, in this table and in the two vocabularies below it.
+ *
+ * The set is deliberately NOT total: a real member with no entry falls to the
+ * `|| 'unknown'` below, which is the intended behaviour for a type this
+ * generator has nothing specific to say about.
+ */
 const FIELD_TYPE_MAP: Record<string, string> = {
   text: 'string',
   textarea: 'string',
@@ -391,7 +475,6 @@ const FIELD_TYPE_MAP: Record<string, string> = {
   html: 'string',
   markdown: 'string',
   number: 'number',
-  integer: 'number',
   currency: 'number',
   percent: 'number',
   boolean: 'boolean',
@@ -411,14 +494,9 @@ const FIELD_TYPE_MAP: Record<string, string> = {
   file: 'string',
   image: 'string',
   password: 'string',
-  slug: 'string',
-  uuid: 'string',
-  ip_address: 'string',
   color: 'string',
   rating: 'number',
-  geo_point: '{ lat: number; lng: number }',
   vector: 'number[]',
-  encrypted: 'string',
 };
 
 function fieldTypeToTs(fieldType: string, multiple?: boolean): string {
@@ -792,6 +870,13 @@ async function runClientGeneration(configPath: string | undefined, flags: { outp
 
 // ─── Migration Generator ────────────────────────────────────────────
 
+/**
+ * The SQL column type each authored field type generates (#13871).
+ *
+ * Same invariant as `FIELD_TYPE_MAP`: every key is a `FieldType` member, an
+ * unmapped member falls to the `|| 'TEXT'` default on purpose, and the pin test
+ * enforces the first half.
+ */
 const FIELD_TYPE_SQL_MAP: Record<string, string> = {
   text: 'VARCHAR(255)',
   textarea: 'TEXT',
@@ -799,7 +884,6 @@ const FIELD_TYPE_SQL_MAP: Record<string, string> = {
   html: 'TEXT',
   markdown: 'TEXT',
   number: 'DECIMAL(18,2)',
-  integer: 'INTEGER',
   currency: 'DECIMAL(18,2)',
   percent: 'DECIMAL(5,2)',
   boolean: 'BOOLEAN',
@@ -819,14 +903,9 @@ const FIELD_TYPE_SQL_MAP: Record<string, string> = {
   file: 'VARCHAR(2048)',
   image: 'VARCHAR(2048)',
   password: 'VARCHAR(255)',
-  slug: 'VARCHAR(255)',
-  uuid: 'UUID',
-  ip_address: 'VARCHAR(45)',
   color: 'VARCHAR(7)',
   rating: 'INTEGER',
-  geo_point: 'POINT',
   vector: 'VECTOR',
-  encrypted: 'TEXT',
 };
 
 function fieldTypeToSql(fieldType: string): string {
@@ -923,17 +1002,17 @@ function generateMigrationTs(config: Record<string, unknown>): string {
 
       switch (fType) {
         case 'text': case 'email': case 'phone': case 'url': case 'select':
-        case 'slug': case 'password': case 'color': case 'ip_address':
+        case 'password': case 'color':
           colMethod = `table.string('${fieldName}')`;
           break;
         case 'textarea': case 'richtext': case 'html': case 'markdown':
-        case 'formula': case 'encrypted':
+        case 'formula':
           colMethod = `table.text('${fieldName}')`;
           break;
         case 'number': case 'currency': case 'percent':
           colMethod = `table.decimal('${fieldName}')`;
           break;
-        case 'integer': case 'rating':
+        case 'rating':
           colMethod = `table.integer('${fieldName}')`;
           break;
         case 'boolean':
@@ -951,7 +1030,7 @@ function generateMigrationTs(config: Record<string, unknown>): string {
         case 'json': case 'multiselect':
           colMethod = `table.jsonb('${fieldName}')`;
           break;
-        case 'uuid': case 'lookup': case 'master_detail':
+        case 'lookup': case 'master_detail':
           colMethod = `table.uuid('${fieldName}')`;
           break;
         // `user` references sys_user, whose id is a text identifier (not a uuid),

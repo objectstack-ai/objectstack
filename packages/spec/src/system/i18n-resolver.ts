@@ -12,8 +12,13 @@
  *   objects.<object>._views.<view_key>.label
  *   objects.<object>._views.<view_key>.description
  *   objects.<object>._actions.<action_name>.label
+ *   objects.<object>._actions.<action_name>.description
  *   objects.<object>._actions.<action_name>.confirmText
  *   objects.<object>._actions.<action_name>.successMessage
+ *   objects.<object>._actions.<action_name>.params.<param_name>.label
+ *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
+ *   objects.<object>._actions.<action_name>.params.<param_name>.placeholder
+ *   objects.<object>._actions.<action_name>.params.<param_name>.options.<value>
  *   objects.<object>._tabs.<tab_name>.label
  *
  * `<view_key>` is the BARE authoring key (`listViews.<key>`, or the default
@@ -23,7 +28,8 @@
  *
  * For object-less actions (no `objectName`), helpers fall back to:
  *
- *   globalActions.<action_name>.label / .confirmText / .successMessage
+ *   globalActions.<action_name>.label / .description / .confirmText /
+ *     .successMessage / .params.<param_name>.*
  *
  * Lookup order: requested locale → each entry of `fallbackChain` (defaults to
  * `['en']`) → literal `label` from the metadata. Helpers never throw — they
@@ -127,12 +133,50 @@ export interface BulkActionParamLike {
 export interface ActionLike {
   name: string;
   label?: string;
+  /**
+   * `ActionSchema.description` — the explanatory line under the title in the
+   * action's param dialog. Narrowed to `string` for the same reason `label` is:
+   * a resolver answers with ONE locale's string.
+   */
+  description?: string;
   confirmText?: string;
   successMessage?: string;
+  /** `ActionSchema.params` — the param dialog's own copy. */
+  params?: ActionParamLike[];
   /** When omitted, the action is treated as global. */
   objectName?: string;
   /** Post-success reveal dialog (see `Action.resultDialog` in ui/action.zod). */
   resultDialog?: ResultDialogLike;
+}
+
+/**
+ * Minimal action-param shape consumed by {@link translateAction} —
+ * `ActionParamSchema` (`ui/action.zod.ts`) narrowed to the copy this resolver
+ * overlays.
+ *
+ * The translation node is keyed by the param's `name`, falling back to `field`
+ * when a field-backed param names no key of its own. That fallback is not a
+ * convenience: it is the SAME collection rule the linter validates against
+ * (`checkActionParams`, `packages/lint/src/validate-translation-references.ts`),
+ * so every key the linter accepts is a key this resolver finds — the two halves
+ * cannot disagree about which params are addressable.
+ */
+export interface ActionParamLike {
+  /** `ActionParamSchema.name` — the `params` translation key. */
+  name?: string;
+  /** `ActionParamSchema.field` — the translation key when `name` is omitted. */
+  field?: string;
+  label?: string;
+  /** An ACTION param spells its hint `helpText`; a BULK param spells it `help`. */
+  helpText?: string;
+  placeholder?: string;
+  /**
+   * `ActionParamSchema.options[]` is an ARRAY of entries while the translation
+   * side is a `value -> label` MAP, so the overlay matches on `value` — the
+   * same shape mismatch `translateObject`'s field options resolve across.
+   */
+  options?: Array<{ value?: string | number | boolean; label?: string; [key: string]: unknown }>;
+  [key: string]: unknown;
 }
 
 /** Minimal result-dialog shape consumed by `resolveActionResultDialog`. */
@@ -417,7 +461,7 @@ function lookupTabLabel(
 function lookupActionField(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
-  field: 'label' | 'confirmText' | 'successMessage',
+  field: 'label' | 'description' | 'confirmText' | 'successMessage',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -546,6 +590,118 @@ export function resolveActionSuccess(
     lookupActionField(bundle, action, 'successMessage', opts) ??
     action.successMessage
   );
+}
+
+/**
+ * The `params.<param>` translation node for one action, in one locale's data —
+ * object-scoped first, then `globalActions`, the same split
+ * {@link lookupActionField} walks.
+ */
+function lookupActionParamNode(
+  data: TranslationData | undefined,
+  action: ActionLike,
+  paramName: string,
+): NonNullable<
+  NonNullable<NonNullable<NonNullable<TranslationData['objects']>[string]['_actions']>[string]['params']>
+>[string] | undefined {
+  if (!data) return undefined;
+  const fromObject = action.objectName
+    ? data.objects?.[action.objectName]?._actions?.[action.name]?.params?.[paramName]
+    : undefined;
+  if (fromObject) return fromObject;
+  return data.globalActions?.[action.name]?.params?.[paramName];
+}
+
+/**
+ * One string off an action param's translation node, across the locale chain.
+ * `undefined` when no locale carries it — the caller then leaves the authored
+ * value in place rather than overwriting it with a fallback.
+ */
+function lookupActionParamText(
+  bundle: TranslationBundle | undefined,
+  action: ActionLike,
+  paramName: string,
+  pick: (node: NonNullable<ReturnType<typeof lookupActionParamNode>>) => unknown,
+  opts?: ResolveOptions,
+): string | undefined {
+  if (!bundle) return undefined;
+  for (const code of localeChain(opts)) {
+    const node = lookupActionParamNode(pickData(bundle, code), action, paramName);
+    if (!node) continue;
+    const value = pick(node);
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Overlay the bundle's `params` copy onto an action's authored `params[]`,
+ * returning the SAME array reference when nothing matched.
+ *
+ * Reference identity is load-bearing rather than tidy, exactly as it is for
+ * {@link translateBulkActionDefs}: {@link translateAction} uses it to decide
+ * whether to write a `params` key at all, so an action with no param
+ * translations comes back with the very array it was authored with.
+ *
+ * A bundle key naming a param the action does NOT declare is ignored here —
+ * the walk is over the declared params, never over the bundle's keys. That
+ * asymmetry is deliberate: the linter already reports the unknown key with a
+ * did-you-mean (`checkActionParams`), and a resolver that invented a param
+ * from a translation file would put a control in the dialog that the action
+ * cannot receive.
+ */
+function translateActionParams(
+  action: ActionLike,
+  bundle: TranslationBundle | undefined,
+  opts?: ResolveOptions,
+): ActionLike['params'] {
+  const params = action.params;
+  if (!Array.isArray(params) || !bundle) return params;
+  let changed = false;
+  const next = params.map((param) => {
+    if (!param || typeof param !== 'object') return param;
+    // `name` with `field` fallback — `checkActionParams`' collection rule.
+    const paramName =
+      (typeof param.name === 'string' && param.name.length > 0 ? param.name : undefined) ??
+      (typeof param.field === 'string' && param.field.length > 0 ? param.field : undefined);
+    if (!paramName) return param;
+    const text = (pick: (node: NonNullable<ReturnType<typeof lookupActionParamNode>>) => unknown) =>
+      lookupActionParamText(bundle, action, paramName, pick, opts);
+
+    const label = text((n) => n.label);
+    const helpText = text((n) => n.helpText);
+    const placeholder = text((n) => n.placeholder);
+
+    let options = param.options;
+    if (Array.isArray(param.options)) {
+      let optionsChanged = false;
+      const nextOptions = param.options.map((opt) => {
+        if (!opt || typeof opt !== 'object' || opt.value === undefined) return opt;
+        const key = String(opt.value);
+        const translated = text((n) => n.options?.[key]);
+        if (translated === undefined) return opt;
+        optionsChanged = true;
+        return { ...opt, label: translated };
+      });
+      if (optionsChanged) options = nextOptions;
+    }
+
+    if (
+      label === undefined && helpText === undefined && placeholder === undefined
+      && options === param.options
+    ) {
+      return param;
+    }
+    changed = true;
+    return {
+      ...param,
+      ...(label !== undefined ? { label } : {}),
+      ...(helpText !== undefined ? { helpText } : {}),
+      ...(placeholder !== undefined ? { placeholder } : {}),
+      ...(options !== param.options ? { options } : {}),
+    };
+  });
+  return changed ? next : params;
 }
 
 /**
@@ -712,9 +868,26 @@ export function translateView<T extends ViewLike>(
 
 /**
  * Apply the active locale to an action metadata document by overwriting
- * `label`, `confirmText`, `successMessage`, and the `resultDialog` copy with
- * translated values when available. The original document is not mutated; a
- * shallow copy is returned.
+ * `label`, `description`, `confirmText`, `successMessage`, the `params[]` copy
+ * and the `resultDialog` copy with translated values when available. The
+ * original document is not mutated; a shallow copy is returned.
+ *
+ * ## Why `description` and `params` are overlaid HERE
+ *
+ * They were declared and validated long before they were applied, and the
+ * asymmetry is what made them expensive: `TranslationItemSchema` declares
+ * `_actions.<action>.description` and `_actions.<action>.params.<param>.{label,
+ * helpText, placeholder, options}`, and the translation linter validates BOTH —
+ * `checkActionParams` even reports a param key the action does not declare, with
+ * a did-you-mean naming the declared ones. An author had every reason to believe
+ * the keys worked, and they parsed, and they linted, and they resolved to
+ * nothing: a Chinese deployment got a Chinese button that opened an English form,
+ * because an action's `description` is its dialog subtitle and `params[].label` /
+ * `.placeholder` / `.helpText` are the entire parameter dialog.
+ *
+ * `params` is overlaid by the param's `name`, falling back to `field` — see
+ * {@link ActionParamLike} for why that fallback is the linter's rule and not a
+ * convenience.
  */
 export function translateAction<T extends ActionLike>(
   action: T,
@@ -722,15 +895,19 @@ export function translateAction<T extends ActionLike>(
   opts?: ResolveOptions,
 ): T {
   const label = resolveActionLabel(bundle, action, opts);
+  const description = lookupActionField(bundle, action, 'description', opts) ?? action.description;
   const confirmText = resolveActionConfirm(bundle, action, opts);
   const successMessage = resolveActionSuccess(bundle, action, opts);
   const resultDialog = resolveActionResultDialog(bundle, action, opts);
+  const params = translateActionParams(action, bundle, opts);
   return {
     ...action,
     label,
+    ...(description !== undefined ? { description } : {}),
     ...(confirmText !== undefined ? { confirmText } : {}),
     ...(successMessage !== undefined ? { successMessage } : {}),
     ...(resultDialog !== undefined ? { resultDialog } : {}),
+    ...(params !== action.params ? { params } : {}),
   };
 }
 

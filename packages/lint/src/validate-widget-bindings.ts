@@ -10,6 +10,7 @@ import {
   isUnjudgeable,
   joinablePrefixes,
   resolveFieldPath,
+  suggestName,
   type ObjectGraph,
 } from './object-graph.js';
 import {
@@ -296,51 +297,6 @@ const CHART_TYPES = new Set<string>(
   ChartTypeSchema.options.filter(t => !MEASURE_EXEMPT_CHART_TYPES.has(t)),
 );
 
-function levenshtein(a: string, b: string): number {
-  const m = a.length, n = b.length;
-  let prev = Array.from({ length: n + 1 }, (_, j) => j);
-  for (let i = 1; i <= m; i++) {
-    const cur = [i];
-    for (let j = 1; j <= n; j++) {
-      cur[j] = Math.min(
-        prev[j] + 1,
-        cur[j - 1] + 1,
-        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
-      );
-    }
-    prev = cur;
-  }
-  return prev[n];
-}
-
-/**
- * Nearest declared name for a typo'd/stale reference, or undefined when
- * nothing is close. Containment is checked first because the cutover's
- * canonical drift is base column → prefixed measure name (`amount` →
- * `sum_amount`), which is far in edit distance but obvious to a human.
- */
-function didYouMean(input: string, candidates: Iterable<string>): string | undefined {
-  let best: string | undefined;
-  let bestScore = Infinity;
-  for (const c of candidates) {
-    let score: number;
-    if (input.length >= 3 && (c.includes(input) || input.includes(c))) {
-      score = Math.abs(c.length - input.length);
-    } else {
-      const d = levenshtein(input, c);
-      if (d > Math.max(2, Math.floor(input.length / 3))) continue;
-      score = 100 + d;
-    }
-    if (score < bestScore) { bestScore = score; best = c; }
-  }
-  return best;
-}
-
-function suggest(input: string, candidates: Iterable<string>): string {
-  const s = didYouMean(input, candidates);
-  return s ? ` Did you mean "${s}"?` : '';
-}
-
 function list(names: Iterable<string>): string {
   const arr = [...names];
   return arr.length > 0 ? arr.join(', ') : '(none)';
@@ -577,7 +533,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           rule: WIDGET_DATASET_UNKNOWN,
           message: `dataset "${dsName}" does not resolve to a declared dataset.`,
           hint:
-            `Declared datasets: ${list(datasets.keys())}.${suggest(dsName, datasets.keys())} ` +
+            `Declared datasets: ${list(datasets.keys())}.${suggestName(dsName, datasets.keys())} ` +
             `Define the dataset with defineDataset() or fix the reference (ADR-0021).`,
         });
       }
@@ -683,10 +639,10 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
                 hint: eff.explicit
                   ? `Point filterBindings: { ${def.name}: '<field>' } at a field that exists on ` +
                     `\`${datasetObject}\`, or opt out with filterBindings: { ${def.name}: false }.` +
-                    `${suggest(field, base.names)} Object fields: ${list(base.names)}.`
+                    `${suggestName(field, base.names)} Object fields: ${list(base.names)}.`
                   : `Set filterBindings: { ${def.name}: false } on this widget to opt out, or ` +
                     `re-target to an existing field with filterBindings: { ${def.name}: '<field>' }.` +
-                    `${suggest(field, base.names)} Object fields: ${list(base.names)}.`,
+                    `${suggestName(field, base.names)} Object fields: ${list(base.names)}.`,
               });
               continue;
             }
@@ -833,7 +789,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             `dimensions[${k}] "${dims[k]}" is not a dimension of dataset ` +
             `"${dsName}" (declared dimensions: ${list(dimensionNames)}).`,
           hint:
-            `Widgets select dataset dimensions BY NAME.${suggest(dims[k], dimensionNames)} ` +
+            `Widgets select dataset dimensions BY NAME.${suggestName(dims[k], dimensionNames)} ` +
             `Add the dimension to the dataset or fix the reference.`,
         });
       }
@@ -850,7 +806,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             `"${dsName}" (declared measures: ${list(measures.keys())}).`,
           hint:
             `Widgets select dataset measures BY NAME, not by base column.` +
-            `${suggest(values[k], measures.keys())} ` +
+            `${suggestName(values[k], measures.keys())} ` +
             `Add the measure to the dataset or fix the reference.`,
         });
       }
@@ -896,9 +852,9 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
           hint: declaredButUnselected
             ? `Add "${sortBy}" to this widget's ${dimensionNames.has(sortBy) ? 'dimensions' : 'values'}, ` +
               `or order by something it already selects.` +
-              `${suggest(sortBy, selected)}`
+              `${suggestName(sortBy, selected)}`
             : `Point options.sortBy at one of this widget's selected names (${list(selected)}).` +
-              `${suggest(sortBy, selected)} Ordering is applied to the query RESULT, so it ` +
+              `${suggestName(sortBy, selected)} Ordering is applied to the query RESULT, so it ` +
               `can only name a column that result carries.`,
         });
       }
@@ -927,7 +883,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             message:
               `chartConfig.xAxis.field "${xAxis.field}" does not resolve to a ` +
               `dimension of dataset "${dsName}" (declared dimensions: ${list(dimensionNames)}).`,
-            hint: `Point xAxis.field at a dataset dimension name.${suggest(xAxis.field, dimensionNames)}`,
+            hint: `Point xAxis.field at a dataset dimension name.${suggestName(xAxis.field, dimensionNames)}`,
           });
         }
 
@@ -946,7 +902,7 @@ export function validateWidgetBindings(stack: AnyRec): WidgetBindingFinding[] {
             hint: declaredButUnselected
               ? `Add "${field}" to the widget's values, or bind the chart to a selected measure.`
               : `Post-cutover data is keyed by the dataset's measure NAME, not the ` +
-                `base column.${suggest(field, selectedValues.size > 0 ? selectedValues : measures.keys())}`,
+                `base column.${suggestName(field, selectedValues.size > 0 ? selectedValues : measures.keys())}`,
           });
         };
 

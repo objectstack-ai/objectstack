@@ -82,6 +82,21 @@ describe('validateActionNameRefs — list view bulk/row actions', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0].message).toContain('Did you mean "crm_convert_lead"?');
   });
+
+  // #14577 — this rule used to carry a private Levenshtein-only `suggest`,
+  // which gave NO hint here: `archive` → `archive_completed_deals` is 17 edits
+  // apart, far outside the `max(2, floor(len/3))` budget. Now delegating to
+  // the shared `suggestName` (#14268), the containment pre-pass catches it —
+  // the same class of drift as the issue's `amount` → `sum_amount` example.
+  it('offers a did-you-mean via containment where edit distance alone would not', () => {
+    const findings = validateActionNameRefs({
+      objects: [{ name: 'crm_lead', fields: { name: { type: 'text' } } }],
+      actions: [{ name: 'archive_completed_deals', label: 'Archive', type: 'script' }],
+      views: [{ name: 'crm_lead', list: { bulkActions: ['archive'] } }],
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('Did you mean "archive_completed_deals"?');
+  });
 });
 
 // These fixtures use the REAL page shape. An earlier version of this suite

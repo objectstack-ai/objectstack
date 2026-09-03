@@ -307,7 +307,7 @@ export class EmailServicePlugin implements Plugin {
    */
   providesServices = ['email'];
   version = '1.0.0';
-  type = 'standard';
+  type = 'standard' as const;
   dependencies = ['com.objectstack.engine.objectql'];
   /**
    * Order-if-present on the settings service (ADR-0116, #10250).

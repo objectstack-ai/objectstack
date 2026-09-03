@@ -49,7 +49,7 @@ export class QueueServicePlugin implements Plugin {
    */
   optionalDependencies = ['com.objectstack.engine.objectql'];
   version = '1.1.0';
-  type = 'standard';
+  type = 'standard' as const;
 
   private readonly options: QueueServicePluginOptions;
   private dbAdapter?: DbQueueAdapter;

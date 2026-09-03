@@ -29,14 +29,14 @@ apps too).
 
 | Skill | Domain | What it covers |
 |:------|:-------|:---------------|
-| [Platform](./objectstack-platform/SKILL.md) | `platform` | Bootstrap, configure, extend, and operate ObjectStack runtimes. Covers project setup (`defineStack`, drivers, adapters, scaffolding), plugin and service development (PluginContext, DI, kernel hooks like `kernel:ready`), and operations (CLI commands, migrations, deployment, test harnesses via LiteKernel). |
+| [Platform](./objectstack-platform/SKILL.md) | `platform` | Bootstrap, configure, extend, and operate ObjectStack runtimes. Covers project setup (`defineStack`, drivers, scaffolding), declaring platform capabilities (`requires:` — which service plugins boot), plugin and service development (PluginContext, DI, kernel hooks like `kernel:ready`), and operations (CLI commands, migrations, deployment, test harnesses via LiteKernel). |
 | [Data](./objectstack-data/SKILL.md) | `data` | Design ObjectStack data schemas — objects, fields, field conditional rules, relationships, validations, indexes, lifecycle hooks, permissions, row-level security, data `lifecycle` retention/TTL/rotation, metadata `protection` locks, and external / federated datasources (`defineDatasource`) — and the seeds (`defineSeed()`) that load fixtures and reference data alongside them. |
 | [Query](./objectstack-query/SKILL.md) | `query` | Construct ObjectQL queries — filters, sorting, pagination, aggregation, relation expansion, and full-text search. |
 | [UI](./objectstack-ui/SKILL.md) | `ui` | Author ObjectStack UI metadata — Views (list/form/kanban/calendar/gantt), Apps (navigation), Pages (structured plus the HTML and React source-authoring tiers, ADR-0080/0081), Dashboards, Reports, Charts, Actions, and package Docs (`src/docs/*.md`). |
 | [Automation](./objectstack-automation/SKILL.md) | `automation` | Design ObjectStack automation — Flows (visual logic), Triggers, Approvals, state machines, and the `jobs` (`defineJob`) / `webhooks` (`defineWebhook`) stack collections. |
-| [AI](./objectstack-ai/SKILL.md) | `ai` | Design ObjectStack AI skills, tools, knowledge sources, conversations, model registry entries, and MCP integrations. |
+| [AI](./objectstack-ai/SKILL.md) | `ai` | Design ObjectStack AI skills, tools, knowledge sources, and the open-edition MCP server surface. |
 | [API](./objectstack-api/SKILL.md) | `api` | Design the server-side API surface that an ObjectStack runtime exposes — REST endpoints, auth providers, realtime channels, error envelopes, batch contracts. |
-| [i18n](./objectstack-i18n/SKILL.md) | `i18n` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the per-locale source layout. |
+| [i18n](./objectstack-i18n/SKILL.md) | `i18n` | Author ObjectStack translation bundles — object/field labels, view text, app navigation strings, automation messages — and configure locale fallback, coverage reporting, and the source layout. |
 | [Formula](./objectstack-formula/SKILL.md) | `expression` | Author CEL expressions used across ObjectStack — formula fields, field conditional rules (`visibleWhen`, `readonlyWhen`, `requiredWhen`), validation / sharing / visibility predicates, flow conditions, and dynamic seed values. This is the companion skill that objectstack-data, -ui, -api and -automation each tell you to load alongside them. |
 | [PM Dispatch](./objectstack-pm-dispatch/SKILL.md) | `process` | Run a project-manager dispatch loop over a GitHub backlog: triage and queue ready issues, claim each one, dispatch it to a parallel developer agent that returns a structured JSON report, review the results against GitHub, and drive accepted pull requests to landing — escalating to the maintainer only what genuinely needs a human decision. Ships the developer-agent operating template the loop injects into every dispatch (no custom agent types required). |
 | [Upgrade](./objectstack-upgrade/SKILL.md) | `process` | Upgrade an ObjectStack metadata project across a protocol major — run the deterministic conversion chain, then work the semantic residue the chain cannot express (intent choices, custom code on retired APIs, stale prose) to a decision with the project's owner, and finish with a green `validate` plus a human-readable upgrade report. |
@@ -52,7 +52,7 @@ apps too).
 ```
 skills/<skill-name>/
 ├── SKILL.md              # frontmatter + prose guide
-├── references/
+├── references/           # may also hold hand-authored reference files linked from SKILL.md
 │   └── _index.md         # generated pointers into @objectstack/spec sources
 │                         # (pnpm --filter @objectstack/spec gen:skill-refs — do not hand-edit)
 ├── rules/                # (optional) detailed per-topic rule files linked from SKILL.md
@@ -84,7 +84,8 @@ carries `SKILL.md` alone — `gen:skill-refs` only visits skills listed in its
 - **Short object names** (`account`, `task`); no `namespace`, no `tableName`.
 - **CEL for all expressions** — predicates, conditions, schedules. Use the
   `F\`\``, `P\`\``, `cel\`\``, `cron\`\``, `tmpl\`\`` tagged templates from
-  `@objectstack/spec`. Legacy `OLD` / `NEW` evaluate to `null` since M9.5.
+  `@objectstack/spec`. Legacy `OLD` / `NEW` are not CEL — use
+  `previous.` / `record.`.
 - **v5.0 vocabulary** — runtime workspace is `environment`, not `project`.
 - **Singular metadata type names** (`agent`, `view`, `flow`, …); REST resource
   collections are plural (`/api/v1/ai/agents`).
@@ -102,10 +103,14 @@ A few common decision points where the right skill isn't obvious:
   **automation** (screen flows). Static record / list / dashboard surfaces are
   **ui**.
 - **Any CEL expression** — load **objectstack-formula** alongside the host
-  skill (data validations, automation guards, UI visibility, AI tool params).
+  skill (data validations, automation guards, UI visibility).
 - **Kernel / plugin events vs. data lifecycle** — `PluginContext` lifecycle and
   `EventBus` belong to **objectstack-platform**; record-level hooks belong to
   **objectstack-data**.
+- **Labels vs. bundles** — a `label` you want translated is **objectstack-i18n**.
+- **Upgrade vs. platform** — a protocol-major move is **objectstack-upgrade**.
+- **Rendering this metadata** — the consuming UI is
+  [objectui `skills/objectui/`](https://github.com/objectstack-ai/objectui).
 
 ---
 

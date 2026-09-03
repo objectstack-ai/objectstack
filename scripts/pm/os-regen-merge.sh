@@ -240,12 +240,77 @@ mode_run() {
   main_edited="$NL$(git diff --name-only "$merge_base" origin/main -- "${regen_paths[@]}")$NL"
 
   echo "→ step 1: git merge origin/main"
-  if ! git merge --no-edit origin/main; then
-    echo "✗ merge stopped on conflicts in NON-generated files — resolve those by hand" >&2
-    echo "  (semantic merge, both intents stack), then rerun this script to redo the" >&2
-    echo "  generated-artifact half. ⛔ Do not resolve generated files textually." >&2
+  # Captured rather than left to inherit the terminal, so a conflict can be
+  # classified below AND the driver's own notice (printed on stderr, for any
+  # os-regen path it declined to defer) is still shown to the operator instead
+  # of scrolling past unread.
+  merge_log="$(mktemp "${TMPDIR:-/tmp}/os-regen-merge-log.XXXXXX")"
+  if ! git merge --no-edit origin/main >"$merge_log" 2>&1; then
+    cat "$merge_log" >&2
+    rm -f "$merge_log"
+
+    # Partition the conflicted set against the os-regen path list already read
+    # above (:216-226) — reusing it as a `git diff` pathspec is the same trick
+    # step 2 already relies on for `branch_edited`/`main_edited` (:239-240), so
+    # this needs no glob-matching code of its own and no new inputs.
+    #
+    # Any conflict on a regen path is necessarily one the merge driver declined
+    # to defer (see git-merge-regen.mjs: a non-`mixed` row always resolves with
+    # exit 0, no markers — only a MIXED row whose deferral would be unsafe falls
+    # through to a real text merge, which is what can conflict here). So a
+    # regen-path conflict always means: hand-resolve the prose, never "take one
+    # side" — the opposite of what a wholly-generated path would call for, and
+    # the reason the blanket "do not resolve generated files textually" line
+    # below is wrong, and suppressed, whenever a regen path shows up here.
+    all_conflicts=()
+    conflict_line=''
+    while IFS= read -r conflict_line; do
+      if [[ -n "$conflict_line" ]]; then all_conflicts+=("$conflict_line"); fi
+    done < <(git diff --name-only --diff-filter=U)
+    regen_conflicts=()
+    regen_conflict_line=''
+    while IFS= read -r regen_conflict_line; do
+      if [[ -n "$regen_conflict_line" ]]; then regen_conflicts+=("$regen_conflict_line"); fi
+    done < <(git diff --name-only --diff-filter=U -- "${regen_paths[@]}")
+
+    NL='
+'
+    regen_set="$NL"
+    for c in "${regen_conflicts[@]+"${regen_conflicts[@]}"}"; do regen_set="$regen_set$c$NL"; done
+    non_regen_conflicts=()
+    for c in "${all_conflicts[@]+"${all_conflicts[@]}"}"; do
+      case "$regen_set" in
+        *"$NL$c$NL"*) ;;
+        *) non_regen_conflicts+=("$c") ;;
+      esac
+    done
+
+    if [ "${#regen_conflicts[@]}" -eq 0 ]; then
+      echo "✗ merge stopped on conflicts in NON-generated files — resolve those by hand" >&2
+      echo "  (semantic merge, both intents stack), then rerun this script to redo the" >&2
+      echo "  generated-artifact half. ⛔ Do not resolve generated files textually." >&2
+    elif [ "${#non_regen_conflicts[@]}" -eq 0 ]; then
+      echo "✗ merge stopped on conflicts in GENERATED files the driver declined to defer" >&2
+      echo "  (MIXED — a generated half plus hand-written prose; see its notice above)." >&2
+      echo "  Hand-resolve the prose; the anchor numbers do not matter here — take" >&2
+      echo "  either side of them, then run the regeneration command the driver printed" >&2
+      echo "  above, then continue with step 4:" >&2
+      printf '    %s\n' "${regen_conflicts[@]}" >&2
+    else
+      echo "✗ merge stopped on conflicts in BOTH non-generated and generated files:" >&2
+      echo "  non-generated (resolve by hand — semantic merge, both intents stack):" >&2
+      printf '    %s\n' "${non_regen_conflicts[@]}" >&2
+      echo "  generated, MIXED — the driver declined to defer these (see its notice" >&2
+      echo "  above). Hand-resolve the prose; the anchor numbers do not matter here —" >&2
+      echo "  take either side of them, then run the regeneration command the driver" >&2
+      echo "  printed above:" >&2
+      printf '    %s\n' "${regen_conflicts[@]}" >&2
+      echo "  Resolve both, then rerun this script to redo the generated-artifact half." >&2
+    fi
     exit 1
   fi
+  cat "$merge_log"
+  rm -f "$merge_log"
 
   echo "→ step 2: taking origin/main's side of the generated artifacts main moved"
   # ⚠️ bash 3.2 expands `"${arr[@]}"` of an EMPTY array as an unbound variable
@@ -403,6 +468,96 @@ st_fixture() {
   git fetch -q origin main
 }
 
+# Build a fixture repo in $1 whose only conflict(s) are a REAL text-merge
+# conflict on a `merge=os-regen` path — the MIXED shape `git-merge-regen.mjs`
+# takes when a deferral would be unsafe (:14064 in the driver's own header),
+# not the clean silent-deferral shape `st_fixture` above exercises. $2, if
+# `both`, also gives the branch a conflicting NON-regen edit, for the "both
+# classes present" case.
+#
+# The driver here is a tiny fixture script, not `true`: it runs
+# `git merge-file` (a REAL 3-way text merge) and, on conflict, prints a
+# driver-shaped remedy naming a fixture regen command before exiting
+# non-zero — the same move the real driver makes for an unsafe MIXED row
+# (`git-merge-regen.mjs`'s `textMergeInPlace` + its `NOT deferred` notice).
+# Kept as a separate file (not inlined in .gitattributes config) so its exit
+# code — not `true`'s constant 0 — is what git sees for this path.
+st_fixture_regen_conflict() {
+  fx="$1"
+  both="${2:-}"
+  rm -rf "$fx"
+  mkdir -p "$fx"
+
+  cat > "$fx/driver.sh" <<'DRIVER'
+#!/usr/bin/env bash
+set -uo pipefail
+ancestor="$1"; ours="$2"; theirs="$3"; path="$4"
+git merge-file "$ours" "$ancestor" "$theirs"
+rc=$?
+if [ "$rc" -eq 0 ]; then
+  exit 0
+fi
+{
+  printf '  \xe2\x9a\xa0 %s\n' "$path"
+  printf '     NOT deferred: the incoming side carries hand-written changes that no regeneration can restore.\n'
+  printf '     This file is MIXED — a generated half plus hand-written prose — so keeping one\n'
+  printf "     side whole would delete the other side's prose with no conflict and no red gate.\n"
+  printf '     Text-merged instead, and it CONFLICTS. Resolve the prose by hand; the anchor\n'
+  printf '     numbers do not matter here — take either side and then run:\n'
+  printf '       pnpm gen:fixture-mixed\n'
+  printf '     which re-derives them from the merged tree.\n'
+} >&2
+exit "$rc"
+DRIVER
+  chmod +x "$fx/driver.sh"
+
+  git init -q --bare -b main "$fx/origin.git"
+  git clone -q "$fx/origin.git" "$fx/work" 2>/dev/null
+  cd "$fx/work"
+  git config user.email selftest@example.invalid
+  git config user.name os-regen-merge-selftest
+  git config commit.gpgsign false
+  git config merge.os-regen.name 'os-regen (fixture: real text merge, conflicts on MIXED prose)'
+  git config merge.os-regen.driver "bash $fx/driver.sh %O %A %B %P"
+
+  mkdir -p gen src
+  printf 'gen/**   merge=os-regen\n' > .gitattributes
+  printf 'hand-written prose: original\n' > gen/mixed.txt
+  printf 'source v1\n' > src/app.txt
+  if [ "$both" = both ]; then
+    printf 'prose v1\n' > src/prose.txt
+  fi
+  git add -A
+  git commit -qm seed
+  git push -q origin main
+
+  git checkout -q -b feature
+  printf 'hand-written prose: BRANCH\n' > gen/mixed.txt
+  if [ "$both" = both ]; then
+    printf 'prose BRANCH\n' > src/prose.txt
+  fi
+  git add -A
+  git commit -qm 'feature: hand-edit the MIXED prose'
+
+  git worktree add -q "$fx/mainwt" main
+  (
+    cd "$fx/mainwt"
+    git config user.email selftest@example.invalid
+    git config user.name os-regen-merge-selftest
+    git config commit.gpgsign false
+    printf 'hand-written prose: MAIN\n' > gen/mixed.txt
+    if [ "$both" = both ]; then
+      printf 'prose MAIN\n' > src/prose.txt
+    fi
+    git add -A
+    git commit -qm 'main: also hand-edit the MIXED prose'
+    git push -q origin main
+  )
+  cd "$fx/work"
+  git worktree remove "$fx/mainwt"
+  git fetch -q origin main
+}
+
 mode_self_test() {
   tmp="$(mktemp -d "${TMPDIR:-/tmp}/os-regen-merge-selftest.XXXXXX")"
   trap 'rm -rf "$tmp"' EXIT INT TERM
@@ -507,6 +662,79 @@ mode_self_test() {
   st_case 'an empty os-regen path list is refused' "$rc" 1
   st_case 'and refuses to guess' \
     "$(printf '%s' "$out" | grep -c 'refusing to guess' || true)" 1
+  cd "$here"
+
+  # --- 6. a MIXED-conflict on a regen path ONLY. The trap this closes: step 1
+  #        must not tell the operator these conflicts are "in NON-generated
+  #        files" (they are not), and must not tell them to leave the file
+  #        alone (⛔ "do not resolve generated files textually") — the driver
+  #        has just asked them to hand-resolve exactly this one.
+  st_fixture_regen_conflict "$tmp/f"
+  out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?
+  st_case 'a regen-only MIXED conflict fails the run' "$rc" 1
+  st_case 'and does NOT call it a non-generated-file conflict' \
+    "$(printf '%s' "$out" | grep -c 'conflicts in NON-generated files' || true)" 0
+  # THE ABSENCE ASSERTION THAT MATTERS (#14671): this exact line is correct
+  # advice for a deferrable regen path and wrong, silently-destructive advice
+  # for a MIXED one — see the driver's own notice, echoed a few lines above in
+  # the same run's output, saying the opposite.
+  st_case 'and does NOT forbid textual resolution of the generated file' \
+    "$(printf '%s' "$out" | grep -c 'Do not resolve generated files textually' || true)" 0
+  st_case 'and DOES say the file needs hand-resolving' \
+    "$(printf '%s' "$out" | grep -c 'Hand-resolve the prose' || true)" 1
+  st_case 'and names the conflicted regen path' \
+    "$(printf '%s' "$out" | grep -q 'gen/mixed.txt' && echo present || echo absent)" present
+  st_case "and the driver's own notice is still shown" \
+    "$(printf '%s' "$out" | grep -c 'NOT deferred: the incoming side carries hand-written changes' || true)" 1
+  st_case "and the driver's regeneration command is still shown" \
+    "$(printf '%s' "$out" | grep -c 'pnpm gen:fixture-mixed' || true)" 1
+  cd "$here"
+
+  # --- 6b. THE DISCRIMINATING MUTATION. A self-test that can never fail is
+  #         worse than none: prove the absence assertion above actually
+  #         distinguishes the fixed script from the original bug by
+  #         reintroducing the old unconditional line and watching case 6 red.
+  mutated="$tmp/mutated-os-regen-merge.sh"
+  # Literal (non-regex) replacement via perl's \Q..\E, keyed off the anchor
+  # line so this stays robust to reflow — same dependency scripts/pm/ already
+  # takes for something bash 3.2 cannot do (os-verify-lock.sh's Time::HiRes).
+  MUT_ANCHOR='echo "✗ merge stopped on conflicts in GENERATED files the driver declined to defer" >&2' \
+  MUT_INSERT='echo "✗ merge stopped on conflicts in NON-generated files — resolve those by hand" >&2
+    echo "  ⛔ Do not resolve generated files textually." >&2' \
+    perl -0777 -pe 's/\Q$ENV{MUT_ANCHOR}\E/$ENV{MUT_INSERT}/' "$SELF" > "$mutated"
+  # Scanned only up to the `--- self-test` marker (the same trick the script's
+  # own step-2-spelling pin uses above) — past that point the phrase also
+  # appears inside THIS self-test's own assertion strings, which the mutation
+  # never touches and which would otherwise inflate the count.
+  st_case 'the mutation anchor was found and replaced (falsifiability check)' \
+    "$(sed -n '1,/^# --- self-test/p' "$mutated" | grep -c 'Do not resolve generated files textually' || true)" 2
+  st_case 'the mutation actually changed the script text' \
+    "$(diff -q "$SELF" "$mutated" >/dev/null 2>&1; echo $?)" 1
+  st_case 'and the mutated script still parses' \
+    "$(bash -n "$mutated" >/dev/null 2>&1; echo $?)" 0
+  st_fixture_regen_conflict "$tmp/f-mutated"
+  mut_out="$(bash "$mutated" 2>&1)" && mut_rc=0 || mut_rc=$?
+  st_case 'mutated: the suppressed line is back (proves the assertion bites)' \
+    "$(printf '%s' "$mut_out" | grep -c 'Do not resolve generated files textually' || true)" 1
+  cd "$here"
+
+  # --- 7. BOTH classes present: a non-regen conflict alongside the regen-path
+  #        MIXED conflict. Each file must be named under its own class, and
+  #        the suppressed line stays suppressed here too — some of the
+  #        generated conflicts in this run DO need hand-resolution, so the
+  #        blanket "do not resolve generated files textually" would be just as
+  #        wrong here as in the regen-only case.
+  st_fixture_regen_conflict "$tmp/g" both
+  out="$(bash "$SELF" 2>&1)" && rc=0 || rc=$?
+  st_case 'a mixed-classes conflict fails the run' "$rc" 1
+  st_case 'and says BOTH classes are present' \
+    "$(printf '%s' "$out" | grep -c 'conflicts in BOTH non-generated and generated files' || true)" 1
+  st_case 'and names the non-generated file' \
+    "$(printf '%s' "$out" | grep -q 'src/prose.txt' && echo present || echo absent)" present
+  st_case 'and names the generated (regen) file' \
+    "$(printf '%s' "$out" | grep -q 'gen/mixed.txt' && echo present || echo absent)" present
+  st_case 'and the suppressed line is absent here too' \
+    "$(printf '%s' "$out" | grep -c 'Do not resolve generated files textually' || true)" 0
   cd "$here"
 
   if [ "$st_fail" -ne 0 ]; then

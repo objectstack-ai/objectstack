@@ -91,8 +91,8 @@
  * the one thing the whole clause-② chain forbids. Same call H31 makes, for the
  * same reason.
  *
- * **It does not read verdict comments, and the PASS half of the recovery rule
- * stays human.** `references/contract-review.md` states the human reading as
+ * **It reads no verdict VALUE, and the PASS half of the recovery rule stays
+ * human.** `references/contract-review.md` states the human reading as
  * 「PASS + 无标 + head 未动 = 已清标非被剥;head 后移或无结论才重挂」. C3
  * mechanizes the second and third conjuncts — 无标, from the labels, and
  * head 未动, from the head commit's date — and deliberately not the first:
@@ -103,6 +103,13 @@
  * the discipline and cleared, and nothing has moved since", NEVER "the review
  * passed". Precondition ① of the landing check is still a human reading a PASS
  * comment on the card.
+ *
+ * ⭐ C4 is the ONE thing this file reads out of a verdict comment, and it is not
+ * the verdict: the `Implemented-by:` / `Reviewed-by:` session-ID pair the
+ * verdict declares about its own AUTHORSHIP. No PASS or FAIL token is read to
+ * reach it, so the boundary above is narrowed by exactly one fact and not
+ * crossed — a self-issued verdict is refused on WHO wrote it, never on what it
+ * concluded, and the row is report-only like every other one here.
  *
  * ## How a COMPLETED review is told from a gate that never ran (#14155)
  *
@@ -156,7 +163,9 @@
  *   0  the pair's clause-② limbs are legible and its carriers agree — which
  *      INCLUDES the completed state: a declared `yes` whose gate was hung on
  *      both carriers, cleared from both, and whose head has not moved since
- *      (#14155). ⚠️ 0 is not "the review passed"; the PASS reading is human and
+ *      (#14155) — and whose governing verdict, if it carries the authorship
+ *      pair at all, was not issued by the session that wrote the diff.
+ *      ⚠️ 0 is not "the review passed"; the PASS reading is human and
  *      is precondition ① of the landing check, not this exit code.
  *   2  also the answer when a C3 candidate's event stream or head commit could
  *      not be read: an unread stream is not a never-hung gate, so it is UNJUDGED
@@ -686,6 +695,206 @@ export function c3DeclaredYesUngated(pair) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The verdict's AUTHORSHIP — the independence clause, given a carrier
+// ---------------------------------------------------------------------------
+
+/**
+ * The discriminator: what makes a comment a contract-review VERDICT.
+ *
+ * Chosen from the live corpus rather than invented — the verdicts on the board
+ * open a fenced block whose first line is `VERDICT: PASS`, alongside
+ * `REVIEWED-HEAD:` and `CLAUSE-2-PATH:`/`CLAUSE-2-CONTENT:`. The key is read the
+ * way `CLAUSE2_KEY_LINE` reads its own: the colon must follow the key, and the
+ * same markdown decoration is tolerated because a seat writes it without meaning
+ * anything by it.
+ *
+ * ⛔ The corpus also supplies the near miss that makes the colon load-bearing:
+ * an os-dev report on the same board writes `` `VERDICT command-exit 0` `` in
+ * prose, repeatedly. A discriminator that merely looked for the WORD would read
+ * a build log as a review verdict; requiring the colon leaves it silent.
+ */
+const VERDICT_MARKER = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?VERDICT`?(?:\*\*)?[ \t]*:/;
+
+/**
+ * The two lines a verdict carries about its own authorship, in the ONE spelling
+ * that counts (maintainer 2026-09-01, verbatim and untranslated: 「同意 A」).
+ *
+ * `Implemented-by:` names the session that produced the diff — read from the
+ * implementation claim, not invented — and `Reviewed-by:` names the session
+ * rendering the verdict. Case-sensitive, exactly like the `Clause-②` key one
+ * section up: this file has one convention for machine spellings and a second
+ * one would be the drift it exists against.
+ */
+export const AUTHORSHIP_KEYS = Object.freeze(['Implemented-by', 'Reviewed-by']);
+
+const AUTHORSHIP_KEY_LINES = new Map(
+  AUTHORSHIP_KEYS.map((key) => [
+    key,
+    new RegExp(`^[ \\t]*(?:>[ \\t]*)?(?:[-*][ \\t]+)?(?:\\*\\*)?\`?${key}\`?(?:\\*\\*)?[ \\t]*:(.*)$`),
+  ]),
+);
+
+/**
+ * The value token — a session ID, read immediately after the colon.
+ *
+ * The same calibration `readValueToken` states for `Clause-②`: the token must be
+ * the FIRST thing after the colon, and what a seat writes after it is their
+ * argument, which this file does not read. Real verdicts wrap the ID in
+ * backticks, so the same decoration is tolerated and nothing else is.
+ */
+function readSessionToken(raw) {
+  const rest = String(raw ?? '').replace(/^[ \t]+/, '');
+  const m = /^(?:\*\*)?(?:`)?[ \t]*(session_[A-Za-z0-9]+)(?![A-Za-z0-9_])/.exec(rest);
+  return m ? m[1] : null;
+}
+
+/**
+ * The authorship pair declared by ONE comment.
+ *
+ * @returns {{ kind: 'pair', implementedBy: string, reviewedBy: string, line: string }
+ *          | { kind: 'malformed', detail: string }
+ *          | { kind: 'legacy' }
+ *          | null}
+ *
+ * Four-valued for the same reason `readClause2Line` is. `null` says the comment
+ * is not a verdict at all; `legacy` says it IS a verdict and carries neither
+ * line — the shape every verdict on the board had before this ruling, and one
+ * that ⛔ must never turn a historic pair red. `malformed` is a carrier that was
+ * STARTED and left unreadable, which is a different fact from never starting it:
+ * a comparison needs two IDs, and half a pair compares to nothing.
+ */
+export function readVerdictAuthorship(text) {
+  const lines = String(text ?? '').split(/\r?\n/);
+  if (!lines.some((line) => VERDICT_MARKER.test(line))) return null;
+
+  const seen = new Map();
+  for (const line of lines) {
+    for (const [key, re] of AUTHORSHIP_KEY_LINES) {
+      if (seen.has(key)) continue;
+      const m = re.exec(line);
+      if (m) seen.set(key, { token: readSessionToken(m[1]), line: quoteLine(line) });
+    }
+  }
+  if (seen.size === 0) return { kind: 'legacy' };
+
+  const missing = AUTHORSHIP_KEYS.filter((key) => !seen.has(key));
+  const unreadable = AUTHORSHIP_KEYS.filter((key) => seen.has(key) && seen.get(key).token === null);
+  if (missing.length > 0 || unreadable.length > 0) {
+    const parts = [];
+    for (const key of missing) parts.push(`no \`${key}:\` line`);
+    for (const key of unreadable) parts.push(`\`${key}:\` carries no readable session ID (${JSON.stringify(seen.get(key).line)})`);
+    return { kind: 'malformed', detail: parts.join('; ') };
+  }
+  return {
+    kind: 'pair',
+    implementedBy: seen.get('Implemented-by').token,
+    reviewedBy: seen.get('Reviewed-by').token,
+    line: seen.get('Reviewed-by').line,
+  };
+}
+
+/**
+ * The authorship state of one CARD's thread, judged on its GOVERNING verdict.
+ *
+ * ⭐ The newest verdict that carries the pair governs, and the choice is
+ * load-bearing rather than tidy: a self-review followed by an independent
+ * re-review is precisely the REMEDY this row asks for, so a rule that judged
+ * every verdict ever posted would leave the remediated pair red on every later
+ * sweep — the exact defect #14155 had to repair in C3, where a row that could
+ * never be cleared made the landing check's own precondition unsatisfiable. A
+ * verdict carrying NEITHER line is not a candidate at all: it is history from
+ * before the carrier existed and cannot be judged, so it neither cleans a pair
+ * nor dirties one.
+ *
+ * @param {{ body?: string, created_at?: string }[]|null} commentRows
+ * @returns {{ state: 'unreadable', reason: string }
+ *          | { state: 'none' }
+ *          | { state: 'independent', implementedBy: string, reviewedBy: string }
+ *          | { state: 'self-review', session: string, at: string, detail: string }
+ *          | { state: 'malformed', at: string, detail: string }}
+ */
+export function cardVerdictAuthorship(commentRows) {
+  if (!Array.isArray(commentRows)) return { state: 'unreadable', reason: 'the comment thread could not be read' };
+
+  const candidates = [];
+  for (const row of commentRows) {
+    const read = readVerdictAuthorship(row?.body);
+    if (read === null || read.kind === 'legacy') continue;
+    const ms = Date.parse(row?.created_at ?? '');
+    // ⛔ An undated candidate is not a droppable row: dropping it would move the
+    // GOVERNING verdict, which is the whole reading. Refuse, exactly as
+    // `carrierGateHistory` refuses an undated gate event.
+    if (!Number.isFinite(ms)) return { state: 'unreadable', reason: 'a contract-review verdict comment carries no readable date' };
+    candidates.push({ read, at: String(row.created_at), ms });
+  }
+  if (candidates.length === 0) return { state: 'none' };
+
+  candidates.sort((a, b) => a.ms - b.ms);
+  const governing = candidates[candidates.length - 1];
+  if (governing.read.kind === 'malformed') {
+    return { state: 'malformed', at: governing.at, detail: governing.read.detail };
+  }
+  const { implementedBy, reviewedBy } = governing.read;
+  if (implementedBy !== reviewedBy) return { state: 'independent', implementedBy, reviewedBy };
+  return { state: 'self-review', session: implementedBy, at: governing.at, detail: governing.read.line };
+}
+
+/**
+ * C4 — the governing contract-review verdict reviewed its own author's diff.
+ *
+ * ⭐ The independence clause, which until now lived in prose alone. The in-seat
+ * review path is a COMPENSATING control for dispatching below the review tier,
+ * and every argument for it assumes the reviewer did not write the diff:
+ * `references/contract-review.md` scopes it to 「低档实现者的契约增量,非自身
+ * 产物」 and its isolation sub-rule refuses to feed an isolated reviewer even
+ * 「派发席自己的结论(污染即失独立性)」. A verdict whose author wrote the diff
+ * is past the far end of that scale, and to every downstream mechanism — the
+ * enqueue gate, the landing check's precondition ①, the audit sweep — it is
+ * indistinguishable from one that passed an independent review.
+ *
+ * The reading costs nothing new: the card's comment thread is already fetched
+ * for the declaration limb, so no pair owes an extra request for this row.
+ */
+export function c4VerdictSelfReview(pair) {
+  const v = cardVerdictAuthorship(pair?.cardComments ?? null);
+  if (v.state === 'unreadable') return null; // UNJUDGED by the caller — never silently clean.
+  if (v.state === 'none' || v.state === 'independent') return null;
+
+  const head = `card #${pair?.card} (delivering open PR #${pair?.pr}${pair?.draft ? ' (draft)' : ''})`;
+  const fixed =
+    'the fixed spelling is `Implemented-by: session_…` (the session that produced the diff, read ' +
+    'from the implementation claim) and `Reviewed-by: session_…` (the session rendering this ' +
+    'verdict), each token immediately after its colon, the seat\'s reasoning free to follow it';
+  const legacyIsSilent =
+    '⚠️ A verdict carrying NEITHER line is a LEGACY verdict and is silent here — it predates the ' +
+    'carrier and ⛔ is never turned red by its absence.';
+
+  if (v.state === 'malformed') {
+    return (
+      `${head} — its governing contract-review verdict (${v.at}) carries the authorship pair HALF ` +
+      `WRITTEN: ${v.detail}. Both lines or neither — half a pair compares to nothing, so there is ` +
+      `no reading of independence here, and a started carrier left unreadable is a different fact ` +
+      `from one never started. ${fixed}. ${legacyIsSilent} ${NEVER_WRITES}`
+    );
+  }
+  return (
+    `${head} — its governing contract-review verdict (${v.at}) is a SELF-REVIEW: \`Implemented-by:\` ` +
+    `and \`Reviewed-by:\` name the SAME session \`${v.session}\` (${JSON.stringify(v.detail)}). The ` +
+    'in-seat review is a COMPENSATING control for dispatching below the review tier, and every ' +
+    'argument for it assumes the reviewer did not write the diff: the clause scopes it to 「低档实现' +
+    '者的契约增量,非自身产物」 and its isolation sub-rule will not feed a reviewer even 「派发席自己' +
+    '的结论(污染即失独立性)」. So this verdict does NOT count as an independent review, and ⛔ no ' +
+    'downstream mechanism may read it as one — not the enqueue gate, not the landing check\'s ' +
+    'precondition ①, not the audit sweep. Remedy: a seat that did NOT write the diff renders a ' +
+    'second verdict carrying its own pair; the NEWEST verdict carrying the lines governs, so an ' +
+    'independent re-review CLEARS this row rather than leaving the pair red forever. ⚠️ Boundary: ' +
+    'both IDs are SELF-DECLARED by the verdict comment — this file compares them to each other and ' +
+    'cross-checks neither against the implementation claim, so the row catches the honest ' +
+    `self-review, not a forged pair. ${NEVER_WRITES}`
+  );
+}
+
 /** Every row for one pair, in reporting order. */
 export function pairRows(pair) {
   const rows = [];
@@ -695,6 +904,8 @@ export function pairRows(pair) {
   if (decl) rows.push({ code: 'C2', text: decl });
   const ungated = c3DeclaredYesUngated(pair);
   if (ungated) rows.push({ code: 'C3', text: ungated });
+  const selfReview = c4VerdictSelfReview(pair);
+  if (selfReview) rows.push({ code: 'C4', text: selfReview });
   return rows;
 }
 
@@ -716,6 +927,13 @@ export function pairUnjudged(pair) {
   if (gaps.length === 0) {
     const binding = gateBindingState(pair);
     if (binding.state === 'unreadable') gaps.push(...binding.gaps);
+  }
+  // C4's own #4690 half: a verdict this file could not ORDER is not a verdict
+  // it read as independent. Reached only once the thread itself read, so the
+  // unreadable-thread gap above is never doubled.
+  if (gaps.length === 0) {
+    const authorship = cardVerdictAuthorship(pair?.cardComments ?? null);
+    if (authorship.state === 'unreadable') gaps.push(`card #${pair?.card}'s verdict authorship (${authorship.reason})`);
   }
   if (gaps.length === 0) return null;
   return (
@@ -1190,6 +1408,82 @@ export function selfTest() {
   t('…and a pair that owes nothing is never UNJUDGED for a stream it was never going to be asked for', pairUnjudged(pair({ cardComments: [CLAIM('Clause-②: no')] })) === null);
   t('the page cap exists, because the stream arrives OLDEST FIRST and a short read loses the removal', Number.isInteger(EVENT_PAGE_CAP) && EVENT_PAGE_CAP > 0);
 
+  // -- C4: the independence clause's carrier (maintainer 2026-09-01 「同意 A」) --
+  // The fixtures are the measured verdict shape, not an invented one: the live
+  // verdicts open a fenced block whose first line is `VERDICT: PASS`, with
+  // `REVIEWED-HEAD:` beside it, and the session IDs are the two real ones from
+  // the round that filed this row — the seat that wrote the diff, and the
+  // independently summoned seat that re-reviewed it.
+  const IMPL_SESSION = 'session_015adLit3ZYASJiXwxKG78Wi';
+  const REVIEW_SESSION = 'session_01489YWhZEoHT9oXshiyywQy';
+  const VERDICT = (pairLines, at = '2026-09-01T11:21:18Z') => ({
+    created_at: at,
+    body: ['契约复审(总监席)', '', '```', 'VERDICT: PASS', 'REVIEWED-HEAD: a16839529 (PR #14191)', ...pairLines, 'FINDINGS: 无阻断。', '```'].join('\n'),
+  });
+  const SELF_PAIR = [`Implemented-by: \`${IMPL_SESSION}\``, `Reviewed-by: \`${IMPL_SESSION}\``];
+  const INDEPENDENT_PAIR = [`Implemented-by: \`${IMPL_SESSION}\``, `Reviewed-by: \`${REVIEW_SESSION}\``];
+  // A declared `no` deliberately: C4 is independent of the declaration limb, and
+  // this base isolates it from C3's candidate shape so an event-stream gap
+  // cannot stand in for the accounting under test. The `yes` direction is pinned
+  // by the reporting-order case at the end of this section.
+  const reviewed = (rows) => pair({ cardComments: [CLAIM('Clause-②: no'), ...rows] });
+
+  // the discriminator, and the near miss the same board supplies
+  t('a fenced `VERDICT:` line makes a comment a verdict — the measured shape', readVerdictAuthorship(VERDICT(SELF_PAIR).body)?.kind === 'pair');
+  t('⛔ the WORD alone is not the discriminator: a build log writing `VERDICT command-exit 0` is not a verdict', readVerdictAuthorship('`VERDICT command-exit 0`, **71/71 tasks successful**, zero tracked-file churn afterwards.') === null);
+  t('…nor is the same phrase introduced by prose', readVerdictAuthorship('all `VERDICT command-exit 0`:') === null);
+  t('⛔ the two lines OUTSIDE a verdict comment are not a verdict — a claim carrying them reads null', readVerdictAuthorship(`Claim: x\nImplemented-by: \`${IMPL_SESSION}\`\nReviewed-by: \`${REVIEW_SESSION}\``) === null);
+
+  // the four mandated states of one verdict
+  t('a SAME-session pair reads as a pair, with both IDs kept', readVerdictAuthorship(VERDICT(SELF_PAIR).body)?.implementedBy === IMPL_SESSION && readVerdictAuthorship(VERDICT(SELF_PAIR).body)?.reviewedBy === IMPL_SESSION);
+  t('a DISTINCT-session pair reads as a pair too — the comparison is the row\'s job, not the reader\'s', readVerdictAuthorship(VERDICT(INDEPENDENT_PAIR).body)?.reviewedBy === REVIEW_SESSION);
+  t('⭐ a LEGACY verdict carrying neither line reads `legacy`, never malformed', readVerdictAuthorship(VERDICT([]).body)?.kind === 'legacy');
+  t('ONE line alone is MALFORMED — half a pair compares to nothing', readVerdictAuthorship(VERDICT([`Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.kind === 'malformed');
+  t('…and the row can say WHICH line is missing', says(readVerdictAuthorship(VERDICT([`Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.detail, 'Implemented-by'));
+  t('a key with no readable session ID is MALFORMED, not a reading', readVerdictAuthorship(VERDICT(['Implemented-by: the dispatching seat', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.kind === 'malformed');
+  t('…and says so rather than blaming the absent line', says(readVerdictAuthorship(VERDICT(['Implemented-by: the dispatching seat', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.detail, 'no readable session ID'));
+
+  // the spelling, mirroring the Clause-② reader exactly
+  t('the token may be followed by the seat\'s reasoning — the same calibration Clause-② uses', readVerdictAuthorship(VERDICT([`Implemented-by: ${IMPL_SESSION} (implementation claim, 09:24Z)`, `Reviewed-by: ${REVIEW_SESSION}`]).body)?.implementedBy === IMPL_SESSION);
+  t('decoration around the keys is tolerated — bullets, bold, backticks', readVerdictAuthorship(VERDICT([`- **\`Implemented-by\`**: \`${IMPL_SESSION}\``, `- **\`Reviewed-by\`**: \`${REVIEW_SESSION}\``]).body)?.kind === 'pair');
+  t('⛔ a different CASE is a different key — one convention for machine spellings, not two', readVerdictAuthorship(VERDICT([`IMPLEMENTED-BY: \`${IMPL_SESSION}\``, `REVIEWED-BY: \`${IMPL_SESSION}\``]).body)?.kind === 'legacy');
+  t('⛔ a bare word after the colon is not a session ID', readVerdictAuthorship(VERDICT(['Implemented-by: me', 'Reviewed-by: me']).body)?.kind === 'malformed');
+
+  // the row itself — the four mandated outcomes
+  const selfRow = c4VerdictSelfReview(reviewed([VERDICT(SELF_PAIR)]));
+  t('⭐ a same-session verdict FIRES C4', typeof selfRow === 'string');
+  t('…and names it a SELF-REVIEW in as many words', says(selfRow, 'SELF-REVIEW'));
+  t('…and quotes the session both lines name', says(selfRow, IMPL_SESSION));
+  t('…and quotes the clause it is the carrier for', says(selfRow, '非自身产物') && says(selfRow, '污染即失独立性'));
+  t('…and states that no downstream mechanism may read it as an independent review', says(selfRow, 'does NOT count as an independent review'));
+  t('…and gives the remedy, which is another seat\'s verdict — never this script\'s write', says(selfRow, 'did NOT write the diff') && says(selfRow, '自查放行'));
+  t('…and names the residual hole: both IDs are SELF-DECLARED', says(selfRow, 'SELF-DECLARED'));
+  t('⭐ a distinct-session verdict produces NO row — that is the shape the clause asks for', c4VerdictSelfReview(reviewed([VERDICT(INDEPENDENT_PAIR)])) === null);
+  t('⭐ a LEGACY verdict with neither line is SILENT — absence never turns a historic pair red', c4VerdictSelfReview(reviewed([VERDICT([])])) === null);
+  t('…and so is a thread with no verdict at all', c4VerdictSelfReview(pair({ cardComments: [CLAIM('Clause-②: yes')] })) === null);
+  const halfRow4 = c4VerdictSelfReview(reviewed([VERDICT([`Reviewed-by: \`${REVIEW_SESSION}\``])]));
+  t('⭐ a ONE-LINE-only verdict is its own reportable malformed state', typeof halfRow4 === 'string' && says(halfRow4, 'HALF'));
+  t('…and quotes the fixed spelling so the remedy is executable', says(halfRow4, 'Implemented-by: session_') && says(halfRow4, 'Reviewed-by: session_'));
+  t('…and says in the same breath that a legacy verdict is NOT this state', says(halfRow4, 'LEGACY') && says(halfRow4, 'never turned red'));
+  t('C4 never prescribes a write from this script either', says(halfRow4, '自查放行'));
+
+  // the governing verdict — why the newest one carrying the pair decides
+  t('⭐ a self-review followed by an INDEPENDENT re-review reads clean — the remedy clears the row', c4VerdictSelfReview(reviewed([VERDICT(SELF_PAIR, '2026-09-01T11:21:18Z'), VERDICT(INDEPENDENT_PAIR, '2026-09-01T12:56:27Z')])) === null);
+  t('…and the reverse order still fires, so a later self-review is not hidden by an earlier clean one', typeof c4VerdictSelfReview(reviewed([VERDICT(INDEPENDENT_PAIR, '2026-09-01T09:00:00Z'), VERDICT(SELF_PAIR, '2026-09-01T12:56:27Z')])) === 'string');
+  t('…and arrival order does not decide it — the reader sorts', cardVerdictAuthorship([VERDICT(INDEPENDENT_PAIR, '2026-09-01T12:56:27Z'), VERDICT(SELF_PAIR, '2026-09-01T11:21:18Z')]).state === 'independent');
+  t('a LEGACY verdict posted after a self-review does not clean it — it is not a candidate at all', cardVerdictAuthorship([VERDICT(SELF_PAIR, '2026-09-01T11:21:18Z'), VERDICT([], '2026-09-01T13:00:00Z')]).state === 'self-review');
+
+  // #4690, C4's half: unread is never clean
+  t('an UNREADABLE thread produces no C4 row — it is UNJUDGED instead', c4VerdictSelfReview(pair({ cardComments: null })) === null);
+  t('an UNDATED verdict refuses the ordering rather than guessing it', cardVerdictAuthorship([VERDICT(SELF_PAIR, null)]).state === 'unreadable');
+  t('…and the unjudged accounting names it, so the pair cannot render as clean', says(pairUnjudged(reviewed([VERDICT(SELF_PAIR, null)])), 'verdict authorship'));
+  t('…while a dated, judged verdict adds no gap of its own', pairUnjudged(reviewed([VERDICT(INDEPENDENT_PAIR)])) === null);
+  t('C4 costs no extra request — it reads the thread C2 already fetched', needsGateHistory(reviewed([VERDICT(SELF_PAIR)])) === false);
+
+  // the reporting order, and the rows that were already there
+  t('C4 reports AFTER the three existing rows, and never displaces one', pairRows(pair({ prLabels: [L], cardLabels: [], cardComments: [CLAIM('Clause-②: yes'), VERDICT(SELF_PAIR)] })).map((r) => r.code).join(',') === 'C1,C4');
+  t('…and a self-reviewed pair is adverse even when every carrier reading is clean', pairRows(reviewed([VERDICT(SELF_PAIR)])).map((r) => r.code).join(',') === 'C4');
+
   // -- the #13910 specimen, end to end ---------------------------------------
   const specimen = pair({ pr: 13910, card: 13476, prLabels: [], cardLabels: [L], cardComments: [CLAIM('Domain: `domain:engine`')] });
   const specimenRows = pairRows(specimen).map((r) => r.code);
@@ -1217,7 +1511,8 @@ export function selfTest() {
   console.log(
     `✓ check-clause2-carriers self-test: ${cases.length} cases pass (fixed-spelling reader, the ` +
       'four declaration states, the 2026-08-31 seven-pair replay, the four gate-binding states ' +
-      'replayed from the 2026-09-01 clear, and the exit register).',
+      'replayed from the 2026-09-01 clear, the verdict-authorship pair and its legacy silence, ' +
+      'and the exit register).',
   );
   return 0;
 }

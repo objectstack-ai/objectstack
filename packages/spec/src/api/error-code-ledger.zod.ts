@@ -535,6 +535,19 @@ export const ERROR_CODE_LEDGER = {
     // been written (`TransactionUnsupportedError`, `transaction-errors.ts`;
     // ADR-0119 D1/D4 fail-closed posture). Same #8087-gate family.
     'ERR_TRANSACTION_UNSUPPORTED',
+    // [#14099] a `multi: true` update whose per-row `beforeUpdate` dispatches
+    // assigned DIFFERENT sets of payload keys — a transition stamp
+    // (`completed_at` on the move into `done`) is the measured shape. One `SET`
+    // clause serves N rows (ADR-0058 Addendum II D3), so the engine refuses the
+    // batch whole, before any write, instead of applying one row's derived
+    // value to every matched row. Registered rather than left as an `ERR_`
+    // operational code precisely because the prescription is the application's
+    // to take: it branches on this to switch to a per-row `ctx.api` write or
+    // by-id updates. Not a VALIDATION_ERROR synonym — the payload and the
+    // predicate are both valid; the batch SHAPE cannot carry a per-row
+    // decision. `MultiUpdateHookKeyDivergenceError`,
+    // `multi-update-hook-key-divergence.ts`.
+    'MULTI_UPDATE_HOOK_KEY_DIVERGENCE',
     // [#11142/#11230] a by-id update carried an `options.where.id` that is not
     // the bound payload `data.id` — a truthy scalar naming a DIFFERENT row
     // (#11142), or a non-scalar predicate over a row SET (#11230, which also
