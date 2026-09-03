@@ -62,7 +62,7 @@ const result = AIChatWindowProps.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional (default: `"script"`) | Action functionality type |
+| **type** | `Enum<'script' \| 'url' \| 'modal' \| 'flow' \| 'api' \| 'form'>` | optional (default: `"script"`) | Action functionality type — the dispatch route. The declarative single-record field write is not a type: it is `operation: 'update'` + `patch` on the default `script` route. |
 | **name** | `string` | optional | Machine name (lowercase snake_case) |
 | **label** | `string \| Record<string, string>` | optional | Display label |
 | **target** | `string` | optional | URL, Script Name, Flow ID, or API Endpoint. Supports $`{param.X}` and $`{ctx.X}` interpolation. |
