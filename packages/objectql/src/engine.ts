@@ -136,7 +136,12 @@ import {
 } from './tenancy/system-write-organization.js';
 // [#13491] The per-object tenancy inventory that replaced the blanket
 // namespace exemption — the ONE reading both narrowed gates consult.
-import { isPlatformObjectOutOfTenantAuditScope } from './tenancy/platform-object-tenancy.js';
+import {
+  assertOrgLessWriteDeclarationAdmitted,
+  isPlatformObjectOutOfTenantAuditScope,
+} from './tenancy/platform-object-tenancy.js';
+import type { OrgLessWriteDeclarationOptions } from './tenancy/orgless-write-declaration.js';
+import { readOrgLessWriteDeclaration } from './tenancy/orgless-write-declaration.js';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { normalizeTenancyPosture, type TenancyPosture } from '@objectstack/spec/security';
 
@@ -3940,15 +3945,39 @@ export class ObjectQL implements IObjectQLEngine {
    * the module header for why each is outside the rule by construction rather
    * than by exemption. They are ordered cheapest-first, so an ordinary write
    * pays two property reads and a regexp.
+   *
+   * [#13636] `declaredOrgLess` is the write's `orgLessWrite` option — the
+   * explicit "these rows are legitimately org-less" declaration the 2026-08-31
+   * ruling (决裁批 #17, direction B) added so that ONE `NULL` stops meaning both
+   * "deliberate" and "bug". See `tenancy/orgless-write-declaration.ts`.
    */
   private async resolveSystemInsertOrganization(
     object: string,
     execCtx: ExecutionContext | undefined,
     rows: readonly Record<string, unknown>[],
+    declaredOrgLess?: unknown,
   ): Promise<string | undefined> {
+    // [#13636] The declaration is validated FIRST — ahead of every early return
+    // below, and on EVERY object rather than only the conditional ones.
+    //
+    // ⚠️ Placement is the load-bearing part, not an ordering preference. Each
+    // early return below is a population this resolver does not judge; if the
+    // check sat after them, a declaration on any of those objects would be
+    // silently ignored, and an option with a silently-ignored spelling is the
+    // 「静默可选标记」 the ruling disqualified by name — 「那只是给旁路换名」.
+    // Here, every spelling of the option either names an adjudicated population
+    // or throws. An ordinary write pays one `undefined` comparison for it.
+    const orgLessDeclaration = assertOrgLessWriteDeclarationAdmitted(object, declaredOrgLess);
     // Already carrying an organization on the context — a session write, or a
     // system write that threaded one. Nothing to resolve; this is the shape the
     // ruling asks every system write to reach.
+    //
+    // A declaration is not contradicted by this branch and does not refuse it:
+    // it describes the rows this write MAY land org-less, and a write that
+    // carries an organization simply never lands one. Keeping the two
+    // independent is what lets a writer state the claim once, at the call site,
+    // instead of duplicating the engine's own org-less test — which is what
+    // makes the declaration reviewable and countable where it is written.
     if (carriesOrganization(execCtx?.tenantId)) return undefined;
     // [#13491] Platform-namespace objects are excluded PER OBJECT, not
     // wholesale. The 2026-08-31 ruling withdrew the blanket
@@ -3972,6 +4001,17 @@ export class ObjectQL implements IObjectQLEngine {
     // stamped resolves nothing — and a batch where some are not is decided by
     // the ones that are not.
     if (rows.every((row) => carriesOrganization(row?.[tenantField]))) return undefined;
+    // [#13636] Everything from here down is a row that WILL land org-less. An
+    // admitted declaration says which adjudicated population it belongs to, so
+    // there is nothing to derive and nothing to refuse — this is the ruled
+    // env-level / untenanted-subject row, not a missing stamp.
+    //
+    // Reached only after the object has been admitted as `conditional`
+    // (`isPlatformObjectOutOfTenantAuditScope` above lets it through) AND the
+    // declaration has been checked against the ledger, so the two halves of the
+    // ruling's discrimination meet exactly here: declared ⇒ deliberate,
+    // undeclared ⇒ the derive-or-refuse decision #8844 already owns.
+    if (orgLessDeclaration !== undefined) return undefined;
 
     const posture = this.resolveEnginePosture();
     const decision = await resolveSystemWriteOrganization({
@@ -9639,7 +9679,7 @@ export class ObjectQL implements IObjectQLEngine {
    * says something `DUPLICATE_RECORD` cannot ("re-seeded, re-issued, still
    * refused"). It carries the driver error as `cause` exactly as before.
    */
-  async insert(object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<any> {
+  async insert(object: string, data: any | any[], options?: DataEngineInsertOptions & WriteObservabilityOptions & OrgLessWriteDeclarationOptions): Promise<any> {
     object = this.resolveObjectName(object);
     this.logger.debug('Insert operation starting', { object, isBatch: Array.isArray(data) });
     this.assertWriteAllowed(object, 'insert');
@@ -9934,6 +9974,14 @@ export class ObjectQL implements IObjectQLEngine {
         object,
         opCtx.context,
         rowHookContexts.map((rowCtx) => rowCtx.input.data as Record<string, unknown>),
+        // [#13636] Read off the OPTIONS, not the row payload. A declaration
+        // carried as a key on the row cannot work: the post-hook declared-field
+        // door above judges `rowCtx.input.data` and refuses any key the object
+        // does not declare, so it would refuse the declaration before this
+        // resolver — the one reader it exists to inform — ever saw it. Widening
+        // `PLATFORM_PROVISIONED_COLUMNS` is closed off by that door's own ⛔, and
+        // rightly: a declaration is not a column.
+        readOrgLessWriteDeclaration(rowHookContexts[0]?.input.options),
       );
       const optionsBase = rowHookContexts[0]?.input.options as any;
       const driverOptions = this.buildDriverOptions(
@@ -10353,7 +10401,7 @@ export class ObjectQL implements IObjectQLEngine {
    * supplied, so a caller holding the input rows can attribute each name back to
    * the rows that carried it (`insertManyData` does exactly that).
    */
-  async insertMany(object: string, rows: any[], options?: DataEngineInsertOptions & WriteObservabilityOptions): Promise<InsertManyRowOutcome[]> {
+  async insertMany(object: string, rows: any[], options?: DataEngineInsertOptions & WriteObservabilityOptions & OrgLessWriteDeclarationOptions): Promise<InsertManyRowOutcome[]> {
     if (!Array.isArray(rows)) throw new Error('insertMany expects an array of rows');
     return this.insert(object, rows, { ...(options ?? {}), __partialRowErrors: true } as any);
   }
@@ -14015,15 +14063,24 @@ export class ObjectRepository implements IScopedObjectRepository {
     });
   }
 
-  async insert(data: any): Promise<any> {
+  /**
+   * [#13636] `options` carries the write-side knobs this handle has no other
+   * way to reach — today the `orgLessWrite` declaration, which the platform's
+   * own audit writers thread through `api.sudo().object(name).create(row)` and
+   * could otherwise only reach by abandoning that idiom for a bare
+   * `engine.insert`. The execution context stays this handle's to supply; a
+   * caller-passed `context` would make the scope a suggestion.
+   */
+  async insert(data: any, options?: OrgLessWriteDeclarationOptions): Promise<any> {
     return this.engine.insert(this.objectName, data, {
+      ...options,
       context: this.context,
     });
   }
 
   /** Alias for insert() — matches @objectql/core convention */
-  async create(data: any): Promise<any> {
-    return this.insert(data);
+  async create(data: any, options?: OrgLessWriteDeclarationOptions): Promise<any> {
+    return this.insert(data, options);
   }
 
   async update(data: any, options: any = {}): Promise<any> {

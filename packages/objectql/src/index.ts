@@ -356,12 +356,29 @@ export {
 // the engine; the ledger itself is hand-adjudicated, never derived.
 export {
   PLATFORM_OBJECT_TENANCY,
+  admittedOrgLessReasons,
+  assertOrgLessWriteDeclarationAdmitted,
   classifyPlatformObjectTenancy,
+  conditionalPlatformObjects,
   isPlatformObjectOutOfTenantAuditScope,
   tenantScopedPlatformObjects,
   type PlatformObjectTenancy,
   type PlatformObjectTenancyEntry,
 } from './tenancy/platform-object-tenancy.js';
+
+// [#13636] The explicit per-write "legitimately org-less" declaration — the
+// 2026-08-31 ruling's channel for telling a deliberate env-level / untenanted
+// row from a missing organization stamp. Exported so the writers of the
+// admitted objects can type their declaration, and so the gate that counts
+// declarations can read the vocabulary from one place.
+export {
+  ORG_LESS_WRITE_REASONS,
+  OrgLessWriteDeclarationRefusedError,
+  readOrgLessWriteDeclaration,
+  type OrgLessWriteDeclaration,
+  type OrgLessWriteDeclarationOptions,
+  type OrgLessWriteReason,
+} from './tenancy/orgless-write-declaration.js';
 export type {
   SystemWriteOrganizationDecision,
   SystemWriteRefusalReason,

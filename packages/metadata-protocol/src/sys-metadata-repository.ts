@@ -191,7 +191,20 @@ export interface SysMetadataEngine {
   insert(
     table: string,
     data: Record<string, unknown>,
-    options?: { context?: any },
+    options?: {
+      context?: any;
+      /**
+       * [#13636] The engine's per-write "these rows are legitimately org-less"
+       * declaration. Spelled structurally rather than imported: the canonical
+       * type is `OrgLessWriteDeclarationOptions` in
+       * `@objectstack/objectql`'s `tenancy/orgless-write-declaration.ts`, and
+       * THAT package depends on this one — importing it here would be a cycle.
+       * The engine validates every declaration against its ledger and throws on
+       * one it does not admit, so a drift between these two spellings fails
+       * loudly at the write rather than being tolerated.
+       */
+      orgLessWrite?: { object: string; reason: string };
+    },
   ): Promise<{ id: string }>;
   update(
     table: string,
@@ -608,7 +621,21 @@ export class SysMetadataRepository implements MetadataRepository {
         });
       } else {
         parentRowData.created_at = now;
-        await this.engine.insert('sys_metadata', parentRowData, { context: ctx });
+        // [#13636] An ENV-LEVEL repository writes `organization_id: null` on
+        // purpose — the #6190 option A population, a row that belongs to the
+        // installation rather than to any organization. `sys_metadata` is
+        // admitted as `conditional` in the engine's platform tenancy ledger, so
+        // without this declaration that write is indistinguishable from a
+        // forgotten stamp and is refused on a walled install. The condition is
+        // the repository's own scope, fixed at construction, not a property of
+        // the row being written — so an org-scoped repository never declares,
+        // and a missing stamp on ITS writes still refuses.
+        await this.engine.insert('sys_metadata', parentRowData, {
+          context: ctx,
+          ...(this.organizationId == null
+            ? { orgLessWrite: { object: 'sys_metadata', reason: 'env-level-metadata' } }
+            : {}),
+        });
       }
 
       // Durable history append — same transaction, so the parent write

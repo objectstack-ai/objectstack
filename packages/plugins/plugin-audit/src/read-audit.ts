@@ -93,6 +93,7 @@ import type { IDataEngine } from '@objectstack/spec/contracts';
 // noise, ADR-0057 telemetry plumbing) is excluded from read auditing for the
 // identical reasons, and a second hand-kept list would disagree on the day
 // either is fixed.
+import { createRecordOrganizationResolver } from '@objectstack/metadata-core';
 import { AUDIT_EXCLUDED_OBJECTS, createFieldPresenceProbe } from './audit-writers.js';
 
 /**
@@ -453,11 +454,19 @@ export function installReadAuditWriter(
    * to `warn`. A bare `.insert()` is far too generic a name for a repo-wide
    * vocabulary. Same reasoning as `persistAuditTrailRow` / `persistAuthEventAuditRow`.
    */
-  const persistReadAuditRows = async (rows: Record<string, unknown>[]): Promise<void> => {
+  const recordOrgResolver = createRecordOrganizationResolver(engine);
+
+  const persistReadAuditRows = async (
+    rows: Record<string, unknown>[],
+    writeOptions?: { orgLessWrite?: { object: string; reason: string } },
+  ): Promise<void> => {
     // `sys_audit_log` exposes only `get`/`list` on the API and every field is
     // `readonly`, so a user-context write would be refused. The system context
     // is also what lets the row keep its VIEW timestamp — see `buildRow`.
-    await engine.insert('sys_audit_log', rows as any, { context: { isSystem: true } } as any);
+    await engine.insert('sys_audit_log', rows as any, {
+      context: { isSystem: true },
+      ...writeOptions,
+    } as any);
   };
 
   let failureReported = false;
@@ -536,7 +545,25 @@ export function installReadAuditWriter(
   const batcher = createReadAuditBatcher({
     async persist(events) {
       try {
-        await persistReadAuditRows(events.map(buildRow));
+        // [#13636] `sys_audit_log` is admitted as `conditional`, so an org-less
+        // audit row must say which adjudicated population it belongs to. The
+        // declaration is a property of the WHOLE batch — the engine resolves one
+        // organization per insert — so it is only made when EVERY row's subject
+        // is an object with no organization column at all (case 1 of the
+        // enumeration in `audit-writers.ts`). A mixed batch declares nothing,
+        // which leaves its unstamped rows in front of the refusal exactly as an
+        // undeclared write is: ⛔ a batch must never be able to launder one
+        // untenanted subject into a blanket claim about its siblings.
+        const batch = events.map(buildRow);
+        const everySubjectUntenanted = events.every(
+          (event) => recordOrgResolver.organizationFieldFor(event.objectName) === null,
+        );
+        await persistReadAuditRows(
+          batch,
+          everySubjectUntenanted
+            ? { orgLessWrite: { object: 'sys_audit_log', reason: 'audit-of-untenanted-record' } }
+            : undefined,
+        );
       } catch (err) {
         reportReadAuditWriteFailure(events.length, err);
       }

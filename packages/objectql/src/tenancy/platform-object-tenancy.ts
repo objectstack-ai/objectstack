@@ -42,7 +42,7 @@
  * half is not a runtime fact. It is a fact about the CODE, established once by
  * inventory and written down here.
  *
- * ## The three classifications, and why `unclassified` is not a failure
+ * ## The four classifications, and why `unclassified` is not a failure
  *
  * The ruling's execution point 2 makes the escape hatch mandatory:
  * 「判不了的逐个列出回批呈裁，⛔ 不猜」 — an object whose tenancy cannot be
@@ -60,19 +60,50 @@
  * repair, or a writer that stamps the column — and an entry without one is the
  * guess the ruling forbids.
  *
+ * ## `conditional`, the fourth verdict (#13636)
+ *
+ * The 2026-08-31 ruling above cut the question two ways, and while implementing
+ * it a THIRD state was measured that neither verdict fits: an object holding
+ * both org-stamped rows and a ruled org-less population, where which one is
+ * correct is a property of the ROW. `tenant-scoped` would refuse that object's
+ * own adjudicated writes on a walled install; `global` would abandon its
+ * org-stamped majority. Both specimens were therefore parked in
+ * `unclassified` — and `sys_metadata` and `sys_audit_log` are two of the
+ * largest write populations in the platform namespace, so parking them is where
+ * the control's coverage went to die.
+ *
+ * The maintainer ruled the fourth verdict in on 2026-08-31 (总监席第 7 场决裁
+ * 批 #17, direction B): the platform gets an explicit per-write declaration, and
+ * the resolver uses it to tell 「有意的环境级/无租户行」 from 「漏 stamp 的
+ * bug」 — 「同一个 NULL 不再身兼两义」. See `orgless-write-declaration.ts` for
+ * the channel and for why it is not the per-write bypass flag
+ * `system-write-organization.ts` forbids.
+ *
+ * ⛔ The admission bar here is STRICTER than `tenant-scoped`'s, not looser: an
+ * entry must cite a writer that demonstrably produces BOTH populations. The
+ * ruling fixes the first batch at exactly the two specimens it named and
+ * requires each later member to arrive with its own writer evidence — ⛔ never
+ * picked out of the unclassified list by guess.
+ *
  * ## What admission actually changes, per object
  *
  * A `tenant-scoped` classification lets the object reach
  * `resolveSystemInsertOrganization` (#8844): on a `single` posture with exactly
  * one organization the write DERIVES it, and on a walled posture
  * (`group` / `isolated`) an org-less write is REFUSED loudly
- * ({@link SystemWriteOrganizationRequiredError}). It also stops the engine
+ * ({@link SystemWriteOrganizationRequiredError}). A `conditional` one reaches
+ * the same decision by the same route, with one addition: a write carrying an
+ * `orgLessWrite` declaration this ledger admits for that object resolves
+ * nothing and is written org-less, which is the adjudicated population. It also
+ * stops the engine
  * auto-muting the driver's tenant-audit warning for elevated writes on it.
  * Both directions are the ruled one — a refusal or a warning, never a silent
  * rewrite of what the write touches (execution point 3).
  */
 
 import { isPlatformNamespaceObject } from './system-write-organization';
+import type { OrgLessWriteDeclaration, OrgLessWriteReason } from './orgless-write-declaration';
+import { OrgLessWriteDeclarationRefusedError } from './orgless-write-declaration';
 
 /**
  * What the one-time inventory concluded about one platform-namespace object.
@@ -87,14 +118,34 @@ export type PlatformObjectTenancy =
   | 'tenant-scoped'
   /** #8672's reasoning inherits: rows are deliberately org-less. Out of scope. */
   | 'global'
+  /**
+   * [#13636] BOTH populations, decided per ROW rather than per object: the
+   * object holds org-stamped rows AND a ruled org-less population, and only the
+   * writer knows which one a given write is. In scope EXACTLY LIKE
+   * `tenant-scoped` — every org-less write is derived or refused — except that
+   * a write carrying an admitted `orgLessWrite` declaration
+   * ({@link OrgLessWriteReason}) is the ruled population and resolves nothing.
+   *
+   * ⛔ This is the strictest verdict in the ledger, not a softer one. Promoting
+   * an object here ADMITS it into #8844's machinery; `unclassified` is what
+   * leaves behaviour where it is.
+   */
+  | 'conditional'
   /** Not determinable from the tree. Out of scope, PENDING ADJUDICATION. */
   | 'unclassified';
 
 /** One inventory entry: the verdict plus the evidence it was reached on. */
 export interface PlatformObjectTenancyEntry {
   readonly tenancy: PlatformObjectTenancy;
-  /** Why. A `tenant-scoped` or `global` entry must cite a source. */
+  /** Why. A `tenant-scoped`, `global` or `conditional` entry must cite a source. */
   readonly evidence: string;
+  /**
+   * [#13636] Which org-less populations THIS object admits. Required on a
+   * `conditional` entry and meaningless on every other verdict — a reason is
+   * never admissible everywhere, so the declaration channel checks the pair
+   * (object, reason) rather than the reason alone.
+   */
+  readonly orgLessReasons?: readonly OrgLessWriteReason[];
 }
 
 /**
@@ -190,6 +241,43 @@ export const PLATFORM_OBJECT_TENANCY: Readonly<Record<string, PlatformObjectTena
       'organization-less grant would silently disappear.',
   },
 
+  // ── conditional ──────────────────────────────────────────────────────────
+  // [#13636] BOTH populations, split per ROW. Admitted by the maintainer's
+  // 2026-08-31 ruling (总监席第 7 场决裁批 #17, verbatim 「同意」), whose
+  // constraint 3 fixes the first batch at EXACTLY these two and requires every
+  // later member to arrive with its own writer evidence:
+  // 「首批只收编两只已裁标本 ... ⛔ 不从 #13491 的 51 只 cannot-determine 里凭猜挑成员」.
+  //
+  // ⛔ Do not add an entry here from the unclassified list without a writer that
+  // demonstrably produces BOTH populations. The admission bar is stricter than
+  // `tenant-scoped`'s, not looser: a `conditional` entry claims a ruled org-less
+  // population exists, and the declaration channel then trusts that claim.
+
+  // #6190 option A (env-wide write for a non-overridable type)
+  sys_metadata: {
+    tenancy: 'conditional',
+    orgLessReasons: ['env-level-metadata'],
+    evidence:
+      'Holds both populations by adjudication. `SysMetadataRepository` stamps `organization_id` from the ' +
+      'repository organization on every org-scoped write (`sys-metadata-repository.ts`), and writes the ' +
+      'SAME column NULL when the repository is env-level — the write the 2026-06 ruling on non-overridable ' +
+      'types settled as landing env-wide, belonging to the installation rather than to any organization. ' +
+      "The env-level write declares itself ('env-level-metadata'); an undeclared org-less write on this " +
+      'object is a missing stamp and is refused.',
+  },
+  // #13636 specimen 2; the enumeration is the writer's own
+  sys_audit_log: {
+    tenancy: 'conditional',
+    orgLessReasons: ['audit-of-untenanted-record'],
+    evidence:
+      'Holds both populations, and its writer enumerates the org-less one in its own source: an audit row ' +
+      'inherits the organization of the RECORD it describes, falling back to the acting session ' +
+      "(`audit-writers.ts`), and neither answers for a record on an object with no organization column at " +
+      'all (single-tenant stacks and ADR-0066 platform-global objects) or a record whose own column is ' +
+      "NULL. Those rows declare themselves ('audit-of-untenanted-record'); an undeclared org-less audit " +
+      'row is the invisible-audit-row defect that writer already guards against, and is refused.',
+  },
+
   // ── global ───────────────────────────────────────────────────────────────
   // #8672, named verbatim by the 2026-08-31 ruling; the driver predicate is #2734.
   // ⚠️ `ensure-default-organization.ts` DOES stamp org-scoped permission sets, so
@@ -234,12 +322,20 @@ export function classifyPlatformObjectTenancy(object: string): PlatformObjectTen
  * old guard covered wholesale — and `false` for a tenant-scoped one, which now
  * flows into the machinery that was always there.
  *
+ * [#13636] `conditional` answers `false` too, on the same footing as
+ * `tenant-scoped`: admitting an object is what puts its org-less writes in
+ * front of #8844's derive-or-refuse decision, and the per-write declaration
+ * then separates the ruled population from the missing stamps. An object whose
+ * org-less rows were ADJUDICATED legitimate is therefore MORE covered by the
+ * control than an unclassified one, never less.
+ *
  * A non-platform object answers `false`: it was never in this exemption, and
  * its tenancy is read from its schema one line further down.
  */
 export function isPlatformObjectOutOfTenantAuditScope(object: string): boolean {
   if (!isPlatformNamespaceObject(object)) return false;
-  return classifyPlatformObjectTenancy(object) !== 'tenant-scoped';
+  const tenancy = classifyPlatformObjectTenancy(object);
+  return tenancy !== 'tenant-scoped' && tenancy !== 'conditional';
 }
 
 /** Every object the inventory admitted as tenant-scoped, for tests and reports. */
@@ -248,4 +344,89 @@ export function tenantScopedPlatformObjects(): readonly string[] {
     .filter(([, e]) => e.tenancy === 'tenant-scoped')
     .map(([name]) => name)
     .sort();
+}
+
+/**
+ * [#13636] Every object admitted as `conditional`, for the gate, the tests and
+ * the census. The gate reads this list to hold every `orgLessWrite` declaration
+ * in the monorepo to the ledger, which is the "checkable" half of the ruling's
+ * three words.
+ */
+export function conditionalPlatformObjects(): readonly string[] {
+  return Object.entries(PLATFORM_OBJECT_TENANCY)
+    .filter(([, e]) => e.tenancy === 'conditional')
+    .map(([name]) => name)
+    .sort();
+}
+
+/**
+ * [#13636] The org-less populations `object` admits, or an EMPTY list for every
+ * object that admits none.
+ *
+ * Empty is the answer for an unlisted object, for a `tenant-scoped` one and for
+ * a `global` one alike, and all three mean the same thing to the caller: this
+ * object has no adjudicated org-less population, so no declaration naming it can
+ * be honoured.
+ */
+export function admittedOrgLessReasons(object: string): readonly OrgLessWriteReason[] {
+  const entry = PLATFORM_OBJECT_TENANCY[object];
+  if (entry?.tenancy !== 'conditional') return [];
+  return entry.orgLessReasons ?? [];
+}
+
+/**
+ * [#13636] Validate one write's `orgLessWrite` option against the ledger, or
+ * THROW.
+ *
+ * Returns the admitted declaration, or `undefined` when the write carries none
+ * — the ordinary path, which pays one `undefined` comparison.
+ *
+ * ⚠️ Every failure here is a THROW rather than a "treat it as absent". That is
+ * the ruling's 「静默可选标记不合格」 made mechanical: if a malformed or
+ * unadmitted declaration were ignored, the option would have a silent spelling,
+ * and a silent spelling is the renamed bypass the ruling disqualified. It also
+ * means the check cannot be moved below the resolver's early returns — an
+ * ignored declaration on an object that returns early is exactly the silence
+ * this refuses.
+ *
+ * @param object the object the write actually targets — compared against the
+ *   declaration's own `object`, which is what stops a declaration on a shared
+ *   context or a spread options bag reaching a different object's row.
+ */
+export function assertOrgLessWriteDeclarationAdmitted(
+  object: string,
+  declared: unknown,
+): OrgLessWriteDeclaration | undefined {
+  if (declared === undefined) return undefined;
+  if (declared === null || typeof declared !== 'object' || Array.isArray(declared)) {
+    throw new OrgLessWriteDeclarationRefusedError(
+      object,
+      `it is not a declaration object (received ${Array.isArray(declared) ? 'an array' : typeof declared})`,
+    );
+  }
+  const { object: declaredObject, reason } = declared as { object?: unknown; reason?: unknown };
+  if (typeof declaredObject !== 'string' || declaredObject === '') {
+    throw new OrgLessWriteDeclarationRefusedError(object, "it names no 'object'");
+  }
+  if (declaredObject !== object) {
+    throw new OrgLessWriteDeclarationRefusedError(
+      object,
+      `it declares '${declaredObject}', which is not the object being written`,
+    );
+  }
+  const admitted = admittedOrgLessReasons(object);
+  if (admitted.length === 0) {
+    throw new OrgLessWriteDeclarationRefusedError(
+      object,
+      `the ledger does not classify '${object}' as 'conditional', so it has no adjudicated org-less ` +
+        'population to declare',
+    );
+  }
+  if (typeof reason !== 'string' || !admitted.includes(reason as OrgLessWriteReason)) {
+    throw new OrgLessWriteDeclarationRefusedError(
+      object,
+      `'${String(reason)}' is not a reason '${object}' admits (it admits: ${admitted.join(', ')})`,
+    );
+  }
+  return { object, reason: reason as OrgLessWriteReason };
 }

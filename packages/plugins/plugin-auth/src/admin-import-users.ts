@@ -532,6 +532,14 @@ export async function runAdminImportUsers(
     const auditRegistered = !engine.getSchema || Boolean(engine.getSchema('sys_audit_log'));
     if (auditRegistered) {
       try {
+        // [#13636] The run-level row describes `sys_user`, a better-auth table
+        // that resolves no tenant field, and the row itself carries no
+        // `organization_id` key at all — deliberately, since an import run
+        // belongs to the installation rather than to one organization. That is
+        // case 1 of `audit-writers.ts`'s enumeration and the population
+        // `sys_audit_log`'s `conditional` admission was ruled on; without the
+        // declaration this write is refused on a walled install, and the refusal
+        // would be swallowed by the best-effort `catch` below.
         await engine.insert('sys_audit_log', {
           action: 'import',
           user_id: actor.id,
@@ -546,7 +554,10 @@ export async function runAdminImportUsers(
             // How `auto` (and the fixed policies) split the batch across channels.
             delivery,
           }),
-        }, { context: SYSTEM_CTX } as any);
+        }, {
+          context: SYSTEM_CTX,
+          orgLessWrite: { object: 'sys_audit_log', reason: 'audit-of-untenanted-record' },
+        } as any);
       } catch (e) {
         // [#12981] An import must not fail over its own audit — control flow is
         // unchanged and the run still answers 200 with its summary. It must not

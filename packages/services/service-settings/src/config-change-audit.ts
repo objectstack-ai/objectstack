@@ -196,7 +196,19 @@ export function buildConfigChangeAuditSink(
         };
         if (declares('organization_id')) row.organization_id = entry.tenantId ?? null;
 
-        await eng.insert('sys_audit_log', row, { context: SYSTEM_CTX });
+        // [#13636] A `global`-scope setting belongs to the installation, not to
+        // an organization, so its audit row has none to inherit — an untenanted
+        // SUBJECT, case 1's sibling in `audit-writers.ts`'s enumeration, and the
+        // population `sys_audit_log`'s `conditional` admission was ruled on. The
+        // test is the setting's own declared scope, not the absence of a tenant
+        // id: an ORGANIZATION-scope entry that reached here without one is a
+        // missing stamp, and it must keep meeting the refusal.
+        await eng.insert('sys_audit_log', row, {
+          context: SYSTEM_CTX,
+          ...(entry.scope === 'global'
+            ? { orgLessWrite: { object: 'sys_audit_log', reason: 'audit-of-untenanted-record' } }
+            : {}),
+        });
       } catch (err: any) {
         // Reported once per process, not once per settings write: a failure here
         // is systemic (plugin-audit not installed, table unreachable), so a line

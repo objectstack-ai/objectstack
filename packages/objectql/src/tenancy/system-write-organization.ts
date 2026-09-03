@@ -65,6 +65,18 @@
  *    org-less rows is `tenancy: { enabled: false }` — a metadata declaration,
  *    loud and checkable — never a per-write bypass flag, which is exactly the
  *    lenient-consumer accommodation Prime Directive #12 forbids.
+ *
+ *    ⚠️ [#13636] The sentence above is about a WHOLE-OBJECT population and it
+ *    still stands. It does not cover the third class the maintainer ruled on
+ *    2026-08-31 (决裁批 #17): an object holding BOTH populations, where org-less
+ *    is a property of the ROW. `tenancy: { enabled: false }` cannot state that
+ *    — it would abandon the object's org-stamped majority — so the ruling added
+ *    a per-write DECLARATION for it. ⛔ That is not the bypass flag this
+ *    paragraph forbids and must not be read as one: it NARROWS (admitting an
+ *    object puts every undeclared org-less write of it in front of the refusal
+ *    below), it names its own object so it cannot travel, and every unadmitted
+ *    spelling of it throws instead of being ignored. See
+ *    `orgless-write-declaration.ts`, which argues all three.
  *  - **Platform-namespace objects the inventory did not admit** ({@link
  *    isPlatformObjectOutOfTenantAuditScope}, `platform-object-tenancy.ts`).
  *

@@ -719,9 +719,10 @@ export function installAuditWriters(
     api: any,
     auditRow: Record<string, any>,
     activityRow: Record<string, any> | undefined,
+    auditWriteOptions?: { orgLessWrite?: { object: string; reason: string } },
   ): Promise<void> => {
     const sys = api.sudo();
-    await sys.object('sys_audit_log').create(auditRow);
+    await sys.object('sys_audit_log').create(auditRow, auditWriteOptions);
     if (activityRow) await sys.object('sys_activity').create(activityRow);
   };
 
@@ -1387,7 +1388,32 @@ export function installAuditWriters(
       // (Comment @mention notifications remain a platform behavior — they are
       //  handled separately by the sys_comment hook below, since SKIP_OBJECTS
       //  excludes it from this writer.)
-      await persistAuditTrailRow(api, auditRow, activitiesEnabled ? activityRow : undefined);
+      // [#13636] Declare the ruled org-less population, and ONLY it.
+      //
+      // `sys_audit_log` is admitted as `conditional` in the engine's platform
+      // tenancy ledger, so an undeclared org-less audit row now takes #8844's
+      // derive-or-refuse decision. The half of this writer's org-less output
+      // that is ADJUDICATED legitimate is case 1 of the enumeration above — a
+      // record on an object that has no organization column at all
+      // (single-tenant stacks, ADR-0066 platform-global objects) — and
+      // `organizationFieldFor` answers exactly that question, from the schema,
+      // for the SUBJECT of the row.
+      //
+      // ⛔ Deliberately NOT declared unconditionally. Case 2 (the subject's own
+      // column is NULL) is byte-for-byte indistinguishable at this call site
+      // from the missing-stamp defect this control exists to find — #9516 was
+      // precisely that, on these lines — so blessing it here would hand the
+      // platform's largest write population back the blindness the 2026-08-31
+      // ruling admitted this object to remove.
+      const subjectHasNoOrganization = recordOrgResolver.organizationFieldFor(ctx.object) === null;
+      await persistAuditTrailRow(
+        api,
+        auditRow,
+        activitiesEnabled ? activityRow : undefined,
+        subjectHasNoOrganization
+          ? { orgLessWrite: { object: 'sys_audit_log', reason: 'audit-of-untenanted-record' } }
+          : undefined,
+      );
     } catch (err) {
       // #5226 — DURABILITY degradation, not a functional one, so it is reported
       // at `error` (AGENTS.md "Degradation log levels"): the audited write

@@ -225,7 +225,17 @@ export function createAuthEventAuditSink(opts: AuthEventAuditSinkOptions): AuthE
     engine: IDataEngine,
     row: Record<string, unknown>,
   ): Promise<void> => {
-    await engine.insert('sys_audit_log', row, { context: { isSystem: true } } as any);
+    // [#13636] Every row this writer produces describes `SESSION_OBJECT` — a
+    // better-auth identity table, which resolves NO tenant field at all, so its
+    // records have no organization for an audit row to inherit. That is case 1
+    // of `audit-writers.ts`'s enumeration, the population the 2026-08-31 ruling
+    // admitted `sys_audit_log` on. Unconditional here because the subject is
+    // fixed by this writer rather than varying per event, so there is no second
+    // population at this call site to discriminate against.
+    await engine.insert('sys_audit_log', row, {
+      context: { isSystem: true },
+      orgLessWrite: { object: 'sys_audit_log', reason: 'audit-of-untenanted-record' },
+    } as any);
   };
 
   return {

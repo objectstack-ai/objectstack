@@ -3528,6 +3528,20 @@ jobs:
       - name: Read-side tenant chokepoint gate
         run: pnpm check:tenant-chokepoint
 
+      # [#13636] The 'orgLessWrite' declaration census. The maintainer's
+      # 2026-08-31 ruling put 'loud, checkable, countable' in the decision text
+      # rather than in implementation notes; the engine discharges the first two
+      # at the write, and this is the third — every declaration in the monorepo
+      # enumerated, held to the same ledger the runtime holds it to, and COUNTED
+      # on every pass. A declaration nobody can count is the silent marker that
+      # ruling disqualified by name.
+      #
+      # Static scan over tracked sources, no build needed, so it belongs here.
+      # Runs its own --self-test first: a matcher that stopped matching would
+      # report OK while reading nothing.
+      - name: Org-less write declaration gate
+        run: pnpm check:orgless-write-declarations
+
       # Every committed `pnpm --filter <name>` must name a real workspace
       # package (#10853).
       #
