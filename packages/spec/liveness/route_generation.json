@@ -4,43 +4,27 @@
   "props": {
     "includeObjects": {
       "status": "dead",
-      "verifiedAt": "2026-09-02",
-      "evidenceScope": "in-repo",
-      "note": "0 read sites at 2514d49f3. Normalized into `this.config.routes.includeObjects` and never consulted: route registration iterates the registered objects with no include filter, so an author who names three objects still gets routes for all of them. Dead at the CONSUMER — the authored value arrives intact and is simply never read."
+      "verifiedAt": "2026-09-03",
+      "evidenceScope": "cross-repo",
+      "note": "REMOVED 2026-09-03 (#14691) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error). No source is stripped by a conversion: a RestServerConfig is plugin TS configuration, never a stack collection member or a sys_metadata row (the `RestServerConfig.openApi31` precedent, #4579), so the D3 entry `rest-server-config-dead-keys-retired` carries the prescription. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); per-object API exposure is declared ON the object and enforced by the REST data surface (rest-server.ts#enforceApiAccess: `enable.apiEnabled: false` → 404, an `enable.apiMethods` whitelist → 405 for unlisted operations), so the capability this key promised already exists at its proper seat and the key was a second, unread dialect of it (Prime Directive #12: one strict contract, not N). Pre-retirement census note: 0 read sites at 2514d49f3. Normalized into `this.config.routes.includeObjects` and never consulted: route registration iterates the registered objects with no include filter, so an author who names three objects still gets routes for all of them. Dead at the CONSUMER — the authored value arrives intact and is simply never read. Scope widened 2026-09-03: in-repo census at 2514d49f3 (0 read sites) + objectui @d4c6a86 clean + cloud @9b6abe0f2fd5 clean STRUCTURALLY (#14796: cloud never authors a `RestServerConfig`), so `evidenceScope` is `cross-repo`."
     },
     "excludeObjects": {
       "status": "dead",
-      "verifiedAt": "2026-09-02",
-      "evidenceScope": "in-repo",
-      "note": "0 read sites at 2514d49f3. Same shape as `includeObjects`: normalized, never consulted, so an excluded object is still mounted. This key is the one customer-visible member of the ten: RestServerConfigSchema's own `@example` advertises `routes: { excludeObjects: ['system_log'] }`, and the generated reference page (content/docs/references/api/rest-server.mdx) repeats the declaration — published prose promising a capability the runtime does not deliver. Fixing that example belongs to whichever limb this key lands on, not here."
+      "verifiedAt": "2026-09-03",
+      "evidenceScope": "cross-repo",
+      "note": "REMOVED 2026-09-03 (#14691) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error). No source is stripped by a conversion: a RestServerConfig is plugin TS configuration, never a stack collection member or a sys_metadata row (the `RestServerConfig.openApi31` precedent, #4579), so the D3 entry `rest-server-config-dead-keys-retired` carries the prescription. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); per-object API exposure is declared ON the object and enforced by the REST data surface (rest-server.ts#enforceApiAccess: `enable.apiEnabled: false` → 404, an `enable.apiMethods` whitelist → 405 for unlisted operations), so the capability this key promised already exists at its proper seat and the key was a second, unread dialect of it (Prime Directive #12: one strict contract, not N). The `@example` on RestServerConfigSchema that advertised `routes: { excludeObjects: ['system_log'] }` is corrected in the same change. Pre-retirement census note: 0 read sites at 2514d49f3. Same shape as `includeObjects`: normalized, never consulted, so an excluded object is still mounted. This key is the one customer-visible member of the ten: RestServerConfigSchema's own `@example` advertises `routes: { excludeObjects: ['system_log'] }`, and the generated reference page (content/docs/references/api/rest-server.mdx) repeats the declaration — published prose promising a capability the runtime does not deliver. Fixing that example belongs to whichever limb this key lands on, not here. Scope widened 2026-09-03: in-repo census at 2514d49f3 (0 read sites) + objectui @d4c6a86 clean + cloud @9b6abe0f2fd5 clean STRUCTURALLY (#14796: cloud never authors a `RestServerConfig`), so `evidenceScope` is `cross-repo`."
     },
     "nameTransform": {
       "status": "dead",
-      "verifiedAt": "2026-09-02",
-      "evidenceScope": "in-repo",
-      "note": "0 read sites at 2514d49f3. Repo-wide there are no reads outside packages/spec and rest-server.ts either. The enum is enforced at the door since #11984 — `'snake_case'` is refused at construction — but no route builder transforms a name, so `'plural'`, `'kebab-case'` and `'camelCase'` all mount exactly what `'none'` mounts. An enum that is validated and then ignored is the clearest case in this file of accept/reject and liveness being different questions."
+      "verifiedAt": "2026-09-03",
+      "evidenceScope": "cross-repo",
+      "note": "REMOVED 2026-09-03 (#14691) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error). No source is stripped by a conversion: a RestServerConfig is plugin TS configuration, never a stack collection member or a sys_metadata row (the `RestServerConfig.openApi31` precedent, #4579), so the D3 entry `rest-server-config-dead-keys-retired` carries the prescription. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); the object `name` is the canonical id on every surface, the REST path segment included (Prime Directive #6), so a URL transform contradicts the one-name rule and was never a candidate for enforcement; the enum was validated (since #11984) and every value mounted what `'none'` mounts. Pre-retirement census note: 0 read sites at 2514d49f3. Repo-wide there are no reads outside packages/spec and rest-server.ts either. The enum is enforced at the door since #11984 — `'snake_case'` is refused at construction — but no route builder transforms a name, so `'plural'`, `'kebab-case'` and `'camelCase'` all mount exactly what `'none'` mounts. An enum that is validated and then ignored is the clearest case in this file of accept/reject and liveness being different questions. Scope widened 2026-09-03: in-repo census at 2514d49f3 (0 read sites) + objectui @d4c6a86 clean + cloud @9b6abe0f2fd5 clean STRUCTURALLY (#14796: cloud never authors a `RestServerConfig`), so `evidenceScope` is `cross-repo`."
     },
     "overrides": {
-      "children": {
-        "enabled": {
-          "status": "dead",
-          "verifiedAt": "2026-09-02",
-          "evidenceScope": "in-repo",
-          "note": "0 read sites at 2514d49f3. The per-object `overrides` record is normalized and never read, so no object's routes can be turned off through it. ⚠️ Do not read the `overrides` hits in packages/rest/src as consumers of this key: rest-server.ts#registerDataActionEndpoints reads `body.overrides` off a REQUEST BODY, and http-request-test-builder.ts takes an `overrides` argument — different keys with the same name."
-        },
-        "basePath": {
-          "status": "dead",
-          "verifiedAt": "2026-09-02",
-          "evidenceScope": "in-repo",
-          "note": "0 read sites at 2514d49f3. Inherits the container's fate: the record is never read, so a per-object custom base path changes no mounted path. The live base path is `crud.dataPrefix` (see the crud_endpoints ledger), which is deployment-wide rather than per-object."
-        },
-        "operations": {
-          "status": "dead",
-          "verifiedAt": "2026-09-02",
-          "evidenceScope": "in-repo",
-          "note": "0 read sites at 2514d49f3. The per-object operation switches are never read. The operation switches that ARE read are the deployment-wide `crud.operations.*` (crud_endpoints ledger) — this key is their per-object counterpart and it does nothing."
-        }
-      }
+      "status": "dead",
+      "verifiedAt": "2026-09-03",
+      "evidenceScope": "cross-repo",
+      "note": "REMOVED 2026-09-03 (#14691) — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error). No source is stripped by a conversion: a RestServerConfig is plugin TS configuration, never a stack collection member or a sys_metadata row (the `RestServerConfig.openApi31` precedent, #4579), so the D3 entry `rest-server-config-dead-keys-retired` carries the prescription. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); `enabled` and `operations` duplicated the object's own enforced exposure keys (`enable.apiEnabled` / `enable.apiMethods`, rest-server.ts#enforceApiAccess) and `basePath` per object would contradict the one deployment-wide data base (`crud.dataPrefix`) the discovery document advertises as `routes.data` — so the family resolved to REMOVE, not to the ENFORCE split triage held open for it. The three child rows this container carried (`enabled` / `basePath` / `operations`) collapse into this one row: the tombstone is a leaf, and rows for keys that left the walked shape would report ORPHAN. Closes #14365's question about `overrides.*.operations` — no record left. Pre-retirement census note: 0 read sites at 2514d49f3. The per-object `overrides` record is normalized and never read, so no object's routes can be turned off through it. ⚠️ Do not read the `overrides` hits in packages/rest/src as consumers of this key: rest-server.ts#registerDataActionEndpoints reads `body.overrides` off a REQUEST BODY, and http-request-test-builder.ts takes an `overrides` argument — different keys with the same name. Scope widened 2026-09-03: in-repo census at 2514d49f3 (0 read sites) + objectui @d4c6a86 clean + cloud @9b6abe0f2fd5 clean STRUCTURALLY (#14796: cloud never authors a `RestServerConfig`), so `evidenceScope` is `cross-repo`."
     }
   }
 }
