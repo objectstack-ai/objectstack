@@ -232,7 +232,7 @@ instrument drift.
 
 ## The census
 
-**IN PROGRESS — 45/72 measured, this is a checkpoint commit, not the
+**IN PROGRESS — 55/72 measured, this is a checkpoint commit, not the
 final reading.** Continuing under the shared verify lock with tighter
 per-batch budgets so the lock cycles for other agents on this container;
 the ledger this table is generated from is
@@ -283,19 +283,19 @@ run is interrupted.
 | `packages/plugins/plugin-hono-server` | 0 | 1 | 13 | 14 | ok |
 | `packages/plugins/plugin-pinyin-search` | 0 | 0 | 13 | 13 | ok |
 | `packages/plugins/plugin-reports` | 247 | 8 | 13 | 268 | ok |
-| `packages/plugins/plugin-security` | — | — | — | — | **NOT MEASURED** |
-| `packages/plugins/plugin-sharing` | — | — | — | — | **NOT MEASURED** |
-| `packages/plugins/plugin-webhooks` | — | — | — | — | **NOT MEASURED** |
+| `packages/plugins/plugin-security` | 305 | 422 | 13 | 740 | ok |
+| `packages/plugins/plugin-sharing` | 633 | 149 | 13 | 795 | ok |
+| `packages/plugins/plugin-webhooks` | 126 | 440 | 13 | 579 | ok |
 | `packages/qa/dogfood` | 1,738 | 26,707 | 25 | 28,470 | ok |
-| `packages/qa/downstream-contract` | — | — | — | — | **NOT MEASURED** |
-| `packages/qa/http-conformance` | — | — | — | — | **NOT MEASURED** |
+| `packages/qa/downstream-contract` | 0 | 0 | 13 | 13 | ok |
+| `packages/qa/http-conformance` | 250 | 302 | 13 | 565 | ok |
 | `packages/rest` | 4,192 | 1,672 | 13 | 5,877 | ok |
 | `packages/runtime` | 815 | 5,550 | 13 | 6,378 | ok |
-| `packages/sdui-parser` | — | — | — | — | **NOT MEASURED** |
-| `packages/services/service-analytics` | — | — | — | — | **NOT MEASURED** |
-| `packages/services/service-automation` | — | — | — | — | **NOT MEASURED** |
-| `packages/services/service-cache` | — | — | — | — | **NOT MEASURED** |
-| `packages/services/service-cluster` | — | — | — | — | **NOT MEASURED** |
+| `packages/sdui-parser` | 0 | 0 | 13 | 13 | ok |
+| `packages/services/service-analytics` | 1 | 294 | 13 | 308 | ok |
+| `packages/services/service-automation` | 333 | 607 | 13 | 953 | ok |
+| `packages/services/service-cache` | 0 | 0 | 13 | 13 | ok |
+| `packages/services/service-cluster` | 5 | 0 | 13 | 18 | ok |
 | `packages/services/service-cluster-redis` | — | — | — | — | **NOT MEASURED** |
 | `packages/services/service-datasource` | — | — | — | — | **NOT MEASURED** |
 | `packages/services/service-i18n` | — | — | — | — | **NOT MEASURED** |
@@ -314,20 +314,20 @@ run is interrupted.
 | `packages/triggers/trigger-schedule` | — | — | — | — | **NOT MEASURED** |
 | `packages/types` | — | — | — | — | **NOT MEASURED** |
 | `packages/verify` | 221 | 3,171 | 13 | 3,405 | ok |
-| **total, 45/72 suites measured** | **14,845** | **58,779** | **636** | **74,260** | |
+| **total, 55/72 suites measured** | **16,498** | **60,993** | **766** | **78,257** | |
 
-structured share of total (structured / (structured+console+reporter)): 79.2%
+structured share of total (structured / (structured+console+reporter)): 77.9%
 
-structured share of console+structured (comparable to the 5-suite framing): 79.8%
+structured share of console+structured (comparable to the 5-suite framing): 78.7%
 
-measured: 45/72 — NOT MEASURED (27): `packages/plugins/plugin-security`, `packages/plugins/plugin-sharing`, `packages/plugins/plugin-webhooks`, `packages/qa/downstream-contract`, `packages/qa/http-conformance`, `packages/sdui-parser`, `packages/services/service-analytics`, `packages/services/service-automation`, `packages/services/service-cache`, `packages/services/service-cluster`, `packages/services/service-cluster-redis`, `packages/services/service-datasource`, `packages/services/service-i18n`, `packages/services/service-job`, `packages/services/service-knowledge`, `packages/services/service-messaging`, `packages/services/service-package`, `packages/services/service-queue`, `packages/services/service-realtime`, `packages/services/service-settings`, `packages/services/service-sms`, `packages/services/service-storage`, `packages/spec`, `packages/triggers/trigger-api`, `packages/triggers/trigger-record-change`, `packages/triggers/trigger-schedule`, `packages/types`
+measured: 55/72 — NOT MEASURED (17): `packages/services/service-cluster-redis`, `packages/services/service-datasource`, `packages/services/service-i18n`, `packages/services/service-job`, `packages/services/service-knowledge`, `packages/services/service-messaging`, `packages/services/service-package`, `packages/services/service-queue`, `packages/services/service-realtime`, `packages/services/service-settings`, `packages/services/service-sms`, `packages/services/service-storage`, `packages/spec`, `packages/triggers/trigger-api`, `packages/triggers/trigger-record-change`, `packages/triggers/trigger-schedule`, `packages/types`
 
 non-zero exit: 0
 
 ## The answer
 
-Not yet — see "IN PROGRESS" above. Provisional read at 45/72 (do not cite):
-structured share of console+structured is ~80%, nowhere near the
+Not yet — see "IN PROGRESS" above. Provisional read at 55/72 (do not cite):
+structured share of console+structured is ~79%, nowhere near the
 five-suite ~45%, in the direction the earlier reading's own explanation
 predicts (see "What is NOT claimed here" / the five-suite table above): most
 of the *unmeasured* population never boots a kernel at all, so it was always
