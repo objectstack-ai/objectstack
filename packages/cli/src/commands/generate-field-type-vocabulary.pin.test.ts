@@ -121,18 +121,28 @@ function lookupTableNames(): string[] {
  * annotation, extraction fails loudly here instead of the compiler silently
  * stopping to check.
  */
-const TABLE_TERMINATOR = '\n} satisfies Record<FieldType, string>;';
+const TABLE_TERMINATOR = '} satisfies Record<FieldType, string>;';
 
 /** The keys of one top-level `Record<string, string>` table, in source order. */
 function lookupTableKeys(name: string): string[] {
   const declaration = `const ${name}: Record<string, string> = {`;
   const start = SOURCE.indexOf(declaration);
   if (start < 0) throw new Error(`lookup table not found in generate.ts: ${name}`);
-  const end = SOURCE.indexOf(TABLE_TERMINATOR, start);
-  if (end < 0) {
+  // Bound the table at ITS OWN closing line — the first line starting with `}`
+  // after the declaration — and then require that line to be the terminator.
+  // Searching for the terminator directly would silently run past a table
+  // whose annotation was deleted and swallow the NEXT table's body, turning a
+  // removed guard into a wrong measurement instead of a named failure.
+  const closing = SOURCE.slice(start).search(/\n\}/);
+  if (closing < 0) throw new Error(`unterminated lookup table in generate.ts: ${name}`);
+  const end = start + closing;
+  const closingLine = SOURCE.slice(end + 1, SOURCE.indexOf('\n', end + 1));
+  if (closingLine !== TABLE_TERMINATOR) {
     throw new Error(
-      `lookup table ${name} in generate.ts is not closed by \`${TABLE_TERMINATOR.trim()}\` — ` +
-      'the satisfies annotation is the type-level half of the #14657 totality rule and must stay.',
+      `${name} in generate.ts must be closed by \`${TABLE_TERMINATOR}\`, but it is closed by ` +
+      `\`${closingLine}\`. That annotation is the type-level half of the #14657 rule that every ` +
+      'FieldType member has an entry: without it, adding a field type to the spec stops being a ' +
+      'compile error here and goes back to silently generating `unknown` / a TEXT column.',
     );
   }
   const body = SOURCE.slice(start + declaration.length, end);
@@ -233,6 +243,10 @@ describe('generate.ts field-type vocabularies (#13871)', () => {
       ).toBe(true);
       expect(() => lookupTableKeys(table)).not.toThrow();
     }
-    expect(SOURCE.match(/\} satisfies Record<FieldType, string>;/g)).toHaveLength(2);
+    expect(
+      SOURCE.match(/^\} satisfies Record<FieldType, string>;$/gm),
+      'both FIELD_TYPE_MAP and FIELD_TYPE_SQL_MAP must close with the satisfies annotation ' +
+      'that makes an unmapped FieldType member a compile error',
+    ).toHaveLength(2);
   });
 });
