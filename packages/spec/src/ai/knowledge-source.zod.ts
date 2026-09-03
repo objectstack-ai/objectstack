@@ -128,8 +128,15 @@ export const KnowledgeSourceSchema = lazySchema(() => z.object({
    * adapters own their own backend.
    */
   vectorStore: VectorStoreSchema.optional(),
-  /** Refresh / sync configuration. */
-  refresh: KnowledgeRefreshPolicySchema.default({}).optional(),
+  /**
+   * Refresh / sync configuration. Omitted ⇒ parses to `{}` — the runtime
+   * default, stated here in words because the published input-shape JSON
+   * Schema cannot carry it beside `cron`'s transform (#14825).
+   */
+  refresh: KnowledgeRefreshPolicySchema.default({}).optional().describe(
+    'Refresh / sync configuration; omitted parses to `{}` (the runtime default — the published '
+    + "input-shape JSON Schema cannot state it beside `cron`'s transform).",
+  ),
   /** Whether `search_knowledge` may expose this source to AI agents. */
   aiExposed: z.boolean().default(true).optional(),
 }));
