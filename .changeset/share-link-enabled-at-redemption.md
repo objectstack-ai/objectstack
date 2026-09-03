@@ -64,6 +64,8 @@ Minting is unchanged: `createLink` still refuses `SHARING_NOT_ENABLED` for an
 ordinary caller, and the system / `permissive` bypass still mints — what it
 mints simply does not serve until the block is on. The refusal logs one `warn`
 line per refused hit and is not latched, so a retroactive deploy with many live
-links on switched-off objects will burst the log once.
+links on switched-off objects does not burst the log once and subside: the
+volume tracks traffic, one line per refused hit, for as long as requests keep
+reaching those links — until the block is re-enabled or the links are revoked.
 
 <!-- adr-0087: not-required (no-migration-prescription) Nothing authorable is removed, renamed or re-shaped: `publicSharing.enabled` keeps its name, its type, its default and its accept-set, and the change is WHEN the platform holds it. There is therefore no tombstone for `objectstack migrate meta` to carry and no mechanical rewrite it could perform — a deployment whose links stop resolving must decide whether the block should be on at all, which is an authoring decision no ledger entry can make on its behalf. -->

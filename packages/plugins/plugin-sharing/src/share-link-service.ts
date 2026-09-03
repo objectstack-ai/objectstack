@@ -100,17 +100,17 @@ function getPolicy(schema: any): {
       enabled: false,
       allowedAudiences: [],
       allowedPermissions: [],
-      // [#13856] The declared redaction set is read REGARDLESS of `enabled`.
-      // This branch used to return `redactFields: []`, so a link minted while
-      // the object was opted IN and redeemed after it was opted OUT kept
-      // resolving AND started serving the very fields the object declares
-      // redacted — turning the feature off WIDENED what the anonymous
-      // endpoint serves. Opting out gates MINTING (`createLink`'s 422 reads
-      // `enabled`, not this list) and whatever #14033 rules for standing
-      // links; it must never strip the object's declared redactions from
-      // tokens that still serve. An object with no `publicSharing` block at
-      // all keeps `[]` — nothing declared, nothing redacted — exactly as
-      // before.
+      // [#13856 -> #14033] The declared redaction set is read REGARDLESS of
+      // `enabled` — DEFENCE IN DEPTH, not a live read. #13856: this branch
+      // returned `[]`, so opting an object OUT WIDENED what an already-minted
+      // token served (fail-open). #14033 then made `enabled` a standing
+      // policy — `resolveToken`'s gate returns `null` before the only reader
+      // of this list (the union below) and `createLink` never reads it, so
+      // nothing reaches this today and the sibling keys are MOOT. But moot is
+      // not "must not be read": #14581 measured that collapsing this back to
+      // `[]` leaves the whole package suite green, so NO pin would catch a
+      // regression of that gate — this is what fails CLOSED behind it. An
+      // object with no `publicSharing` block keeps `[]`, exactly as before.
       redactFields: Array.isArray(raw?.redactFields) ? (raw.redactFields as string[]) : [],
     };
   }
