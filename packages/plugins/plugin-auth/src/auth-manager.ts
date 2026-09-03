@@ -236,7 +236,6 @@ function installWebContainerRequestStatePolyfill(): void {
   if (!g[sym].context) g[sym].context = {};
   if (!g[sym].context.requestStateAsyncStorage) {
     g[sym].context.requestStateAsyncStorage = new WebContainerRequestStateAsyncLocalStorage();
-    // eslint-disable-next-line no-console
     console.warn(
       '[AuthManager] WebContainer detected: installed synchronous request-state polyfill ' +
         '(node:async_hooks AsyncLocalStorage does not propagate context across await in WebContainer).',

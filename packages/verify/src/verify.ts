@@ -7,7 +7,6 @@
 // metadata, exercise it through the real HTTP surface, and tell me where the
 // declared behavior doesn't actually hold at runtime.
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import type { VerifyStack } from './harness.js';
 import { deriveCrudCases, fillRelationalRefs, type CrudCase } from './derive.js';

@@ -124,11 +124,8 @@ export interface MetadataActivationStore {
  * what is used keeps every test double honest about that.
  */
 export interface MetadataActivationStoreEngine {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     find(object: string, options?: any): Promise<any[]>;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     insert(object: string, data: any, options?: any): Promise<any>;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     update(object: string, data: any, options?: any): Promise<any>;
 }
 
@@ -224,7 +221,6 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
             context: SYSTEM_CTX,
         });
         const current = Array.isArray(existing)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             ? existing.find((r: any) => r?.organization_id == null)
             : undefined;
 
