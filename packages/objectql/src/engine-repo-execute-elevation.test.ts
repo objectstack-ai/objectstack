@@ -50,7 +50,12 @@ function makeDriver() {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
     async find(object: string, ast: any) {
-      return Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      const rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
+      // [check:objectql-double-limit] Apply the caller's bound AFTER the
+      // filter, by PRESENCE — this fixture is not under test for pagination,
+      // but a `find` double that silently ignores `limit` is exactly the
+      // shape that gate exists to catch.
+      return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
     },
     async findOne(object: string, ast: any) {
       for (const r of storeFor(object).values()) if (matches(r, ast?.where)) return r;
