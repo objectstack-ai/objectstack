@@ -199,6 +199,13 @@ describe('ADR-0130 D1 + D3 — the gate relaxation and the object-name check are
     expect(err.namespace).toBe('crm');
     expect(err.existingPackageId).toBe('com.acme.crm');
     expect(err.incomingPackageId).toBe('com.acme.crm.billing');
+    // [#14474] The ADR-0112 envelope, asserted the same way this file already
+    // asserts its D3 sibling's (`caught?.code` / `caught?.status` below). The
+    // instance check above is NOT a substitute: it stayed green through every
+    // year this class carried no `code` and no `status` at all, which is
+    // precisely how the refusal reached `POST /api/v1/packages` as a 500.
+    expect((refused as Envelope).code).toBe('NAMESPACE_CONFLICT');
+    expect((refused as Envelope).status).toBe(422);
     // Nothing half-applied: the refused package is not recorded.
     expect(engineOf(kernel).registry.getPackage('com.acme.crm.billing')).toBeUndefined();
   });

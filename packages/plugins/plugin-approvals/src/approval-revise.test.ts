@@ -480,10 +480,12 @@ describe('Send back for revision (ADR-0044)', () => {
     });
 
     it('reverse check (tenant admin): admitted on `pending` too — the narrowing is about status, not posture', async () => {
-      const { req } = await pendingRequest();
+      const { req, editAttempt } = await pendingRequest();
+      await expect(editAttempt()).rejects.toThrow(/RECORD_LOCKED/);   // pending → locked
       const out = await service.recall(req.id, { actorId: 'org_owner' }, TENANT_ADMIN);
       expect(out.request.status).toBe('recalled');
       expect(await actionsOf(req.id)).toContain('recall');
+      await expect(editAttempt()).resolves.toBeUndefined();            // the #3424 release still happens
     });
 
     it("the submitter's own revise-window recall is untouched (ADR-0044)", async () => {
