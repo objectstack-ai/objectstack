@@ -92,13 +92,6 @@ const SYS = { isSystem: true } as const;
 
 type Health = 'green' | 'yellow' | 'red';
 
-/** Normalize the engine's list shape (array, or `{ records }`). */
-function rowsOf(result: unknown): Array<Record<string, unknown>> {
-  if (Array.isArray(result)) return result as Array<Record<string, unknown>>;
-  const records = (result as { records?: unknown })?.records;
-  return Array.isArray(records) ? (records as Array<Record<string, unknown>>) : [];
-}
-
 /** Read a numeric column defensively — a currency/progress column may arrive as a string. */
 function num(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -145,28 +138,24 @@ export function healthFor(input: {
  * this handler can be reached without them.
  */
 export async function sweepProjectHealth({ jobId, ql, logger }: JobHandlerContext): Promise<void> {
-  const projects = rowsOf(
-    await ql.find('showcase_project', {
-      where: { status: { $in: [...SWEPT_STATUSES] } },
-      fields: ['id', 'status', 'health', 'budget', 'spent'],
-      limit: READ_LIMIT,
-      context: SYS,
-    }),
-  );
+  const projects: Array<Record<string, unknown>> = await ql.find('showcase_project', {
+    where: { status: { $in: [...SWEPT_STATUSES] } },
+    fields: ['id', 'status', 'health', 'budget', 'spent'],
+    limit: READ_LIMIT,
+    context: SYS,
+  });
   if (projects.length === 0) {
     logger.info('[showcase] project health sweep: no in-play projects', { job: jobId });
     return;
   }
 
   const projectIds = projects.map((p) => String(p.id));
-  const tasks = rowsOf(
-    await ql.find('showcase_task', {
-      where: { project: { $in: projectIds } },
-      fields: ['project', 'progress'],
-      limit: READ_LIMIT,
-      context: SYS,
-    }),
-  );
+  const tasks: Array<Record<string, unknown>> = await ql.find('showcase_task', {
+    where: { project: { $in: projectIds } },
+    fields: ['project', 'progress'],
+    limit: READ_LIMIT,
+    context: SYS,
+  });
 
   const progressByProject = new Map<string, number[]>();
   for (const task of tasks) {

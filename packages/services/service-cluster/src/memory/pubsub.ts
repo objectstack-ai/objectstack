@@ -47,7 +47,6 @@ export class MemoryPubSub implements IPubSub {
         this.onError =
             opts.onError ??
             ((err, channel) => {
-                // eslint-disable-next-line no-console
                 console.error(`[MemoryPubSub] handler error on channel "${channel}":`, err);
             });
         this.nodeId = opts.nodeId;
