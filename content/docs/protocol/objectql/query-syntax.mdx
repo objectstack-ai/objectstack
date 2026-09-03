@@ -969,9 +969,9 @@ disclose every other tenant's values for that column.
 ### Full-Text Search
 
 The `search` parameter does **not** reach a full-text index. The engine expands it into
-an `$or` of `$contains` predicates across the object's server-resolved searchable fields
+an `$or` of `$icontains` predicates across the object's server-resolved searchable fields
 (ADR-0061) and deletes `search` from the AST before the driver sees it — every driver
-already runs `$or`/`$contains`, so no driver support is needed (which is also why the
+already runs `$or`/`$icontains`, so no driver support is needed (which is also why the
 old `supports.fullTextSearch` capability bit had no reader and was retired in 17.0.0,
 #4634).
 
@@ -1006,13 +1006,15 @@ because the engine-side intersection alone used to drop the unknown name and fal
 scanning the full searchable set. Internal callers reaching `engine.find()` directly keep
 the tolerant intersection. Multiple whitespace-separated terms are AND-ed and
 fields are OR-ed. Case sensitivity comes from the operator the expansion emits, not
-from the expansion: it emits a plain `$contains`, which is **case-sensitive** by the
-rule in [Case Sensitivity](#case-sensitivity) above. Note what that means for search —
-a user typing `acme` does not find `ACME Corp`. Only `select` / `status` option
-*labels* are matched case-insensitively by the expansion itself.
+from the expansion: it emits `$icontains`, which ignores **ASCII case** by the
+rule in [Case Sensitivity](#case-sensitivity) above. So a user typing `acme` does
+find `ACME Corp` — search is case-insensitive by ruling
+([#7641](https://github.com/objectstack-ai/objectstack/issues/7641)). `select` /
+`status` option *labels* are matched case-insensitively too, by a separate
+label→value mapping in the expansion rather than by the operator.
 
 <Callout type="info">
-  **Measured today: every driver matches that rule.** The `$contains` alignment
+  **Measured today: both operators mean one thing on every driver.** The `$contains` alignment
   landed in three steps —
   [#6518](https://github.com/objectstack-ai/objectstack/issues/6518) made `SqlDriver`
   case-exact per dialect (`GLOB` on the SQLite dialects, `LIKE` unchanged on
@@ -1024,8 +1026,12 @@ a user typing `acme` does not find `ACME Corp`. Only `select` / `status` option
   the divergence this callout warned about is closed, and
   `FILTER_TEXT_CASES` holds all five drivers to it. Whether the expansion should emit
   `$icontains` instead of `$contains` — i.e. whether search is case-insensitive by
-  definition — remains a separate open question, and one that can now actually be
-  answered, since both operators mean one thing everywhere.
+  definition — is **settled, not open**:
+  [#7641](https://github.com/objectstack-ai/objectstack/issues/7641) ruled that it should,
+  and `expandSearchToFilter` has compiled `$search` to `$icontains` ever since.
+  `$contains` stays case-**sensitive** by contract
+  ([#4706](https://github.com/objectstack-ai/objectstack/issues/4706) Q2 = A) — the two
+  are different operators, not two spellings of one.
 </Callout>
 `fuzzy`, `boost`, `operator`, `minScore`, `language`, and `highlight` carry
 `[EXPERIMENTAL — not enforced]` markers (#4286): the schema accepts them, the
@@ -1050,8 +1056,8 @@ The declarative answer is a **mirror field**: copy the related record's title
 into a stored field on this object and declare *that* field searchable — a task
 list searched by project name carries a `project_name` text column on `task`,
 maintained on write and listed in `task.searchableFields`, so the expansion stays
-a single-table `$or` of `$contains`. The mirror must be **stored**: a `formula`
-field is virtual, no driver materializes a column for it, and a `$contains`
+a single-table `$or` of `$icontains`. The mirror must be **stored**: a `formula`
+field is virtual, no driver materializes a column for it, and an `$icontains`
 against one has nothing to scan. Cross-object search paths are rejected by
 design, not pending — see [Schema Design → Searching by a related record's
 title](/docs/data-modeling/schema-design#searching-by-a-related-records-title--mirror-the-value)

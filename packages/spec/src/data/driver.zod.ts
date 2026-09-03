@@ -294,9 +294,10 @@ export const DriverCapabilitiesSchema = lazySchema(() => z.object({
     + 'driver-side JOIN planning — no code consulted the bit.')),
 
   fullTextSearch: retiredKey(capRemoved('fullTextSearch',
-    '`$search` is compiled by the engine into an `$or` of `$contains` predicates over the '
+    '`$search` is compiled by the engine into an `$or` of `$icontains` predicates over the '
     + 'searchable fields (ADR-0061) and removed from the AST before the driver sees it — no '
-    + 'driver-side full-text path exists.')),
+    + 'driver-side full-text path exists. The operator is `$icontains`, NOT `$contains`: '
+    + 'textual search is case-insensitive by ruling (#7641).')),
   jsonQuery: retiredKey(capRemoved('jsonQuery',
     'No engine path ever branched on driver-side JSON querying.')),
   geospatialQuery: retiredKey(capRemoved('geospatialQuery',
