@@ -1243,3 +1243,274 @@ describe('the declared leg loads an ESM-only package via a hostRoot node_modules
     expect((err as Error).message).toMatch(/INSTALL problem/);
   });
 });
+
+/**
+ * ── #14278: an ALIASED install names its own package, and the finder must know ─
+ *
+ * `{ "dependencies": { "foo": "npm:bar@1" } }` installs the package `bar` at
+ * `<hostRoot>/node_modules/foo`: the manifest there is named `bar`, while the
+ * importable specifier — and the declaration key — is `foo`. The #14041
+ * fallback finder verifies the directory it consults by matching that
+ * manifest's `name` against the declared name, so it refused every aliased
+ * install BY CONSTRUCTION, and an ESM-only aliased package kept the
+ * pre-#14041 INSTALL wording: a confidently-wrong remedy against an install
+ * that is already correct.
+ *
+ * The fix parses the DECLARATION, never the directory. The host's own
+ * `package.json` says which package `foo` is an alias for, so the expectation
+ * is still authored by the host and the check is exactly as tight as it was —
+ * what moves is the EXPECTED NAME, never the comparison. The TIGHTNESS cases
+ * below are that proof: an alias naming one package does not license a
+ * directory holding another, and a NON-aliased declaration is untouched (the
+ * `manifest NAMES the declared package` case above is that control, and it
+ * stays green).
+ *
+ * `link:` / `file:` name a LOCATION rather than a package, so no name can be
+ * derived from them at all; they keep the key expectation, and with it today's
+ * conservative refusal.
+ */
+describe('an aliased install is verified against the name its DECLARATION names (#14278)', () => {
+  /** The card's exact shape: `import` condition only, no `require`, no `main`. */
+  const ESM_ONLY_EXPORTS = { '.': { import: './dist/index.js' } };
+
+  const roots: string[] = [];
+
+  afterAll(() => {
+    for (const dir of roots) rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A fresh host app declaring `key` with the literal specifier under test. */
+  function app(tag: string, key: string, specifier: string): string {
+    const root = mkdtempSync(join(tmpdir(), `os-aliased-${tag}-`));
+    roots.push(root);
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({
+        name: 'aliased-host-fixture',
+        type: 'module',
+        dependencies: { [key]: specifier },
+      }),
+      'utf8',
+    );
+    return root;
+  }
+
+  /**
+   * Install a package NAMED `manifestName` at `node_modules/<key>` — the
+   * on-disk shape every aliasing package manager produces. (`link:` /
+   * `workspace:` installs put a SYMLINK there instead; the finder reads
+   * `node_modules/<key>` either way and realpaths only afterwards, so a plain
+   * directory exercises the same code.)
+   */
+  function installAs(
+    root: string,
+    key: string,
+    manifestName: string,
+    manifest: Record<string, unknown>,
+    files: Record<string, string>,
+  ): void {
+    const dir = join(root, 'node_modules', ...key.split('/'));
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({
+        name: manifestName,
+        version: '0.0.0-fixture',
+        type: 'module',
+        ...manifest,
+      }),
+      'utf8',
+    );
+    for (const rel of Object.keys(files)) {
+      const target = join(dir, rel);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, files[rel] as string, 'utf8');
+    }
+  }
+
+  it('PRECONDITION: an aliased ESM-only install reaches the fallback at all', () => {
+    // Same precondition the #14041 suite pins, re-measured through an alias:
+    // the CJS resolver FINDS `node_modules/aliased` and refuses on the
+    // CONDITION, so everything below is decided inside that throw's catch —
+    // the fallback is the only thing that can answer, and before this fix it
+    // answered `absent`.
+    const root = app('precondition', 'aliased', 'npm:@fixture/alias-target@1');
+    installAs(root, 'aliased', '@fixture/alias-target', { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'aliased-esm-only';\n",
+    });
+    let code: string | undefined;
+    try {
+      createHostRequire(root).resolve('aliased');
+    } catch (e) {
+      code = (e as { code?: string }).code;
+    }
+    expect(code).toBe('ERR_PACKAGE_PATH_NOT_EXPORTED');
+  });
+
+  it('THE CARD: an aliased ESM-only package is rescued, not reported as an INSTALL problem', async () => {
+    const root = app('loads', 'aliased-esm', 'npm:@fixture/alias-esm-only@1');
+    installAs(root, 'aliased-esm', '@fixture/alias-esm-only', { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'aliased-esm-only';\n",
+    });
+    expect((await createHostImporter(root)('aliased-esm')).BUILD).toBe('aliased-esm-only');
+  });
+
+  it('THE CARD (wording): an aliased install with no loadable entry gets the PACKAGE message', async () => {
+    // The card's named deliverable: the aliased install answers with the
+    // ESM-only wording (`declared-no-loadable-entry`) instead of the INSTALL
+    // wording, because the install is fine and no install action can help.
+    const root = app('types-only', 'aliased-types', 'npm:@fixture/alias-types-only@1');
+    installAs(
+      root,
+      'aliased-types',
+      '@fixture/alias-types-only',
+      { exports: { '.': { types: './dist/index.d.ts' } } },
+      { 'dist/index.d.ts': 'export declare const BUILD: string;\n' },
+    );
+    const err = await createHostImporter(root)('aliased-types').catch((e: unknown) => e);
+    expect(hostImportFailureKind(err)).toBe('declared-no-loadable-entry');
+    expect((err as Error).message).toMatch(/publishes no entry/);
+    expect((err as Error).message).not.toMatch(/INSTALL problem/);
+  });
+
+  it('a SCOPED key aliasing an unscoped package is rescued too', async () => {
+    // Both halves of the mapping are free to be scoped or not: the key is a
+    // directory path under `node_modules`, the alias target is a package name.
+    const root = app('scoped-key', '@app/aliased', 'npm:alias-unscoped@^2.0.0');
+    installAs(root, '@app/aliased', 'alias-unscoped', { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'alias-unscoped';\n",
+    });
+    expect((await createHostImporter(root)('@app/aliased')).BUILD).toBe('alias-unscoped');
+  });
+
+  it('an aliased SUBPATH resolves against the aliased package', async () => {
+    const root = app('subpath', 'aliased-sub', 'npm:@fixture/alias-subpaths@1');
+    installAs(
+      root,
+      'aliased-sub',
+      '@fixture/alias-subpaths',
+      { exports: { '.': { import: './dist/index.js' }, './plugin': { import: './dist/plugin.js' } } },
+      {
+        'dist/index.js': "export const WHERE = 'root';\n",
+        'dist/plugin.js': "export const WHERE = 'plugin';\n",
+      },
+    );
+    expect((await createHostImporter(root)('aliased-sub/plugin')).WHERE).toBe('plugin');
+  });
+
+  it('an alias with no version range names its target just the same', async () => {
+    const root = app('no-range', 'aliased-bare', 'npm:@fixture/alias-bare');
+    installAs(root, 'aliased-bare', '@fixture/alias-bare', { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'alias-bare';\n",
+    });
+    expect((await createHostImporter(root)('aliased-bare')).BUILD).toBe('alias-bare');
+  });
+
+  it('a `workspace:` ALIAS names its target; a plain `workspace:` range does not', async () => {
+    // pnpm spells an aliased workspace dependency `workspace:<name>@<range>`;
+    // `workspace:*` / `workspace:^1.2.3` carry a RANGE only, so the key stays
+    // the expected name.
+    const aliased = app('workspace-alias', 'ws-aliased', 'workspace:@fixture/ws-target@*');
+    installAs(aliased, 'ws-aliased', '@fixture/ws-target', { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'ws-target';\n",
+    });
+    expect((await createHostImporter(aliased)('ws-aliased')).BUILD).toBe('ws-target');
+
+    const plain = app('workspace-plain', '@fixture/ws-plain', 'workspace:*');
+    installAs(plain, '@fixture/ws-plain', '@fixture/ws-plain', { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'ws-plain';\n",
+    });
+    expect((await createHostImporter(plain)('@fixture/ws-plain')).BUILD).toBe('ws-plain');
+  });
+
+  it('a `link:` specifier names a LOCATION, so the KEY stays the expected name', async () => {
+    // The linked package installed under its own key loads, exactly as before.
+    const root = app('link-ok', 'linked', 'link:../linked');
+    installAs(root, 'linked', 'linked', { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'linked';\n",
+    });
+    expect((await createHostImporter(root)('linked')).BUILD).toBe('linked');
+  });
+
+  it('BOUNDARY: a `link:` target whose manifest names something else keeps the refusal', async () => {
+    // Deliberate, and the reason `link:` is not "parsed" into a name: a path
+    // specifier carries no package name for the finder to expect, so there is
+    // nothing to verify a differing manifest against. The conservative
+    // direction (refuse, never load the wrong thing) is kept rather than
+    // guessed at — widening it here would make the finder looser than the
+    // manifest-name check exists to be.
+    const root = app('link-mismatch', 'linked-other', 'link:../elsewhere');
+    installAs(root, 'linked-other', '@fixture/some-other-name', { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'other';\n",
+    });
+    const err = await createHostImporter(root)('linked-other').catch((e: unknown) => e);
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect((err as Error).message).toMatch(/INSTALL problem/);
+  });
+
+  it('TIGHTNESS: an alias naming one package does not license a directory holding another', async () => {
+    // The check moved its EXPECTATION, not its strictness. The declaration
+    // says this directory holds `@fixture/alias-declared`; it holds
+    // `@fixture/alias-installed`, so it is not the declared package's install
+    // and must not be rescued from.
+    const root = app('alias-mismatch', 'aliased-wrong', 'npm:@fixture/alias-declared@1');
+    installAs(root, 'aliased-wrong', '@fixture/alias-installed', { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'imposter';\n",
+    });
+    const err = await createHostImporter(root)('aliased-wrong').catch((e: unknown) => e);
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect((err as Error).message).toMatch(/INSTALL problem/);
+  });
+
+  it('TIGHTNESS: a NON-aliased declaration is unchanged — the key is still the expected name', async () => {
+    // The control the card names: an aliased-install red that also reddens
+    // this one would mean the finder got looser, not smarter. A plain range
+    // declares no alias, so a directory holding a different package is refused
+    // exactly as it was before #14278.
+    const root = app('plain-range', '@fixture/plain-range', '^1.0.0');
+    installAs(root, '@fixture/plain-range', '@fixture/somebody-else', { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'imposter';\n",
+    });
+    const err = await createHostImporter(root)('@fixture/plain-range').catch((e: unknown) => e);
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect((err as Error).message).toMatch(/INSTALL problem/);
+  });
+
+  it('TIGHTNESS: an alias target carrying a SUBPATH is not a package name, and is refused', async () => {
+    // `npm:` values are `<name>[@<range>]` — never a subpath. A value that is
+    // not a bare package name yields no expectation to move to, so the key
+    // stays, and this directory (named for the subpath's package) is refused.
+    const root = app('alias-subpath-value', 'aliased-bad', 'npm:@fixture/alias-bad/deep@1');
+    installAs(root, 'aliased-bad', '@fixture/alias-bad', { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'imposter';\n",
+    });
+    const err = await createHostImporter(root)('aliased-bad').catch((e: unknown) => e);
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+    expect((err as Error).message).toMatch(/INSTALL problem/);
+  });
+
+  it('TIGHTNESS: an alias does not reopen the hostRoot boundary', async () => {
+    // Every other axis of the finder's tightness is unaffected by the alias:
+    // the one directory consulted is still `<hostRoot>/node_modules/<key>`,
+    // never a parent's. Installed one level up, under the same key and the
+    // aliased name, it is still not this app's install.
+    const parent = mkdtempSync(join(tmpdir(), 'os-aliased-parent-'));
+    roots.push(parent);
+    installAs(parent, 'aliased-up', '@fixture/alias-parent', { exports: ESM_ONLY_EXPORTS }, {
+      'dist/index.js': "export const BUILD = 'from-parent';\n",
+    });
+    const root = join(parent, 'app');
+    mkdirSync(root, { recursive: true });
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({
+        name: 'nested-aliased-host-fixture',
+        type: 'module',
+        dependencies: { 'aliased-up': 'npm:@fixture/alias-parent@1' },
+      }),
+      'utf8',
+    );
+    const err = await createHostImporter(root)('aliased-up').catch((e: unknown) => e);
+    expect(hostImportFailureKind(err)).toBe('declared-unresolvable');
+  });
+});

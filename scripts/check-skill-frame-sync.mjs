@@ -342,7 +342,57 @@ const SCAN_ROOTS = ['.claude', 'skills'];
  * than re-spelled, so re-scoping a root cannot leave this describing the old one.
  */
 const ROOT_DIR_WATCH_HINTS = ['skills/**'];
-const SCAN_SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'references']);
+/**
+ * Directories the anti-dormancy walk refuses to descend into: trees that are
+ * INSTALLED or GENERATED, where nothing hand-written lives.
+ *
+ * ## Why `references` is NOT one of them (#15056)
+ *
+ * It was, until this edit, carried over from the idiom the repo's prose gates
+ * share — and that idiom states its reason outright, in
+ * `check-corpus-claim-drift.mjs`:
+ *
+ *   > Generated `references/` is skipped: the spec source is the fix site
+ *   > there, so a finding in a generated file names the wrong file.
+ *
+ * That sentence is about `content/docs/references/`, which IS generated from
+ * spec. This gate never walks `content/docs`. Under SCAN_ROOTS the same
+ * directory NAME holds hand-written operative prose: the PM protocol files
+ * under `.claude/skills/pm-dispatch/references/` — `decision-analysis.md`
+ * among them, whose subject matter IS escalation analysis and so is the single
+ * likeliest place for a third copy to be pasted — and the published reference
+ * companions that ship verbatim to third parties via `npx skills add`, the
+ * exact distribution path this gate's header gives as the reason the published
+ * copy is watched at all. So the reason did not hold here, and the skip hid 32
+ * of 72 markdown files (44%) from the half of this gate whose entire job is to
+ * notice a copy of the frame appearing somewhere new. A scan that cannot see
+ * 44% of its population is the #4690 anti-pattern one directory level down: it
+ * runs, it passes, and it reports nothing about the files it never opened.
+ *
+ * Two sibling gates over this same corpus already carry the corrected verdict.
+ * `check-skill-identifier-liveness.mjs` keeps `references` OUT of its skip set
+ * and pins the difference in its self-test ("under `skills/**` those files are
+ * hand-authored published content, unlike content/docs/references which is
+ * generated"). `check-doc-authoring.mjs` gave its published-catalog rule a
+ * SECOND walk rather than reuse the skipping one, because reusing it "would
+ * have produced a gate that runs, passes, and cannot see a ninth of the
+ * population it exists to guard".
+ *
+ * Hence no narrowed carve-out for the generated pages under `skills/**` either
+ * (`references/_index.md`, `references/react-blocks.md`). That is the same
+ * refusal `check-doc-authoring.mjs` records beside them — "an exemption over a
+ * surface that no longer needs one is where the next regeneration would smuggle
+ * one back in. A red here is fixed AT THE SPEC SOURCE, never by hand-editing
+ * the artifact" — and it holds a fortiori here: a fingerprint hit in a
+ * generated page would mean the GENERATOR is emitting a copy of the frame,
+ * which is a real finding whose fix site is the generator, not a false one.
+ *
+ * The self-test pins this from the WALK's own output rather than as a file
+ * count: a count has to be re-typed whenever a page is added, and the failure
+ * it must catch — "the scan reaches no reference page at all" — is not a
+ * statement a count can make.
+ */
+const SCAN_SKIP_DIRS = new Set(['node_modules', '.git', 'dist']);
 const SCAN_EXTENSIONS = ['.md', '.mdx'];
 
 function matchAllOf(text, source) {
@@ -935,11 +985,48 @@ function selfTest() {
   for (const f of declFailures) console.error(`  ✗ dispatch-gates declaration: ${f}`);
   failed += declFailures.length;
 
+  // ── The scan population (#15056) ──────────────────────────────────────────
+  //
+  // What SCAN_SKIP_DIRS leaves out IS the anti-dormancy half's reach, and a
+  // skip is invisible in the pass line: "40 markdown files scanned" reads
+  // exactly like 72 to anyone not counting. `references` sat in that set for
+  // reasons belonging to a corpus this gate does not walk, and hid 44% of the
+  // population — see the SCAN_SKIP_DIRS docblock.
+  //
+  // Pinned from the WALK, on the real tree, by the same call `main()` makes —
+  // never as a hand-typed file count. A count has to be re-typed whenever a
+  // page is added, and it cannot state the thing that actually went wrong:
+  // "the scan reaches no reference page at all".
+  const INSTALLED_OR_GENERATED = new Set(['node_modules', '.git', 'dist']);
+  const popFailures = [];
+  let popCases = 0;
+  const pop = (label, ok) => { popCases += 1; if (!ok) popFailures.push(label); };
+  const walked = SCAN_ROOTS.flatMap((root) => walkMarkdown(root, []));
+  const inReferences = walked.filter((f) => /(^|[\\/])references[\\/]/.test(f.file));
+  pop('the walk reaches the `references/` subtrees under SCAN_ROOTS — hand-written '
+    + 'operative prose, not an installed or generated tree. Restoring the skip empties '
+    + 'this and every gate stays green, which is the defect this case exists for',
+    inReferences.length > 0);
+  pop('the walk reaches more than those subtrees, so the case above is judging a real '
+    + 'population rather than passing on a coincidence',
+    walked.length > inReferences.length);
+  pop('every SCAN_SKIP_DIRS entry is DECLARED installed-or-generated here — the '
+    + 'criterion the three surviving entries meet and `references` never did, so a '
+    + 'fourth entry has to be stated rather than appended',
+    [...SCAN_SKIP_DIRS].every((d) => INSTALLED_OR_GENERATED.has(d)));
+  for (const f of popFailures) console.error(`  ✗ scan population: ${f}`);
+  failed += popFailures.length;
+
   if (failed > 0) {
     console.error(`\n✗ check-skill-frame-sync self-test failed (${failed} case(s)).`);
     process.exit(1);
   }
-  console.log(`✓ check-skill-frame-sync self-test: ${cases.length} cases pass, plus 5 dispatch-gates declaration cases.`);
+  console.log(
+    `✓ check-skill-frame-sync self-test: ${cases.length} cases pass, plus 5 `
+    + `dispatch-gates declaration cases and ${popCases} scan-population cases `
+    + `(${walked.length} markdown files walked under the scan roots, `
+    + `${inReferences.length} of them inside a references/ directory).`,
+  );
   selfTestReachedVerdict = true;
 }
 
