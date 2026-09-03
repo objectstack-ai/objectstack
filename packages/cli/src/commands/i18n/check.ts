@@ -30,16 +30,17 @@ export default class I18nCheck extends Command {
   // is published here in the same edit.
   //
   // Why `summary` as well, when no sibling command sets one: oclif renders a
-  // command's help in two places with different budgets. The COMMANDS list in
-  // `os i18n --help` shows `summary` — falling back to the description's FIRST
-  // LINE when there is none — as one right-hand column entry, and flips the
-  // whole list to a multi-line layout once any entry wraps past five lines. The
-  // command's own `--help` has room for the set. So the short line goes in
-  // `summary` (the parenthetical simply dropped — never a five-item sample of
-  // fifteen), and the full derived set goes in `description`, where the reader
-  // asking what this command covers is actually looking. oclif prints the two
-  // one after the other, so `description` elaborates the summary rather than
-  // restating it.
+  // command in two places with very different budgets, and the set fits only
+  // one of them. The COMMANDS list (`os i18n --help`) prints `summary`, falling
+  // back to the description's FIRST LINE when a command sets none — measured at
+  // COLUMNS=80, the derived set in that column wraps to five lines against the
+  // sibling's three, and `renderList`'s `lines.length > 4` would drop the whole
+  // list into its multi-line layout on one more. The command's own `--help` has
+  // room for it. So the short line goes in `summary`, with the parenthetical
+  // dropped outright — never a five-item sample of fifteen — and the derived
+  // set goes in `description`, where a reader asking what this command covers
+  // is actually looking. oclif prints the two one after the other, so the
+  // description elaborates the summary rather than restating it.
   static override summary = 'Detect missing translation keys across all configured locales';
 
   static override description =
