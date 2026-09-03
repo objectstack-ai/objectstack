@@ -550,7 +550,7 @@ export const ASSIGNMENT_VALUE_ENVELOPE_REFUSAL =
  * kept. The envelope is the only CEL spelling in this slot — which is exactly
  * what lets the two forms coexist without a mode switch.
  */
-export const AssignmentExpressionValueSchema = lazySchema(() => ExpressionSchema
+export const AssignmentExpressionValueSchema = ExpressionSchema
   .refine((e) => e.dialect === 'cel', {
     path: ['dialect'],
     message:
@@ -562,7 +562,7 @@ export const AssignmentExpressionValueSchema = lazySchema(() => ExpressionSchema
     description:
       'CEL value envelope `{ dialect: \'cel\', source }` — evaluated by the expression engine to the value the '
       + 'variable takes; the whole CEL stdlib (`joinNonEmpty`, …) is reachable',
-  }));
+  });
 
 export type AssignmentExpressionValue = z.input<typeof AssignmentExpressionValueSchema>;
 
@@ -595,8 +595,14 @@ export type AssignmentExpressionValue = z.input<typeof AssignmentExpressionValue
  * derives the ledger path `assignments.*`. objectui's inspector reads
  * `xExpression` on string properties only, so the marker changes no editor —
  * the keyValue widget stores an envelope typed as JSON in the value cell.
+ *
+ * Built eagerly, not through `lazySchema`: `.meta()` registers by schema
+ * IDENTITY, and the lazy Proxy is not the identity the registry holds, so a
+ * lazily wrapped marker never reaches the JSON Schema (measured — the sibling
+ * markers all sit on eager inner schemas). The schema is two nodes; nothing
+ * is saved by deferring it.
  */
-export const AssignmentValueSchema = lazySchema(() => z.unknown()
+export const AssignmentValueSchema = z.unknown()
   .superRefine((value, ctx) => {
     if (!isExpressionEnvelopeShaped(value)) return;
     const result = AssignmentExpressionValueSchema.safeParse(value);
@@ -616,9 +622,15 @@ export const AssignmentValueSchema = lazySchema(() => z.unknown()
       + 'envelope `{ dialect: \'cel\', source }` evaluated by the expression engine (the CEL stdlib such as '
       + '`joinNonEmpty` is reachable), or any other literal',
     xExpression: 'value',
-  }));
+  });
 
 export type AssignmentValue = z.input<typeof AssignmentValueSchema>;
+
+/** What the refusal of the legacy `assignments: [{ variable, value }]` array says. */
+export const ASSIGNMENT_ARRAY_FORM_PRESCRIPTION =
+  '`assignments` is a map of variable name → value (`{ assignments: { total: \'{amount}\' } }`). The array form '
+  + '`[{ variable, value }]` is a legacy shape the executor still reads but this contract does not describe — '
+  + 'write the map, which is also the only shape that accepts a CEL value envelope.';
 
 /**
  * `assignment` node config — what the executor reads (logic-nodes.ts), from
@@ -646,21 +658,16 @@ export type AssignmentValue = z.input<typeof AssignmentValueSchema>;
  */
 export const AssignmentConfigSchema = lazySchema(() => z.object({
   /** Variable name → value; the canonical authoring surface. */
-  assignments: z.record(z.string().min(1), AssignmentValueSchema).optional()
+  assignments: z.record(z.string().min(1), AssignmentValueSchema, {
+    // The array form is a TYPE error on this slot; the message is the
+    // prescription, carried on the record's own `invalid_type` issue because
+    // an object-level refinement never runs once a property has failed its
+    // type (Zod aborts the object) — measured, not assumed.
+    error: (issue) => (Array.isArray(issue.input) ? ASSIGNMENT_ARRAY_FORM_PRESCRIPTION : undefined),
+  }).optional()
     .describe('Variables to set: each key is a variable name, each value a `{token}` template, a CEL value envelope, or a literal'),
 })
-  .catchall(z.unknown())
-  .superRefine((config, ctx) => {
-    if (!Array.isArray(config.assignments)) return;
-    ctx.addIssue({
-      code: 'custom',
-      path: ['assignments'],
-      message:
-        '`assignments` is a map of variable name → value (`{ assignments: { total: \'{amount}\' } }`). The array form '
-        + '`[{ variable, value }]` is a legacy shape the executor still reads but this contract does not describe — '
-        + 'write the map, which is also the only shape that accepts a CEL value envelope.',
-    });
-  }));
+  .catchall(z.unknown()));
 
 export type AssignmentConfig = z.input<typeof AssignmentConfigSchema>;
 export type AssignmentConfigParsed = z.infer<typeof AssignmentConfigSchema>;

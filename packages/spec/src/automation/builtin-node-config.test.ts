@@ -20,6 +20,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 
 import {
+  ASSIGNMENT_ARRAY_FORM_PRESCRIPTION,
   ASSIGNMENT_VALUE_ENVELOPE_REFUSAL,
   AssignmentConfigSchema,
   AssignmentExpressionValueSchema,
@@ -357,13 +358,15 @@ describe('assignment value contract — a CEL envelope beside `{token}` interpol
     expect(result.error!.issues.map((i) => i.path.join('.'))).toEqual(['assignments.broken']);
   });
 
-  it('refuses the legacy array form with the map as the prescription', () => {
+  it('refuses the legacy array form as a type error carrying the map as the prescription', () => {
     const result = AssignmentConfigSchema.safeParse({ assignments: [{ variable: 'digest', value: DIGEST_ENVELOPE }] });
     expect(result.success).toBe(false);
-    const issue = result.error!.issues.find((i) => i.code === 'custom' && i.path.join('.') === 'assignments')!;
-    expect(issue).toBeDefined();
-    expect(issue.message).toContain('`[{ variable, value }]`');
-    expect(issue.message).toContain('write the map');
+    expect(result.error!.issues.map((i) => [i.code, i.path.join('.')])).toEqual([['invalid_type', 'assignments']]);
+    expect(result.error!.issues[0]!.message).toBe(ASSIGNMENT_ARRAY_FORM_PRESCRIPTION);
+    expect(ASSIGNMENT_ARRAY_FORM_PRESCRIPTION).toContain('`[{ variable, value }]`');
+    // The prescription is scoped to the array: any other wrong type keeps Zod's own message.
+    expect(AssignmentConfigSchema.safeParse({ assignments: 'nope' }).error!.issues[0]!.message)
+      .not.toBe(ASSIGNMENT_ARRAY_FORM_PRESCRIPTION);
   });
 
   it('declares the slot to the expression ledger: `xExpression: \'value\'` rides onto the map value', () => {
