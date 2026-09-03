@@ -14,9 +14,10 @@ group-level template rows 「不考虑集团级模板行，作废相关需求」
 breaks every remaining tie: 「我们现在创业阶段，应该定一套最稳定可靠的方案，而不是盲目追求功能。」; and the
 provenance rule for editing: 「可以先约定代码推送过来的元数据就只能在代码中修改。studio 界面上配置的元数据，
 保存在库中，可以在界面上修改，包括 ../cloud build agent 构建的元数据，因为也是保存在库中，可以在界面上修改。」;
-and the sealing ruling that fixes D6: 「你这么说还不如先完全封死。flow 也先不让改。然后软件包应该有两种安装方式，
+the sealing ruling that fixes D6: 「你这么说还不如先完全封死。flow 也先不让改。然后软件包应该有两种安装方式，
 有一种是模版形式直接进库，那就是所有都可以修改。但是单库多租户禁止安装这种模版软件包；有一种是受管软件包，什么都以
-软件包中的为准，就是不让改。」
+软件包中的为准，就是不让改。」; and the catalog ruling that fixes D3: 「角色、岗位、权限集，Setup 里组织自建的是组织级。
+这个说的是单库单租户吧，单库多租户我可以禁止他们创建。但是你要支持我绑定到人员。」
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (the metadata overlay — its
 environment layer is re-keyed by D6), [ADR-0049](./0049-no-unenforced-security-properties.md)
 (enforce or remove — the posture of D13), [ADR-0066](./0066-unified-authorization-model.md) D2
@@ -82,10 +83,13 @@ else. The maintainer's model is simpler and this record adopts it whole:
    environment's, not any organization's, and its ledger carries **no organization column**. Template
    packages are **refused on shared-DB multi-tenant deployments**. Both provenances are cross-tenant
    by nature: every organization runs the same schema.
-2. **A row with an organization column exists only when an organization authored it** — a position an
-   admin created in Setup, a set they cloned, an assignment they made. Every such row carries its
-   organization, NOT NULL. Registry items are referenced **by name**, the way ADR-0129 already treats
-   objects.
+2. **A row with an organization column exists only when an organization authored it** — an assignment
+   (this user holds this position, this user holds this permission set), a business unit, a sharing
+   rule, a record share. Every such row carries its organization, NOT NULL, and references registry
+   items **by name**, the way ADR-0129 already treats objects. **Catalog definitions — positions,
+   permission sets, capabilities — are never organization rows**: they live only in the environment
+   registry. In a single-tenant deployment the organization *is* the environment, so its admins author
+   them there; in a shared-DB multi-tenant deployment tenants **assign but do not define**.
 3. **A table with no organization column is deployment-level or code-level**, governed by permission,
    not by a wall. There is no third shape.
 
@@ -238,15 +242,33 @@ D2/D4 (D1 of that record stands and is generalized; its projection is no longer 
 per-organization catalog machinery (`per-organization-catalog.ts`, #10103 Option C) — there is
 nothing left to copy per organization.
 
-### D3 — A row exists only when an organization authored it
+### D3 — A row exists only when an organization authored it; the catalog is environment-level, assignments are organization-level
 
-The tables that hold catalog-shaped data (`sys_position`, `sys_permission_set`,
-`sys_position_permission_set`, `sys_user_position`, `sys_user_permission_set`, `sys_capability`,
-`sys_sharing_rule`, `sys_record_share`, `sys_email_template`, `sys_notification_template`, …) hold
-**only what an organization wrote**: positions and sets an admin created (including clones of declared
-ones), capabilities they defined, rules they authored, assignments and bindings they made, and — when
-a door is open (D6) — overrides they saved. Every such row carries the authoring organization, NOT
-NULL.
+**The catalog has one home.** Positions, permission sets and capabilities are **definitions**, and a
+definition lives only in the environment registry — code-declared (managed, sealed) or
+environment-authored (Studio, template package; editable by metadata-authoring capability holders).
+The position → permission-set binding is part of the position's definition, declared in code or
+authored in Studio. There is **no organization-level catalog**: the objects `sys_position`,
+`sys_permission_set`, `sys_position_permission_set` and `sys_capability` retire (D13), completing
+[ADR-0094](./0094-sys-permission-set-pure-projection.md) D1 — the metadata layer was already the sole
+authoritative store; the projected row no longer exists either. Consequences by posture, verbatim from
+the ruling 「单库多租户我可以禁止他们创建。但是你要支持我绑定到人员」:
+
+- **Single-tenant** (`single`): the organization is the environment. An admin who creates a position
+  or permission set in Setup performs an environment metadata write — the redirect ADR-0094 D3
+  already makes today — gated by the metadata-authoring capability, which the deployment's owner holds
+  and grants as they see fit.
+- **Shared-DB multi-tenant** (`group` / `isolated`): tenant admins **cannot create or edit catalog
+  items**; the operator defines the catalog for every tenant (managed packages, Studio). Creation
+  through Setup or the API is refused with a message naming the posture and the capability.
+
+**Assignments are organization rows, in every posture.** `sys_user_position` (this user holds this
+position) and `sys_user_permission_set` (this user holds this set) are owned by the organization the
+assignment is made in, NOT NULL, reference the catalog item **by name** (D4), and are created and
+removed by that organization's admins for its own members — walled by Layer 0 like any other
+organization data. So are the other things an organization writes: business units, sharing rules and
+record shares it authors, approvals, files, and every business row. Every such row carries the
+authoring organization, NOT NULL.
 
 Under `single` the authoring organization is the Default Organization
 ([ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md); `ensure-default-organization.ts`), which
@@ -255,7 +277,7 @@ becomes **load-bearing**: it exists before the first authenticated write (today 
 inversion is needed — the organization only has to exist before a person acts.
 
 An organization has no rows until it authors something. A fresh deployment with ten organizations
-and no customization has an **empty** catalog table.
+has **no catalog tables at all** and empty assignment tables until an admin assigns someone.
 
 ### D4 — Declared items are referenced by name; resolution is registry-first
 
@@ -304,9 +326,10 @@ anchor retire with D13. No NULL grant row is ever produced.
   with a message naming the posture: a template import would hand every tenant an editable shared
   schema. Under `single` it is how a customer takes an app and makes it theirs.
 
-Creating one's own item — a new permission set, position, view, flow — in Setup (organization-owned,
-D3) or Studio (environment-owned) is ordinary authoring, not customization of a managed item;
-pre-filling the form from a managed item is a UI convenience that records no linkage.
+Creating one's own item — a new permission set, position, view, flow — is environment authoring
+(Studio, or Setup acting as a metadata editor under `single`), gated by the metadata-authoring
+capability and refused to tenants of a shared-DB deployment (D3). It is not customization of a
+managed item; pre-filling the form from a managed item is a UI convenience that records no linkage.
 
 **Code-provenance metadata is edited in code.** No runtime door edits a managed item.
 
@@ -367,11 +390,11 @@ per-organization on a tenant runtime.
 
 **Presentation** (the lesson of the maintainer's prior platform, where a merged list of in-memory and
 database metadata forced search, sort and paging to be re-implemented in application code): no surface
-promises **one merged, server-paged list** of declared and organization-authored items. Studio lists
-declared items from the registry; Setup lists the organization's rows with the data API's native
-search, sort and paging, plus a *Clone from package* action that reads the registry; pickers
-(assignments, bindings, recipients) union the two **small** sets client-side. Declared catalogs are
-tens of items; nothing about them needs a server.
+merges sources. The catalog has one source, the registry (D3): Studio lists and edits it; Setup's
+position and permission-set pages read the same registry — as an editor under `single` for capability
+holders, read-only under a wall — and the assignment pages list the organization's own rows with the
+data API's native search, sort and paging. Pickers (assign a user to a position, choose a recipient)
+list the registry. Catalogs are tens of items; nothing about them needs a server-side merge.
 
 ### D8 — One predicate, computed once
 
@@ -442,7 +465,9 @@ equivalent; the seeders and projector of D2; `per-organization-catalog.ts` inclu
 `meta-write-org-scope.ts`'s NULL layer, `bootstrap-system-capabilities.ts`; the email-template seed
 and `email-template-provenance.ts`; the `__global__` sentinel and ADR-0120 D3's `COALESCE`;
 `platform-object-tenancy.ts` and `isPlatformObjectOutOfTenantAuditScope`; #12699's stand-down
-semantics (replaced by D7's no-column); ADR-0005's org-scoped write path for the five tier-A types.
+semantics (replaced by D7's no-column); ADR-0005's org-scoped write path for the five tier-A types;
+the catalog objects `sys_position`, `sys_permission_set`, `sys_position_permission_set` and
+`sys_capability` (D3 — definitions live in the registry; ADR-0094's projection is no longer needed).
 The packaged-flow disable/clone door and `sys_metadata_activation` are **not** on this list because they
 do not wait for protocol 18: unreleased, they are removed in C5 before the next release (D6). Each
 retirement of an authorable shape is an [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) entry.
@@ -491,13 +516,19 @@ refusal, mirror deletion, arm removal, retirements (D1/D9/D10/D13), in the stagi
 
 **What it costs.**
 
-- **Reference columns move from id to name** (D4): `sys_user_position`, `sys_position_permission_set`,
+- **Reference columns move from id to name** (D4): `sys_user_position`, `sys_user_permission_set`,
   sharing recipients, grants — a schema migration with an id→name rewrite over existing rows, and the
   verified rewrite is the precondition of D10 fate 2.
-- **Resolution changes at the measured sites** — the read-side ledger counted them: three objects with
-  tenant-threaded reads, plus the store helpers — from row lookup to registry-first lookup.
-- **Setup, Studio and pickers change** (D7): Setup drops the declared rows it used to list, gains
-  *Clone from package*; pickers read two sources. No server-side merge is built.
+- **Four catalog objects retire** (D3/D13): `sys_position`, `sys_permission_set`,
+  `sys_position_permission_set`, `sys_capability`. Every reader of those tables — authorization
+  resolution, hierarchy security, delegated admin, sharing recipients, the Setup pages — moves to the
+  registry. The read-side ledger counted the tenant-threaded readers; the bare-context readers are the
+  larger population and are enumerated by C2.
+- **Setup changes shape** (D7): its catalog pages become registry views (editors under `single`,
+  read-only under a wall); its assignment pages stay data pages. No server-side merge is built.
+- **Tenants of a shared-DB deployment lose catalog authoring** they nominally have today (creating a
+  position or set in Setup). They keep assignment. A tenant that needs its own catalog gets its own
+  environment.
 - **Organization-level template editing is unavailable** (D6); existing customized template rows
   need a ruling (§6 Q1). Studio-authored and template-installed templates remain editable in Studio.
 - **Deployment-level settings leave `sys_setting`** (D7): configuration or a tenant-less object.
@@ -537,6 +568,7 @@ refusal, mirror deletion, arm removal, retirements (D1/D9/D10/D13), in the stagi
 | **Read-time overlay of code and database metadata for the same item** (the maintainer's prior platform; ADR-0005's mechanism) | Field-level precedence ambiguity, silent drift on upgrade, no way to delete a code item from the database, merged lists that re-implement search/sort/paging. D4 avoids it by keeping the sets disjoint and unioned by name; D7 avoids it by never merging lists server-side. |
 | **A string sentinel (`__global__`) as owner** | Breaks the FK to `sys_organization`; every layer special-cases it forever (ADR-0120 D3's COALESCE is the running cost). |
 | **Declare a legitimately org-less write per call** (#13636 option B, draft PR #14923) | Makes NULL a *declared* state instead of removing it; every future writer of a conditionally-scoped object must know to declare; the column stays nullable, so the constraint D1 wants can never land. Superseded by taking the column off the objects whose rows are legitimately org-less (§1.6). |
+| **An organization-level catalog beside the environment one** (this record's second draft: tenant-created positions and sets as org-owned rows, pickers unioning registry and rows) | Two sources at selection time, a uniqueness check spanning both, a resolution order — three costs paid so that a tenant of a shared-DB deployment can define its own roles, a need no customer has stated. Deferred: if it arrives, it returns as an org-owned catalog object (the same shape), never as rows in a nullable-column table. |
 | **Keep ADR-0126's overlay and disable + clone regimes live for managed content** | Each regime is a per-type customization mechanism with its own ledger, walls and UI; under the startup posture the maintainer chose one switch (the install mode) over three mechanisms. Regime E stays because it costs nothing (a package). Paused, not rejected: the regimes return only on a measured pull, and never through a nullable tenant column. |
 
 ---
@@ -587,15 +619,15 @@ One epic tracks the family. Phases 1–3 are additive (17.x); phase 4 is protoco
 | # | Card | Decisions | Blocked by |
 |---|---|---|---|
 | C1 | Default Organization load-bearing under `single`; `resolveSystemInsertOrganization` derives it, refuses elsewhere | D3, D9, D11 | ADR merge |
-| C2 | Registry-first catalog resolution; references by name (id→name columns + rewrite); dangling-name boot report; cross-source uniqueness | D2, D4 | ADR merge |
-| C3 | Retire the seeders and the per-organization catalog machinery; built-ins and audience anchors as declared metadata; platform-admin grant row owned by the Default Organization | D2, D5, D13 | C1, C2 |
+| C2 | Catalog resolution reads the registry; assignment tables reference by name (id→name columns + rewrite); dangling-name boot report; every reader of the four catalog tables enumerated and converted | D2, D3, D4 | ADR merge |
+| C3 | Retire the seeders, the per-organization catalog machinery and the four catalog objects; built-ins and audience anchors as declared metadata; Setup catalog creation = environment metadata write under `single`, refused under a wall; platform-admin grant row owned by the Default Organization | D2, D3, D5, D13 | C1, C2 |
 | C4 | Templates: `sendTemplate` resolves the registry; seed and provenance stamp retired; door closed; customized-rows ruling applied | D6, D10 | ADR merge (+ §6 Q1) |
 | C5 | `sys_metadata` family tenant-less (environment definitions, UI-editable by metadata authors); per-organization overlay axis retired (org-scoped writes of the five tier-A types refused); managed content sealed — the unreleased packaged-flow disable/clone machinery and `sys_metadata_activation` **removed before the next release**; ADR-0005 and ADR-0126 amended | D6, D7 | C1 |
 | C12 | Template install mode: manifest `installModes`, one-time import into the environment ledger with provenance, refusal on `group` / `isolated`, CLI + marketplace surfaces | D6 | C5 |
 | C6 | Deployment-level state has no column: settings global rung leaves `sys_setting`; plumbing objects drop the column; #12699 declaration made total | D7 | ADR merge (+ §6 Q3) |
 | C7 | Inventory + migration: four fates, id→name rewrite verified before mirror deletion, per-table boot report | D10 | C2, C3, C4, C5, C6 |
 | C8 | One predicate; NOT NULL per cleared table; every-posture refusal; both arms and the ledger retired — protocol 18 | D1, D8, D9, D13, D14 | C7 |
-| C9 | objectui: Setup lists org rows + *Clone from package*; Studio lists declared; pickers dual-source client-side; no merged server list | D7 | C2 |
+| C9 | objectui: Setup catalog pages read the registry (editor under `single`, read-only under a wall); assignment pages stay data pages; pickers list the registry; Studio lists and edits environment metadata | D3, D7 | C2 |
 | C10 | cloud: control plane and objectos-ee adopt the record (per-deployment no-column, backfill, tests) | D7, D8, D10 | C6, then C8 |
 | C11 | Docs and card-family close-out (#13564, #11611, #10103 posture; #13636 superseded, PR #14923 closed unmerged) | — | C8, C10 |
 
