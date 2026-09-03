@@ -70,6 +70,24 @@ describe('Analytics Service Contract', () => {
     expect(meta[0].measures).toHaveLength(1);
   });
 
+  // #14492 — `fields[].builtinAggregate` is optional and is the closed
+  // `AggregationFunction` vocabulary, nothing else. The first two literals are
+  // the two shapes the producer emits (built-in default vs authored label); the
+  // third pins the closure at compile time.
+  it('carries builtinAggregate on a built-in default measure column and refuses a spelling outside the enum', () => {
+    const builtin: AnalyticsResult['fields'][number] = { name: 'count', type: 'number', builtinAggregate: 'count' };
+    const authored: AnalyticsResult['fields'][number] = { name: 'task_count', type: 'number', label: 'Tasks' };
+    expect(builtin.builtinAggregate).toBe('count');
+    expect(authored.builtinAggregate).toBeUndefined();
+    const offEnum: AnalyticsResult['fields'][number] = {
+      name: 'count',
+      type: 'number',
+      // @ts-expect-error — `total` is not an AggregationFunction; the discriminator is closed
+      builtinAggregate: 'total',
+    };
+    expect(offEnum.name).toBe('count');
+  });
+
   it('should generate SQL without executing', async () => {
     const service: IAnalyticsService = {
       query: async () => ({ rows: [], fields: [] }),
