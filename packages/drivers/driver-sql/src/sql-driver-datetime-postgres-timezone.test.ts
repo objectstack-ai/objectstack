@@ -49,20 +49,36 @@ describe.skipIf(!URL)('Field.datetime on Postgres is timezone-independent (#3912
   let driver: SqlDriver;
   let serverTimeZone = '';
 
+  // ── Why this beforeAll carries an explicit 60_000 budget (#14213) ──
+  // The driver argument here is `PG_CELL.config()` — unconditionally LIVE, not
+  // a parametrised `cell.config()` that would be SQLite for the sqlite cell —
+  // so this hook pays a full connect cycle against the cell's Postgres server,
+  // a `current_setting('TimeZone')` round trip and a disconnect.
+  // ⚠️ A hook inherits `hookTimeout`, NOT `testTimeout`. Measured in this
+  // package's config (which sets neither, so both are vitest's own defaults):
+  // an unbudgeted hook dies at 10000ms ("Hook timed out in 10000ms"), not at
+  // the 5000ms an unbudgeted it() gets. Ten seconds is still a ceiling nobody
+  // chose for live work, and the third argument does lift it (measured).
+  // ⛔ NOT a claim that this hook is known to time out: it was found by a
+  // per-site AST walk over the package, never by a measured red.
   beforeAll(async () => {
     const probe = new SqlDriver(PG_CELL.config());
     const res: any = await probe.execute(`select current_setting('TimeZone') as tz`);
     serverTimeZone = ((res?.rows ?? res)[0] as any).tz;
     await probe.disconnect();
-  });
+  }, 60_000);
 
+  // ── Why this beforeEach carries an explicit 60_000 budget (#14213) ──
+  // Same live-cell reasoning as the beforeAll above, except this one is paid
+  // PER TEST rather than once: a fresh live connect, a `drop table ... cascade`
+  // and `initObjects(...)` schema-sync DDL, for every it() in this suite.
   beforeEach(async () => {
     driver = new SqlDriver(PG_CELL.config());
     await driver.execute(`drop table if exists "${TABLE}" cascade`);
     await driver.initObjects([
       { name: TABLE, fields: { label: { type: 'string' }, at: { type: 'datetime' } } },
     ]);
-  });
+  }, 60_000);
 
   afterEach(async () => {
     await driver.execute(`drop table if exists "${TABLE}" cascade`).catch(() => {});
