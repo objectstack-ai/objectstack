@@ -858,14 +858,6 @@
     },
     {
       "file": "packages/services/service-automation/src/suspended-run-store.test.ts",
-      "verb": "delete",
-      "unguarded": 1,
-      "kind": "DEBT",
-      "why": "HAND-MIRRORS the guard already, which is the second copy of the contract this gate exists to remove. MEASURED (#5393): the devDependency that used to block replacing the copy now EXISTS — @objectstack/objectql was added to @objectstack/service-automation's devDependencies when `builtin/crud-bulk-intent.test.ts` was pinned, and the graph is acyclic (see the sibling entries). What is left is replacing the mirrored `if` with the producer's predicate.",
-      "closes": "replace the mirrored `if` with assertEngineDeleteDispatch(options) — the devDependency is already declared"
-    },
-    {
-      "file": "packages/services/service-automation/src/suspended-run-store.test.ts",
       "verb": "update",
       "unguarded": 1,
       "kind": "DEBT",
