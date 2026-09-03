@@ -798,7 +798,7 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   scale: z.number().int().nonnegative().optional().describe('Decimal places to round a computed numeric/currency result to.'),
   autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable."),
   readonlyWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`)."),
-  requiredWhen: ExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`.'),
+  requiredWhen: ExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.'),
 }));
 
 export const FieldSchema = lazySchema(() => {
@@ -947,7 +947,7 @@ export const FieldSchema = lazySchema(() => {
   // server accepts, at severity error/destructive, before #11431 taught the
   // consumer to defend itself). Which TYPES may author the key is the
   // superRefine below (BOUNDED_STRING_FIELD_TYPES).
-  maxLength: z.number().int().min(1).optional().describe('Max character length (positive integer). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode.'),
+  maxLength: z.number().int().min(1).optional().describe('Max character length (positive integer). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode. Checked on the WRITTEN value only (the `min`/`max` transition-gate class): a stored value longer than a bound declared later is never re-read and survives unrelated edits — only a write carrying an over-long value is refused.'),
   // #11949 (maintainer ruling 2026-08-25) — `minLength` converges on the
   // #11566 template above, `maxLength`'s twin defect pair: same shape, same
   // applicability set, same forms convergence. The lower bound is deliberately
@@ -955,7 +955,7 @@ export const FieldSchema = lazySchema(() => {
   // is a permanently-true declaration — exactly the vacuous noise an AI
   // metadata author mass-produces — and is refused loudly at authoring instead
   // of parsing cleanly and asserting nothing.
-  minLength: z.number().int().min(1).optional().describe('Min character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode.'),
+  minLength: z.number().int().min(1).optional().describe('Min character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode. Checked on the WRITTEN value only (the `min`/`max` transition-gate class): a stored value shorter than a bound declared later is never re-read and survives unrelated edits — only a write carrying a too-short value is refused.'),
 
   // objectui#6140 (maintainer ruling 2026-08-25, Option A — verbatim:
   // 「就全部接受，然后继续下一批」): `rows` was consumed-but-undeclared.
@@ -987,8 +987,8 @@ export const FieldSchema = lazySchema(() => {
   // own alias table (`scale → precision` there) — do not conflate.
   precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer)'),
   scale: z.number().int().min(0).optional().describe('Decimal places (non-negative integer)'),
-  min: z.number().optional().describe('Minimum value'),
-  max: z.number().optional().describe('Maximum value'),
+  min: z.number().optional().describe('Minimum value. Checked on the WRITTEN value only — the same transition-gate class as `requiredWhen`: an UPDATE validates just the fields the payload carries, so a stored value below a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused, and a repairing write is accepted. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
+  max: z.number().optional().describe('Maximum value. Checked on the WRITTEN value only — the same transition-gate class as `min`: a stored value above a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   /**
    * Presentation hint (#7768): whether a `number` field renders with digit
    * grouping (`Intl.NumberFormat`'s `useGrouping`, e.g. `2,026` vs `2026`).
@@ -1446,7 +1446,7 @@ export const FieldSchema = lazySchema(() => {
    */
   visibleWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`"),
   readonlyWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`"),
-  requiredWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
+  requiredWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
 
   /**
    * [REMOVED in protocol 17 — #3855] The deprecated alias of `requiredWhen`.
