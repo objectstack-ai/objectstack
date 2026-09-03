@@ -403,7 +403,20 @@ export const CEILINGS = new Map([
   // operation channel mapping moved out to references/rest-channel.md below.
   // The two right-sized-reads rows the same ruling ordered were paid from that
   // saving in place, and three lines came back. Headroom 0 again.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 314],
+  // 314 → 324 by the CROSS-FILE MOVE the 2026-09-03 ruling authorises —
+  // #14685 item 5 (comment 5520452691), declared in CROSS_FILE_MOVES below and
+  // re-derived there on every run. Three misplaced per-repo facts consolidate
+  // into the file that is their single source: the objectstack required-check
+  // set with its `in_progress` and advisory boundaries (lanes/cli.md, −4), the
+  // two aggregate-reading gate boundaries (lanes/services.md, −2), and the
+  // merge_group count-is-not-a-mechanism tombstone (rest-channel.md, −5, moved
+  // byte-identically). The per-job-conclusion rule the first of those carried
+  // was NOT copied: this file already states it in 队列成员资格 above, so the
+  // moved bullet points at it instead — a move that restated it would be paying
+  // for a second copy. +10 against a net source decrease of 11, so the map's
+  // total falls by one; that is the ruling's own condition and the reason this
+  // is a move rather than a raise. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 324],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -433,7 +446,13 @@ export const CEILINGS = new Map([
   // by re-wrap: the file measures zero reclaimable lines under this gate's own
   // wrapLine, and re-wrap funding is refused per the 2026-08-17 rule in any
   // case. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/rest-channel.md', 93],
+  // Lowered 93 → 88 as a SOURCE of the cross-file move recorded on
+  // platform-readings.md above: the merge_group count-is-not-a-mechanism
+  // tombstone left this table for the readings file, byte-identically. This
+  // file's own header already routes the queue-section readings there and
+  // refuses to keep a second copy, so nothing is left behind but the rows that
+  // are channel mappings. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/rest-channel.md', 88],
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 84],
   ['.claude/skills/pm-dispatch/references/landing-operations.md', 80],
   // Release-aftercare duties — what a lane PM still owes AFTER a tagged release
@@ -479,8 +498,14 @@ export const CEILINGS = new Map([
   // lanes and now lives once in SKILL.md 执行座位职责, so every lane drops it.
   // cli.md pays −2 because it was carrying the map's last line of headroom.
   ['.claude/skills/pm-dispatch/references/lanes/engine.md', 40],
-  ['.claude/skills/pm-dispatch/references/lanes/services.md', 30],
-  ['.claude/skills/pm-dispatch/references/lanes/cli.md', 35],
+  // Lowered 30 → 28 and 35 → 31 as the other two SOURCES of the cross-file
+  // move recorded on platform-readings.md above. A per-repo gate reading in a
+  // lane charter is read by one lane and missed by the other six, which is the
+  // whole defect the move repairs: services.md gave up the two aggregate-
+  // reading boundaries, cli.md the required-check set with its `in_progress`
+  // and advisory clauses. Landed counts, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/lanes/services.md', 28],
+  ['.claude/skills/pm-dispatch/references/lanes/cli.md', 31],
   ['.claude/skills/pm-dispatch/references/lanes/devx.md', 39],
   ['.claude/skills/pm-dispatch/references/lanes/skills.md', 35],
   ['.claude/skills/pm-dispatch/references/lanes/spec.md', 46],
@@ -635,7 +660,23 @@ export const RULING_CITATION = '#14685 item 5 (comment 5520452691)';
  * the later raise, not to this one, and its author is holding the ruling that
  * has to account for it.
  */
-export const CROSS_FILE_MOVES = new Map([]);
+export const CROSS_FILE_MOVES = new Map([
+  // The readings consolidation — the first move taken under the ruling, and the
+  // one it was ruled for. Sources' `was` values are their ceilings on
+  // `origin/main` at f3ae441fa2; the reviewer holds them against that diff.
+  [
+    '.claude/skills/pm-dispatch/references/platform-readings.md',
+    {
+      ruling: 'per-repo readings consolidation, authorised by #14685 item 5 (comment 5520452691)',
+      was: 314,
+      sources: [
+        ['.claude/skills/pm-dispatch/references/lanes/cli.md', 35],
+        ['.claude/skills/pm-dispatch/references/lanes/services.md', 30],
+        ['.claude/skills/pm-dispatch/references/rest-channel.md', 93],
+      ],
+    },
+  ],
+]);
 
 /**
  * Per-file MAX TABLE ROW BYTES — the second ratchet, and the only metered thing
@@ -857,7 +898,7 @@ export function crossFileMoveTotalVerdict(moves, ceilings) {
   if (net > 0) {
     return { ok: false, msg: `the declared cross-file moves raise the map's total by ${net} lines. The ruling admits a move only while total lines do not increase: pay the difference by deleting more at a source, or take the raise the ordinary way — a maintainer ruling quoted in the raising PR.` };
   }
-  return { ok: true, msg: `declared cross-file moves: ${moves.size}, total ceilings ${net === 0 ? 'unchanged' : `down ${-net} lines`}.` };
+  return { ok: true, msg: `declared cross-file moves: ${moves.size}, total ceilings ${net === 0 ? 'unchanged' : `down ${-net} line${net === -1 ? '' : 's'}`}.` };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

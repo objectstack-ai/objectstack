@@ -76,11 +76,6 @@ payload → REST → MCP/GraphQL** 的策略住那里,本表是逐操作的通�
   `PUT .../pulls/{n}/merge`,强制队列 ruleset 下回 **405 `Changes must be made through the merge queue`**;② PR
   上的 `added_to_merge_queue` timeline 事件;③ 对已入队 PR 调 update-branch 回「已入队分支不能更新,
   要改先出队」。①② 拼写与边界是 `platform-readings.md` 队列段既有行,本条只归拢判据。
-- ⚠️ **计数不是机理读数(被当天推翻的推断的墓碑)**:「`GET .../actions/runs?event=merge_group`
-  计数 0 ⇒ required 集为空」提出当天即被自身推翻 —— 同一姊妹仓 2026-08-24 首现 merge_group
-  run(0 → 8),同日再测 224(阳性对照 `event=pull_request` 全程非零)。计数答「至今发生过没有」,
-  不答「机制在不在」:零计数只作**弱先验**,判 required 集为空要读 ruleset
-  的 required 集本身、或看队列合并是否真在等检查;⛔ 别处写下的计数值一律先复测再用。
 - **required job 名与分片矩阵的改名耦合(现行,自 2026-08-24)**:
   队列 required 集按 **job / check-run 名**匹配,**workflow 名从不作为 check context 出现**(所以拿
   workflow 名在选择器里搜什么也搜不到);改其中任一 job 名**或 test 分片矩阵的形状**,
