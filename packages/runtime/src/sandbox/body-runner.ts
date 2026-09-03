@@ -505,6 +505,86 @@ function vmVisibleEntryKeys(entryInput: unknown): string[] {
 }
 
 /**
+ * [#14758] Which keys of the exit dump the write-back should re-assert, or
+ * `undefined` to assert all of them (the pre-#14758 behaviour).
+ *
+ * Two sources, unioned, and neither is sufficient alone:
+ *
+ *  1. `writtenKeys` — what the VM's `ctx.input` recorder saw the body assign,
+ *     define or delete. Exact for everything that goes through a trap, which
+ *     includes the cases a dump diff cannot see: a computed key, an
+ *     `Object.assign(ctx.input, …)`, an alias, and — the one #14088 exists for
+ *     — an IDEMPOTENT write, a body assigning the value already standing on the
+ *     key. Keys it names that the dump does not carry are dropped: a key
+ *     assigned and then deleted, or assigned `undefined`, is absent from the
+ *     dump and belongs to the deletion leg, not to this merge.
+ *  2. Object-valued entry keys whose dumped value no longer matches the entry
+ *     snapshot. A body that writes THROUGH a value it read (`ctx.input.meta.x =
+ *     1`) never trips a trap on `ctx.input`, so (1) cannot list it and dropping
+ *     it would be exactly the silent loss this card exists to end. The
+ *     comparison is confined to keys whose ENTRY value is an object because a
+ *     primitive cannot be mutated in place — every change to one is an
+ *     assignment (1) already saw — and confining it there is what keeps this
+ *     leg from re-widening into the value diff #14099's ruling refused.
+ *
+ * `undefined` (no narrowing) whenever the evidence is not there: no recorder,
+ * or no usable entry snapshot to read leg 2 from.
+ */
+function carriedInputKeys(
+  mutated: Record<string, unknown>,
+  writtenKeys: readonly string[] | undefined,
+  entryInput: unknown,
+): string[] | undefined {
+  if (!writtenKeys) return undefined;
+  if (!entryInput || typeof entryInput !== 'object' || Array.isArray(entryInput)) return undefined;
+  const entry = entryInput as Record<string, unknown>;
+  const carried = new Set<string>();
+  for (const key of writtenKeys) {
+    if (Object.prototype.hasOwnProperty.call(mutated, key)) carried.add(key);
+  }
+  for (const [key, before] of Object.entries(entry)) {
+    if (carried.has(key)) continue;
+    if (!before || typeof before !== 'object') continue;
+    if (!Object.prototype.hasOwnProperty.call(mutated, key)) continue;
+    if (!sameJsonValue(before, mutated[key])) carried.add(key);
+  }
+  return [...carried];
+}
+
+/**
+ * Structural equality under JSON semantics, used only to answer "did the body
+ * write through this object-valued key?".
+ *
+ * Key ORDER is deliberately not significant: a JSON round-trip through the VM
+ * preserves insertion order for string keys but reorders integer-like ones, and
+ * a reorder is not a write. Every failure direction is the safe one — anything
+ * this cannot prove equal is reported as changed and therefore CARRIED, which
+ * is the pre-#14758 behaviour for that key. That covers the host values JSON
+ * cannot represent (a `Date` arrives back as a string and compares unequal, so
+ * it is carried exactly as it was before this card).
+ *
+ * Terminates on a cyclic `a`: `b` is always JSON-parsed and therefore finite,
+ * so the walk is bounded by `b`'s depth.
+ */
+function sameJsonValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  if (typeof a !== 'object' || typeof b !== 'object') return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    const other = b as unknown[];
+    return a.length === other.length && a.every((v, i) => sameJsonValue(v, other[i]));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const leftKeys = Object.keys(left);
+  if (leftKeys.length !== Object.keys(right).length) return false;
+  return leftKeys.every(
+    (k) => Object.prototype.hasOwnProperty.call(right, k) && sameJsonValue(left[k], right[k]),
+  );
+}
+
+/**
  * Write one settled body's mutations back onto the host `ctx.input`.
  *
  * ## [#12277] Why a key diff, and not `Object.assign` alone
@@ -539,6 +619,51 @@ function vmVisibleEntryKeys(entryInput: unknown): string[] {
  * Deletions apply BEFORE both merges, so a body that deletes a key and then
  * returns it (`delete ctx.input.x; return { x: 1 };`) keeps the explicit patch
  * — the return value is the later, more deliberate statement of the two.
+ *
+ * ## [#14758] Why the merge is a KEY SET and no longer the whole dump
+ *
+ * `mutatedInput` is the whole post-run `ctx.input`, so `Object.assign(target,
+ * mutated)` re-asserted every key a body could see, touched or not. `target` is
+ * the engine's flat-input Proxy, whose `set` trap the #14088 hook-write
+ * provenance recorder watches — so the write-back was TELLING the engine that a
+ * body which touched nothing had written every payload key.
+ *
+ * #14099's per-row divergence refusal reads exactly that recording: per row,
+ * the key set the hook chain assigned, refusing a `multi: true` batch when two
+ * rows disagree. Under D3 all rows share ONE payload, so the noise was
+ * order-dependent — measured on `origin/main` with #14099's own fixture driven
+ * through a QuickJS body, one open row and one already-done row:
+ *
+ * ```
+ * already -> open   row1 {status}              row2 {status,completed_at}  refused
+ * open -> already   row1 {status,completed_at} row2 {status,completed_at}  NOT refused
+ * ```
+ *
+ * In the second order the already-done row inherits `completed_at` from the
+ * transitioning row's write onto the shared payload, the blanket write-back
+ * re-asserts it as that row's own write, the windows match — and #14099's
+ * corruption lands on a row that never transitioned. So the carry-back is now
+ * the body's own key set ({@link ScriptResult.mutatedInputKeys}).
+ *
+ * Three properties of the narrowing, each load-bearing:
+ *
+ *  - **Deletion is untouched.** It was never expressed by the merge: the loop
+ *    above reads it from the ENTRY snapshot as absence-from-dump, and a key the
+ *    body never touched is present in the dump and so is never deleted. A
+ *    narrowing that had also filtered the deletion leg would have dropped a leg
+ *    that works.
+ *  - **A key set that cannot speak is not narrowed on.** `mutatedInputKeys`
+ *    `undefined` — a runner with no recorder, a read that failed, a body that
+ *    replaced `ctx.input` with a non-object — falls back to the full
+ *    `Object.assign` verbatim. `[]` is a real answer and does narrow.
+ *  - **Writes made THROUGH a value are still carried.** `ctx.input.meta.x = 1`
+ *    mutates an object the body reached from `ctx.input`; no trap on `ctx.input`
+ *    itself ever fires, so the recorder cannot list `meta`. The dump is the only
+ *    witness for those, and {@link carriedInputKeys} reads it the narrowest way
+ *    available: an OBJECT-valued entry key whose dumped value no longer matches
+ *    the entry snapshot was written through, and is carried. Primitives need no
+ *    such leg — a primitive cannot be mutated in place, so every change to one
+ *    is an assignment the recorder saw.
  */
 function applyMutationsToInput(
   engineCtx: any,
@@ -556,7 +681,15 @@ function applyMutationsToInput(
     for (const key of vmVisibleEntryKeys(entryInput)) {
       if (!(key in mutated)) delete (target as Record<string, unknown>)[key];
     }
-    Object.assign(target, mutated);
+    const carried = carriedInputKeys(mutated, result.mutatedInputKeys, entryInput);
+    if (carried === undefined) {
+      // The recorder could not speak — pre-#14758 behaviour, verbatim.
+      Object.assign(target, mutated);
+    } else {
+      for (const key of carried) {
+        (target as Record<string, unknown>)[key] = mutated[key];
+      }
+    }
   }
   if (
     result.value &&

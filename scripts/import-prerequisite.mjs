@@ -84,6 +84,126 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { WORKSPACE_SCOPE, workspaceBuildFix } from './cli-build-prerequisite.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// This self-test used to decide success by "no failure was recorded" and
+// nothing else, so "every case held" and "the cases never ran" printed the same
+// line. Closed the way PR #13487 validated on check-doc-authoring: what is
+// pinned is the registered NAMES, not a number. Every section opens with
+// `battery('<name>')`, every assertion is attributed to the battery most
+// recently opened, and the floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3 keeps
+// a total "right" the moment a sibling grows. A set difference says WHICH
+// battery stopped; a count says only that something did.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+//
+// The machinery lives HERE, at module scope, rather than inside the self-test:
+// this self-test's assertion sink is not a block-bodied helper in its body (it
+// is a concise arrow, or a module-scope function), so there is no in-body
+// helper to thread a per-run ledger through. Module scope is safe because the
+// self-test runs once per process, and it is what lets the existing sink route
+// through `registerCase()` with no case rewritten and no assertion changed.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the specifier → package reduction': 6,
+  'branch 1: nothing there at all': 2,
+  'branch 2: workspace package present, never built': 4,
+  'branch 3: a subpath import of the same unbuilt package': 1,
+  'branch 4: third party present but incomplete': 2,
+  'branch 5: the package is whole, so the miss came from inside it': 3,
+  'branch 6: a built workspace package': 1,
+  'branch 7: resolved-then-threw is not ours': 1,
+  'the entry-point probe\'s own deferrals': 3,
+  'a LOCAL module that reaches for an absent package': 3,
+  'a local module whose failure text names nothing': 1,
+  'the message parser on its own': 3,
+  'SELF-REFERENCE: a package\'s own gate importing it by name': 4,
+  'findPackageDir walks upward, as node does': 2,
+  'the printed COMMAND: a path the reader can run, not a name': 9,
+  'the inherited pipe-shape advisory': 5,
+  'the exit-code CLASS, and the advisory that must move with it': 10,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 17;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// ⚠️ None of these helpers is named with a self-test spelling, deliberately and
+// on the record: `check:pm-dispatch-gates` anchors on a top-level declaration
+// whose NAME spells self-test, and every such name owes a row in that gate's
+// COMPOUND_ANCHOR_LEDGER. These are the battery ROSTER's machinery -- they hold
+// no fixtures to mask and read no path literal -- so the accurate name is the
+// one that says `battery`, not the one that would owe a ledger row for a role
+// this code does not have.
+
+/** Cases registered per battery: `battery()` opens one, `registerCase()` files into it. */
+const batteryCases = new Map();
+let openBattery = null;
+
+/** Open a battery. Every assertion after this line is attributed to it. */
+function battery(name) {
+  openBattery = name;
+}
+
+/** Called by the self-test's own assertion sink, once per assertion. */
+function registerCase() {
+  const name = openBattery ?? UNATTRIBUTED_BATTERY;
+  batteryCases.set(name, (batteryCases.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Evaluated after every battery has had its chance and BEFORE the verdict, so
+ * the success line can only be printed by a run in which the set of batteries
+ * that registered assertions EQUALS the set declared.
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batteryCases) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batteryCases.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  return problems;
+}
+
 /** `pnpm install` at the repo root — the one remedy for an absent dependency. */
 export const INSTALL_FIX = 'pnpm install';
 
@@ -604,10 +724,14 @@ let selfTestReachedVerdict = false;
 
 export function selfTest() {
   const cases = [];
-  const t = (name, ok, detail) => cases.push({ name, ok: Boolean(ok), detail });
+  const t = (name, ok, detail) => {
+    registerCase();
+    return cases.push({ name, ok: Boolean(ok), detail });
+  };
   const MNF = (msg) => Object.assign(new Error(msg), { code: 'ERR_MODULE_NOT_FOUND' });
 
   // ── the specifier → package reduction ─────────────────────────────────────
+  battery('the specifier → package reduction');
   t('a bare specifier is its own package', packageNameOf('yaml') === 'yaml');
   t('a subpath is dropped', packageNameOf('yaml/util') === 'yaml');
   t('a scoped package keeps both segments', packageNameOf('@objectstack/spec') === '@objectstack/spec');
@@ -641,11 +765,13 @@ export function selfTest() {
     const at = (spec, msg) => classifyImportFailure(spec, MNF(msg ?? `Cannot find package '${spec}'`), dir);
 
     // ── branch 1: nothing there at all ──────────────────────────────────────
+    battery('branch 1: nothing there at all');
     const absent = at('totally-absent-fixture');
     t('an absent package is not-installed', absent.kind === 'not-installed', absent.kind);
     t('an absent package prescribes install', absent.fix === INSTALL_FIX, absent.fix);
 
     // ── branch 2: workspace package present, never built ────────────────────
+    battery('branch 2: workspace package present, never built');
     const unbuilt = at('@objectstack/unbuilt-fixture');
     t('a linked-but-unbuilt workspace package is workspace-unbuilt', unbuilt.kind === 'workspace-unbuilt', unbuilt.kind);
     t('an unbuilt workspace package prescribes a BUILD, never an install',
@@ -656,6 +782,7 @@ export function selfTest() {
     t('unbuilt and not-installed are DIFFERENT verdicts', unbuilt.kind !== absent.kind && unbuilt.fix !== absent.fix);
 
     // ── branch 3: a subpath import of the same unbuilt package ──────────────
+    battery('branch 3: a subpath import of the same unbuilt package');
     const unbuiltSub = classifyImportFailure(
       '@objectstack/unbuilt-fixture/system',
       Object.assign(new Error('no exports main'), { code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' }),
@@ -664,12 +791,14 @@ export function selfTest() {
     t('a subpath of an unbuilt workspace package classifies the same way', unbuiltSub.kind === 'workspace-unbuilt', unbuiltSub.kind);
 
     // ── branch 4: third party present but incomplete ────────────────────────
+    battery('branch 4: third party present but incomplete');
     const partial = at('partial-fixture');
     t('a third party missing its entry is broken, NOT unbuilt', partial.kind === 'broken', partial.kind);
     t('a broken install says so rather than blaming the tree',
       partial.headline.includes('installed but incomplete'), partial.headline);
 
     // ── branch 5: the package is whole, so the miss came from inside it ──────
+    battery('branch 5: the package is whole, so the miss came from inside it');
     const inner = at('whole-fixture', "Cannot find package 'some-transitive-dep' imported from /x/whole-fixture/index.js");
     t('a whole package whose OWN import failed is dependency-missing', inner.kind === 'dependency-missing', inner.kind);
     t('dependency-missing quotes what node actually said',
@@ -678,15 +807,18 @@ export function selfTest() {
       !inner.headline.includes('is not installed'), inner.headline);
 
     // ── branch 6: a built workspace package ─────────────────────────────────
+    battery('branch 6: a built workspace package');
     const built = at('@objectstack/built-fixture', "Cannot find package 'inner-dep'");
     t('a BUILT workspace package is never reported unbuilt', built.kind !== 'workspace-unbuilt', built.kind);
 
     // ── branch 7: resolved-then-threw is not ours ───────────────────────────
+    battery('branch 7: resolved-then-threw is not ours');
     const threw = classifyImportFailure('whole-fixture', new SyntaxError('Unexpected token'), dir);
     t('a package that resolved and threw is broken with no headline (rethrown)',
       threw.kind === 'broken' && threw.headline === '', `${threw.kind}/${threw.headline}`);
 
     // ── the entry-point probe's own deferrals ───────────────────────────────
+    battery('the entry-point probe\'s own deferrals');
     t('an unreadable manifest defers rather than guessing',
       'unknown' in entryPointOnDisk(join(dir, 'no-such-package')));
     const noEntry = mk('no-entry-fixture', { name: 'no-entry-fixture' });
@@ -699,6 +831,7 @@ export function selfTest() {
     // The shape three ratchet gates have: they import '../eslint.config.mjs',
     // and that file imports '@typescript-eslint/parser'. Naming the local module
     // as "not installed" would be nonsense; naming the package is the diagnosis.
+    battery('a LOCAL module that reaches for an absent package');
     const viaLocal = classifyImportFailure(
       '../eslint.config.mjs',
       MNF("Cannot find package '@typescript-eslint/parser' imported from /repo/eslint.config.mjs"),
@@ -713,11 +846,13 @@ export function selfTest() {
       !viaLocal.headline.includes('eslint.config'), viaLocal.headline);
 
     // ── a local module whose failure text names nothing ─────────────────────
+    battery('a local module whose failure text names nothing');
     const opaque = classifyImportFailure('../eslint.config.mjs', MNF('something else entirely'), dir);
     t('an unrecognisable local failure defers rather than inventing a package',
       opaque.kind === 'broken' && opaque.headline === '', `${opaque.kind}/${opaque.headline}`);
 
     // ── the message parser on its own ───────────────────────────────────────
+    battery('the message parser on its own');
     t('a package miss is read out of the message', missingPackageFromMessage("Cannot find package 'yaml' imported from /x") === 'yaml');
     t('a scoped package miss keeps its scope',
       missingPackageFromMessage("Cannot find package '@typescript-eslint/parser' imported from /x") === '@typescript-eslint/parser');
@@ -728,6 +863,7 @@ export function selfTest() {
     // `packages/lint/scripts/*.mjs` imports '@objectstack/lint'. There is no
     // node_modules link for that — node resolves it through the enclosing
     // package.json — so a node_modules-only walk reports it uninstalled.
+    battery('SELF-REFERENCE: a package\'s own gate importing it by name');
     const selfPkgDir = join(dir, 'self-pkg');
     mkdirSync(join(selfPkgDir, 'scripts'), { recursive: true });
     writeFileSync(
@@ -755,6 +891,7 @@ export function selfTest() {
       findPackageDir('@objectstack/no-exports', join(noExports, 'scripts')) === '');
 
     // ── findPackageDir walks upward, as node does ───────────────────────────
+    battery('findPackageDir walks upward, as node does');
     const deep = join(dir, 'a', 'b', 'c');
     mkdirSync(deep, { recursive: true });
     t('a nested importer finds a package hoisted above it',
@@ -773,6 +910,7 @@ export function selfTest() {
     // That shape is the whole reason the marker is the workspace manifest, and
     // the negative control below is what turns that from a preference into a
     // measurement.
+    battery('the printed COMMAND: a path the reader can run, not a name');
     const wt = join(dir, 'objectstack-issue-fixture');
     mkdirSync(join(wt, 'scripts'), { recursive: true });
     mkdirSync(join(wt, 'packages', 'lint', 'scripts'), { recursive: true });
@@ -851,6 +989,7 @@ export function selfTest() {
   // print. The clauses are the four the advisory is for; the negative one is
   // the load-bearing one, since the wrong claim it excludes reads perfectly
   // plausible and shipped once already.
+  battery('the inherited pipe-shape advisory');
   const advisory = prerequisiteNotMetText(
     new URL('file:///repo/scripts/check-fixture-gate.mjs').href,
     { headline: 'h', detail: ['d'], fix: 'f' },
@@ -882,6 +1021,7 @@ export function selfTest() {
   // constant reading 3, every consumer green (they all treat any non-zero as
   // failure, so 1-instead-of-3 is invisible to all of them), and a message that
   // still reads perfectly right. Nothing else in this repo would notice.
+  battery('the exit-code CLASS, and the advisory that must move with it');
   const hardcodesExitCall = (fn) => /process\.exit\(\s*\d/.test(fn.toString());
   const spellsALiteralCode = (fn) => /Exit code \d/.test(fn.toString());
   t('the refusal exits through the named constant, never a literal',
@@ -921,6 +1061,10 @@ export function selfTest() {
   // the text is a false advisory inherited by all 45 importers.
   t('the advisory carries NO stale spelling of the old code',
     !/Exit code 1\b/.test(advisory), advisory);
+
+  // The floor runs BEFORE the verdict below, so a success line can only be
+  // printed by a run in which every declared battery registered its cases.
+  for (const message of batteryFloorFailures()) cases.push({ name: message, ok: false });
 
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name}${c.detail ? ` -- ${c.detail}` : ''}`);

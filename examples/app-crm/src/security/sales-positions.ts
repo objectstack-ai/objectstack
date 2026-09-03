@@ -19,7 +19,12 @@ export const SalesManagerPosition = definePosition({
   description: 'Manages a team of sales reps.',
 });
 
-/** Referenced by the Discount Approval second step. */
+/**
+ * Registered in `objectstack.config.ts` (`positions`) and bound to the
+ * `crm_sales_user` permission set by `bind-position-sets.ts`, alongside
+ * `sales_rep` and `sales_manager`. This app models no approval flow; the
+ * worked approval flows live in `examples/app-showcase/src/automation/flows/`.
+ */
 export const FinanceApproverPosition = definePosition({
   name: 'finance_approver',
   label: 'Finance Approver',

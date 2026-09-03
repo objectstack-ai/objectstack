@@ -17,14 +17,14 @@ Decision: **enforce** record search as one **metadata-driven, server-resolved** 
 ## Context
 
 ### The declared-but-unenforced failure, again
-ObjectStack's defining risk is not a crash but a primitive that is *declarable* yet *inert* (ADR-0049, ADR-0060). Record search is a clean instance: the `docs/audits/2026-06-record-search-liveness.md` evidence shows `$search` (`spec/.../query.zod.ts:454`) parsed but executed by no driver (`driver-sql`/`memory` both `fullTextSearch: false`), so it returns rows unfiltered. AI authorship amplifies this — a model emits `searchableFields` that *looks* wired and nothing reads it.
+ObjectStack's defining risk is not a crash but a primitive that is *declarable* yet *inert* (ADR-0049, ADR-0060). Record search is a clean instance: the `docs/audits/2026-06-record-search-liveness.md` evidence shows `$search` (`packages/spec/src/data/query.zod.ts`) parsed but executed by no driver (`driver-sql`/`memory` both `fullTextSearch: false`), so it returns rows unfiltered. AI authorship amplifies this — a model emits `searchableFields` that *looks* wired and nothing reads it.
 
 ### The requirement is platform-wide, not "lookup multi-field search"
 Search surfaces, all sending the same `$search` today:
 - **Lookup picker** (`fields/LookupField`, `RecordPickerDialog`) — type-ahead + dialog.
 - **List quick-search** (`plugin-list/ListView`) — already sends `$searchFields` (drift).
 - **Global / ⌘K** (`app-shell/CommandPalette` → `react/useRecordSearch`) — client fan-out + client ranking.
-- **Public-form picker** (`rest-server.ts:3751`) — the only working, scoped path.
+- **Public-form picker** (`packages/rest/src/rest-server.ts`) — the only working, scoped path.
 - **Structured filters** (FilterUI, grid/report filter bars) — `$filter`/`$contains`, *not* full-text; out of scope here.
 - **Knowledge / RAG / vector** — separate semantic subsystem; out of scope here.
 

@@ -868,6 +868,12 @@ function allSpecSources() {
 
 // ── Self-test ───────────────────────────────────────────────────────────────
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-skill-identifier-liveness self-test reached its verdict';
+
 /**
  * Why this exists at all, in the words of the wiring gate that requires it: a
  * gate whose defect class is its MATCHING RULE cannot detect its own regression
@@ -1141,6 +1147,8 @@ function selfTest() {
     process.exit(1);
   }
   console.log('check-skill-identifier-liveness --self-test OK');
+
+  return SELF_TEST_VERDICT;
 }
 
 let SELF_SOURCE = null;
@@ -1152,6 +1160,14 @@ function selfSource() {
 }
 
 if (isEntrypoint(import.meta.url)) {
-  if (argv.includes('--self-test')) selfTest();
-  else main();
+  if (argv.includes('--self-test')) {
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-skill-identifier-liveness self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  } else main();
 }

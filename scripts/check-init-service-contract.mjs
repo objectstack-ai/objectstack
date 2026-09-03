@@ -85,6 +85,53 @@ import { requireDefaultExport } from './import-prerequisite.mjs';
 const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
 import { parseSourceFile } from './ts-parse.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '1. The #4420 pre-fix shape MUST be caught: dependencies = [], no': 3,
+  '2. The post-#4460 shape (declared tolerance via optionalDependencies) passes.': 1,
+  '3. A hard dependency on the provider passes.': 1,
+  '4. requiresServices naming the service passes.': 1,
+  '5. getService inside a hook callback registered during init is DEFERRED —': 1,
+  '6. getService in start() is the sanctioned best-effort pattern — not flagged.': 1,
+  '7. A service with no workspace provider has nothing to order against.': 1,
+  '8. Object-literal plugins (the createApiRegistryPlugin shape) are scanned too.': 1,
+  '9. Self-provided services are not edges.': 1,
+  '10. The walk is transitive: init → helperA → helperB → getService, plus a': 1,
+  '11. A dynamic (non-literal) service name cannot be judged statically —': 1,
+  '12. Recursion between helpers must terminate.': 1,
+  '13. #4772 VERBATIM, pre-fix (`f2eb85007^`, packages/plugins/plugin-auth/src/auth-plugin.ts:346):': 5,
+  '14. The same call without the optional-call / cast noise — a plain': 1,
+  '15. Declaring it discharges the obligation — the remedy the message prints': 1,
+  '16. `getServiceScoped` resolves through the very same': 2,
+  '17. Every exemption is decided by WHEN the call runs, not by which accessor': 1,
+  '18. `--list` and the problem text must quote the accessor actually called.': 1,
+  '19. Nothing outside the vocabulary is invented: a lookup-shaped call on a': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 19;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
 const DECLARATION_FIELDS = ['dependencies', 'optionalDependencies', 'requiresServices', 'providesServices'];
@@ -506,7 +553,21 @@ function list() {
 const SELF_TEST_VERDICT = 'check-init-service-contract self-test reached its verdict';
 
 function selfTest() {
-  const assert = (cond, msg) => { if (!cond) { console.error('✗ self-test: ' + msg); process.exit(1); } };
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
+  const assert = (cond, msg) => { registerCase(); if (!cond) { console.error('✗ self-test: ' + msg); process.exit(1); } };
 
   const auditSource = (code) => {
     const src = parseSourceFile('fixture.ts', code);
@@ -526,6 +587,7 @@ function selfTest() {
   //    optionalDependencies, no requiresServices — and the getService('manifest')
   //    is NOT in init()'s own body but in a private helper init() calls, wrapped
   //    in a best-effort try/catch. Exactly what shipped the data-loss bug.
+  battery('1. The #4420 pre-fix shape MUST be caught: dependencies = [], no');
   {
     const { problems } = auditSource(PROVIDER + `
       export class AutomationServicePlugin implements Plugin {
@@ -555,6 +617,7 @@ function selfTest() {
   }
 
   // 2. The post-#4460 shape (declared tolerance via optionalDependencies) passes.
+  battery('2. The post-#4460 shape (declared tolerance via optionalDependencies) passes.');
   {
     const { problems } = auditSource(PROVIDER + `
       export class AutomationServicePlugin implements Plugin {
@@ -568,6 +631,7 @@ function selfTest() {
   }
 
   // 3. A hard dependency on the provider passes.
+  battery('3. A hard dependency on the provider passes.');
   {
     const { problems } = auditSource(PROVIDER + `
       export class ApprovalsPlugin implements Plugin {
@@ -580,6 +644,7 @@ function selfTest() {
   }
 
   // 4. requiresServices naming the service passes.
+  battery('4. requiresServices naming the service passes.');
   {
     const { problems } = auditSource(PROVIDER + `
       export class AuthPlugin implements Plugin {
@@ -593,6 +658,7 @@ function selfTest() {
 
   // 5. getService inside a hook callback registered during init is DEFERRED —
   //    it runs after every init(), so it is not an init-ordering edge.
+  battery('5. getService inside a hook callback registered during init is DEFERRED —');
   {
     const { problems } = auditSource(PROVIDER + `
       export class LatePlugin implements Plugin {
@@ -606,6 +672,7 @@ function selfTest() {
   }
 
   // 6. getService in start() is the sanctioned best-effort pattern — not flagged.
+  battery('6. getService in start() is the sanctioned best-effort pattern — not flagged.');
   {
     const { problems } = auditSource(PROVIDER + `
       export class StartConsumerPlugin implements Plugin {
@@ -618,6 +685,7 @@ function selfTest() {
   }
 
   // 7. A service with no workspace provider has nothing to order against.
+  battery('7. A service with no workspace provider has nothing to order against.');
   {
     const { problems } = auditSource(`
       export class HostConsumerPlugin implements Plugin {
@@ -629,6 +697,7 @@ function selfTest() {
   }
 
   // 8. Object-literal plugins (the createApiRegistryPlugin shape) are scanned too.
+  battery('8. Object-literal plugins (the createApiRegistryPlugin shape) are scanned too.');
   {
     const { problems } = auditSource(PROVIDER + `
       export function createBadPlugin(): Plugin {
@@ -642,6 +711,7 @@ function selfTest() {
   }
 
   // 9. Self-provided services are not edges.
+  battery('9. Self-provided services are not edges.');
   {
     const { problems } = auditSource(`
       export class SelfPlugin implements Plugin {
@@ -658,6 +728,7 @@ function selfTest() {
 
   // 10. The walk is transitive: init → helperA → helperB → getService, plus a
   //     same-file free function.
+  battery('10. The walk is transitive: init → helperA → helperB → getService, plus a');
   {
     const { problems } = auditSource(PROVIDER + `
       function seedThings(ctx: PluginContext) { ctx.getService('data').insert('t', {}); }
@@ -673,6 +744,7 @@ function selfTest() {
 
   // 11. A dynamic (non-literal) service name cannot be judged statically —
   //     ignored here; the runtime describeInitOrderFault diagnostics cover it.
+  battery('11. A dynamic (non-literal) service name cannot be judged statically —');
   {
     const { problems } = auditSource(PROVIDER + `
       export class DynamicPlugin implements Plugin {
@@ -684,6 +756,7 @@ function selfTest() {
   }
 
   // 12. Recursion between helpers must terminate.
+  battery('12. Recursion between helpers must terminate.');
   {
     const { problems } = auditSource(PROVIDER + `
       export class LoopPlugin implements Plugin {
@@ -718,6 +791,7 @@ function selfTest() {
   //     via an optional call on a cast `ctx`, inside a best-effort try/catch, and
   //     the plugin's declarations cover `data`/`manifest`/objectql — never `cache`.
   //     Before `getServiceAsync` joined the vocabulary this audited GREEN.
+  battery('13. #4772 VERBATIM, pre-fix (`f2eb85007^`, packages/plugins/plugin-auth/src/auth-plugin.ts:346):');
   {
     const code = CACHE_PROVIDER + `
       export class AuthPlugin implements Plugin {
@@ -760,6 +834,7 @@ function selfTest() {
 
   // 14. The same call without the optional-call / cast noise — a plain
   //     `await ctx.getServiceAsync('cache')` is the same undeclared edge.
+  battery('14. The same call without the optional-call / cast noise — a plain');
   {
     const { problems } = auditSource(CACHE_PROVIDER + `
       export class PlainAsyncPlugin implements Plugin {
@@ -772,6 +847,7 @@ function selfTest() {
 
   // 15. Declaring it discharges the obligation — the remedy the message prints
   //     works for the async accessor exactly as it does for the sync one.
+  battery('15. Declaring it discharges the obligation — the remedy the message prints');
   {
     const { problems } = auditSource(CACHE_PROVIDER + `
       export class DeclaredAsyncPlugin implements Plugin {
@@ -786,6 +862,7 @@ function selfTest() {
   // 16. `getServiceScoped` resolves through the very same
   //     `pluginLoader.getService(name, scopeId)` as `getServiceAsync`, so it
   //     carries the identical hazard and the identical verdict.
+  battery('16. `getServiceScoped` resolves through the very same');
   {
     const { problems } = auditSource(CACHE_PROVIDER + `
       export class ScopedPlugin implements Plugin {
@@ -799,6 +876,7 @@ function selfTest() {
 
   // 17. Every exemption is decided by WHEN the call runs, not by which accessor
   //     made it: start() is still the sanctioned best-effort seam.
+  battery('17. Every exemption is decided by WHEN the call runs, not by which accessor');
   {
     const { problems } = auditSource(CACHE_PROVIDER + `
       export class LateAsyncPlugin implements Plugin {
@@ -813,6 +891,7 @@ function selfTest() {
   // 18. `--list` and the problem text must quote the accessor actually called.
   //     Hardcoding `getService('X')` made the edge list rename every reader —
   //     a machine-readable surface that lies about the code it describes.
+  battery('18. `--list` and the problem text must quote the accessor actually called.');
   {
     const { edges } = auditSource(CACHE_PROVIDER + `
       export class MixedPlugin implements Plugin {
@@ -834,6 +913,7 @@ function selfTest() {
 
   // 19. Nothing outside the vocabulary is invented: a lookup-shaped call on a
   //     name `packages/core` does not expose to plugins stays unjudged.
+  battery('19. Nothing outside the vocabulary is invented: a lookup-shaped call on a');
   {
     const { problems } = auditSource(CACHE_PROVIDER + `
       export class ProbePlugin implements Plugin {
@@ -842,6 +922,53 @@ function selfTest() {
       }
     `);
     assert(problems.length === 0, 'hasService is not in the vocabulary (not plugin-reachable in packages/core)');
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    console.error('✗ self-test: ' + message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+    process.exit(1);
   }
 
   console.log('✓ self-test: 19 cases');

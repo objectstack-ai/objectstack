@@ -372,7 +372,6 @@ export class MetadataPlugin implements Plugin {
 
         // Register Metadata Manager as the primary metadata service provider.
         ctx.registerService('metadata', this.manager);
-        console.log('[MetadataPlugin] Registered metadata service, has getRegisteredTypes:', typeof this.manager.getRegisteredTypes);
 
         // Register metadata system objects via the manifest service (if available).
         // MetadataPlugin may init before ObjectQLPlugin, so wrap in try/catch.

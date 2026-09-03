@@ -103,6 +103,56 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '1. POSITIVE — the measurement itself, per section, on BOTH numbers. A': 2,
+  '2. POSITIVE — a wrong N is caught, and the message names the section and': 5,
+  '3. POSITIVE — the M-ASSERTION, and the case that makes this gate more than': 4,
+  '4. POSITIVE — a deleted table row is caught.': 2,
+  '5. POSITIVE — the SINGULAR "(1 of 1 schema)" heading is a real section.': 2,
+  '6. POSITIVE — a section ends at the next `##` even when that heading has no': 1,
+  '7. POSITIVE — the heading FORMAT changing is loud, not silent. Both halves': 2,
+  '8. POSITIVE — the OLD `(N schemas)` spelling is refused rather than silently': 1,
+  '9. POSITIVE — a counted section whose table vanished.': 2,
+  '10. POSITIVE — a page the parser no longer recognises at all fails loudly': 2,
+  '11. POSITIVE — two tables in one counted section is ambiguous, not silently': 1,
+  '12. POSITIVE — a bare unlinked name is refused. This is the shape Shared\'s': 1,
+  '13. POSITIVE — a row that documents its protocol outside the reference tree': 1,
+  '14. POSITIVE — and the mirror: marking a row that IS in its own tree hides a': 1,
+  '15. POSITIVE — a row pointing at a reference page that no longer exists.': 1,
+  '16. POSITIVE — #6319\'s actual defect, caught by LINK rather than by count: a': 1,
+  '17. POSITIVE — one page listed twice inflates N while every count still': 1,
+  '18. POSITIVE — a category directory that is neither sectioned nor declared.': 2,
+  '19. POSITIVE — the declared page count of an unsectioned category is checked': 1,
+  '20. POSITIVE — declaring a category as unsectioned while it HAS a section is': 2,
+  '21. POSITIVE — a declared directory that does not exist. The symmetric': 1,
+  '22. POSITIVE — deleting the whole block is loud. Without this, "state the': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 22;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const ROOT = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 const TARGET = 'content/docs/getting-started/quick-reference.mdx';
 const REFERENCES = 'content/docs/references';
@@ -538,8 +588,23 @@ const GOOD_PAGE = [
 let selfTestReachedVerdict = false;
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   const failures = [];
   const expect = (label, got, want) => {
+    registerCase();
     const g = JSON.stringify(got);
     const w = JSON.stringify(want);
     if (g !== w) failures.push(`  ✗ ${label}: expected ${w}, got ${g}`);
@@ -550,6 +615,7 @@ function selfTest() {
   //    gutted checker that returns nothing fails here, and so does one that
   //    stops resolving the directory side: the fourth column is the catalog's
   //    real size, not the page's claim about it.
+  battery('1. POSITIVE — the measurement itself, per section, on BOTH numbers. A');
   {
     const { sections, findings } = checkPage(GOOD_PAGE, GOOD_CATALOG);
     expect(
@@ -568,6 +634,7 @@ function selfTest() {
 
   // 2. POSITIVE — a wrong N is caught, and the message names the section and
   //    BOTH numbers. A gate that merely says "mismatch" fails this.
+  battery('2. POSITIVE — a wrong N is caught, and the message names the section and');
   {
     const bad = GOOD_PAGE.replace('## Data Protocol (3 of 4 schemas)', '## Data Protocol (5 of 4 schemas)');
     const { findings } = checkPage(bad, GOOD_CATALOG);
@@ -583,6 +650,7 @@ function selfTest() {
   //    only the directory disagrees. Delete the `declaredTotal !== pages.length`
   //    comparison in checkPage and this case measures zero findings — which is
   //    exactly the green-forever state #6530 documented.
+  battery('3. POSITIVE — the M-ASSERTION, and the case that makes this gate more than');
   {
     const bad = GOOD_PAGE.replace('## Data Protocol (3 of 4 schemas)', '## Data Protocol (3 of 9 schemas)');
     const { findings } = checkPage(bad, GOOD_CATALOG);
@@ -593,6 +661,7 @@ function selfTest() {
   }
 
   // 4. POSITIVE — a deleted table row is caught.
+  battery('4. POSITIVE — a deleted table row is caught.');
   {
     const bad = GOOD_PAGE.replace(
       '| **[Object](/docs/references/data/object)** | `object.zod.ts` | Object | Object defs |\n',
@@ -607,6 +676,7 @@ function selfTest() {
   //    #6319's report came from a plural-only regex; under one, this page yields
   //    no finding at all because QA is not a section and its row is charged to
   //    Data.
+  battery('5. POSITIVE — the SINGULAR "(1 of 1 schema)" heading is a real section.');
   {
     const bad = GOOD_PAGE.replace('## QA Protocol (1 of 1 schema)', '## QA Protocol (2 of 1 schema)');
     const { findings } = checkPage(bad, GOOD_CATALOG);
@@ -619,6 +689,7 @@ function selfTest() {
   //    Declarative Endpoints rule table is charged to QA. Asserted as a measured
   //    value (1), not as "no findings" — the leaky scanner of #6319 would
   //    measure 5 here.
+  battery('6. POSITIVE — a section ends at the next `##` even when that heading has no');
   {
     const { sections } = checkPage(GOOD_PAGE, GOOD_CATALOG);
     const qa = sections.find((s) => s.title === 'QA Protocol');
@@ -628,6 +699,7 @@ function selfTest() {
   // 7. POSITIVE — the heading FORMAT changing is loud, not silent. Both halves
   //    matter: the section stops being counted (so nothing is compared) and the
   //    gate must say so — including that its category then has no section.
+  battery('7. POSITIVE — the heading FORMAT changing is loud, not silent. Both halves');
   {
     const bad = GOOD_PAGE.replace('## Data Protocol (3 of 4 schemas)', '## Data Protocol - 3 schemas');
     const { findings } = checkPage(bad, GOOD_CATALOG);
@@ -638,6 +710,7 @@ function selfTest() {
   // 8. POSITIVE — the OLD `(N schemas)` spelling is refused rather than silently
   //    accepted. Without this, #6530's migration could be reverted one heading
   //    at a time and the M-assertion would quietly stop applying to it.
+  battery('8. POSITIVE — the OLD `(N schemas)` spelling is refused rather than silently');
   {
     const bad = GOOD_PAGE.replace('## Data Protocol (3 of 4 schemas)', '## Data Protocol (3 schemas)');
     const { findings } = checkPage(bad, GOOD_CATALOG);
@@ -645,6 +718,7 @@ function selfTest() {
   }
 
   // 9. POSITIVE — a counted section whose table vanished.
+  battery('9. POSITIVE — a counted section whose table vanished.');
   {
     const bad = [
       '## Data Protocol (2 of 4 schemas)',
@@ -665,6 +739,7 @@ function selfTest() {
 
   // 10. POSITIVE — a page the parser no longer recognises at all fails loudly
   //     instead of passing with zero comparisons.
+  battery('10. POSITIVE — a page the parser no longer recognises at all fails loudly');
   {
     const { findings } = checkPage('# Quick Reference Guide\n\nnothing here.\n', GOOD_CATALOG);
     expect('unrecognised page is reported', has(findings, /no "## <Name> \(N of M schemas\)" sections found at all/), true);
@@ -673,6 +748,7 @@ function selfTest() {
 
   // 11. POSITIVE — two tables in one counted section is ambiguous, not silently
   //     summed.
+  battery('11. POSITIVE — two tables in one counted section is ambiguous, not silently');
   {
     const bad = GOOD_PAGE.replace(
       '| **[Object](/docs/references/data/object)** | `object.zod.ts` | Object | Object defs |',
@@ -690,6 +766,7 @@ function selfTest() {
 
   // 12. POSITIVE — a bare unlinked name is refused. This is the shape Shared's
   //     `Connector Auth` row had before #6530.
+  battery('12. POSITIVE — a bare unlinked name is refused. This is the shape Shared\'s');
   {
     const bad = GOOD_PAGE.replace(
       '| **[Field](/docs/references/data/field)** | `field.zod.ts` | Field | Field types |',
@@ -701,6 +778,7 @@ function selfTest() {
 
   // 13. POSITIVE — a row that documents its protocol outside the reference tree
   //     must carry the marker; unmarked, it silently claims to be one of the M.
+  battery('13. POSITIVE — a row that documents its protocol outside the reference tree');
   {
     const bad = GOOD_PAGE.replace(
       '| **[Events](/docs/kernel/events)** ↗ |',
@@ -712,6 +790,7 @@ function selfTest() {
 
   // 14. POSITIVE — and the mirror: marking a row that IS in its own tree hides a
   //     page from the coverage the heading advertises.
+  battery('14. POSITIVE — and the mirror: marking a row that IS in its own tree hides a');
   {
     const bad = GOOD_PAGE.replace(
       '| **[Field](/docs/references/data/field)** |',
@@ -723,6 +802,7 @@ function selfTest() {
 
   // 15. POSITIVE — a row pointing at a reference page that no longer exists.
   //     Nothing else on the page changes, so only the directory can catch it.
+  battery('15. POSITIVE — a row pointing at a reference page that no longer exists.');
   {
     const bad = GOOD_PAGE.replace('/docs/references/data/object)', '/docs/references/data/ghost)');
     const { findings } = checkPage(bad, GOOD_CATALOG);
@@ -731,6 +811,7 @@ function selfTest() {
 
   // 16. POSITIVE — #6319's actual defect, caught by LINK rather than by count: a
   //     row that migrated into the wrong section. The counts still agree.
+  battery('16. POSITIVE — #6319\'s actual defect, caught by LINK rather than by count: a');
   {
     const bad = GOOD_PAGE.replace('/docs/references/data/object)', '/docs/references/qa/testing)');
     const { findings } = checkPage(bad, GOOD_CATALOG);
@@ -739,6 +820,7 @@ function selfTest() {
 
   // 17. POSITIVE — one page listed twice inflates N while every count still
   //     agrees with every other count.
+  battery('17. POSITIVE — one page listed twice inflates N while every count still');
   {
     const bad = GOOD_PAGE.replace('/docs/references/data/object)', '/docs/references/data/field)');
     const { findings } = checkPage(bad, GOOD_CATALOG);
@@ -747,6 +829,7 @@ function selfTest() {
 
   // 18. POSITIVE — a category directory that is neither sectioned nor declared.
   //     This is the category-level half of #6530's drift.
+  battery('18. POSITIVE — a category directory that is neither sectioned nor declared.');
   {
     const bad = GOOD_PAGE.replace('| [`studio`](/docs/references/studio) | 3 | Designer-facing metadata. |\n', '');
     const { findings } = checkPage(bad, GOOD_CATALOG);
@@ -756,6 +839,7 @@ function selfTest() {
 
   // 19. POSITIVE — the declared page count of an unsectioned category is checked
   //     against the directory too, so `studio` growing a page is not silent.
+  battery('19. POSITIVE — the declared page count of an unsectioned category is checked');
   {
     const bad = GOOD_PAGE.replace('](/docs/references/studio) | 3 |', '](/docs/references/studio) | 5 |');
     const { findings } = checkPage(bad, GOOD_CATALOG);
@@ -764,6 +848,7 @@ function selfTest() {
 
   // 20. POSITIVE — declaring a category as unsectioned while it HAS a section is
   //     a contradiction, not a harmless duplicate.
+  battery('20. POSITIVE — declaring a category as unsectioned while it HAS a section is');
   {
     const bad = GOOD_PAGE.replace('| `contracts` | 0 |', '| `data` | 4 |');
     const { findings } = checkPage(bad, GOOD_CATALOG);
@@ -773,6 +858,7 @@ function selfTest() {
 
   // 21. POSITIVE — a declared directory that does not exist. The symmetric
   //     rot: the block outliving the tree it describes.
+  battery('21. POSITIVE — a declared directory that does not exist. The symmetric');
   {
     const bad = GOOD_PAGE.replace('| `contracts` | 0 |', '| `gone` | 0 |');
     const { findings } = checkPage(bad, GOOD_CATALOG);
@@ -781,10 +867,57 @@ function selfTest() {
 
   // 22. POSITIVE — deleting the whole block is loud. Without this, "state the
   //     curation on the page" is enforced only while someone keeps it there.
+  battery('22. POSITIVE — deleting the whole block is loud. Without this, "state the');
   {
     const bad = GOOD_PAGE.split('## Categories Without a Section')[0] + '## Common Patterns\n';
     const { findings } = checkPage(bad, GOOD_CATALOG);
     expect('missing block is reported', has(findings, /no "## Categories Without a Section" block found/), true);
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
   }
 
   if (failures.length) {

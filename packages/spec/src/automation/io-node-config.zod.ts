@@ -135,21 +135,23 @@ const NOTIFY_KEY_GUIDANCE: Readonly<Record<string, string>> = {
  *    delivery path resolves `(name, locale)` at delivery time via
  *    `IEmailService.sendTemplate({ template, locale })`.
  *
- *    That `locale` is **ONE value for the whole notification, not one per
- *    recipient** — declared here exactly as the delivery path enforces it
- *    (`service-messaging/src/email-channel.ts`, which says the same thing at
- *    its own `getDefaultTemplateLocale`). It is `payload.locale` when the
- *    producer set one — interpolated ONCE, before fan-out, so every recipient
- *    of a node gets that single value — and otherwise the **deployment
- *    default**, `II18nService.getDefaultLocale()`, the same ruled source the
- *    auth emails use (#8195). The platform has no per-user locale to read:
- *    `sys_user` carries no locale column, and request-scoped locale
- *    (`Accept-Language` → `ExecutionContext.requestLocale`) does not exist at
- *    async delivery time. Per the maintainer ruling of **2026-08-13** a
- *    per-user locale is DEFERRED until measured pull; when it lands it layers
- *    in as an override at that same seam. So do not author on the belief that
- *    two recipients with different personal languages will receive different
- *    rows — today they receive the same one.
+ *    That `locale` is resolved **per recipient, after fan-out** — declared
+ *    here exactly as the delivery path enforces it
+ *    (`service-messaging/src/recipient-locale.ts`, the one read point every
+ *    channel resolves through). The chain is the recipient's own
+ *    `sys_user.locale` → the **deployment default**,
+ *    `II18nService.getDefaultLocale()` (the same ruled source the auth emails
+ *    read as their deployment rung, #8195). A recipient whose column is
+ *    absent, empty or malformed always falls back to the deployment default;
+ *    no value ever dead-letters a delivery. Maintainer ruling **2026-09-01**
+ *    (#13881), which lifted the 2026-08-13 deferral once hotcrm measured the
+ *    pull (4 published languages × 16 notify nodes × 0 localizable). The
+ *    pre-ruling single value — `payload.locale`, interpolated once before
+ *    fan-out — is no longer consulted. Request-scoped locale
+ *    (`Accept-Language` → `ExecutionContext.requestLocale`) still does not
+ *    exist at async delivery time and is not part of this chain. So two
+ *    recipients with different `sys_user.locale` values DO receive different
+ *    rows of the same bundle.
  *    Inline `title`/`message` are the NON-localizable path — raw strings sent
  *    to every recipient verbatim. The two paths are mutually exclusive on one
  *    node (see the `superRefine` below): runtime precedence would silently
@@ -198,18 +200,19 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
    * `IEmailService.sendTemplate({ template, locale })` picks that locale's row
    * with the documented en-US fallback ladder.
    *
-   * The `locale` is ONE value for the whole notification, NOT one per
-   * recipient: `payload.locale` when the producer set one (interpolated once,
-   * before fan-out), else the DEPLOYMENT DEFAULT —
-   * `II18nService.getDefaultLocale()`. There is no per-user locale to read
-   * (`sys_user` has no locale column); the 2026-08-13 ruling defers one until
-   * measured pull, and it layers in as an override when it lands.
+   * The `locale` is resolved PER RECIPIENT, after fan-out (maintainer ruling
+   * 2026-09-01, #13881): the recipient's own `sys_user.locale` when set, else
+   * the DEPLOYMENT DEFAULT — `II18nService.getDefaultLocale()`. A missing,
+   * empty or malformed recipient value always falls back; it never reaches
+   * the template lookup. A producer-set `payload.locale` is NOT consulted —
+   * it was the pre-ruling single value for the whole notification, and that
+   * shape is what the ruling retired.
    *
    * Read RAW like `topic`/`channels`: a static metadata cross-reference, never
    * interpolated. Mutually exclusive with inline `title`/`message`.
    */
   template: z.string().optional()
-    .describe('Email template name (`sys_email_template.name`, e.g. `crm.large_deal_won`) — the localizable content path: the delivery path resolves `(name, locale)` against sys_email_template at delivery time and renders subject/body from that row. The locale is ONE value for the whole notification, not one per recipient: `payload.locale` if the producer set one, else the deployment default (`II18nService.getDefaultLocale()`) — the platform has no per-user locale, so recipients with different personal languages all receive the same row (deferred by the 2026-08-13 ruling; it layers in as an override when it lands). Mutually exclusive with inline `title`/`message`, which are the non-localizable path. Read raw — no `{token}` interpolation.'),
+    .describe('Email template name (`sys_email_template.name`, e.g. `crm.large_deal_won`) — the localizable content path: the delivery path resolves `(name, locale)` against sys_email_template at delivery time and renders subject/body from that row. The locale is resolved per recipient, after fan-out: the recipient\'s own `sys_user.locale` when set, else the deployment default (`II18nService.getDefaultLocale()`) — so recipients whose personal languages differ receive different rows of the same bundle (maintainer ruling 2026-09-01). A producer-set `payload.locale` is not consulted. Mutually exclusive with inline `title`/`message`, which are the non-localizable path. Read raw — no `{token}` interpolation.'),
   /**
    * Render context for the referenced template's `{{var}}` holes. Values are
    * interpolated per run (`{record.x}` resolves), so flow state can feed the
@@ -273,7 +276,7 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
       message:
         '`template` cannot be combined with inline `title`/`message` — pick ONE content path: '
         + '`template` (localizable: resolves `(name, locale)` from sys_email_template at delivery, the locale being '
-        + '`payload.locale` or the deployment default — one locale per notification, not per recipient) '
+        + 'each recipient\'s own `sys_user.locale` or the deployment default — resolved per recipient, after fan-out) '
         + 'or inline `title` + `message` (sent verbatim, not localizable). To localize, keep `template`, move '
         + 'the text into the template bundle\'s rows, and delete `title`/`message`; runtime precedence would '
         + 'silently ignore one of them.',
@@ -294,8 +297,8 @@ export const NotifyConfigSchema = lazySchema(() => strictObject({
       path: ['title'],
       message:
         'A notify node needs one content source: inline `title` (+ optional `message`), or a `template` '
-        + 'reference resolving a sys_email_template bundle at delivery in the notification\'s locale '
-        + '(`payload.locale` or the deployment default — one locale per notification, not per recipient). '
+        + 'reference resolving a sys_email_template bundle at delivery in each recipient\'s locale '
+        + '(the recipient\'s own `sys_user.locale` or the deployment default — resolved per recipient, after fan-out). '
         + 'Neither was given, so there is nothing to deliver.',
     });
   }

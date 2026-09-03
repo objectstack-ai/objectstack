@@ -1530,7 +1530,38 @@ export class RemoteTransport {
     return rows[0] || toInsert;
   }
 
-  async update(object: string, id: string | number, data: Record<string, unknown>): Promise<Record<string, unknown>> {
+  /**
+   * [#14428] A miss answers `null` — the arm `IDataDriver.update()` declares
+   * (#13878), and the answer this driver's LOCAL face (`SqlDriver.update`,
+   * through `TursoDriver.update`'s `super` branch) has always given.
+   *
+   * The line this replaces stapled the id onto the caller's own payload:
+   *
+   *   return rows[0] || { id, ...data };
+   *
+   * so `UPDATE … WHERE "id" = ?` matching nothing, followed by a `SELECT`
+   * returning nothing, still handed back a row. One `TursoDriver`, two answers
+   * to one question, chosen by `isRemote` — the divergence class this package
+   * has paid for repeatedly (#5769, #5903, #6203, #8413). The maintainer ruled
+   * the convergence on 2026-09-03 (「同意」, decision batch #15 item 1,
+   * posture A: return `null`, not throw — a throw would have been a THIRD
+   * posture on top of the two this collapses).
+   *
+   * Two things downstream become correct rather than merely different:
+   *
+   *  - `TursoDriver.update()`'s remote branch passes this through
+   *    `formatRemoteRow`, which already guards `row && typeof row === 'object'`
+   *    — so `null` reaches the engine untouched and the two faces converge with
+   *    no edit at that seam.
+   *  - {@link bulkUpdate}'s `if (updated)` skip stops being DEAD CODE. It is
+   *    the cross-driver convention `SqlDriver.bulkUpdate` follows, and on this
+   *    transport `updated` could never be falsy, so a batch over N missing ids
+   *    answered N invented rows. It now answers the rows that exist.
+   *
+   * ⚠️ `upsert()` is deliberately untouched: an upsert never answers
+   * "not found".
+   */
+  async update(object: string, id: string | number, data: Record<string, unknown>): Promise<Record<string, unknown> | null> {
     await this.ensureConnected();
 
     const columns = Object.keys(data);
@@ -1546,7 +1577,7 @@ export class RemoteTransport {
       args: [id],
     });
     const rows = this.mapRows(result);
-    return rows[0] || { id, ...data };
+    return rows[0] ?? null;
   }
 
   async upsert(object: string, data: Record<string, unknown>, conflictKeys?: string[]): Promise<Record<string, unknown>> {

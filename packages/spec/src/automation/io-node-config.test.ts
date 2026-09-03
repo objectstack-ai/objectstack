@@ -238,17 +238,17 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
   // path; the two paths are mutually exclusive — loud refusal over silent
   // precedence, following `objectNavTargetExclusivity` (ui/app.zod.ts).
   //
-  // The `locale` half of that pair is pinned below to the DEPLOYMENT DEFAULT,
-  // not to a per-recipient value. These strings previously said "recipient
-  // locale" unqualified, which reads as "each recipient's own language selects
-  // the row" — the delivery path does not do that and deliberately does not
-  // (maintainer ruling 2026-08-13: no per-user locale until measured pull;
-  // `sys_user` carries no locale column, and `payload.locale` is interpolated
-  // once before fan-out, so it is one value for the whole notification). The
-  // assertions therefore pin the qualification itself: a future edit that
-  // drops it back to a bare "recipient locale" turns these RED, because the
-  // wording an author reads is the whole contract here — declared must equal
-  // enforced.
+  // The `locale` half of that pair is pinned below to the PER-RECIPIENT chain
+  // the delivery path enforces since #13881 (maintainer ruling 2026-09-01):
+  // the recipient's own `sys_user.locale`, else the deployment default.
+  // Until that ruling these strings pinned the OPPOSITE — one value for the
+  // whole notification (`payload.locale`, interpolated once before fan-out,
+  // else the deployment default), because the 2026-08-13 ruling had deferred
+  // a per-user locale until measured pull. The assertions pin the substance
+  // of the chain, both rungs named, and REFUSE the retired single-value
+  // wording: a future edit that says "one value for the whole notification"
+  // or "not one per recipient" again turns these RED, because the wording an
+  // author reads is the whole contract here — declared must equal enforced.
   describe('template reference (#9205)', () => {
     /** Custom (superRefine) issues at exactly `path`, or `[]` when accepted. */
     function customIssuesAt(value: unknown, path: string): ReadonlyArray<{ code: string; message: string }> {
@@ -287,12 +287,14 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
         expect(msg).toContain('`template`');
         expect(msg).toContain('`title`');
         // The localizable path is identified by what it actually resolves —
-        // `(name, locale)` with the locale qualified — never a bare
-        // "recipient locale", which promises per-recipient selection.
+        // `(name, locale)` with both rungs of the per-recipient chain named
+        // (#13881): the recipient's own column, then the deployment default.
         expect(msg).toMatch(/\(name, locale\)/);
+        expect(msg).toContain('`sys_user.locale`');
         expect(msg).toMatch(/deployment default/);
-        expect(msg).toMatch(/not per recipient/);
-        expect(msg).not.toMatch(/recipient locale/);
+        expect(msg).toMatch(/per recipient/);
+        expect(msg).not.toMatch(/not per recipient/);
+        expect(msg).not.toMatch(/one locale per notification/);
         expect(msg).toMatch(/delete `title`\/`message`/);
         expect(msg).toMatch(/silently ignore/);
       }
@@ -321,18 +323,25 @@ describe('NotifyConfigSchema — strict as of #4001 批 9', () => {
       expect(templateDoc).toMatch(/\(name, locale\)/);
       expect(templateDoc).toMatch(/delivery time/);
       expect(templateDoc).toContain('sys_email_template');
-      // …with the locale named as what it IS — the deployment default, one
-      // value per notification. A bare "recipient locale" here is the defect
-      // this pin exists to catch: it licenses "convert the nodes and non-English
-      // users get non-English mail", which is false and is a net regression when
-      // acted on (TEMPLATE_* failures classify `permanent` and dead-letter).
-      expect(templateDoc).not.toMatch(/recipient locale/);
+      // …with the locale named as what it IS since #13881 — resolved per
+      // recipient, after fan-out, from the recipient's own `sys_user.locale`
+      // with the deployment default underneath. Both rungs are pinned by
+      // name, and the retired single-value wording is refused: "one value for
+      // the whole notification" would tell an author that converting the
+      // nodes does NOT localize per user, which is now false.
+      expect(templateDoc).toMatch(/per recipient/);
+      expect(templateDoc).toContain('`sys_user.locale`');
       expect(templateDoc).toMatch(/deployment default/);
       expect(templateDoc).toContain('II18nService.getDefaultLocale()');
-      expect(templateDoc).toMatch(/not one per recipient/);
-      // The deferral is dated, so the text carries its own provenance rather
+      expect(templateDoc).not.toMatch(/not one per recipient/);
+      expect(templateDoc).not.toMatch(/one value for the whole notification/i);
+      // The producer's pre-ruling knob is named as NOT consulted, so an author
+      // who still writes `payload.locale` learns from the contract that it is
+      // inert rather than from a recipient who got the wrong language.
+      expect(templateDoc).toMatch(/`payload\.locale` is not consulted/);
+      // The ruling is dated, so the text carries its own provenance rather
       // than reading as a permanent limitation of the design.
-      expect(templateDoc).toContain('2026-08-13');
+      expect(templateDoc).toContain('2026-09-01');
       // …and it is a RAW cross-reference, like topic/channels.
       expect(templateDoc).toMatch(/no `\{token\}` interpolation/i);
 

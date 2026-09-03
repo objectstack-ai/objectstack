@@ -183,6 +183,17 @@ const MULTILINE_EDITOR_FIELD_TYPES: ReadonlySet<string> = new Set([
  * and (c) never legitimately supplied by a caller. `formula` and `summary` are
  * deliberately NOT here: they are derived-on-read/roll-up, not stored values a
  * caller could forge into a sequence.
+ *
+ * A runtime-issued value is issued AS AN IDENTIFIER, and an identifier that
+ * may repeat is not one — so since #13894 (maintainer ruling 2026-08-31 on
+ * hotcrm#1301) a field of one of these types also defaults to
+ * `unique: 'organization'` when the author omits `unique` (materialized in
+ * `FieldSchema`'s `.overwrite()` tail, the `case_number` template); an
+ * authored `unique: false` opts out. This set is NOT what that default reads —
+ * it keys on `type === 'autonumber'` directly, the same test the platform's
+ * duplicate scan (`os migrate duplicates`) uses to call a field an identifier
+ * — but the two facts belong to the same ownership: the runtime mints it, the
+ * runtime keeps it unique.
  */
 export const RUNTIME_OWNED_FIELD_TYPES: ReadonlySet<string> = new Set<string>(['autonumber']);
 
@@ -798,7 +809,7 @@ export const InlineGridColumnSchema = lazySchema(() => strictObject({
   scale: z.number().int().nonnegative().optional().describe('Decimal places to round a computed numeric/currency result to.'),
   autofill: z.boolean().optional().describe("For `lookup` columns: picking a record copies its same-named fields into sibling columns (a product's unit_price/description). On by default; set false to disable."),
   readonlyWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — the cell is read-only when TRUE, evaluated per row against the row as `record` plus the header as `parent` (e.g. P`parent.status == 'paid'`)."),
-  requiredWhen: ExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`.'),
+  requiredWhen: ExpressionInputSchema.optional().describe('Predicate (CEL) — the cell is required when TRUE. Same `record` + `parent` scope as `readonlyWhen`. PRESENTATION ONLY: this flags the cell inline-invalid in the grid; nothing on the write path reads it. The server-enforced contract is the child FIELD\'s own `requiredWhen` — a transition gate, see `Field.requiredWhen` — which hydration copies onto an identity-only column, so declaring the requirement here alone enforces nothing.'),
 }));
 
 export const FieldSchema = lazySchema(() => {
@@ -936,7 +947,17 @@ export const FieldSchema = lazySchema(() => {
   // `true` = unique WITHIN the tenant on a tenant-scoped object (composite
   // `(tenantField, field)` index); `'global'` = platform-wide single-column
   // unique. See {@link UniqueScopeSchema} for the scope vocabulary (ADR-0120).
-  unique: UniqueScopeSchema.default(false).describe("Unique constraint and its scope (ADR-0120). 'organization' = one holder per organization (NULL-safe composite with the organization key part on organization-scoped objects) — prefer this explicit spelling in new code; true = same per-organization scope (positional synonym, stays valid); 'global' = one holder across the whole installation. 'tenant'/'org' are rejected — the word is 'organization'"),
+  //
+  // [#13894] No key-level `.default()` here, on purpose: the default is
+  // TYPE-CONDITIONAL — `autonumber` ⇒ `'organization'`, every other type ⇒
+  // `false` — and a key-level default can neither see `type` nor tell an
+  // omitted key from an authored `false` (the opt-out spelling). It is
+  // materialized by the `.overwrite()` tail of this schema, at this shape
+  // position, so parse output for every non-autonumber type is byte-identical
+  // to the `.default(false)` era. The JSON Schema therefore carries NO
+  // `default` annotation (a single value would be wrong for one of the two
+  // cases) — the description states the rule.
+  unique: UniqueScopeSchema.optional().describe("Unique constraint and its scope (ADR-0120). 'organization' = one holder per organization (NULL-safe composite with the organization key part on organization-scoped objects) — prefer this explicit spelling in new code; true = same per-organization scope (positional synonym, stays valid); 'global' = one holder across the whole installation. 'tenant'/'org' are rejected — the word is 'organization'. Omitted ⇒ false, EXCEPT on an `autonumber` field, where omitted ⇒ 'organization' (an auto-number is a business identifier, so the platform makes it unique per organization by default — the same tenant-composite shape an explicit `unique: true` produces). To opt an autonumber field out, write `unique: false` explicitly — legitimate only for a display-only sequence that is not used to identify the record; the platform's duplicate scan (`os migrate duplicates`) still treats every autonumber field as an identifier."),
   defaultValue: z.unknown().optional().describe('Default applied on INSERT when the field is omitted or null (`\'\'` is a real value, not absence). Three legal shapes, discriminated in the engine\'s own order: a CEL Expression envelope `{ dialect: \'cel\', source: \'today()\' }` (accepted structurally; result type is a runtime concern); a runtime TOKEN — `NOW()` on `datetime`/`date`/`time` only, `current_user` on `user` or `lookup` with `reference: \'sys_user\'` only, neither on a multi-value field; or a LITERAL, which must satisfy this field\'s own stored value contract (ADR-0104 D1 `valueSchemaFor`). Anything else is refused at parse time with a prescriptive message.'),
   
   /** Text/String Constraints */
@@ -947,7 +968,7 @@ export const FieldSchema = lazySchema(() => {
   // server accepts, at severity error/destructive, before #11431 taught the
   // consumer to defend itself). Which TYPES may author the key is the
   // superRefine below (BOUNDED_STRING_FIELD_TYPES).
-  maxLength: z.number().int().min(1).optional().describe('Max character length (positive integer). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode.'),
+  maxLength: z.number().int().min(1).optional().describe('Max character length (positive integer). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode. Checked on the WRITTEN value only (the `min`/`max` transition-gate class): a stored value longer than a bound declared later is never re-read and survives unrelated edits — only a write carrying an over-long value is refused.'),
   // #11949 (maintainer ruling 2026-08-25) — `minLength` converges on the
   // #11566 template above, `maxLength`'s twin defect pair: same shape, same
   // applicability set, same forms convergence. The lower bound is deliberately
@@ -955,7 +976,7 @@ export const FieldSchema = lazySchema(() => {
   // is a permanently-true declaration — exactly the vacuous noise an AI
   // metadata author mass-produces — and is refused loudly at authoring instead
   // of parsing cleanly and asserting nothing.
-  minLength: z.number().int().min(1).optional().describe('Min character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode.'),
+  minLength: z.number().int().min(1).optional().describe('Min character length (positive integer; `minLength: 0` is refused — express "no minimum" by omitting the key). Only authorable on types that store a bounded string: text, textarea, email, url, phone, password, markdown, html, richtext, code, signature, qrcode. Checked on the WRITTEN value only (the `min`/`max` transition-gate class): a stored value shorter than a bound declared later is never re-read and survives unrelated edits — only a write carrying a too-short value is refused.'),
 
   // objectui#6140 (maintainer ruling 2026-08-25, Option A — verbatim:
   // 「就全部接受，然后继续下一批」): `rows` was consumed-but-undeclared.
@@ -987,8 +1008,8 @@ export const FieldSchema = lazySchema(() => {
   // own alias table (`scale → precision` there) — do not conflate.
   precision: z.number().int().min(0).optional().describe('Total digits (non-negative integer)'),
   scale: z.number().int().min(0).optional().describe('Decimal places (non-negative integer)'),
-  min: z.number().optional().describe('Minimum value'),
-  max: z.number().optional().describe('Maximum value'),
+  min: z.number().optional().describe('Minimum value. Checked on the WRITTEN value only — the same transition-gate class as `requiredWhen`: an UPDATE validates just the fields the payload carries, so a stored value below a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused, and a repairing write is accepted. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
+  max: z.number().optional().describe('Maximum value. Checked on the WRITTEN value only — the same transition-gate class as `min`: a stored value above a bound declared later is never re-read and survives unrelated edits; only a write that carries an out-of-bound value is refused. For an invariant re-checked on every write, declare a `validations[]` `script` rule instead.'),
   /**
    * Presentation hint (#7768): whether a `number` field renders with digit
    * grouping (`Intl.NumberFormat`'s `useGrouping`, e.g. `2,026` vs `2026`).
@@ -1446,7 +1467,7 @@ export const FieldSchema = lazySchema(() => {
    */
   visibleWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is shown only when TRUE (else hidden). e.g. P`record.type == 'invoice'`"),
   readonlyWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is read-only when TRUE. e.g. P`record.status == 'paid'`"),
-  requiredWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
+  requiredWhen: ExpressionInputSchema.optional().describe("Predicate (CEL) — field is required when TRUE. A TRANSITION GATE, not an invariant: the write is refused only when the merged record violates the requirement AND the pre-write record complied — so the write that flips the predicate TRUE, an INSERT born inside the gate, and a write that clears the cell are all refused, while a row that was already missing the value keeps passing unrelated edits and state moves that stay inside the gate (ADR-0113 non-regression: adding the rule to a deployed object never bricks existing rows). Need an invariant every write must satisfy instead ('X may never exceed Y') — declare a `validations[]` `script` rule, which re-checks the merged record with no exemption. Enforced by `evaluateValidationRules`. The only slot; the `conditionalRequired` alias was removed in protocol 17."),
 
   /**
    * [REMOVED in protocol 17 — #3855] The deprecated alias of `requiredWhen`.
@@ -1639,6 +1660,49 @@ export const FieldSchema = lazySchema(() => {
    * '{0000}'` on every `text`, `number` and `lookup` field ever parsed — a
    * format on a field that has no counter. The annotation states the default
    * to schema consumers and AI metadata authors without touching parse output.
+   *
+   * ## Uniqueness of the minted value — the contract default (#13894)
+   *
+   * An auto-number is a business identifier (a contract number, a quote
+   * number, a case number), and an identifier that may repeat is not one. So
+   * an `autonumber` field that omits `unique` is `unique: 'organization'` by
+   * contract (maintainer ruling 2026-08-31, hotcrm#1301): one holder per
+   * organization, materialized by the driver as the NULL-safe tenant-composite
+   * index `(COALESCE(organization_id, '__global__'), <field>)` on an
+   * organization-scoped object and as a plain unique index where the object
+   * has no organization key — exactly what hotcrm's `crm_case.case_number`
+   * declared by hand, now the platform default for the other eight. Every
+   * other field type keeps `unique: false` as its default.
+   *
+   * Two things this default changes on purpose. A counter that re-issues a
+   * number after a burned reservation, or two counters minting for one object
+   * (the seed/API tenancy split), used to produce a SILENT duplicate; under the
+   * default they produce a loud unique-violation refusal at the write. And a
+   * table that ALREADY holds duplicate auto-numbers when the default arrives
+   * cannot take the index: the SQL driver logs that at `error` naming the index
+   * and the remedy, the same boot's drift pass names the conflicting key groups
+   * with their row counts, and `os migrate plan` reports the blocked
+   * `create_index` with the same groups until the rows are deduplicated —
+   * never a silent skip (`syncDeclaredIndexes` in driver-sql; ADR-0120 D4).
+   *
+   * **Opting out**: write `unique: false` explicitly. That is the whole
+   * opt-out surface — no second key. It is legitimate only for a display-only
+   * sequence that nothing uses to identify the record (an ordinal shown on a
+   * line, say), and note the platform's duplicate scan (`os migrate
+   * duplicates`) keeps treating every autonumber field as an identifier
+   * regardless.
+   *
+   * Why this default is a parse-time materialization while `autonumberFormat`
+   * above is a JSON-Schema annotation: the two are read at different seams.
+   * The format is resolved at MINT time by `resolveAutonumberFormat`, a helper
+   * every generator calls, so the declaration can stay absent. The unique
+   * scope is read off the DECLARED field by every driver's index sync
+   * (`isUniqueScopeDeclared(field.unique)` in driver-sql, the Mongo and memory
+   * drivers alike) — value-only reads that never see `type` — so the default
+   * has to be present on the parsed field for an index to exist at all. It is
+   * therefore materialized in the `.overwrite()` tail of this schema, the
+   * type-conditional precedent `deleteBehavior` set (#9689 / #9784), and only
+   * on `autonumber`, so no other type's parse output moves.
    */
   autonumberFormat: z.string().optional().meta({
     description: 'Auto-number format: literal text + {0000} counter, {YYYY}/{MM}/{DD}/{YYYYMMDD} date tokens (business tz), and {field_name} interpolation. Counter resets per rendered prefix (e.g. AD{YYYYMMDD}{0000} resets daily). Omitted on an `autonumber` field ⇒ the contract default `{0000}` (#6555).',
@@ -1949,22 +2013,45 @@ export const FieldSchema = lazySchema(() => {
     });
   }
   }).overwrite((field) => {
-    // #9689 — the relocated `.default('set_null')`, applied AFTER the checks
-    // above. `.overwrite()` rather than `.transform()` per the measured #6926
-    // precedent (`CurrencyConfigSchema` in this file is the sibling): it keeps
-    // this schema a `ZodObject` (a pipe has no `.extend` and answers shape
+    // The TYPE-CONDITIONAL defaults of this schema — relocated key-level
+    // `.default()`s, applied AFTER the checks above. `.overwrite()` rather
+    // than `.transform()` per the measured #6926 precedent
+    // (`CurrencyConfigSchema` in this file is the sibling): it keeps this
+    // schema a `ZodObject` (a pipe has no `.extend` and answers shape
     // introspection with an empty set), and checks run in attachment order, so
-    // the superRefine above always sees the pre-materialized value. The key is
-    // re-inserted at its SHAPE position (Zod emits parse output in shape
-    // order), so output is byte-identical to the `.default('set_null')` era on
-    // the reference types that still materialize it (`lookup` / `tree`) — see
-    // the two rulings below for why `master_detail` and every non-reference
-    // type omit it instead. The one accepted cost, same as the currency
-    // precedent's: the INFERRED output type declares `deleteBehavior?` even
-    // though a parsed `lookup`/`tree` field always carries it (ADR-0122
-    // forbids hand-narrowing the inferred type); the runtime contract is the
-    // enforced one.
-    if (field.deleteBehavior !== undefined) return field;
+    // the superRefine above always sees the pre-materialized value. Each key
+    // is re-inserted at its SHAPE position (Zod emits parse output in shape
+    // order), so output is byte-identical to the key-level `.default()` era
+    // wherever the value is unchanged. The one accepted cost, same as the
+    // currency precedent's: the INFERRED output type declares the key optional
+    // (`deleteBehavior?`, `unique?`) even though a parsed field carries it
+    // (ADR-0122 forbids hand-narrowing the inferred type); the runtime
+    // contract is the enforced one.
+    const patch: Record<string, unknown> = {};
+
+    // [#13894] `unique` — the relocated `.default(false)`, made type-aware
+    // (maintainer ruling 2026-08-31 on hotcrm#1301: an auto-number is a
+    // business identifier, so the platform makes it unique per organization
+    // by default, the `case_number` template; explicit `unique: false` is the
+    // opt-out). A key-level `.default()` can neither see `type` nor tell an
+    // omitted key from an authored `false`, which is the one distinction the
+    // opt-out rests on — so the key is `.optional()` on the shape and
+    // materialized here: `autonumber` ⇒ `'organization'`, every other type ⇒
+    // `false`, byte-identical to before. An authored value of any accepted
+    // spelling is returned verbatim. Idempotent by construction (#9689 class):
+    // `'organization'` is itself an accepted authored spelling, so
+    // `parse(parse(x))` is stable, and the drivers — which read the parsed
+    // `unique` value-only (`isUniqueScopeDeclared(field.unique)`) — see a
+    // declared scope where the author wrote none.
+    if (field.unique === undefined) {
+      patch.unique = field.type === 'autonumber' ? 'organization' : false;
+    }
+
+    // #9689 — the relocated `.default('set_null')`, materialized only on the
+    // reference types that still carry it (`lookup` / `tree`) — see the two
+    // rulings below for why `master_detail` and every non-reference type omit
+    // it instead. An AUTHORED `deleteBehavior` on any type is returned verbatim.
+    //
     // #9689 (maintainer ruling 2026-08-24, idempotent materialization —
     // 「四维分析一致的，接手你的建议。」): NEVER materialize a default the
     // schema itself would refuse as authored. The superRefine above rejects an
@@ -1981,7 +2068,7 @@ export const FieldSchema = lazySchema(() => {
     // carrying a value the schema itself refuses. Every other type keeps
     // byte-identity, and the #7918 currency `precision` twin of this landmine
     // is #11423 — same principle, its own card.
-    if (field.type === 'master_detail') return field;
+    //
     // #9784 — materialize the default ONLY on reference types. `deleteBehavior`
     // has no meaning on a non-reference field: the engine's
     // `cascadeDeleteRelations` reaches the key exclusively on
@@ -1995,15 +2082,19 @@ export const FieldSchema = lazySchema(() => {
     // (ADR-0033 direction). Non-reference fields therefore parse to output
     // that OMITS the key. The accept-set is untouched: an AUTHORED
     // `deleteBehavior` on any type still parses exactly as before (the
-    // `!== undefined` early return above), so stored artifacts from the
-    // materializing era stay legal. `tree` (hierarchical reference) keeps
-    // materializing with `lookup`: it is in the relational family, where the
-    // key states delete semantics — the conservative byte-identity side of
-    // the line. `user` is stored identically to `lookup` but sits outside
-    // today's cascade guard exactly like `text` does, so it takes the
-    // non-reference side; an authored value there still round-trips.
-    if (field.type !== 'lookup' && field.type !== 'tree') return field;
-    const withDefault: Record<string, unknown> = { ...field, deleteBehavior: 'set_null' };
+    // `=== undefined` guard), so stored artifacts from the materializing era
+    // stay legal. `tree` (hierarchical reference) keeps materializing with
+    // `lookup`: it is in the relational family, where the key states delete
+    // semantics — the conservative byte-identity side of the line. `user` is
+    // stored identically to `lookup` but sits outside today's cascade guard
+    // exactly like `text` does, so it takes the non-reference side; an
+    // authored value there still round-trips.
+    if (field.deleteBehavior === undefined && (field.type === 'lookup' || field.type === 'tree')) {
+      patch.deleteBehavior = 'set_null';
+    }
+
+    if (Object.keys(patch).length === 0) return field;
+    const withDefault: Record<string, unknown> = { ...field, ...patch };
     const out: Record<string, unknown> = {};
     for (const key of shapeOrder) {
       if (key in withDefault) out[key] = withDefault[key];
