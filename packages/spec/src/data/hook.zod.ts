@@ -163,6 +163,8 @@ export const HookSchema = lazySchema(() => strictObject(
       timeoutms: 'timeout',
       errorpolicy: 'onError',
       onfailure: 'onError',
+      // [#14010] `run_as` / `run-as` / `RunAs` all probe-fold to this one entry.
+      runas: 'runAs',
     },
     guidance: {
       enabled:
@@ -186,7 +188,7 @@ export const HookSchema = lazySchema(() => strictObject(
       elevated:
         "`elevated` is not a hook key. Declare `runAs: 'system'` to run the hook's `ctx.api` "
         + "data operations elevated, `runAs: 'user'` to pin them to the triggering user.",
-      issystem:
+      isSystem:
         "`isSystem` is not a hook key — it is an ExecutionContext flag, not a declaration. "
         + "Declare `runAs: 'system'` to run the hook's `ctx.api` data operations elevated.",
     },
