@@ -19,17 +19,29 @@ import {
 import { computeI18nCoverage, COVERAGE_SURFACE_PHRASE } from '../../utils/i18n-coverage.js';
 
 export default class I18nCheck extends Command {
-  // The parenthetical is the WHOLE taxonomy, derived from the detector's own
-  // source-kind union (`COVERAGE_SURFACE_PHRASE`), never a hand-typed sample.
-  // It used to name five kinds of fifteen, and a sample that size reads as a
-  // scope statement rather than an illustration: a reader who wanted app
+  // ⛔ The surface list is DERIVED (`COVERAGE_SURFACE_PHRASE`), never a
+  // hand-typed sample. It used to be a parenthetical naming five source kinds
+  // of the fifteen the report carries, and a sample that size does not read as
+  // an illustration — it reads as a scope statement: a reader who wanted app
   // navigation or dashboard widgets checked was told this command does objects
   // and fields, so they skipped the gate or went looking for a second tool that
-  // does not exist. Deriving it means the two cannot drift again — a new union
-  // member fails to compile until it is named, and is published here in the
-  // same edit. ⛔ Never re-inline this as a literal list.
+  // does not exist. Deriving it is what stops the two drifting again — a new
+  // member of `CoverageIssue['source']` fails to compile until it is named, and
+  // is published here in the same edit.
+  //
+  // Why `summary` as well, when no sibling command sets one: oclif renders a
+  // command's help in two places with different budgets. The COMMANDS list in
+  // `os i18n --help` shows `summary` — falling back to the description's FIRST
+  // LINE when there is none — as one right-hand column entry, and flips the
+  // whole list to a multi-line layout once any entry wraps past five lines. The
+  // command's own `--help` has room for the set. So the short line goes in
+  // `summary` (the parenthetical simply dropped — never a five-item sample of
+  // fifteen), and the full derived set goes in `description`, where the reader
+  // asking what this command covers is actually looking.
+  static override summary = 'Detect missing translation keys across all configured locales';
+
   static override description =
-    `Detect missing translation keys for every translatable surface (${COVERAGE_SURFACE_PHRASE}) across all configured locales`;
+    `Detect missing translation keys across all configured locales, for every translatable surface the coverage report carries: ${COVERAGE_SURFACE_PHRASE}.`;
 
   static override examples = [
     '$ os i18n check',

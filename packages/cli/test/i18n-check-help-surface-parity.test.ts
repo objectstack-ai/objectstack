@@ -39,6 +39,7 @@ import {
 } from '../src/utils/i18n-coverage.js';
 
 const description = String(I18nCheck.description);
+const summary = String(I18nCheck.summary);
 
 /**
  * A small but ordinary stack: one object (fields, a select's options, a field
@@ -126,6 +127,15 @@ describe('`os i18n check --help` names the surface set, not a sample of it', () 
 
   it('no longer carries the retired five-of-fifteen sample', () => {
     expect(description).not.toContain('(object/field/option/view/action labels)');
+    expect(summary).not.toContain('(object/field/option/view/action labels)');
+  });
+
+  it('keeps the one-line `summary` free of a surface sample entirely', () => {
+    // oclif's COMMANDS list shows `summary`, which has no room for the set —
+    // so it names none of the kinds rather than a few of them. Naming a strict
+    // subset here would restore the defect in the place a user meets first.
+    const named = COVERAGE_SOURCE_KINDS.filter((kind) => summary.includes(surfaceOf(kind)));
+    expect(named, `summary names ${named.length} of ${COVERAGE_SOURCE_KINDS.length} kinds`).toEqual([]);
   });
 });
 
