@@ -58,6 +58,7 @@ export interface ChartBindingFinding {
   hint: string;
 }
 
+import { suggestName } from './object-graph.js';
 import { walkPageComponents, type AnyRec } from './page-walk.js';
 
 function asArray(v: unknown): AnyRec[] {
@@ -78,37 +79,6 @@ function strList(v: unknown): string[] {
 
 function isRec(v: unknown): v is AnyRec {
   return !!v && typeof v === 'object' && !Array.isArray(v);
-}
-
-function distance(a: string, b: string): number {
-  const m = a.length;
-  const n = b.length;
-  if (m === 0) return n;
-  if (n === 0) return m;
-  let prev = Array.from({ length: n + 1 }, (_, j) => j);
-  for (let i = 1; i <= m; i++) {
-    const curr = [i, ...new Array<number>(n).fill(0)];
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
-    }
-    prev = curr;
-  }
-  return prev[n];
-}
-
-function suggest(target: string, known: Iterable<string>): string {
-  let best: string | undefined;
-  let bestScore = Infinity;
-  for (const c of known) {
-    const d = distance(target, c);
-    if (d < bestScore) {
-      bestScore = d;
-      best = c;
-    }
-  }
-  const limit = Math.max(2, Math.floor(target.length / 3));
-  return best && bestScore <= limit ? ` Did you mean "${best}"?` : '';
 }
 
 function list(names: Iterable<string>): string {
@@ -185,7 +155,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
           `binds dataset "${dsName}", which resolves to no declared dataset — ` +
           `the chart has no data to render.`,
         hint:
-          `Declared datasets: ${list(datasets.keys())}.${suggest(dsName, datasets.keys())} ` +
+          `Declared datasets: ${list(datasets.keys())}.${suggestName(dsName, datasets.keys())} ` +
           `Define it with defineDataset() or fix the reference (ADR-0021).`,
       });
       return;
@@ -203,7 +173,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
           `Post-ADR-0021 result rows are keyed by DIMENSION NAME, not the base ` +
           `field, so this axis renders with no categories.`,
         hint:
-          `Dataset dimensions: ${list(ds.dimensions)}.${suggest(name, ds.dimensions)} ` +
+          `Dataset dimensions: ${list(ds.dimensions)}.${suggestName(name, ds.dimensions)} ` +
           `Declare the dimension on the dataset, or bind an existing one.`,
       });
     };
@@ -220,7 +190,7 @@ export function validateChartBindings(stack: AnyRec): ChartBindingFinding[] {
             `Post-ADR-0021 result rows are keyed by MEASURE NAME (e.g. "sum_amount"), ` +
             `not the base field (e.g. "amount"), so this series comes back empty.`,
           hint:
-            `Dataset measures: ${list(ds.measures)}.${suggest(name, ds.measures)} ` +
+            `Dataset measures: ${list(ds.measures)}.${suggestName(name, ds.measures)} ` +
             `Declare the measure on the dataset, or bind an existing one.`,
         });
         return;

@@ -1113,8 +1113,10 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
    surface** (Prime Directive #14 names them — more than ADRs): push it, open the PR,
    and stop there, landing it is the maintainer's, by hand. For that class, a
    finished task = a PR left visibly awaiting a human merge.
-3. **Add a changeset for feature work.** When the change is a feature or functional improvement, run `pnpm changeset`
-   (or add a `.changeset/*.md` entry) describing it before committing. Pure bug fixes do **not** require a changeset.
+3. **Add a changeset for anything that publishes.** Feature, functional improvement or fix — run `pnpm changeset`
+   (or add a `.changeset/*.md` entry) describing it before committing. A bug fix in a released package takes a
+   **`patch`** changeset — never none, and ⛔ never `skip-changeset`: that label is for a diff that publishes
+   nothing from any released package.
    **Breaking changesets must carry their migration.** If the change removes or renames anything an author can write (a
    spec key, an export, a config field), the changeset body must state the FROM → TO mapping and the one-line fix —
    this text ships to consumers as `CHANGELOG.md` inside the npm package and is what an upgrading agent greps after the
@@ -1133,14 +1135,7 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
    <!-- adr-0087: not-required (already-registered SOME-MIGRATION-ID) why -->
    <!-- adr-0087: not-required (no-migration-prescription) why -->
    ```
-   Why it is asked of you at all: the ADR-0087 gates pin ledger ↔ **artifact synchrony**, and the artifacts are a pure
-   projection of the registry — a retirement whose entry was **never written** leaves everything perfectly consistent
-   and every gate green (a removal has shipped that way, caught only by a human comparing by eye). Ledger entries are
-   the sole channel that reaches an upgrader (`objectstack migrate meta`, `spec-changes.json`, the upgrade guide) —
-   for a surface with no spec schema there is no tombstone or schema rejection either. Roughly 1 declared-breaking
-   change in 7 needs an entry, so `not-required` is the ordinary answer and costs one line; the markers are re-verified
-   mechanically, and `no-migration-prescription` is refused when the changeset's own body carries a FROM → TO
-   prescription.
+   Why it is asked of you at all: the gate prints the argument when it fails — that output is the authority.
 4. **A removal that breaks the pinned sibling checkout ships together with the sibling fix and the pin bump — or it
    does not ship.** The `Console Pin Gate` job builds objectui at the pinned `.objectui-sha` against **current** `main`,
    so a removal or rename the pinned sibling still imports turns `main` red for every PR in the repo the moment it
@@ -1151,7 +1146,7 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
    pinned SHA before merging.
 5. **Touched `packages/spec`? Regenerate and commit its artifacts before pushing** — § *Touched `packages/spec`*
    above is the authority; note `OS_SKIP_DTS=1` greens `check:api-surface` locally and reds it in CI.
-6. Update `CHANGELOG.md` / `ROADMAP.md` if user-facing or architectural.
+6. Update `ROADMAP.md` if user-facing or architectural.
 7. **Delete temporary artifacts** — screenshots, traces, scratch logs, `.playwright-mcp/`, throwaway `tmp*.ts`, ad-hoc
    scripts. Repo must look identical to before, minus intended changes.
 

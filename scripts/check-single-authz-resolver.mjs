@@ -545,9 +545,66 @@ function mentionOnlyFixtureBody(tables = GRANT_TABLES) {
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  // ⛔ NOT today's count. This battery runs one case per exemption row (2 today)
+  // plus the one structural case, and that list is meant to LOSE rows — an
+  // exemption that no longer exempts anything is dead weight, as the comment
+  // over its declaration says. A floor at 3 would redden a legitimate deletion
+  // and train the next author to edit the floor, which is the one habit these
+  // floors exist to prevent. Pinned instead is the part that does not move with
+  // the list: the structural case ran AND at least one row was actually audited.
+  'Every exemption carries its reason.': 2,
+  'POSITIVE CONTROL, on the REAL repo.': 5,
+  'The two ALLOW steps are separable, which is what makes them assertable.': 1,
+  'The criterion is query-shaped, not mention-shaped (#6286).': 4,
+  'The read-call spellings the criterion must recognise (POSITIVE polarity).': 23,
+  'Reverse proof for the positive control (#6286), made permanent.': 7,
+  'Reverse proof for the dead-root hard error (#4930), made permanent.': 6,
+  'Reverse proof for the empty-scan hard error (#5916), same discipline.': 11,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 8;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   const expect = (label, got, want) => {
+    registerCase();
     if (got !== want) failures.push(`  ✗ ${label}: expected ${JSON.stringify(want)}, got ${JSON.stringify(got)}`);
   };
 
@@ -555,6 +612,7 @@ function selfTest() {
   // The old list rotted because nothing required an entry to justify itself; two paths
   // sat there exempting callers from a predicate that could not fire. A path with no
   // reason is indistinguishable from a path someone added to make a red go away.
+  battery('Every exemption carries its reason.');
   for (const [path, reason] of ALLOW) {
     expect(`ALLOW entry ${path} carries a reason`, typeof reason === 'string' && reason.length > 20, true);
   }
@@ -565,6 +623,7 @@ function selfTest() {
   // silent: everything else in this self-test runs on fixtures the predicate cannot
   // disagree with. This one runs against the actual canonical resolver in the checkout.
   // Positive polarity — it goes RED when GRANT_TABLES drifts off the real tables.
+  battery('POSITIVE CONTROL, on the REAL repo.');
   let realCanonicalSrc = null;
   try {
     realCanonicalSrc = readFileSync(join(ROOT, CANONICAL), 'utf8');
@@ -606,6 +665,7 @@ function selfTest() {
     // if the criterion stops recognising resolver shape) and MUST NOT be reported
     // (ALLOW's job). Asserting only the second would pass just as well if the heuristic
     // matched nothing at all — exactly the failure being fixed.
+    battery('The two ALLOW steps are separable, which is what makes them assertable.');
     expect('the allow-listed explain mirror IS matched by the heuristic',
       queriesAllGrantTables(readFileSync(join(dir, 'packages/plugins/plugin-security/src/explain-engine.ts'), 'utf8')), true);
 
@@ -614,6 +674,7 @@ function selfTest() {
     // because a predicate that matches nothing also matches no mention-only file. It is
     // here to pin the 18-of-20 noise reduction, and it is load-bearing ONLY next to the
     // positive assertions above and below, which do go red.
+    battery('The criterion is query-shaped, not mention-shaped (#6286).');
     expect('a mention-only file is NOT a duplicate resolver (unquoted keys, prose, name lists)',
       queriesAllGrantTables(mentionOnlyFixtureBody()), false);
     expect('...and it is not reported even though it is NOT allow-listed',
@@ -629,6 +690,7 @@ function selfTest() {
     // recall side of the criterion, which no fixture above can reach because
     // `resolverFixtureBody` only ever emits `ql.find`. The canonical resolver uses the
     // `tryFind` HELPER spelling, so losing it would break the positive control itself.
+    battery('The read-call spellings the criterion must recognise (POSITIVE polarity).');
     const t0 = GRANT_TABLES[0];
     for (const [label, src] of [
       ['member call', `ql.find('${t0}', { where: {} })`],
@@ -719,6 +781,7 @@ function selfTest() {
     //
     // This is the assertion whose ABSENCE was the bug: without it the rename produced a
     // gate that could not fail, and every other assertion in this file stayed green.
+    battery('Reverse proof for the positive control (#6286), made permanent.');
     write(CANONICAL, resolverFixtureBody(GRANT_TABLES.map((t) => `${t}_v2`)));
     let lostErr = null;
     try { audit(dir); } catch (err) { lostErr = err; }
@@ -756,6 +819,7 @@ function selfTest() {
     // the root the way a rename breaks it in the real repo, require red, require
     // the red to name the root, then restore it and require green again.
     // Red-then-green, in the same run, every run.
+    battery('Reverse proof for the dead-root hard error (#4930), made permanent.');
     const renamed = join(dir, 'packages-renamed-by-self-test');
     renameSync(join(dir, 'packages'), renamed);
     let deadErr = null;
@@ -795,6 +859,7 @@ function selfTest() {
     // nothing must be RED, and the red must name that root only. This is the case
     // #4930's assertion cannot reach — nothing is renamed, nothing is unreadable,
     // the directory is right there; the corpus is simply not in it any more.
+    battery('Reverse proof for the empty-scan hard error (#5916), same discipline.');
     const baseline = collectScanFiles(dir).length;
     expect('the compliant tree yields a corpus to reason over', baseline > 0, true);
 
@@ -846,6 +911,51 @@ function selfTest() {
     rmSync(dir, { recursive: true, force: true });
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     console.error(`\n✗ check-single-authz-resolver self-test failed:\n${failures.join('\n')}\n`);
     process.exit(1);

@@ -236,7 +236,6 @@ function installWebContainerRequestStatePolyfill(): void {
   if (!g[sym].context) g[sym].context = {};
   if (!g[sym].context.requestStateAsyncStorage) {
     g[sym].context.requestStateAsyncStorage = new WebContainerRequestStateAsyncLocalStorage();
-    // eslint-disable-next-line no-console
     console.warn(
       '[AuthManager] WebContainer detected: installed synchronous request-state polyfill ' +
         '(node:async_hooks AsyncLocalStorage does not propagate context across await in WebContainer).',
@@ -2066,8 +2065,17 @@ export class AuthManager {
           // carve-out: an app that seeds people makes the bootstrap probe
           // answer "populated" before the seed ever runs. Cheap synchronous
           // check first, so the ticket path costs no I/O.
+          // [#14373] The email alone no longer admits — see
+          // `stageOperatorProvisioning`'s doc. `ctx.body` is the vendor's own
+          // zod-validated body, which keeps any key outside the declared
+          // schema (`signUpEmailBodySchema.and(z.record(...))`), so the
+          // in-process seed call's ticket field survives here untouched.
           const signUpEmail = typeof ctx?.body?.email === 'string' ? ctx.body.email : undefined;
-          if (this.isOperatorProvisioning(signUpEmail) || (await this.isBootstrapCreation())) {
+          const provisioningTicket = ctx?.body?.[AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD];
+          if (
+            this.isOperatorProvisioning(signUpEmail, provisioningTicket) ||
+            (await this.isBootstrapCreation())
+          ) {
             ctx.context.__osDisableSignUpOrig = ep.disableSignUp;
             ep.disableSignUp = false;
           }
@@ -3809,8 +3817,12 @@ export class AuthManager {
    * [#14157] Addresses the deployment's OWN boot command is provisioning right
    * now — see {@link stageOperatorProvisioning} for why this exists and why it
    * is not the bootstrap probe.
+   *
+   * [#14373] Keyed by email, but admission also requires the per-stage
+   * `ticket` below — see {@link stageOperatorProvisioning} for why the
+   * address alone stopped being enough.
    */
-  private pendingOperatorProvisioning = new Map<string, { stagedAtMs: number }>();
+  private pendingOperatorProvisioning = new Map<string, { stagedAtMs: number; ticket: string }>();
 
   /**
    * Deliberately short. The window this covers is a single in-process
@@ -3818,6 +3830,19 @@ export class AuthManager {
    * only the floor under a caller killed between the two.
    */
   private static readonly OPERATOR_PROVISIONING_STAGE_TTL_MS = 60 * 1000;
+
+  /**
+   * [#14373] Body field the ticket's random value rides on for the single
+   * in-process `signUpEmail` call it admits. `signUpEmailBodySchema` in
+   * better-auth is `z.object({...}).and(z.record(z.string(), z.any()))`, so
+   * an unrecognized key survives validation on `ctx.body` untouched — this
+   * rides that catch-all rather than a declared `additionalFields` column,
+   * so it never becomes a `sys_user` field. The name is deliberately
+   * internal-looking; nothing public ever sends this key, so its presence in
+   * a request is itself the credential this seam demands (see
+   * {@link isOperatorProvisioning}).
+   */
+  static readonly OPERATOR_PROVISIONING_TICKET_FIELD = '__osOperatorProvisioningTicket';
 
   /**
    * Page size of the bootstrap population probe ({@link isBootstrapCreation}).
@@ -3887,17 +3912,23 @@ export class AuthManager {
    * OAuth flows redirect to the error URL carrying the same code).
    *
    * [#11767] The vendor's second argument — the endpoint context — is
-   * deliberately UNREAD. Both probes below take their own ctx-independent data
-   * path, because sourcing this gate's I/O from the request context is exactly
-   * what made the bootstrap bypass inert (see {@link isBootstrapCreation}).
-   * The parameter is kept so the signature still reads as the vendor's.
+   * deliberately UNREAD for the population probes below: both take their own
+   * ctx-independent data path, because sourcing THEIR I/O from the request
+   * context is exactly what made the bootstrap bypass inert (see {@link
+   * isBootstrapCreation}). [#14373] carves one narrow exception: the operator
+   * ticket's random value (see `stageOperatorProvisioning`), which travels
+   * only as a `ctx.body` field and has no other channel to reach this gate —
+   * `data.user` here is `internalAdapter.createUser`'s own input, not the raw
+   * request body, so it never carries an undeclared key. That is a plain read
+   * of an already-parsed value, not a re-derived I/O probe, so it does not
+   * reopen what #11767 closed.
    */
   private async validateAudienceAdmission(
     data: {
       user?: Record<string, unknown>;
       source?: { action?: string; method?: string; oauth?: { providerId?: string } };
     },
-    _ctx?: unknown,
+    ctx?: unknown,
   ): Promise<{ error: string; errorDescription?: string } | undefined> {
     try {
       // link-account / provider sign-in concern an EXISTING user's identity,
@@ -3911,7 +3942,15 @@ export class AuthManager {
       // because the seed reaches better-auth through the same `signUpEmail`
       // API a person's sign-up does. See `stageOperatorProvisioning` for why
       // this is a declared ticket and not a wider bootstrap probe.
-      const creationClass: AudienceCreationClass = this.isOperatorProvisioning(email)
+      // [#14373] …and why email alone no longer decides it: the ticket's
+      // random value must also match, read off the SAME endpoint context the
+      // `disableSignUp` before-hook already reads `ctx.body.email` from
+      // (`getCurrentAuthEndpointContext()` — one context per request, shared
+      // across the before/after hooks and this validateUserInfo callback).
+      const provisioningTicket = (ctx as { body?: Record<string, unknown> } | undefined)?.body?.[
+        AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD
+      ];
+      const creationClass: AudienceCreationClass = this.isOperatorProvisioning(email, provisioningTicket)
         ? 'operator'
         : classifyCreationMethod(data?.source, {
             enterpriseOAuthProviderIds: this.enterpriseOAuthProviderIds(),
@@ -4229,15 +4268,58 @@ export class AuthManager {
    * `NODE_ENV==='development'`, the ticket names ONE address, the caller
    * clears it in a `finally`, and anything that outlives that is pruned by
    * {@link OPERATOR_PROVISIONING_STAGE_TTL_MS}.
+   *
+   * ## [#14373] Why the address alone stopped being the whole ticket
+   *
+   * The address is **not a secret**: `admin@objectos.ai` is the documented
+   * default and the boot banner prints it (with the password) once the seed
+   * completes. "The address is the operator's own" is true but does not
+   * narrow the attacker set the way it would for an unguessable value — a
+   * stranger's OWN concurrent `POST /sign-up/email` for that same address,
+   * arriving while this ticket is staged, would satisfy an email-only peek at
+   * BOTH admission seams and get admitted as `operator` class: past the
+   * `disableSignUp` bypass, and (since the stamp only cares about the
+   * creation class) potentially email-verified at creation too — a stranger
+   * would not merely read as the operator, their row would BECOME the
+   * account at that address, since a unique-email constraint lets only one of
+   * the two concurrent `signUpEmail` calls actually land. Milliseconds and
+   * `NODE_ENV==='development'` are true today, but both are properties of the
+   * *caller*, not of what the ticket asserts.
+   *
+   * So the ticket now also carries a random, unguessable `ticket` string,
+   * returned here and threaded by the caller into the SAME `signUpEmail`
+   * call's body under {@link OPERATOR_PROVISIONING_TICKET_FIELD} — see
+   * `AuthPlugin.maybeSeedDevAdmin`. {@link isOperatorProvisioning} requires an
+   * exact match on both email AND this ticket, so admission now asks "did
+   * THIS process's own boot command make THIS exact call" rather than "does
+   * the address match" — a stranger's request, however precisely it times
+   * the window, carries no value that was ever transmitted anywhere for them
+   * to replay. Not a stronger *guess* — a different question.
    */
-  stageOperatorProvisioning(email: string): void {
+  stageOperatorProvisioning(email: string): string {
     this.prunePendingOperatorProvisioning();
-    this.pendingOperatorProvisioning.set(email.trim().toLowerCase(), { stagedAtMs: Date.now() });
+    const ticket = this.generateOperatorProvisioningTicket();
+    this.pendingOperatorProvisioning.set(email.trim().toLowerCase(), { stagedAtMs: Date.now(), ticket });
+    return ticket;
   }
 
   /** [#14157] Drop the ticket staged by {@link stageOperatorProvisioning}. */
   clearOperatorProvisioning(email: string): void {
     this.pendingOperatorProvisioning.delete(email.trim().toLowerCase());
+  }
+
+  /**
+   * [#14373] 128 bits from WebCrypto, hex-encoded — same `getRandomValues`
+   * baseline `resolvePasswordHasher`'s WebContainer salt uses, so this stays
+   * portable to hosts without `node:crypto`. Never persisted, never logged,
+   * never sent anywhere but the one in-process `signUpEmail` body call that
+   * consumes it.
+   */
+  private generateOperatorProvisioningTicket(): string {
+    const bytes = (globalThis as any).crypto.getRandomValues(new Uint8Array(16));
+    let hex = '';
+    for (let i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, '0');
+    return hex;
   }
 
   /**
@@ -4247,11 +4329,19 @@ export class AuthManager {
    * creation, so a one-shot read here would admit at the first seam and refuse
    * at the second. The ticket's lifetime is bounded by its owner's `finally`
    * and by the TTL instead.
+   *
+   * [#14373] `ticket` is REQUIRED to match the value {@link
+   * stageOperatorProvisioning} returned — see that method's doc for why the
+   * address alone is no longer sufficient. A missing, wrong-typed, or
+   * mismatched ticket reads as "not provisioning", the same as no ticket at
+   * all; there is no email-only fallback path.
    */
-  isOperatorProvisioning(email: unknown): boolean {
+  isOperatorProvisioning(email: unknown, ticket?: unknown): boolean {
     if (typeof email !== 'string' || email.trim() === '') return false;
     this.prunePendingOperatorProvisioning();
-    return this.pendingOperatorProvisioning.has(email.trim().toLowerCase());
+    const entry = this.pendingOperatorProvisioning.get(email.trim().toLowerCase());
+    if (!entry) return false;
+    return typeof ticket === 'string' && ticket === entry.ticket;
   }
 
   private prunePendingOperatorProvisioning(): void {
@@ -5044,7 +5134,7 @@ export class AuthManager {
    * generated docs and the #13816 refusal all asserted the ban.
    *
    * This method restores declared = enforced by routing the state to the
-   * platform's OWN ban write (`admin-ban-endpoints.ts`):
+   * platform's OWN ban write (`user-ban-write.ts`):
    *
    *  - `active: false` on a row that is not banned ⇒ `applyUserBan` with
    *    `SCIM_DEACTIVATION_BAN_REASON` and no expiry. The vendor's
@@ -5073,8 +5163,14 @@ export class AuthManager {
    * A consequence worth stating: on 1.7.2 a SCIM `DELETE /Users/{id}` no
    * longer deletes the better-auth user (the vendor tombstones the source);
    * it leaves the user with no active source, so this callback disables the
-   * account. Re-provisioning through the tombstone re-links the same user,
-   * the state turns active, and the SCIM ban is lifted by the second bullet.
+   * account — by the SAME branch as `active: false`, including over an
+   * administrator's timed ban, whose `banExpires` a DELETE therefore clears
+   * too: a deprovision cannot be outlived by an expiry the administrator set.
+   * For the same reason a DELETE is judged by the `beforeUpdate` guard below
+   * and never by any `beforeDelete` — deleting the last administrator through
+   * SCIM is refused exactly as deactivating them is. Re-provisioning through
+   * the tombstone re-links the same user, the state turns active, and the
+   * SCIM ban is lifted by the second bullet.
    *
    * The break-glass last-administrator guard (ADR-0024 D5.2, #5892) is an
    * ENGINE `beforeUpdate` hook on `sys_user`, so it judges this write exactly

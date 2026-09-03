@@ -115,7 +115,6 @@ export async function resolveSqliteDriver(
     opts.warn ??
     ((message: string) => {
       try {
-        // eslint-disable-next-line no-console
         console.warn(message);
       } catch {
         /* ignore */

@@ -575,7 +575,6 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
     if (dbNotice) {
         // Legacy-file compat-read (#6469): loud, once per boot, on stderr so a
         // `--json` command's reserved stdout stays a single parseable document.
-        // eslint-disable-next-line no-console
         console.warn(`[StandaloneStack] ⚠ ${dbNotice}`);
     }
 

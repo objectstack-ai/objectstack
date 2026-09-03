@@ -22,7 +22,14 @@
 //   limb (2) files ONE anchor issue when the same failing test file has ejected
 //     >= 2 DISTINCT pull requests in 24 h, and REFRESHES it rather than filing a
 //     second one. Idempotency is a property of the PAIR of runs, and the second
-//     run is the one nobody tests.
+//     run is the one nobody tests. Its lookup is keyed on the FILE KEY, never on
+//     a triage-state label: the first shipped version selected `open` +
+//     `finding`, so the moment an anchor was graded -- `finding` comes off, that
+//     is what first-touch grading means -- the workflow stopped seeing it and
+//     filed a fresh one on the next ejection (five anchors for one test file in
+//     3 h 43 m). A2 pins the un-graded pair; A14-A17 pin the graded and closed
+//     ones, and the `listForRepo` double honours `state` and `labels` so they
+//     can tell the two lookups apart at all.
 //
 // So the subject here is the shipped bytes, driven twice where it matters, with
 // real logs on the input side and a full call ledger on the output side.
@@ -102,6 +109,9 @@
 // runs instead of distinct PRs, aggregate over keys this run never hit, always
 // create instead of refreshing, drop the sighting markers, drop each anti-no-op
 // announcement, create an anchor without having established one does not exist,
+// revert the anchor lookup to the `open` + `finding` selection that made a
+// GRADED anchor invisible, stop recognising a closed-as-duplicate chain, drop
+// the link a regression anchor owes the anchor it regressed from,
 // and move the redelivery guard below the aggregation -- and requires the
 // battery to go RED for each, naming the scenario it expects. Each mutation
 // also asserts its own anchor was PRESENT before substituting: a mutation that
@@ -217,6 +227,7 @@ function httpError(status, message) {
 
 const MODELLED_ISSUE_METHODS = new Set([
   'listComments', 'createComment', 'listCommentsForRepo', 'listForRepo', 'create', 'update',
+  'addLabels',
 ]);
 const MODELLED_ACTION_METHODS = new Set(['listJobsForWorkflowRun', 'listWorkflowRunsForRepo']);
 
@@ -248,11 +259,17 @@ function makeDoubles(world) {
     repoComments: [],
     repoCommentPages: null,
     repoCommentsError: null,
-    openIssues: [],
-    openIssuePages: null,
+    // The repo's issue store as `listForRepo` sees it. NOT "open issues": the
+    // anchor lookup reads CLOSED anchors too (closed-as-duplicate and
+    // closed-as-resolved are different answers), so each entry may carry
+    // `state`, `state_reason` and `labels`; the double defaults them to an
+    // un-labelled open issue.
+    repoIssues: [],
+    repoIssuePages: null,
     listIssuesError: null,
     createIssueError: null,
     updateIssueError: null,
+    addLabelsError: null,
     queueRuns: [],
     prCommentPostError: null,
     ...world,
@@ -260,7 +277,7 @@ function makeDoubles(world) {
 
   const calls = {
     listComments: [], listCommentsForRepo: [], listForRepo: [],
-    createComment: [], issueCreate: [], issueUpdate: [], logs: [],
+    createComment: [], issueCreate: [], issueUpdate: [], addLabels: [], logs: [],
   };
   const log = { info: [], warning: [], failed: [], summary: [] };
   const unstubbedCalls = [];
@@ -287,13 +304,30 @@ function makeDoubles(world) {
       }
       return { data: page === 1 ? w.repoComments.map((body) => ({ body })) : [] };
     },
-    async listForRepo({ page = 1, per_page: perPage = 100, state, labels }) {
+    async listForRepo({ page = 1, per_page: perPage = 100, state = 'open', labels }) {
       calls.listForRepo.push({ page, perPage, state, labels });
       if (w.listIssuesError) throw w.listIssuesError;
-      if (w.openIssuePages !== null) {
-        return { data: Array.from({ length: perPage }, (_, i) => ({ number: 900000 + i, title: 'unrelated finding', body: 'nothing' })) };
+      // The truncation simulation is deliberately BLIND to the filters: what it
+      // models is a repo whose issue list never ends. A filter-aware version
+      // would hand back a short page and stop being a truncation at all.
+      if (w.repoIssuePages !== null) {
+        return { data: Array.from({ length: perPage }, (_, i) => ({ number: 900000 + i, title: 'unrelated finding', body: 'nothing', state: 'open', labels: ['finding'] })) };
       }
-      return { data: page === 1 ? w.openIssues : [] };
+      // `state` and `labels` are HONOURED. A double that ignored them would let
+      // a lookup keyed on `open` + `finding` satisfy a scenario about a GRADED
+      // anchor -- which is the exact defect these scenarios exist to catch, so
+      // ignoring the filters here would make every one of them unfalsifiable.
+      const wanted = String(labels ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+      const namesOf = (i) => (i.labels ?? []).map((x) => (typeof x === 'string' ? x : x?.name));
+      const matched = w.repoIssues
+        .map((i) => ({ state: 'open', state_reason: null, labels: [], ...i }))
+        .filter((i) => (state === 'all' || i.state === state) && wanted.every((l) => namesOf(i).includes(l)));
+      return { data: page === 1 ? matched : [] };
+    },
+    async addLabels({ issue_number: n, labels }) {
+      calls.addLabels.push({ issue_number: n, labels });
+      if (w.addLabelsError) throw w.addLabelsError;
+      return { data: [] };
     },
     async create({ title, body, labels }) {
       if (w.createIssueError) throw w.createIssueError;
@@ -477,11 +511,23 @@ const INCIDENT = {
   head12855: pad('1a24e9778'),
 };
 
-/** The anchor issue an earlier pair already produced. */
-const anchorIssue = (number, key) => ({
+/**
+ * The anchor issue an earlier pair already produced.
+ *
+ * The defaults are what the FIXED workflow files: open, and carrying both the
+ * triage-state label and the machine-owned identity label. `over` is how a
+ * scenario says the anchor has since been GRADED (`finding` off, `priority:*`
+ * on), closed as a duplicate, or closed on its own merits -- the three states
+ * the lookup has to tell apart.
+ */
+const anchorIssue = (number, key, over = {}) => ({
   number,
   title: `Queue-flake anchor: ${key}`,
   body: `earlier body\n<!-- queue-signature-anchor:${key} -->`,
+  state: 'open',
+  state_reason: null,
+  labels: ['finding', 'queue-flake-anchor'],
+  ...over,
 });
 
 /** The one comment the script posted in `result`, or ''. */
@@ -727,7 +773,12 @@ function scenarios(root) {
           sightingComment(KEY_A, 10105, 32328768059),
           postedBody(first),
         ],
-        openIssues: first.calls.issueCreate.map((c) => ({ number: c.number, title: c.title, body: c.body })),
+        // The LABELS come through too. Without them this fixture would describe
+        // a label-less anchor, and every lookup -- including one keyed on
+        // `finding` -- would have to be judged against the wrong world.
+        repoIssues: first.calls.issueCreate.map((c) => ({
+          number: c.number, title: c.title, body: c.body, state: 'open', labels: c.labels,
+        })),
       }),
       check(r, t, first) {
         const anchor = first.calls.issueCreate[0];
@@ -742,6 +793,104 @@ function scenarios(root) {
             && /\|\s*#10003\s*\|/.test(r.calls.issueUpdate[0]?.body ?? ''),
             `the refreshed body lists all three victims, got: ${JSON.stringify(r.calls.issueUpdate[0]?.body ?? '')}`),
           t(postedBody(r).includes(`#${anchor?.number}`), "the third victim's comment links the SAME anchor"),
+        ];
+      },
+    },
+    {
+      id: 'A14',
+      name: 'GRADED anchor: an OPEN anchor that has been triaged (`finding` taken off) is REFRESHED, not duplicated',
+      // The live defect. First-touch grading removes `finding` BY DEFINITION, so
+      // a lookup keyed on it stops seeing the anchor the moment a human answers
+      // it -- and the next ejection files another anchor, and the next, and the
+      // next. This is #14648 as the API returned it: open, `finding` gone,
+      // `priority:p1` / `domain:cli` on, and no identity label because it was
+      // filed before there was one.
+      world: () => base({
+        repoComments: [sightingComment(KEY_A, 10105, 32328768059)],
+        repoIssues: [anchorIssue(14648, KEY_A, { labels: ['tests', 'priority:p1', 'pm:dispatched', 'domain:cli'] })],
+      }),
+      check(r, t) {
+        return [
+          t(r.calls.issueCreate.length === 0,
+            `NO second anchor is filed for a key that already has an open one, got ${r.calls.issueCreate.length}: `
+              + `${JSON.stringify(r.calls.issueCreate.map((c) => c.title))}`),
+          t(r.calls.issueUpdate.length === 1 && r.calls.issueUpdate[0].issue_number === 14648,
+            `the graded anchor #14648 is the one refreshed, got ${JSON.stringify(r.calls.issueUpdate.map((u) => u.issue_number))}`),
+          t(r.calls.addLabels.some((c) => c.issue_number === 14648 && c.labels.includes('queue-flake-anchor')),
+            `and it is ADOPTED -- the identity label is put on it so the next lookup finds it in one bounded query, got ${JSON.stringify(r.calls.addLabels)}`),
+          t(postedBody(r).includes('#14648'), "the victim's comment links the anchor that already exists"),
+        ];
+      },
+    },
+    {
+      id: 'A15',
+      name: 'the newest anchor is CLOSED AS DUPLICATE and an older one is open: the OLDER OPEN one is refreshed',
+      // The shape the incident actually reached. Closing the duplicates is
+      // correct triage; a lookup that filters on state turns it into fuel,
+      // because each closure removes the only anchor the lookup could see.
+      world: () => base({
+        repoComments: [sightingComment(KEY_A, 10105, 32328768059)],
+        repoIssues: [
+          anchorIssue(14720, KEY_A, { state: 'closed', state_reason: 'duplicate' }),
+          anchorIssue(14648, KEY_A, { labels: ['tests', 'priority:p1'] }),
+        ],
+      }),
+      check(r, t) {
+        return [
+          t(r.calls.issueCreate.length === 0,
+            `closing the duplicates does not license a new anchor, got ${r.calls.issueCreate.length}`),
+          t(r.calls.issueUpdate.length === 1 && r.calls.issueUpdate[0].issue_number === 14648,
+            `the surviving OPEN anchor #14648 is refreshed -- not the closed duplicate, got ${JSON.stringify(r.calls.issueUpdate.map((u) => u.issue_number))}`),
+        ];
+      },
+    },
+    {
+      id: 'A16',
+      name: 'every anchor for the key is CLOSED AS DUPLICATE: nothing is filed, and the comment says where the conversation went',
+      // GitHub's issue payload carries `state_reason: duplicate` but not the
+      // duplicate's TARGET, so the canonical cannot be followed from here.
+      // Filing a fresh anchor would be closed as a duplicate in turn -- the loop
+      // this whole lookup exists to stop -- so the run NAMES the closure and
+      // decides nothing, which is this workflow's declared boundary.
+      world: () => base({
+        repoComments: [sightingComment(KEY_A, 10105, 32328768059)],
+        repoIssues: [anchorIssue(14720, KEY_A, { state: 'closed', state_reason: 'duplicate' })],
+      }),
+      check(r, t) {
+        return [
+          t(r.calls.issueCreate.length === 0,
+            `no anchor is filed into a closed-as-duplicate chain, got ${r.calls.issueCreate.length}`),
+          t(r.calls.issueUpdate.length === 0, 'and the closed duplicate is not written to either'),
+          t(r.log.warning.some((x) => /anchor not created/i.test(x.props?.title ?? '')),
+            `the run is annotated, got titles: ${JSON.stringify(r.log.warning.map((x) => x.props?.title))}`),
+          t(postedBody(r).includes('#14720'),
+            "the victim's comment names the closed anchor, so the fact is not only in a log line"),
+        ];
+      },
+    },
+    {
+      id: 'A17',
+      name: 'the only anchor for the key was closed ON ITS MERITS: a REGRESSION anchor is filed, and it links the old one',
+      // The other side of A16, and the reason state alone cannot decide this.
+      // Closed-as-duplicate means the conversation moved; closed-as-resolved
+      // means it was answered and the file is ejecting PRs again. Only the
+      // second one earns a new anchor, and only if it says what it regressed
+      // from -- otherwise the previous answer is lost.
+      world: () => base({
+        repoComments: [sightingComment(KEY_A, 10105, 32328768059)],
+        repoIssues: [anchorIssue(14300, KEY_A, { state: 'closed', state_reason: 'completed', labels: ['queue-flake-anchor'] })],
+      }),
+      check(r, t) {
+        const created = r.calls.issueCreate[0];
+        return [
+          t(r.calls.issueCreate.length === 1,
+            `a resolved anchor does not silence a returning flake, got ${r.calls.issueCreate.length} created`),
+          t((created?.body ?? '').includes('#14300'),
+            `the new anchor LINKS the closed one, got: ${JSON.stringify(created?.body ?? '')}`),
+          t((created?.body ?? '').includes('回归'),
+            'and says it is a regression rather than presenting itself as the first sighting'),
+          t((created?.labels ?? []).includes('queue-flake-anchor'),
+            `the new anchor carries the identity label, so grading it cannot hide it, got ${JSON.stringify(created?.labels)}`),
         ];
       },
     },
@@ -913,7 +1062,7 @@ function scenarios(root) {
       name: 'an anchor is NOT created while its absence is unestablished',
       world: () => base({
         repoComments: [sightingComment(KEY_A, 10105, 32328768059)],
-        openIssuePages: 'full',
+        repoIssuePages: 'full',
       }),
       check(r, t) {
         return [
@@ -1231,6 +1380,47 @@ const MUTATIONS = [
     // A1 carries no stack of its own, so it is the control that this mutation
     // does not simply red the battery.
     keepGreen: ['A1'],
+  },
+  {
+    id: 'M17',
+    what: 'the anchor lookup goes back to selecting `open` + `finding`, so a GRADED anchor is invisible and every further ejection files another one',
+    from: [
+      '  const ANCHOR_QUERIES = [',
+      "    { state: 'all', labels: ANCHOR_IDENTITY_LABEL, firstMatchWins: false, adopts: false },",
+      "    { state: 'open', firstMatchWins: true, adopts: true },",
+      '  ];',
+    ].join('\n'),
+    to: [
+      '  const ANCHOR_QUERIES = [',
+      "    { state: 'open', labels: ANCHOR_LABEL, firstMatchWins: true, adopts: false },",
+      '  ];',
+    ].join('\n'),
+    expect: ['A14', 'A15', 'A16', 'A17'],
+    // A1 has no prior anchor at all and A2's anchor still carries `finding`, so
+    // both are found either way. They are the controls that make the four reds
+    // above a reading of the GRADED and CLOSED cases rather than of a lookup
+    // that simply stopped finding anything.
+    keepGreen: ['A1', 'A2'],
+  },
+  {
+    id: 'M18',
+    what: 'a closed-as-duplicate chain stops being recognised, so the workflow files the anchor that will be closed as a duplicate in turn',
+    from: '  if (closedAsDuplicate) {',
+    to: '  if (false) {',
+    expect: ['A16'],
+    keepGreen: ['A14', 'A17'],
+  },
+  {
+    id: 'M19',
+    what: 'a regression anchor stops naming the closed anchor it regressed from, so the previous answer is lost',
+    from: [
+      '  const priorAnchor = resolvedBefore && (!existing || existing.number > resolvedBefore.number)',
+      '    ? resolvedBefore',
+      '    : null;',
+    ].join('\n'),
+    to: '  const priorAnchor = null;',
+    expect: ['A17'],
+    keepGreen: ['A1', 'A14', 'A16'],
   },
   {
     id: 'M13',

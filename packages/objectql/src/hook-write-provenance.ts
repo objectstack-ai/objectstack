@@ -92,6 +92,31 @@ export interface HookWriteRecording {
    */
   readonly payload: Record<string, unknown>;
   /**
+   * [#14099] Close the current OBSERVATION WINDOW and open a fresh one: the
+   * keys assigned since the previous `closeWindow()` — or since arming, for
+   * the first call — and nothing before that.
+   *
+   * The cumulative record {@link HookWriteRecording.seal} returns is NOT
+   * affected, and that separation is the whole point. One recording answers
+   * two different questions on the predicate-update path, and the answers must
+   * not be the same set:
+   *
+   *  - "did a HOOK assign this key at all?" — cumulative, what the read-only
+   *    strips read for provenance (#14088, the reason this module exists);
+   *  - "did THIS row's dispatch assign it?" — windowed, what ADR-0058
+   *    Addendum II D3's enforcement compares between rows (#14099). A batch of
+   *    N rows closes N windows; a cumulative set could never tell two rows
+   *    apart, because the second row writing the same key does not grow it.
+   *
+   * A window mirrors the cumulative record's own rule on removal: a key
+   * deleted during the window leaves it, so the window means "the keys holding
+   * a value this row's chain assigned", never "the names this row touched".
+   *
+   * After {@link HookWriteRecording.seal} the recording records nothing more,
+   * so this returns an empty set rather than a stale one.
+   */
+  closeWindow(): ReadonlySet<string>;
+  /**
    * Close the recording and hand back the payload the rest of the write must
    * use.
    *
@@ -137,6 +162,12 @@ export interface SealedHookWrites {
  */
 export function recordHookPayloadWrites(target: Record<string, unknown>): HookWriteRecording {
   const written = new Set<string>();
+  // [#14099] The windowed twin of `written` — same entries, cleared at each
+  // `closeWindow()`. Kept beside the cumulative set rather than derived from
+  // it, because a derivation cannot exist: two rows writing the SAME key grow
+  // the cumulative set once, so a delta would report the second row as having
+  // written nothing, which is the exact false reading D3's enforcement turns on.
+  let windowWrites = new Set<string>();
   let sealed = false;
 
   const record = (key: string | symbol): void => {
@@ -146,6 +177,7 @@ export function recordHookPayloadWrites(target: Record<string, unknown>): HookWr
     // collide with a real key's provenance.
     if (sealed || typeof key !== 'string') return;
     written.add(key);
+    windowWrites.add(key);
   };
 
   const payload = new Proxy(target, {
@@ -173,13 +205,22 @@ export function recordHookPayloadWrites(target: Record<string, unknown>): HookWr
       // records it again. Dropping it here keeps the set meaning "a hook
       // assigned the value standing on this key" rather than "a hook once
       // touched this name".
-      if (ok && typeof key === 'string') written.delete(key);
+      if (ok && typeof key === 'string') {
+        written.delete(key);
+        windowWrites.delete(key);
+      }
       return ok;
     },
   });
 
   return {
     payload,
+    closeWindow(): ReadonlySet<string> {
+      if (sealed) return new Set();
+      const closed = windowWrites;
+      windowWrites = new Set();
+      return closed;
+    },
     seal(current: unknown): SealedHookWrites {
       sealed = true;
       if (current !== payload) {

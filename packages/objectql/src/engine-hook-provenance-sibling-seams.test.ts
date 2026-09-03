@@ -18,16 +18,16 @@
 // way. So a `beforeInsert` hook that re-issues or normalises a record number
 // still loses its write to the one caller that submitted the same value.
 //
-// ⛔ THE SIBLING SEAM IS DELIBERATELY NOT HERE. #14259 named a second one —
-// `isCallerSuppliedValue`, behind the two `readonlyWhen` strips — and it is
-// WITHHELD pending a maintainer ruling, not forgotten. Measured on this branch:
-// threading the record into that predicate turns the existing #9107 pin
-// `LOCK 3b` red, because a hook spelled `ctx.input.data.x = ctx.input.data.x`
-// is a `set` on the recorded object, so the CALLER's forged value becomes
-// hook-owned and survives a TRUE `readonlyWhen` predicate (measured:
-// `closed_note` committed `'1999-01-01'` where the lock had stripped it to
-// `null`). That is the card's own fork clause — a caller value surviving a TRUE
-// predicate — and it goes to the decision inbox, never resolved here.
+// ⛔ THE SIBLING SEAM IS DELIBERATELY NOT HERE, AND IT HAS SINCE BEEN RULED.
+// #14259 named a second one — `isCallerSuppliedValue`, behind the two
+// `readonlyWhen` strips — and maintainer ruling B kept it on VALUE EQUALITY:
+// the divergence from this seam is deliberate, not a port nobody got to.
+// ⛔ The argument is NOT restated here. It lives on `isCallerSuppliedValue`'s
+// docblock (`validation/rule-validator.ts`), and each face carries a pin:
+// `MEASURED: a lone self-assigning hook leaves the CALLER value on the key`
+// (this suite, insert side; `engine-readonly-strip-caller-values.test.ts`,
+// update side) against `LOCK 3b` in
+// `engine-readonly-when-derived-writes.test.ts`.
 //
 // ⛔ WHAT THIS SUITE IS NOT, and is written to fail if anyone reads it that
 // way: it is NOT a relaxation of #5503. The DISCRIMINATOR PAIRS are the
@@ -348,8 +348,9 @@ describe('seam 2 — the insert-side runtime-owned strip reads PROVENANCE (#1425
     // pinned rather than argued: it is the exact shape that forked the
     // `readonlyWhen` seam out of this PR, whose #9107 pin `LOCK 3b` pins the
     // OPPOSITE verdict for a STATE lock ("a hook that writes the caller value
-    // BACK is the caller value, and goes"). #14259's fork clause sends that one
-    // to the decision inbox; nothing here resolves it.
+    // BACK is the caller value, and goes"). That fork was RULED (#14259,
+    // maintainer ruling B): the two verdicts are one recorded asymmetry, and
+    // `isCallerSuppliedValue`'s docblock carries the argument.
     //
     // Why the same mechanism ships on THIS seam: `stripRuntimeOwnedFields`
     // guards a runtime-owned COLUMN (#5503) — the same class of protection

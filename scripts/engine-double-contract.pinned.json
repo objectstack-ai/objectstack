@@ -2439,7 +2439,7 @@
     {
       "file": "packages/plugins/plugin-security/src/claim-seed-ownership.test.ts",
       "verb": "update",
-      "pinned": 1
+      "pinned": 5
     },
     {
       "file": "packages/plugins/plugin-security/src/controlled-by-parent-chain.test.ts",
@@ -2567,6 +2567,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/record-share-tenant-wall.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/resolve-permission-sets-for-context.pin.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -2688,6 +2693,11 @@
     },
     {
       "file": "packages/plugins/plugin-sharing/src/authored-row-write-deferral.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/backfill-sys-record-share-organizations.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -3189,6 +3199,11 @@
     {
       "file": "packages/services/service-automation/src/runas-grant-resolution.integration.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/suspended-run-store.test.ts",
+      "verb": "delete",
       "pinned": 1
     },
     {

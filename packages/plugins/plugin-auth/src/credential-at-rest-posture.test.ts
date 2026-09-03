@@ -76,35 +76,12 @@ import { createHash, createHmac } from 'node:crypto';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AuthManager } from './auth-manager.js';
+import { authIdentityObjects } from './manifest.js';
 import { createTenancyService } from './tenancy-service.js';
 import {
   mintScimConnectionCredential,
   SCIM_BEARER_PREFIX,
 } from './scim-connection-service.js';
-import {
-  SysUser,
-  SysSession,
-  SysAccount,
-  SysVerification,
-  SysOrganization,
-  SysMember,
-  SysInvitation,
-  SysTeam,
-  SysTeamMember,
-  SysScimConnectionBinding,
-  SysScimConnectionCredential,
-  SysScimGroup,
-  SysScimGroupMember,
-  SysScimIdentityTombstone,
-  SysScimProjectionGrant,
-  SysScimSubject,
-  SysScimUser,
-  SysOauthApplication,
-  SysOauthAccessToken,
-  SysOauthRefreshToken,
-  SysOauthConsent,
-  SysJwks,
-} from '@objectstack/platform-objects';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -146,32 +123,12 @@ afterEach(async () => {
   }
 });
 
-/** The identity surface the org + admin + scim + oauth-provider plugins touch. */
-const AUTH_OBJECTS = [
-  SysUser,
-  SysSession,
-  SysAccount,
-  SysVerification,
-  SysOrganization,
-  SysMember,
-  SysInvitation,
-  SysTeam,
-  SysTeamMember,
-  // The stable scim model set + the ObjectStack-owned credential store (#3653).
-  SysScimConnectionBinding,
-  SysScimConnectionCredential,
-  SysScimGroup,
-  SysScimGroupMember,
-  SysScimIdentityTombstone,
-  SysScimProjectionGrant,
-  SysScimSubject,
-  SysScimUser,
-  SysOauthApplication,
-  SysOauthAccessToken,
-  SysOauthRefreshToken,
-  SysOauthConsent,
-  SysJwks,
-];
+/**
+ * The objects a deployment that mounts plugin-auth registers, imported from the
+ * plugin's own manifest rather than re-spelled here, so this harness cannot
+ * drift from what `auth-plugin.ts` registers at runtime (#14615).
+ */
+const AUTH_OBJECTS = authIdentityObjects;
 
 async function bootEngine(): Promise<ObjectQL> {
   const engine = new ObjectQL();

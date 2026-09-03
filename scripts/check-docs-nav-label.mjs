@@ -517,13 +517,65 @@ export async function main(argv = []) {
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the control file map and its per-source legs': 1,
+  'leg A': 5,
+  'leg C': 2,
+  'leg D': 2,
+  'leg E': 2,
+  'leg B, over REAL modules': 5,
+  'leg F': 3,
+  'the real tree, and the population positive control': 3,
+  'wiring: this gate really runs in CI': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 9;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 export async function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   let checked = 0;
   const assert = (ok, what) => {
+    registerCase();
     checked++;
     if (!ok) failures.push(what);
   };
+  battery('the control file map and its per-source legs');
   const legs = (violations) => [...new Set(violations.map((v) => v.leg))].sort();
 
   // A file map that PASSES every source leg, as the control the mutations move.
@@ -545,6 +597,7 @@ export async function selfTest() {
   assert(judgeSources(GOOD()).length === 0, `the control file map passes every source leg — got ${JSON.stringify(judgeSources(GOOD()))}`);
 
   // ── leg A ────────────────────────────────────────────────────────────────
+  battery('leg A');
   const leaked = GOOD();
   leaked.set('apps/docs/app/og/docs/[...slug]/route.tsx', 'title={page.data.navTitle ?? page.data.title}\n');
   assert(legs(judgeSources(leaked)).includes('A'), 'leg A fires when a consumer reads the key in code');
@@ -566,6 +619,7 @@ export async function selfTest() {
   assert(legs(judgeSources(undeclared)).includes('A'), 'leg A fires when the schema stops declaring the key');
 
   // ── leg C ────────────────────────────────────────────────────────────────
+  battery('leg C');
   const unwired = GOOD();
   unwired.set('apps/docs/lib/source.ts', 'export const source = loader({ plugins: [lucideIconsPlugin()] });\nexport const getLLMText = (page) => `# ${page.data.title}`;\n');
   assert(legs(judgeSources(unwired)).includes('C'), 'leg C fires when the plugin is dropped from the loader');
@@ -575,6 +629,7 @@ export async function selfTest() {
   assert(legs(judgeSources(commentedOut)).includes('C'), 'leg C is not satisfied by the call COMMENTED OUT');
 
   // ── leg D ────────────────────────────────────────────────────────────────
+  battery('leg D');
   const treeLeaf = GOOD();
   treeLeaf.set(JSONLD, 'getBreadcrumbItems(page.url, tree, { includePage: true });\nconst t = page.data.title;\n');
   assert(legs(judgeSources(treeLeaf)).includes('D'), 'leg D fires when the breadcrumb leaf is taken from the page tree again');
@@ -584,6 +639,7 @@ export async function selfTest() {
   assert(legs(judgeSources(noOption)).includes('D'), 'leg D fires when the option is absent — fumadocs defaults it to false, but silence is not a decision on the record');
 
   // ── leg E ────────────────────────────────────────────────────────────────
+  battery('leg E');
   const rewired = GOOD();
   rewired.set('apps/docs/app/llms.txt/route.ts', 'lines.push(treeNode.name);\n');
   assert(legs(judgeSources(rewired)).includes('E'), 'leg E fires when a title consumer stops reading `page.data.title`');
@@ -593,6 +649,7 @@ export async function selfTest() {
   assert(legs(judgeSources(missing)).includes('E'), 'leg E fires when a pinned consumer is gone rather than reporting a clean zero');
 
   // ── leg B, over REAL modules ─────────────────────────────────────────────
+  battery('leg B, over REAL modules');
   const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const tmp = mkdtempSync(join(tmpdir(), 'docs-nav-label-'));
@@ -657,17 +714,20 @@ export async function selfTest() {
   }
 
   // ── leg F ────────────────────────────────────────────────────────────────
+  battery('leg F');
   assert(judgeFumadocs(['title', 'description', 'icon', 'full', '_openapi'], ['title', 'pages']).length === 0, 'leg F is green on fumadocs 16.14.4\'s real key sets');
   assert(judgeFumadocs(['title', 'sidebarTitle'], ['title']).some((v) => v.leg === 'F'), 'leg F fires when fumadocs ships a first-class nav label');
   assert(judgeFumadocs(['title'], ['title', 'navLabel']).some((v) => v.leg === 'F'), 'leg F watches `metaSchema` too — a per-page label override would land there');
 
   // ── the real tree, and the population positive control ───────────────────
+  battery('the real tree, and the population positive control');
   const real = readCodeFiles(join(REPO_ROOT, 'apps/docs'));
   assert(real.size > 0, 'the real apps/docs scan reads a non-empty population — a clean zero over nothing is the failure this control exists for');
   assert(real.has(RESOLVER) && real.has(LOADER) && real.has(JSONLD), 'the real scan reaches all three mechanism files');
   assert(!real.has('apps/docs/node_modules/x.ts'), 'the walk skips installed and generated directories');
 
   // ── wiring: this gate really runs in CI ──────────────────────────────────
+  battery('wiring: this gate really runs in CI');
   const SELF = 'scripts/check-docs-nav-label.mjs';
   let lint = null;
   try {
@@ -680,6 +740,51 @@ export async function selfTest() {
     assert(lint.includes(`node ${SELF} --self-test`), 'wiring: lint.yml runs the --self-test leg too');
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length > 0) {
     console.error(`✗ check-docs-nav-label --self-test — ${failures.length} of ${checked} assertion(s) failed\n`);
     for (const f of failures) console.error(`  • ${f}`);
