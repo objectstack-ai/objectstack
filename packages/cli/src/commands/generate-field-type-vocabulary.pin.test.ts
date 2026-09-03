@@ -43,15 +43,42 @@
  * accepts, and an AI or a human reading this switch to learn the field types
  * would learn four that do not exist.
  *
- * ## What this pin asserts, and what it deliberately does NOT
+ * ## What this pin asserts
  *
- * FORWARD ONLY: every token the three vocabularies key on is a `FieldType`
- * member. The converse is NOT asserted — plenty of real members (`secret`,
- * `address`, `location`, `code`, `tags`, …) have no entry and fall to the
- * `default` arm / the `|| fallback`, and that fallback is deliberate. Demanding
- * total coverage would be a different card with a different decision behind it
- * (what column type each unmapped member deserves), and this pin is written so
- * it does not prejudge that.
+ * BOTH DIRECTIONS, since #14657.
+ *
+ * FORWARD (#13871): every token the three vocabularies key on is a `FieldType`
+ * member.
+ *
+ * BACKWARD (#14657): every `FieldType` member is keyed on by all three. #13871
+ * deliberately did not assert this, because "what column type does each
+ * unmapped member deserve" was an open question; #14657 answered it member by
+ * member and this half became assertable. It matters because the gap was
+ * SILENT: 21 real members had no entry in either map (24 in the switch), and
+ * every one of them generated a plausible-looking wrong schema — TS `unknown`,
+ * a `TEXT` / `table.text` column — with nothing to tell the author. `secret`
+ * and `location` were among them.
+ *
+ * The two lookup tables carry the same rule a second time as
+ * `satisfies Record<FieldType, string>`, which makes a missing member a named
+ * `tsc` error (`packages/cli` type-checks `src/**`) as well as a red test. That
+ * annotation is itself pinned below: the extractor here REQUIRES it as each
+ * table's terminator, so deleting it cannot quietly demote the type-level half
+ * to nothing. The `switch` cannot carry a `satisfies` — its scrutinee is a
+ * plain `string` off an unvalidated config — so for that vocabulary this file
+ * is the only mechanism, which is why the totality assertion lives here rather
+ * than being left to the compiler.
+ *
+ * ⚠️ What is NOT asserted, and why the difference is the point: that a mapping
+ * is CORRECT. This pin measures presence, not the value — a wrong-but-present
+ * entry is a different defect (`autonumber: 'SERIAL'` against a runtime that
+ * writes a rendered string, `formula` given a column the runtime never
+ * creates), filed separately rather than pinned here on a guess.
+ *
+ * The runtime fallbacks (`|| 'unknown'`, `|| 'TEXT'`, `default:`) stay and are
+ * NOT dead: they answer a `type` string that is not a `FieldType` at all, which
+ * the UNVALIDATED authoring door still delivers. Totality is over the enum, not
+ * over every string that can reach the generator.
  *
  * The `FieldType` side is imported, never transcribed: a list written out here
  * would just relocate the drift into this file. And the vocabularies are read
@@ -88,13 +115,36 @@ function lookupTableNames(): string[] {
   return [...SOURCE.matchAll(LOOKUP_TABLE_DECL)].map((m) => m[1]);
 }
 
+/**
+ * The terminator every lookup table must carry — the type-level half of the
+ * #14657 totality rule. Required rather than tolerated: if someone deletes the
+ * annotation, extraction fails loudly here instead of the compiler silently
+ * stopping to check.
+ */
+const TABLE_TERMINATOR = '} satisfies Record<FieldType, string>;';
+
 /** The keys of one top-level `Record<string, string>` table, in source order. */
 function lookupTableKeys(name: string): string[] {
   const declaration = `const ${name}: Record<string, string> = {`;
   const start = SOURCE.indexOf(declaration);
   if (start < 0) throw new Error(`lookup table not found in generate.ts: ${name}`);
-  const end = SOURCE.indexOf('\n};', start);
-  if (end < 0) throw new Error(`unterminated lookup table in generate.ts: ${name}`);
+  // Bound the table at ITS OWN closing line — the first line starting with `}`
+  // after the declaration — and then require that line to be the terminator.
+  // Searching for the terminator directly would silently run past a table
+  // whose annotation was deleted and swallow the NEXT table's body, turning a
+  // removed guard into a wrong measurement instead of a named failure.
+  const closing = SOURCE.slice(start).search(/\n\}/);
+  if (closing < 0) throw new Error(`unterminated lookup table in generate.ts: ${name}`);
+  const end = start + closing;
+  const closingLine = SOURCE.slice(end + 1, SOURCE.indexOf('\n', end + 1));
+  if (closingLine !== TABLE_TERMINATOR) {
+    throw new Error(
+      `${name} in generate.ts must be closed by \`${TABLE_TERMINATOR}\`, but it is closed by ` +
+      `\`${closingLine}\`. That annotation is the type-level half of the #14657 rule that every ` +
+      'FieldType member has an entry: without it, adding a field type to the spec stops being a ' +
+      'compile error here and goes back to silently generating `unknown` / a TEXT column.',
+    );
+  }
   const body = SOURCE.slice(start + declaration.length, end);
   return [...body.matchAll(/^ {2}([A-Za-z_][\w]*):/gm)].map((m) => m[1]);
 }
@@ -146,5 +196,57 @@ describe('generate.ts field-type vocabularies (#13871)', () => {
 
     const ghosts = labels.filter((l) => !REAL_FIELD_TYPES.has(l));
     expect(ghosts, 'the field-type switch cases on types that are not FieldType members').toEqual([]);
+  });
+
+  // ── The #14657 half: no real member may go unmapped ──────────────────────
+  //
+  // Read this as one rule stated three times, not three rules: the authority is
+  // `FieldType`, and each vocabulary is measured against it. A member added to
+  // the spec with no answer here used to produce TS `unknown` and a `TEXT`
+  // column in silence; it now names itself in a failing assertion.
+
+  const VOCABULARIES: ReadonlyArray<readonly [string, () => string[]]> = [
+    ['FIELD_TYPE_MAP (os generate types)', () => lookupTableKeys('FIELD_TYPE_MAP')],
+    ['FIELD_TYPE_SQL_MAP (os generate migration --format sql)', () => lookupTableKeys('FIELD_TYPE_SQL_MAP')],
+    ['the migration switch (os generate migration, typescript)', migrationSwitchLabels],
+  ];
+
+  for (const [label, read] of VOCABULARIES) {
+    it(`${label} covers every FieldType member`, () => {
+      const covered = new Set(read());
+      // Non-vacuity: the same control the forward assertions buy. An extractor
+      // that returned nothing would make "everything is missing" the finding,
+      // not a silent pass — but state it anyway so the failure is legible.
+      expect(covered.size).toBeGreaterThan(20);
+
+      const unmapped = [...REAL_FIELD_TYPES].filter((t) => !covered.has(t));
+      expect(
+        unmapped,
+        `${label} has no entry for these real FieldType members, so each one silently ` +
+        'takes the generator default (TS `unknown` / a TEXT column). Add an entry — or, ' +
+        'if the default is genuinely the right answer for it, say so with an explicit ' +
+        'entry that spells the default out, so the decision is written down rather than ' +
+        'left as an absence.',
+      ).toEqual([]);
+    });
+  }
+
+  it('the two lookup tables carry the type-level totality annotation', () => {
+    // The runtime half above and the compile-time half must both be present:
+    // `tsc` names a missing member at build time, this file names it in CI even
+    // if the annotation is loosened. `lookupTableKeys` throws without it, so
+    // this assertion is the readable statement of a rule already enforced.
+    for (const table of ['FIELD_TYPE_MAP', 'FIELD_TYPE_SQL_MAP'] as const) {
+      expect(
+        SOURCE.includes(`const ${table}: Record<string, string> = {`),
+        `${table} declaration moved`,
+      ).toBe(true);
+      expect(() => lookupTableKeys(table)).not.toThrow();
+    }
+    expect(
+      SOURCE.match(/^\} satisfies Record<FieldType, string>;$/gm),
+      'both FIELD_TYPE_MAP and FIELD_TYPE_SQL_MAP must close with the satisfies annotation ' +
+      'that makes an unmapped FieldType member a compile error',
+    ).toHaveLength(2);
   });
 });

@@ -212,9 +212,27 @@ const DEFER_NOTE_EVERY = 12;
 
 const argv = process.argv.slice(2);
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 // Handled before the option loop below: --self-test takes no --log and must not
-// spawn a wrapped command. selfTest() never returns.
-if (argv.includes('--self-test')) await selfTest();
+// spawn a wrapped command. selfTest() never returns -- unless it left early, which
+// is exactly what the handshake below refuses.
+if (argv.includes('--self-test')) {
+  await selfTest();
+  if (!selfTestReachedVerdict) {
+    console.error(
+      '\n✗ run-with-stall-guard self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
+}
 
 let logPath = '';
 let stallMinutes = 10;
@@ -1091,5 +1109,6 @@ async function selfTest() {
     process.exit(1);
   }
   console.log(`\n✓ ${results.length} case(s) passed — the guard fires, classifies and tears down.`);
+  selfTestReachedVerdict = true;
   process.exit(0);
 }

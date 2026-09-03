@@ -144,18 +144,27 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       //     schema files it inventories, so the ledger IS an input to the ratchet.
       'content/docs/api/error-catalog.mdx',
       'docs/audits/2026-07-unknown-key-strictness-ledger.md',
-      // src/shared/retired-key-migrate-sentence.test.ts judges the ONE
-      // governed markdown file its population was widened by (#10848,
-      // maintainer-ruled): the retirement playbook that teaches authors the
-      // prescription sentence the pin holds. One file, not `.claude/**`.
+      // src/shared/retired-key-migrate-sentence.test.ts judges two corpora
+      // (#10848, maintainer-ruled): this ONE governed `.claude` markdown
+      // file — the retirement playbook that teaches authors the
+      // prescription sentence the pin holds — plus every `skills/**/*.md`
+      // file, declared separately below since that root has its own holder
+      // too. One file for THIS entry, not `.claude/**`.
       '.claude/skills/spec-property-retirement/SKILL.md',
-      // scripts/export-list.test.ts ends in a corpus gate over the PUBLISHED
-      // skill references — it enumerates `skills/` and reads every
-      // `<skill>/references/_index.md`, asserting none of their `Exports:` rows
-      // names a machine constant (#12201). The artifacts are what a customer
-      // agent actually loads, so they are the population that gate must judge;
-      // checking the generator's output in memory instead would re-assert the
-      // rule and see nothing about what is checked in.
+      // Two holders. scripts/export-list.test.ts ends in a corpus gate over
+      // the PUBLISHED skill references — it enumerates `skills/` and reads
+      // every `<skill>/references/_index.md`, asserting none of their
+      // `Exports:` rows names a machine constant (#12201). The artifacts are
+      // what a customer agent actually loads, so they are the population
+      // that gate must judge; checking the generator's output in memory
+      // instead would re-assert the rule and see nothing about what is
+      // checked in.
+      //
+      // src/shared/retired-key-migrate-sentence.test.ts also reads this
+      // root (`PUBLISHED_SKILLS_ROOT`, `:102`) as the second corpus for its
+      // widened population (#10848, see the `.claude` entry above) — "plus
+      // every `.md` file under `skills/`" (`:92`), emitted as
+      // `skills:`-prefixed entries (`:484-485`).
       //
       // The whole subtree rather than `skills/*/references/_index.md`: the test
       // reads the DIRECTORY too (a new skill dir changes its verdict), and a

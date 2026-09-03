@@ -219,8 +219,6 @@
     "CrossObjectBatchRequestSchema": "src/api/batch.zod.ts#CrossObjectBatchRequestSchema (const)",
     "CrossObjectBatchResponse": "src/api/batch.zod.ts#CrossObjectBatchResponse (type)",
     "CrossObjectBatchResponseSchema": "src/api/batch.zod.ts#CrossObjectBatchResponseSchema (const)",
-    "CrudEndpointPattern": "src/api/rest-server.zod.ts#CrudEndpointPattern (type)",
-    "CrudEndpointPatternSchema": "src/api/rest-server.zod.ts#CrudEndpointPatternSchema (const)",
     "CrudEndpointsConfig": "src/api/rest-server.zod.ts#CrudEndpointsConfig (type)",
     "CrudEndpointsConfigParsed": "src/api/rest-server.zod.ts#CrudEndpointsConfigParsed (type)",
     "CrudEndpointsConfigSchema": "src/api/rest-server.zod.ts#CrudEndpointsConfigSchema (const)",

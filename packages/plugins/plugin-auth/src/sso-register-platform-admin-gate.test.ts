@@ -60,27 +60,23 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { AuthManager } from './auth-manager.js';
+import { authIdentityObjects } from './manifest.js';
 import { AuthPlugin } from './auth-plugin.js';
 import { createTenancyService } from './tenancy-service.js';
 import type { PluginContext } from '@objectstack/core';
-import {
-  SysUser,
-  SysSession,
-  SysAccount,
-  SysVerification,
-  SysOrganization,
-  SysMember,
-  SysInvitation,
-  SysTeam,
-  SysTeamMember,
-  SysSsoProvider,
-} from '@objectstack/platform-objects';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
 const SECRET = 'test-secret-at-least-32-chars-long-10009';
 const SYSTEM = { context: { isSystem: true } } as const;
+
+/**
+ * The objects a deployment that mounts plugin-auth registers, imported from the
+ * plugin's own manifest rather than re-spelled here, so this harness cannot
+ * drift from what `auth-plugin.ts` registers at runtime (#14615).
+ */
+const AUTH_OBJECTS = authIdentityObjects;
 
 const sysPermissionSet = {
   name: 'sys_permission_set',
@@ -126,11 +122,7 @@ async function bootEngine(): Promise<ObjectQL> {
     true,
   );
   await engine.init();
-  const objects = [
-    SysUser, SysSession, SysAccount, SysVerification, SysOrganization,
-    SysMember, SysInvitation, SysTeam, SysTeamMember, SysSsoProvider,
-  ];
-  for (const object of objects) {
+  for (const object of AUTH_OBJECTS) {
     engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
   }
   engine.registry.registerObject(sysPermissionSet as never, '@objectstack/plugin-auth');

@@ -2567,6 +2567,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/record-share-tenant-wall.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/resolve-permission-sets-for-context.pin.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -2692,6 +2697,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-sharing/src/backfill-sys-record-share-organizations.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-sharing/src/boot-backfill.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2782,12 +2792,12 @@
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-sharing/src/system-write-skip-notice.test.ts",
+      "file": "packages/plugins/plugin-sharing/src/system-write-materialisation.test.ts",
       "verb": "delete",
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-sharing/src/system-write-skip-notice.test.ts",
+      "file": "packages/plugins/plugin-sharing/src/system-write-materialisation.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -2998,6 +3008,11 @@
     },
     {
       "file": "packages/runtime/src/action-execution-calldata-not-found.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/action-governance-scope-divergence.test.ts",
       "verb": "findOne",
       "pinned": 1
     },

@@ -62,6 +62,12 @@ export type { InboxChannelOptions } from './inbox-channel.js';
 export { createEmailChannel, USER_OBJECT as EMAIL_USER_OBJECT } from './email-channel.js';
 export type { EmailChannelOptions, EmailSenderSurface } from './email-channel.js';
 export { createSmsChannel } from './sms-channel.js';
+// #13881 — the ONE per-recipient locale read point every channel resolves through.
+export {
+    RECIPIENT_LOCALE_FIELD,
+    normalizeRecipientLocale,
+    resolveRecipientLocale,
+} from './recipient-locale.js';
 export type { SmsChannelOptions, SmsSenderSurface } from './sms-channel.js';
 
 // Templates + renderer (ADR-0030 P3)

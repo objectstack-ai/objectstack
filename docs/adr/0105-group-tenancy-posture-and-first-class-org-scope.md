@@ -68,7 +68,7 @@ all plants' data. Two requirements are *inherent* to the shape, not optional:
 ### Today's two postures, and the unsupported middle
 
 - **`single`** (ADR-0093): one logical tenant. Layer 0 inert
-  (`plugin-security/src/tenant-layer.ts:87`). Factories can be modeled as
+  (`packages/plugins/plugin-security/src/tenant-layer.ts`). Factories can be modeled as
   business units in one tree — group visibility and approvals are native, but
   there is no per-factory membership/invitation boundary, and org scoping
   relies entirely on authored configuration.
@@ -77,9 +77,9 @@ all plants' data. Two requirements are *inherent* to the shape, not optional:
   business-RLS change, sharing rule, or superuser bit can widen it (W1/W2).
   Correct for legal-entity isolation — and structurally hostile to the two
   inherent requirements above: one active org per session
-  (`core/src/security/resolve-authz-context.ts:125`), org-scoped approver
-  resolution (`plugin-approvals/src/approval-node.ts:118`, other-tenant
-  position holders excluded — `approval-service.test.ts:263-265`), no
+  (`packages/core/src/security/resolve-authz-context.ts`), org-scoped approver
+  resolution (`packages/plugins/plugin-approvals/src/approval-node.ts`, other-tenant
+  position holders excluded — `packages/plugins/plugin-approvals/src/approval-service.test.ts`), no
   cross-org query path short of `isSystem` mirroring.
 
 The middle — organizations as *membership boundaries* over one shared dataset —
@@ -90,7 +90,7 @@ orgs + `organization_id` columns + authored RLS, without
 ### Findings (verified, file:line)
 
 - **F1 — authored org policies are silently stripped.**
-  `collectRLSPolicies` (`plugin-security/src/security-plugin.ts:2785-2791`)
+  `collectRLSPolicies` (`packages/plugins/plugin-security/src/security-plugin.ts#collectRLSPolicies`)
   drops **any** policy whose `using` contains the substring
   `current_user.organization_id` whenever the `org-scoping` service is absent.
   The intent was to strip the platform's own wildcard tenant policies in
@@ -99,7 +99,7 @@ orgs + `organization_id` columns + authored RLS, without
   ADR-0049 class of defect ("declared but unenforced").
 - **F2 — wildcard VAMA is contained only by the wall.** `organization_admin`
   carries `'*': { viewAllRecords: true, modifyAllRecords: true }`
-  (`plugin-security/src/objects/default-permission-sets.ts:150-160`) and is
+  (`packages/plugins/plugin-security/src/objects/default-permission-sets.ts#viewAllRecords`) and is
   auto-granted to every owner/admin member (`auto-org-admin-grant.ts`). The
   superuser bit short-circuits Layer 1 business RLS and sharing; in the
   isolated posture Layer 0 contains it (the #2937 fix), but in any wall-less
@@ -108,10 +108,10 @@ orgs + `organization_id` columns + authored RLS, without
   environment-wide superuser while operating in an org where they hold
   owner/admin.
 - **F3 — dead spec surface on the org axis.**
-  `PermissionSet.contextVariables` (`spec/src/security/permission.zod.ts:282`)
+  `PermissionSet.contextVariables` (`packages/spec/src/security/permission.zod.ts#PermissionSet`)
   has zero runtime consumers; `ExecutionContext.rlsMembership`
-  (`spec/src/kernel/execution-context.zod.ts:165`, merged at
-  `plugin-security/src/rls-compiler.ts:164-177`) has no production resolver —
+  (`packages/spec/src/kernel/execution-context.zod.ts#ExecutionContext`, merged at
+  `packages/plugins/plugin-security/src/rls-compiler.ts#org_user_ids`) has no production resolver —
   only `org_user_ids` is populated; `spec/src/security/territory.zod.ts` has
   no runtime object or stack field. All three violate ADR-0049
   enforce-or-remove.
@@ -164,7 +164,7 @@ into a first-class `ExecutionContext.accessible_org_ids`, sibling to
 ADR-0095 D1 mandates: **AND-first, independent compiler, no shared bypass bit**
 (W1/W2 preserved; only the predicate widens from equality to set membership).
 Empty set ⇒ `RLS_DENY_FILTER` (fail closed), mirroring
-`tenant-layer.ts:103`. The active organization keeps its current meaning
+`packages/plugins/plugin-security/src/tenant-layer.ts`. The active organization keeps its current meaning
 (default write target, UI context); it no longer bounds *read* reach in
 `group` posture — membership does.
 
@@ -187,7 +187,7 @@ the org predicate in any posture where one applies (this is already true in
 wall-less postures get a de-VAMA'd `organization_admin` variant from
 `auto-org-admin-grant` so the F2 amplification path (personal orgs) closes.
 Crossing org scope remains exclusively the `PLATFORM_ADMIN` rung on
-posture-permitting objects (`tenant-layer.ts:54,100`), unchanged.
+posture-permitting objects (`packages/plugins/plugin-security/src/tenant-layer.ts`), unchanged.
 
 **D5 — Group-mode stamping and write validation move into the engine.**
 On insert in `group`/`isolated` postures the engine stamps `organization_id`
@@ -195,7 +195,7 @@ from `ctx.tenantId` (active org) when absent, and **validates** any explicit
 value against `accessible_org_ids` (group) / equality (isolated) — the
 write-side twin of the read wall, alongside the existing Layer-0 post-image
 check (#2937). `tenancy.enabled: false` objects
-(`spec/src/data/object.zod.ts:240-256`) remain exempt: platform-global by
+(`packages/spec/src/data/object.zod.ts`) remain exempt: platform-global by
 declaration, business RLS as their only scoping — the sanctioned escape hatch
 for cross-org catalogs.
 
@@ -214,7 +214,7 @@ reporting/grouping dimension only**. Two red lines, both lint-enforced:
    and ADR-0090 D3 finalized for positions; it stays retired for
    organizations.
 2. **BU trees remain org-internal.** `sys_business_unit` is org-scoped
-   (`plugin-sharing/src/business-unit-graph.ts:174-177`; the enterprise
+   (`packages/plugins/plugin-sharing/src/business-unit-graph.ts#sys_business_unit`; the enterprise
    resolver org-predicates all lookups). Every BU mechanism —
    `unit_and_subordinates` sharing, `adminScope` delegation, depth scopes —
    operates within one organization. There is no cross-org tree.
@@ -311,7 +311,7 @@ reserves the concept and its place in Phase 2.
 - `ExecutionContext.rlsMembership`: **productize** the seam — a registered
   membership-resolver extension point (service contract) that plugins/apps
   implement; resolved sets merge under their declared keys
-  (`rls-compiler.ts:164-177` already merges). `accessible_org_ids` (D2) is
+  (`packages/plugins/plugin-security/src/rls-compiler.ts` already merges). `accessible_org_ids` (D2) is
   core-resolved, not an app resolver.
 - `spec/src/security/territory.zod.ts`: **remove**. Matrix requirements are
   served today by multi-position × BU anchoring; a generalized dimension

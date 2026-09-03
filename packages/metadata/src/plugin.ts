@@ -372,7 +372,6 @@ export class MetadataPlugin implements Plugin {
 
         // Register Metadata Manager as the primary metadata service provider.
         ctx.registerService('metadata', this.manager);
-        console.log('[MetadataPlugin] Registered metadata service, has getRegisteredTypes:', typeof this.manager.getRegisteredTypes);
 
         // Register metadata system objects via the manifest service (if available).
         // MetadataPlugin may init before ObjectQLPlugin, so wrap in try/catch.
@@ -633,14 +632,12 @@ export class MetadataPlugin implements Plugin {
                         w.on('change', () => { void reload(); });
                         w.on('add', () => { void reload(); });
                         this.artifactWatcher = { close: () => w.close() };
-                        // eslint-disable-next-line no-console
                         console.log('[MetadataPlugin] artifact file watcher attached', src.path);
                     } catch (e: any) {
                         ctx.logger.warn('[MetadataPlugin] artifact watcher failed to start', { error: e?.message });
                     }
                 }
                 if (hub) {
-                    // eslint-disable-next-line no-console
                     console.log('[MetadataPlugin] HMR endpoint registered at /api/v1/dev/metadata-events');
                 } else {
                     // Printed on every non-development boot, deliberately: a
@@ -648,18 +645,15 @@ export class MetadataPlugin implements Plugin {
                     // door that was never asked about, and this line is what an
                     // operator greps when the Studio preview stops
                     // auto-reloading.
-                    // eslint-disable-next-line no-console
                     console.log(
                         '[MetadataPlugin] dev metadata-HMR endpoints NOT mounted — they require '
                         + `NODE_ENV=development (this process: ${process.env.NODE_ENV ? `NODE_ENV=${process.env.NODE_ENV}` : 'NODE_ENV unset, treated as production'})`,
                     );
                 }
             } else {
-                // eslint-disable-next-line no-console
                 console.log('[MetadataPlugin] HTTP server with getRawApp() not available — skipping HMR endpoint');
             }
         } catch (e: any) {
-            // eslint-disable-next-line no-console
             console.warn('[MetadataPlugin] Failed to register HMR endpoint', e?.message);
         }
     }

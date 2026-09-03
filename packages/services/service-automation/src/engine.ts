@@ -302,6 +302,27 @@ export interface NodeExecutionResult {
     output?: Record<string, unknown>;
     error?: string;
     /**
+     * #14419 — the platform's own classified failure code (ADR-0112
+     * `StandardErrorCode`, e.g. `DUPLICATE_RECORD`), when the executor chose
+     * to surface one. `error` stays the human-readable sentence a run log or
+     * a notification renders; `code` is what a `try_catch` catch region or a
+     * `fault` edge handler can actually BRANCH on (`{$error.code}`) to tell
+     * "the row is already there" apart from "the store is down" or any other
+     * reason the same string-shaped `error` could otherwise describe.
+     * Optional, and deliberately narrow per executor rather than "any
+     * platform envelope, forwarded wholesale": `create_record` (#14419) is
+     * the only executor that sets it today, and only for the one code its
+     * repair was scoped to — `DUPLICATE_RECORD` — not any code a driver
+     * error might someday carry unaudited. An executor that never classifies
+     * a failure leaves it unset, exactly as before this field existed. See
+     * {@link AutomationEngine.executeNode}, which copies it onto `$error`
+     * beside `message`, and `try_catch`'s executor, which preserves it
+     * across its own `errorVariable` binding (subject to the identity guard
+     * described there — a node that FAILS BY THROWING with no fault edge of
+     * its own must not inherit an earlier failure's leftover `code`).
+     */
+    code?: string;
+    /**
      * #3863 — why this failed, which decides whether a `fault` edge may route it.
      * Only meaningful when `success` is false; defaults to `runtime`.
      * See {@link NodeFailureClass}.
@@ -7142,8 +7163,18 @@ export class AutomationEngine implements IAutomationService {
                     steps.push(...result.childSteps);
                 }
 
-                // Write error output to variable context for downstream nodes
-                variables.set('$error', { nodeId: node.id, message: errMsg, output: result.output });
+                // Write error output to variable context for downstream nodes.
+                // #14419 — carry the executor's classified `code` (when it set
+                // one) alongside `message`, so a `fault` edge handler reading
+                // `{$error.code}` can branch on it; a `try_catch` region reads
+                // this same node-level `$error` before its OWN `errorVariable`
+                // write can shadow it (see try-catch-node.ts).
+                variables.set('$error', {
+                    nodeId: node.id,
+                    message: errMsg,
+                    output: result.output,
+                    ...(result.code ? { code: result.code } : {}),
+                });
                 this.setNodeError(variables, node.id, errMsg);
 
                 // #3863 — only a `runtime` failure may be routed. A `guard`

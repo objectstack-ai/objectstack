@@ -63,7 +63,7 @@
 # for anyone who means it. Widening it to string-match anywhere in the command would block
 # every `grep "git stash"` run against this very file.
 #
-# Self-test (44 cases, no network, no build): .claude/hooks/guard-shared-stash.selftest.sh
+# Self-test (51 cases, no network, no build): .claude/hooks/guard-shared-stash.selftest.sh
 
 set -uo pipefail
 
@@ -97,16 +97,35 @@ fi
 # as a mere argument of `echo` (#11738). Measured on this repo's copy before the fix:
 # `echo \" ; git stash pop` was ALLOWED while a bare `git stash pop` was blocked.
 #
-# This is the same repair guard-main-checkout-bash.sh's split_segments() took in #11131,
-# in the same shape; that guard's `word` bookkeeping has no analogue here because this pass
-# has no comment rule to track word starts for. Both characters are kept verbatim — this
-# pass only SPLITS, and check_segment() re-reads the words afterwards.
+# INSIDE "…" the rule inverts: there a backslash is special only before " \ $ ` , and an
+# escaped `\"` is a literal quote that leaves the region OPEN. Without that branch this pass
+# read it as CLOSING, so it went "outside quotes" while bash was still inside and separators
+# behind it split where bash would not — the tail of a pure READ became a segment of its own
+# and was judged on its own head word (#11804, the #10406 half). Measured on this repo's copy
+# before the fix: `grep -rn "he said \"cd x && git stash pop\" once" .claude/` was BLOCKED
+# while the single-level `grep -rn "cd x && git stash pop" .claude/` next to it was allowed.
+# That is a false BLOCK on a command that touches no stash — precisely the failure the
+# paragraph at the top of this section says must never happen. The same missing rule also
+# fails OPEN once the escapes pair up: `echo "he said \"x\"" && git stash pop` left the
+# region hanging and rode through. Inside '…' nothing is special, hence the q='"' gate.
+#
+# These are the same two repairs guard-main-checkout-bash.sh's split_segments() took in
+# #11131 (outside) and #10406 (inside), in the same shape and with the same escapee list;
+# that guard's `word` bookkeeping has no analogue here because this pass has no comment rule
+# to track word starts for. Both characters are kept verbatim — this pass only SPLITS, and
+# check_segment() re-reads the words afterwards.
 segments=()
 split_segments() {
   local s="$1" seg="" q="" ch i n=${#1}
   for ((i = 0; i < n; i++)); do
     ch="${s:i:1}"
     if [ -n "$q" ]; then
+      if [ "$q" = '"' ] && [ "$ch" = '\' ] && [ $((i + 1)) -lt "$n" ]; then
+        case "${s:i+1:1}" in
+          '"' | '\' | '$' | '`')
+            seg+="$ch" ; i=$((i + 1)) ; seg+="${s:i:1}" ; continue ;;
+        esac
+      fi
       seg+="$ch"
       [ "$ch" = "$q" ] && q=""
       continue

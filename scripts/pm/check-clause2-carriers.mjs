@@ -1234,6 +1234,13 @@ const CLAIM = (extra) => ({
   body: `Claim: PM loop round R1\nBranch: \`claude/issue-13476-unresolvable-engine-403\`\n${extra ?? ''}`,
 });
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 export function selfTest() {
   const cases = [];
   const t = (name, ok, detail) => cases.push({ name, ok: Boolean(ok), detail });
@@ -1514,13 +1521,26 @@ export function selfTest() {
       'replayed from the 2026-09-01 clear, the verdict-authorship pair and its legacy silence, ' +
       'and the exit register).',
   );
+
+  selfTestReachedVerdict = true;
   return 0;
 }
 
 // ---------------------------------------------------------------------------
 
 async function main(argv) {
-  if (argv.includes('--self-test')) return selfTest();
+  if (argv.includes('--self-test')) {
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-clause2-carriers self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    return selfTestCode;
+  }
 
   const repoRes = resolveSweepRepo(process.env);
   if (!repoRes.valid) {
@@ -1577,7 +1597,16 @@ async function main(argv) {
 
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    process.exit(selfTest());
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-clause2-carriers self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    process.exit(selfTestCode);
   } else {
     const rearmed = rearmThroughProxy(process.argv.slice(2));
     if (rearmed !== null) process.exit(rearmed);

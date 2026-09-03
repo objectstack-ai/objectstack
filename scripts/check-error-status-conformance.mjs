@@ -114,6 +114,57 @@ import { maskComments } from './js-comment-mask.mjs';
 import { join, relative } from 'node:path';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '1 — THE regression pin: the real pre-#8963 pages go RED, naming 422.': 2,
+  '2 — POSITIVE CONTROL for the zero-hit case: the instrument must be SEEING a': 3,
+  '3 — a green run over a fixture with NO producer must NOT report reconciled': 2,
+  '4 — direction B: a doc claim no producer can reach.': 2,
+  '5 — section headings are `covered`: they absolve direction A, and never': 2,
+  '6 — constant resolution: a class that names its code and status.': 1,
+  '6b — object-member and MAP[OBJ.key] resolution.': 1,
+  '7 — an UNRESOLVABLE declaration is reported, never silently dropped.': 1,
+  '8 — an ambiguous identifier is refused, not guessed.': 1,
+  '9 — the two `sendError` doors, and the mapper\'s `{ status, body }` terminal.': 1,
+  '10 — the door map contributes explicit entries only, never the bucket fallback.': 2,
+  '11 — the ratchet-authority convention holds on the weakening remedy only.': 2,
+  '12 — the vocabulary bound: a ledger code is derived but not reconciled.': 1,
+  '13 — comments are NOT producers. Both halves matter: a docblock narrating a': 2,
+  '14 — a computed-key status table beside the code table it keys on, the': 1,
+  '15 — a LEDGER code the docs publish a status for is reconciled, in both': 2,
+  '16 — the extension is load-bearing, not decorative: the SAME ledger code': 1,
+  '17 — the surviving bound: a ledger code NO page publishes a status for stays': 1,
+  '18 — the unreadable census: a heading that names a code in an unrecognised': 3,
+  '19 — `**HTTP Status:**` is honoured on the CATALOG too (it was read on the': 2,
+  '20 — the ungraded census: an entry the parser READ but for which no page': 3,
+  '21 — nowPinned, the PRODUCER branch: a baselined code that GAINS a': 2,
+  '22 — nowPinned, the DOC-REMOVED branch: the #9266/#9563 counterfactual,': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 23;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const SCAN_ROOT = 'packages';
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage', 'build', 'fixtures']);
 const ERRORS_ZOD = 'packages/spec/src/api/errors.zod.ts';
@@ -773,11 +824,26 @@ function runFixture({ files, handling, catalog, members }) {
 let selfTestReachedVerdict = false;
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   const failures = [];
-  const check = (name, ok, detail) => { if (!ok) failures.push(`${name}${detail ? ` — ${detail}` : ''}`); };
+  const check = (name, ok, detail) => { registerCase(); if (!ok) failures.push(`${name}${detail ? ` — ${detail}` : ''}`); };
   const members = ['MISSING_REQUIRED_FIELD', 'VALIDATION_ERROR', 'TIMEOUT'];
 
   // 1 — THE regression pin: the real pre-#8963 pages go RED, naming 422.
+  battery('1 — THE regression pin: the real pre-#8963 pages go RED, naming 422.');
   const pre = runFixture({
     files: { 'a/errors.ts': CBP_ERROR_CLASS, 'a/routes.ts': CBP_400_DOOR },
     handling: PRE_8963_HANDLING, catalog: PRE_8963_CATALOG, members,
@@ -792,6 +858,7 @@ function selfTest() {
   //     status it accepts, not merely finding nothing. Same fixture, post-#8963
   //     text: zero findings AND a non-zero count of reconciled (code, status)
   //     pairs, so "0 findings" can never be reported by a blind run.
+  battery('2 — POSITIVE CONTROL for the zero-hit case: the instrument must be SEEING a');
   const post = runFixture({
     files: { 'a/errors.ts': CBP_ERROR_CLASS, 'a/routes.ts': CBP_400_DOOR },
     handling: POST_8963_HANDLING, catalog: POST_8963_CATALOG, members,
@@ -805,12 +872,14 @@ function selfTest() {
 
   // 3 — a green run over a fixture with NO producer must NOT report reconciled
   //     pairs (the blind-run inverse of case 2).
+  battery('3 — a green run over a fixture with NO producer must NOT report reconciled');
   const blind = runFixture({ files: { 'a/x.ts': 'export const nothing = 1;' }, handling: '', catalog: PRE_8963_CATALOG, members });
   check('3 no producers ⇒ no reconciled pairs', blind.reconciledPairs === 0 && blind.reconciledCodes === 0);
   check('3b documented-but-unproduced lands in the census, not in a failure',
     blind.unpinned.includes('MISSING_REQUIRED_FIELD') && blind.emittedNotDocumented.length === 0);
 
   // 4 — direction B: a doc claim no producer can reach.
+  battery('4 — direction B: a doc claim no producer can reach.');
   const dirB = runFixture({
     files: { 'a/e.ts': 'export class E extends Error {\n  readonly code = \'TIMEOUT\';\n  readonly status = 504;\n}' },
     handling: '#### `TIMEOUT`\n**HTTP Status:** 500  \n', catalog: '', members,
@@ -823,6 +892,7 @@ function selfTest() {
 
   // 5 — section headings are `covered`: they absolve direction A, and never
   //     drive direction B.
+  battery('5 — section headings are `covered`: they absolve direction A, and never');
   const sec = runFixture({
     files: { 'a/e.ts': 'export class E extends Error {\n  readonly code = \'VALIDATION_ERROR\';\n  readonly statusCode = 428;\n}' },
     handling: '', catalog: '## Request Errors (405/428)\n\n### `VALIDATION_ERROR`\n', members,
@@ -831,6 +901,7 @@ function selfTest() {
   check('5b a section heading never demands reachability', sec.documentedNotReachable.length === 0);
 
   // 6 — constant resolution: a class that names its code and status.
+  battery('6 — constant resolution: a class that names its code and status.');
   const consts = runFixture({
     files: {
       'a/c.ts': `export const REFUSAL_CODE = 'VALIDATION_ERROR';\nexport const REFUSAL_STATUS = 400;`,
@@ -842,6 +913,7 @@ function selfTest() {
     consts.reconciledPairs === 1 && consts.emittedNotDocumented.length === 0, JSON.stringify(consts.emittedNotDocumented));
 
   // 6b — object-member and MAP[OBJ.key] resolution.
+  battery('6b — object-member and MAP[OBJ.key] resolution.');
   const mapped = runFixture({
     files: {
       'a/c.ts': `export const CODES = { timeout: 'TIMEOUT' };\nexport const STATUS = { TIMEOUT: 504 };`,
@@ -852,6 +924,7 @@ function selfTest() {
   check('6b MAP[OBJ.key] resolves', mapped.reconciledPairs === 1 && mapped.unresolved.length === 0, JSON.stringify(mapped.unresolved));
 
   // 7 — an UNRESOLVABLE declaration is reported, never silently dropped.
+  battery('7 — an UNRESOLVABLE declaration is reported, never silently dropped.');
   const opaque = runFixture({
     files: { 'a/e.ts': 'export class E extends Error {\n  readonly code = lookupCode(x);\n  readonly status = lookupStatus(x);\n}' },
     handling: '', catalog: '', members,
@@ -859,10 +932,12 @@ function selfTest() {
   check('7 an unresolved declaration is reported', opaque.unresolved.length === 1, JSON.stringify(opaque.unresolved));
 
   // 8 — an ambiguous identifier is refused, not guessed.
+  battery('8 — an ambiguous identifier is refused, not guessed.');
   const amb = buildConstantIndex(new Map([['a.ts', `const S = 400;`], ['b.ts', `const S = 500;`]]));
   check('8 an ambiguous constant refuses to resolve', resolveStatus('S', amb) === undefined);
 
   // 9 — the two `sendError` doors, and the mapper's `{ status, body }` terminal.
+  battery('9 — the two `sendError` doors, and the mapper\'s `{ status, body }` terminal.');
   const doors = runFixture({
     files: {
       'a/a.ts': `sendError(res, 503, 'SERVICE_UNAVAILABLE', 'down');`,
@@ -878,11 +953,13 @@ function selfTest() {
     [...doors.emitted.keys()].join(','));
 
   // 10 — the door map contributes explicit entries only, never the bucket fallback.
+  battery('10 — the door map contributes explicit entries only, never the bucket fallback.');
   const door = deriveDoorMap(`export const HttpStatusErrorCodeMap: Record<number, StandardErrorCode> = {\n  400: 'VALIDATION_ERROR',\n  504: 'TIMEOUT',\n};\n`);
   check('10 the door map is parsed', door.length === 2 && door.some((d) => d.code === 'TIMEOUT' && d.status === 504));
   check('10b the bucket fallback contributes nothing', !door.some((d) => d.status === 415 || d.status === 507));
 
   // 11 — the ratchet-authority convention holds on the weakening remedy only.
+  battery('11 — the ratchet-authority convention holds on the weakening remedy only.');
   check('11 the baseline-expanding remedy is marked maintainer-only',
     RATCHET_EXPANSION_OFFER.test(newUnpinnedMessage('X')) && newUnpinnedMessage('X').includes(RATCHET_AUTHORITY_MARKER));
   check('11b both ratchet-DOWN remedies stay the author\'s own',
@@ -890,6 +967,7 @@ function selfTest() {
     && !nowPinnedDocRemovedMessage('X').includes(RATCHET_AUTHORITY_MARKER));
 
   // 12 — the vocabulary bound: a ledger code is derived but not reconciled.
+  battery('12 — the vocabulary bound: a ledger code is derived but not reconciled.');
   const ledger = runFixture({
     files: { 'a/e.ts': 'export class E extends Error {\n  readonly code = \'SETTINGS_LOCKED\';\n  readonly statusCode = 409;\n}' },
     handling: '', catalog: '', members: ['VALIDATION_ERROR'],
@@ -901,6 +979,7 @@ function selfTest() {
   //      fixed bug must not mint a finding, and the real declaration two lines
   //      down must still be read. Both sentences below are the real ones this
   //      gate first tripped over on `main`.
+  battery('13 — comments are NOT producers. Both halves matter: a docblock narrating a');
   const prose = runFixture({
     files: {
       'a/n.ts':
@@ -921,6 +1000,7 @@ function selfTest() {
 
   // 14 — a computed-key status table beside the code table it keys on, the
   //      `external-errors.ts` shape.
+  battery('14 — a computed-key status table beside the code table it keys on, the');
   const computed = runFixture({
     files: {
       'a/c.ts':
@@ -949,6 +1029,7 @@ function selfTest() {
 
   // 15 — a LEDGER code the docs publish a status for is reconciled, in both
   //      directions, without appearing in `StandardErrorCode`.
+  battery('15 — a LEDGER code the docs publish a status for is reconciled, in both');
   const ledgerDoc = runFixture({
     files: { 'a/meta.ts': META_PRODUCER },
     handling: '', catalog: META_CATALOG, members: ['VALIDATION_ERROR'],
@@ -965,6 +1046,7 @@ function selfTest() {
   // 16 — the extension is load-bearing, not decorative: the SAME ledger code
   //      goes red when the published status is not one the runtime can emit.
   //      This is the defect the ledger half was previously blind to.
+  battery('16 — the extension is load-bearing, not decorative: the SAME ledger code');
   const ledgerDrift = runFixture({
     files: { 'a/meta.ts': "sendError(res, 409, 'INVALID_REQUEST', 'drifted');" },
     handling: '', catalog: META_CATALOG, members: ['VALIDATION_ERROR'],
@@ -977,6 +1059,7 @@ function selfTest() {
   // 17 — the surviving bound: a ledger code NO page publishes a status for stays
   //      OUT of the vocabulary (derived, counted, not reconciled). The residual
   //      is a subtraction, so this must not drift into a per-code assertion.
+  battery('17 — the surviving bound: a ledger code NO page publishes a status for stays');
   const ledgerSilent = runFixture({
     files: { 'a/e.ts': "export class E extends Error {\n  readonly code = 'SETTINGS_LOCKED';\n  readonly statusCode = 409;\n}" },
     handling: '', catalog: META_CATALOG, members: ['VALIDATION_ERROR'],
@@ -988,6 +1071,7 @@ function selfTest() {
 
   // 18 — the unreadable census: a heading that names a code in an unrecognised
   //      shape is REPORTED, never silently dropped. Both refusal reasons.
+  battery('18 — the unreadable census: a heading that names a code in an unrecognised');
   const oddShape = runFixture({
     files: {}, handling: '', catalog: '## Errors (400)\n\n### `INVALID_REQUEST`: unrecognised type spelling\n',
     members: ['VALIDATION_ERROR'],
@@ -1010,6 +1094,7 @@ function selfTest() {
 
   // 19 — `**HTTP Status:**` is honoured on the CATALOG too (it was read on the
   //      handling page only), and a section heading still only ever COVERS.
+  battery('19 — `**HTTP Status:**` is honoured on the CATALOG too (it was read on the');
   const catalogClaim = runFixture({
     files: { 'a/e.ts': "export class E extends Error {\n  readonly code = 'TIMEOUT';\n  readonly status = 504;\n}" },
     handling: '', catalog: '## Server Errors (5xx)\n\n### `TIMEOUT`\n**HTTP Status:** 500  \n', members: ['TIMEOUT'],
@@ -1023,6 +1108,7 @@ function selfTest() {
   // 20 — the ungraded census: an entry the parser READ but for which no page
   //      publishes a status in a graded shape is reported, and does NOT fail.
   //      This is the `## Batch Operation Errors` shape on the live catalog.
+  battery('20 — the ungraded census: an entry the parser READ but for which no page');
   const ungradedFx = runFixture({
     files: {}, handling: '',
     catalog: '## Batch Operation Errors\n\n### `TRANSACTION_FAILED`\n**Cause:** the transaction rolled back.\n',
@@ -1040,6 +1126,7 @@ function selfTest() {
   // 21 — nowPinned, the PRODUCER branch: a baselined code that GAINS a
   //      producer while remaining documented is named a producer, never a
   //      doc removal.
+  battery('21 — nowPinned, the PRODUCER branch: a baselined code that GAINS a');
   const producerCase = runFixture({
     files: { 'a/e.ts': "export class E extends Error {\n  readonly code = 'TRANSACTION_FAILED';\n  readonly status = 500;\n}" },
     handling: '#### `TRANSACTION_FAILED`\n**HTTP Status:** 500  \n', catalog: '', members: ['TRANSACTION_FAILED'],
@@ -1060,6 +1147,7 @@ function selfTest() {
   //      the real cause the old single-cause message misdiagnosed as "a
   //      producer now declares its status" when the `## Batch Operation
   //      Errors` entries were deleted on `main`.
+  battery('22 — nowPinned, the DOC-REMOVED branch: the #9266/#9563 counterfactual,');
   const docRemovedCase = runFixture({ files: {}, handling: '', catalog: '', members: ['TRANSACTION_FAILED'] });
   const docRemovedFindings = nowPinned({
     baselined: ['TRANSACTION_FAILED'], unpinned: docRemovedCase.unpinned,
@@ -1073,6 +1161,52 @@ function selfTest() {
     && !nowPinnedDocRemovedMessage('TRANSACTION_FAILED').includes('a producer now declares'));
 
   const CASES = 40;
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\n✗ check-error-status-conformance --self-test: ${failures.length}/${CASES} case(s) failed.\n`);

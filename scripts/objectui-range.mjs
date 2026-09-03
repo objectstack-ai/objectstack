@@ -355,9 +355,58 @@ function main() {
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the class that went missing: it must be IN the artifact, and lead': 4,
+  '#6294: the leading section is keyed on the SHARED breaking verdict': 6,
+  'what ships nothing is excluded, and SAYS SO in the artifact': 5,
+  'a range that excludes NOTHING still says so (zeros are load-bearing)': 1,
+  '`--all` names the excluded entries instead of only counting them': 1,
+  'end-to-end through the real CLI': 4,
+  '#11952: `--help`\'s self-read is bound to the header, not every': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 7;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   const check = (name, cond, detail = '') => {
+    registerCase();
     if (cond) {
       console.log(`  ✓ ${name}`);
     } else {
@@ -460,6 +509,7 @@ function selfTest() {
     const { markdown } = renderRange({ fromSha: base, toSha: head, classified });
 
     // --- the class that went missing: it must be IN the artifact, and lead ---
+    battery('the class that went missing: it must be IN the artifact, and lead');
     check(
       'a BREAKING `refactor(...)!` commit IS in the pasteable list',
       markdown.includes('PageNodeRenderer') && markdown.includes(breakingSha.slice(0, 9)),
@@ -491,6 +541,7 @@ function selfTest() {
     // objectui never declares `major` in a release window, so a level-keyed
     // table left `### Breaking changes` structurally unrenderable and filed the
     // author-annotated breaking entries under "Features".
+    battery('#6294: the leading section is keyed on the SHARED breaking verdict');
     check(
       'a `minor` entry the AUTHOR annotated breaking is under Breaking changes',
       (sectionOf(markdown, 'Breaking changes') ?? '').includes('not the raw value'),
@@ -543,6 +594,7 @@ function selfTest() {
     );
 
     // --- what ships nothing is excluded, and SAYS SO in the artifact ---
+    battery('what ships nothing is excluded, and SAYS SO in the artifact');
     check(
       'a `fix(ci)` with an EMPTY frontmatter changeset is NOT listed',
       !markdown.includes('cross-repo token'),
@@ -570,6 +622,7 @@ function selfTest() {
     );
 
     // --- a range that excludes NOTHING still says so (zeros are load-bearing) ---
+    battery('a range that excludes NOTHING still says so (zeros are load-bearing)');
     const clean = renderRange({
       fromSha: base,
       toSha: head,
@@ -589,6 +642,7 @@ function selfTest() {
     );
 
     // --- `--all` names the excluded entries instead of only counting them ---
+    battery('`--all` names the excluded entries instead of only counting them');
     const all = renderRange({ fromSha: base, toSha: head, classified, showExcluded: true });
     check(
       '`--all` itemizes the excluded commits by subject',
@@ -599,6 +653,7 @@ function selfTest() {
     );
 
     // --- end-to-end through the real CLI ------------------------------------
+    battery('end-to-end through the real CLI');
     const cli = fileURLToPath(import.meta.url);
     const run = (args) =>
       execFileSync('node', [cli, ...args], {
@@ -639,6 +694,7 @@ function selfTest() {
     // the header is still there, and none of the six measured stray lines —
     // an internal helper's rationale (pinAt, mid-`main`) and this very
     // self-test's own section banner — leak into the usage text.
+    battery('#11952: `--help`\'s self-read is bound to the header, not every');
     const helpOut = run(['--help']);
     check(
       '--help still carries the real header (Usage/Env sections intact)',
@@ -662,6 +718,51 @@ function selfTest() {
     rmSync(tmp, { recursive: true, force: true });
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     console.error(`\n⛔ objectui-range --self-test: ${failures.length} failure(s)`);
     for (const f of failures) console.error(`   - ${f}`);

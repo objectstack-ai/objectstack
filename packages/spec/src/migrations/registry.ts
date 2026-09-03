@@ -5546,6 +5546,42 @@ const step18: MigrationStep = {
         'and that anonymous sign-up now answers 403 SELF_REGISTRATION_CLOSED.',
     },
     {
+      id: 'autonumber-default-unique-organization',
+      surface: '`fields.<name>.unique` on a `type: \'autonumber\'` field when the author OMITS the key — '
+        + 'the contract default moves from `false` (no index) to `\'organization\'` (one holder per '
+        + 'organization; the NULL-safe tenant-composite unique index '
+        + '`(COALESCE(organization_id, \'__global__\'), <field>)` on an organization-scoped object, a '
+        + 'plain unique index where the object has no organization key)',
+      replacement: 'keep the omission to take the default — an auto-number is a business identifier and '
+        + 'is unique per organization from now on with zero application-side declaration; write '
+        + '`unique: false` EXPLICITLY on the one autonumber field that is a display-only sequence and '
+        + 'is never used to identify the record. Every other field type keeps `unique: false` as its '
+        + 'default, and every authored spelling (`true` / `\'organization\'` / `\'global\'` / `false`) '
+        + 'parses exactly as before',
+      reason:
+        'Not losslessly convertible because the change is data-dependent, not textual: a table that '
+        + 'already holds duplicate auto-numbers (a counter that re-issued a burned number, or the '
+        + 'seed/API tenancy split running two counters for one object) cannot take the index the '
+        + 'default now declares. The SQL driver refuses to silently degrade — it logs at `error` '
+        + 'naming the index, the columns and the remedy, the same boot\'s drift pass names the '
+        + 'conflicting key groups with row counts, and `os migrate plan` reports the blocked '
+        + '`create_index` with the same groups (ADR-0120 D4) — but which of the duplicate rows keeps '
+        + 'the number is a business decision no migration entry can make. Maintainer ruling '
+        + '2026-08-31 (hotcrm#1301): an auto-number that may repeat is not an identifier, so unique '
+        + 'is the platform default and opting out is the declaration, not the other way round '
+        + '(#13894).',
+      acceptanceCriteria:
+        'Every `autonumber` field without an authored `unique` parses to `unique: \'organization\'` '
+        + '(`FieldSchema.parse({ type: \'autonumber\' }).unique === \'organization\'`, and through '
+        + '`ObjectSchema` the same); an authored `unique: false` on an autonumber field parses to '
+        + '`false`; every non-autonumber field type without an authored `unique` still parses to '
+        + '`false` at the same key position. On a serving boot, each organization-scoped object with '
+        + 'such a field carries `uniq_<object>_organization_id_<field>`; a table whose data blocks it '
+        + 'shows the blocked `create_index` with its conflicting groups in `os migrate plan` until '
+        + 'the rows are deduplicated and the plan is re-run, and `os migrate duplicates` lists the '
+        + 'holder rows of any value minted across organization partitions.',
+    },
+    {
       id: 'branded-identifier-schemas-retired',
       surface:
         'the six branded identifier schemas of `@objectstack/spec/shared` '
@@ -7523,6 +7559,50 @@ const step18: MigrationStep = {
         + 'key and still parse.',
     },
     {
+      id: 'rest-server-config-dead-keys-retired',
+      surface: 'restServer.crud.patterns / restServer.crud.objectParamStyle / restServer.metadata.cacheTtl / '
+        + 'restServer.metadata.endpoints.schema / restServer.batch.operations.upsertMany / '
+        + 'restServer.batch.defaultAtomic / restServer.routes.includeObjects / restServer.routes.excludeObjects / '
+        + 'restServer.routes.nameTransform / restServer.routes.overrides',
+      replacement:
+        '(removed — delete each key; none had an effect to preserve. Per-object API exposure is declared on '
+        + 'the object: `enable.apiEnabled: false` hides it from the REST data surface (404) and '
+        + '`enable.apiMethods` whitelists its operations (405). The data base path is `crud.dataPrefix`, '
+        + 'deployment-wide. An endpoint on a custom path or method — or one that needs its own `summary` / '
+        + '`description` / `cacheTtl` — is a declarative `api` endpoint (`type: \'object_operation\'`). '
+        + 'Batch atomicity is the per-request `options.atomic` (ADR-0119 D4); upsert is an operation type of '
+        + 'the generic `POST /data/:object/batch` endpoint, gated by `batch.enableBatchEndpoint`.)',
+      reason:
+        'The #14369 liveness census enrolled the four `RestServerConfig` sub-objects and found 15 of their '
+        + '32 rows `dead`: parsed, defaulted and normalized into the REST server\'s config by `normalizeConfig` '
+        + '(#11984) and never read back. `crud.patterns` and `routes.overrides` described route customization '
+        + 'the server mounts from fixed pairs; `routes.includeObjects` / `excludeObjects` and `overrides.enabled` '
+        + '/ `operations` duplicated the object\'s own enforced exposure keys; `nameTransform` and '
+        + '`objectParamStyle` were enums validated and then ignored; `metadata.endpoints.schema` and '
+        + '`batch.operations.upsertMany` gated routes that were never built; `metadata.cacheTtl` fed no cache '
+        + 'and no header; `batch.defaultAtomic` would have silently overridden a per-request contract ADR-0119 '
+        + 'D4 had deliberately set. Enforce-or-remove (ADR-0049) resolved every family to REMOVE because each '
+        + 'promised capability either already exists at its proper seat (the object, the declarative endpoint, '
+        + 'the batch request) or would contradict a fixed contract (the client SDK, the discovery document and '
+        + 'the served /openapi.json all describe the mounted CRUD paths; the object `name` is the REST path '
+        + 'segment). All four schemas are non-strict `z.object()`s, so each key is a `retiredKey()` tombstone '
+        + 'and its ledger row stays `dead` with a REMOVED note; `api/CrudEndpointPattern`, the value def of '
+        + '`crud.patterns`, leaves with it. No D2 conversion: a `RestServerConfig` is plugin TS configuration, '
+        + 'never a stack collection member or a `sys_metadata` row (the `openApi31` precedent, #4579). Cloud '
+        + 'sweep #14796 @9b6abe0f2fd5: zero hits, structural — cloud never authors a `RestServerConfig`. #14691.',
+      acceptanceCriteria:
+        'No `RestServerConfig` value passed to the REST plugin (or `plugin-hono-server` `restConfig`) carries '
+        + 'any of the ten keys — a config that does now fails `new RestServer(...)` / `createRestApiPlugin().start()` '
+        + 'with the retirement prescription (naming the sub-object, the key and the declaring schema) instead of '
+        + 'being accepted and ignored; `tsc` refuses the key at the authoring site (`never`). Every LIVE key of the '
+        + 'four sub-objects parses byte-identically to before: `crud.operations.*`, `crud.dataPrefix`, '
+        + '`metadata.prefix` / `enableCache` / `maskObjectFields` / `endpoints.types|items|item`, '
+        + '`batch.maxBatchSize` / `enableBatchEndpoint` / `operations.createMany|updateMany|deleteMany` keep '
+        + 'their defaults and their mounts. The mounted REST surface is byte-identical before and after — none '
+        + 'of the ten keys ever reached it. No code imports `CrudEndpointPattern(Schema)` from '
+        + '`@objectstack/spec/api` (TS2305 after upgrade).',
+    },
+    {
       id: 'scim-provider-object-retired',
       surface:
         'the `sys_scim_provider` platform object (`SysScimProvider` in '
@@ -8357,6 +8437,142 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-key:18>
+    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
+    // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
+    // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
+    // `RestServerConfig` at all, #14796). All four sub-schemas are non-strict
+    // `z.object()`s, so the route is a `retiredKey()` tombstone (a bare deletion
+    // would strip the key silently), the ledger rows stay `dead` with a REMOVED
+    // note, and there is no D2 conversion: a `RestServerConfig` is plugin TS
+    // configuration (REST plugin constructor / `plugin-hono-server` `restConfig`),
+    // never a stack collection member or a `sys_metadata` row — the
+    // `api/RestServerConfig:openApi31` (#4579) precedent. D3 semantic entry
+    // `rest-server-config-dead-keys-retired`. Registered under 18, not 17: the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // `batch.defaultAtomic`: no batch handler consulted it. Atomicity is a
+    // per-request option (`BatchOptionsSchema.atomic`, ADR-0119 D4 — opt-in,
+    // default `false`, deliberately aligned to what every caller already got); a
+    // server-side default that flipped it silently would change the failure
+    // semantics of callers who send nothing, the exact move ADR-0119 D4 refused,
+    // so this is a remove, not an enforce.
+    'api/BatchEndpointsConfig:defaultAtomic',
+    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
+    // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
+    // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
+    // `RestServerConfig` at all, #14796). All four sub-schemas are non-strict
+    // `z.object()`s, so the route is a `retiredKey()` tombstone (a bare deletion
+    // would strip the key silently), the ledger rows stay `dead` with a REMOVED
+    // note, and there is no D2 conversion: a `RestServerConfig` is plugin TS
+    // configuration (REST plugin constructor / `plugin-hono-server` `restConfig`),
+    // never a stack collection member or a `sys_metadata` row — the
+    // `api/RestServerConfig:openApi31` (#4579) precedent. D3 semantic entry
+    // `rest-server-config-dead-keys-retired`. Registered under 18, not 17: the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // `batch.operations.upsertMany`: gated a route that was never built — no
+    // `POST /data/:object/upsertMany`, no protocol member behind it (the protocol
+    // carries createManyData / updateManyData / deleteManyData only). Upsert is an
+    // operation TYPE of the generic batch endpoint (`BatchOperationType` 'upsert'),
+    // gated by `enableBatchEndpoint`. Nested key of an inline block — no
+    // `authorable-surface/` line of its own.
+    'api/BatchEndpointsConfig:operations.upsertMany',
+    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
+    // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
+    // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
+    // `RestServerConfig` at all, #14796). All four sub-schemas are non-strict
+    // `z.object()`s, so the route is a `retiredKey()` tombstone (a bare deletion
+    // would strip the key silently), the ledger rows stay `dead` with a REMOVED
+    // note, and there is no D2 conversion: a `RestServerConfig` is plugin TS
+    // configuration (REST plugin constructor / `plugin-hono-server` `restConfig`),
+    // never a stack collection member or a `sys_metadata` row — the
+    // `api/RestServerConfig:openApi31` (#4579) precedent. D3 semantic entry
+    // `rest-server-config-dead-keys-retired`. Registered under 18, not 17: the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // `crud.objectParamStyle`: every CRUD route takes the object name as a PATH
+    // segment; `'query'` was validated against the enum and mounted exactly what
+    // `'path'` mounts.
+    'api/CrudEndpointsConfig:objectParamStyle',
+    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
+    // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
+    // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
+    // `RestServerConfig` at all, #14796). All four sub-schemas are non-strict
+    // `z.object()`s, so the route is a `retiredKey()` tombstone (a bare deletion
+    // would strip the key silently), the ledger rows stay `dead` with a REMOVED
+    // note, and there is no D2 conversion: a `RestServerConfig` is plugin TS
+    // configuration (REST plugin constructor / `plugin-hono-server` `restConfig`),
+    // never a stack collection member or a `sys_metadata` row — the
+    // `api/RestServerConfig:openApi31` (#4579) precedent. D3 semantic entry
+    // `rest-server-config-dead-keys-retired`. Registered under 18, not 17: the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // `crud.patterns`: every CRUD route is mounted from the fixed method/path
+    // pairs in `registerCrudEndpoints`; a custom pattern was validated and never
+    // read. Not enforced, because the mounted paths ARE the contract the client
+    // SDK, the discovery document and the served /openapi.json describe — a
+    // per-operation method/path knob would make every one of them lie. The live
+    // door for a custom path or method is a declarative `api` endpoint. Its value
+    // def `api/CrudEndpointPattern` leaves with it (RETIRED_DEFS_BY_MAJOR[18]); its
+    // four ledger child rows collapse into the one `patterns` row. Closes #14365's
+    // question about the record's input type — there is no record left to reshape.
+    'api/CrudEndpointsConfig:patterns',
+    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
+    // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
+    // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
+    // `RestServerConfig` at all, #14796). All four sub-schemas are non-strict
+    // `z.object()`s, so the route is a `retiredKey()` tombstone (a bare deletion
+    // would strip the key silently), the ledger rows stay `dead` with a REMOVED
+    // note, and there is no D2 conversion: a `RestServerConfig` is plugin TS
+    // configuration (REST plugin constructor / `plugin-hono-server` `restConfig`),
+    // never a stack collection member or a `sys_metadata` row — the
+    // `api/RestServerConfig:openApi31` (#4579) precedent. D3 semantic entry
+    // `rest-server-config-dead-keys-retired`. Registered under 18, not 17: the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // `metadata.cacheTtl`: `enableCache` selects the protocol's `getMetaItemCached`
+    // read path, which takes no TTL, and no Cache-Control / ETag / Last-Modified
+    // header was ever built from the value. Its negative-bound defect (no lower
+    // bound, `-1` accepted — #11984 pinned it as accepted because that was the
+    // contract) dies with the key.
+    'api/MetadataEndpointsConfig:cacheTtl',
+    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
+    // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
+    // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
+    // `RestServerConfig` at all, #14796). All four sub-schemas are non-strict
+    // `z.object()`s, so the route is a `retiredKey()` tombstone (a bare deletion
+    // would strip the key silently), the ledger rows stay `dead` with a REMOVED
+    // note, and there is no D2 conversion: a `RestServerConfig` is plugin TS
+    // configuration (REST plugin constructor / `plugin-hono-server` `restConfig`),
+    // never a stack collection member or a `sys_metadata` row — the
+    // `api/RestServerConfig:openApi31` (#4579) precedent. D3 semantic entry
+    // `rest-server-config-dead-keys-retired`. Registered under 18, not 17: the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // `metadata.endpoints.schema`: gated a route that does not exist — the REST
+    // server mounts no `GET /meta/:type/:name/schema` — so `false` removed nothing
+    // and `true` added nothing, while its three siblings each gate a real mount.
+    // A nested key of an inline block, so it has no line of its own in
+    // `authorable-surface/` (the `kernel/Manifest:contributes.routes` shape).
+    'api/MetadataEndpointsConfig:endpoints.schema',
     // #13823 — ADR-0049 enforce-or-remove on `RestApiEndpointSchema.handlerStatus`
     // (maintainer ruling 2026-09-01, director decision batch #27, verbatim
     // 「同意」: remove). The key (`implemented` / `stub` / `planned`) was declared
@@ -8393,6 +8609,94 @@ export const RETIRED_KEYS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // narrowings ride minor releases) and the prescription lives at the major
     // boundary where `migrate meta` users look (the #11846 / #12428 grading).
     'api/RestApiEndpoint:handlerStatus',
+    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
+    // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
+    // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
+    // `RestServerConfig` at all, #14796). All four sub-schemas are non-strict
+    // `z.object()`s, so the route is a `retiredKey()` tombstone (a bare deletion
+    // would strip the key silently), the ledger rows stay `dead` with a REMOVED
+    // note, and there is no D2 conversion: a `RestServerConfig` is plugin TS
+    // configuration (REST plugin constructor / `plugin-hono-server` `restConfig`),
+    // never a stack collection member or a `sys_metadata` row — the
+    // `api/RestServerConfig:openApi31` (#4579) precedent. D3 semantic entry
+    // `rest-server-config-dead-keys-retired`. Registered under 18, not 17: the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // `routes.excludeObjects`: same shape as `includeObjects` — an excluded
+    // object was still mounted. The one customer-visible member of the family:
+    // `RestServerConfigSchema`'s own `@example` advertised
+    // `routes: { excludeObjects: ['system_log'] }`; corrected in the same change.
+    'api/RouteGenerationConfig:excludeObjects',
+    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
+    // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
+    // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
+    // `RestServerConfig` at all, #14796). All four sub-schemas are non-strict
+    // `z.object()`s, so the route is a `retiredKey()` tombstone (a bare deletion
+    // would strip the key silently), the ledger rows stay `dead` with a REMOVED
+    // note, and there is no D2 conversion: a `RestServerConfig` is plugin TS
+    // configuration (REST plugin constructor / `plugin-hono-server` `restConfig`),
+    // never a stack collection member or a `sys_metadata` row — the
+    // `api/RestServerConfig:openApi31` (#4579) precedent. D3 semantic entry
+    // `rest-server-config-dead-keys-retired`. Registered under 18, not 17: the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // `routes.includeObjects`: route registration iterates every registered
+    // object with no include filter. Per-object API exposure is declared ON the
+    // object and enforced by the REST data surface (`enable.apiEnabled` → 404,
+    // `enable.apiMethods` → 405), so the capability exists where the contract
+    // belongs and this key was a second, unread dialect of it.
+    'api/RouteGenerationConfig:includeObjects',
+    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
+    // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
+    // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
+    // `RestServerConfig` at all, #14796). All four sub-schemas are non-strict
+    // `z.object()`s, so the route is a `retiredKey()` tombstone (a bare deletion
+    // would strip the key silently), the ledger rows stay `dead` with a REMOVED
+    // note, and there is no D2 conversion: a `RestServerConfig` is plugin TS
+    // configuration (REST plugin constructor / `plugin-hono-server` `restConfig`),
+    // never a stack collection member or a `sys_metadata` row — the
+    // `api/RestServerConfig:openApi31` (#4579) precedent. D3 semantic entry
+    // `rest-server-config-dead-keys-retired`. Registered under 18, not 17: the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // `routes.nameTransform`: the enum was validated (since #11984) and every value
+    // mounted exactly what `'none'` mounts. Not enforced, because the object
+    // `name` is the canonical id on every surface including the REST path segment
+    // (Prime Directive #6) — a URL transform would contradict the one-name rule.
+    'api/RouteGenerationConfig:nameTransform',
+    // #14691 — ADR-0049 enforce-or-remove on the `RestServerConfig` sub-objects,
+    // executing the #14369 liveness census (15 `dead` rows across the `crud` /
+    // `metadata` / `batch` / `routes` sub-schemas; 0 read sites in `packages/rest`
+    // outside `normalizeConfig` and the normalized-config type; objectui @d4c6a86
+    // clean; cloud @9b6abe0f2fd5 clean STRUCTURALLY — cloud never authors a
+    // `RestServerConfig` at all, #14796). All four sub-schemas are non-strict
+    // `z.object()`s, so the route is a `retiredKey()` tombstone (a bare deletion
+    // would strip the key silently), the ledger rows stay `dead` with a REMOVED
+    // note, and there is no D2 conversion: a `RestServerConfig` is plugin TS
+    // configuration (REST plugin constructor / `plugin-hono-server` `restConfig`),
+    // never a stack collection member or a `sys_metadata` row — the
+    // `api/RestServerConfig:openApi31` (#4579) precedent. D3 semantic entry
+    // `rest-server-config-dead-keys-retired`. Registered under 18, not 17: the
+    // tombstone ships on the 17.x line (launch-window convention) and the
+    // prescription lives at the major boundary where `migrate meta` users look.
+    //
+    // `routes.overrides`: the per-object record (`enabled` / `basePath` /
+    // `operations`) was normalized and never read. `enabled` and `operations`
+    // duplicate the object's own enforced exposure keys (`enable.apiEnabled` /
+    // `enable.apiMethods`); `basePath` per object would contradict the one
+    // deployment-wide data base (`crud.dataPrefix`) the discovery document
+    // advertises. Its three ledger child rows collapse into the one `overrides`
+    // row. Closes #14365's question about `overrides.*.operations` — no record left.
+    'api/RouteGenerationConfig:overrides',
     // #10414 — ADR-0049 enforce-or-remove (triage routed REMOVE; the #10298 shape
     // one level up). `filters` was a declared, authorable per-metric raw-SQL
     // filter (`filters: [{ sql: string }]`) with ZERO consumers, measured with a
@@ -9708,6 +10012,14 @@ export const RETIRED_DEFS_BY_MAJOR: Readonly<Record<number, readonly string[]>> 
     // entry id by `gen:migration-registry` (#7297). Add an entry by adding a
     // FILE — never by editing between the markers, which is generated.
     // <os-generated retired-def:18>
+    // #14691 — `api/CrudEndpointPattern` (the `{ method, path, summary, description }`
+    // value shape of `crud.patterns`) leaves with its carrier key: its ONLY consumer
+    // was `CrudEndpointsConfigSchema.patterns`, tombstoned in the same change under
+    // ADR-0049 enforce-or-remove, and an exported value schema with no consumer
+    // reads as a capability (#3950). `api/CrudOperation` stays —
+    // `GeneratedEndpointSchema.operation` still reads it. See
+    // `retired-keys/18.api__CrudEndpointsConfig__patterns.ts` for the retirement record.
+    'api/CrudEndpointPattern',
     // #13823 — `api/HandlerStatus` (the `implemented` / `stub` / `planned` enum)
     // left with its two carriers: `RestApiEndpoint.handlerStatus` is tombstoned
     // in this same major (`RETIRED_KEYS_BY_MAJOR[18]`) and

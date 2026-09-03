@@ -77,7 +77,6 @@
 // coverage is reported per position for exactly that reason — the fan-out must
 // never be read as N× the reach.
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { SecurityPlugin, securityDefaultPermissionSets, appSecurityPluginOptions } from '@objectstack/plugin-security';
 import { AUDIENCE_ANCHOR_POSITIONS } from '@objectstack/spec/identity';

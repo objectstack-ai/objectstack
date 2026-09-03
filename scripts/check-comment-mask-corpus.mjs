@@ -123,6 +123,8 @@
  * run.
  */
 
+// dispatch-gates: whole-tree-population -- `collectSources` walks every authored JS/TS file from the repo root, so the corpus is the whole tree; the one literal below names the masker this gate exercises, not the files it reads.
+
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';

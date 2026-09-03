@@ -1559,6 +1559,12 @@ function render(result, target) {
 // exercised only `classifyTransportProbe` would restate #9946's self-test
 // instead of covering this file. It still opens no socket: the two readers are
 // injected.
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'ci-failure self-test reached its verdict';
+
 async function selfTest() {
   const failures = [];
   const t = (label, actual, expected = true) => {
@@ -2374,6 +2380,8 @@ async function selfTest() {
     '    And a `fix` renders as the ONE remedy it is: a single `fix:` marker with its\n' +
     '    continuations padded under it, keeping a copy-pasteable command on a line of its own.',
   );
+
+  return SELF_TEST_VERDICT;
 }
 
 /**
@@ -2448,7 +2456,14 @@ if (!invokedDirectly) {
   // as an import side effect would make this file impossible to reuse without
   // also spending someone else's rate limit.
 } else if (process.argv.includes('--self-test')) {
-  await selfTest();
+  if ((await selfTest()) !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ ci-failure self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
 } else if (process.argv.includes('--help') || process.argv.includes('-h')) {
   console.log(usageText(readFileSync(fileURLToPath(import.meta.url), 'utf8')));
 } else {

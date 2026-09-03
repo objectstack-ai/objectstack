@@ -126,10 +126,11 @@ describe('lint — intra-package duplicate-name advisory (ADR-0048 §3.4)', () =
 
 describe('lint — actions dedup on the composite engine key, not the bare name (#5510)', () => {
   // The engine registers an action under `<objectName>:<name>`
-  // (`ObjectQLPlugin.actionObjectKey`; the runtime's
-  // `standaloneActionObjectName` is kept in lockstep with it), with the
-  // canonical object-less key `'global'` (#3913). Deduping on the bare name
-  // asked a question the registry never asks.
+  // (`standaloneActionOwnerKey` in `@objectstack/objectql`, which the ObjectQL
+  // plugin calls directly and the runtime's `standaloneActionObjectName` now
+  // delegates to), with the canonical object-less key `'global'`
+  // (`GLOBAL_ACTION_OBJECT_KEY`, #3913). Deduping on the bare name asked a
+  // question the registry never asks.
   const ACTIVITY_ACTIONS = ['log_call', 'log_meeting', 'schedule_meeting'];
   const CRM_OBJECTS = ['crm_lead', 'crm_contact', 'crm_account', 'crm_opportunity', 'crm_case'];
 
