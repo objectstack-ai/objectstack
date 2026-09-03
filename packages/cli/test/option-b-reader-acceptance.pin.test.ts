@@ -65,9 +65,18 @@
  * ## Reverse-verified, per the card
  *
  * Run with `OPTION_B_LOSSES` emptied on `origin/main` `33681eaef`, the pin
- * reports 21 subsystems losing their collections — the red output is recorded
- * in this card's PR body. The additive leg is green in the same run, which is
- * what makes the red a discrimination rather than a broken fixture.
+ * reports **24 subsystems** losing their collections, across all three packages
+ * the program scopes — the full red output is recorded in this card's PR body.
+ * In the SAME run the additive baseline and the `packages[]` control both pass,
+ * which is what makes the red a discrimination rather than a broken fixture.
+ *
+ * One row in that output is worth naming here, because it is a loss no
+ * presence-check would have found: on the compiled path a function declared
+ * `effect: 'writes'` comes back through `collectBundleFunctionEntries` as
+ * `effect: 'pure'`. `mergeRuntimeModule` re-supplies the CALLABLE from the
+ * sibling ESM module regardless of shape, and `normalizeFlowFunctionEntry`
+ * defaults a bare callable's effect — so the collection is not absent, it is
+ * WRONG, and the writer's writes are counted as none.
  *
  * ## Boundaries — what this pin does NOT reach, stated rather than implied
  *
