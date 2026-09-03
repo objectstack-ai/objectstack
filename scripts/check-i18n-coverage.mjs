@@ -142,6 +142,30 @@
 // addressing only `fix` would have left it splitting; readings belong in
 // `evidence`, which is not keyed. The classified branches (`WORKSPACE_BUILD_FIX` /
 // `INSTALL_THEN_BUILD_FIX`) group byte-for-byte as they did before.
+//
+// #14729 named a class the ratchet itself produces, not a defect in it: PR #14651
+// (#14376) taught this gate to walk three new families, one of them
+// `objects.OBJECT._validations.RULE.message`, and its committed baseline therefore
+// held counts only that branch could compute — on `main` the walk did not exist, so
+// other PRs moved those counts without being able to see that they did. Two PRs did
+// exactly that while it waited to land, each costing a patch round: merge `main`,
+// re-derive, rebuild every number in the PR body. Stated generally, because it is
+// not i18n-specific — type-check debt counts, token ratchets and liveness state
+// counts have the same shape: a PR that widens what a committed ratchet MEASURES
+// races every PR that changes what is MEASURED, for its whole review-and-queue
+// latency — and the race is invisible on `main`, because there the instrument does
+// not exist. The two collisions were not independent draws, either: both were steps
+// of one in-flight campaign moving the examples' authored `validations[].message`
+// onto a shared translation channel, and a campaign that systematically touches
+// exactly the family a PR makes measurable collides on every step it lands. As of
+// `224f8ea`, `app-showcase` has zero untranslated rule messages left — that leg is
+// finished — but the exposure is forward-looking, not closed: `app-crm` (5) and
+// `app-todo` (4) rule messages, plus `bulkActions` (18) and `datasets` (62), are
+// untranslated populations nobody is currently working, and a PR that starts
+// walking any of them will race this gate the same way. It fails safe either
+// direction — the DOWN-direction remedy below is what caught both collisions — so
+// the cost is latency and re-derive rounds, not correctness; that is why the fix
+// here is one sentence in that remedy, not a mechanism.
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, writeFileSync, existsSync, openSync, closeSync, unlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -1338,7 +1362,8 @@ for (const [file, allowed] of Object.entries(baseline)) {
   } else if (now < allowed) {
     errors.push(
       `${file}: untranslated declared strings improved ${allowed} → ${now} — ratchet DOWN: ` +
-        `run \`node scripts/check-i18n-coverage.mjs --update\` and commit the baseline.`,
+        `run \`node scripts/check-i18n-coverage.mjs --update\` and commit the baseline. ` +
+        `If you did not touch this population, merge \`origin/main\` first — the movement is probably not yours.`,
     );
   }
 }

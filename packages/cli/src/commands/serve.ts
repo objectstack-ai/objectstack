@@ -1917,10 +1917,11 @@ export default class Serve extends Command {
     // compiled artifact is reachable (explicit OS_ARTIFACT_PATH —
     // including http(s):// URLs — or the canonical
     // `<cwd>/dist/objectstack.json`), boot from that artifact alone.
-    // This is the same capability previously hard-coded in
-    // `apps/objectos/objectstack.config.ts`, lifted into the framework
-    // so any project can `objectstack start` against just a
-    // `dist/objectstack.json`.
+    // This is the same capability previously hard-coded in the tenant
+    // runtime's own `objectstack.config.ts` — that app is `apps/objectos` in
+    // the separate `objectstack-ai/cloud` repo, NOT a path in this one — and
+    // lifted into the framework so any project can `objectstack start`
+    // against just a `dist/objectstack.json`.
     const configMissing = !configExists;
     let useArtifactFallback = false;
     let useEmptyBoot = false;
@@ -2786,10 +2787,17 @@ export default class Serve extends Command {
       // need this wrap when they ALSO carry top-level metadata — otherwise
       // top-level `flows`, `objects`, etc. never reach the ObjectQL registry
       // and downstream services like AutomationServicePlugin start with 0 flows.
+      // `examples/app-showcase` is the in-repo worked example of exactly that
+      // shape: its `plugins[]` holds instantiated connector plugins while the
+      // stack still declares top-level `objects` / `apps` / `flows` / `apis`
+      // (`serve-host-config-security-registrar.pin.test.ts` records an `os dev`
+      // boot of it).
       //
       // To avoid double-registration when the host already wraps itself with
-      // an AppPlugin (e.g. apps/objectos's dev-workspace stack), we skip if
-      // any plugin in `plugins[]` is already an AppPlugin instance.
+      // an AppPlugin, we skip if any plugin in `plugins[]` is already an
+      // AppPlugin instance. That branch keys on the SHAPE — a `plugins[]` that
+      // already holds an AppPlugin instance — and never on a named app, so it
+      // is checked structurally below.
       const hasAppPluginAlready = plugins.some(isAppPluginLike);
       const configHasMetadata = !!(
         config.objects || config.manifest || config.apps || config.flows || config.apis
@@ -2962,9 +2970,9 @@ export default class Serve extends Command {
             || p.constructor?.name === 'I18nServicePlugin'
       );
       // Check the top-level config AND any nested AppPlugin bundles in the
-      // `plugins` array — host/aggregator configs (e.g. apps/objectos) don't
-      // define translations themselves but compose multiple `new AppPlugin(...)`
-      // entries, each carrying its own translations.
+      // `plugins` array — a host/aggregator config may define no translations
+      // of its own and instead compose several `new AppPlugin(...)` entries,
+      // each carrying its own. Keyed on that shape, not on a named app.
       const pluginBundleHasTranslations = (bundle: any): boolean => {
         if (!bundle || typeof bundle !== 'object') return false;
         if (Array.isArray(bundle.translations) && bundle.translations.length > 0) return true;
