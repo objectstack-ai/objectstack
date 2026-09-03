@@ -1346,7 +1346,14 @@ export class MCPServerRuntime {
         description: 'Load an agent\'s system prompt with optional UI context. ' +
           'Use the agentName argument to select which agent\'s instructions to use.',
         argsSchema: {
-          agentName: z.string().describe('Name of the agent to load (e.g. "data_chat", "metadata_assistant")'),
+          // [#14461] The example names the two CANONICAL platform agent ids.
+          // It used to read `"data_chat", "metadata_assistant"` — both retired
+          // aliases, neither canonical id present — so every MCP client asking
+          // what to pass was taught the exact two spellings
+          // `skills/objectstack-ai` forbids. The aliases still resolve (cloud's
+          // one-way alias registry), so nothing broke; what was wrong is that
+          // this is the suggestion an author copies.
+          agentName: z.string().describe('Name of the agent to load (e.g. "ask", "build")'),
           objectName: z.string().optional().describe('Current object the user is viewing'),
           recordId: z.string().optional().describe('Currently selected record ID'),
           viewName: z.string().optional().describe('Current view name'),
