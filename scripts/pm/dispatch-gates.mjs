@@ -1512,6 +1512,202 @@ export function declaredNoPathPopulation(scriptSource) {
 }
 
 /**
+ * A GATE SCRIPT's own declaration that its population is the WHOLE TREE — a
+ * whole-line comment anywhere in the script's source:
+ *
+ *   // dispatch-gates: whole-tree-population -- <reason>
+ *   #  dispatch-gates: whole-tree-population -- <reason>      (shell gates)
+ *
+ * Read it as the exact INVERSE of `no-path-population` above — which is why
+ * the two are spelled to read as opposites, tolerate the same two comment
+ * forms, and are parsed by sibling regexes. That one says "this gate reads NO
+ * file, and here is why". This one says "this gate reads EVERY file; every
+ * card implicates me; do not try to narrow me."
+ *
+ * ## The defect (#14189, filed out of #13519's measured M bucket)
+ *
+ * #13519 repaired four gates by having each declare, in its own module body,
+ * the population it really reads (the `ROOT_DIR_WATCH_HINTS` idiom). Three
+ * could not be repaired that way, and the reason was the same for all three:
+ * their population is the whole repository. `check:nul-bytes` sweeps
+ * `git ls-files` PLUS the untracked-not-ignored listing;
+ * `check-comment-mask-corpus` walks every authored source file from the repo
+ * root; `check:refd-timer-probe` reads the same tracked-plus-untracked tree.
+ *
+ * A TRUTHFUL declaration for any of them is "every file", and this file's own
+ * header prices that direction and refuses it: "22 leads is the same as none".
+ * A gate named on every card is a gate named on no card, and MATCHED is the
+ * one column whose entire value is precision. ⛔ So the remedy is NOT a
+ * whole-tree literal in the gate's declaration — not `**`, not `.`, not the
+ * bare root: `scripts/workspace-enumerator.mjs`'s header prices the
+ * workspace-wide version of exactly that move at +41725 (gate, file) pairs,
+ * every one of them a fabricated lead.
+ *
+ * What did not exist is a third thing for such a gate to BE — neither a lead
+ * nor a silence. `check:nul-bytes` is the specimen the card was filed on: a
+ * gate every dev is told to run on ANY edit, whose declared population is two
+ * files. A dev deriving the family for a card that adds a file with a raw
+ * control byte in it was not told about the one gate that judges exactly that,
+ * and the report they hand back — "I ran the gates the tool named" — is true
+ * and incomplete at the same time.
+ *
+ * ## What the declaration DOES to the derivation
+ *
+ * A declaring family is placed BY ITS DECLARATION and leaves the three
+ * verdicts entirely (`placeFamily` below is the one seam that does it): never
+ * `matched`, because that would be a lead on every card; never `silent`,
+ * because its silence would be a lie; never `undetermined`, because its
+ * population is not unknown — it has been READ. It is rendered under its own
+ * always-runs heading, identical for every card, and its command IS inside the
+ * runnable union `--commands` prints and `--ran` reconciles against, because a
+ * gate every card implicates is a gate this card owes.
+ *
+ * The lead columns are untouched by construction: nothing enters or leaves
+ * `matched`/`silent`/`undetermined` for any NON-declaring family because of
+ * this channel — `placeFamily` delegates to `classifyEntry` unchanged, and a
+ * self-test case holds that byte-identity over probe paths.
+ *
+ * ⚠️ Unlike `no-path-population`, this declaration does NOT contradict a gate
+ * that names paths. A whole-tree gate still spells its own baseline artifacts
+ * and its own conveniences, and those literals stay in `entry.hints`, where
+ * the unreachable sweep and the per-hint residue annotations still grade them.
+ * The declaration supersedes them for PLACEMENT only — the one question those
+ * literals were answering wrongly. What it DOES contradict is
+ * `no-path-population`: "every file" and "no file" cannot both be true of one
+ * gate, and `wholeTreePopulationRefusal` refuses the pair.
+ *
+ * The reason is REQUIRED, for the same reason it is required on both markers
+ * above: an opt-out with no reason reads exactly like a placeholder nobody
+ * will revisit, and is the one shape a reviewer cannot tell from a gate whose
+ * population was never examined.
+ */
+const WHOLE_TREE_POPULATION_MARKER =
+  /^[ \t]*(?:\/\/|#)[ \t]*dispatch-gates:[ \t]*whole-tree-population[ \t]*--[ \t]*(\S.*)$/m;
+
+export function declaredWholeTreePopulation(scriptSource) {
+  const m = WHOLE_TREE_POPULATION_MARKER.exec(String(scriptSource));
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * The recognised spellings of a REPO-ROOT WALK — the liveness half of the
+ * declaration above, and PUBLISHED here rather than left inside the
+ * implementation.
+ *
+ * ## Why a liveness predicate at all
+ *
+ * `check:declared-population-live` (#13519) exists because a declared
+ * population that reaches NOTHING is the quietest failure this family has: the
+ * gate keeps declaring, the derivation keeps placing it, and every count still
+ * prints. This channel has the same exposure pointed the other way — a gate
+ * that declares the whole tree and does not walk it would be advertised on
+ * EVERY card forever, and a wrong row on every card is this file's own
+ * definition of a fabricated lead. So the declaration is checkable, and this
+ * is what it is checked against.
+ *
+ * ## What the predicate is, and the direction it is allowed to fail in
+ *
+ * It is a claim about the gate's own SOURCE TEXT, comments and `--self-test`
+ * bodies masked (the same normalization `payloadEnvDependence` applies, for
+ * the same reason: what a gate SAYS is not what it READS — a fixture tree
+ * built inside a self-test is not the gate's population, and every one of
+ * these gates builds one).
+ *
+ * It is deliberately a NECESSARY condition and not a sufficient one. A gate
+ * that seeds a root walk and then filters it to a subtree passes this and is
+ * still mis-declared; nothing textual can settle that, and the declaration's
+ * REASON is where the human answer lives, judged by a reader — the same
+ * contract `unreachableLines` states for its own listing. What the predicate
+ * does buy is the failure direction that is silent: a declaration with no walk
+ * behind it at all cannot pass. Its own failure mode is the loud one — a gate
+ * that really does sweep the tree in a spelling not listed here is REFUSED,
+ * which is a missing declaration somebody has to fix, never a wrong row on
+ * every card.
+ *
+ * ## Why the list is published instead of hidden
+ *
+ * Same rule AGENTS.md states for `check:cross-package-test-inputs`: a source
+ * scan sees only the spellings it knows, and an unrecognised one produces no
+ * flag — silently. So the recognised set is written where the author of the
+ * next whole-tree gate reads it, the refusal text prints it, and the remedy
+ * for a new spelling is to EXTEND this list with a self-test case beside it,
+ * never to route around the check.
+ *
+ * Measured over the six candidate gates #14189 and #14325 nominated: limbs A/B
+ * select five, and `check-self-test-workflow-commands.mjs` — whose walk is
+ * seeded at `scripts/`, a bounded subtree — is selected by none of them, which
+ * is the reading of its source, not a coincidence. That gate's remedy is the
+ * ordinary subtree declaration, not this channel.
+ */
+export const REPO_ROOT_WALK_SPELLINGS = [
+  {
+    label: 'a `git ls-files` enumeration of the tracked corpus',
+    // The subcommand as the gate spells it: an argv element, never the joined
+    // command line, because that is how `execFileSync` takes it here.
+    re: /['"`]ls-files['"`]/,
+  },
+  {
+    // The root is the WHOLE argument list, deliberately. Written to allow a
+    // trailing comma-argument this limb accepts `join(REPO_ROOT, 'scripts')`
+    // and `resolve(REPO_ROOT, maskerPath)` — path BUILDS, not walks — which
+    // was measured on the candidates and made the limb near-vacuous: it
+    // selected `check-comment-mask-corpus` on a `resolve` call while the walk
+    // it really performs is reached through limb C.
+    label: 'a walk CALLED on the repo-root binding as its whole argument',
+    re: /\b[A-Za-z_$][\w$]*\(\s*(?:REPO_ROOT|REPO_ROOT_DIR|ROOT_DIR)\s*\)/,
+  },
+  {
+    label: 'a walk whose DEFAULT PARAMETER is the repo-root binding',
+    re: /[({,]\s*[A-Za-z_$][\w$]*\s*=\s*(?:REPO_ROOT|REPO_ROOT_DIR|ROOT_DIR)\s*[,)}]/,
+  },
+];
+
+/**
+ * The first recognised repo-root walk spelling in this gate's own source, or
+ * null. The LABEL is returned rather than a boolean, because it is printed
+ * beside the declaration it vouches for: a reader deciding whether to trust
+ * the row is being told which reading produced it, exactly as the matched
+ * column's `via` says which key produced a lead.
+ */
+export function repoRootWalkSpelling(scriptSource) {
+  const body = maskedModuleBody(String(scriptSource));
+  for (const { label, re } of REPO_ROOT_WALK_SPELLINGS) if (re.test(body)) return label;
+  return null;
+}
+
+/**
+ * Why this family's whole-tree declaration must be refused, or null when it
+ * stands. Pure, and reading only what the discovery already put on the entry,
+ * so the live half of the self-test and any future caller cannot disagree
+ * about what a bad declaration is.
+ *
+ * Two refusals, and each one is a contradiction the derivation cannot resolve
+ * on the gate's behalf:
+ *
+ *   BOTH markers   "every file" and "no file" are not both true of one gate.
+ *                  Silently preferring either one would place the family by a
+ *                  coin toss and print a confident row for it.
+ *   NO WALK        the declaration is the only evidence for a row that appears
+ *                  on every card, and nothing in the gate's source backs it.
+ */
+export function wholeTreePopulationRefusal(entry) {
+  const reason = entry?.wholeTreeReason ?? null;
+  if (!reason) return null;
+  if (entry?.noPopulationReason) {
+    return 'declares BOTH whole-tree-population and no-path-population — "my population is every file" and "my population '
+      + 'is no file" cannot both be true of one gate. Delete the one that is not true; a derivation that picked either '
+      + 'would be placing the family by a coin toss.';
+  }
+  if (!entry?.rootWalk) {
+    return 'declares whole-tree-population and its own source carries no recognised repo-root walk. Recognised spellings: '
+      + `${REPO_ROOT_WALK_SPELLINGS.map((s) => s.label).join('; ')}. A declaration with no walk behind it puts a row on `
+      + 'EVERY card on no evidence. If the walk is real and spelled some other way, EXTEND REPO_ROOT_WALK_SPELLINGS in '
+      + 'scripts/pm/dispatch-gates.mjs with a self-test case beside it — never route around this refusal.';
+  }
+  return null;
+}
+
+/**
  * A family whose verdict CANNOT EXIST outside a workflow run, read from the
  * gate's own source rather than from a roster of names (#14004).
  *
@@ -4544,6 +4740,34 @@ export function classifyEntry(entry, paths) {
   }
   if (hits.length) return { verdict: 'matched', hits };
   return { verdict: (entry.hints ?? []).length === 0 ? 'undetermined' : 'silent', hits };
+}
+
+/**
+ * Place one family, declaration FIRST (#14189). The one seam through which the
+ * whole-tree channel touches placement, and it is deliberately the whole of
+ * it: everything below this line is `classifyEntry`, unchanged, so a family
+ * that declares nothing is classified byte-for-byte as it was before this
+ * channel existed. A self-test case pins that identity over probe paths, and
+ * removing the two lines above the delegation is the mutation that reddens the
+ * placement pins — which is what makes them discriminating rather than
+ * decorative.
+ *
+ * Why the declaration is consulted BEFORE the matchers rather than after: a
+ * whole-tree gate would `match` a card that edits its own script (the identity
+ * key) and score `silent` for every other card, so an "after" ordering would
+ * hand the same gate two different placements depending on the card — the one
+ * shape this channel exists to retire. Its population does not vary by card,
+ * so neither does its placement.
+ *
+ * `always-runs` is a FOURTH verdict, not a fourth flavour of the three: it is
+ * outside `matched`/`silent`/`undetermined` everywhere they are counted, and
+ * `residueLines` accounts for it as its own term rather than folding it into
+ * the partition (a fold would silently shrink the residue, which is the exact
+ * failure that function's own throw exists to catch).
+ */
+export function placeFamily(entry, paths) {
+  if (entry?.wholeTreeReason) return { verdict: 'always-runs', hits: [] };
+  return classifyEntry(entry, paths);
 }
 
 // ---------------------------------------------------------------------------
@@ -7830,18 +8054,71 @@ export function alwaysRunLines(rows, counts) {
   return lines;
 }
 
+/**
+ * The whole-tree channel, rendered (#14189) — its own heading, identical on
+ * every card, printed ABOVE the reconciliation because its commands are inside
+ * that total.
+ *
+ * ⛔ Not folded into the matched block. A row that appears on every card is not
+ * a lead, and pasting these into the matched block would put them under a
+ * caption that promises "these families name YOUR paths" — the fabricated-lead
+ * shape this file's header prices and refuses. The heading is the claim: these
+ * are placed by declaration.
+ *
+ * Each row carries the gate's own REASON and the liveness spelling that vouches
+ * for it, for the same reason the matched column carries `via`: a reader
+ * deciding whether to trust a row is being told what produced it. A refused
+ * declaration prints as a REFUSED row rather than vanishing — a family dropped
+ * from every rendering because its declaration was malformed is the silent
+ * direction, and this file's contract is that an omission is stated where the
+ * omission happens.
+ */
+export function alwaysRunsPopulationLines(rows) {
+  if (rows.length === 0) return [];
+  const lines = [
+    `Always runs — ${rows.length} famil(ies) DECLARE that their population is the WHOLE TREE, so every card implicates them:`,
+  ];
+  for (const row of rows) {
+    if (row.refused) {
+      lines.push(`  - ⚠ ${row.check}: REFUSED — ${row.refused}`);
+      continue;
+    }
+    lines.push(`  - ${row.command}   [${row.workflows.join(', ')}]   declared whole-tree population — ${row.reason}`);
+    lines.push(
+      `      ↳ liveness: its own source carries ${row.rootWalk}` +
+        `${row.ciOnly ? ' · CI-MEASURED ONLY — no local run of it can produce a verdict, so it is NOT in --commands' : ''}`,
+    );
+  }
+  lines.push(
+    '  ⇒ Placed by DECLARATION, not by your paths: every card gets these same rows, which is the honest shape for a gate that reads every' +
+      ' file. They are NOT leads — nothing enters or leaves the matched column because of them — and they ARE in the runnable total below.',
+  );
+  return lines;
+}
+
 export function residueLines(
   {
     discovered, matched, undetermined, silent, unfiltered, unreachable, swept,
-    artifactRosters, invertedRosters, documentedNoPopulation,
+    artifactRosters, invertedRosters, documentedNoPopulation, alwaysRuns = 0,
   },
   kinds = CHANGE_KIND_GATES,
 ) {
-  const placed = matched + undetermined + silent;
+  // FOUR verdicts now (#14189). The whole-tree channel is a term of the
+  // partition rather than a subset of one, and it is added HERE because the
+  // throw below is the thing that would otherwise absorb it silently: a fourth
+  // placement wired into the derivation and not into this sum shrinks the
+  // residue by exactly the families it placed, and every count still prints.
+  const placed = matched + undetermined + silent + alwaysRuns;
   if (placed !== discovered) {
     throw new Error(
       `residue accounting is short: ${placed} famil(ies) placed of ${discovered} discovered ` +
-        '(matched + undetermined + silent must cover every discovered family)',
+        '(matched + undetermined + silent + always-runs must cover every discovered family)',
+    );
+  }
+  if (!Number.isInteger(alwaysRuns) || alwaysRuns < 0 || alwaysRuns > discovered) {
+    throw new Error(
+      `declared-whole-tree count is not derivable: got ${String(alwaysRuns)} of ${discovered} discovered ` +
+        "(it is read from each gate's own marker — never omitted; a missing count would print as a missing line)",
     );
   }
   if (!Number.isInteger(unfiltered) || unfiltered < 0 || unfiltered > discovered) {
@@ -7896,7 +8173,13 @@ export function residueLines(
   return [
     `Residue — all ${discovered} discovered famil(ies) placed, derived at runtime:`,
     `  ${matched} matched above · ${undetermined} undetermined (their sources name no path at all — NOT known irrelevant)` +
-      ` · ${silent} silent (their sources name paths, none of which cover yours).`,
+      ` · ${silent} silent (their sources name paths, none of which cover yours)` +
+      ` · ${alwaysRuns} always-runs (they DECLARE a whole-tree population, so they are placed by declaration and not by your paths).`,
+    `  Those ${alwaysRuns} are not leads and not silences: a gate that reads EVERY file is named on every card, so naming it in the matched` +
+      ' column would be a fabricated lead and leaving it silent would be a false clearance. It declares the fact in its own source' +
+      ' (dispatch-gates: whole-tree-population -- <reason>, the inverse of the no-path-population marker above), the declaration is checked' +
+      " against a repo-root walk in that same source, and the family is listed under its own always-runs heading with its commands INSIDE" +
+      ' this card\'s runnable total.',
     `  ${documentedNoPopulation} of those ${undetermined} undetermined famil(ies) DECLARE that they have no path population, each with its own` +
       ' reason, read from a marker in the gate\'s source and printed against it under --residue. Those have been examined; the rest of the bucket' +
       ' has not, and the two used to read alike. A declaration is not an escape from having a population: a gate that walks a subtree declares it' +
@@ -8410,6 +8693,12 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
         entry.readOrigin.set(target, f);
       }
       entry.noPopulationReason ??= declaredNoPathPopulation(source);
+      // ONE read, and the SEVENTH and EIGHTH answers off it (#14189). The
+      // declaration and the walk that vouches for it are read from the same
+      // source text as the six above, so the liveness check can never grade a
+      // different revision of the gate than the declaration it is grading.
+      entry.wholeTreeReason ??= declaredWholeTreePopulation(source);
+      entry.rootWalk ??= repoRootWalkSpelling(source);
       // ONE read, SIX answers now (#14004). The payload dependence is read off
       // the SAME source text as the five above, so this classification cannot
       // describe a different revision of the gate than the hints printed beside
@@ -8514,6 +8803,13 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     // the marker while inheriting a population is a contradiction the live
     // half of the self-test catches, which is the direction that costs.
     entry.noPopulationReason ??= null;
+    // Read from the gate's own files only, for the same reason as the
+    // declaration above it: a followed module cannot declare on its caller's
+    // behalf that the CALLER sweeps the whole tree, and it cannot withdraw the
+    // claim either. The liveness half is anchored the same way — the walk that
+    // vouches for the declaration has to be in the source that carries it.
+    entry.wholeTreeReason ??= null;
+    entry.rootWalk ??= null;
     // Read from the gate's own files only, exactly like the declaration above
     // it: a followed module cannot make its caller CI-only, and a family that
     // reached no file at all reaches no classification either.
@@ -8549,11 +8845,17 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
  * subtract them. One expression, so `--commands` and the reconciliation cannot
  * disagree about which commands are omitted.
  */
-export function ciOnlyCommandSet(matchedRows = []) {
-  return new Set(matchedRows.filter((row) => row.ciOnly).map((row) => row.command));
+export function ciOnlyCommandSet(matchedRows = [], alwaysRunsRows = []) {
+  // Both row sets, because the subtraction follows the COMMAND and not the
+  // section it was reached through — the rule `commandsFor` already states for
+  // the convention block, applied unchanged to the whole-tree channel (#14189).
+  // Empty on this tree today (no declaring family reads the payload) and kept
+  // for the same reason that exclusion is kept there: a rule that held in one
+  // section and not another is the two-renderings drift this file keeps closing.
+  return new Set([...matchedRows, ...alwaysRunsRows].filter((row) => row.ciOnly).map((row) => row.command));
 }
 
-export function commandsFor({ matchedRows = [], kindGroups = [] } = {}) {
+export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows = [] } = {}) {
   const commands = new Set();
   // A CI-MEASURED-ONLY family contributes NOTHING here (#14004). This list's
   // caption promises one RUNNABLE command per line, and a command whose only
@@ -8564,8 +8866,14 @@ export function commandsFor({ matchedRows = [], kindGroups = [] } = {}) {
   // `ciOnly` on its row in `--json`. ⛔ Not silence — omission stated where the
   // omission happens is this file's own rule for the pending-changeset
   // families, and it applies here unchanged.
-  const ciOnly = ciOnlyCommandSet(matchedRows);
+  const ciOnly = ciOnlyCommandSet(matchedRows, alwaysRunsRows);
   for (const row of matchedRows) if (!row.ciOnly) commands.add(row.command);
+  // The whole-tree channel is IN the union, on every card (#14189). It is not
+  // a lead — nothing about `matched` moves — but it is a gate the card owes,
+  // and this list's whole contract is that it is the complete runnable answer
+  // for the paths it was given. A declaring family left out of it would be the
+  // very omission the card was filed about, reproduced inside its own fix.
+  for (const row of alwaysRunsRows) if (!row.ciOnly) commands.add(row.command);
   for (const group of kindGroups) {
     // The exclusion follows the COMMAND, not the section it was reached
     // through: a family named by change KIND as well as by path is one family,
@@ -8636,8 +8944,8 @@ export function commandsFor({ matchedRows = [], kindGroups = [] } = {}) {
  * explanation — a STALE row prints and contributes no command, and one family
  * hit by two kinds prints twice. Both are stated in the rendering.
  */
-export function familyReconciliation({ matchedRows = [], kindGroups = [] } = {}) {
-  const commands = commandsFor({ matchedRows, kindGroups });
+export function familyReconciliation({ matchedRows = [], kindGroups = [], alwaysRunsRows = [] } = {}) {
+  const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   // The SAME expression commandsFor uses for its matched half. Written as a
   // second traversal it would be a second answer to a question this file
   // already answers once.
@@ -8648,7 +8956,12 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [] } = {})
   // a CI-measured family is outside it by construction. Kept as its own term so
   // the omission is a number the reader gets rather than a difference they have
   // to notice (#14004).
-  const ciOnlyCommands = ciOnlyCommandSet(matchedRows);
+  const ciOnlyCommands = ciOnlyCommandSet(matchedRows, alwaysRunsRows);
+  // The SAME expression `commandsFor` unions for the whole-tree channel, for
+  // the reason this function's header gives for the other two terms: a count
+  // built by a second traversal can drift from the section it claims to
+  // reconcile, and this one is asserted against the union below.
+  const alwaysRunsCommands = new Set(alwaysRunsRows.filter((row) => !row.ciOnly).map((row) => row.command));
   const conventionCommands = new Set();
   let conventionRows = 0;
   let staleRows = 0;
@@ -8670,8 +8983,18 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [] } = {})
     }
   }
   const both = [...conventionCommands].filter((command) => matchedCommands.has(command)).length;
+  // The set-algebra term: |M u C u A| = |M| + |C| - |M n C| + |A \ (M u C)|.
+  // Counted as the REMAINDER rather than as the whole of A, so a declaring
+  // family that some card also reaches by path or by kind is counted once,
+  // exactly like `both` one term over.
+  const alwaysRunsOnly = [...alwaysRunsCommands].filter(
+    (command) => !matchedCommands.has(command) && !conventionCommands.has(command),
+  ).length;
   const recon = {
     total: commands.length,
+    alwaysRuns: alwaysRunsCommands.size,
+    alwaysRunsOnly,
+    alwaysRunsRows: alwaysRunsRows.length,
     matched: matchedCommands.size,
     matchedRows: runnableRows.length,
     ciOnly: ciOnlyCommands.size,
@@ -8683,10 +9006,11 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [] } = {})
     staleRows,
     ciOnlyConventionRows,
   };
-  if (recon.matched + recon.convention - recon.both !== recon.total) {
+  if (recon.matched + recon.convention - recon.both + recon.alwaysRunsOnly !== recon.total) {
     throw new Error(
       'dispatch-gates: the family reconciliation does not close — ' +
-        `${recon.matched} matched + ${recon.convention} convention − ${recon.both} both ≠ ${recon.total} distinct. ` +
+        `${recon.matched} matched + ${recon.convention} convention − ${recon.both} both + ${recon.alwaysRunsOnly} declared ` +
+        `whole-tree (reached no other way) ≠ ${recon.total} distinct. ` +
         'The parts and the union came from different structures, which is the drift this line exists to detect. ' +
         'Refusing rather than printing a total that cannot be trusted (#4690).',
     );
@@ -8742,6 +9066,14 @@ export function familyReconciliationLines(recon) {
     );
   }
   if (ciOnlyLine) lines.push(ciOnlyLine);
+  if (recon.alwaysRuns > 0) {
+    lines.push(
+      `  + ${recon.alwaysRuns} of the ${recon.total} DECLARE that their population is the WHOLE TREE` +
+        `${recon.alwaysRunsOnly !== recon.alwaysRuns ? `, ${recon.alwaysRuns - recon.alwaysRunsOnly} of them also reached by path or kind` : ''}` +
+        ' — placed by their own declaration, never by your paths, and named under their own heading above. They are INSIDE this total' +
+        ' (a gate every card implicates is a gate this card owes) and outside the matched column (a row on every card is not a lead).',
+    );
+  }
   lines.push(
     `  ⇒ Skip the arithmetic: --commands prints exactly these ${recon.total}, one runnable command per line, nothing else on stdout.` +
       ' It cannot drop a section or a spelling; this line exists so a harvest of the PROSE can be caught when it does.',
@@ -9116,8 +9448,8 @@ export function runReconciliationLines(recon) {
  * That distinction is the card's own subject matter: what is left out of a list
  * must be visible in the list.
  */
-export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity }) {
-  const commands = commandsFor({ matchedRows, kindGroups });
+export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [] }) {
+  const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const { otherCommands, ...spelling } = spellingSplit(commands);
   return {
     tool: 'dispatch-gates',
@@ -9128,6 +9460,13 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
     spelling: otherCommands.length ? { ...spelling, otherCommands } : spelling,
     matched: matchedRows,
     convention: kindGroups,
+    // IN this document and IN `commands`, unlike `pendingChangeset` below: a
+    // declaring family is runnable today and owed by this card, and the whole
+    // reason it has its own key is that it is placed by declaration rather
+    // than by `paths` — a consumer reading `matched` must not find it there
+    // (that would be a lead on every card) and must not have to infer it from
+    // the commands list either (#14189).
+    alwaysRunsPopulation: alwaysRunsRows,
     pendingChangeset: {
       probePath: CHANGESET_PROBE_PATH,
       families: pending.map(({ check, entry }) => ({
@@ -9156,23 +9495,36 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
  * LOUD. A quiet omission is the defect this mode was added to fix, and adding a
  * new one inside the fix is how that defect reproduces itself one layer up.
  */
-function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts }) {
+function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [] }) {
   const identity = repoIdentity();
-  const commands = commandsFor({ matchedRows, kindGroups });
+  const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const split = spellingSplit(commands);
 
   if (mode === 'json') {
-    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity }), null, 2));
+    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows }), null, 2));
   } else {
     for (const command of commands) console.log(command);
   }
 
   const conventionCount = kindGroups.reduce((n, g) => n + g.gates.filter((x) => x.command).length, 0);
   const ciOnlyRows = matchedRows.filter((row) => row.ciOnly);
+  const alwaysRunsRunnable = alwaysRunsRows.filter((row) => !row.ciOnly && !row.refused);
   console.error(
     `dispatch-gates --${mode}: ${commands.length} command(s) — ${split.pnpm} pnpm, ${split.node} direct node` +
-      `${split.other ? `, ${split.other} neither` : ''} (${matchedRows.length - ciOnlyRows.length} matched by path, ${conventionCount} by change KIND).`,
+      `${split.other ? `, ${split.other} neither` : ''} (${matchedRows.length - ciOnlyRows.length} matched by path, ${conventionCount} by change KIND` +
+      `${alwaysRunsRunnable.length ? `, ${alwaysRunsRunnable.length} declared WHOLE-TREE and named on every card` : ''}).`,
   );
+  // Stated on stderr where every other provenance is stated, and stated even
+  // though these commands ARE on stdout: a consumer counting "matched by path"
+  // against the stdout line count would otherwise find a surplus with no
+  // explanation, which is the arithmetic-with-no-story shape this mode's own
+  // accounting exists to prevent (#14189).
+  if (alwaysRunsRunnable.length) {
+    console.error(
+      `  + those ${alwaysRunsRunnable.length} are placed by their own whole-tree-population declaration, not by these paths — identical on every` +
+        ' card, and outside the matched/silent/undetermined verdicts entirely. Run without --commands/--json to see each one with its reason.',
+    );
+  }
   // The THIRD thing stdout deliberately omits, omitted OUT LOUD for the reason
   // this function's header gives for the other two: a quiet omission is the
   // defect this mode exists to fix (#14004).
@@ -9218,9 +9570,15 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   const matched = new Map();
   const undetermined = [];
   const silent = [];
+  // The fourth bucket (#14189): families placed by their own whole-tree
+  // declaration. `placeFamily` is the ONLY thing that decides which bucket a
+  // family lands in, so a family that declares nothing reaches exactly the
+  // classifier it always reached.
+  const alwaysRuns = [];
   for (const [check, entry] of byCheck) {
-    const { verdict, hits } = classifyEntry(entry, paths);
-    if (verdict === 'matched') matched.set(check, { entry, hits });
+    const { verdict, hits } = placeFamily(entry, paths);
+    if (verdict === 'always-runs') alwaysRuns.push([check, entry]);
+    else if (verdict === 'matched') matched.set(check, { entry, hits });
     else if (verdict === 'undetermined') undetermined.push([check, entry]);
     else silent.push([check, entry]);
   }
@@ -9248,6 +9606,21 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     // (#14004).
     ciOnly: entry.ciOnly ?? null,
   }));
+  // Built the same way `matchedRows` is, and for the same reason: every
+  // rendering below is a reading of these rows, so the human block, the
+  // `--commands` union and the `--json` document cannot disagree about which
+  // families declared a whole-tree population or why (#14189).
+  const alwaysRunsRows = [...alwaysRuns].sort().map(([check, entry]) => ({
+    check,
+    command: runnableInvocation(entry),
+    workflows: [...entry.workflows],
+    reason: entry.wholeTreeReason,
+    // The liveness reading travels ON the row for the same reason the matched
+    // provenance does: the row is a claim, and the reader is owed what backs it.
+    rootWalk: entry.rootWalk ?? null,
+    refused: wholeTreePopulationRefusal(entry),
+    ciOnly: entry.ciOnly ?? null,
+  }));
   const kindGroups = changeKindGates(paths, resolveInvocation);
   // The pending-changeset section is derived in BOTH input modes and is gated
   // on nothing but the answer itself: the PM's paths are a hypothesis with no
@@ -9265,8 +9638,12 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     // answers once — and it would be the answer the reconciliation is judged
     // against, which is the worst possible place to keep a duplicate.
     const recon = runReconciliation({
-      derived: commandsFor({ matchedRows, kindGroups }),
-      ciOnlyCommands: ciOnlyCommandSet(matchedRows),
+      // The whole-tree channel is DERIVED work, so `--ran` holds the runner to
+      // it exactly as it holds them to a matched family: a declaring gate this
+      // card never ran comes back UNRUN, which is the half of the channel that
+      // makes it a contract rather than a note (#14189).
+      derived: commandsFor({ matchedRows, kindGroups, alwaysRunsRows }),
+      ciOnlyCommands: ciOnlyCommandSet(matchedRows, alwaysRunsRows),
       pendingCommands: new Set(pending.map(({ entry }) => runnableInvocation(entry))),
       record: runRecord,
     });
@@ -9280,12 +9657,14 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       matchedRows,
       kindGroups,
       pending,
+      alwaysRunsRows,
       counts: {
         discovered: byCheck.size,
         workflows: workflows.length,
         matched: matched.size,
         undetermined: undetermined.length,
         silent: silent.length,
+        alwaysRuns: alwaysRuns.length,
         unreachable: unreachable.length,
         swept: swept.length,
       },
@@ -9298,7 +9677,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // the block it counts) and the reconciliation line below. Recomputing it in
   // either place would be two readings of one derivation, which is the drift
   // this card is about.
-  const recon = familyReconciliation({ matchedRows, kindGroups });
+  const recon = familyReconciliation({ matchedRows, kindGroups, alwaysRunsRows });
 
   console.log(`dispatch-gates: ${byCheck.size} check famil(ies) discovered across ${workflows.length} workflow file(s) — derived at runtime, nothing listed in this script.\n`);
   // The tier verdict prints on EVERY run, hit or not. Printing it only on a hit
@@ -9354,6 +9733,16 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   if (kindLines.length) {
     console.log('\nConvention-triggered gates (this change KIND moves them; no path derivation can name them):');
     for (const line of kindLines) console.log(line);
+  }
+
+  // ABOVE the reconciliation and BELOW the two per-card sections, because its
+  // commands are inside that total and its rows are not about this card's
+  // paths. Its own heading is the whole point: the same rows on every card,
+  // said to be the same rows on every card (#14189).
+  const alwaysRunsOut = alwaysRunsPopulationLines(alwaysRunsRows);
+  if (alwaysRunsOut.length) {
+    console.log('');
+    for (const line of alwaysRunsOut) console.log(line);
   }
 
   // Directly BELOW the last section that feeds it, and above everything the
@@ -9427,6 +9816,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     matched: matched.size,
     undetermined: undetermined.length,
     silent: silent.length,
+    alwaysRuns: alwaysRuns.length,
     // Neither declaration reaches them: no workflow `paths:` trigger AND no job
     // `if:` that resolves to a paths-filter population (#12956). Counting only
     // the first would keep printing 'no path derivation can narrow them' about
