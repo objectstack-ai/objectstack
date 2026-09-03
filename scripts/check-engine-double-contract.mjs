@@ -3343,9 +3343,81 @@ function report() {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-engine-double-contract self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'Detection: an unpinned engine fake is found, a pinned one is not flagged.': 5,
+  'Scope: the DRIVER\'s delete(object, id, options) is a different contract': 3,
+  'Shape coverage: the fake shapes this repo actually writes.': 2,
+  'The MOCK CONSTRUCTOR spelling (#8639).': 6,
+  'The DEFAULTED spelling (#9877), driven arm by arm.': 9,
+  'Arity: a fake omits the parameters it ignores (#5629).': 9,
+  'The `update` slice (#5480).': 15,
+  'The SCOPED REPOSITORY, the third shape (#6327, from #5945).': 11,
+  'The CONSUMER SEAMS (#8194)': 20,
+  'The ratchet-remedy authority convention (#8435)': 2,
+  'The INHERITANCE clause (#8553)': 5,
+  'RETAINED (#9680): the pinned population is enumerated, not counted': 3,
+  'The four loss worlds, each separated from its neighbours.': 4,
+  'The clean direction: a ledger that matches the census reports nothing.': 1,
+  'Each loss world reaches its OWN message, and never a neighbour\'s.': 7,
+  'The growth direction. Both spellings, because a new FILE and a new double': 3,
+  'Bootstrap: a missing ledger is ONE error, not one per row. The failure': 1,
+  'DECLARED\'s twin for this ledger: an entry naming a verb no slice scans': 2,
+  'The reason this invariant exists, stated as an assertion: the pinned': 2,
+  'SEAMS_RETAINED (#9708): the seam POPULATION is enumerated, not counted': 4,
+  'The four loss worlds, each separated from its neighbours. (2)': 4,
+  'The clean direction, first: without it every assertion below could pass': 1,
+  'Each loss world reaches its OWN message, and never a neighbour\'s. (2)': 5,
+  'The growth direction — the one measured to fire most often (2 arrivals,': 3,
+  'A MOVE — the shape this population has actually taken twice — must be': 1,
+  'Bootstrap: one error for a missing artifact, not one per seam.': 1,
+  'An entry naming a verb the seam scan never reads can never lose its': 2,
+  'The declaration walker, which is what separates `function-removed` from': 11,
+  'The UNRECOGNISED census (#9747)': 23,
+  'The RECOGNIZER CENSUS (#9943)': 7,
+  '#11626: the DECLARED single-verb double': 14,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 31;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
-  const expect = (label, cond) => { if (!cond) failures.push(label); };
+  const expect = (label, cond) => { registerCase(); if (!cond) failures.push(label); };
 
   const IMPORT = "import { assertEngineDeleteDispatch } from '@objectstack/objectql';\n";
   const engineFake = (deleteBody, header = '') => `${header}
@@ -3360,6 +3432,7 @@ function makeEngine() {
 `;
 
   // ── Detection: an unpinned engine fake is found, a pinned one is not flagged.
+  battery('Detection: an unpinned engine fake is found, a pinned one is not flagged.');
   let d = scanSource('a.test.ts', engineFake('return { ok: true };'));
   expect('finds an unpinned engine double', d.length === 1 && d[0].pinned === false);
 
@@ -3384,6 +3457,7 @@ function makeEngine() {
 
   // ── Scope: the DRIVER's delete(object, id, options) is a different contract
   //    and must not be swept in, or the gate drowns in false positives.
+  battery('Scope: the DRIVER\'s delete(object, id, options) is a different contract');
   const driverFake = `
 const driver = {
   async find(o: string) { return []; },
@@ -3409,6 +3483,7 @@ const driver = {
   expect('an object with no engine siblings is out of scope', scanSource('c.test.ts', bare).length === 0);
 
   // ── Shape coverage: the fake shapes this repo actually writes.
+  battery('Shape coverage: the fake shapes this repo actually writes.');
   const classFake = `${IMPORT}
 class FakeEngine {
   async find(o: string, q?: any) { return []; }
@@ -3438,6 +3513,7 @@ const engine = {
   // drives ONE arm of `unwrapCallImpl`, because this file has already measured
   // what an unfixtured arm is worth: "with only the `new Error` fixture above,
   // neutering the call-expression arm left the self-test GREEN".
+  battery('The MOCK CONSTRUCTOR spelling (#8639).');
   const viFake = (init) => `
 const engine = {
   find: vi.fn(async (o: string) => []),
@@ -3476,6 +3552,7 @@ const engine = {
   // unguarded engine delete behind it. Same discipline as the #8639 block
   // above: one fixture per arm, because an unfixtured arm has already been
   // measured in this file to be worth nothing.
+  battery('The DEFAULTED spelling (#9877), driven arm by arm.');
   d = scanSource('v.test.ts', viFake('overrides.delete ?? vi.fn(async (o: string, opts?: any) => ({ ok: true }))'));
   expect('#9877 — a `??`-defaulted engine delete is in scope', d.length === 1 && d[0].pinned === false);
 
@@ -3548,6 +3625,7 @@ const driver = {
   // cases drive both halves of the sibling evidence that admits them now,
   // because the obvious cheap fix (admit every short-arity delete) is WRONG:
   // fake drivers drop their unused parameters exactly like fake engines do.
+  battery('Arity: a fake omits the parameters it ignores (#5629).');
   const zeroArityEngine = `
 const engine = {
   async find(o: string) { return []; },
@@ -3643,6 +3721,7 @@ const store = {
   // siblings (so it must not count itself), and the driver's `update` carries
   // its primary key in the same second position `delete`'s does but with a
   // payload behind it.
+  battery('The `update` slice (#5480).');
   const U = SLICES.find((s) => s.verb === 'update');
   const UIMPORT = "import { assertEngineUpdateDispatch } from '@objectstack/objectql';\n";
   const engineFakeU = (updateBody, header = '') => `${header}
@@ -3784,6 +3863,7 @@ const driver = {
   // the control does not merely accompany the claim — it is the same object
   // with the evidence removed, which is the only version that can distinguish
   // "the veto fired" from "discovery died".
+  battery('The SCOPED REPOSITORY, the third shape (#6327, from #5945).');
   const repoBody = `
   find: async (query?: any) => [],
   findOne: async (query?: any) => null,
@@ -3904,6 +3984,7 @@ const engine = {
   // is the SAME source with one thing changed, and the control asserts the
   // seam IS found without it.
 
+  battery('The CONSUMER SEAMS (#8194)');
   const ENV = "import { recordNotFoundError } from '@objectstack/core';\n";
   const seamSrc = (body, header = '') => `${header}
 class Ingress {
@@ -4105,6 +4186,7 @@ class Svc {
   // everything would keep (2) green with the convention gone. Its fixture is
   // SYNTHETIC rather than the real message with the marker stripped: derived,
   // it also fired on a rewording and misdescribed the cause.
+  battery('The ratchet-remedy authority convention (#8435)');
   const pinned = pinnedMessage(
     { verb: 'update', symbols: new Set(['assertEngineUpdateDispatch']),
       producer: 'ObjectQL.update', pinCall: 'assertEngineUpdateDispatch(data, options)' },
@@ -4125,6 +4207,7 @@ class Svc {
   // on BOTH ratchet remedies (an author meets whichever one their file's
   // baseline state produces, so a clause on only one of them is a coin flip),
   // and the detector discriminates.
+  battery('The INHERITANCE clause (#8553)');
   expect('#8553 — the PINNED remedy names the inheritance rule, so an author who reaches for '
     + '`Object.assign` can tell whether they satisfied the rule or side-stepped it',
     remedyNamesInheritance(pinned));
@@ -4150,6 +4233,7 @@ class Svc {
   // Driven through the two pure functions the invariant is built from, so all
   // four loss worlds are exercised without creating and deleting real files.
   // `onDisk` and the two censuses are injected for exactly that reason.
+  battery('RETAINED (#9680): the pinned population is enumerated, not counted');
   const LEDGER_OK = true;
   const noDisk = () => false;
   const onDisk = () => true;
@@ -4172,6 +4256,7 @@ class Svc {
       .length === 0);
 
   // ── The four loss worlds, each separated from its neighbours.
+  battery('The four loss worlds, each separated from its neighbours.');
   expect('a file gone from disk classifies as file-removed',
     classifyPinLoss({ onDisk: false, declared: 0, wasPinned: 1 }) === 'file-removed');
   expect('a file on disk declaring no double classifies as double-removed',
@@ -4184,6 +4269,7 @@ class Svc {
   // ── The clean direction: a ledger that matches the census reports nothing.
   // Without this every assertion below could pass on a function that always
   // errors, which is the guard-that-cannot-pass twin of #4118.
+  battery('The clean direction: a ledger that matches the census reports nothing.');
   const cleanLedger = { entries: [{ file: 'a.test.ts', verb: 'delete', pinned: 1 }] };
   const cleanCensus = [{ file: 'a.test.ts', verb: 'delete', pinned: 1 }];
   expect('a ledger matching the census is silent',
@@ -4191,6 +4277,7 @@ class Svc {
       dcount([['a.test.ts', 'delete', 1]]), onDisk).length === 0);
 
   // ── Each loss world reaches its OWN message, and never a neighbour's.
+  battery('Each loss world reaches its OWN message, and never a neighbour\'s.');
   const lostFile = retainedErrors([], cleanLedger, LEDGER_OK, dcount([]), noDisk);
   expect('a deleted test file is reported as a legitimate decrease',
     lostFile.length === 1 && anyOf(lostFile, 'gone from disk')
@@ -4221,6 +4308,7 @@ class Svc {
 
   // ── The growth direction. Both spellings, because a new FILE and a new double
   // in a known file arrive by different routes and only one was in the first draft.
+  battery('The growth direction. Both spellings, because a new FILE and a new double');
   const grewNew = retainedErrors([{ file: 'new.test.ts', verb: 'delete', pinned: 1 }],
     { entries: [] }, LEDGER_OK, dcount([['new.test.ts', 'delete', 1]]), onDisk);
   expect('a newly pinned file the ledger does not record is reported',
@@ -4236,6 +4324,7 @@ class Svc {
   // ── Bootstrap: a missing ledger is ONE error, not one per row. The failure
   // this guards is a fresh checkout reporting one problem per census row for a
   // single missing file.
+  battery('Bootstrap: a missing ledger is ONE error, not one per row. The failure');
   const missing = retainedErrors(
     [{ file: 'a.test.ts', verb: 'delete', pinned: 1 }, { file: 'b.test.ts', verb: 'update', pinned: 1 }],
     { entries: [] }, false, dcount([]), onDisk);
@@ -4244,6 +4333,7 @@ class Svc {
 
   // ── DECLARED's twin for this ledger: an entry naming a verb no slice scans
   // can never lose its pin, so it would record coverage nothing checks.
+  battery('DECLARED\'s twin for this ledger: an entry naming a verb no slice scans');
   const badVerb = retainedErrors([], { entries: [{ file: 'a.test.ts', verb: 'destroy', pinned: 1 }] },
     LEDGER_OK, dcount([]), onDisk);
   expect('a pinned-ledger entry naming an unscanned verb is rejected',
@@ -4255,6 +4345,7 @@ class Svc {
   // population must be enumerated. A ledger holding only a COUNT cannot express
   // the swap that motivated #9680 -- one file loses a pin, another gains one --
   // so the census rows carry identity, and this fails if they ever stop.
+  battery('The reason this invariant exists, stated as an assertion: the pinned');
   expect('census rows carry file identity, not just a total',
     censusPinned(mixedSlices)[0].file === 'a.test.ts'
       && typeof censusPinned(mixedSlices)[0].verb === 'string');
@@ -4272,6 +4363,7 @@ class Svc {
   // every loss world is driven without creating and deleting real files, and
   // each assertion has a control that fails if the predicate under it started
   // approving everything.
+  battery('SEAMS_RETAINED (#9708): the seam POPULATION is enumerated, not counted');
   const seamLedgerOf = (rows) => ({ entries: rows.map(([file, fn, verb, seams]) => ({ file, fn, verb, seams: seams ?? 1 })) });
   const seamCensusOf = (rows) => rows.map(([file, fn, verb, seams]) => ({ file, fn, verb, seams: seams ?? 1 }));
   const declared = () => true;
@@ -4295,6 +4387,7 @@ class Svc {
       .includes('line') === false);
 
   // ── The four loss worlds, each separated from its neighbours.
+  battery('The four loss worlds, each separated from its neighbours. (2)');
   expect('a seam file gone from disk classifies as file-removed',
     classifySeamLoss({ onDisk: false, fnDeclared: false, discovered: 0 }) === 'file-removed');
   expect('a live file no longer declaring the function classifies as function-removed',
@@ -4306,12 +4399,14 @@ class Svc {
 
   // ── The clean direction, first: without it every assertion below could pass
   // on a function that always errors (#4118's twin).
+  battery('The clean direction, first: without it every assertion below could pass');
   const cleanSeamLedger = seamLedgerOf([['a.ts', 'f', 'update']]);
   const cleanSeamCensus = seamCensusOf([['a.ts', 'f', 'update']]);
   expect('a seam ledger matching the census is silent',
     seamsRetainedErrors(cleanSeamCensus, cleanSeamLedger, LEDGER_OK, onDisk, declared).length === 0);
 
   // ── Each loss world reaches its OWN message, and never a neighbour's.
+  battery('Each loss world reaches its OWN message, and never a neighbour\'s. (2)');
   const seamFileGone = seamsRetainedErrors([], cleanSeamLedger, LEDGER_OK, noDisk, notDeclared);
   expect('a deleted source file is reported as a legitimate decrease',
     seamFileGone.length === 1 && anyOf(seamFileGone, 'gone from disk')
@@ -4340,6 +4435,7 @@ class Svc {
 
   // ── The growth direction — the one measured to fire most often (2 arrivals,
   // 0 departures in the 58 days to 2026-08-21).
+  battery('The growth direction — the one measured to fire most often (2 arrivals,');
   const seamNew = seamsRetainedErrors(cleanSeamCensus, seamLedgerOf([]), LEDGER_OK, onDisk, declared);
   expect('a seam the ledger does not record is reported',
     seamNew.length === 1 && anyOf(seamNew, 'does not record it'));
@@ -4353,12 +4449,14 @@ class Svc {
 
   // ── A MOVE — the shape this population has actually taken twice — must be
   // reported from both ends, or a rename reads as a silent swap.
+  battery('A MOVE — the shape this population has actually taken twice — must be');
   const seamMoved = seamsRetainedErrors(seamCensusOf([['b.ts', 'f', 'update']]), cleanSeamLedger,
     LEDGER_OK, onDisk, notDeclared);
   expect('a seam that MOVED file is reported as both a loss and an arrival',
     seamMoved.length === 2 && anyOf(seamMoved, 'a.ts') && anyOf(seamMoved, 'b.ts'));
 
   // ── Bootstrap: one error for a missing artifact, not one per seam.
+  battery('Bootstrap: one error for a missing artifact, not one per seam.');
   const seamMissing = seamsRetainedErrors(
     seamCensusOf([['a.ts', 'f', 'update'], ['b.ts', 'g', 'delete']]),
     seamLedgerOf([]), false, onDisk, declared);
@@ -4367,6 +4465,7 @@ class Svc {
 
   // ── An entry naming a verb the seam scan never reads can never lose its
   // seam, so it would record a population nothing checks.
+  battery('An entry naming a verb the seam scan never reads can never lose its');
   const seamBadVerb = seamsRetainedErrors([], seamLedgerOf([['a.ts', 'f', 'destroy']]),
     LEDGER_OK, onDisk, declared);
   expect('a seam-ledger entry naming an unread verb is rejected',
@@ -4378,6 +4477,7 @@ class Svc {
   // `unrecognised`. Both directions on every shape a LIVE seam takes, because
   // a walker blind to one of them would classify that seam's loss as the
   // quieter story — and the classifier would still look healthy.
+  battery('The declaration walker, which is what separates `function-removed` from');
   const namesOf = (src) => declaredFunctionNames(
     parseSourceFile('d.ts', src, ts.ScriptKind.TS));
   expect('declaredFunctionNames reads a top-level function declaration (`callData`s shape)',
@@ -4416,6 +4516,7 @@ class Svc {
   // a construct that is CORRECTLY out of scope must count as SCOPED OUT, never
   // as unrecognised. #8662 is why -- a correct OUT_OF_SCOPE verdict that reads
   // as noise discredits the whole direction on day one.
+  battery('The UNRECOGNISED census (#9747)');
   const D = SLICES.find((s) => s.verb === 'delete');
   const censusFake = (deleteMember, header = '') => `${header}
 function makeEngine() {
@@ -4624,6 +4725,7 @@ const driver: any = { create: async (o: string, d: any) => d, find: async (o: st
   // proved on both sides -- a census whose kinds silently collapsed into one
   // another would print a confident table and hide the same blind spot the
   // constants did.
+  battery('The RECOGNIZER CENSUS (#9943)');
   const kindsOf = (src) => {
     const sf = parseSourceFile('k.test.ts', src, ts.ScriptKind.TSX);
     const out = [];
@@ -4670,6 +4772,7 @@ const driver: any = { create: async (o: string, d: any) => d, find: async (o: st
   // ENGINE_CONTRACT_NAME. The population fixtures deliberately carry ZERO
   // engine siblings, which is the whole point: before this route the only way
   // in was to pad the double with verbs its test never calls.
+  battery('#11626: the DECLARED single-verb double');
   const CIMPORT = "import type { IDataEngine } from '@objectstack/spec/contracts';\n";
   const UD = SLICES.find((sl) => sl.verb === 'update');
   const DD = SLICES.find((sl) => sl.verb === 'delete');
@@ -4803,6 +4906,51 @@ const driver: any = { create: async (o: string, d: any) => d, find: async (o: st
   expect('#11626 — an UNDECLARED single-verb construct is in neither walk',
     cc2.unrecognised.length === 0 && cc2.scopedOut.length === 0);
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-engine-double-contract --self-test: ${failures.length} failure(s).\n`);

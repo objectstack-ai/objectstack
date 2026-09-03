@@ -9,6 +9,7 @@ import type {
     SendResult,
 } from './channel.js';
 import type { EmailSenderSurface } from './email-channel.js';
+import { RECIPIENT_LOCALE_FIELD, USER_OBJECT, resolveRecipientLocale } from './recipient-locale.js';
 
 /** The object the inbox channel writes rows to. */
 export const INBOX_OBJECT = 'sys_inbox_message';
@@ -43,12 +44,15 @@ export interface InboxChannelOptions {
      */
     getEmail?(): EmailSenderSurface | undefined;
     /**
-     * The recipient locale for `sys_email_template` resolution on the
-     * template path — same lazily-probed deployment-default source as
-     * `EmailChannelOptions.getDefaultTemplateLocale` (#9205), consulted only
-     * when the delivery's payload carries no `locale`.
+     * The DEPLOYMENT DEFAULT locale for `sys_email_template` resolution on
+     * the template path — same lazily-probed source as
+     * `EmailChannelOptions.getDefaultTemplateLocale` (#9205). Since #13881 it
+     * is the second rung under the recipient's own `sys_user.locale`, composed
+     * in `recipient-locale.ts` exactly as the email channel composes it.
      */
     getDefaultTemplateLocale?(): string | undefined;
+    /** User identity object the recipient's locale is read from (default `sys_user`). */
+    userObject?: string;
 }
 
 /**
@@ -66,6 +70,30 @@ export interface InboxChannelOptions {
 export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel {
     const objectName = opts.objectName ?? INBOX_OBJECT;
     const receiptObject = opts.receiptObject ?? RECEIPT_OBJECT;
+    const userObject = opts.userObject ?? USER_OBJECT;
+    const deploymentLocale = (): string | undefined => opts.getDefaultTemplateLocale?.();
+
+    /**
+     * #13881 — the recipient's own `sys_user.locale`, read only on the
+     * template path (the inline path renders no localized row). A failed read
+     * costs the language, never the delivery: warn once and fall to the
+     * deployment default.
+     */
+    async function readRecipientLocale(
+        ctx: MessagingChannelContext,
+        data: IDataEngine,
+        userId: string,
+    ): Promise<unknown> {
+        try {
+            const user = await data.findOne(userObject, { where: { id: userId }, fields: [RECIPIENT_LOCALE_FIELD] });
+            return user?.[RECIPIENT_LOCALE_FIELD];
+        } catch (err) {
+            ctx.logger.warn(
+                `[inbox] locale lookup for '${userId}' failed (${(err as Error).message}); using the deployment default`,
+            );
+            return undefined;
+        }
+    }
     const now = opts.now ?? (() => new Date().toISOString());
 
     /**
@@ -140,9 +168,15 @@ export function createInboxChannel(opts: InboxChannelOptions): MessagingChannel 
                         error: `TEMPLATE_UNSUPPORTED: notify template '${templateName}' needs an email service with renderTemplate(); ${email ? "the registered 'email' service does not provide it" : "no 'email' service is registered"}`,
                     };
                 }
-                const templateLocale = typeof payload.locale === 'string' && payload.locale.trim()
-                    ? payload.locale.trim()
-                    : opts.getDefaultTemplateLocale?.();
+                // Per-recipient locale (#13881): the recipient's own
+                // `sys_user.locale`, else the deployment default — the same
+                // chain the email channel resolves, so one notification cannot
+                // arrive in two languages across channels. `payload.locale` is
+                // no longer consulted.
+                const templateLocale = resolveRecipientLocale(
+                    await readRecipientLocale(ctx, data, userId),
+                    deploymentLocale,
+                );
                 const templateData = (payload.templateData ?? undefined) as Record<string, unknown> | undefined;
                 try {
                     const rendered = await email.renderTemplate({
