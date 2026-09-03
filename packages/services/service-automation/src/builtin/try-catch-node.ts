@@ -13,10 +13,13 @@ import { parseNodeConfig } from './parse-config.js';
  * Runs the protected `try` region; if it throws (a node fails), an optional
  * `retry` policy re-runs the `try` region with exponential backoff. If the
  * region still fails after retries, the optional `catch` region runs with the
- * caught error bound to `errorVariable` (default `$error`). Both regions are
- * self-contained single-entry/single-exit sub-graphs validated at
- * `registerFlow()`, executed in the **enclosing variable scope** via
- * {@link AutomationEngine.runRegion}.
+ * caught error bound to `errorVariable` (default `$error`) — `{ nodeId,
+ * message }`, plus `code` (#14419) when the failing node's own result set a
+ * platform-classified one (e.g. `create_record`'s `DUPLICATE_RECORD`), so the
+ * catch region can branch on `{$error.code}` instead of only ever seeing a
+ * string. Both regions are self-contained single-entry/single-exit sub-graphs
+ * validated at `registerFlow()`, executed in the **enclosing variable scope**
+ * via {@link AutomationEngine.runRegion}.
  *
  * Outcome:
  *  - `try` (or a retry) succeeds → the node succeeds, downstream continues.
@@ -121,6 +124,19 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
       // container still reports `success` when it recovers. Only the record of
       // what happened changes.
       let lastError = 'unknown error';
+      // #14419 — the classified `code` (ADR-0112 `StandardErrorCode`, e.g.
+      // `DUPLICATE_RECORD`) of whichever node inside the try region last
+      // failed, when that node's executor set one. Captured from `$error`
+      // (below) rather than from the caught exception itself: a node that
+      // FAILS BY RETURNING (`{ success: false, code }`, the common shape)
+      // never throws anything carrying `code` — the engine writes it onto the
+      // shared `$error` variable before it converts that returned failure
+      // into the exception this loop catches, and this read happens before
+      // either the next retry attempt or this executor's own `errorVariable`
+      // write (below) can shadow it. Without this, a `try_catch`'s catch
+      // region could never distinguish "the row is already there" from any
+      // other failure — the whole point of #14419.
+      let lastErrorCode: string | undefined;
       const failedAttemptSteps: StepLogEntry[] = [];
       for (let attempt = 0; attempt <= maxRetries; attempt++) {
         if (attempt > 0) {
@@ -154,13 +170,22 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
           };
         } catch (err) {
           lastError = err instanceof Error ? err.message : String(err);
+          const innerError = variables.get('$error');
+          lastErrorCode =
+            innerError && typeof innerError === 'object' && 'code' in innerError
+              ? ((innerError as { code?: unknown }).code as string | undefined)
+              : undefined;
           failedAttemptSteps.push(...attemptSteps);
         }
       }
 
       // The try region (and any retries) failed. Run the catch handler if present.
       if (catchRegion != null) {
-        variables.set(errorVariable, { nodeId: node.id, message: lastError });
+        variables.set(errorVariable, {
+          nodeId: node.id,
+          message: lastError,
+          ...(lastErrorCode ? { code: lastErrorCode } : {}),
+        });
         // #14222: sink for the catch region's OWN partial steps, filled by
         // `runRegion` only if the handler itself throws. Without it the catch
         // region's completed steps unwound with the stack exactly as the try
