@@ -8076,7 +8076,8 @@ export function alwaysRunLines(rows, counts) {
 export function alwaysRunsPopulationLines(rows) {
   if (rows.length === 0) return [];
   const lines = [
-    `Always runs — ${rows.length} famil(ies) DECLARE that their population is the WHOLE TREE, so every card implicates them:`,
+    `Always runs (declared population) — ${rows.length} famil(ies) DECLARE that their population is the WHOLE TREE, so every card` +
+      ' implicates them. ⛔ Not the always-runs STEP tail further down: that one is about workflow steps this derivation names no family for.',
   ];
   for (const row of rows) {
     if (row.refused) {
@@ -8177,7 +8178,7 @@ export function residueLines(
       ` · ${alwaysRuns} always-runs (they DECLARE a whole-tree population, so they are placed by declaration and not by your paths).`,
     `  Those ${alwaysRuns} are not leads and not silences: a gate that reads EVERY file is named on every card, so naming it in the matched` +
       ' column would be a fabricated lead and leaving it silent would be a false clearance. It declares the fact in its own source' +
-      ' (dispatch-gates: whole-tree-population -- <reason>, the inverse of the no-path-population marker above), the declaration is checked' +
+      ' (dispatch-gates: whole-tree-population -- REASON, the inverse of the no-path-population marker above), the declaration is checked' +
       " against a repo-root walk in that same source, and the family is listed under its own always-runs heading with its commands INSIDE" +
       ' this card\'s runnable total.',
     `  ${documentedNoPopulation} of those ${undetermined} undetermined famil(ies) DECLARE that they have no path population, each with its own` +
@@ -9056,6 +9057,7 @@ export function familyReconciliationLines(recon) {
   const lines = [
     `Reconciliation — ${recon.total} famil(ies): this card's WHOLE runnable answer, and the number to assert a harvest against.`,
     `  ${recon.matched} named by PATH (the matched block) + ${recon.convention} named by change KIND (the convention block)` +
+      `${recon.alwaysRunsOnly ? ` + ${recon.alwaysRunsOnly} DECLARED whole-tree (the always-runs block)` : ''}` +
       `${recon.both ? `, ${recon.both} of them the same family reached both ways` : ''} ⇒ ${recon.total} distinct.`,
   ];
   if (recon.conventionOnly > 0) {
@@ -14002,6 +14004,208 @@ function selfTest() {
     declaredNoPathPopulation('// see the dispatch-gates: no-path-population -- marker for how to opt out\n') === null,
   );
 
+  // ── The gate-level WHOLE-TREE declaration (#14189) ────────────────────────
+  //
+  // The marker above says "this gate names no path". This one says the exact
+  // opposite — "this gate reads every path" — and it exists because a gate
+  // whose population is the whole tree had no truthful thing to say: the
+  // honest literal is "every file", which this file's header prices as 22
+  // leads and refuses. Every pin below is paired with the failure it catches;
+  // the placement pins are the discriminating ones, and the mutation that
+  // reddens them is deleting the declaration branch from `placeFamily`.
+  t(
+    'a whole-tree declaration reads its reason back',
+    declaredWholeTreePopulation('// dispatch-gates: whole-tree-population -- it sweeps git ls-files\n')
+      === 'it sweeps git ls-files',
+  );
+  t(
+    'the shell comment spelling is read too (the two markers tolerate the same comment forms, deliberately)',
+    declaredWholeTreePopulation('#!/usr/bin/env bash\n# dispatch-gates: whole-tree-population -- a shell gate reason\n')
+      === 'a shell gate reason',
+  );
+  t('no marker present reads as no declared whole-tree population', declaredWholeTreePopulation('// just a comment\n') === null);
+  t(
+    'the marker with no reason text does not count as declared (the same refusal both other markers make, and for the same reason)',
+    declaredWholeTreePopulation('// dispatch-gates: whole-tree-population\n') === null,
+  );
+  t(
+    'the marker must be its OWN line — prose ABOUT the convention is not a declaration under it',
+    declaredWholeTreePopulation('// see the dispatch-gates: whole-tree-population -- marker for the inverse case\n') === null,
+  );
+  // The two markers are OPPOSITE claims and must never read as each other. A
+  // shared prefix and a sibling regex is exactly the shape where one parser
+  // quietly answers for both.
+  t(
+    'a no-path-population declaration does NOT read as a whole-tree one',
+    declaredWholeTreePopulation('// dispatch-gates: no-path-population -- CI runs the self-test only\n') === null,
+  );
+  t(
+    'and a whole-tree declaration does NOT read as a no-path one',
+    declaredNoPathPopulation('// dispatch-gates: whole-tree-population -- it sweeps git ls-files\n') === null,
+  );
+
+  // The liveness half. Each published spelling is pinned to the shape it was
+  // written for, and each pin names the gate it was read off.
+  t(
+    'limb A reads the git enumeration of the tracked corpus (check-nul-bytes, check-refd-timer-probe, check-closing-keyword-parity)',
+    repoRootWalkSpelling("const out = execFileSync('git', ['ls-files', '-z'], { cwd: root });")
+      === REPO_ROOT_WALK_SPELLINGS[0].label,
+  );
+  t(
+    'limb B reads a walk CALLED on the repo-root binding (check-watch-hint-literal)',
+    repoRootWalkSpelling('const { rows } = audit(walk(REPO_ROOT));') === REPO_ROOT_WALK_SPELLINGS[1].label,
+  );
+  t(
+    'limb C reads a walk whose DEFAULT PARAMETER is the repo-root binding (check-comment-mask-corpus, check-refd-timer-probe)',
+    repoRootWalkSpelling('export function collectSources(root = REPO_ROOT) { return walk(root); }')
+      === REPO_ROOT_WALK_SPELLINGS[2].label,
+  );
+  // The measured tightening. Written to accept a trailing argument, limb B
+  // selected `resolve(REPO_ROOT, maskerPath)` — a path BUILD — and would have
+  // vouched for practically any gate holding a REPO_ROOT constant, which is a
+  // liveness check that cannot fail.
+  t(
+    'a path BUILD off the repo root is not a walk — the root must be the WHOLE argument',
+    repoRootWalkSpelling("const target = resolve(REPO_ROOT, maskerPath);\nconst dir = join(REPO_ROOT, 'scripts');") === null,
+  );
+  // What a gate SAYS is not what it READS — the same normalization
+  // `payloadEnvDependence` applies, and the same two ways to fail it.
+  t(
+    'a gate that only DESCRIBES a whole-tree walk in prose does not pass liveness',
+    repoRootWalkSpelling("// this gate used to run git ls-files over walk(REPO_ROOT)\nconst x = 1;\n") === null,
+  );
+  t(
+    "nor does one whose --self-test body stages a fixture tree (the self-test is not the gate's work)",
+    repoRootWalkSpelling("function selfTest() {\n  execFileSync('git', ['ls-files', '-z'], { cwd: tmp });\n}\n") === null,
+  );
+  // The live specimen for the NEGATIVE direction: a walk seeded at a bounded
+  // subtree. check-self-test-workflow-commands.mjs is exactly this shape, and
+  // it is why #14325's census of six is a census of five here.
+  t(
+    'a walk seeded at a bounded subtree is not a repo-root walk',
+    repoRootWalkSpelling("const scriptsDir = join(ROOT, 'scripts');\nconst files = walkScripts(scriptsDir);") === null,
+  );
+
+  // The refusals — the two contradictions the derivation must not resolve on
+  // the gate's behalf.
+  const wtLive = { wholeTreeReason: 'sweeps the tree', rootWalk: REPO_ROOT_WALK_SPELLINGS[0].label, noPopulationReason: null };
+  t('a family declaring nothing is refused nothing', wholeTreePopulationRefusal({ wholeTreeReason: null }) === null);
+  t('a declaration backed by a root walk stands', wholeTreePopulationRefusal(wtLive) === null);
+  t(
+    'a declaration with NO root walk behind it is refused, and the refusal publishes the recognised spellings',
+    (() => {
+      const why = wholeTreePopulationRefusal({ ...wtLive, rootWalk: null });
+      return typeof why === 'string'
+        && REPO_ROOT_WALK_SPELLINGS.every((sp) => why.includes(sp.label))
+        && why.includes('EVERY card');
+    })(),
+  );
+  t(
+    'declaring BOTH whole-tree and no-path population is a contradiction, refused rather than resolved by a coin toss',
+    (wholeTreePopulationRefusal({ ...wtLive, noPopulationReason: 'CI runs the self-test only' }) ?? '')
+      .includes('BOTH whole-tree-population and no-path-population'),
+  );
+
+  // Placement. These are the pins the mutation reddens: delete the
+  // `wholeTreeReason` branch from `placeFamily` and every one of them fails.
+  const wtEntry = { files: ['scripts/check-nul-bytes.mjs'], hints: ['scripts/check-nul-bytes.mjs'], wholeTreeReason: 'sweeps the tree' };
+  t('a declaring family is placed as always-runs', placeFamily(wtEntry, ['packages/rest/src/server.ts']).verdict === 'always-runs');
+  t(
+    'and its placement does not vary by card — that is the whole claim',
+    ['docs/adr/0001-x.md', 'content/docs/index.mdx', 'scripts/check-nul-bytes.mjs', 'pnpm-workspace.yaml']
+      .every((p) => placeFamily(wtEntry, [p]).verdict === 'always-runs'),
+  );
+  t(
+    'NOT matched even for a card editing the gate\'s own script, where the identity key would otherwise hit',
+    classifyEntry(wtEntry, ['scripts/check-nul-bytes.mjs']).verdict === 'matched'
+      && placeFamily(wtEntry, ['scripts/check-nul-bytes.mjs']).verdict !== 'matched',
+  );
+  t(
+    'NOT silent and NOT undetermined either — the two buckets it used to fall into by accident',
+    !['silent', 'undetermined'].includes(placeFamily(wtEntry, ['packages/rest/src/server.ts']).verdict),
+  );
+  t('a declaring family carries no hits, so no rendering can print a lead for it', placeFamily(wtEntry, ['scripts/check-nul-bytes.mjs']).hits.length === 0);
+  // The byte-identity half, and it is the constraint the card carries: this
+  // channel must not move a single NON-declaring family. `placeFamily`
+  // delegates unchanged, and this pin is what holds it to that.
+  t(
+    'a family that declares nothing is placed byte-for-byte as classifyEntry places it',
+    [
+      { files: ['scripts/check-silent.mjs'], hints: ['packages/spec/src'] },
+      { files: ['scripts/check-empty.mjs'], hints: [] },
+      { files: ['scripts/check-hit.mjs'], hints: ['packages/rest'] },
+    ].every((e) => ['packages/rest/src/server.ts', 'docs/adr/0001-x.md', 'scripts/check-hit.mjs', 'packages/spec/src/index.ts']
+      .every((p) => JSON.stringify(placeFamily(e, [p])) === JSON.stringify(classifyEntry(e, [p])))),
+  );
+
+  // The union and the reconciliation.
+  const wtRow = { check: 'check:nul-bytes', command: 'pnpm check:nul-bytes', workflows: ['lint.yml'], reason: 'sweeps the tree', rootWalk: REPO_ROOT_WALK_SPELLINGS[0].label, refused: null, ciOnly: null };
+  t(
+    'a declaring family IS in the runnable union --commands prints, on a card whose paths reach nothing else',
+    commandsFor({ matchedRows: [], kindGroups: [], alwaysRunsRows: [wtRow] }).includes('pnpm check:nul-bytes'),
+  );
+  t(
+    'a CI-MEASURED declaring family contributes NO command — the exclusion follows the command, not the section',
+    commandsFor({ matchedRows: [], kindGroups: [], alwaysRunsRows: [{ ...wtRow, ciOnly: { env: 'GITHUB_EVENT_PATH' } }] }).length === 0,
+  );
+  const wtRecon = familyReconciliation({
+    matchedRows: [{ check: 'check:x', command: 'pnpm check:x', workflows: [], via: [], ciOnly: null }],
+    kindGroups: [],
+    alwaysRunsRows: [wtRow],
+  });
+  t('the reconciliation counts the whole-tree channel as its own term and still closes', wtRecon.total === 2 && wtRecon.alwaysRuns === 1 && wtRecon.alwaysRunsOnly === 1);
+  t(
+    'and counts a command reached BOTH ways ONCE — the same dedupe the `both` term makes one column over',
+    (() => {
+      const r = familyReconciliation({
+        matchedRows: [{ check: 'check:nul-bytes', command: 'pnpm check:nul-bytes', workflows: [], via: [], ciOnly: null }],
+        kindGroups: [],
+        alwaysRunsRows: [wtRow],
+      });
+      return r.total === 1 && r.alwaysRuns === 1 && r.alwaysRunsOnly === 0;
+    })(),
+  );
+  t(
+    'the reconciliation lines STATE the third term rather than leaving the arithmetic unexplained',
+    familyReconciliationLines(wtRecon).some((l) => l.includes('DECLARED whole-tree (the always-runs block)'))
+      && familyReconciliationLines(wtRecon).some((l) => l.includes('DECLARE that their population is the WHOLE TREE')),
+  );
+
+  // The rendering.
+  const wtLines = alwaysRunsPopulationLines([wtRow]);
+  t('the always-runs section names the gate, its reason and the liveness spelling that vouches for it', wtLines.some((l) => l.includes('pnpm check:nul-bytes') && l.includes('sweeps the tree')) && wtLines.some((l) => l.includes(REPO_ROOT_WALK_SPELLINGS[0].label)));
+  t('and says out loud that these are NOT leads', wtLines.some((l) => l.includes('NOT leads')));
+  t(
+    'its heading cannot be confused with the always-runs STEP tail, which opens on the same three words',
+    wtLines[0].includes('Always runs (declared population)') && wtLines[0].includes('Not the always-runs STEP tail'),
+  );
+  t(
+    'a REFUSED declaration prints as refused rather than vanishing from every rendering',
+    alwaysRunsPopulationLines([{ ...wtRow, refused: 'declares whole-tree-population and its own source carries no recognised repo-root walk' }])
+      .some((l) => l.includes('REFUSED')),
+  );
+  t('no declaring family, no section', alwaysRunsPopulationLines([]).length === 0);
+
+  // The residue partition. A fourth placement wired into the derivation and
+  // not into this sum shrinks the residue silently, which is the exact failure
+  // residueLines' own throw exists to catch.
+  const wtResidue = residueLines({
+    discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 50, alwaysRuns: 5,
+    unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1,
+  });
+  t('the residue accounts for the whole-tree bucket as a fourth term', wtResidue.some((l) => l.includes('5 always-runs')));
+  t(
+    'and REFUSES a derivation that placed families it did not count',
+    (() => {
+      try {
+        residueLines({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 50, alwaysRuns: 0, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
+        return false;
+      } catch (err) {
+        return /residue accounting is short/.test(err.message) && /always-runs/.test(err.message);
+      }
+    })(),
+  );
+
   // ── The followed-module inherited-population declaration (#11556) ─────────
   //
   // The two markers above are a GATE's declarations about itself. This one is a
@@ -14206,6 +14410,36 @@ function selfTest() {
   t(
     'every live declaration carries a non-empty reason',
     declaredEmpty.every(([, e]) => typeof e.noPopulationReason === 'string' && e.noPopulationReason.length > 0),
+  );
+
+  // The live half of the WHOLE-TREE channel (#14189), held to the same
+  // standard and for the same reason: a declaration is a claim about a gate,
+  // so it is graded against the real tree. The direction that costs here is a
+  // declaration that rots into a lie — the gate stops sweeping the tree, keeps
+  // the marker, and a wrong row goes out on every card forever.
+  const declaredWholeTree = [...liveDiscovery.byCheck].filter(([, e]) => e.wholeTreeReason);
+  t(
+    `the live tree carries at least one whole-tree declaration (the guard is not vacuous; found ${declaredWholeTree.length})`,
+    declaredWholeTree.length > 0,
+  );
+  t(
+    'every live whole-tree declaration carries a non-empty reason',
+    declaredWholeTree.every(([, e]) => typeof e.wholeTreeReason === 'string' && e.wholeTreeReason.length > 0),
+  );
+  const wtRefused = declaredWholeTree
+    .map(([c, e]) => [c, wholeTreePopulationRefusal(e)])
+    .filter(([, why]) => why);
+  t(
+    `every live whole-tree declaration is BACKED by a repo-root walk in its own source and contradicts no other marker (refused: ${wtRefused.map(([c]) => c).join(', ') || 'none'})`,
+    wtRefused.length === 0,
+  );
+  // The placement claim, live: whatever card is being derived, a declaring
+  // family is out of all three verdicts. Two unrelated probe surfaces, because
+  // the claim is precisely that the answer does not depend on the card.
+  t(
+    'no live declaring family lands in matched, silent or undetermined for any card',
+    ['packages/rest/src/server.ts', 'docs/adr/0112-x.md', 'scripts/check-nul-bytes.mjs'].every((p) =>
+      declaredWholeTree.every(([, e]) => placeFamily(e, [p]).verdict === 'always-runs')),
   );
 
   // ── The CI-MEASURED-ONLY shape (#14004) ───────────────────────────────────
@@ -17002,6 +17236,15 @@ function selfTest() {
     // no check family runs.
     const seamCard = 'scripts/measure-partial-retirement-annotation.mjs';
     const humanRun = runCli([seamCard]);
+    // The whole-tree channel is in `--commands` and NOT in the matched block
+    // the published snippet harvests, so the two agree only once it is
+    // subtracted (#14189). Read off the REAL rendering, like everything else
+    // in this block: a hardcoded count here would be a second copy of a fact
+    // the tool derives, drifting the day a gate declares or stops declaring.
+    const declaredWholeTreeCommands = (humanText) => (humanText ?? '')
+      .split('\n')
+      .filter((l) => l.includes('   declared whole-tree population — '))
+      .map((l) => l.replace(/^ {2}- (.*?) {3}\[.*$/, '$1'));
     const humanOut = humanRun.stdout ?? '';
     t('the seam card still derives at all', humanRun.status === 0 && humanOut.trim().length > 0);
     // 形 2, in the DEFAULT output. No flag: the footer is the control for
@@ -17031,7 +17274,25 @@ function selfTest() {
       const cmdRows = (cmdRun.stdout ?? '').split('\n').filter(Boolean);
       t('--commands answers', cmdRun.status === 0 && cmdRows.length > 0);
       t('and stdout is commands and NOTHING else — no heading, no annotation, no blank-line block to parse', cmdRows.every((l) => /^(pnpm|node) \S/.test(l)));
-      t('and it agrees exactly with the published snippet on this card', [...cmdRows].sort().join('\n') === [...harvestedRows].sort().join('\n'));
+      // The declaring families are the ONE documented difference between the
+      // two lists on a card no convention kind hits: they are in the union
+      // because every card owes them, and out of the matched block because a
+      // row on every card is not a lead. Subtracted here, and the subtraction
+      // is pinned as NON-EMPTY below so this cannot quietly become a no-op.
+      const seamAlwaysRuns = declaredWholeTreeCommands(humanOut);
+      t(
+        'the whole-tree channel really is on this card, so the subtraction below is not vacuous',
+        seamAlwaysRuns.length > 0 && seamAlwaysRuns.every((c) => cmdRows.includes(c)),
+      );
+      t(
+        'and none of them is in the matched block the snippet harvests — placed by declaration, never as a lead',
+        seamAlwaysRuns.every((c) => !harvestedRows.includes(c)),
+      );
+      const cmdRowsNoAlwaysRuns = cmdRows.filter((l) => !seamAlwaysRuns.includes(l));
+      t(
+        'and it agrees exactly with the published snippet on this card, once the declared whole-tree families are subtracted',
+        [...cmdRowsNoAlwaysRuns].sort().join('\n') === [...harvestedRows].sort().join('\n'),
+      );
       // ⭐ CONTROL 1 and CONTROL 2 as ONE assertion pair, on ONE input. A new
       // mode returning the full list proves nothing on its own if the old
       // harvest would have too — the defect has to still be there for the
@@ -17039,7 +17300,10 @@ function selfTest() {
       const blockRows = harvestedRows.length;
       const oldHarvest = harvestedRows.filter((l) => l.startsWith('pnpm check:')).length;
       t('CONTROL: the OLD one-spelling harvest is still SHORT on this input — the defect is real and untouched', oldHarvest < blockRows);
-      t('CONTROL: and --commands returns the FULL list on that same input', cmdRows.length === blockRows);
+      t(
+        'CONTROL: and --commands returns the FULL list on that same input — the block, plus the whole-tree families the block cannot carry',
+        cmdRows.length === blockRows + seamAlwaysRuns.length,
+      );
       t('and the rows the old harvest drops are exactly the ones spelled the other way', blockRows - oldHarvest === harvestedRows.filter((l) => l.startsWith('node ')).length);
     } finally {
       rmSync(harvestTmp, { recursive: true, force: true });
@@ -17176,7 +17440,12 @@ function selfTest() {
         .filter(Boolean);
       t('the published harvest of the pasted block no longer yields the CI-measured command', harvested.length > 0 && !harvested.includes(guardCommand));
       const cmdRows = (cmdRun.stdout ?? '').split('\n').filter(Boolean);
-      t('--commands omits it too, and the two renderings still agree exactly', !cmdRows.includes(guardCommand) && [...cmdRows].sort().join('\n') === [...harvested].sort().join('\n'));
+      t(
+        '--commands omits it too, and the two renderings still agree exactly once the declared whole-tree families are subtracted',
+        !cmdRows.includes(guardCommand)
+          && [...cmdRows.filter((l) => !declaredWholeTreeCommands(out).includes(l))].sort().join('\n')
+            === [...harvested].sort().join('\n'),
+      );
       t('and every command still on the list is one a dev can actually run here', cmdRows.length > 0 && cmdRows.every((l) => /^(pnpm|node) \S/.test(l)));
       t('the stderr accounting says the omission out loud, where it cannot corrupt the harvest', (cmdRun.stderr ?? '').includes('CI-MEASURED ONLY'));
     } finally {
