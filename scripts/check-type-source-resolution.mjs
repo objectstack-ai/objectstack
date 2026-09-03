@@ -1724,6 +1724,12 @@ function buildFixtureTree() {
   return root;
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-type-source-resolution self-test reached its verdict';
+
 function selfTest() {
   const root = buildFixtureTree();
   const problems = [];
@@ -2062,13 +2068,22 @@ function selfTest() {
     process.exit(1);
   }
   console.log('check-type-source-resolution --self-test OK');
+
+  return SELF_TEST_VERDICT;
 }
 
 // ── entry point ─────────────────────────────────────────────────────────────
 
 const argv = process.argv.slice(2);
 if (argv.includes('--self-test')) {
-  selfTest();
+  if (selfTest() !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ check-type-source-resolution self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
 } else if (argv.includes('--list')) {
   printList(REPO_ROOT);
 } else {
