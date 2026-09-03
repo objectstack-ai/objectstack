@@ -849,6 +849,265 @@ const TRIAGE = new Map([
   }],
 ]);
 
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ * CENSUS_REFUSE_WIDE — REFUSE-WIDE rows #14325's WIDER census found, which
+ * `sweep()` below can never discover (#14695)
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * `TRIAGE` above only ever holds a row `sweep()` can produce on the LIVE tree:
+ * a `const X_ROOTS = ['packages']`-shaped bare literal, invisible to
+ * `extractWatchHints` for the reason this file's own header explains
+ * (`populationSpans` needs a `const`/`let`/`var` NAME matching
+ * `POPULATION_CONSTANT` to even look for a bare word inside it). The rows
+ * below are a DIFFERENT species, found by a WIDER instrument: #14325's
+ * `--residue` + fs-trace census (#14131, PR #14323; the sitting that measured
+ * these is PR #14692) walked every Silent family's ACTUAL file-open footprint
+ * against the live corpus, independent of how — or whether — that family's
+ * OWN source spells a root at all. Most of the twelve below hold no `const`
+ * population literal anywhere in their source; where a bare `'packages'`
+ * word exists (`check:route-envelope`, twice), it is a `join(ROOT,
+ * 'packages')` CALL ARGUMENT, not an assignment `populationSpans` can find a
+ * NAME for. Recording one of these as an ordinary `TRIAGE` row was tried and
+ * self-reverts on this file's own `--self-test`: `sweep()` never produces the
+ * key, so the row reads STALE the instant it lands — "a recorded verdict
+ * outliving its row" — proven on this tree (the failing run is quoted in
+ * #14695's dev report), not merely asserted. So these live in their OWN
+ * table, pinned by their OWN battery below, coupled to nothing `sweep()`
+ * derives — the shrink-only stale/fresh/contradicted machinery over `TRIAGE`
+ * stays exactly as blind to this table as `sweep()` itself is.
+ *
+ * Every row states the SAME trade the REFUSE-WIDE verdict always states —
+ * TRUE and refused for WIDTH, not for falsehood — at the SAME base commit,
+ * `2aa8456cf`, #14325's own measurement used, so a share here is directly
+ * comparable to a `TRIAGE` row's REFUSE-WIDE share above.
+ *
+ * ⚠️ Re-measured HERE rather than copied out of PR #14692's body: that body
+ * (read in full, twice, before this table was written — the saved and the
+ * live copy diff byte-for-byte but for a trailing newline) states an exact
+ * figure for exactly ONE of these twelve, `check:route-envelope` (36.6%,
+ * "2138 undeclared reads"); the other eleven are named with no percentage,
+ * and the body's own bucket table states only the AGGREGATE "14 members,
+ * 32–52%", never a per-member figure. #14695's own triage comment asserts
+ * "Yours are at `2aa8456cf` by the card's own method" — true of the filing
+ * session's own working notes, not of anything this dev session could read:
+ * neither the issue, the PR body, nor its comments carry the other eleven
+ * numbers. Carrying a share that isn't actually recorded anywhere reachable
+ * would be exactly the "defect wearing fresher digits" this file's own
+ * docblock prices as the costlier error, so each share below is INSTEAD
+ * measured fresh, AT THE SAME BASE the filing named — never mixed with a
+ * later tree — which this docblock's own rule reads as the honest resolution
+ * between "carry the numbers" (impossible; they were never available here)
+ * and "silently invent them" (refused by name, repeatedly, above).
+ *
+ * Method: `strace -f -e trace=openat` over that gate's own CLI entrypoint
+ * (`node scripts/check-X.mjs`, its production leg, no flags), run against a
+ * dedicated worktree checked out AT `2aa8456cf`, filtered to `openat` calls
+ * that succeeded and landed on a tracked file under `packages/` (5837 tracked
+ * files at that commit — the same denominator #14695's issue text states).
+ * `openat` traces the SYSCALL, so it counts what the process actually opened
+ * regardless of which Node API did the opening (`readFileSync`,
+ * `execFileSync git ls-files`, the TypeScript parser) — this is the fs-trace
+ * method #14325's own report names ("every enumerating candidate run under an
+ * fs-tracing preload"), at the syscall layer rather than a JS-level shim. A
+ * JS-level shim (monkey-patching `fs.readFileSync`/`fs.promises.readFile` via
+ * `--import`) was tried FIRST and measured EMPTY — 0 reads recorded — against
+ * `check:route-envelope`'s own known-nonzero population, because Node's ESM
+ * binding for a core module's named export does not reliably re-resolve
+ * through a later reassignment of the CJS-compat `fs` object's property; that
+ * false-EMPTY run is why this is `strace`, not a patched `fs`, and it is
+ * recorded here so the same dead end is not re-walked. `check:route-envelope`
+ * traced at 2181 of 5837 tracked `packages/` files opened (37.4%) — within 2%
+ * of PR #14692's cited 2138 "undeclared reads" (36.6%), the gap being that
+ * figure's own subtraction of the handful of route paths this gate ALREADY
+ * spells as literals elsewhere in its source (already visible to
+ * `extractWatchHints`, hence "undeclared" excludes them) — corroborating this
+ * method against the one stated figure available, without reproducing its
+ * bookkeeping term for term.
+ *
+ * ⭐ All FOURTEEN members are recorded below (follow-up to this table's first
+ * sitting, which shipped twelve — #14695's dev report at the time named the
+ * remaining two as an open question, since the issue text's claim that they
+ * were "named in PR #14692's body with their measured shares" did not hold
+ * up against that body's actual text, which states only the aggregate row
+ * above). The filing session (which ran the original census) supplied its
+ * artifacts directly: `check:error-code-provenance` and
+ * `check:objectui-pin-citations`, both `packages/spec`-scoped gates run via
+ * `pnpm --filter @objectstack/spec run check:X`, sitting in that census's own
+ * "root-wide, same class, no ledger row" bucket as members 13 and 14. Their
+ * shares below are RE-MEASURED here by this table's own method (traced fresh
+ * against the `2aa8456cf` worktree), not copied from the filing session's
+ * numbers — the same "carry the base, never mix, measure rather than trust a
+ * secondhand digit" discipline the twelve above already follow. The filing
+ * session's own sitting-1 counts are cited in each row's `why` as a
+ * cross-check, and both land within 1 file of this table's independent
+ * measurement (2070 vs 2069, and an exact 1192 vs 1192) — corroborating the
+ * method a second time, on a `tsx`-run gate rather than a plain `node` one.
+ *
+ * ⚠️ Six of the fourteen below measure OUTSIDE the issue's summarised
+ * "32–52%" range for this bucket: FOUR above it (`check:driver-memory-census`
+ * 91.7%, `check:parse-guard` 90.6%, `check:live-db-isolation` 90.3%,
+ * `check:type-check-coverage`/`check:type-check-debt` 55.8%) and ONE below it
+ * (`check:objectui-pin-citations`, 20.4% — recorded as measured, not forced
+ * into the quoted band). Each is measured on this tree by the SAME method as
+ * every other row here, and the ratio does not change the verdict either
+ * direction — existing `TRIAGE` rows already span 39% (`check:authz-resolver`)
+ * to 99% (`scripts/check-position-name-fold-loaders.mjs`) under the identical
+ * REFUSE-WIDE trade, wide or narrow within that span is still the same
+ * width-alone trade. Recorded as measured rather than clipped to the summary
+ * range; the discrepancy against the issue's own "32–52%" framing is stated
+ * in #14695's dev report for a maintainer to reconcile, not resolved by
+ * quietly rounding the numbers to fit.
+ *
+ * `check:type-check-debt` shares its script (`check-type-check-coverage.mjs`)
+ * and its file-population walk with `check:type-check-coverage`; its own
+ * `--re-measure` mode could not be traced independently on this tree (exit 3,
+ * PREREQUISITE NOT MET — it refuses to run without every ledgered package's
+ * dependency closure built first, which this ledger-bookkeeping card does not
+ * warrant building). The row below carries the SAME measured count as its
+ * sibling for that reason, named explicitly rather than silently duplicated.
+ */
+export const CENSUS_REFUSE_WIDE = new Map([
+  ['check:route-envelope packages', {
+    verdict: 'REFUSE-WIDE',
+    reads: 2181,
+    of: 5837,
+    base: '2aa8456cf',
+    why: 'discoverHonoRoutes() parses every non-test file under packages/ (join(ROOT, \'packages\'), '
+      + 'twice — the walk and the route-module read) looking for a written Hono context response; '
+      + 'traced at 2181 of 5837 tracked files (37.4%). Same class as check:authz-resolver, recorded '
+      + 'REFUSE-WIDE above at 39%: the population is not a subset of the root, it IS the root, so a '
+      + 'declaration would be TRUE and is refused for the same width trade',
+  }],
+  ['check:driver-memory-census packages', {
+    verdict: 'REFUSE-WIDE',
+    reads: 5352,
+    of: 5837,
+    base: '2aa8456cf',
+    why: 'candidateFiles() runs git ls-files over *.ts/*.tsx/*.mts/*.cts/package.json REPO-WIDE, with '
+      + 'no root argument at all — traced at 5352 of 5837 tracked packages/ files (91.7%). The widest '
+      + 'of the twelve: nearer the whole-tree class (check:skill-identifier-liveness, 96%) than the '
+      + 'issue text\'s summarised 32–52%, and refused on the same width-alone ground either way',
+  }],
+  ['check:parse-guard packages', {
+    verdict: 'REFUSE-WIDE',
+    reads: 5289,
+    of: 5837,
+    base: '2aa8456cf',
+    why: 'censusOutside() audits every source file under the root for a direct ts.createSourceFile / '
+      + 'ts.createProgram call outside the two canonical entry points — traced at 5289 of 5837 (90.6%). '
+      + 'A true declaration would name this gate on every card touching a package',
+  }],
+  ['check:live-db-isolation packages', {
+    verdict: 'REFUSE-WIDE',
+    reads: 5269,
+    of: 5837,
+    base: '2aa8456cf',
+    why: 'traced at 5269 of 5837 tracked packages/ files (90.3%), the same whole-tree-adjacent class '
+      + 'as check:driver-memory-census and check:parse-guard above',
+  }],
+  ['check:org-identifier packages', {
+    verdict: 'REFUSE-WIDE',
+    reads: 2211,
+    of: 5837,
+    base: '2aa8456cf',
+    why: 'populationFiles() runs git ls-files over ROOTS = [\'examples\', \'apps\', \'packages\'] — '
+      + 'traced at 2211 of 5837 tracked packages/ files (37.9%), the packages/ share of a walk that '
+      + 'also names two other roots this row does not speak to',
+  }],
+  ['check:startup-registry-verdict packages', {
+    verdict: 'REFUSE-WIDE',
+    reads: 2182,
+    of: 5837,
+    base: '2aa8456cf',
+    why: 'traced at 2182 of 5837 tracked packages/ files (37.4%) — the same non-test TypeScript-source '
+      + 'count as check:wildcard-fallthrough, check:init-service-contract and '
+      + 'check:settings-bind-window below, each walking the identical corpus',
+  }],
+  ['check:wildcard-fallthrough packages', {
+    verdict: 'REFUSE-WIDE',
+    reads: 2182,
+    of: 5837,
+    base: '2aa8456cf',
+    why: 'walk(join(ROOT, \'packages\')) over non-test TypeScript source — traced at 2182 of 5837 '
+      + '(37.4%), the same corpus as check:startup-registry-verdict above',
+  }],
+  ['check:init-service-contract packages', {
+    verdict: 'REFUSE-WIDE',
+    reads: 2182,
+    of: 5837,
+    base: '2aa8456cf',
+    why: 'walk(join(ROOT, \'packages\')) over non-test TypeScript source — traced at 2182 of 5837 '
+      + '(37.4%), the same corpus as check:startup-registry-verdict above',
+  }],
+  ['check:settings-bind-window packages', {
+    verdict: 'REFUSE-WIDE',
+    reads: 2182,
+    of: 5837,
+    base: '2aa8456cf',
+    why: 'walk(join(ROOT, \'packages\')) over non-test TypeScript source — traced at 2182 of 5837 '
+      + '(37.4%), the same corpus as check:startup-registry-verdict above',
+  }],
+  ['check:cli-command-ids packages', {
+    verdict: 'REFUSE-WIDE',
+    reads: 1951,
+    of: 5837,
+    base: '2aa8456cf',
+    why: 'traced at 1951 of 5837 tracked packages/ files (33.4%) via a git ls-files-backed walk over '
+      + 'the tracked corpus, the narrowest of the twelve and still the whole-root trade',
+  }],
+  ['check:type-check-coverage packages', {
+    verdict: 'REFUSE-WIDE',
+    reads: 3255,
+    of: 5837,
+    base: '2aa8456cf',
+    why: 'tsc runs over every ledgered workspace package under the root plus its own DEBT/TEST_DEBT '
+      + 'bookkeeping reads — traced at 3255 of 5837 tracked packages/ files (55.8%), narrowly above '
+      + 'the issue text\'s summarised range and still the same width-alone trade',
+  }],
+  ['check:type-check-debt packages', {
+    verdict: 'REFUSE-WIDE',
+    reads: 3255,
+    of: 5837,
+    base: '2aa8456cf',
+    why: 'shares its script and file-population walk with check:type-check-coverage above (only its '
+      + '--re-measure flag differs); that mode could not be traced independently on this tree — exit '
+      + '3, PREREQUISITE NOT MET, it refuses to run without every ledgered package\'s dependency '
+      + 'closure built first — so this row carries the SAME traced count as its sibling, named rather '
+      + 'than silently duplicated',
+  }],
+  ['check:error-code-provenance packages', {
+    verdict: 'REFUSE-WIDE',
+    reads: 2070,
+    of: 5837,
+    base: '2aa8456cf',
+    why: 'packages/spec/scripts/check-error-code-provenance.ts scans every non-test .ts source under '
+      + 'the (repo-root-relative) packages/ tree for a registered-code stamp site, run via `pnpm '
+      + '--filter @objectstack/spec run check:error-code-provenance` — traced at 2070 of 5837 tracked '
+      + 'packages/ files (35.5%), corroborated by the filing session\'s own sitting-1 census '
+      + '(tracked_reads 2079, undeclared 2077, byRoot.packages 2069 — 1 file apart from this '
+      + 'independent measurement). Squarely inside the issue\'s summarised 32–52% band. The gate '
+      + 'declares 3 hints already (a comment-mask helper and its own ledger file, twice), none of them '
+      + 'a subtree — a true packages/** declaration would name this gate for every card touching any '
+      + 'package, the same width trade as every other row here',
+  }],
+  ['check:objectui-pin-citations packages', {
+    verdict: 'REFUSE-WIDE',
+    reads: 1192,
+    of: 5837,
+    base: '2aa8456cf',
+    why: 'packages/spec/scripts/check-objectui-pin-citations.ts scans spec source for citations '
+      + 'pinned against .objectui-sha, run via `pnpm --filter @objectstack/spec run '
+      + 'check:objectui-pin-citations` — traced at 1192 of 5837 tracked packages/ files (20.4%), an '
+      + 'EXACT match to the filing session\'s own sitting-1 census (tracked_reads 1200, undeclared '
+      + '1200, byRoot.packages 1192). The narrowest of the fourteen, and BELOW the issue\'s summarised '
+      + '32–52% band — recorded as measured rather than forced into the quoted range; the gate '
+      + 'declares no hint at all today, and the population is still the whole non-test packages/ '
+      + 'source tree it walks, so the width trade is unchanged by sitting below the band. The gap '
+      + 'between the earlier report\'s "12 of 14, two unrecorded" and this row is closed here',
+  }],
+]);
+
 // ---------------------------------------------------------------------------
 // The sweep — derived at runtime. Nothing below is listed in this file.
 // ---------------------------------------------------------------------------
@@ -992,6 +1251,16 @@ function report({ wide = false } = {}) {
     `\n${untriaged.length} untriaged row(s). Every verdict above is a judgement recorded once, `
       + 'not a rule; the sweep itself is re-derived from the tree on every run.',
   );
+
+  console.log(
+    `\n${CENSUS_REFUSE_WIDE.size} CENSUS row(s) — found by #14325's wider fs-trace census, not by `
+      + 'the sweep above, and not coupled to it (#14695):',
+  );
+  for (const [key, row] of CENSUS_REFUSE_WIDE) {
+    const pct = ((100 * row.reads) / row.of).toFixed(1);
+    console.log(`  ${row.verdict.padEnd(19)} ${key}   (${row.reads} of ${row.of}, ${pct}%, base ${row.base})`);
+    console.log(`  ${' '.repeat(19)}   ${row.why}`);
+  }
 }
 
 function selfTest() {
@@ -1237,6 +1506,48 @@ function selfTest() {
   t('every verdict is one of the four defined, and carries a stated reason',
     [...TRIAGE.values()].every((v) => VERDICTS.has(v.verdict) && typeof v.why === 'string' && v.why.length > 20));
 
+  // ── CENSUS_REFUSE_WIDE, pinned on its OWN terms (#14695) ──────────────────
+  //
+  // This table is DELIBERATELY not audited by the stale/fresh/contradicted
+  // triple above: `sweep()` cannot produce any of its keys (the docblock on
+  // the table explains why), so asking whether `sweep()`'s output still
+  // matches it is a question with no meaningful answer, not a question this
+  // battery skips out of laziness. What CAN be held mechanically instead:
+  // every row's own internal shape, and that this table never collides with
+  // `TRIAGE`'s key space or contributes a population hint of its own.
+  {
+    const overlap = [...CENSUS_REFUSE_WIDE.keys()].filter((k) => TRIAGE.has(k)).sort();
+    t(`no CENSUS_REFUSE_WIDE key collides with a TRIAGE key${overlap.length
+      ? ` — COLLISION: ${overlap.join(' · ')}. The two tables must stay disjoint: a key in both is `
+        + 'judged by two independent audits that can silently disagree.' : ''}`, overlap.length === 0);
+
+    t('no CENSUS_REFUSE_WIDE key enters this file\'s own hint set as a path',
+      [...CENSUS_REFUSE_WIDE.keys()].every((k) => asHints(k).length === 0));
+
+    const shapeOk = [...CENSUS_REFUSE_WIDE.entries()].every(([k, v]) => (
+      /^check:[\w-]+ packages$/.test(k)
+      && v.verdict === 'REFUSE-WIDE'
+      && Number.isInteger(v.reads) && v.reads > 0
+      && Number.isInteger(v.of) && v.of > 0
+      && v.reads <= v.of
+      && typeof v.base === 'string' && /^[0-9a-f]{7,40}$/.test(v.base)
+      && typeof v.why === 'string' && v.why.length > 20
+    ));
+    t('every CENSUS_REFUSE_WIDE row is well-formed: a `check:<name> packages` key, verdict '
+      + 'REFUSE-WIDE, a positive integer read count no greater than its positive integer '
+      + 'denominator, a base commit spelled as a short hex sha, and a stated reason over 20 chars',
+      shapeOk);
+
+    t('this table judges something', CENSUS_REFUSE_WIDE.size > 0);
+
+    // Every row in this table was measured at the SAME base — mixing bases
+    // silently is exactly what the table's own docblock refuses by name.
+    const bases = new Set([...CENSUS_REFUSE_WIDE.values()].map((v) => v.base));
+    t(`every CENSUS_REFUSE_WIDE row shares one base commit${bases.size > 1
+      ? ` — MIXED: ${[...bases].join(' · ')}. Re-measure every row at one base, or name the base `
+        + 'each row was actually measured at instead of one shared field.' : ''}`, bases.size === 1);
+  }
+
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\nbare-root-worklist --self-test: ${failures.length} failure(s).\n`);
@@ -1250,7 +1561,9 @@ function selfTest() {
       + "hintCovers' own terms. The recogniser is proven to speak and to discriminate (a "
       + 'separator-carrying and a dotted root are both refused as already visible), the '
       + 'constant-name restriction is proven to restrict, and neither the triage keys nor this '
-      + 'file declare any population of their own.',
+      + `file declare any population of their own. ${CENSUS_REFUSE_WIDE.size} CENSUS row(s) `
+      + '(#14695) are well-formed, disjoint from TRIAGE, contribute no hint of their own, and share '
+      + 'one base commit.',
   );
 }
 
