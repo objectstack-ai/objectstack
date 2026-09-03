@@ -288,9 +288,16 @@ authoring organization, NOT NULL.
 
 Under `single` the authoring organization is the Default Organization
 ([ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md); `ensure-default-organization.ts`), which
-becomes **load-bearing**: it exists before the first authenticated write (today it is created on
-`kernel:ready` best-effort; a failure becomes a boot error). Because nothing is seeded, no boot-order
-inversion is needed — the organization only has to exist before a person acts.
+becomes **load-bearing**: it exists before the first write that needs an owner (today it is created on
+`kernel:ready` best-effort; a failure becomes a boot error). The catalog needs no ordering because it is
+never seeded — but **application seed data** (`SeedSchema` datasets: a showcase's accounts, business
+units, sample records) still is, and today lands `organization_id = NULL` on a first boot because the
+organization does not exist yet (`seed-loader.ts::resolveSoleOrganizationId` correctly finds none; the
+`seed-tenancy-backfill` migration exists for exactly that residue). Two rules close it: the Default
+Organization is created **before** application seed datasets load under `single`, and the seed loader's
+exemption of `sys_` / `cloud_` / `ai_` seeds from stamping ("intentionally global") is withdrawn — there
+are no platform-global seeds left; a seeded `sys_business_unit` is the organization's business unit
+(D9 derives the owner; #14547 is this defect seen from the sharing side).
 
 An organization has no rows until it authors something. A fresh deployment with ten organizations
 has **no catalog tables at all** and empty assignment tables until an admin assigns someone.
@@ -654,7 +661,7 @@ One epic tracks the family. C0 lands before 17.3; every other card is on the **v
 | # | Card | Decisions | Blocked by |
 |---|---|---|---|
 | C0 | Revert the unreleased ADR-0126 flow machinery (#12296, #12419, #12156) so 17.3 does not publish it | D6, D14 | ADR merge; **before 17.3** |
-| C1 | Default Organization load-bearing under `single`; `resolveSystemInsertOrganization` derives it, refuses elsewhere | D3, D9, D11 | ADR merge |
+| C1 | Default Organization load-bearing under `single` and created before application seed datasets load; the seed loader stamps every seed (the `sys_` exemption withdrawn); `resolveSystemInsertOrganization` derives it, refuses elsewhere | D3, D9, D11 | ADR merge |
 | C2 | Catalog resolution reads the registry; assignment tables reference by name (id→name columns + rewrite); dangling-name boot report; every reader of the four catalog tables enumerated and converted | D2, D3, D4 | ADR merge |
 | C3 | Retire the seeders, the per-organization catalog machinery and the four catalog objects; built-ins and audience anchors as declared metadata; Setup catalog creation = environment metadata write under `single`, refused under a wall; platform-admin grant row owned by the Default Organization | D2, D3, D5, D13 | C1, C2 |
 | C4 | Templates: `sendTemplate` resolves the registry; seed and provenance stamp retired; door closed; customized-rows ruling applied | D6, D10 | ADR merge (+ §6 Q1) |
