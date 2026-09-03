@@ -360,7 +360,7 @@ import {
   symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, dirname, relative, resolve } from 'node:path';
+import * as nodePath from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -1176,7 +1176,7 @@ export function extractCheckInvocations(workflowText, workflowFile) {
     for (const m of cmd.matchAll(SELF_TEST_INVOCATION)) {
       const script = m[1];
       // Already admitted above, under its bare path key. See the docblock.
-      if (basename(script).includes('check-')) continue;
+      if (nodePath.basename(script).includes('check-')) continue;
       out.push({
         // The flag is part of the KEY because it is part of the runnable
         // command: `node scripts/pm/bare-root-worklist.mjs` on its own prints
@@ -2099,7 +2099,7 @@ export function resolveCheckToFiles(checkName, scriptsMap, { dir = '' } = {}) {
   // cannot both be returned.
   const out = new Set();
   for (const m of cmd.matchAll(/((?:\.\.\/)*scripts\/[\w./-]+\.(?:mjs|cjs|js|sh|ts|mts|cts))(?![\w-])/g)) {
-    const tracked = join(dir, m[1]);
+    const tracked = nodePath.join(dir, m[1]);
     // Climbed clear of the repo root: unnameable as a tracked path, so it is
     // not a lead at all.
     if (tracked === '..' || tracked.startsWith('../')) continue;
@@ -2799,7 +2799,7 @@ export function isNonPathNamespace(literal) {
  * `hintCovers` as the sole predicate.
  */
 export function resolveModuleRelativeHint(literal, scriptPath, { root = ROOT } = {}) {
-  const rel = relative(root, resolve(join(root, dirname(scriptPath)), literal));
+  const rel = nodePath.relative(root, nodePath.resolve(nodePath.join(root, nodePath.dirname(scriptPath)), literal));
   if (!rel || rel === '..' || rel.startsWith('../')) return null;
   return rel;
 }
@@ -3440,16 +3440,16 @@ export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}
   const specifiers = new Set();
   for (const m of body.matchAll(IMPORT_FROM_SPECIFIER)) specifiers.add(m[2]);
   for (const m of body.matchAll(SIDE_EFFECT_IMPORT)) specifiers.add(m[2]);
-  const here = dirname(join(root, scriptPath));
+  const here = nodePath.dirname(nodePath.join(root, scriptPath));
   const targets = new Set();
   for (const specifier of specifiers) {
     if (!specifier.startsWith('./') && !specifier.startsWith('../')) continue;
-    const rel = relative(root, resolve(here, specifier));
+    const rel = nodePath.relative(root, nodePath.resolve(here, specifier));
     // One test, three refusals: a path that escapes the repo, one that lands
     // at the root, and one in any other tree all fail to start with scripts/.
     if (!rel.startsWith('scripts/')) continue;
     if (rel.split('/').includes('node_modules')) continue;
-    const abs = join(root, rel);
+    const abs = nodePath.join(root, rel);
     // A specifier that resolves to nothing is a specifier, not a module: the
     // extension-less spellings ESM does not resolve, and the ../<rel> shapes a
     // module body carries as illustration, both land here.
@@ -6028,7 +6028,7 @@ export function inTreeScratchDirs({ cwd = ROOT, files = null } = {}) {
   for (const rel of list) {
     let source;
     try {
-      source = readFileSync(join(cwd, rel), 'utf8');
+      source = readFileSync(nodePath.join(cwd, rel), 'utf8');
     } catch {
       continue;
     }
@@ -6910,7 +6910,7 @@ const CODE_CONSTANT_BINDING =
 /** The file's text, or null when there is nothing on disk to read. */
 function readTrackedSource(path) {
   try {
-    return readFileSync(join(ROOT, path), 'utf8');
+    return readFileSync(nodePath.join(ROOT, path), 'utf8');
   } catch {
     return null;
   }
@@ -7028,7 +7028,7 @@ export function findI18nBundlePackages(configs) {
  */
 let i18nConfigs = null;
 function i18nExtractConfigs() {
-  i18nConfigs ??= findExtractConfigs(join(ROOT, 'packages'), 'packages');
+  i18nConfigs ??= findExtractConfigs(nodePath.join(ROOT, 'packages'), 'packages');
   return i18nConfigs;
 }
 
@@ -7044,7 +7044,7 @@ export function i18nBundlePackageDirs() {
  */
 let formModules = null;
 export function metadataFormModulePaths() {
-  formModules ??= findMetadataFormModules(join(ROOT, 'packages'), 'packages');
+  formModules ??= findMetadataFormModules(nodePath.join(ROOT, 'packages'), 'packages');
   return formModules;
 }
 
@@ -7074,7 +7074,7 @@ export function metadataFormsSurfaceIsExtracted() {
  * turns the throw into a non-zero exit.
  */
 export function rootTsconfigExcludeEntries() {
-  const raw = readFileSync(join(ROOT, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  const raw = readFileSync(nodePath.join(ROOT, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
   let parsed;
   try {
     parsed = JSON.parse(raw);
@@ -8507,10 +8507,10 @@ export function tierLines(result) {
  * the only other caller, and it calls THIS.
  */
 export function discoverFamilies({ tree = watchHintTree() } = {}) {
-  const wfDir = join(ROOT, '.github/workflows');
+  const wfDir = nodePath.join(ROOT, '.github/workflows');
   const workflows = readdirSync(wfDir).filter((f) => /\.ya?ml$/.test(f));
   if (workflows.length === 0) throw new Error('no workflow files found under .github/workflows');
-  const rootScripts = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
+  const rootScripts = JSON.parse(readFileSync(nodePath.join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
 
   const invocations = [];
   // The `paths:` each workflow declares, read from the SAME text the check
@@ -8529,7 +8529,7 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   // states what the family list does not cover.
   const workflowEntries = [];
   for (const wf of workflows) {
-    const text = readFileSync(join(wfDir, wf), 'utf8');
+    const text = readFileSync(nodePath.join(wfDir, wf), 'utf8');
     workflowEntries.push({ file: wf, text });
     invocations.push(...extractCheckInvocations(text, wf));
     triggerPathsByWorkflow.set(wf, extractTriggerPaths(text));
@@ -8574,7 +8574,7 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
       // package-scoped check: resolve through that package's manifest when findable
       const pkgDirGuess = entry.filter.replace(/^@objectstack\//, '');
       for (const base of ['packages', 'packages/plugins', 'packages/drivers', 'packages/services']) {
-        const p = join(ROOT, base, pkgDirGuess, 'package.json');
+        const p = nodePath.join(ROOT, base, pkgDirGuess, 'package.json');
         if (existsSync(p)) {
           const pkgScripts = JSON.parse(readFileSync(p, 'utf8')).scripts ?? {};
           // The manifest's own directory goes IN, and tracked paths come back
@@ -8583,7 +8583,7 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
           // was measured to misattribute exactly that spelling to the package
           // (#12107; resolveCheckToFiles' docblock carries the measurement).
           files = files.concat(
-            resolveCheckToFiles(entry.check, pkgScripts, { dir: join(base, pkgDirGuess) }),
+            resolveCheckToFiles(entry.check, pkgScripts, { dir: nodePath.join(base, pkgDirGuess) }),
           );
         }
       }
@@ -8613,7 +8613,7 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
       // revisions of a file, the same discipline the trigger paths take above.
       // A module that declares nothing contributes everything it spells, which
       // is the behaviour every followed module had before the marker existed.
-      const source = readFileSync(join(ROOT, rel), 'utf8');
+      const source = readFileSync(nodePath.join(ROOT, rel), 'utf8');
       const spelled = extractWatchHints(source, rel, { tree });
       const declared = declaredInheritedPopulation(source, spelled);
       moduleHints.set(rel, declared ? declared.population : spelled);
@@ -8633,7 +8633,7 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
       let population = [];
       const dir = rel.slice(0, Math.max(0, rel.length - 'package.json'.length - 1));
       try {
-        const manifest = JSON.parse(readFileSync(join(ROOT, rel), 'utf8'));
+        const manifest = JSON.parse(readFileSync(nodePath.join(ROOT, rel), 'utf8'));
         const exportsMap = manifest?.exports;
         if (dir && exportsMap && typeof exportsMap === 'object' && Object.keys(exportsMap).length > 0) {
           const src = `${dir}/src`;
@@ -8672,7 +8672,7 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     entry.hintOrigin = new Map();
     entry.hintEdge = new Map();
     for (const f of entry.files) {
-      const abs = join(ROOT, f);
+      const abs = nodePath.join(ROOT, f);
       if (!existsSync(abs)) continue;
       // ONE read, FOUR answers now — the hints, the gate's own no-population
       // declaration, the first-party modules it imports, and the program files
@@ -10492,7 +10492,7 @@ export function bannerLines({ identity, paths = [], drift = null }) {
     `  Families are a property of THAT repo. A card landing in another repo derives nothing here — assert with ${REPO_FLAG} to make this checkable.`,
   ];
   lines.push(...driftLines(drift));
-  const missing = paths.filter((p) => !p.includes('*') && !existsSync(join(identity?.root ?? ROOT, p)));
+  const missing = paths.filter((p) => !p.includes('*') && !existsSync(nodePath.join(identity?.root ?? ROOT, p)));
   if (missing.length > 0) {
     lines.push(
       `  ${missing.length} of ${paths.length} path(s) are absent from this tree: ${missing.slice(0, 6).join(' ')}${missing.length > 6 ? ' …' : ''}`,
@@ -10700,7 +10700,7 @@ function selfTest() {
     '…and it resolves to a file that EXISTS, which is what a flagged key would have broken',
     liveSelfTestFamilies
       .filter(([c]) => c === 'scripts/pm/bare-root-worklist.mjs --self-test')
-      .every(([, e]) => (e.files ?? []).length === 1 && existsSync(join(ROOT, e.files[0]))),
+      .every(([, e]) => (e.files ?? []).length === 1 && existsSync(nodePath.join(ROOT, e.files[0]))),
   );
   // The import narrowing, proven NON-VACUOUS: the module this gate imports
   // really does declare literals, and they really would have reached the tree.
@@ -10709,10 +10709,10 @@ function selfTest() {
   const bareRootEntry = liveSelfTestFamilies.find(([c]) => c === 'scripts/pm/bare-root-worklist.mjs --self-test')?.[1];
   const importedByBareRoot = firstPartyImportTargets(
     'scripts/pm/bare-root-worklist.mjs',
-    readFileSync(join(ROOT, 'scripts/pm/bare-root-worklist.mjs'), 'utf8'),
+    readFileSync(nodePath.join(ROOT, 'scripts/pm/bare-root-worklist.mjs'), 'utf8'),
   );
   const wouldHaveInherited = importedByBareRoot.flatMap((m) =>
-    extractWatchHints(readFileSync(join(ROOT, m), 'utf8'), m),
+    extractWatchHints(readFileSync(nodePath.join(ROOT, m), 'utf8'), m),
   );
   t(
     `the refused inheritance is real — the modules this gate imports declare ${wouldHaveInherited.length} literal(s)`,
@@ -10730,7 +10730,7 @@ function selfTest() {
   // and this measures it through the follow's rule rather than through the raw
   // extractor the case above uses.
   const inheritableFromImports = importedByBareRoot.flatMap((m) => {
-    const src = readFileSync(join(ROOT, m), 'utf8');
+    const src = readFileSync(nodePath.join(ROOT, m), 'utf8');
     const spelled = extractWatchHints(src, m);
     return declaredInheritedPopulation(src, spelled)?.population ?? spelled;
   });
@@ -10770,11 +10770,11 @@ function selfTest() {
   for (const [check, entry] of discoverFamilies().byCheck) {
     if (entry.selfTest) continue;
     for (const f of entry.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
-      const src = readFileSync(join(ROOT, f), 'utf8');
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
+      const src = readFileSync(nodePath.join(ROOT, f), 'utf8');
       for (const mod of firstPartyImportTargets(f, src)) {
         if (!promoted.includes(mod)) continue;
-        const lost = extractWatchHints(readFileSync(join(ROOT, mod), 'utf8'), mod);
+        const lost = extractWatchHints(readFileSync(nodePath.join(ROOT, mod), 'utf8'), mod);
         if (lost.length > 0) subtracted.push(`${check} <- ${mod} (${lost.join(', ')})`);
       }
     }
@@ -10797,8 +10797,8 @@ function selfTest() {
   for (const [check, e] of importClassFamilies) {
     const edges = new Set();
     for (const f of e.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
-      for (const mod of firstPartyImportTargets(f, readFileSync(join(ROOT, f), 'utf8'))) {
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
+      for (const mod of firstPartyImportTargets(f, readFileSync(nodePath.join(ROOT, f), 'utf8'))) {
         if ((e.files ?? []).includes(mod)) continue;
         edges.add(mod);
       }
@@ -10867,8 +10867,8 @@ function selfTest() {
   // the sizes. A red here re-prices the paragraph; it does not fault the
   // derivation.
   const everyPRWorkflow = new Map();
-  for (const wf of readdirSync(join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) {
-    const wfText = readFileSync(join(ROOT, '.github/workflows', wf), 'utf8');
+  for (const wf of readdirSync(nodePath.join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) {
+    const wfText = readFileSync(nodePath.join(ROOT, '.github/workflows', wf), 'utf8');
     // No `paths:` on a workflow that declares `pull_request` is the same
     // reading `discoverFamilies` makes when it drops such a workflow from
     // `triggers` — an unfiltered workflow discriminates nothing, which is
@@ -10923,7 +10923,7 @@ function selfTest() {
   //    match while `existsSync` kept the file closed and the family kept
   //    reading zero hints. Measured on this tree at the fix: 0 phantoms.
   const phantomGateFiles = tsLiveFamilies.flatMap(([check, e]) =>
-    (e.files ?? []).filter((f) => !existsSync(join(ROOT, f))).map((f) => `${check} -> ${f}`),
+    (e.files ?? []).filter((f) => !existsSync(nodePath.join(ROOT, f))).map((f) => `${check} -> ${f}`),
   );
   t(
     `every gate file the derivation names exists on disk${phantomGateFiles.length ? ` — PHANTOM: ${phantomGateFiles.join(' · ')}` : ''}`,
@@ -10950,7 +10950,7 @@ function selfTest() {
   //    zero-file family is one of those composites — never that the count is
   //    zero, which would mean this fix had absorbed a family it cannot honestly
   //    resolve.
-  const rootScriptsMap = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
+  const rootScriptsMap = JSON.parse(readFileSync(nodePath.join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
   const zeroFile = tsLiveFamilies.filter(([, e]) => (e.files ?? []).length === 0);
   const unexplained = zeroFile
     .map(([check]) => [check, rootScriptsMap[check] ?? ''])
@@ -10978,10 +10978,10 @@ function selfTest() {
     if (entry.selfTest) continue;
     for (const f of entry.files ?? []) {
       if (/\.(?:ts|mts|cts)$/.test(f)) continue;
-      if (!existsSync(join(ROOT, f))) continue;
-      for (const mod of firstPartyImportTargets(f, readFileSync(join(ROOT, f), 'utf8'))) {
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
+      for (const mod of firstPartyImportTargets(f, readFileSync(nodePath.join(ROOT, f), 'utf8'))) {
         if (!admittedTs.includes(mod)) continue;
-        const lost = extractWatchHints(readFileSync(join(ROOT, mod), 'utf8'), mod);
+        const lost = extractWatchHints(readFileSync(nodePath.join(ROOT, mod), 'utf8'), mod);
         if (lost.length > 0) tsSubtracted.push(`${check} <- ${mod} (${lost.join(', ')})`);
       }
     }
@@ -11315,7 +11315,7 @@ function selfTest() {
       if (!ANCHOR_CENSUS_EXTENSIONS.test(rel)) continue;
       let text;
       try {
-        text = readFileSync(join(ROOT, rel), 'utf8');
+        text = readFileSync(nodePath.join(ROOT, rel), 'utf8');
       } catch {
         continue;
       }
@@ -11337,7 +11337,7 @@ function selfTest() {
       const rel = census.get(key);
       if (!rel) continue;
       const name = key.slice(rel.length + 2);
-      const src = readFileSync(join(ROOT, rel), 'utf8');
+      const src = readFileSync(nodePath.join(ROOT, rel), 'utf8');
       const alt = withoutAnchor(src, name);
       if (alt === null || compoundAnchorDecls(alt).length !== compoundAnchorDecls(src).length - 1) {
         costly.push(`${key} (the counterfactual rename did not land — this row was NOT measured)`);
@@ -11367,7 +11367,7 @@ function selfTest() {
   // rename that "fixes" either one has to move the ledger row rather than the
   // problem.
   {
-    const selfCensus = compoundAnchorDecls(readFileSync(join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8'));
+    const selfCensus = compoundAnchorDecls(readFileSync(nodePath.join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8'));
     const names = selfCensus.map((d) => d.name);
     t("this module's own masker is in the anchor's population", names.includes('maskSelfTests'));
     t('…and so is the reachability helper beside it', names.includes('selfTestOnlyCallables'));
@@ -11415,7 +11415,7 @@ function selfTest() {
   // directions, so a future edit that deletes the file or empties its
   // declaration cannot leave this green by vacuity.
   const rehearsalPath = 'scripts/pm/release-rehearsal-clone.mjs';
-  const rehearsalAbs = join(ROOT, rehearsalPath);
+  const rehearsalAbs = nodePath.join(ROOT, rehearsalPath);
   t('the fixture-in-helper specimen is still on the tree', existsSync(rehearsalAbs));
   if (existsSync(rehearsalAbs)) {
     const rehearsalHints = extractWatchHints(readFileSync(rehearsalAbs, 'utf8'), rehearsalPath);
@@ -11636,7 +11636,7 @@ function selfTest() {
     'the live spec gate binds the package root the card names',
     packageRootBinding(
       'packages/spec/scripts/check-generated.ts',
-      readFileSync(join(ROOT, 'packages/spec/scripts/check-generated.ts'), 'utf8'),
+      readFileSync(nodePath.join(ROOT, 'packages/spec/scripts/check-generated.ts'), 'utf8'),
       hintTree,
     ) === 'packages/spec',
   );
@@ -11720,7 +11720,7 @@ function selfTest() {
   // LIVE, on this tree: the specimen the card was filed for, driven through
   // `hintCovers` — never through `collapseHint` and never re-implemented.
   const liveSchemaHints = extractWatchHints(
-    readFileSync(join(ROOT, 'packages/spec/scripts/build-schemas.ts'), 'utf8'),
+    readFileSync(nodePath.join(ROOT, 'packages/spec/scripts/build-schemas.ts'), 'utf8'),
     'packages/spec/scripts/build-schemas.ts',
   );
   t(
@@ -12098,19 +12098,19 @@ function selfTest() {
   // gates stops declaring its root, re-point the case at whatever gate then
   // does". Left pointing at the gate it would have gone green over an empty
   // hint list, which is the vacuous-pass shape these cases exist to refuse.
-  const crossPkgHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/cross-package-test-inputs.mjs'), 'utf8'), 'scripts/cross-package-test-inputs.mjs');
+  const crossPkgHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/cross-package-test-inputs.mjs'), 'utf8'), 'scripts/cross-package-test-inputs.mjs');
   // NOT `scripts/check-nul-bytes.mjs`: that gate names that file explicitly
   // too, so the case would pass with the declaration still refused — measured,
   // it survived the ablation. Pick a scripts path reachable ONLY through the
   // declared subtree, or the case pins nothing.
   t('the cross-package declaration table reaches the root scripts dir it declares', crossPkgHints.some((h) => hintCovers(h, 'scripts/pm/dispatch-gates.mjs')));
   t('and the content tree it declares', crossPkgHints.some((h) => hintCovers(h, 'content/docs/getting-started/index.mdx')));
-  const governedHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-governed-merges.mjs'), 'utf8'), 'scripts/pm/check-governed-merges.mjs');
+  const governedHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/pm/check-governed-merges.mjs'), 'utf8'), 'scripts/pm/check-governed-merges.mjs');
   t('the governed-merge gate reaches the published skills catalog it declares', governedHints.some((h) => hintCovers(h, 'skills/objectstack-upgrade/SKILL.md')));
 
   // The card this landed for: the ONLY fragment coverage in the repo, which
   // scored `silent` for every content card while being REQUIRED in lint.yml.
-  const anchorHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'), 'scripts/check-doc-anchors.mjs');
+  const anchorHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'), 'scripts/check-doc-anchors.mjs');
   t('the doc-anchors gate reaches the content page population it declares', anchorHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
   t('and does not thereby claim a path outside that population', !anchorHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
 
@@ -12122,7 +12122,7 @@ function selfTest() {
   // populated `names:` column, which reads as "declared, just not relevant to
   // you" rather than as a blind spot — the reason it survived five same-class
   // fixes without being noticed.
-  const docAuthoringHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-authoring.mjs'), 'utf8'), 'scripts/check-doc-authoring.mjs');
+  const docAuthoringHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/check-doc-authoring.mjs'), 'utf8'), 'scripts/check-doc-authoring.mjs');
   // One case per declared root, because a single one passes for a declaration
   // that dropped the other three — which is the exact shape being fixed. Each
   // path is reachable ONLY through its root's subtree spelling, never through a
@@ -12172,7 +12172,7 @@ function selfTest() {
   // lint.yml — twice at the cost of a p0's CI round (#9391, PR #9695). It now
   // declares the subtree it lints. Read from the real gate, not a fixture: what
   // is being pinned is that the tree still HAS the declaration.
-  const slotHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-slot-lookup-ratchet.mjs'), 'utf8'), 'scripts/check-slot-lookup-ratchet.mjs');
+  const slotHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/check-slot-lookup-ratchet.mjs'), 'utf8'), 'scripts/check-slot-lookup-ratchet.mjs');
   t('the slot-lookup ratchet reaches the package source population it declares', slotHints.some((h) => hintCovers(h, 'packages/services/service-datasource/src/admin-routes.ts')));
   // The negative half is the load-bearing one for a declaration this broad: a
   // gate named on EVERY card is the louder version of naming none. `packages/**`
@@ -12190,7 +12190,7 @@ function selfTest() {
   // zero gates, on the largest ceiling in that map at headroom 0. It declares
   // the subtree spelling instead. Read from the real gate, not a fixture: what
   // is pinned is that the tree still HAS the declaration.
-  const lineRatchetHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-skill-line-ratchet.mjs'), 'utf8'), 'scripts/pm/check-skill-line-ratchet.mjs');
+  const lineRatchetHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/pm/check-skill-line-ratchet.mjs'), 'utf8'), 'scripts/pm/check-skill-line-ratchet.mjs');
   t('the pm line ratchet reaches the repo-root instruction file it declares', lineRatchetHints.some((h) => hintCovers(h, 'AGENTS.md')));
   // The negative half, and the reason this is a DECLARATION rather than an
   // extractor change. Widening the extractor to admit bare top-level `*.md`
@@ -12226,7 +12226,7 @@ function selfTest() {
     ['the doc-anchors gate (ARCHITECTURE.md half)', 'scripts/check-doc-anchors.mjs', 'ARCHITECTURE.md'],
   ];
   for (const [what, gate, rootFile] of rootFileDeclarations) {
-    const gateHints = extractWatchHints(readFileSync(join(ROOT, gate), 'utf8'), gate);
+    const gateHints = extractWatchHints(readFileSync(nodePath.join(ROOT, gate), 'utf8'), gate);
     t(`${what} reaches the repo-root file it declares (${rootFile})`, gateHints.some((h) => hintCovers(h, rootFile)));
     // The negative half, and the reason each of these is a DECLARATION rather
     // than an extractor change: a declaration must buy its own file and NOT the
@@ -12238,9 +12238,9 @@ function selfTest() {
   // …and the root files stay separated from each other: the governed-merge
   // register is the only one of the six that declares two, and nothing here may
   // reach a root file its gate does not read.
-  const proseHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-governed-prose.mjs'), 'utf8'), 'scripts/pm/check-governed-prose.mjs');
+  const proseHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/pm/check-governed-prose.mjs'), 'utf8'), 'scripts/pm/check-governed-prose.mjs');
   t('a one-root declaration does not reach the other root file', !proseHints.some((h) => hintCovers(h, 'CLAUDE.md')));
-  const anchorRootHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'), 'scripts/check-doc-anchors.mjs');
+  const anchorRootHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'), 'scripts/check-doc-anchors.mjs');
   t('and the doc-anchors pair claims neither instruction file', !anchorRootHints.some((h) => hintCovers(h, 'AGENTS.md') || hintCovers(h, 'CLAUDE.md')));
 
   // A THIRD shape of the same class, and the one with the worst failure
@@ -12264,7 +12264,7 @@ function selfTest() {
   // delete the case together with the literal — never keep it green by
   // re-pointing it at a tree the gate never reads.
   const llmsHints = extractWatchHints(
-    readFileSync(join(ROOT, 'packages/spec/scripts/check-llms-txt.ts'), 'utf8'),
+    readFileSync(nodePath.join(ROOT, 'packages/spec/scripts/check-llms-txt.ts'), 'utf8'),
     'packages/spec/scripts/check-llms-txt.ts',
   );
   const llmsReaches = (f) => llmsHints.some((h) => hintCovers(h, f));
@@ -12308,7 +12308,7 @@ function selfTest() {
   // still HAS the declaration. If this gate stops walking that root, delete the
   // declaration and these cases together — never keep them green by re-pointing
   // at a gate that never read it.
-  const roleWordHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-role-word.mjs'), 'utf8'), 'scripts/check-role-word.mjs');
+  const roleWordHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/check-role-word.mjs'), 'utf8'), 'scripts/check-role-word.mjs');
   t('the role-word ratchet reaches the published skills catalog it declares', roleWordHints.some((h) => hintCovers(h, 'skills/objectstack-platform/SKILL.md')));
   t('and still reaches the content half it always named', roleWordHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
   // The negative halves, and the reason this is a DECLARATION and not an
@@ -12346,7 +12346,7 @@ function selfTest() {
   //
   // Read from the real gate, not a fixture: what is pinned is that the tree
   // still HAS the declaration.
-  const docFormulaHints = extractWatchHints(readFileSync(join(ROOT, 'packages/lint/scripts/check-doc-formula-expressions.mjs'), 'utf8'), 'packages/lint/scripts/check-doc-formula-expressions.mjs');
+  const docFormulaHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'packages/lint/scripts/check-doc-formula-expressions.mjs'), 'utf8'), 'packages/lint/scripts/check-doc-formula-expressions.mjs');
   // One case per declared root, because a single one passes for a declaration
   // that dropped the other two. Each path is reachable ONLY through its root's
   // subtree spelling, never through a SKIP_PATHS literal.
@@ -13217,7 +13217,7 @@ function selfTest() {
   // case still passes (it asserts discovery, not the YAML style); if the gate
   // moves out of pr-automation.yml, re-point the case at its new home rather
   // than deleting it.
-  const liveWf = readFileSync(join(ROOT, '.github/workflows/pr-automation.yml'), 'utf8');
+  const liveWf = readFileSync(nodePath.join(ROOT, '.github/workflows/pr-automation.yml'), 'utf8');
   const liveInvs = extractCheckInvocations(liveWf, 'pr-automation.yml').map((i) => i.check);
   t('the live Check Changeset job discovers its ADR-0087 gate', liveInvs.includes('scripts/check-adr-0087-registration.mjs'));
   t('the live Check Changeset job discovers its empty-changeset gate', liveInvs.includes('scripts/check-empty-changeset.mjs'));
@@ -13226,7 +13226,7 @@ function selfTest() {
   // gate through the ordinary watch-hint match. That gate names `.changeset` in
   // its own source, so this asserts the whole chain (discover -> resolve ->
   // hint -> cover) rather than the parser alone.
-  const adrHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-adr-0087-registration.mjs'), 'utf8'), 'scripts/check-adr-0087-registration.mjs');
+  const adrHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/check-adr-0087-registration.mjs'), 'utf8'), 'scripts/check-adr-0087-registration.mjs');
   t('a .changeset path is covered by the ADR-0087 gate own hints', adrHints.some((h) => hintCovers(h, '.changeset/some-breaking-change.md')));
 
   // ── The measured population (#8478), against the REAL scripts ─────────────
@@ -13242,7 +13242,7 @@ function selfTest() {
   // check-adr-0087-registration 34 -> 6, check-skill-id-lint 2 -> 2 (already
   // clean, the control). Across all 66 discoverable gate scripts: 1144 hints ->
   // 473, with no hint gained that any repo path can reach.
-  const readHints = (rel) => extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'), rel);
+  const readHints = (rel) => extractWatchHints(readFileSync(nodePath.join(ROOT, rel), 'utf8'), rel);
   const covers = (hs, p) => hs.some((h) => hintCovers(h, p));
 
   t(
@@ -13353,7 +13353,7 @@ function selfTest() {
   );
   // The shared module is a real file, so the two claims above are live rather
   // than a pair of matching strings.
-  t('the declared shared module exists', existsSync(join(ROOT, SHARED)));
+  t('the declared shared module exists', existsSync(nodePath.join(ROOT, SHARED)));
 
   // The same coupling once more, for the frame-sync gate whose COPIES table
   // the 2026-08-20 clause-① narrowing made a DEFINING input of the tier
@@ -13366,7 +13366,7 @@ function selfTest() {
     'the dispatch-gates gate declares the frame-sync module the tier mandate is defined against',
     covers(readHints('scripts/pm/check-dispatch-gates.mjs'), FRAME),
   );
-  t('the declared frame-sync module exists', existsSync(join(ROOT, FRAME)));
+  t('the declared frame-sync module exists', existsSync(nodePath.join(ROOT, FRAME)));
 
   // The same shape again, for the TYPE-registry edge of walkMetadataForms
   // (#9144) — two specific, known files rather than a runtime-enumerated
@@ -13391,8 +13391,8 @@ function selfTest() {
   );
   // Both declared paths are real files, so the four claims above are live
   // rather than a pair of matching strings.
-  t('the declared type registry module exists', existsSync(join(ROOT, TYPE_REGISTRY)));
-  t('the declared form registry module exists', existsSync(join(ROOT, FORM_REGISTRY)));
+  t('the declared type registry module exists', existsSync(nodePath.join(ROOT, TYPE_REGISTRY)));
+  t('the declared form registry module exists', existsSync(nodePath.join(ROOT, FORM_REGISTRY)));
 
   // ── A family's OWN script files as match keys (#8509) ─────────────────────
   //
@@ -13427,7 +13427,7 @@ function selfTest() {
   // gate whose entire job is running that script's self-test names the script
   // there and nowhere in the script's source, which is why the identity key is
   // the only thing that can reach it.
-  const liveRootScripts = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
+  const liveRootScripts = JSON.parse(readFileSync(nodePath.join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
   const selfTestGateFiles = resolveCheckToFiles('check:changeset-gate-self-tests', liveRootScripts);
   t('the changeset self-test gate really resolves to the script the card named', selfTestGateFiles.includes('scripts/check-empty-changeset.mjs'));
   t(
@@ -13658,7 +13658,7 @@ function selfTest() {
   // different answer from the LIVE one. If the console job is renamed or its
   // filter re-spelled, re-point these cases — do not delete them: they are the
   // measured statement that a pin bump derives its own gates.
-  const liveCiPops = jobPathPopulations(readFileSync(join(ROOT, '.github/workflows/ci.yml'), 'utf8'), 'ci.yml');
+  const liveCiPops = jobPathPopulations(readFileSync(nodePath.join(ROOT, '.github/workflows/ci.yml'), 'utf8'), 'ci.yml');
   const livePinJob = liveCiPops.find((p) => p.checks.includes('check:console-sha'));
   t('the live console job is found by the gate it runs', Boolean(livePinJob));
   t('and it is named Console Pin Gate — the name branch protection and the Checks tab use', livePinJob?.name === 'Console Pin Gate');
@@ -13732,7 +13732,7 @@ function selfTest() {
   // this (a `packages/objectql/**` path, which is NOT in the list at all — the
   // job ran because that PR also touched a path that is). If this workflow is
   // renamed or its gates move, re-point these cases; do not delete them.
-  const livenessWf = readFileSync(join(ROOT, '.github/workflows/spec-liveness-check.yml'), 'utf8');
+  const livenessWf = readFileSync(nodePath.join(ROOT, '.github/workflows/spec-liveness-check.yml'), 'utf8');
   const livenessTriggers = extractTriggerPaths(livenessWf);
   t('the liveness workflow really declares a path filter', livenessTriggers.length > 0);
   const livenessFamilies = extractCheckInvocations(livenessWf, 'spec-liveness-check.yml').map((i) => i.check);
@@ -13781,8 +13781,8 @@ function selfTest() {
   // "every name in the table is a family the workflows really run", and it needs
   // the live population to mean anything.
   const liveFamilies = new Set();
-  for (const wf of readdirSync(join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) {
-    for (const i of extractCheckInvocations(readFileSync(join(ROOT, '.github/workflows', wf), 'utf8'), wf)) {
+  for (const wf of readdirSync(nodePath.join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) {
+    for (const i of extractCheckInvocations(readFileSync(nodePath.join(ROOT, '.github/workflows', wf), 'utf8'), wf)) {
       liveFamilies.add(i.check);
     }
   }
@@ -13831,7 +13831,7 @@ function selfTest() {
   const APPS_TEST = 'apps/docs/src/x.test.ts';                      // no tracked member today
   t('the gate is discovered with hints at all, so these cases are not vacuous', (xpkgEntry?.hints ?? []).length > 0);
   t('both residue specimens are real tracked files, so the negatives are live rather than a pair of matching strings',
-    existsSync(join(ROOT, OUTSIDE_PACKAGES)) && existsSync(join(ROOT, TSX_TEST)));
+    existsSync(nodePath.join(ROOT, OUTSIDE_PACKAGES)) && existsSync(nodePath.join(ROOT, TSX_TEST)));
   t('the hint route really does reach an ordinary packages test file — the redundancy #12300 recovered is real',
     covers(xpkgEntry.hints, 'packages/spec/src/x.test.ts'));
   t('but no hint of this gate reaches a test file outside packages/**', !covers(xpkgEntry.hints, OUTSIDE_PACKAGES));
@@ -13901,11 +13901,11 @@ function selfTest() {
   const REF = ['origin', 'main'].join('/');
   const refSpellers = [ratchetEntries.get(QOE), ratchetEntries.get(WM)]
     .flatMap((e) => e.files ?? [])
-    .filter((f) => existsSync(join(ROOT, f)) && readFileSync(join(ROOT, f), 'utf8').includes(`'${REF}'`));
+    .filter((f) => existsSync(nodePath.join(ROOT, f)) && readFileSync(nodePath.join(ROOT, f), 'utf8').includes(`'${REF}'`));
   t(`both ratchet sources still spell ${REF} (${refSpellers.length}), so the next case is about the extractor and not a missing literal`,
     refSpellers.length === 2);
   t(`…and not one of them yields it as a hint, which is why no row here may name it`,
-    refSpellers.every((f) => !extractWatchHints(readFileSync(join(ROOT, f), 'utf8'), f).includes(REF)));
+    refSpellers.every((f) => !extractWatchHints(readFileSync(nodePath.join(ROOT, f), 'utf8'), f).includes(REF)));
 
   // ── The check-family coverage guard (#9187) ───────────────────────────────
   //
@@ -14312,7 +14312,7 @@ function selfTest() {
   // that it holds for THIS module — the one measured specimen. Delete the
   // marker line and these cases redden instead of 2632 fabricated pairs coming
   // back silently for the next gate that imports the tool.
-  const ownToolSource = readFileSync(join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8');
+  const ownToolSource = readFileSync(nodePath.join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8');
   const ownDeclared = declaredInheritedPopulation(ownToolSource);
   // Read through `?.` on purpose: deleting the marker line must render as a
   // NAMED failing case, not as a TypeError that aborts the run and takes every
@@ -14362,7 +14362,7 @@ function selfTest() {
     .filter((f) => f.startsWith('scripts/') && /\.(mjs|mts|js|sh)$/.test(f))
     // Read from the MODULE BODY, so the fixture markers above — which live
     // inside this very self-test — are not counted as live declarations.
-    .filter((f) => INHERITED_POPULATION_MARKER.test(maskSelfTests(readFileSync(join(ROOT, f), 'utf8'))))
+    .filter((f) => INHERITED_POPULATION_MARKER.test(maskSelfTests(readFileSync(nodePath.join(ROOT, f), 'utf8'))))
     .sort();
   t(
     `exactly the two priced modules in the scripts tree carry the declaration (${declaringModules.join(' · ') || 'none'})`,
@@ -14481,7 +14481,7 @@ function selfTest() {
   // way, and the whole classification is about THAT file.
   t(
     'LIVE: the queue guard\'s own source still carries the payload dependence this reads',
-    payloadEnvDependence(readFileSync(join(ROOT, 'scripts/pm/check-governed-queue-guard.mjs'), 'utf8')) === 'GITHUB_EVENT_PATH',
+    payloadEnvDependence(readFileSync(nodePath.join(ROOT, 'scripts/pm/check-governed-queue-guard.mjs'), 'utf8')) === 'GITHUB_EVENT_PATH',
   );
 
   // limb 2, both directions. It selects 43 families on this tree ALONE, so
@@ -14587,7 +14587,7 @@ function selfTest() {
   // A pin whose specimen is chosen by iteration order can be true of the tree
   // and silent about the rule.
   const liveGateFiles = new Set([...liveDiscovery.byCheck.values()].flatMap((e) => e.files ?? []));
-  const liveSource = (rel) => readFileSync(join(ROOT, rel), 'utf8');
+  const liveSource = (rel) => readFileSync(nodePath.join(ROOT, rel), 'utf8');
   // A followed module's hints AS A FOLLOWER RECEIVES THEM. `discoverFamilies`
   // reads `declaredInheritedPopulation` at this seam (`hintsOfModule`), so a
   // reconstruction that re-scanned the raw literals instead would redden for
@@ -14660,7 +14660,7 @@ function selfTest() {
     const direct = [];
     const manifests = [];
     for (const f of entry.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
       const source = liveSource(f);
       own.push(...extractWatchHints(source, f, { tree: liveTree }));
       for (const mod of firstPartyImportTargets(f, source)) {
@@ -14728,7 +14728,7 @@ function selfTest() {
   const gateModuleEdges = [];
   for (const [check, entry] of liveDiscovery.byCheck) {
     for (const f of entry.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
       for (const mod of liveTargets(f)) {
         if (liveGateFiles.has(mod) && !(entry.files ?? []).includes(mod)) gateModuleEdges.push([check, mod]);
       }
@@ -14851,7 +14851,7 @@ function selfTest() {
   for (const [check, entry] of liveDiscovery.byCheck) {
     const expected = [];
     for (const f of entry.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
       for (const r of readProgramTargetsInSource(f, liveSource(f), (x) => liveTree.files.has(x))) {
         if (!expected.includes(r)) expected.push(r);
       }
@@ -14894,7 +14894,7 @@ function selfTest() {
   const dataReads = [];
   for (const [check, entry] of liveDiscovery.byCheck) {
     for (const f of entry.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
       for (const r of anchoredReadTargets(f, liveSource(f), (x) => liveTree.files.has(x))) {
         if (!PROGRAM_TEXT_TARGET.test(r)) dataReads.push(`${check} <- ${r}`);
       }
@@ -15037,7 +15037,7 @@ function selfTest() {
     const expected = [];
     if (!entry.selfTest) {
       for (const f of entry.files ?? []) {
-        if (!existsSync(join(ROOT, f))) continue;
+        if (!existsSync(nodePath.join(ROOT, f))) continue;
         for (const r of spawnedProgramTargets(f, liveSource(f), (x) => liveTree.files.has(x))) {
           if (!liveGateFiles.has(r) && !expected.includes(r)) expected.push(r);
         }
@@ -15058,7 +15058,7 @@ function selfTest() {
   const runGateEdges = [];
   for (const [check, entry] of liveDiscovery.byCheck) {
     for (const f of entry.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
       for (const r of spawnedProgramTargets(f, liveSource(f), (x) => liveTree.files.has(x))) {
         if (liveGateFiles.has(r) && !(entry.files ?? []).includes(r)) runGateEdges.push([check, r]);
       }
@@ -15274,7 +15274,7 @@ function selfTest() {
     const expected = [];
     if (!entry.selfTest) {
       for (const f of entry.files ?? []) {
-        if (!existsSync(join(ROOT, f))) continue;
+        if (!existsSync(nodePath.join(ROOT, f))) continue;
         for (const p of packageManifestTargets(f, liveSource(f), (x) => liveTree.files.has(x))) {
           if (!expected.includes(p)) expected.push(p);
         }
@@ -15295,7 +15295,7 @@ function selfTest() {
   const manifestNonReaders = [];
   for (const [check, entry] of liveDiscovery.byCheck) {
     for (const f of entry.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
       const source = liveSource(f);
       const bare = anchoredReadTargets(f, maskSelfTests(source), (x) => liveTree.files.has(x)).filter((x) =>
         /(?:^|\/)package\.json$/.test(x),
@@ -15409,7 +15409,7 @@ function selfTest() {
   const CLI_TEST_SPECIMEN = 'packages/cli/test/authoring-rule-command-parity.test.ts';
   t(
     'both CLI specimens are real tracked files, so the two directions below are live',
-    existsSync(join(ROOT, CLI_SRC_SPECIMEN)) && existsSync(join(ROOT, CLI_TEST_SPECIMEN)),
+    existsSync(nodePath.join(ROOT, CLI_SRC_SPECIMEN)) && existsSync(nodePath.join(ROOT, CLI_TEST_SPECIMEN)),
   );
   for (const check of ['check:i18n', 'check:i18n-coverage']) {
     const cliEntry = liveDiscovery.byCheck.get(check);
@@ -15427,10 +15427,10 @@ function selfTest() {
   // family or declares why not. This is what actually fails CI the day a new
   // paths-filtered workflow adds an undiscoverable verification step and
   // forgets both halves of the fix.
-  const liveWfDir = join(ROOT, '.github/workflows');
+  const liveWfDir = nodePath.join(ROOT, '.github/workflows');
   const liveWorkflowEntries = readdirSync(liveWfDir)
     .filter((f) => /\.ya?ml$/.test(f))
-    .map((file) => ({ file, text: readFileSync(join(liveWfDir, file), 'utf8') }));
+    .map((file) => ({ file, text: readFileSync(nodePath.join(liveWfDir, file), 'utf8') }));
   t('the live tree has at least one paths-filtered workflow (the guard is not vacuous)', liveWorkflowEntries.some((e) => extractTriggerPaths(e.text).length > 0));
   const liveGaps = checkFamilyCoverageGaps(liveWorkflowEntries);
   t(`every real paths-filtered workflow discovers a check family or declares why not (gaps: ${liveGaps.join(', ') || 'none'})`, liveGaps.length === 0);
@@ -15690,7 +15690,7 @@ function selfTest() {
   // be gone from the file the derivation actually reads.
   const misparsedFamilySources = ['scripts/release-github-releases.mjs', 'scripts/check-skill-frame-freshness.mjs'];
   for (const rel of misparsedFamilySources) {
-    const famHints = extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'), rel);
+    const famHints = extractWatchHints(readFileSync(nodePath.join(ROOT, rel), 'utf8'), rel);
     t(`${rel} no longer declares a phantom population`, !famHints.some(isNonPathNamespace));
   }
   // The live pin that the repair CHANGED the verdict: neither family may sit in
@@ -15699,7 +15699,7 @@ function selfTest() {
   // `undetermined` ("names no path at all"), which is the honest bucket.
   const liveSweepEntries = [];
   for (const rel of misparsedFamilySources) {
-    liveSweepEntries.push([rel, fam(extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'), rel))]);
+    liveSweepEntries.push([rel, fam(extractWatchHints(readFileSync(nodePath.join(ROOT, rel), 'utf8'), rel))]);
   }
   t('the repaired families declare no population at all, so the sweep skips them', unreachableFamilies([...liveSweepEntries, ['check:anchor', fam(['packages/spec/src'])]], liveCorpus).length === 0);
   // The same live pin for the @-scope refusal (#13312): the two families whose
@@ -15709,7 +15709,7 @@ function selfTest() {
   const packageLedgerFamilySources = ['scripts/check-driver-memory-census.mjs', 'scripts/check-test-completeness.mjs'];
   const ledgerSweepEntries = [];
   for (const rel of packageLedgerFamilySources) {
-    const famHints = extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'), rel);
+    const famHints = extractWatchHints(readFileSync(nodePath.join(ROOT, rel), 'utf8'), rel);
     t(`${rel} no longer declares a phantom package-name population`, !famHints.some((h) => h.startsWith('@')));
     ledgerSweepEntries.push([rel, fam(famHints)]);
   }
@@ -15915,7 +15915,7 @@ function selfTest() {
   t('a family naming only the pre-mode file is NOT pending — a new changeset is not that file', !pendingNames.includes('check:invented-pre-mode-gate'));
   t('a family naming an unrelated tree is NOT pending', !pendingNames.includes('check:invented-unrelated-gate'));
   t('nor is one whose source names no path at all — undetermined is not pending', !pendingNames.includes('check:invented-undetermined-gate'));
-  t('and the probe path itself is the hypothetical one, never a file on disk', !existsSync(join(ROOT, CHANGESET_PROBE_PATH)));
+  t('and the probe path itself is the hypothetical one, never a file on disk', !existsSync(nodePath.join(ROOT, CHANGESET_PROBE_PATH)));
   // The subtraction: when the input really carries a changeset these families
   // are in the matched list already, and printing them twice would make two
   // sections claim different things about the same lead.
@@ -16009,11 +16009,11 @@ function selfTest() {
   // mandates nothing while reading as protection — the incident class itself.
   t('the mandatory table is not empty (the guard below is not vacuous)', MANDATORY_TIER_GLOBS.length > 0);
   const deadGlobs = MANDATORY_TIER_GLOBS.filter(
-    (g) => !existsSync(join(ROOT, g.glob.replace(/\*\*?/g, '').replace(/\/+$/, ''))),
+    (g) => !existsSync(nodePath.join(ROOT, g.glob.replace(/\*\*?/g, '').replace(/\/+$/, ''))),
   );
   t(`every declared mandatory glob names a path this tree really has (dead: ${deadGlobs.map((g) => g.glob).join(', ') || 'none'})`, deadGlobs.length === 0);
   t('every declared glob carries the tier it mandates and a reason', MANDATORY_TIER_GLOBS.every((g) => g.glob && g.tier && g.why));
-  t('the incident file is a real file, so the references NON-mandate is a live claim and not a fixture', existsSync(join(ROOT, '.claude/skills/pm-dispatch/references/review-checklist.md')));
+  t('the incident file is a real file, so the references NON-mandate is a live claim and not a fixture', existsSync(nodePath.join(ROOT, '.claude/skills/pm-dispatch/references/review-checklist.md')));
   // The frame-copy half of the mandate is DEFINED by check:skill-frame-sync's
   // COPIES table (the 2026-08-20 ruling's own wording), so the coupling is
   // pinned mechanically: a copy added to that gate without a matching mandate
@@ -16025,7 +16025,7 @@ function selfTest() {
     [
       '--input-type=module',
       '-e',
-      `const m = await import(${JSON.stringify(pathToFileURL(join(ROOT, 'scripts/check-skill-frame-sync.mjs')).href)}); console.log(JSON.stringify([...new Set(m.COPIES.map((c) => c.file))]));`,
+      `const m = await import(${JSON.stringify(pathToFileURL(nodePath.join(ROOT, 'scripts/check-skill-frame-sync.mjs')).href)}); console.log(JSON.stringify([...new Set(m.COPIES.map((c) => c.file))]));`,
     ],
     { encoding: 'utf8', cwd: ROOT },
   );
@@ -16062,7 +16062,7 @@ function selfTest() {
   // Same liveness guards as the mandatory table: dead data reading as
   // protection is the incident class itself.
   const deadSuspects = SUSPECT_TIER_GLOBS.filter(
-    (g) => !existsSync(join(ROOT, g.glob.replace(/\*\*?/g, '').replace(/\/+$/, ''))),
+    (g) => !existsSync(nodePath.join(ROOT, g.glob.replace(/\*\*?/g, '').replace(/\/+$/, ''))),
   );
   t(`every declared suspect glob names a path this tree really has (dead: ${deadSuspects.map((g) => g.glob).join(', ') || 'none'})`, deadSuspects.length === 0);
   t('the suspect table is not empty and every entry carries its reason', SUSPECT_TIER_GLOBS.length > 0 && SUSPECT_TIER_GLOBS.every((g) => g.glob && g.why));
@@ -16115,13 +16115,13 @@ function selfTest() {
       const stack = [root];
       while (stack.length > 0) {
         const rel = stack.pop();
-        const abs = join(base, rel);
+        const abs = nodePath.join(base, rel);
         if (!existsSync(abs)) {
           sites.push(`${rel} (MISSING)`);
           continue;
         }
         if (statSync(abs).isDirectory()) {
-          for (const name of readdirSync(abs)) stack.push(join(rel, name));
+          for (const name of readdirSync(abs)) stack.push(nodePath.join(rel, name));
           continue;
         }
         scanned += 1;
@@ -16153,8 +16153,8 @@ function selfTest() {
       .split('\n')
       .findIndex((l) => l.includes('CONTRACT_REVIEW_TIER') && l.includes(CONTRACT_REVIEW_TIER)) + 1;
   const tierRoots = [
-    dirname(MANDATORY_TIER_GLOBS.find((g) => g.glob === '.claude/skills/pm-dispatch/SKILL.md')?.glob ?? ''),
-    dirname(tierOwnRel),
+    nodePath.dirname(MANDATORY_TIER_GLOBS.find((g) => g.glob === '.claude/skills/pm-dispatch/SKILL.md')?.glob ?? ''),
+    nodePath.dirname(tierOwnRel),
   ];
   const tierScan = tierValueSites(ROOT, tierRoots, CONTRACT_REVIEW_TIER);
   t(
@@ -16179,7 +16179,7 @@ function selfTest() {
   // file is absent from the derived set would pass just as happily against a
   // fixture that never reproduced the incident — so the same tree is diffed the
   // WRONG way in the same breath, and the sibling has to show up there.
-  const gitTmp = mkdtempSync(join(tmpdir(), 'dispatch-gates-git-'));
+  const gitTmp = mkdtempSync(nodePath.join(tmpdir(), 'dispatch-gates-git-'));
   try {
     const g = (args, cwd) => {
       const r = spawnSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], {
@@ -16190,8 +16190,8 @@ function selfTest() {
       return (r.stdout ?? '').trim();
     };
     const write = (repo, rel, text) => {
-      mkdirSync(dirname(join(repo, rel)), { recursive: true });
-      writeFileSync(join(repo, rel), text);
+      mkdirSync(nodePath.dirname(nodePath.join(repo, rel)), { recursive: true });
+      writeFileSync(nodePath.join(repo, rel), text);
     };
     const commit = (repo, rel, msg) => {
       write(repo, rel, `${msg}\n`);
@@ -16200,7 +16200,7 @@ function selfTest() {
     };
 
     // Scenario: branch cut, THEN a sibling PR lands on the base branch.
-    const up = join(gitTmp, 'up');
+    const up = nodePath.join(gitTmp, 'up');
     mkdirSync(up, { recursive: true });
     g(['init', '--initial-branch=main', '.'], up);
     commit(up, 'packages/spec/base.ts', 'root');
@@ -16243,7 +16243,7 @@ function selfTest() {
 
     // A branch that changes nothing derives an EMPTY set rather than the
     // base branch history — the CLI turns that into a refusal, not "no gates".
-    const onBase = join(gitTmp, 'on-base');
+    const onBase = nodePath.join(gitTmp, 'on-base');
     mkdirSync(onBase, { recursive: true });
     g(['init', '--initial-branch=main', '.'], onBase);
     commit(onBase, 'packages/spec/only.ts', 'root');
@@ -16254,10 +16254,10 @@ function selfTest() {
     // graft, merge-base exits 1 EMPTY and the three-dot diff exits 128, while
     // the two-dot form exits 0 with the inflated list. So the derivation must
     // refuse — and must not quietly become the two-dot form it replaced.
-    const shallow = join(gitTmp, 'shallow');
+    const shallow = nodePath.join(gitTmp, 'shallow');
     spawnSync('git', ['clone', '--quiet', '--no-single-branch', '--depth', '1', `file://${up}`, shallow], { encoding: 'utf8' });
     let shallowErr = null;
-    if (existsSync(join(shallow, '.git'))) {
+    if (existsSync(nodePath.join(shallow, '.git'))) {
       g(['checkout', '-B', 'feature', 'origin/feature'], shallow);
       t('the shallow fixture really is a shallow checkout', g(['rev-parse', '--is-shallow-repository'], shallow) === 'true');
       try {
@@ -16314,10 +16314,10 @@ function selfTest() {
     //
     // The repo's REAL `.gitignore` is copied in rather than an excerpt written
     // here: an excerpt would pin the excerpt.
-    const ignoreRepo = join(gitTmp, 'ignore-coverage');
+    const ignoreRepo = nodePath.join(gitTmp, 'ignore-coverage');
     mkdirSync(ignoreRepo, { recursive: true });
     g(['init', '--initial-branch=main', '.'], ignoreRepo);
-    write(ignoreRepo, '.gitignore', readFileSync(join(ROOT, '.gitignore'), 'utf8'));
+    write(ignoreRepo, '.gitignore', readFileSync(nodePath.join(ROOT, '.gitignore'), 'utf8'));
     g(['add', '-A'], ignoreRepo);
     g(['commit', '-m', 'the real ignore rules'], ignoreRepo);
     g(['update-ref', 'refs/remotes/origin/main', g(['rev-parse', 'main'], ignoreRepo)], ignoreRepo);
@@ -16326,7 +16326,7 @@ function selfTest() {
     const leftoverAtUncoveredRoot = 'packages/cli/test/tmp-node-env-default-selftest/objectstack.config.ts';
     for (const rel of [leftoverAtCoveredRoot, leftoverAtUncoveredRoot]) {
       write(ignoreRepo, rel, "import { AuthPlugin } from '@objectstack/plugin-auth';\n");
-      write(ignoreRepo, join(dirname(rel), 'package.json'), '{ "private": true, "type": "module" }\n');
+      write(ignoreRepo, nodePath.join(nodePath.dirname(rel), 'package.json'), '{ "private": true, "type": "module" }\n');
     }
     const leftovers = changedPathsFromGit({ cwd: ignoreRepo });
 
@@ -16344,7 +16344,7 @@ function selfTest() {
     );
     t(
       'and it is the repo-wide tmp/ rule doing it, with no bespoke entry for the fixture former root',
-      !readFileSync(join(ROOT, '.gitignore'), 'utf8').includes('packages/cli/test/tmp-node-env-default'),
+      !readFileSync(nodePath.join(ROOT, '.gitignore'), 'utf8').includes('packages/cli/test/tmp-node-env-default'),
     );
     // ── The CLASS the pin above does not hold (#12749) ──────────────────────
     //
@@ -16416,10 +16416,10 @@ function selfTest() {
     // at a covered root and one at an uncovered one, and the uncovered one has
     // to come back EXPOSED. Without this arm every live-tree case below passes
     // just as happily against a verdict function that returns an empty list.
-    const classRepo = join(gitTmp, 'fixture-root-class');
+    const classRepo = nodePath.join(gitTmp, 'fixture-root-class');
     mkdirSync(classRepo, { recursive: true });
     g(['init', '--initial-branch=main', '.'], classRepo);
-    const realIgnoreRules = readFileSync(join(ROOT, '.gitignore'), 'utf8');
+    const realIgnoreRules = readFileSync(nodePath.join(ROOT, '.gitignore'), 'utf8');
     write(classRepo, '.gitignore', realIgnoreRules);
     const fixtureSourceRootedAt = (rel) =>
       [
@@ -16642,15 +16642,15 @@ function selfTest() {
   t('drift reaches the banner, and stays behind the repo line that must come first', bannerLines({ identity: hereIdentity, paths: [], drift: { base: 'aaaaaaa', behind: 9, changed: ['scripts/x.mjs'] } })[0].includes('gate list derived from the tree of'));
   t('and a banner given no drift is byte-identical to before the flag existed', bannerLines({ identity: hereIdentity, paths: [], drift: null }).join('\n') === bannerLines({ identity: hereIdentity, paths: [] }).join('\n'));
 
-  const driftTmp = mkdtempSync(join(tmpdir(), 'dispatch-gates-drift-'));
+  const driftTmp = mkdtempSync(nodePath.join(tmpdir(), 'dispatch-gates-drift-'));
   try {
     const gd = (args, cwd) => spawnSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
-    const up = join(driftTmp, 'upstream');
+    const up = nodePath.join(driftTmp, 'upstream');
     mkdirSync(up, { recursive: true });
     gd(['init', '-q', '-b', DEFAULT_BASE_BRANCH], up);
-    writeFileSync(join(up, 'seed.txt'), 'seed\n');
+    writeFileSync(nodePath.join(up, 'seed.txt'), 'seed\n');
     gd(['add', '-A'], up); gd(['commit', '-qm', 'seed'], up);
-    const clone = join(driftTmp, 'clone');
+    const clone = nodePath.join(driftTmp, 'clone');
     gd(['clone', '-q', up, clone], driftTmp);
     // Positive control: a clone level with its base must read zero, or a
     // non-zero reading below proves nothing.
@@ -16670,7 +16670,7 @@ function selfTest() {
     // `rev-list --count HEAD..<ref>` cannot answer. The literals above describe
     // that state; only a repo shows it is reachable, which is the whole reason
     // this fixture exists beside them.
-    const unborn = join(driftTmp, 'unborn');
+    const unborn = nodePath.join(driftTmp, 'unborn');
     mkdirSync(unborn, { recursive: true });
     gd(['init', '-q', '-b', DEFAULT_BASE_BRANCH], unborn);
     gd(['remote', 'add', DEFAULT_BASE_REMOTE, up], unborn);
@@ -16694,7 +16694,7 @@ function selfTest() {
     t('and the banner a reader actually sees carries it, from that real reading',
       bannerLines({ identity: hereIdentity, paths: [], drift: unbornRepo }).join('\n').includes('STALENESS NOT MEASURED'));
     // Upstream moves in a file the answer is NOT derived from.
-    writeFileSync(join(up, 'seed.txt'), 'seed2\n');
+    writeFileSync(nodePath.join(up, 'seed.txt'), 'seed2\n');
     gd(['add', '-A'], up); gd(['commit', '-qm', 'unrelated'], up);
     gd(['fetch', '-q', DEFAULT_BASE_REMOTE], clone);
     const offSurface = baseDrift({ cwd: clone });
@@ -16702,8 +16702,8 @@ function selfTest() {
     t('and a commit outside the derivation surface stays off the loud list — and the quiet render says what it can see',
       offSurface.changed.length === 0 && driftLines(offSurface).length === 2 && driftLines(offSurface)[0].includes('can SEE'));
     // Now upstream moves a file the answer IS derived from — the measured shape.
-    mkdirSync(join(up, 'scripts'), { recursive: true });
-    writeFileSync(join(up, 'scripts', 'check-thing.mjs'), 'export const a = 1;\n');
+    mkdirSync(nodePath.join(up, 'scripts'), { recursive: true });
+    writeFileSync(nodePath.join(up, 'scripts', 'check-thing.mjs'), 'export const a = 1;\n');
     gd(['add', '-A'], up); gd(['commit', '-qm', 'change a check script'], up);
     gd(['fetch', '-q', DEFAULT_BASE_REMOTE], clone);
     const onSurface = baseDrift({ cwd: clone });
@@ -16731,11 +16731,11 @@ function selfTest() {
     // clear sentence from a FAILED read — so the last assertion here is the
     // required red: it fails if a reassurance can ever again be manufactured
     // without an established reading.
-    const shallow = join(driftTmp, 'shallow');
+    const shallow = nodePath.join(driftTmp, 'shallow');
     gd(['clone', '-q', '--depth', '1', `file://${up}`, shallow], driftTmp);
     t('a fresh shallow clone still counts a distance fine — shallowness alone breaks nothing (positive control)',
       baseDrift({ cwd: shallow }).behind === 0);
-    writeFileSync(join(up, 'scripts', 'check-thing.mjs'), 'export const a = 3;\n');
+    writeFileSync(nodePath.join(up, 'scripts', 'check-thing.mjs'), 'export const a = 3;\n');
     gd(['add', '-A'], up); gd(['commit', '-qm', 'move a check script beyond the shallow boundary'], up);
     gd(['fetch', '-q', '--depth', '1', DEFAULT_BASE_REMOTE], shallow);
     const shallowRepo = baseDrift({ cwd: shallow });
@@ -16750,16 +16750,16 @@ function selfTest() {
     rmSync(driftTmp, { recursive: true, force: true });
   }
 
-  const idTmp = mkdtempSync(join(tmpdir(), 'dispatch-gates-id-'));
+  const idTmp = mkdtempSync(nodePath.join(tmpdir(), 'dispatch-gates-id-'));
   try {
     const gi = (args, cwd) => spawnSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
     gi(['init', '-q', '-b', 'main', 'named'], idTmp);
-    const named = join(idTmp, 'named');
+    const named = nodePath.join(idTmp, 'named');
     gi(['remote', 'add', DEFAULT_BASE_REMOTE, 'https://github.com/an-owner/a-repo.git'], named);
     const namedIdentity = repoIdentity({ cwd: named });
     t('a checkout with a readable remote identifies itself from git, never from a constant', namedIdentity.slug === 'an-owner/a-repo');
     gi(['init', '-q', '-b', 'main', 'anonymous'], idTmp);
-    const anonymous = repoIdentity({ cwd: join(idTmp, 'anonymous') });
+    const anonymous = repoIdentity({ cwd: nodePath.join(idTmp, 'anonymous') });
     t('a checkout with no such remote degrades to unverified and still names its tree', anonymous.slug === null && !!anonymous.root);
   } finally {
     rmSync(idTmp, { recursive: true, force: true });
@@ -16803,11 +16803,11 @@ function selfTest() {
   // child process can.
   const SELF = fileURLToPath(import.meta.url);
   t('the entry predicate answers true for this module named by its own path', invokedAs(SELF, SELF));
-  t('and for the same file named relatively from the repo root, as the gate spells it', invokedAs(join(ROOT, 'scripts/pm/dispatch-gates.mjs'), SELF));
-  t('a different file in the same directory is not this module', !invokedAs(join(ROOT, 'scripts/pm/check-dispatch-gates.mjs'), SELF));
+  t('and for the same file named relatively from the repo root, as the gate spells it', invokedAs(nodePath.join(ROOT, 'scripts/pm/dispatch-gates.mjs'), SELF));
+  t('a different file in the same directory is not this module', !invokedAs(nodePath.join(ROOT, 'scripts/pm/check-dispatch-gates.mjs'), SELF));
   t('an absent argv[1] is not this module — the `node --eval` importer', !invokedAs(undefined, SELF) && !invokedAs('', SELF));
 
-  const entryTmp = mkdtempSync(join(tmpdir(), 'dispatch-gates-entry-'));
+  const entryTmp = mkdtempSync(nodePath.join(tmpdir(), 'dispatch-gates-entry-'));
   try {
     // RUN DIRECTLY the modes must all still reach their branches. `--tier`
     // stands in for every one of them: the guard is a SINGLE site wrapping the
@@ -16881,7 +16881,7 @@ function selfTest() {
     // the real file while argv[1] names the link. Under the precedent's
     // one-comparison spelling this run goes inert, exit 0, no output: the
     // false-green the gate cannot see.
-    const link = join(entryTmp, 'linked-dispatch-gates.mjs');
+    const link = nodePath.join(entryTmp, 'linked-dispatch-gates.mjs');
     symlinkSync(SELF, link);
     const viaLink = spawnSync(process.execPath, [link, '--tier', 'packages/spec/src/data/filter.zod.ts'], {
       encoding: 'utf8',
@@ -16896,7 +16896,7 @@ function selfTest() {
     // IMPORTED the module must do nothing at all. The importer's argv carries
     // this tool's own flags on purpose: that is the shape that fired an
     // unrelated file's assertions inside the importer's self-test.
-    const consumer = join(entryTmp, 'consumer.mjs');
+    const consumer = nodePath.join(entryTmp, 'consumer.mjs');
     const REACHED = 'CONSUMER-REACHED function function function';
     writeFileSync(
       consumer,
@@ -17033,9 +17033,9 @@ function selfTest() {
   // would go stale with nothing failing — which is the defect this whole file
   // is about.
   const liveTail = alwaysRunSteps(
-    readdirSync(join(ROOT, '.github/workflows'))
+    readdirSync(nodePath.join(ROOT, '.github/workflows'))
       .filter((f) => /\.ya?ml$/.test(f))
-      .map((f) => ({ file: f, text: readFileSync(join(ROOT, '.github/workflows', f), 'utf8') })),
+      .map((f) => ({ file: f, text: readFileSync(nodePath.join(ROOT, '.github/workflows', f), 'utf8') })),
   );
   const liveCommands = liveTail.rows.flatMap((r) => r.commands);
   t('the live tail is not empty — an empty one would mean the walk broke, not that CI runs nothing', liveTail.rows.length > 0);
@@ -17067,7 +17067,7 @@ function selfTest() {
   t(
     'every live row really sits in a workflow CI cannot narrow by path',
     liveTail.rows.every((r) => {
-      const text = readFileSync(join(ROOT, '.github/workflows', r.workflow), 'utf8');
+      const text = readFileSync(nodePath.join(ROOT, '.github/workflows', r.workflow), 'utf8');
       return declaresPullRequestTrigger(text) && extractTriggerPaths(text).length === 0;
     }),
   );
@@ -17277,9 +17277,9 @@ function selfTest() {
     // with the real awk and sed, because a reimplementation in JS would be
     // pinning this file's idea of the snippet rather than the snippet.
     // The snippet reads `gates.txt`; feed it the same bytes under that name.
-    const harvestTmp = mkdtempSync(join(tmpdir(), 'dg-harvest-'));
+    const harvestTmp = mkdtempSync(nodePath.join(tmpdir(), 'dg-harvest-'));
     try {
-      writeFileSync(join(harvestTmp, 'gates.txt'), humanOut);
+      writeFileSync(nodePath.join(harvestTmp, 'gates.txt'), humanOut);
       const real = spawnSync('bash', ['-c', HARVEST_SNIPPET.join('\n')], { encoding: 'utf8', cwd: harvestTmp });
       const harvestedRows = (real.stdout ?? '').split('\n').filter(Boolean);
       t('the published snippet still runs against a real rendering', real.status === 0 && harvestedRows.length > 0);
@@ -17469,9 +17469,9 @@ function selfTest() {
     // for a second reading would be a minute of fleet compute to answer a
     // question this run already answered — and two runs could disagree.
     const cmdRun = runCli(['--commands', guardCard]);
-    const harvestTmp = mkdtempSync(join(tmpdir(), 'dg-cionly-'));
+    const harvestTmp = mkdtempSync(nodePath.join(tmpdir(), 'dg-cionly-'));
     try {
-      writeFileSync(join(harvestTmp, 'gates.txt'), out);
+      writeFileSync(nodePath.join(harvestTmp, 'gates.txt'), out);
       const harvested = (spawnSync('bash', ['-c', HARVEST_SNIPPET.join('\n')], { encoding: 'utf8', cwd: harvestTmp }).stdout ?? '')
         .split('\n')
         .filter(Boolean);
@@ -17700,13 +17700,13 @@ function selfTest() {
   // without a normaliser, which is the condition triage attached to this shape.
   {
     const ranCard = 'scripts/measure-durability-swallow-family.mjs';
-    const ranTmp = mkdtempSync(join(tmpdir(), 'dg-ran-'));
+    const ranTmp = mkdtempSync(nodePath.join(tmpdir(), 'dg-ran-'));
     try {
       const cmdRun = runCli(['--commands', ranCard]);
       const rows = (cmdRun.stdout ?? '').split('\n').filter(Boolean);
       t('CONTROL: the card derives a runnable union at all', cmdRun.status === 0 && rows.length >= 2);
 
-      const completePath = join(ranTmp, 'ran-complete.list');
+      const completePath = nodePath.join(ranTmp, 'ran-complete.list');
       writeFileSync(completePath, `${rows.join('\n')}\n`);
       const green = runCli([RAN_FLAG, completePath, ranCard]);
       const greenOut = green.stdout ?? '';
@@ -17717,7 +17717,7 @@ function selfTest() {
       t('and it needed no normalisation to do it — the two lists are the same strings', greenOut.includes(`${rows.length} derived, ${rows.length} run`));
 
       const dropped = rows[rows.length - 1];
-      const shortPath = join(ranTmp, 'ran-short.list');
+      const shortPath = nodePath.join(ranTmp, 'ran-short.list');
       writeFileSync(shortPath, `${rows.slice(0, -1).join('\n')}\n`);
       const red = runCli([RAN_FLAG, shortPath, ranCard]);
       const redOut = red.stdout ?? '';
@@ -17732,7 +17732,7 @@ function selfTest() {
           && runCli([RAN_FLAG, completePath, '--json', ranCard]).status === 2,
       );
       t('and so is asking for a tier verdict there is nothing to reconcile against', runCli([RAN_FLAG, completePath, '--tier', ranCard]).status === 2);
-      const missing = runCli([RAN_FLAG, join(ranTmp, 'no-such-record.list'), ranCard]);
+      const missing = runCli([RAN_FLAG, nodePath.join(ranTmp, 'no-such-record.list'), ranCard]);
       t('an unreadable record REFUSES rather than reconciling against nothing (#4690)', missing.status === 2 && (missing.stdout ?? '').trim() === '');
       t('and the refusal names the file it could not read', (missing.stderr ?? '').includes('no-such-record.list'));
       const valueless = runCli([RAN_FLAG]);
@@ -17911,7 +17911,7 @@ if (invokedDirectly) {
     let runRecord = [];
     if (argv.runRecord !== null) {
       try {
-        runRecord = parseRunRecord(readFileSync(resolve(argv.runRecord), 'utf8'));
+        runRecord = parseRunRecord(readFileSync(nodePath.resolve(argv.runRecord), 'utf8'));
       } catch (err) {
         console.error(`dispatch-gates: could not read the run record '${argv.runRecord}' — ${err.message}`);
         console.error(

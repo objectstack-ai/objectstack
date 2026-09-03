@@ -24,6 +24,14 @@ import { NavigationContributionSchema } from '../ui/app.zod';
  * the persisted `granted_permissions` set enforced at load by the
  * PluginPermissionEnforcer.
  *
+ * The consented set reaches the runtime on the environment artifact
+ * envelope — `EnvironmentArtifactSchema.grantedPermissions`
+ * (`system/environment-artifact.zod.ts`, #14865): a map keyed by this
+ * manifest's `id` whose values are this very schema. The loader reads it
+ * from the environment-local carrier at materialize time, never from
+ * `sys_package_installation` directly (ADR-0003 / cloud ADR-0007). Absent
+ * there = no consent record; `{}` = consented to nothing.
+ *
  * @example
  * ```jsonc
  * { "services": ["object", "http"], "hooks": ["record.beforeInsert"],
