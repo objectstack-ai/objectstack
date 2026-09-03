@@ -235,7 +235,7 @@ should recognise it instead of re-deriving it.
    rule-materialised grant that the next reconcile silently restores.
 
 5. **`applySystemFields` does not read this flag.** It is named as if it did.
-   `packages/objectql/src/registry.ts:464` is **schema-side column
+   `packages/objectql/src/registry.ts:475` is **schema-side column
    provisioning** — which columns an object carries — and consumes
    `ExecutionContext.isSystem` zero times. The write-time ownership behaviour
    people attribute to it is row 2, in `plugin-security`.

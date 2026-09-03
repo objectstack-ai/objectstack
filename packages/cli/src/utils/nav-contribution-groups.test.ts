@@ -39,7 +39,20 @@
  * keep in sync, and a divergence in it would read as a finding.
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
+// [#7668 family, `check:test-source-alias`] A MODULE-TOP side-effect load of
+// the dependency `findNavGroupDiagnostics` imports dynamically. This package
+// resolves `@objectstack/objectql/core` through its `dist/`, so the first call
+// transforms that whole module graph — measured here at over vitest's 5s
+// default, inside a test body, which is a CLOCKED window. Paying it during
+// COLLECTION (which vitest clocks against nothing) is the convention: clocked
+// windows measure behaviour, never loading. ⛔ Do not "fix" a timeout here by
+// widening it — that relocates the cliff to the next heavier shard.
+//
+// The production import stays lazy and stays where it is: this line decides
+// only WHERE the first load is paid in THIS suite, and `os build`'s cold path
+// must not pull the data engine in to judge a stack with no contributions.
+import '@objectstack/objectql/core';
+import { describe, it, expect } from 'vitest';
 import { composeStacks, normalizeStackInput, ObjectStackDefinitionSchema } from '@objectstack/spec';
 import { collectNavGroupInputs, findNavGroupDiagnostics } from './nav-contribution-groups.js';
 
@@ -89,7 +102,7 @@ const ordersStack = (group: string) => ({
     navigationContributions: [{
       app: APP,
       group,
-      items: [{ id: 'nav_orders', type: 'object', objectName: 'crm_order', label: 'Orders' }],
+      items: [{ id: 'nav_orders', type: 'object' as const, objectName: 'crm_order', label: 'Orders' }],
     }],
   },
   objects: [{
@@ -139,17 +152,6 @@ const packagesOf = (parsed: AnyRec) =>
   });
 
 describe('#14553 — `os build` checks `navigationContributions[].group` across one composed artifact', () => {
-  // `findNavGroupDiagnostics` loads `@objectstack/objectql/core` LAZILY, and
-  // that first load costs several seconds — measured here, over vitest's 5s
-  // default, which is what surfaced it. That cost is the reason the import is
-  // lazy in production too: `os build`'s cold path must not pull the data
-  // engine in to judge a stack that declares no contributions at all. Warmed
-  // once, with its own budget, so the per-test durations below report what the
-  // derivation costs rather than what the module loader does.
-  beforeAll(async () => {
-    await import('@objectstack/objectql/core');
-  }, 60_000);
-
   it('the fixture really is a two-package artifact — the floor under every reading below', async () => {
     // Without this, a composition change that stopped emitting `packages[]`
     // would make every assertion in this file vacuously true: the derivation
@@ -231,7 +233,7 @@ describe('#14553 — `os build` checks `navigationContributions[].group` across 
         navigationContributions: [{
           app: APP,
           group: 'sales_grp',
-          items: [{ id: 'nav_orders', type: 'object', objectName: 'crm_order', label: 'Orders' }],
+          items: [{ id: 'nav_orders', type: 'object' as const, objectName: 'crm_order', label: 'Orders' }],
         }],
       },
       apps: coreStack().apps,
