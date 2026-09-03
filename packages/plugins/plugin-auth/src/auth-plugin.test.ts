@@ -541,6 +541,9 @@ describe('AuthPlugin', () => {
     let hookCapture: ReturnType<typeof createHookCapture>;
     let setEmailLocaleSpy: ReturnType<typeof vi.spyOn>;
     let setSmsLocaleSpy: ReturnType<typeof vi.spyOn>;
+    let setEmailServiceSpy: ReturnType<typeof vi.spyOn>;
+    let rawApp: { all: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn>; post: ReturnType<typeof vi.fn>; use: ReturnType<typeof vi.fn> };
+    let httpServer: { getRawApp: ReturnType<typeof vi.fn>; use: ReturnType<typeof vi.fn> };
 
     type Resolved = { value: unknown; source: string };
 
@@ -576,10 +579,26 @@ describe('AuthPlugin', () => {
      * `i18n` is passed as `null` to mean "no such service" — `getService`
      * THROWS for an unregistered service, which is the shape the plugin
      * probes for, not a falsy return.
+     *
+     * `registerRoutes` is threaded through on purpose (#14724). It answers a
+     * TRANSPORT-MOUNTING question — "does this plugin mount its own
+     * `/api/v1/auth/*` routes" — and must not decide any of the SERVICE
+     * COMPOSITION this block is about. A routes-less embedding (every cloud
+     * tenant environment kernel is one) has the same mail transport, brand
+     * and locale needs as a routing one; before #14724 all of it hung off the
+     * routing flag, so a `registerRoutes: false` kernel did not even READ the
+     * `localization` namespace.
      */
-    const boot = async (opts: { settings?: unknown; i18nDefault?: string | null }) => {
+    const boot = async (opts: {
+      settings?: unknown;
+      i18nDefault?: string | null;
+      registerRoutes?: boolean;
+      email?: unknown;
+    }) => {
       hookCapture = createHookCapture();
       mockContext.hook = hookCapture.hookFn;
+      rawApp = { all: vi.fn(), get: vi.fn(), post: vi.fn(), use: vi.fn() };
+      httpServer = { getRawApp: vi.fn(() => rawApp), use: vi.fn() };
       // `: any` on the RETURN, not a cast on the assignment: `getService` is
       // generic (`<T>(name: string) => T`), so an inferred union return is a
       // TS2322 — the exact debt `check:test-typecheck` ledgers for the older
@@ -587,6 +606,11 @@ describe('AuthPlugin', () => {
       // states its shape instead of adding to it.
       mockContext.getService = vi.fn((name: string): any => {
         if (name === 'manifest') return { register: vi.fn() };
+        if (name === 'http-server') return httpServer;
+        if (name === 'email') {
+          if (opts.email === undefined) throw new Error('Service not found: email');
+          return opts.email;
+        }
         if (name === 'settings') {
           if (opts.settings === undefined) throw new Error('Service not found: settings');
           return opts.settings;
@@ -599,9 +623,11 @@ describe('AuthPlugin', () => {
       });
       setEmailLocaleSpy = vi.spyOn(AuthManager.prototype, 'setDefaultEmailLocale');
       setSmsLocaleSpy = vi.spyOn(AuthManager.prototype, 'setDefaultSmsLocale');
+      setEmailServiceSpy = vi.spyOn(AuthManager.prototype, 'setEmailService');
       authPlugin = new AuthPlugin({
         secret: 'test-secret-at-least-32-chars-long',
         baseUrl: 'http://localhost:3000',
+        ...(opts.registerRoutes === undefined ? {} : { registerRoutes: opts.registerRoutes }),
       });
       await authPlugin.init(mockContext);
       await authPlugin.start(mockContext);
@@ -611,72 +637,138 @@ describe('AuthPlugin', () => {
     afterEach(() => {
       setEmailLocaleSpy?.mockRestore();
       setSmsLocaleSpy?.mockRestore();
+      setEmailServiceSpy?.mockRestore();
     });
 
-    it('a zh-CN workspace binds zh-CN on the EMAIL channel, not just on SMS', async () => {
-      const settings = makeSettings({ value: 'zh-CN', source: 'tenant' });
-      await boot({ settings, i18nDefault: 'en' });
+    // #14724 — run the whole block against BOTH values of the routing flag.
+    // Covering only the default is how the split defect survived: a test that
+    // exercises one branch of a flag cannot see the other.
+    describe.each([
+      ['registerRoutes: true (default)', true],
+      ['registerRoutes: false (routes-less embedding)', false],
+    ] as const)('%s', (_label, registerRoutes) => {
+      it('a zh-CN workspace binds zh-CN on the EMAIL channel, not just on SMS', async () => {
+        const settings = makeSettings({ value: 'zh-CN', source: 'tenant' });
+        await boot({ settings, i18nDefault: 'en', registerRoutes });
 
-      expect(settings.get).toHaveBeenCalledWith('localization', 'locale', {});
-      // The regression, stated as the two channels agreeing. Before #14319 the
-      // SMS assertion passed and the email one read 'en'.
-      expect(setSmsLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
-      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
-    });
-
-    it.each(['ja-JP', 'es-ES'])('and the same for a %s workspace', async (locale) => {
-      await boot({ settings: makeSettings({ value: locale, source: 'global' }), i18nDefault: 'en' });
-      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith(locale);
-    });
-
-    it('a workspace that never chose a language keeps the app build-time default', async () => {
-      // `get` answers the manifest default ('en-US') for an untouched
-      // workspace, so taking `value` unconditionally would demote every
-      // deployment that declared `i18n.defaultLocale` — the #8195 behaviour
-      // this change must not regress.
-      await boot({
-        settings: makeSettings({ value: 'en-US', source: 'default' }),
-        i18nDefault: 'zh-CN',
+        expect(settings.get).toHaveBeenCalledWith('localization', 'locale', {});
+        // The regression, stated as the two channels agreeing. Before #14319 the
+        // SMS assertion passed and the email one read 'en'.
+        expect(setSmsLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
+        expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
       });
-      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
-    });
 
-    it('names NO locale when neither producer speaks — the documented en-US fallback', async () => {
-      // The issue's second acceptance criterion: absent language ⇒ English.
-      // Spelled as an ABSENT locale rather than 'en-US', because that is what
-      // `EmailService`'s ladder contract ("no locale means the DOCUMENTED
-      // default") is written against.
-      await boot({ settings: makeSettings({ value: 'en-US', source: 'default' }) });
-      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith(undefined);
-    });
+      it.each(['ja-JP', 'es-ES'])('and the same for a %s workspace', async (locale) => {
+        await boot({
+          settings: makeSettings({ value: locale, source: 'global' }),
+          i18nDefault: 'en',
+          registerRoutes,
+        });
+        expect(setEmailLocaleSpy).toHaveBeenLastCalledWith(locale);
+      });
 
-    it('binds the build-time default when there is no settings service at all', async () => {
-      await boot({ i18nDefault: 'ja-JP' });
-      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('ja-JP');
-    });
+      it('a workspace that never chose a language keeps the app build-time default', async () => {
+        // `get` answers the manifest default ('en-US') for an untouched
+        // workspace, so taking `value` unconditionally would demote every
+        // deployment that declared `i18n.defaultLocale` — the #8195 behaviour
+        // this change must not regress.
+        await boot({
+          settings: makeSettings({ value: 'en-US', source: 'default' }),
+          i18nDefault: 'zh-CN',
+          registerRoutes,
+        });
+        expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
+      });
 
-    it('re-binds live when the workspace switches language', async () => {
-      const settings = makeSettings({ value: 'en-US', source: 'default' });
-      await boot({ settings, i18nDefault: 'en' });
-      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('en');
+      it('names NO locale when neither producer speaks — the documented en-US fallback', async () => {
+        // The issue's second acceptance criterion: absent language ⇒ English.
+        // Spelled as an ABSENT locale rather than 'en-US', because that is what
+        // `EmailService`'s ladder contract ("no locale means the DOCUMENTED
+        // default") is written against.
+        await boot({
+          settings: makeSettings({ value: 'en-US', source: 'default' }),
+          registerRoutes,
+        });
+        expect(setEmailLocaleSpy).toHaveBeenLastCalledWith(undefined);
+      });
 
-      expect(settings.subscribe).toHaveBeenCalledWith('localization', expect.any(Function));
-      settings.set({ value: 'zh-CN', source: 'tenant' });
-      for (const handler of settings.handlers) handler();
-      // The subscribe handler is fire-and-forget (`void`); flush its promise.
-      await new Promise((resolve) => setImmediate(resolve));
+      it('binds the build-time default when there is no settings service at all', async () => {
+        await boot({ i18nDefault: 'ja-JP', registerRoutes });
+        expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('ja-JP');
+      });
 
-      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
-      expect(setSmsLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
-    });
+      it('re-binds live when the workspace switches language', async () => {
+        const settings = makeSettings({ value: 'en-US', source: 'default' });
+        await boot({ settings, i18nDefault: 'en', registerRoutes });
+        expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('en');
 
-    it('leaves the build-time default standing when the settings read fails', async () => {
-      const settings = makeSettings(new Error('boom'));
-      await expect(boot({ settings, i18nDefault: 'zh-CN' })).resolves.toBeUndefined();
-      expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
-      expect(mockContext.logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('failed to apply localization.locale'),
-      );
+        expect(settings.subscribe).toHaveBeenCalledWith('localization', expect.any(Function));
+        settings.set({ value: 'zh-CN', source: 'tenant' });
+        for (const handler of settings.handlers) handler();
+        // The subscribe handler is fire-and-forget (`void`); flush its promise.
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
+        expect(setSmsLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
+      });
+
+      it('leaves the build-time default standing when the settings read fails', async () => {
+        const settings = makeSettings(new Error('boom'));
+        await expect(
+          boot({ settings, i18nDefault: 'zh-CN', registerRoutes }),
+        ).resolves.toBeUndefined();
+        expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
+        expect(mockContext.logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining('failed to apply localization.locale'),
+        );
+      });
+
+      // ── #14724 acceptance criterion 1 ──────────────────────────────────
+      // The service composition is complete at the end of `kernel:ready`
+      // whichever way the routing flag is set. Measured before the split with
+      // `registerRoutes: false`: settingsRead [], emailLocaleCalls [],
+      // smsLocaleCalls [], emailServiceCalls [] — the namespace was not even
+      // read.
+      it('ends kernel:ready with the transport wired and BOTH locales bound', async () => {
+        const settings = makeSettings({ value: 'zh-CN', source: 'tenant' });
+        const email = { send: vi.fn() };
+        await boot({ settings, email, i18nDefault: 'en', registerRoutes });
+
+        expect(mockContext.getService).toHaveBeenCalledWith('email');
+        expect(setEmailServiceSpy).toHaveBeenCalledWith(email);
+        expect(settings.get).toHaveBeenCalledWith('localization', 'locale', {});
+        expect(setEmailLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
+        expect(setSmsLocaleSpy).toHaveBeenLastCalledWith('zh-CN');
+      });
+
+      // ── #14724 acceptance criterion 2 — the regression guard ───────────
+      // Route registration itself stays gated. This is the half that must
+      // NOT move: `registerRoutes: false` mounts no auth routes, and it is
+      // pinned here rather than left to prose.
+      it(`${registerRoutes ? 'mounts' : 'mounts NO'} auth routes`, async () => {
+        await boot({
+          settings: makeSettings({ value: 'zh-CN', source: 'tenant' }),
+          email: { send: vi.fn() },
+          i18nDefault: 'en',
+          registerRoutes,
+        });
+
+        const httpServerLookups = (mockContext.getService as ReturnType<typeof vi.fn>).mock.calls
+          .filter((args: unknown[]) => args[0] === 'http-server');
+
+        if (registerRoutes) {
+          expect(httpServerLookups.length).toBeGreaterThan(0);
+          expect(httpServer.getRawApp).toHaveBeenCalled();
+          expect(rawApp.all).toHaveBeenCalledWith('/api/v1/auth/*', expect.any(Function));
+        } else {
+          // The `http-server` service is present in this harness, so a zero
+          // lookup count is a statement about the gate and not about the
+          // service being absent.
+          expect(httpServerLookups.length).toBe(0);
+          expect(httpServer.getRawApp).not.toHaveBeenCalled();
+          expect(rawApp.all).not.toHaveBeenCalled();
+        }
+      });
     });
   });
 
