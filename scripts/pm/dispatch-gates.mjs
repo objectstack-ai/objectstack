@@ -10514,6 +10514,23 @@ export function bannerLines({ identity, paths = [], drift = null }) {
 // the tree, in both directions.
 // ---------------------------------------------------------------------------
 
+/**
+ * Returned by `selfTest()` only after its verdict line is printed, and compared
+ * at the dispatch: a `return` that leaves the function above that line prints
+ * NOTHING and still exits 0, because the dispatch discarded the result. Measured
+ * on this file before this guard existed: an early return took the run from
+ * "1288 cases pass" to zero bytes of output and exit 0 — a self-test that never
+ * finished, reported as one that passed.
+ *
+ * The mechanical probe in `scripts/measure-self-test-floor.mjs` cannot read this
+ * file (its anchor matches the first `function selfTest() {` in the source, which
+ * here is a FIXTURE STRING, so the injection lands inside a template literal and
+ * only ever produces a SyntaxError). That is a limit of the instrument, not a
+ * property of this file, and it is why the entry is hand-read there. Anchoring an
+ * early return on the real definition below measures it in one run.
+ */
+const SELF_TEST_VERDICT = 'dispatch-gates self-test reached its verdict';
+
 function selfTest() {
   const cases = [];
   // Stream the verdict the moment it is decided (#14281) rather than only at
@@ -17737,6 +17754,8 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`✓ dispatch-gates self-test: ${cases.length} cases pass.`);
+
+  return SELF_TEST_VERDICT;
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
@@ -17791,7 +17810,14 @@ if (invokedDirectly) {
   const argvPaths = argv.paths;
   const wantsChanged = process.argv.includes('--changed');
   if (process.argv.includes('--self-test')) {
-    selfTest();
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ dispatch-gates self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
   } else if (argv.malformed) {
     console.error(`dispatch-gates: ${argv.malformed}.`);
     process.exit(2);
