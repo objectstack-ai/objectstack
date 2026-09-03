@@ -3,7 +3,7 @@
 
 /**
  * check-governed-merges — report-only post-merge audit of the governed
- * surfaces (#9495), across the four governed repos (#9619), plus the
+ * surfaces (#9495), across the five governed repos (#9619, #14867), plus the
  * pre-arm `--test` predicate every seat runs before flipping ready (#9550).
  * Enumerates the PRs that MERGED into `main` since a given date/ref whose diff
  * touched a governed surface, with merge attribution, for the PM round report
@@ -11,7 +11,7 @@
  * completed sweep exits 0 whether it found 0 or 40 entries; non-zero exits
  * classify the ENVIRONMENT, not the tree).
  *
- *   node scripts/pm/check-governed-merges.mjs                  # sweep, last 24h, all four repos
+ *   node scripts/pm/check-governed-merges.mjs                  # sweep, last 24h, all five repos
  *   node scripts/pm/check-governed-merges.mjs --since 7d       # or 36h, or ISO date
  *   node scripts/pm/check-governed-merges.mjs --since-ref v5.0.0-rc.3       # topological, exact
  *   node scripts/pm/check-governed-merges.mjs --since-ref objectstack=<tip> --since-ref objectui=<tip>
@@ -216,14 +216,32 @@
  * giving the guard job dependencies, which is a CI-cost decision no ruling
  * covers; it is filed rather than taken.
  *
- * ## The governed REPOS (maintainer 「同意」 2026-08-18, wired here by #9619)
+ * ## The governed REPOS (maintainer 「同意」 2026-08-18, wired here by #9619;
+ * ## `hotcrm` added by the 2026-09-03 ruling on #14867)
  *
  * The same day, asked whether the rule reaches the sibling repos — 「任何对
  * agents.md 等文件的修改…包括 objectui cloud仓库」 — the maintainer answered
  * 「同意」. So the surface register above is REPO-AGNOSTIC: the same five
- * globs are governed in `objectstack`, `objectui`, `cloud` and `objectos`,
- * and this sweep covers all four in one invocation regardless of the working
- * directory it is run from.
+ * surface globs are governed in `objectstack`, `objectui`, `cloud`,
+ * `objectos` and `hotcrm`, and this sweep covers all five repos in one
+ * invocation regardless of the working directory it is run from.
+ *
+ * ⚠️ The 2026-08-18 quotation above names two sibling repos and the register
+ * below holds five, so read that quote as the repos IN VIEW that day — an
+ * enumeration, never an exclusion, and never the register. The definition it
+ * states (agent instruction files, judged the same across repos) already
+ * covered `hotcrm`, a repo agents edit daily; only the CONFIGURATION lagged,
+ * and it lagged in the direction that reads as safety. Measured cost of the
+ * lag, #14867: the `repo:hotcrm` seat treated that repo's `AGENTS.md` chain
+ * as governed and paid for hand-merges on it, while this sweep printed no row
+ * for hotcrm at all — and a repo that produces NO ROW is indistinguishable in
+ * this output from a repo that swept clean. That is the #4690 rule failing one
+ * level up: a configured repo that cannot be read is loudly UNAUDITED, but an
+ * unconfigured repo is silent, so absence of coverage can only be made loud by
+ * configuring the repo. Ruled 2026-09-03 (#14867, sibling #14881 ruled with
+ * it), maintainer verbatim 「其他同意」 adopting 纳入 — `GOVERNED_REPOS` gains
+ * `hotcrm`, and every "CLEAN WINDOW" this sweep published before that date is
+ * re-read as "clean over the FOUR repos then configured".
  *
  * ⚠️ Until #9619 that was not true, and the gap was not theoretical: run from
  * the objectui checkout the sweep still enumerated objectstack PRs, so a
@@ -266,7 +284,7 @@
  * asks whether the floor predates the window rather than whether the clone is
  * shallow, so a shallow container with enough depth — the common case, since
  * the default window is 24h — still sweeps exactly as before, with no fetch.
- * Deepening is never done here: this sweep reads four checkouts it does not
+ * Deepening is never done here: this sweep reads five checkouts it does not
  * own, so the remedy is printed as a command for the operator to run.
  *
  * ## And a DEAD MIRROR is the same fact again, in the direction that reads as
@@ -287,12 +305,17 @@
  * `git fetch origin main` in the surviving local clone answered
  * `fatal: repository ... not found`; `objectos`, `hotcrm`, `objectui` and
  * `objectstack` all resolved in the same batch, so this was a scope change for
- * one repo and not a broken channel. Wherever that clone survives, this sweep
+ * one repo and not a broken channel. (⚠️ Read that batch with its date: on
+ * 2026-08-30 `hotcrm` was probed BY HAND, as a control this sweep had no row
+ * for — it was not configured here until the 2026-09-03 ruling above. The
+ * reading stands as measured; what changed is that those four names are now
+ * four of the five repos this sweep audits itself.) Wherever that clone
+ * survives, this sweep
  * printed `✓ audited objectstack-ai/cloud — tip 15f55df2d ... 0 mainline
  * commit(s) in window` and exited 0 — and would have printed it FOREVER, since
  * the row's own prescribed remedy (`git fetch origin main`) is exactly the
  * command that 404s. The control had not degraded; it had been silently
- * switched off for one of the four repos it covers while continuing to print a
+ * switched off for one of the repos it covers while continuing to print a
  * tick for it.
  *
  * So reachability is a MEASURED PRECONDITION, asked of every governed repo in
@@ -418,7 +441,8 @@
  *      resolves, and `--since-ref <repoId>=<ref>` pins one repo (repeatable).
  *      A repo no ref resolves in falls back to the date window below, and its
  *      report line SAYS which repos got which window — one repo's ref silently
- *      dating four repos' windows is the same class of bug as the one above.
+ *      dating every other repo's window is the same class of bug as the one
+ *      above.
  *      Recording the previous round's tip is the CALLER's obligation (this
  *      script keeps no state), so every sweep prints the `--since-ref` line to
  *      use next round. Bonus property: for a topological window the #9902
@@ -824,7 +848,9 @@ export function applyGeneratedExceptions(verdict, provenanceByPath = new Map()) 
 }
 
 /**
- * The four repos the 2026-08-18 cross-repo extension governs. `id` doubles as
+ * The five governed repos: the four the 2026-08-18 cross-repo extension named,
+ * plus `hotcrm`, added by the 2026-09-03 ruling on #14867 (「其他同意」 → 纳入)
+ * because the definition's own terms already covered it. `id` doubles as
  * the sibling directory name beside this checkout — the layout every session
  * container uses — and `--repo-root <id>=<path>` overrides it for any other
  * layout. A checkout whose `origin` remote is not `slug` is treated as ABSENT
@@ -835,6 +861,7 @@ export const GOVERNED_REPOS = Object.freeze([
   Object.freeze({ id: 'objectui', slug: 'objectstack-ai/objectui', what: 'the UI repo (live skills/** tree)' }),
   Object.freeze({ id: 'cloud', slug: 'objectstack-ai/cloud', what: 'the cloud repo' }),
   Object.freeze({ id: 'objectos', slug: 'objectstack-ai/objectos', what: 'the objectos repo' }),
+  Object.freeze({ id: 'hotcrm', slug: 'objectstack-ai/hotcrm', what: 'the hotcrm exemplar app repo (#14867, ruled 2026-09-03)' }),
 ]);
 
 export const SELF_REPO_ID = 'objectstack';
@@ -974,7 +1001,7 @@ export function classifyCommit({ sha, date, subject }, changedPaths, repo = null
 
 /**
  * The pre-arm answer, as data. Pure and repo-agnostic — the register is the
- * same in all four governed repos, so a seat can run this from anywhere with
+ * same in all five governed repos, so a seat can run this from anywhere with
  * the file list of any PR in any of them.
  */
 export function testVerdict(paths) {
@@ -2542,7 +2569,15 @@ async function selfTest() {
   assert('exit-test-not-governed-is-0', EXIT_TEST_NOT_GOVERNED === 0);
 
   // ── multi-repo scope (#9619) ──────────────────────────────────────────────
-  assert('four-governed-repos-declared', GOVERNED_REPOS.map((r) => r.id).join(',') === 'objectstack,objectui,cloud,objectos', GOVERNED_REPOS.map((r) => r.id).join(','));
+  assert('five-governed-repos-declared', GOVERNED_REPOS.map((r) => r.id).join(',') === 'objectstack,objectui,cloud,objectos,hotcrm', GOVERNED_REPOS.map((r) => r.id).join(','));
+  // #14867: hotcrm pinned by SLUG as well as id. The defect this closes is not
+  // a wrong row — it is NO row: an unconfigured repo prints nothing at all, so
+  // a later removal would restore a silence indistinguishable from a clean
+  // sweep. Pinned separately from the ordered-ids assertion above so a removal
+  // reds a check that NAMES hotcrm rather than one that reads as a reordering.
+  assert('hotcrm-is-a-governed-repo-with-its-slug (#14867)',
+    GOVERNED_REPOS.some((r) => r.id === 'hotcrm' && r.slug === 'objectstack-ai/hotcrm'),
+    JSON.stringify(GOVERNED_REPOS.map((r) => `${r.id}=${r.slug}`)));
   assert('slug-from-https-remote', slugFromRemote('https://github.com/objectstack-ai/objectui') === 'objectstack-ai/objectui');
   assert('slug-from-ssh-remote-with-suffix', slugFromRemote('git@github.com:objectstack-ai/cloud.git') === 'objectstack-ai/cloud');
   assert('slug-from-nonsense-is-null', slugFromRemote('/some/local/path') === null);
@@ -2556,7 +2591,12 @@ async function selfTest() {
   };
   const resolved = resolveRepoCheckouts({ selfRoot: '/w/objectstack', siblingDir: '/w', probe: (p) => layout[p] ?? { exists: false, slug: null } });
   const byId = Object.fromEntries(resolved.map((r) => [r.id, r]));
-  assert('all-four-repos-are-resolved-not-just-the-self-repo', resolved.length === 4);
+  assert('all-five-repos-are-resolved-not-just-the-self-repo', resolved.length === 5);
+  // /w/hotcrm is absent from the layout too, so this fixture also pins the
+  // property #14867 bought: a governed repo with no checkout is UNAUDITED and
+  // says so, where an unconfigured repo said nothing.
+  assert('a-configured-repo-with-no-checkout-is-UNAUDITED-never-silent',
+    byId.hotcrm.status === 'unaudited' && /no git checkout at \/w\/hotcrm/.test(byId.hotcrm.reason), JSON.stringify(byId.hotcrm));
   assert('the-self-repo-is-audited-from-the-scripts-own-root-not-cwd', byId.objectstack.status === 'audited' && byId.objectstack.path === '/w/objectstack');
   assert('a-sibling-checkout-beside-it-is-audited', byId.objectui.status === 'audited' && byId.objectos.status === 'audited');
   assert('an-absent-checkout-is-UNAUDITED-never-clean', byId.cloud.status === 'unaudited' && /no git checkout at \/w\/cloud/.test(byId.cloud.reason), JSON.stringify(byId.cloud));
@@ -3419,7 +3459,7 @@ async function selfTest() {
     for (const failure of failures) console.error(`  • ${failure}`);
     process.exit(1);
   }
-  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the four-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes).\n  ${liveNote}`);
+  console.log(`✓ check-governed-merges --self-test: ${checked} assertions (the unified governed predicate + near misses, subject→PR spellings, window parsing, the #12633 landing window — the QS-7 regression pin in both directions, the topological close beyond the budget, the unproven-boundary EDGE, the listed-or-INCOMPLETE invariant over every fixture, the escalating floors, per-repo --since-ref resolution and its named fallback, and the window words — the replay fixtures, the five-repo resolution incl. absent/wrong-origin/relocated checkouts, the attribution channel chain + its proxy-transport re-arm plan and its one named fallback line, the three-way attribution column (resolved · every-channel-failed · NOT LOOKED UP, and the note pointer that belongs to the middle one alone), the --test pre-arm predicate, the generated-artifact provenance exception — the register's invariants incl. the RETIRED #9866 row staying retired (no row lifts anything under .claude/**, and the audit workflow is plainly governed again), a row with no recompute failing closed, lift/reject/absent-provenance semantics, the untouched mixed-diff rule, named-rows-not-a-class, the #11084 generator co-edit fence in both directions incl. a row with no instrument tree, and its render words — the #11705 generator-owned rows inside skills/** (a genuine generated file passes, the same path hand-edited does not, a path no generator declares is hand-authored content, per-row fences, and the enumeration read from the real generator), the exit table, the report wording pins, and the #13307 remote-reachability leg — the pure freshness verdicts in every branch (unreachable · a remote naming no commit · an unreadable local tip · a mirror behind its remote · the two-unreadable-shas degenerate case that must never read as a match), the report words in both directions (an unreachable repo never renders the tick, a reachable one still says a MEASURED zero, and a row with no remote reading never claims one), and the REAL prober on local bare-repo fixtures over the file transport — a live remote, a deleted one, the --exit-code branch, and a mirror the remote moved past — the #13423 identity leg (an origin no slug parses from refuses, pure and end-to-end, with audited reachable only through a parsed matching slug), the #13424 per-repo window resolution (a sibling-only pin resolves in its own repo, the self-only control still errors, and the end-to-end sibling-pin sweep reports instead of exiting 1), the #13307 sweep-code provenance line in all three branches, and the #13836 attribution set — every refusal carries its precondition category on the row, in the footer, and in --json; the shallow-clone path in both directions; and the run-1-vs-run-2 flip reproduced on real fixtures with zero local writes).\n  ${liveNote}`);
 
   return SELF_TEST_VERDICT;
 }
