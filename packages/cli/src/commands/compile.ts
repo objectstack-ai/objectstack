@@ -181,17 +181,23 @@ export default class Compile extends Command {
     let capProviderWarnings: Array<{ token: string; message: string }> = [];
     let unknownKeyWarnings: string[] = [];
     let docWarnings: DocIssue[] = [];
-    // [#14553] Build-only, so a SEPARATE payload key rather than a member of
-    // `warningsSoFar()` — the `bodyExtractionWarnings` precedent one field
-    // over, and for its stated reason: `os validate` never computes these, and
-    // folding a shape only ONE command can ship into the cross-command
-    // `warnings` key teaches consumers a shape the other command never emits.
-    let navGroupDiagnostics: NavContributionGroupDiagnostic[] = [];
+    // [#14553] A member of `warningsSoFar()`, NOT a payload key of its own.
+    //
+    // ⛔ The first cut made it a separate top-level key and two standing pins
+    // refused it by name — `build-json-advisory-parity` and
+    // `build-json-undeclared-key-parity`, both titled "adds NO new top-level
+    // key to the payload — this fills a declared key, it is not a new
+    // surface". #11643 and #11727 each faced this choice and filled
+    // `warnings`. `os validate` computes the same list, so the parity the
+    // third pin in that file asserts ("nothing rides in build that validate
+    // does not also report") holds rather than being weakened to fit.
+    let navGroupWarnings: NavContributionGroupDiagnostic[] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
       ...unknownKeyWarnings,
       ...capProviderWarnings,
+      ...navGroupWarnings,
     ];
     // [#12125] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the four lists above — one field over. The
@@ -474,18 +480,15 @@ export default class Compile extends Command {
       //     yields nothing: contributing into an app another artifact ships is
       //     the supported cross-artifact case, and is precisely why the merge
       //     is a read-time fold. Only the composed case can be judged here.
-      navGroupDiagnostics = await findNavGroupDiagnostics(
-        result.data as Record<string, unknown>,
-        packageEntries,
-      );
-      if (navGroupDiagnostics.length > 0 && !flags.json) {
+      navGroupWarnings = await findNavGroupDiagnostics(result.data as Record<string, unknown>);
+      if (navGroupWarnings.length > 0 && !flags.json) {
         console.log('');
         printWarning(
           `Navigation contributions aimed at a group the target app does not declare ` +
-            `(${navGroupDiagnostics.length}) — the items still install, RELOCATED to the app's top level`,
+            `(${navGroupWarnings.length}) — the items still install, RELOCATED to the app's top level`,
         );
         printBulletList(
-          navGroupDiagnostics.map((d) => `[${d.code}] ${d.message} Fix: ${d.fix}`),
+          navGroupWarnings.map((d) => `[${d.code}] ${d.message} Fix: ${d.fix}`),
           { noun: 'navigation-contribution diagnostic' },
         );
       }
@@ -839,16 +842,6 @@ export default class Compile extends Command {
           // callable lowered cleanly, so a CI consumer can read the key
           // unconditionally.
           bodyExtractionWarnings: lowering.bodyExtractionWarnings,
-          // [#14553] Navigation contributions relocated past a missing group.
-          // A SEPARATE key for the same reason as the one above: `os validate`
-          // computes nothing of the kind, so folding these records into the
-          // cross-command `warnings` list would teach a consumer a shape only
-          // this command can ever ship. Empty array when every contribution
-          // resolved, so CI can read the key unconditionally — the records are
-          // the ADR-0038 BuildIssue-family entries the runtime fold raises
-          // (ADR-0112 D6c: a diagnostics code, lowercase and out of the error
-          // ledger), so one consumer reads one shape from either door.
-          navigationGroupDiagnostics: navGroupDiagnostics,
           // Same key `os validate --json` uses, so a CI consumer reads one shape
           // from either command rather than learning two.
           conversions: conversionNotices,

@@ -54,7 +54,7 @@
 import '@objectstack/objectql/core';
 import { describe, it, expect } from 'vitest';
 import { composeStacks, normalizeStackInput, ObjectStackDefinitionSchema } from '@objectstack/spec';
-import { collectNavGroupInputs, findNavGroupDiagnostics } from './nav-contribution-groups.js';
+import { artifactPackagesOf, collectNavGroupInputs, findNavGroupDiagnostics } from './nav-contribution-groups.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -141,15 +141,15 @@ const parsedArtifact = (group: string): AnyRec => {
   return result.data as unknown as AnyRec;
 };
 
-/** The artifact's packages, in the `{ index, id, body }` shape `compile.ts` walks. */
-const packagesOf = (parsed: AnyRec) =>
-  ((parsed.packages ?? []) as Array<{ manifest?: AnyRec }>).map((entry, index) => {
-    const body = (entry.manifest ?? {}) as AnyRec;
-    const id = typeof body.id === 'string' && body.id !== ''
-      ? body.id
-      : (typeof body.name === 'string' ? body.name : `packages[${index}]`);
-    return { id, body };
-  });
+/**
+ * The artifact's packages, through the SHIPPED derivation.
+ *
+ * ⛔ Not a local re-spelling of the id rule. A second copy here would let this
+ * file keep passing while the rule the commands actually run drifted — which is
+ * the same defect one layer down that the shared `checkNavContributionGroups`
+ * exists to prevent.
+ */
+const packagesOf = (parsed: AnyRec) => artifactPackagesOf(parsed);
 
 describe('#14553 — `os build` checks `navigationContributions[].group` across one composed artifact', () => {
   it('the fixture really is a two-package artifact — the floor under every reading below', async () => {
@@ -170,6 +170,20 @@ describe('#14553 — `os build` checks `navigationContributions[].group` across 
 
   it('the correctly spelled group id reports NOTHING', async () => {
     expect(await findNavGroupDiagnostics(artifact(GROUP), packagesOf(artifact(GROUP)))).toEqual([]);
+  });
+
+  it('needs only the parsed stack — the commands call it with one argument', async () => {
+    // Both `os compile` and `os validate` reach this through
+    // `findNavGroupDiagnostics(result.data)`, letting the package walk default
+    // to `artifactPackagesOf`. Pinned because the explicit-packages form is
+    // what every other case here exercises, so a default that silently stopped
+    // deriving would leave this file green while both commands went blind.
+    const typod = artifact('sales_grp');
+    expect(await findNavGroupDiagnostics(typod)).toEqual(
+      await findNavGroupDiagnostics(typod, packagesOf(typod)),
+    );
+    expect(await findNavGroupDiagnostics(typod)).toHaveLength(1);
+    expect(await findNavGroupDiagnostics(artifact(GROUP))).toEqual([]);
   });
 
   it('ONE typo\'d group id prints one diagnostic naming the package, the app, the group and the items', async () => {

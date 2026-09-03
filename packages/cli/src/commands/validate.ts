@@ -30,11 +30,17 @@ import {
   formatZodErrors,
   collectMetadataStats,
   printMetadataStats,
+  printWarning,
+  printBulletList,
   emitJson,
   isExitSignal,
   errorCodeFields,
 } from '../utils/format.js';
 import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
+// [#14553] The navigation-contribution group check, shared with `os compile`.
+// Reports; never refuses — the runtime still relocates, deliberately.
+import { findNavGroupDiagnostics } from '../utils/nav-contribution-groups.js';
+import type { NavContributionGroupDiagnostic } from '@objectstack/objectql';
 
 export default class Validate extends Command {
   static override description =
@@ -120,12 +126,25 @@ export default class Validate extends Command {
     let unknownKeyWarnings: string[] = [];
     let docWarnings: DocIssue[] = [];
     let structuralWarnings: string[] = [];
+    // [#14553] Computed HERE as well as in `os compile`, not only there. The
+    // #11727 residue pin asserts that nothing rides in build's `warnings` that
+    // validate does not also report, and the two commands being one wall with
+    // two doors is the #4409 / #4463 discipline this list already follows.
+    let navGroupWarnings: NavContributionGroupDiagnostic[] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
       ...unknownKeyWarnings,
       ...capProviderWarnings,
       ...structuralWarnings,
+      // [#14553] APPENDED, and the position is load-bearing. #12047's
+      // `the order lives at ONE site` pin matches the five members above as
+      // CONTIGUOUS source text — that is how it proves the order is defined
+      // once rather than re-spelled per exit. Slotting a sixth member (or even
+      // a comment) between them breaks that match, so a new member goes on the
+      // end and the pin keeps guarding exactly what it was written to guard.
+      // ⛔ Do not "fix" that pin by loosening its regex.
+      ...navGroupWarnings,
     ];
     // [#12125] The ADR-0087 D2 conversion notices, hoisted for the SAME reason
     // and under the SAME ruling as the five lists above — one field over. The
@@ -269,6 +288,26 @@ export default class Validate extends Command {
       //     an advisory `pnpm add` hint. Mirrors the `os build` gate exactly.
       //
       //     Not a registry rule: it reads `node_modules`, not the stack.
+      // [#14553] Navigation contributions whose `group` names no group in an
+      //     app this same compilation unit ships. Reports, never refuses: the
+      //     runtime relocates the items to the app's top level deliberately
+      //     (the read-time fold stays order-independent, contributions into
+      //     optional groups keep working), so what was missing was visibility,
+      //     not a gate. A contribution aimed at an app no package here ships is
+      //     NOT reported — that is the supported cross-artifact case.
+      navGroupWarnings = await findNavGroupDiagnostics(result.data as Record<string, unknown>);
+      if (navGroupWarnings.length > 0 && !flags.json) {
+        console.log('');
+        printWarning(
+          `Navigation contributions aimed at a group the target app does not declare ` +
+            `(${navGroupWarnings.length}) — the items still install, RELOCATED to the app's top level`,
+        );
+        printBulletList(
+          navGroupWarnings.map((d) => `[${d.code}] ${d.message} Fix: ${d.fix}`),
+          { noun: 'navigation-contribution diagnostic' },
+        );
+      }
+
       if (!flags.json) printStep('Checking capability providers (#3366)...');
       const capProviderPreflight = preflightRequiredCapabilities({
         requires: Array.isArray((config as { requires?: unknown[] }).requires)

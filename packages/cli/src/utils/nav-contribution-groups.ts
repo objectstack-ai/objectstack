@@ -38,6 +38,27 @@
  * up. Loaded LAZILY, and only for a stack that actually declares a
  * contribution: `os build`'s cold path should not pull the data engine in to
  * judge two empty arrays.
+ *
+ * ## Why the findings ride the declared `warnings` key, and why BOTH commands
+ * ## compute them
+ *
+ * The first cut gave `os build --json` a new top-level
+ * `navigationGroupDiagnostics` key. Two standing pins caught it —
+ * `build-json-advisory-parity.e2e.test.ts` and
+ * `build-json-undeclared-key-parity.e2e.test.ts`, both titled "adds NO new
+ * top-level key to the payload — this fills a declared key, it is not a new
+ * surface". #11643 and #11727 each faced the same choice and filled
+ * `warnings`; that payload's shape is MIRRORED from `os validate --json` so a
+ * consumer reads one shape per class from either command rather than learning
+ * two.
+ *
+ * A third pin in the same file settles the other half: the ONLY permitted
+ * residue between the two payloads is the structural advisory set, and
+ * "nothing rides in build that validate does not also report". Folding these
+ * into build's `warnings` alone would therefore have turned THAT pin red. So
+ * both commands compute them — which is the better answer on its own terms
+ * too: an author running `os validate` sees the mis-aim exactly as one running
+ * `os build` does.
  */
 
 import type { NavContributionGroupDiagnostic } from '@objectstack/objectql';
@@ -48,10 +69,29 @@ const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 const asRec = (v: unknown): AnyRec | undefined =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as AnyRec) : undefined;
 
-/** One artifact package as `compile.ts` walks them. */
+/** One artifact package, in the `{ id, body }` shape the commands walk. */
 export interface CompiledPackage {
   readonly id: string;
   readonly body: AnyRec;
+}
+
+/**
+ * The artifact's package entries, derived from the PARSED stack.
+ *
+ * Mirrors `compile.ts`' `artifactPackages` id rule — `manifest.id`, falling
+ * back to `name`, then to the positional spelling — because that is the string
+ * the runtime registers a contribution under, so a command names a package the
+ * same way the fold does. Derived here rather than passed in, so both commands
+ * reach the check through ONE call that needs only the parsed stack.
+ */
+export function artifactPackagesOf(parsed: AnyRec): CompiledPackage[] {
+  return asArray(parsed.packages).map((entry, index) => {
+    const body = asRec((entry as { manifest?: unknown })?.manifest) ?? {};
+    const id = typeof body.id === 'string' && body.id !== ''
+      ? body.id
+      : (typeof body.name === 'string' && body.name !== '' ? body.name : `packages[${index}]`);
+    return { id, body };
+  });
 }
 
 /**
@@ -130,7 +170,7 @@ export function collectNavGroupInputs(
  */
 export async function findNavGroupDiagnostics(
   parsed: AnyRec,
-  packages: readonly CompiledPackage[],
+  packages: readonly CompiledPackage[] = artifactPackagesOf(parsed),
 ): Promise<NavContributionGroupDiagnostic[]> {
   const { apps, contributions } = collectNavGroupInputs(parsed, packages);
   if (contributions.length === 0 || apps.length === 0) return [];
