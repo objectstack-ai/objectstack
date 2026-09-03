@@ -891,7 +891,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       basics: {
         label: "基础信息",
-        description: "名称与图标"
+        description: "仪表板标识与描述"
       },
       layout: {
         label: "布局",
@@ -899,11 +899,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       widgets: {
         label: "组件",
-        description: "图表、指标、列表等"
+        description: "放置在栅格上的卡片与图表"
       },
       filters: {
         label: "筛选",
-        description: "全局筛选与日期范围"
+        description: "应用到所有组件的默认筛选与全局筛选"
       },
       advanced: {
         label: "高级设置",
@@ -936,7 +936,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       header: {
         label: "页眉",
-        helpText: "标题、操作按钮与筛选"
+        helpText: "仪表板页眉配置（title、subtitle、actions）"
       },
       widgets: {
         label: "组件",
