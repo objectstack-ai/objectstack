@@ -1,8 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { MetadataManager } from './metadata-manager';
-import { DatabaseLoader } from './loaders/database-loader';
+import { MetadataManager } from './metadata-manager.js';
+import { DatabaseLoader } from './loaders/database-loader.js';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 describe('Metadata History', () => {
@@ -147,7 +147,7 @@ describe('Metadata History', () => {
       const diffResult = await manager.diff('object', 'test_object', 1, 2);
 
       expect(diffResult.identical).toBe(false);
-      expect(diffResult.patch.length).toBeGreaterThan(0);
+      expect(diffResult.patch!.length).toBeGreaterThan(0);
       expect(diffResult.summary).toContain('modified');
     }
   });

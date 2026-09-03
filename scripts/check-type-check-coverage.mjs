@@ -642,6 +642,27 @@ const ROOT_PROGRAM_COUPLED_SCRIPT = 'scripts/check-test-typecheck.mts';
 // at all, and simultaneously EXPOSED 12 real defects in `service-settings`
 // that the unresolved imports had been masking. A config-tier count is an
 // upper bound on nothing: fix the config first, then read the residue.
+//
+// `@objectstack/metadata` GRADUATED from this ledger (#14342; entry: 89 raw,
+// repaired to 0, the route #13978 took for `metadata-protocol` and ruled by
+// precedent for this one). It is worth a line because it is the sharpest
+// measurement of the paragraph directly above, and because the composition
+// this entry recorded was wrong in a way no re-measure could show. Its opening
+// itemisation read, verbatim, 'code-tier 30 (TS2345 x30); config-tier 25
+// (TS2835 x25); noise 34 (TS7006 x33, TS6133)'. Repairing the 25 TS2835 alone
+// took the pile to 52 -- ALL 33 TS7006 dissolved (they were the
+// cascade, not noise the package owed), while 20 TS2322 and 1 TS18048 appeared
+// that the 89 had never contained. So the true code tier was 51, not 30: 30
+// TS2345 (the one shared mock `PluginContext` literal, closed by adding the two
+// members it lacked to the single factory), 20 TS2322 (`(evt) => arr.push(evt)`
+// in a watcher slot typed `void | Promise<void>` -- a concise arrow body whose
+// `number` only becomes visible once the callback parameter has a real type,
+// and which the void-return assignability rule does NOT forgive because the
+// target is a union), and 1 TS18048. This is the `rest` lesson (TS18048 x13
+// exposed the same way) measured a second time, on a package whose note had
+// already itemised its own tiers with confidence: a tier split read off an
+// unrepaired config is a guess about what is UNDER it, and the only honest way
+// to size the code tier is to fix the config and look.
 const DEBT = {
   '@objectstack/cloud-connection': {
     errors: 13,
@@ -657,21 +678,6 @@ const DEBT = {
   '@objectstack/hono': {
     errors: 3,
     note: 'all code-tier (TS2769/TS18046).',
-  },
-  '@objectstack/metadata': {
-    errors: 89,
-    note: 'code-tier 30 (TS2345 x30); config-tier 25 (TS2835 x25); noise 34 (TS7006 x33, TS6133). '
-      + 'Re-measured 89 at 4b84834a32, DOWN from 92 at 5ab08428 -- itself up from 87, so this entry has '
-      + 'now drifted both ways. Against the composition recorded here at 92 the delta is attributable '
-      + 'tier by tier: code-tier lost the 4 TS2322 (-4), config-tier gained one TS2835 (+1), noise did '
-      + 'not move. TS2353 then TS2322 have each passed through the code tier and left; TS2345 x30 is its '
-      + 'only lasting resident. Read the 89 as three mechanical repairs, not 89 problems: all 30 TS2345 '
-      + 'are one defect thirty times over, in metadata.test.ts between 608 and 945, every one the same '
-      + 'mock PluginContext literal missing registerServiceFactory and getServiceScoped, so one shared '
-      + 'fixture closes the code tier outright; the 25 TS2835 are the widest spread (12 files) and are '
-      + 'one codemod, a relative import wanting an explicit .js extension under node16 resolution. '
-      + 'metadata.test.ts (34) and register-notifies-watchers.test.ts (16) do still hold 50 of the 89, '
-      + 'but that is over HALF -- the "two thirds" claimed here was true at neither 92 nor 89.',
   },
   '@objectstack/observability': {
     errors: 11,

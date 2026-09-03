@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { LRUCache } from './lru-cache';
+import { LRUCache } from './lru-cache.js';
 
 describe('LRUCache', () => {
   describe('basic set / get', () => {

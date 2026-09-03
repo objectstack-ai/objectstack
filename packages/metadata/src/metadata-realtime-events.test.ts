@@ -24,8 +24,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MetadataEventSchema } from '@objectstack/spec/api';
 import type { IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
-import { MetadataManager } from './metadata-manager';
-import { MemoryLoader } from './loaders/memory-loader';
+import { MetadataManager } from './metadata-manager.js';
+import { MemoryLoader } from './loaders/memory-loader.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 
 vi.mock('@objectstack/core', async (orig) => ({
