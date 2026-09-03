@@ -117,6 +117,13 @@ describe('os explain — schema catalog accuracy', () => {
   // Parsing the sample against the real schema is the guard that cannot itself
   // drift — it re-derives the truth from the spec on every run, which is what
   // the hand-maintained catalog otherwise has no way to do.
+  // The catalog's element shape, stated locally: `SchemaInfo` is not exported,
+  // and these tests must stay honest even where `SCHEMAS` widens to `any`
+  // (this file sits outside every tsc program — see the TEST_DEBT ledger — so
+  // an implicit `any` here would silently stop checking anything).
+  type CatalogField = { name: string; type: string };
+  const flowFields = (kind: 'required' | 'optional'): CatalogField[] => SCHEMAS.flow[kind];
+
   it('ships a flow example that actually parses as a Flow (#14782)', () => {
     // The catalog stores examples as authored source, so evaluate the literal.
     const literal = new Function(`return (${SCHEMAS.flow.example});`)() as unknown;
@@ -130,7 +137,7 @@ describe('os explain — schema catalog accuracy', () => {
   });
 
   it('documents flow.type as the full FlowSchema type enum (#14782)', () => {
-    const type = SCHEMAS.flow.required.find((f) => f.name === 'type');
+    const type = flowFields('required').find((f) => f.name === 'type');
     expect(type, 'flow schema should document a `type` field').toBeDefined();
     const tokens = (type!.type.match(/'[^']+'|"[^"]+"/g) ?? []).map((t) => t.slice(1, -1));
     expect(new Set(tokens)).toEqual(
@@ -140,13 +147,14 @@ describe('os explain — schema catalog accuracy', () => {
 
   it('teaches the acting user as {$User.Id}, and no catalog example revives $currentUser (#14782)', () => {
     expect(SCHEMAS.flow.example).toContain('{$User.Id}');
-    for (const [key, info] of Object.entries(SCHEMAS)) {
+    const entries = Object.entries(SCHEMAS) as Array<[string, { example: string }]>;
+    for (const [key, info] of entries) {
       expect(info.example, `os explain ${key} example`).not.toContain('$currentUser');
     }
   });
 
   it('never re-teaches `steps` / `trigger` as flow keys — both are aliases, not fields (#14782)', () => {
-    const declared = [...SCHEMAS.flow.required, ...SCHEMAS.flow.optional].map((f) => f.name);
+    const declared = [...flowFields('required'), ...flowFields('optional')].map((f) => f.name);
     expect(declared).not.toContain('steps');
     expect(declared).not.toContain('trigger');
     expect(declared).toContain('nodes');
