@@ -16,6 +16,7 @@ import type {
 } from '@objectstack/spec/automation';
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import type { DroppedFieldsEvent } from '@objectstack/spec/data';
+import { StandardErrorCode } from '@objectstack/spec/api';
 import type { AutomationEngine } from '../engine.js';
 import { interpolate, interpolateFilter, type VariableMap } from './template.js';
 import { refuseNode } from '../guard-refusal.js';
@@ -356,7 +357,43 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                         metrics: { acted: 1 },
                     };
                 } catch (err) {
-                    return { success: false, error: `create_record(${objectName}) failed: ${(err as Error).message}` };
+                    // #14419 — `engine.insert` (#14095) raises `DuplicateRecordError`
+                    // for a unique-constraint violation, carrying the ADR-0112
+                    // `code: 'DUPLICATE_RECORD'` this executor used to throw away by
+                    // folding every failure into one opaque string. Surfacing it here
+                    // (beside the existing `errorClass`) is what lets a `try_catch`
+                    // catch region or a `fault` edge handler branch on `{$error.code}`
+                    // — "the row is already there" vs. "the store is down" vs. any
+                    // other reason — instead of only ever seeing "create_record(...)
+                    // failed: <message>".
+                    //
+                    // Reading the classified `code` off the thrown value — never
+                    // importing `@objectstack/objectql`'s `DuplicateRecordError`
+                    // CLASS — is deliberate, not a shortcut: `objectql` is this
+                    // package's devDependency (tests only; `check:undeclared-dep-imports`
+                    // refuses it as a runtime one), because this executor runs against
+                    // ANY `IDataEngine`, not a concrete engine. The class's own header
+                    // prescribes exactly this shape anyway ("branch on `code ===
+                    // 'DUPLICATE_RECORD'` … rather than a dialect's code or message, so
+                    // the handling survives a change of store") — `code` IS the
+                    // envelope's public contract, and `StandardErrorCode` is the
+                    // platform-wide vocabulary it is drawn from (already a real
+                    // dependency here via `@objectstack/spec`).
+                    //
+                    // Deliberately narrow to THIS verb: `update_record` / `delete_record`
+                    // collapse identically, but `engine.update` still leaks the raw
+                    // driver error (#14390, not yet fixed) — those node results have
+                    // nothing structured to surface yet, so they are untouched here.
+                    const rawCode =
+                        err && typeof err === 'object' && 'code' in err
+                            ? (err as { code?: unknown }).code
+                            : undefined;
+                    const code = rawCode === StandardErrorCode.enum.DUPLICATE_RECORD ? rawCode : undefined;
+                    return {
+                        success: false,
+                        error: `create_record(${objectName}) failed: ${(err as Error).message}`,
+                        ...(code ? { code } : {}),
+                    };
                 }
             },
         });

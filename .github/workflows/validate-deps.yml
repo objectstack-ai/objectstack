@@ -18,8 +18,11 @@ on:
       # exercised on the PR that introduces them.
       - '.github/workflows/validate-deps.yml'
   schedule:
-    # Run weekly on Monday at 03:00 UTC
-    - cron: '0 3 * * 1'
+    # Run daily at 03:00 UTC — narrows the discovery window for a new OSV
+    # advisory from up to six days (weekly) to one, so the scheduled scan
+    # is more likely to surface a red before an unrelated PR's blocking
+    # trigger collides with it (#14645).
+    - cron: '0 3 * * *'
   workflow_dispatch:
 
 jobs:

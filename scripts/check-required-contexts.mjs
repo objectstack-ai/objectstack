@@ -191,6 +191,56 @@ import { fileURLToPath } from 'node:url';
 import { invokes, shellCommands } from './check-shard-attestation.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the checked-in state is green': 2,
+  '(3) THE PIN: reverse verification, one per workflow file': 7,
+  '(2) the job disappearing entirely': 2,
+  '(4) growing a matrix on a registered job': 2,
+  '(5) continue-on-error': 4,
+  '(6) the merge_group trigger': 3,
+  '(7) a path-filtered pull_request trigger': 4,
+  '(7b) a `types:` list that drops a GitHub default': 6,
+  '(9) the shadowing collision, on the live specimen': 3,
+  '(8) a registry that lists one context twice': 1,
+  '(10) a `carries` string that embeds a step count': 3,
+  'missing input is a failure, never a pass (#4690)': 6,
+  'the `on:` key under both YAML schemas': 3,
+  'instruction surfaces (#9491): the stale-name scan': 28,
+  'the dispatch-gates declaration (#9979)': 6,
+  'the wiring: this gate must actually run on every PR': 28,
+  'the live mode stays OFF the required path': 3,
+  '…and the standing caller it DOES have (#9678)': 7,
+  'the recognizer itself, in BOTH directions': 10,
+  '…and the NARROW recognizer beside it, in both directions': 6,
+  'is the pin WIRED into the required job?': 3,
+  'the wiring recognizer, in BOTH directions': 13,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 22;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 /**
  * The branch-protection-required check contexts, as this repository declares
  * them. Each entry is `<workflow file>` + `<job id>` → the exact check-run name.
@@ -1583,9 +1633,24 @@ async function main() {
 const SELF_TEST_VERDICT = 'check-required-contexts self-test reached its verdict';
 
 async function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   const failures = [];
   let checked = 0;
   const assert = (condition, description) => {
+    registerCase();
     checked += 1;
     if (!condition) failures.push(description);
   };
@@ -1620,6 +1685,7 @@ async function selfTest() {
   };
 
   // ── the checked-in state is green ─────────────────────────────────────────
+  battery('the checked-in state is green');
   const baseline = await scanWorkflows(root);
   assert(baseline.problems.length === 0, `the checked-in workflows pass the pin — got ${JSON.stringify(baseline.problems)}`);
   assert(baseline.pinned.length === REQUIRED_CONTEXTS.length, `every registered context is reached and pinned (${baseline.pinned.length}/${REQUIRED_CONTEXTS.length})`);
@@ -1633,6 +1699,7 @@ async function selfTest() {
   // this fixture doubles as the regression test for that rename: reverting
   // lint.yml alone, without this registry, is exactly the half-landed state
   // the #9325 sequencing exists to prevent, and it must be red.
+  battery('(3) THE PIN: reverse verification, one per workflow file');
   const renamedGateJob = fixture('rename the gate-family job back to ESLint', 'lint.yml', (s) =>
     s.replace('    name: Lint & Repo Gates\n', '    name: ESLint\n'),
   );
@@ -1663,6 +1730,7 @@ async function selfTest() {
   // Re-pointed from `console-pin` to `temporal-conformance` when #9533 dropped
   // the console-pin row: a fixture must mutate a job the registry still
   // REGISTERS, or it asserts nothing while reading exactly as before.
+  battery('(2) the job disappearing entirely');
   const droppedJob = fixture('drop the temporal-conformance job', 'ci.yml', (s) =>
     s.replace('\n  temporal-conformance:\n', '\n  temporal-conformance-disabled:\n'),
   );
@@ -1673,6 +1741,7 @@ async function selfTest() {
 
   // ── (4) growing a matrix on a registered job ──────────────────────────────
   // Re-pointed from `build-docs` for the same reason as (2) above.
+  battery('(4) growing a matrix on a registered job');
   const matrixed = fixture('matrix on build-core', 'ci.yml', (s) =>
     s.replace('  build-core:\n    name: Build Core\n', '  build-core:\n    name: Build Core\n    strategy:\n      matrix:\n        shard: [1, 2]\n'),
   );
@@ -1682,6 +1751,7 @@ async function selfTest() {
   );
 
   // ── (5) continue-on-error ────────────────────────────────────────────────
+  battery('(5) continue-on-error');
   const soft = fixture('continue-on-error on typecheck', 'lint.yml', (s) =>
     s.replace('  typecheck:\n    name: TypeScript Type Check\n', '  typecheck:\n    name: TypeScript Type Check\n    continue-on-error: true\n'),
   );
@@ -1696,6 +1766,7 @@ async function selfTest() {
   assert(softFalse.problems.length === 0, `continue-on-error: false ⇒ green — got ${JSON.stringify(softFalse.problems)}`);
 
   // ── (6) the merge_group trigger ──────────────────────────────────────────
+  battery('(6) the merge_group trigger');
   const noQueue = fixture('drop merge_group from lint.yml', 'lint.yml', (s) => s.replace('\n  merge_group:\n', '\n'));
   assert(
     noQueue.problems.some((p) => p.includes('merge_group') && p.includes('Lint & Repo Gates') && p.includes('TypeScript Type Check')),
@@ -1707,6 +1778,7 @@ async function selfTest() {
   );
 
   // ── (7) a path-filtered pull_request trigger ─────────────────────────────
+  battery('(7) a path-filtered pull_request trigger');
   const pathFiltered = fixture('paths: on ci.yml', 'ci.yml', (s) =>
     s.replace('  pull_request:\n    branches:\n      - main\n', "  pull_request:\n    branches:\n      - main\n    paths:\n      - 'packages/**'\n"),
   );
@@ -1726,6 +1798,7 @@ async function selfTest() {
   // is the same permanent-pending wedge as a `paths:` filter (#8304). The
   // no-`types:`-at-all ⇒ green half is the checked-in baseline itself,
   // asserted green at the top of this self-test.
+  battery('(7b) a `types:` list that drops a GitHub default');
   const droppedReopened = fixture('grow a types: list that omits reopened onto ci.yml', 'ci.yml', (s) =>
     s.replace('  pull_request:\n    branches:\n      - main\n', '  pull_request:\n    types: [opened, synchronize]\n    branches:\n      - main\n'),
   );
@@ -1753,6 +1826,7 @@ async function selfTest() {
   // and its aggregate gate is named `Test Core`. Dropping the suffix makes two
   // jobs publish one context, and the surviving conclusion is whichever
   // finished last — a shard could satisfy the aggregate's required gate.
+  battery('(9) the shadowing collision, on the live specimen');
   const collided = fixture('collide the shard name with the gate name', 'ci.yml', (s) =>
     s.replace('name: Test Core (${{ matrix.shard }}/6)', 'name: Test Core'),
   );
@@ -1768,6 +1842,7 @@ async function selfTest() {
   );
 
   // ── (8) a registry that lists one context twice ──────────────────────────
+  battery('(8) a registry that lists one context twice');
   const doubled = judge({
     registry: [...REQUIRED_CONTEXTS, { workflow: 'ci.yml', job: 'build-docs', context: 'Build Core' }],
     workflows: new Map(Object.entries(sources).map(([f, text]) => [f, { doc: parse(text) }])),
@@ -1778,6 +1853,7 @@ async function selfTest() {
   // The rot mode #9103 recorded, now with an assertion on it. Both spellings
   // the registry actually used are exercised, since the parenthesised form is
   // the one a future author is most likely to reintroduce.
+  battery('(10) a `carries` string that embeds a step count');
   const workflowsFor = () => new Map(Object.entries(sources).map(([f, text]) => [f, { doc: parse(text) }]));
   for (const spelling of ['the whole check:* gate family (25 steps)', 'the type-check family, 33 steps']) {
     const stale = judge({
@@ -1797,6 +1873,7 @@ async function selfTest() {
   );
 
   // ── missing input is a failure, never a pass (#4690) ─────────────────────
+  battery('missing input is a failure, never a pass (#4690)');
   assert(judge({ registry: [], workflows: new Map() }).problems.length === 1, 'an empty registry ⇒ red, never a silent tick');
   assert(
     judge({ registry: REQUIRED_CONTEXTS, workflows: new Map() }).problems.some((p) => p.includes('was never read')),
@@ -1834,6 +1911,7 @@ async function selfTest() {
   // Same document, two parser verdicts. Reading only one spelling would make
   // every trigger assertion vacuous the day the parser's schema changes — and
   // vacuous means GREEN, which is the direction that never gets noticed.
+  battery('the `on:` key under both YAML schemas');
   const triggerDoc = { push: {}, pull_request: {}, merge_group: null };
   assert(triggersOf({ on: triggerDoc }) === triggerDoc, "the YAML 1.2 spelling (string key 'on') is read");
   assert(triggersOf({ [true]: triggerDoc }) === triggerDoc, 'the YAML 1.1 spelling (boolean key true) is read');
@@ -1847,6 +1925,7 @@ async function selfTest() {
   // when this scan landed; a fixture anchored into the line it rewrites would
   // have let THIS self-test eject that PR from the merge queue — the exact
   // block-the-sitting failure the budget design exists to avoid.
+  battery('instruction surfaces (#9491): the stale-name scan');
   const CHECKLIST_SURFACE = '.claude/skills/pm-dispatch/references/review-checklist.md';
   const surfaceSources = Object.fromEntries(
     INSTRUCTION_SURFACES.map((s) => [s.file, readFileSync(join(root, s.file), 'utf8')]),
@@ -2144,6 +2223,7 @@ async function selfTest() {
   // shows up only as a dev dispatched on an AGENTS.md card with this gate
   // absent from the brief — on the surface that carries `mustName` for all six
   // required contexts.
+  battery('the dispatch-gates declaration (#9979)');
   assert(
     INSTRUCTION_SURFACES.map((s) => s.file)
       .filter((f) => !f.includes('/'))
@@ -2199,6 +2279,7 @@ async function selfTest() {
   // unrun — #4690 with a network call attached. Everything below is offline:
   // synthetic rulesets for each direction, plus one frozen copy of the real
   // 2026-08-18 reading so the shape this code parses is the shape GitHub sends.
+  battery('the wiring: this gate must actually run on every PR');
   const RULESET_SNAPSHOT = {
     id: 12119582,
     name: 'main',
@@ -2357,6 +2438,7 @@ async function selfTest() {
   // reddens on the very PR that carries the repo half of a rename, deadlocking
   // the two-step. Wiring it is a maintainer decision, and it goes red HERE
   // first rather than silently in the queue.
+  battery('the live mode stays OFF the required path');
   {
     for (const [file, text] of Object.entries(sources)) {
       assert(
@@ -2380,6 +2462,7 @@ async function selfTest() {
     // .github/workflows tree is swept rather than the two files `sources`
     // carries: a second caller appearing in some third workflow is exactly the
     // thing the absences above are guarding against, and they cannot see it.
+    battery('…and the standing caller it DOES have (#9678)');
     const workflowDir = join(root, '.github', 'workflows');
     // A document this sweep could not READ is not a document with nothing in
     // it (#4690), and the recognizer now needs a parse to answer at all. So an
@@ -2510,6 +2593,7 @@ async function selfTest() {
     // under test — parse, then lex each `run:`, then look for the flag. One
     // seam, so the recognizer can be swapped for the old line filter under
     // reverse verification without touching a single fixture.
+    battery('the recognizer itself, in BOTH directions');
     const wired = (source) => wiresLiveRead(parse(source));
     const workflowFixture = (...lines) => lines.join('\n');
     const stepFixture = (...runLines) =>
@@ -2653,6 +2737,7 @@ async function selfTest() {
     // the two recognizers are pinned TOGETHER here because the point is that
     // they deliberately disagree. Reading these cases as "one of them is wrong"
     // is the mistake this block exists to prevent; see `invokesLiveRead`.
+    battery('…and the NARROW recognizer beside it, in both directions');
     const invoked = (source) => invokesLiveRead(parse(source));
 
     // (j′) the measured defect: the patrol's own `echo` about the flag. Spelled
@@ -2714,6 +2799,7 @@ async function selfTest() {
     // `jobs.lint.steps` and asks each step's `run:` whether it INVOKES the
     // script; the three text shapes that used to satisfy this are catalogued
     // there and pinned below in both directions.
+    battery('is the pin WIRED into the required job?');
     const lintDoc = parse(sources['lint.yml']);
     const lintJob = lintDoc?.jobs?.lint;
     // #4690: "no readable `lint` job" must be a NAMED failure, not a zero that
@@ -2749,6 +2835,7 @@ async function selfTest() {
     // self-test gets is loosened. So every "prose" case below is paired with the
     // same wiring made REAL and asserted as wiring, and the checked-in lint.yml
     // is asserted above as the sixth live limb.
+    battery('the wiring recognizer, in BOTH directions');
     const lintFixture = (...jobLines) => ['name: Lint', 'on:', '  push: {}', 'jobs:', ...jobLines].join('\n');
     const lintJobFixture = (...stepLines) => lintFixture('  lint:', '    runs-on: ubuntu-latest', '    steps:', ...stepLines);
 
@@ -2863,6 +2950,52 @@ async function selfTest() {
     assert(
       !/\bfetch\(|verifyRequiredSet\(|fetchLiveRulesets\(/.test(mainBody),
       'wiring: the pin (main) stays network-free — the live required-set read is report-only and off the required path (#9642)',
+    );
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
     );
   }
 

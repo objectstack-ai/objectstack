@@ -216,6 +216,43 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 import { blank, scanSource } from './js-comment-mask.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the detector FIRES, once per import form': 10,
+  'the detector STAYS SILENT where it must': 6,
+  'the comment mask, in both directions': 3,
+  'tsconfig exclusions are honoured, and only where declared': 2,
+  'refusals': 8,
+  'provenance: the record must stay reproducible, and visibly so': 8,
+  'ledger reconciliation, in both directions': 10,
+  'the declared watch hints stay equal to the real population': 2,
+  'POSITIVE CONTROL on the real tree': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 9;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 
@@ -717,8 +754,22 @@ function makeTree(root, { manifest, files, workspace }) {
 let selfTestReachedVerdict = false;
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   let failures = 0;
-  const t = (name, ok) => { if (!ok) { failures += 1; console.error(`  FAIL  ${name}`); } else console.log(`  ok    ${name}`); };
+  const t = (name, ok) => { registerCase(); if (!ok) { failures += 1; console.error(`  FAIL  ${name}`); } else console.log(`  ok    ${name}`); };
 
   const tmp = mkdtempSync(join(tmpdir(), 'undeclared-dep-imports-'));
   const run = (spec) => {
@@ -730,6 +781,7 @@ function selfTest() {
 
   try {
     // ── the detector FIRES, once per import form ────────────────────────────
+    battery('the detector FIRES, once per import form');
     const staticImport = run({ manifest: baseManifest, files: { 'src/a.ts': "import { x } from '@objectstack/undeclared';\n" } });
     t('static value import of an undeclared package is a finding',
       staticImport.findings.length === 1 && staticImport.findings[0].dep === '@objectstack/undeclared'
@@ -774,6 +826,7 @@ function selfTest() {
       devOnly.findings.length === 1 && devOnly.findings[0].devDeclared === true);
 
     // ── the detector STAYS SILENT where it must ─────────────────────────────
+    battery('the detector STAYS SILENT where it must');
     const declared = run({
       manifest: { ...baseManifest, dependencies: { '@objectstack/dep': 'workspace:*' } },
       files: { 'src/a.ts': "import { x } from '@objectstack/dep';\n" },
@@ -812,6 +865,7 @@ function selfTest() {
     t('only `src/**` is read', outsideSrc.findings.length === 0);
 
     // ── the comment mask, in both directions ───────────────────────────────
+    battery('the comment mask, in both directions');
     const prose = run({
       manifest: baseManifest,
       files: {
@@ -837,6 +891,7 @@ function selfTest() {
       assembled.findings.length === 0 && assembled.assembled === 1);
 
     // ── tsconfig exclusions are honoured, and only where declared ──────────
+    battery('tsconfig exclusions are honoured, and only where declared');
     const payload = run({
       manifest: baseManifest,
       files: {
@@ -858,6 +913,7 @@ function selfTest() {
       noExclusion.findings.length === 1);
 
     // ── refusals ───────────────────────────────────────────────────────────
+    battery('refusals');
     const emptyRoot = mkdtempSync(join(tmp, 'empty-'));
     t('REFUSAL — a root with no pnpm-workspace.yaml is fatal, never clean',
       typeof sweep(emptyRoot).fatal === 'string');
@@ -898,6 +954,7 @@ function selfTest() {
     // when the RECORD stops being a self-contained, reproducible claim: a ref
     // that is not a ref, a quotation that restated the ref instead of reading
     // it, or a pass line that stopped showing the reader both censuses.
+    battery('provenance: the record must stay reproducible, and visibly so');
     t('PROVENANCE — the record carries the ref it was measured on, inside the frozen record',
       typeof MEASURED.ref === 'string' && /^[0-9a-f]{7,40}$/.test(MEASURED.ref) && Object.isFrozen(MEASURED),
       JSON.stringify(MEASURED.ref));
@@ -943,6 +1000,7 @@ function selfTest() {
       'the pass path in main() no longer calls provenanceLine — the record would stop being reconciled in the log');
 
     // ── ledger reconciliation, in both directions ─────────────────────────
+    battery('ledger reconciliation, in both directions');
     const row = { pkg: '@objectstack/p', dep: '@objectstack/d', file: 'packages/p/src/a.ts', kind: 'optional-runtime-probe', why: 'x'.repeat(50) };
     const dyn = { pkg: '@objectstack/p', dep: '@objectstack/d', file: 'packages/p/src/a.ts', form: 'dynamic', line: 1, spec: '@objectstack/d', devDeclared: false };
     t('LEDGER — a matching dynamic finding is covered by its row',
@@ -974,6 +1032,7 @@ function selfTest() {
     t('LEDGER — the shipped ledger is well formed', ledgerShapeProblems(LEDGER).length === 0);
 
     // ── the declared watch hints stay equal to the real population ────────
+    battery('the declared watch hints stay equal to the real population');
     const declaredGlobs = workspaceGlobs(readFileSync(join(REPO_ROOT, 'pnpm-workspace.yaml'), 'utf8'));
     const hintRoots = ROOT_DIR_WATCH_HINTS.map((h) => h.replace(/\/\*+$/, ''));
     t('WATCH HINTS — every `packages:` glob in pnpm-workspace.yaml sits under a declared hint',
@@ -986,12 +1045,60 @@ function selfTest() {
     // A zero from this gate is only a reading if the instrument is seen working
     // on the tree it actually judges. The sweep must reach the real population
     // and must extract real specifiers; a matcher that has died reads as clean.
+    battery('POSITIVE CONTROL on the real tree');
     const real = sweep(REPO_ROOT);
     t('POSITIVE CONTROL — the real sweep reaches its population and extracts specifiers',
       real.fatal === undefined && real.packages.length >= MIN_PACKAGES
       && real.scannedFiles >= MIN_SCANNED_FILES && real.specifiers >= MIN_SPECIFIERS);
   } finally {
     rmSync(tmp, { recursive: true, force: true });
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures += 1;
+      console.error(`  FAIL  ${message}`);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
   }
 
   console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  check-undeclared-dep-imports --self-test (${failures} failure(s))`);

@@ -697,6 +697,12 @@ export function selfTest() {
   return failures;
 }
 
+// Returned by `runSelfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-workspace-manifest-cycles self-test reached its verdict';
+
 function runSelfTest() {
   const failures = selfTest();
   if (failures.length) {
@@ -705,10 +711,20 @@ function runSelfTest() {
     process.exit(1);
   }
   console.log('OK: check-workspace-manifest-cycles --self-test — all cases passed.');
+
+  return SELF_TEST_VERDICT;
 }
 
 // Exports bindings, so an import for those exports alone must run nothing (#10667).
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) runSelfTest();
-  else main();
+  if (process.argv.includes('--self-test')) {
+    if (runSelfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-workspace-manifest-cycles self-test: runSelfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  } else main();
 }
