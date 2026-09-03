@@ -647,13 +647,6 @@ const DEBT = {
     errors: 13,
     note: 'code-tier 11 (TS2493 tuple indexing) + 2 config-tier.',
   },
-  '@objectstack/core': {
-    errors: 98,
-    note: 'code-tier 3 (TS18046/TS2739/TS2352); the rest is config-tier 23 (TS2835 x22 / TS2347 module '
-      + 'resolution) and noise 72 (TS7006 x71, TS6133). Re-measured 98 at 5ab08428, up from 91: the '
-      + 'code-tier count is UNCHANGED at 3, so the whole +7 landed in the NodeNext/implicit-any residue '
-      + '-- which is the tier the note at the top of this ledger says to fix first, not last.',
-  },
   '@objectstack/hono': {
     errors: 3,
     note: 'all code-tier (TS2769/TS18046).',
