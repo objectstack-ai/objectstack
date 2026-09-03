@@ -1850,6 +1850,56 @@ describe('script / cross_field predicates', () => {
       evaluateValidationRules(schema, { a: 1 }, 'update', { previous: { a: 0 } }),
     ).toThrow(/rule 'broken' could not be evaluated/);
   });
+
+  // ── #14891 — the case that DEFINES a `script`/`cross_field` rule as an
+  // INVARIANT rather than a transition gate. `checkPredicate` (above) is handed
+  // `ctx.merged` on EVERY write, with no exemption for a violation that was
+  // already stored, so a row that already violates is refused on *any* edit
+  // until a repairing write lands: frozen, not bricked.
+  //
+  // That is the exact opposite of `Field.requiredWhen`, whose ADR-0113
+  // exemption is pinned at the top of this file — "legacy rows rest: a
+  // pre-existing violation does not block an unrelated write". Until these two
+  // cases landed, the boundary had asymmetric coverage: the gate's exemption
+  // was pinned, the invariant's *absence* of one was not — so a future edit
+  // that quietly gave `script` rules the same exemption would have gone
+  // unnoticed by this suite.
+  const discountSchema = {
+    validations: [
+      {
+        type: 'script' as const,
+        name: 'discount_cap',
+        condition: { dialect: 'cel', source: 'record.discount > 60' },
+        message: 'Discount may not exceed 60%.',
+      },
+    ],
+  };
+
+  it('a stored violation FREEZES the row — an unrelated-field write is refused too (#14891)', () => {
+    // pre: discount 90 → ALREADY violates. The write touches only `note`, so it
+    // CREATES nothing; it is refused all the same, because the merged record
+    // still violates. (Asserting the envelope, not just `toThrow` — a bare
+    // throw here would also be satisfied by an unrelated fault.)
+    let caught: unknown;
+    try {
+      evaluateValidationRules(discountSchema, { note: 'x' }, 'update', { previous: { discount: 90 } });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(ValidationError);
+    expect((caught as ValidationError).code).toBe('VALIDATION_FAILED');
+    expect((caught as ValidationError).fields).toEqual([
+      { field: '_record', code: 'rule_violation', message: 'Discount may not exceed 60%.' },
+    ]);
+  });
+
+  it('…and the REPAIRING write passes — frozen, not bricked (#14891)', () => {
+    // Same violating prior row; this write brings the merged record back under
+    // the cap, so the invariant is satisfied and the row is editable again.
+    expect(() =>
+      evaluateValidationRules(discountSchema, { discount: 50 }, 'update', { previous: { discount: 90 } }),
+    ).not.toThrow();
+  });
 });
 
 describe('introspection', () => {
