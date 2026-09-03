@@ -7,7 +7,7 @@
  */
 
 // ── Core Auth Objects ──────────────────────────────────────────────────────
-export { SysUser } from './sys-user.object.js';
+export { SysUser, SYS_USER_LOCALE_TAG_PATTERN } from './sys-user.object.js';
 export { SysSession } from './sys-session.object.js';
 export { SysAccount } from './sys-account.object.js';
 export { SysVerification } from './sys-verification.object.js';

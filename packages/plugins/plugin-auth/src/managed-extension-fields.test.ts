@@ -123,6 +123,7 @@ import {
   managedExtensionFields,
   managedExtensionEditableFields,
 } from './managed-extension-fields.js';
+import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 
 /** better-auth model name → the ObjectStack object it materializes as. */
 const MODEL_TO_OBJECT: Record<string, string> = {
@@ -862,14 +863,44 @@ describe('managed extension fields (ADR-0105 D7)', () => {
 
   it('admin-surface-only sys_user fields are declared but NOT generically editable', () => {
     // `manager_id` / `ai_access` drive authorization and AI seating;
-    // `primary_business_unit_id` is a projection plugin-sharing maintains;
-    // `locale` (#13881) is declared as ours so the D7 guard judges it, and
-    // stays off the editable map until a ruling widens the ADR-0092 D2
-    // profile whitelist — an unwidened whitelist is the recorded state, not
-    // an oversight.
-    for (const field of ['manager_id', 'ai_access', 'primary_business_unit_id', 'locale']) {
+    // `primary_business_unit_id` is a projection plugin-sharing maintains.
+    //
+    // ⚠️ `locale` was in this list until 2026-09-03 and has been REVERSED out
+    // of it, not dropped: the entry recorded "stays off the editable map until
+    // a ruling widens the ADR-0092 D2 profile whitelist", and that ruling
+    // arrived (option B, adopted 「同意」). It is now pinned in the opposite
+    // direction by the test below. The sentence it used to carry was right on
+    // its own terms — an unwidened whitelist was the recorded state, not an
+    // oversight — which is exactly why the reversal is named here instead of
+    // erasing it.
+    for (const field of ['manager_id', 'ai_access', 'primary_business_unit_id']) {
       expect(managedExtensionFields('sys_user')).toContain(field);
       expect(managedExtensionEditableFields('sys_user')).not.toContain(field);
+    }
+  });
+
+  it('`sys_user.locale` is declared AND generically editable (2026-09-03 ruling)', () => {
+    expect(managedExtensionFields('sys_user')).toContain('locale');
+    expect(managedExtensionEditableFields('sys_user')).toContain('locale');
+    // One name, not a family: the ruling grew the user-writable set by exactly
+    // one field, so this map's `sys_user` entry has exactly one member.
+    expect([...managedExtensionEditableFields('sys_user')]).toEqual(['locale']);
+  });
+
+  it('`sys_user`\'s editable declaration is a subset of the whitelist actually registered', () => {
+    // `auth-plugin.ts` SKIPS `sys_user` when it registers whitelists from this
+    // map and registers the tiered `SYS_USER_PROFILE_EDIT_FIELDS` instead — so
+    // for this one object the map is a declaration and something else is the
+    // enforcement. A name that reaches the map but never the whitelist would be
+    // a write the platform advertises and the guard refuses: declared ≠
+    // enforced, the shape ADR-0049 exists to ban. Nothing else pins the two
+    // together, because nothing else reads both.
+    for (const field of managedExtensionEditableFields('sys_user')) {
+      expect(
+        SYS_USER_PROFILE_EDIT_FIELDS.has(field),
+        `sys_user.${field} is declared generically editable but is not in `
+          + `SYS_USER_PROFILE_EDIT_FIELDS, which is the set auth-plugin.ts actually registers`,
+      ).toBe(true);
     }
   });
 

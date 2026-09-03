@@ -304,6 +304,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       }
+    },
+    _validations: {
+      locale_bcp47_shape: {
+        message: "El idioma debe ser una etiqueta de idioma BCP-47, por ejemplo zh-CN o ja-JP."
+      }
     }
   },
   sys_session: {
