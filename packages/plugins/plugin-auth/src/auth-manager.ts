@@ -3029,8 +3029,12 @@ export class AuthManager {
               // very card one seat over. The 2026-09-02 ruling enumerates
               // signup, sign-in and password reset — sends where the requester
               // IS the recipient — and the superseded 2026-08-13 ruling named
-              // invitations as its own counterexample. So an invitee gets the
-              // deployment default until a per-user language exists to read.
+              // invitations as its own counterexample. A per-user language
+              // now EXISTS to read — `sys_user.locale` (#13881, ruling
+              // 2026-09-01) — but an invitee has no `sys_user` row until they
+              // accept, so this send keeps the deployment rung; reading the
+              // invitee's column where one exists is #14641's rung, not this
+              // card's.
               ...this.emailLocaleArg(),
               data: {
                 inviter: {
@@ -4706,9 +4710,12 @@ export class AuthManager {
    * the request rung applies only where the requester IS the recipient, and
    * why the invitation send below still reads this rung.
    *
-   * Per-user locale is STILL deferred by the 2026-09-02 ruling — `sys_user`
-   * carries no locale column and none is added here. When one arrives it
-   * layers on top as a third rung, so nothing here is wasted.
+   * Per-user locale EXISTS since #13881 (maintainer ruling 2026-09-01):
+   * `sys_user.locale`, resolved per recipient by service-messaging for
+   * notification mail (`recipient-locale.ts`). Auth mail does NOT read it
+   * yet — this ladder stays request rung → deployment rung. Layering the
+   * user's own column on top as a third rung is #14641 (invitations) and
+   * its own card for the other sends; nothing here is wasted by that.
    */
   setDefaultEmailLocale(locale: string | undefined): void {
     this.emailLocale = normalizeAuthEmailLocale(locale);
