@@ -895,7 +895,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       layout: {
         label: "布局",
-        description: "栅格与响应式"
+        description: "栅格尺寸与刷新间隔"
       },
       widgets: {
         label: "组件",
