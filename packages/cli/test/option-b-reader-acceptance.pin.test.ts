@@ -1,0 +1,264 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * ADR-0130 D4 / option B — **the acceptance pin for the reader program**
+ * (#15004, card 1/4; the program was ruled on #14512 comment 5528589044,
+ * maintainer 2026-09-03, decision batch #23).
+ *
+ * ## What option B is, and what its failure mode is
+ *
+ * A multi-package artifact today serializes every definition TWICE: once
+ * flattened to the top level, once inside `packages[i].manifest`. Option B
+ * removes the flattened copy, so `packages[]` carries each definition exactly
+ * once. The ruled order is **readers first, emitter last** — every reader
+ * learns to resolve `packages[]` while the artifact stays additive, and only
+ * then does `composeStacks` stop emitting the flat copy.
+ *
+ * The failure mode that order exists to contain is **a reader nobody
+ * enumerated**, and it is not hypothetical: the enumeration missed sites twice
+ * (#14512 comments 5523603341 and 5523741937), the second time including one in
+ * `@objectstack/plugin-security`, a package nobody had scoped. The symptom is
+ * SILENT. Nothing throws. The collection is simply absent, so a multi-package
+ * artifact boots clean having lost its declarative actions, its scheduled jobs,
+ * its seed data, its object routing or its default permission set.
+ *
+ * This file is the thing that makes that loud. In the ruling's own words, *"the
+ * reader half does not land without it."*
+ *
+ * ## How it works
+ *
+ * `option-b-collection-zoo.ts` composes two ordinary packages carrying one
+ * member of every collection family, in the two shapes — today's additive one
+ * and the ruled option-B one (flattened collections stripped, `packages[]`
+ * intact). `option-b-reader-probe.ts` runs every reader over each shape and
+ * reports what each subsystem SAW. Both entry paths are driven, because they
+ * share no seam: the compiled artifact is written to disk and loaded through
+ * `loadArtifactBundle` / `createStandaloneStack` / `resolve-project-database`,
+ * and the from-source config is driven exactly as `os serve` / `os dev` /
+ * `os build` / `os migrate` drive it after their own `loadConfig`.
+ *
+ * ## Why the losses are LEDGERED instead of simply asserted away
+ *
+ * The card's acceptance is that the option-B leg is RED today — a probe already
+ * green on option-B before any reader work has landed is a broken probe. A
+ * permanently red test cannot land, so the red is held the way every other
+ * measured-state gate in this repo holds one: `OPTION_B_LOSSES` records EXACTLY
+ * which rows lose today, and the pin asserts set EQUALITY against it.
+ *
+ * That gives all four directions at once, and the last two are the ones a bare
+ * `expect(...).toBe(0)` could not give:
+ *
+ *   - a reader fixed by card 2/4, 3/4 or 4/4 ⇒ RED, naming the ledger line to
+ *     DELETE. The ledger shrinks one subsystem at a time, exactly as the ruling
+ *     describes, and reaching empty is what "the program is done" means.
+ *   - a reader that REGRESSES ⇒ RED, naming the row.
+ *   - a NEW reader nobody enumerated, arriving in a later change ⇒ RED on
+ *     arrival, which is the entire point of the card.
+ *   - the probe itself quietly measuring less ⇒ RED, because a row that stops
+ *     being measured stops matching its ledger line.
+ *
+ * ⛔ `OPTION_B_LOSSES` is SHRINK-ONLY. Adding a line is never how a red build is
+ * fixed — teaching the reader to resolve `packages[]` is. A row that belongs in
+ * this ledger is a subsystem that silently loses a collection, and the reader
+ * program exists to remove it.
+ *
+ * ## Reverse-verified, per the card
+ *
+ * Run with `OPTION_B_LOSSES` emptied on `origin/main` `33681eaef`, the pin
+ * reports 21 subsystems losing their collections — the red output is recorded
+ * in this card's PR body. The additive leg is green in the same run, which is
+ * what makes the red a discrimination rather than a broken fixture.
+ *
+ * ## Boundaries — what this pin does NOT reach, stated rather than implied
+ *
+ * Three reads in the enumeration are expressions inline inside oclif command
+ * bodies, with no exported reader and no service on the far side, so no probe
+ * short of running the command reaches them. They are named here so the next
+ * reader does not mistake this file for full coverage of the enumeration:
+ *
+ *   - `serve.ts` `config.objects` gating ObjectQL engine auto-registration, and
+ *     the sibling gate for storage-driver auto-registration. The artifact half
+ *     of both IS covered — `createStandaloneStack` surfaces `objects` precisely
+ *     so that path can drive them, and that row is in the table — but the
+ *     from-source half is reachable only through a real `os serve`.
+ *   - `dev.ts` `readArtifactObjects()`, a module-private function that opens the
+ *     artifact with its own `JSON.parse(readFileSync(...))` to diff the object
+ *     inventory across recompiles. Non-fatal; it goes permanently empty.
+ *   - `compile.ts`'s union authoring-rule run, which under option B would judge
+ *     an empty stack.
+ *
+ * ⛔ Do not "cover" these by asserting `config.objects` in this file. A row
+ * shaped like the read it is watching is a second copy of the code the reader
+ * program is about to change: it stays red after the reader beside it is fixed,
+ * and a gate that cannot go green gets deleted. Cards 3/4 and 4/4 own those
+ * sites; a probe for them belongs beside whatever seam those cards introduce.
+ */
+
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+
+import {
+  additiveProject,
+  optionBProject,
+  ARTIFACT_ENVELOPE_KEYS,
+  PACKAGE_OWNED_COLLECTION_KEYS,
+} from './fixtures/option-b-collection-zoo.js';
+import { measureShape, type ProbeRow, type ShapeMeasurement } from './fixtures/option-b-reader-probe.js';
+
+/**
+ * The subsystems that silently lose their collection when the flattened top
+ * level is gone — MEASURED on `origin/main` `33681eaef`, not curated.
+ *
+ * ⛔ SHRINK-ONLY, audited in BOTH directions (see the header). Each line names
+ * a boundary, a subsystem and the collection it reads.
+ */
+const OPTION_B_LOSSES: readonly string[] = [
+  'B1 · AppPlugin declared-datasource auto-connect (compiled artifact) · datasources',
+  'B1 · AppPlugin job scheduling (compiled artifact) · jobs',
+  'B1 · AppPlugin objects handed to datasource connect (compiled artifact) · objects',
+  'B1 · AppPlugin ql.setDatasourceMapping (object routing) (compiled artifact) · datasourceMapping',
+  'B1 · AppPlugin seed datasets merged (compiled artifact) · data',
+  'B1 · AppPlugin translation loading into the i18n service (compiled artifact) · translations',
+  'B1 · createStandaloneStack surfaced objects (CLI tier resolution + engine/driver auto-registration) · objects',
+  'B1 · createStandaloneStack surfaced permissions (ADR-0056 D7) · permissions',
+  'B1 · createStandaloneStack surfaced positions · positions',
+  'B1 · plugin-security appSecurityPluginOptions over the artifact-serve config (default permission set) · permissions',
+  'B1 · runtime collectBundleActions (action dispatch registration) · actions + objects[].actions',
+  'B1 · runtime collectBundleFunctionEntries (declared function effect) · functions',
+  'B1 · runtime collectBundleHooks (declarative hook binding) · hooks',
+  'B2 · AppPlugin declared-datasource auto-connect (from source) · datasources',
+  'B2 · AppPlugin job scheduling (from source) · jobs',
+  'B2 · AppPlugin objects handed to datasource connect (from source) · objects',
+  'B2 · AppPlugin ql.setDatasourceMapping (object routing) (from source) · datasourceMapping',
+  'B2 · AppPlugin seed datasets merged (from source) · data',
+  'B2 · AppPlugin translation loading into the i18n service (from source) · translations',
+  'B2 · plugin-security appSecurityPluginOptions over the from-source config (default permission set) · permissions',
+  'B2 · runtime collectBundleActions over the from-source config · actions + objects[].actions',
+  'B2 · runtime collectBundleFunctionEntries over the from-source config · functions',
+  'B2 · runtime collectBundleHooks over the from-source config · hooks',
+  'B5 · resolve-project-database readConfigDeclaredDefault (project database tier) · datasourceMapping + datasources',
+];
+
+const render = (rows: ProbeRow[], only?: (r: ProbeRow) => boolean): string =>
+  rows
+    .filter((r) => (only ? only(r) : true))
+    .map((r) => `  ${r.lost ? 'LOST   ' : 'present'}  ${r.id} = ${r.observed}`)
+    .join('\n');
+
+describe('#15004 — option-B acceptance pin: every subsystem must see its collections in BOTH shapes', () => {
+  let roots: string[] = [];
+  let additive: ShapeMeasurement;
+  let optionB: ShapeMeasurement;
+
+  beforeAll(async () => {
+    const mkRoot = (tag: string): string => {
+      const dir = mkdtempSync(join(tmpdir(), `os-option-b-${tag}-`));
+      roots.push(dir);
+      return dir;
+    };
+    additive = await measureShape(additiveProject(), mkRoot('additive'));
+    optionB = await measureShape(optionBProject(), mkRoot('optionb'));
+  }, 120_000);
+
+  afterAll(() => {
+    for (const dir of roots) rmSync(dir, { recursive: true, force: true });
+    roots = [];
+  });
+
+  // ── The two shapes are what they claim to be ─────────────────────────────
+
+  it('the two shapes differ in exactly the package-owned collections, derived from the schemas', () => {
+    const additiveKeys = Object.keys(additiveProject() as Record<string, unknown>).sort();
+    const optionBKeys = Object.keys(optionBProject() as Record<string, unknown>).sort();
+
+    // A positive first, so the set difference below is a measurement rather
+    // than two empties agreeing.
+    expect(PACKAGE_OWNED_COLLECTION_KEYS.length).toBeGreaterThan(30);
+    expect(ARTIFACT_ENVELOPE_KEYS).toEqual(
+      ['api', 'i18n', 'manifest', 'onEnable', 'packages', 'runtimeModule', 'server'],
+    );
+
+    // Every key option B drops is a package-owned collection, and every key it
+    // keeps is an envelope key. Nothing else moved.
+    const dropped = additiveKeys.filter((k) => !optionBKeys.includes(k));
+    expect(dropped.length).toBeGreaterThan(0);
+    expect(dropped.filter((k) => !PACKAGE_OWNED_COLLECTION_KEYS.includes(k))).toEqual([]);
+    expect(optionBKeys.filter((k) => !ARTIFACT_ENVELOPE_KEYS.includes(k))).toEqual([]);
+  });
+
+  it("CONTROL — the reader that already resolves `packages[]` sees the SAME items in both shapes", () => {
+    // `MetadataPlugin` / `ObjectQLPlugin` register through
+    // `resolveArtifactPackageOrder`, so the SchemaRegistry is served by
+    // `packages[]` and must not notice the difference. This is the anti-vacuity
+    // control for every LOST row below: it proves the option-B fixture really
+    // carries every definition under `packages[]`, so a zero is a reader losing
+    // a collection and never a fixture that shipped an empty package.
+    expect(additive.registryObjectsFromArtifact).toEqual(['probe_account', 'probe_order']);
+    expect(optionB.registryObjectsFromArtifact).toEqual(additive.registryObjectsFromArtifact);
+    expect(optionB.registryObjectsFromSource).toEqual(additive.registryObjectsFromSource);
+    expect(optionB.registryObjectsFromSource).toEqual(['probe_account', 'probe_order']);
+  });
+
+  // ── The baseline: green today, and it must stay green ────────────────────
+
+  it('BASELINE — on today\'s additive shape every subsystem sees its collections', () => {
+    const lost = additive.rows.filter((r) => r.lost);
+    expect(
+      lost.map((r) => r.id),
+      `The pin's BASELINE broke: ${lost.length} subsystem(s) see nothing on the shape the ` +
+        `platform emits TODAY. This is never an option-B finding — it means the fixture stopped ` +
+        `carrying a collection, or a reader regressed on the additive path.\n${render(additive.rows)}`,
+    ).toEqual([]);
+    // Anti-vacuity: a probe that measured no rows would satisfy the line above.
+    expect(additive.rows.length).toBeGreaterThanOrEqual(OPTION_B_LOSSES.length);
+  });
+
+  // ── The pin ──────────────────────────────────────────────────────────────
+
+  it('THE PIN — the subsystems that lose their collections under option B are EXACTLY the ledgered ones', () => {
+    const measured = optionB.rows.filter((r) => r.lost).map((r) => r.id).sort();
+    const ledger = [...OPTION_B_LOSSES].sort();
+
+    const newlyLost = measured.filter((id) => !ledger.includes(id));
+    const nowFixed = ledger.filter((id) => !measured.includes(id));
+
+    expect(
+      measured,
+      newlyLost.length > 0
+        ? `A subsystem lost a collection that the ledger does not carry — this is the failure ` +
+          `#15004 exists to make loud. An option-B artifact reaches it with the collection ABSENT ` +
+          `and NOTHING THROWN.\n\n  ${newlyLost.join('\n  ')}\n\n` +
+          `⛔ Do not add these to OPTION_B_LOSSES. Teach the reader to resolve \`packages[]\` ` +
+          `(cards #15005 runtime / #15006 cli / #15007 plugin-security), or file the site as 5/4 ` +
+          `if it is a package the program never scoped.\n\nFull option-B report:\n${render(optionB.rows)}`
+        : `A ledgered subsystem now SEES its collections under option B — the reader program moved ` +
+          `forward. Delete these lines from OPTION_B_LOSSES:\n\n  ${nowFixed.join('\n  ')}\n\n` +
+          `When the ledger is empty the reader half is done and the emitter half (#14512) can land.`,
+    ).toEqual(ledger);
+  });
+
+  it('the ledger names only rows the probe actually measures', () => {
+    // A phantom ledger line would silently license a subsystem nobody watches.
+    const ids = new Set(optionB.rows.map((r) => r.id));
+    expect(OPTION_B_LOSSES.filter((id) => !ids.has(id))).toEqual([]);
+  });
+
+  it('every one of the five boundaries is represented in the probe', () => {
+    // The enumeration's own finding is that a probe covering one boundary
+    // proves nothing about the others — B5 in particular runs 112 lines BEFORE
+    // `loadArtifactBundle` inside `createStandaloneStack` and is reached
+    // independently from `os dev`, `os start` and `os db clean`.
+    const ids = optionB.rows.map((r) => r.id);
+    for (const boundary of ['B1 · ', 'B2 · ', 'B5 · ']) {
+      expect(ids.filter((id) => id.startsWith(boundary)).length, `${boundary} has no row`)
+        .toBeGreaterThan(0);
+    }
+    // B3 (`os build`) and B4 (`os migrate`) load the config module through the
+    // same loader B2 does and hand the export on untouched, so their readers
+    // are the B2 rows. The header's "Boundaries" section states what that does
+    // and does not cover.
+    expect(ids.some((id) => id.startsWith('B5 · resolve-project-database'))).toBe(true);
+  });
+});
