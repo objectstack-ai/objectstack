@@ -243,6 +243,9 @@ monitor 按自己的 deadline 触发;身份 = 三元组 `(issue, 分支, PR head
 - **文件面两句原文**:「预期落点是 X;若实测表明真正的生产者在别包,报备后按生产者侧修
   (落点与理由写进报告和 PR 正文),⛔ 不在消费者侧打补丁」—— 只写一个路径名,
   是要求 dev 在守约与修对之间二选一;跨包常等于跨车道,PM 事后补跨座位声明。
+- **模型标识只禁内容工件**(维护者 2026-09-03 裁):PR 标题/正文、代码注释、文档、changeset、
+  issue/PR 评论;两条豁免同属规则 —— harness 写在 commit 的 `Co-Authored-By` 尾注(含 session 链接),
+  与 `.claude/agents/*` frontmatter 的 `model:`(`check:agent-model-declared` 要求);⛔ 不再申报为偏差。
 - **Same-day churn 行与在飞重叠**:派发时 `git log origin/main --oneline -20 -- <paths>`
   见当天合并 ⇒ 加一行「基于合并后的代码工作,issue 引用的片段可能已变,
   先核对当前 main」(dev 的 worktree 切出后不会自己更新)。
