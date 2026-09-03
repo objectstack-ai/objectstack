@@ -76,14 +76,20 @@ export const PageRegionSchema = lazySchema(() => strictObject({
 // Adding a member here is an accept-set narrowing (Clause ②) — a contract
 // decision, never a convenience: an entry needs the ruling that retired the
 // type, the measured zero-renderer finding, and the row + enum edits beside it.
+//
+// The prescription names no issue id on purpose — `check:doc-authoring` refuses
+// citation-shaped tokens in text printed AT the customer (maintainer ruling
+// 2026-08-12); the anchors for an internal reader are HERE: the ruling is
+// objectstack#14159 (option B of the objectstack#12183 ask), the zero-renderer
+// measurement is objectui#7135.
 export const RETIRED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = new Map([
   ['user:profile', '`user:profile` is not a page-placeable element — it is shell chrome (the '
     + "signed-in user's avatar menu, which the app shell renders itself on every page), no "
-    + 'renderer for it exists anywhere by ruling (objectstack#14159, objectui#7135), and there '
-    + 'is nothing to put in its place: delete the component node and let the shell render the '
-    + 'profile. Until this refusal an authored `user:profile` node validated clean and drew the '
-    + 'red unknown-type panel in front of an end user — the ADR-0078 shape its four sibling '
-    + 'shell singletons closed with renderers (objectstack#12183); this one gets no renderer '
+    + 'renderer for it exists anywhere by ruling, and there is nothing to put in its place: '
+    + 'delete the component node and let the shell render the profile. Until this refusal an '
+    + 'authored `user:profile` node validated clean and drew the red unknown-type panel in '
+    + 'front of an end user — the ADR-0078 shape its four sibling shell singletons closed with '
+    + 'renderers; this one gets no renderer '
     + '(zero measured pull — a future consumer files a feature card, and the refusal flips '
     + 'additively). Removed from `PageComponentType` in @objectstack/spec 17 (ADR-0049 '
     + 'enforce-or-remove); the name stays refused here so the failure lands in front of the '
@@ -238,7 +244,7 @@ export const PageComponentSchema = lazySchema(() => strictObject({
     if (guidance) {
       ctx.addIssue({ code: 'custom', message: guidance, params: { retiredComponentType: type } });
     }
-  }).describe('Component Type — a standard vocabulary member, or a custom/registered component type in its own namespace (e.g. `object-grid`, `mcp:connect-agent`). The spec\'s own type namespaces are a closed vocabulary at author time: inside them, a type the vocabulary does not declare is refused by `os validate` / `os build` / `os lint` (rule `component-type-unknown`); a type the vocabulary RETIRED by name (`user:profile`, #14159 — shell chrome, not author-placeable) is refused at the parse itself, with the retirement prescription.'),
+  }).describe('Component Type — a standard vocabulary member, or a custom/registered component type in its own namespace (e.g. `object-grid`, `mcp:connect-agent`). The spec\'s own type namespaces are a closed vocabulary at author time: inside them, a type the vocabulary does not declare is refused by `os validate` / `os build` / `os lint` (rule `component-type-unknown`); a type the vocabulary RETIRED by name (`user:profile` — shell chrome, not author-placeable) is refused at the parse itself, with the retirement prescription.'),
   id: z.string().optional().describe('Unique instance ID'),
   
   /** Configuration */

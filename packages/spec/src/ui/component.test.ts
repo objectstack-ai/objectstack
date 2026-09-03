@@ -1034,7 +1034,11 @@ describe('ComponentPropsMap', () => {
   // sentence are the pin — never a bare `toThrow()`, which greens on any error.
   describe('user:profile is not author-placeable (#14159, ruling B)', () => {
     const FIRST_SENTENCE =
-      /^`user:profile` is not a page-placeable element — it is shell chrome \(the signed-in user's avatar menu, which the app shell renders itself on every page\), no renderer for it exists anywhere by ruling \(objectstack#14159, objectui#7135\), and there is nothing to put in its place: delete the component node and let the shell render the profile\./;
+      /^`user:profile` is not a page-placeable element — it is shell chrome \(the signed-in user's avatar menu, which the app shell renders itself on every page\), no renderer for it exists anywhere by ruling, and there is nothing to put in its place: delete the component node and let the shell render the profile\./;
+    // `check:doc-authoring` (maintainer ruling 2026-08-12): a prescription printed
+    // at the customer carries no citation-shaped issue id — the ADR id is the
+    // durable reference; the issue anchors live in the adjacent source comment.
+    const ISSUE_ID = /#\d{3,}/;
 
     it('the ComponentPropsMap row refuses even the empty bag — the flipped accept pin', () => {
       const r = ComponentPropsMap['user:profile'].safeParse({});
@@ -1045,6 +1049,8 @@ describe('ComponentPropsMap', () => {
       expect(issue.code).toBe('invalid_type');
       expect(issue.path).toEqual([]);
       expect(issue.message).toMatch(FIRST_SENTENCE);
+      expect(issue.message).not.toMatch(ISSUE_ID);
+      expect(issue.message).toContain('ADR-0049');
       // A populated bag gets the same prescription, not an unknown-key verdict.
       const populated = ComponentPropsMap['user:profile'].safeParse({ showAvatar: true });
       expect(populated.success).toBe(false);
