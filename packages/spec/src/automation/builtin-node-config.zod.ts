@@ -539,10 +539,16 @@ export const ASSIGNMENT_VALUE_ENVELOPE_REFUSAL =
  * 2026-09-02: option A, the rendering half).
  *
  * The envelope is the spelling `shared/expression.zod.ts` already defines and
- * `validateExpression` already reads — not a second one. Only the dialect is
- * narrowed: `validateExpression('value', …)` refuses a `template` or `cron`
- * envelope in a value slot ("expected a CEL expression but got a … dialect"),
- * so the contract refuses it here, at authoring, with the same verdict.
+ * `validateExpression` already reads — not a second one: `ExpressionSchema`
+ * itself, `safeExtend`ed (the form Zod reserves for a refined object, keeping
+ * its `source`-or-`ast` rule) with the one key narrowed, at the type level too
+ * (`dialect: 'cel'`, so a `template` envelope is a compile error before it is
+ * a parse error). `validateExpression('value', …)` refuses a `template` or
+ * `cron` envelope in a value slot ("expected a CEL expression but got a …
+ * dialect"), so the contract refuses it here, at authoring, with the same
+ * verdict — and refuses the one shape that validator lets through: an envelope
+ * with no `source` reads as "not authored" there (`ok: true`), so this parse
+ * is the only gate that catches `{ dialect: 'cel' }` before it is stored.
  *
  * A bare string is deliberately NOT accepted as CEL shorthand the way
  * `ExpressionInputSchema` accepts it elsewhere: in an assignment value a plain
@@ -551,12 +557,13 @@ export const ASSIGNMENT_VALUE_ENVELOPE_REFUSAL =
  * what lets the two forms coexist without a mode switch.
  */
 export const AssignmentExpressionValueSchema = ExpressionSchema
-  .refine((e) => e.dialect === 'cel', {
-    path: ['dialect'],
-    message:
-      'An assignment value envelope is evaluated by the expression engine to a value, which only the `cel` dialect '
-      + 'does — `template` and `cron` envelopes have no meaning here. For text with holes write a plain string '
-      + '(`{token}` flow interpolation); for a computed value write `{ dialect: \'cel\', source: \'…\' }`.',
+  .safeExtend({
+    dialect: z.literal('cel', {
+      error: () =>
+        'An assignment value envelope is evaluated by the expression engine to a value, which only the `cel` dialect '
+        + 'does — `template` and `cron` envelopes have no meaning here. For text with holes write a plain string '
+        + '(`{token}` flow interpolation); for a computed value write `{ dialect: \'cel\', source: \'…\' }`.',
+    }),
   })
   .meta({
     description:
