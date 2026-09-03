@@ -34,3 +34,5 @@ serializers, not §10's `.json`-only rule, which governs the `metadata-fs` store
 `loadMany()` is unchanged and still returns bodies for nested and
 extension-less files; `findFile()` still resolves an explicitly path-shaped
 name such as `crm/account`, which nothing lists.
+
+<!-- adr-0087: not-required (no-migration-prescription) No authorable key, Zod schema or stored row moves: this narrows one runtime loader's `list()` output. The ledger's artifacts project metadata rewrites, and there is nothing here for `objectstack migrate meta` to rewrite — a tree carrying a nested or extension-less file needs the FILE relocated into the two-segment layout ADR-0008 §10 already prescribes, which no migration prescription can express. -->
