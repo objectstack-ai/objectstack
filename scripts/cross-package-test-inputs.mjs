@@ -528,6 +528,17 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'examples/app-showcase/src/ui/pages/capability-map.page.ts',
       'examples/app-showcase/src/ui/pages/command-center-jsx.page.ts',
       'examples/app-showcase/src/ui/pages/start-here.page.ts',
+      //   src/validate-page-visualization-bindings.test.ts (#14073) imports the
+      //     seven shipped `showcase_task` interface pages, that object, and its
+      //     view aggregate LIVE, and asserts each whitelisted visualization
+      //     still derives a binding. The coupling runs in BOTH directions: a
+      //     new whitelist entry on a page, a renamed or retyped field on the
+      //     object (the date / select / image / location fields the derivation
+      //     finds), or a `calendar:` / `map:` block moving on the view all
+      //     change the rule's verdict, so each must re-run this package's suite.
+      'examples/app-showcase/src/ui/pages/task-visualizations.pages.ts',
+      'examples/app-showcase/src/data/objects/task.object.ts',
+      'examples/app-showcase/src/ui/views/task.view.ts',
       'sdui.manifest.json',
     ],
     heldBy: {
