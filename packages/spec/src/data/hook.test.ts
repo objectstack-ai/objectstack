@@ -335,6 +335,85 @@ describe('HookSchema', () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // [#14010] `runAs` — the declared execution identity of a hook's ctx.api.
+  //
+  // Ruling 2026-09-01: `'system' | 'user' | 'inherit'`, default `'inherit'`.
+  // The `'system'` / `'user'` value semantics are FlowSchema's word for word;
+  // `'inherit'` is the hook-only third value (only a hook has a context to
+  // inherit) and is what makes the key purely additive.
+  //
+  // Both halves of the reachability judgement are asserted, because they are
+  // different facts: that the KEY is a real authoring surface (a fixture
+  // carrying it parses fully green, not merely "no unrecognized_keys"), and
+  // that the VALUE set is closed (a non-member is a VALUE error located at
+  // `runAs`, never a top-level unrecognized key).
+  // ---------------------------------------------------------------------------
+  describe('runAs (#14010)', () => {
+    const base = {
+      name: 'stamp_grade',
+      object: 'account',
+      events: ['afterInsert'] as const,
+      handler: 'stampGrade',
+    };
+
+    it('defaults to inherit — the pre-runAs behaviour, so no existing hook changes', () => {
+      const hook = HookSchema.parse({ ...base });
+      expect(hook.runAs).toBe('inherit');
+    });
+
+    it.each(['system', 'user', 'inherit'] as const)('accepts %s, full parse green', (runAs) => {
+      const result = HookSchema.safeParse({ ...base, runAs });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      expect(result.data!.runAs).toBe(runAs);
+    });
+
+    it('refuses a value outside the enum as a VALUE error at runAs, and prescribes the members', () => {
+      const result = HookSchema.safeParse({ ...base, runAs: 'elevated' });
+      expect(result.success).toBe(false);
+      const issue = result.error!.issues[0]!;
+      // Located at the key, not reported as an unknown key at the top level:
+      // the author wrote a real key with an unreal value, and the two failures
+      // send them to different places.
+      expect(issue.code).not.toBe('unrecognized_keys');
+      expect(issue.path).toEqual(['runAs']);
+      const message = JSON.stringify(result.error!.issues);
+      for (const member of ['system', 'user', 'inherit']) {
+        expect(message).toContain(member);
+      }
+    });
+
+    it('still refuses unknown keys — widening the accept set by one key widened it by ONE key', () => {
+      const result = HookSchema.safeParse({ ...base, runAsUser: 'someone' });
+      expect(result.success).toBe(false);
+      expect(result.error!.issues.some((i) => i.code === 'unrecognized_keys')).toBe(true);
+    });
+
+    describe('the elevation near-misses are answered with runAs, not with a bare refusal', () => {
+      // Every one of these is a spelling an author reaches for when they want a
+      // hook to write past a permission. Before #14010 they were refused with
+      // nothing to do next; `ctx.api.sudo()` — the shape the platform's own
+      // lint used to prescribe — is a TypeError in the sandbox (#14044).
+      it.each(['sudo', 'elevate', 'elevated', 'isSystem'])(
+        '`%s` is refused with a prescription naming runAs',
+        (key) => {
+          const result = HookSchema.safeParse({ ...base, [key]: true });
+          expect(result.success).toBe(false);
+          const message = result.error!.issues.map((i) => i.message).join('\n');
+          expect(message).toContain('runAs');
+          expect(message).toContain(key);
+        },
+      );
+
+      it('`run_as` is a RENAME — the spelling changes, the value carries over', () => {
+        const result = HookSchema.safeParse({ ...base, run_as: 'system' });
+        expect(result.success).toBe(false);
+        const message = result.error!.issues.map((i) => i.message).join('\n');
+        expect(message).toContain('runAs');
+      });
+    });
+  });
+
   describe('Complete Hook Examples', () => {
     it('should accept validation hook', () => {
       const hook: Hook = {

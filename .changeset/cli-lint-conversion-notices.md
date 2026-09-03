@@ -52,8 +52,9 @@ and their metadata stopped loading.
 | face | before | after |
 | --- | --- | --- |
 | console (`os lint`) | nothing | one `⚠` line per notice: the path, `'from'` → `'to'`, the conversion id, and the protocol major it retires in |
-| `os lint --json` | no such key | `conversions`: the same structured notices, unconditionally present |
-| `os lint --json`, thrown / caught | no such key | what the run had computed — `[]` for a throw at load |
+| `os lint --json` (project lint) | no such key | `conversions`: the same structured notices, present on every exit of this mode |
+| `os lint --json` (project lint), thrown / caught | no such key | what the run had computed — `[]` for a throw at load |
+| `os lint --eval --json` | no such key | **still no such key** — out of scope here, see below |
 
 The console wording is `compile.ts`'s, verbatim, so an author who runs two of
 the three commands over one tree is told the same thing in the same words. The
@@ -63,18 +64,30 @@ consumer reads all three authoring commands the same way.
 
 ## What a consumer should know
 
-✅ `conversions` is **always an array** on `os lint --json`, success or
-failure, so it can be read unconditionally. Each entry keeps its structured
-`conversionId`, `surface`, `from`, `to`, `path`, `toMajor` and `retiresIn`
-fields, so a CI job can gate on `retiresIn` without a second run.
+✅ `conversions` is **always an array** on the **project-lint** `--json`
+payloads — the report exit and the caught-error exit, success or failure — so
+a consumer of plain `os lint --json` can read it unconditionally. Each entry
+keeps its structured `conversionId`, `surface`, `from`, `to`, `path`,
+`toMajor` and `retiresIn` fields, so a CI job can gate on `retiresIn` without
+a second run.
+
+⛔ **`os lint --eval --json` does not carry the key**, and this change did not
+add it there. `--eval` scores a generation corpus instead of loading the
+project, so it never reaches the conversion layer; both of its JSON exits —
+the eval report, and the `--generator` load failure — publish no `conversions`.
+That is the whole exception: `lint.ts` has four `--json` exits, the two
+project-lint ones carry the key and the two `--eval` ones do not. A consumer
+that runs both modes must guard the key on the `--eval` path (or branch on the
+mode it asked for) — `payload.conversions.length` is a `TypeError` there.
 
 ⛔ `conversions: []` does **not** mean "this tree converts nothing" on the
 caught-error payload — it means the run stopped before the conversion layer
 ran. A config that fails to load reports `[]` by construction. Read the
 `error` key to tell the two apart.
 
-⛔ A consumer asserting an exact key set on `os lint --json` must add
-`conversions` to it. No existing key changed: `total`, `errors`, `warnings`
+⛔ A consumer asserting an exact key set on the project-lint
+`os lint --json` payload must add `conversions` to it; the `--eval` key sets
+are unchanged. No existing key changed: `total`, `errors`, `warnings`
 and `suggestions` count exactly what they counted before, and exit codes are
 untouched (errors still exit 1).
 

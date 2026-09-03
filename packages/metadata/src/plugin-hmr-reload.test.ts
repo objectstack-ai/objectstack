@@ -12,8 +12,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MetadataPlugin } from './plugin';
-import type { NodeMetadataManager } from './node-metadata-manager';
+import { MetadataPlugin } from './plugin.js';
+import type { NodeMetadataManager } from './node-metadata-manager.js';
 
 function fakeCtx() {
     return {
@@ -111,7 +111,7 @@ describe('MetadataPlugin._reloadAndAnnounce — fires metadata:reloaded after re
         const file = writeArtifact('sweep3');
 
         const perItemEvents: unknown[] = [];
-        mgr.subscribe('flow', (evt) => perItemEvents.push(evt));
+        mgr.subscribe('flow', (evt) => { perItemEvents.push(evt); });
 
         await (plugin as any)._reloadAndAnnounce(ctx, { path: file, fetchTimeoutMs: undefined }, [file]);
 

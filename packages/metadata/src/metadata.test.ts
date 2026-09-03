@@ -4,9 +4,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MetadataManager } from './metadata-manager';
-import { MemoryLoader } from './loaders/memory-loader';
-import type { MetadataLoader } from './loaders/loader-interface';
+import { MetadataManager } from './metadata-manager.js';
+import { MemoryLoader } from './loaders/memory-loader.js';
+import type { MetadataLoader } from './loaders/loader-interface.js';
 
 // Suppress logger output during tests
 vi.mock('@objectstack/core', async (orig) => ({
@@ -953,6 +953,11 @@ function createMockLoaderMany(name: string, items: any[], shouldFail = false): M
 function createMockPluginContext() {
   return {
     registerService: vi.fn(),
+    // Required members of `PluginContext` (@objectstack/core) that this suite
+    // never drives — inert stubs so the literal satisfies the parameter type
+    // rather than 30 call sites each asserting past it.
+    registerServiceFactory: vi.fn(),
+    getServiceScoped: vi.fn(),
     replaceService: vi.fn(),
     getService: vi.fn().mockReturnValue(null),
     getServices: vi.fn().mockReturnValue(new Map()),

@@ -337,6 +337,34 @@ describe('validateReadonlyHookWrites - GREEN: nothing statically knowable is gue
 });
 
 describe('validateReadonlyHookWrites - readonlyWhen is a SECOND shape, not the same verdict', () => {
+  // [#14010] A hook that DECLARES elevation is not the shape this rule judges:
+  // `runAs: 'system'` gives its `ctx.api` a system context, and the static
+  // strip skips a system context, so the write lands. Gating a build over
+  // working code is the mirror of the defect the hint fix above closed.
+  it("skips a hook that declares runAs: 'system' — its write is not stripped", () => {
+    const stack = crmStack("await ctx.api.object('crm_account').update({ last_activity_date: now });");
+    const elevated = {
+      ...stack,
+      hooks: (stack.hooks as any[]).map((h) => ({ ...h, runAs: 'system' })),
+    };
+    expect(validateReadonlyHookWrites(elevated)).toHaveLength(0);
+    // …and the control, so the skip is attributable to the declaration alone:
+    // the SAME body without it is still the gating error.
+    expect(validateReadonlyHookWrites(stack)).toHaveLength(1);
+  });
+
+  it.each(['user', 'inherit'])(
+    "still flags a hook that declares runAs: '%s' — neither reaches the strip elevated",
+    (runAs) => {
+      const stack = crmStack("await ctx.api.object('crm_account').update({ last_activity_date: now });");
+      const declared = {
+        ...stack,
+        hooks: (stack.hooks as any[]).map((h) => ({ ...h, runAs })),
+      };
+      expect(validateReadonlyHookWrites(declared)).toHaveLength(1);
+    },
+  );
+
   // readonlyWhen strips per record STATE, so the write is conditional, not
   // certain - warning, exactly as the flow sibling grades it.
   it('grades a readonlyWhen field as an advisory warning, not an error', () => {
@@ -368,6 +396,11 @@ describe('validateReadonlyHookWrites - readonlyWhen is a SECOND shape, not the s
     expect(finding.hint).toContain('beforeUpdate hook');
     expect(finding.hint).toContain('does land, even on a locked record');
     expect(finding.hint).not.toMatch(/strips even a beforeUpdate-derived value/);
+    // [#14010] The conditional lock is the one place elevation genuinely does
+    // NOT help, so the hint must keep saying so now that the platform HAS a
+    // declared elevation knob — an author who just learned `runAs: 'system'`
+    // from the static-readonly hint would otherwise reach for it here.
+    expect(finding.hint).toContain("runAs: 'system'");
     expect(finding.hint).not.toMatch(/own-hook stamp is NOT a workaround/);
 
     // NOT elevation, for two independent reasons, both stated. `sudo()` is

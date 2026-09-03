@@ -1,8 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { MetadataManager } from './metadata-manager';
-import { MemoryLoader } from './loaders/memory-loader';
+import { MetadataManager } from './metadata-manager.js';
+import { MemoryLoader } from './loaders/memory-loader.js';
 import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
 
 // Suppress logger output during tests

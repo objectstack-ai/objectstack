@@ -22,6 +22,7 @@ import { ExpressionEngine } from '@objectstack/formula';
 import { noopHookMetricsRecorder, type HookMetricsRecorder, type HookMetricOutcome } from './hook-metrics.js';
 import { materializeDeclaredFields } from './declared-fields.js';
 import { describeCelFault, type CelFault } from './cel-fault.js';
+import { hookRunAs, deriveHookApi, type HookRunAs } from './hook-run-as.js';
 
 /**
  * The logger the hook layer writes its diagnostics to — the `Logger` CONTRACT
@@ -359,6 +360,10 @@ export function wrapDeclarativeHook(
   // `async` is only meaningful for after* events; ignore on before* (we must
   // wait for the handler to potentially mutate ctx.input).
   const fireAndForget = Boolean(meta.async) && isAfterEvent;
+  // [#14010] Read ONCE at wrap time, and refused here for a non-member so the
+  // binder skips (or, under `strict`, fails) the hook instead of running it
+  // under an identity it never declared. `undefined` is the schema default.
+  const runAs: HookRunAs = hookRunAs(meta as { name?: unknown; runAs?: unknown });
 
   const runWithTimeout = async (ctx: HookContext): Promise<void> => {
     if (!timeoutMs) {
@@ -444,6 +449,13 @@ export function wrapDeclarativeHook(
     }
 
     const restore = installFlatInput(ctx);
+    // [#14010] `runAs` is applied to `ctx.api` ONLY, and only for the handler
+    // call — the same install/restore shape as the flat input above, so the
+    // engine's own context object is never touched (the condition gate above
+    // already ran against it; the readonly strip and the session keep reading
+    // it). Under `'inherit'` this is a no-op that leaves the engine-built api
+    // in place by reference.
+    const restoreApi = installRunAsApi(ctx, runAs, meta.name);
     const startedAt = Date.now();
 
     const recordOutcome = (err?: any) => {
@@ -464,7 +476,15 @@ export function wrapDeclarativeHook(
         try { metrics.recordSkip(labelFor(ctx), 'fire_and_forget'); } catch { /* noop */ }
         // For fire-and-forget we can't keep ctx.input swapped while the
         // engine moves on — copy what we need, restore, and run async.
-        void runWithErrorPolicy(ctx)
+        //
+        // [#14010] The SAME race would un-elevate a `runAs` hook: the `finally`
+        // below restores `ctx.api` synchronously, before an async handler's
+        // first `await` returns. So a non-`'inherit'` hook runs against a
+        // detached view that keeps the derived api past that restore. Under
+        // `'inherit'` the context object is handed through unchanged, exactly
+        // as before this key existed.
+        const detached = runAs === 'inherit' ? ctx : { ...ctx };
+        void runWithErrorPolicy(detached)
           .then(() => recordOutcome())
           .catch((err) => {
             recordOutcome(err);
@@ -485,8 +505,33 @@ export function wrapDeclarativeHook(
         throw err;
       }
     } finally {
+      restoreApi();
       restore();
     }
+  };
+}
+
+/**
+ * [#14010] Swap `ctx.api` for the api the hook's declared `runAs` derives from
+ * it, returning the restore. `'inherit'` installs nothing and restores nothing
+ * — the engine-built api stays in place BY REFERENCE, which is the "byte-
+ * identical to today" guarantee the ruling's default rests on and the pin in
+ * `hook-run-as.test.ts` asserts with `toBe`.
+ *
+ * The derivation itself lives on the api (`ScopedContext.withRunAs`) because
+ * only the api holds the full triggering `ExecutionContext` — `ctx.session` is
+ * a projection of it and drops the transaction handle, among other things.
+ */
+function installRunAsApi(ctx: HookContext, runAs: HookRunAs, hookName: string): () => void {
+  if (runAs === 'inherit') return () => {};
+  const original = ctx.api;
+  ctx.api = deriveHookApi(original, runAs, {
+    hook: hookName,
+    object: ctx.object,
+    event: ctx.event,
+  }) as HookContext['api'];
+  return () => {
+    ctx.api = original;
   };
 }
 
