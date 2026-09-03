@@ -178,7 +178,17 @@ const ALL_SPELLINGS: string[] = [
     ]),
 ].sort();
 
-const OVERRIDABLE = DEFAULT_METADATA_TYPE_REGISTRY.filter((e) => e.allowOrgOverride).map((e) => e.type);
+/**
+ * The org-overridable canonical types, derived. Widened to `string[]`
+ * deliberately: the registry's `type` is a literal union, and every use below
+ * asks the question of a type read back OUT of a WHERE clause or a fold —
+ * a plain `string` by construction. Narrowing the probe to the union would
+ * make `includes` a compile error against exactly the values this file exists
+ * to judge.
+ */
+const OVERRIDABLE: readonly string[] = DEFAULT_METADATA_TYPE_REGISTRY
+    .filter((e) => e.allowOrgOverride)
+    .map((e) => e.type);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // §0 — the population this rests on, pinned so a registry change is visible
