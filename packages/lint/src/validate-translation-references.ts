@@ -158,6 +158,21 @@ function strName(v: unknown): string | undefined {
 }
 
 /**
+ * Add a validation rule's own `name` to the universe, then recurse into a
+ * `conditional` rule's `then` / `otherwise` branch — each branch is itself a
+ * full rule (with its own `name`, and possibly its own nested branches), and
+ * mirrors the recursion `evaluateRule` performs at runtime (#14700). See the
+ * call site in {@link buildUniverse} for why the wrapper's own name is kept
+ * too, even though `then` / `otherwise` are what a caller actually reads.
+ */
+function collectValidationRuleNames(rule: AnyRec, validations: Set<string>): void {
+  const ruleName = strName(rule.name);
+  if (ruleName) validations.add(ruleName);
+  if (isRec(rule.then)) collectValidationRuleNames(rule.then, validations);
+  if (isRec(rule.otherwise)) collectValidationRuleNames(rule.otherwise, validations);
+}
+
+/**
  * "Did you mean?" over the known names — a namespace pass the shared helper
  * cannot see, falling back to `suggestName`'s containment/edit-distance
  * budget.
@@ -209,9 +224,12 @@ interface ObjectFacts {
   sections: Set<string>;
   /**
    * `_validations` names — the custom validation rules this object declares
-   * (`objects[].validations[].name`). `objects.<obj>._validations.<rule>.message`
-   * (#14253) is keyed by that name, so a ghost here is a rule message that
-   * renders in the source locale inside an otherwise translated refusal.
+   * (`objects[].validations[].name`, including a nested `conditional` rule's
+   * `then` / `otherwise` branch — the branch is itself a full rule and is the
+   * address `checkConditional` / `authoredRuleMessage` actually key on;
+   * #14700). `objects.<obj>._validations.<rule>.message` (#14253) is keyed by
+   * that name, so a ghost here is a rule message that renders in the source
+   * locale inside an otherwise translated refusal.
    */
   validations: Set<string>;
   /**
@@ -605,9 +623,19 @@ function buildUniverse(stack: AnyRec): Universe {
     // #14253: `_validations.<rule>` is keyed by the rule's own `name`. A rule
     // without a name has no key and is not registered — the resolver cannot
     // address it either, so nothing is lost by skipping it here.
+    // #14700: a `conditional` rule's `then` / `otherwise` branch is itself a
+    // full rule, and its `name` — not the wrapper's — is the address
+    // `checkConditional` delegates to and `authoredRuleMessage` keys on (see
+    // `packages/objectql/src/validation/rule-validator.ts`). A flat walk over
+    // `obj.validations` never sees a branch name, so a legitimate bundle
+    // entry for one was reported as an orphan. Descend into `then` /
+    // `otherwise`, mirroring `evaluateRule`'s recursion (a branch may itself
+    // be a nested `conditional`, so depth is unbounded); the wrapper's own
+    // name stays in the universe too — its message is structurally
+    // unreachable at runtime, but #14518 keeps a bundle entry for it
+    // deliberately so the bundle mirrors the declared rule set 1:1.
     for (const rule of asArray(obj.validations)) {
-      const ruleName = strName(rule.name);
-      if (ruleName) facts.validations.add(ruleName);
+      collectValidationRuleNames(rule, facts.validations);
     }
   }
 

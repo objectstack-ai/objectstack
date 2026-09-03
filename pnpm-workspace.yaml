@@ -239,6 +239,11 @@ overrides:
   #   fast-uri GHSA-7p8r-x3mc-p8w7 (7.5 high) — transitive-only via ajv@8.20.0
   #     (declares ^3.0.1), which reaches @modelcontextprotocol/sdk, objectql,
   #     secretlint and table. Nothing declares fast-uri directly.
+  #     2026-09-03 (#14732): four MORE fast-uri advisories, GHSA-5jgf-p345-68v8,
+  #     GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf and GHSA-jqff-g426-hqxp (7.5
+  #     high each), fixed in 3.1.6 — target lifted from ^3.1.5, selector stays
+  #     at the 4.0.0 boundary. ajv@8.20.0's ^3.0.1 already admits 3.1.6, so
+  #     this is a dedupe onto the patched line, not a forced upgrade.
   #   hono GHSA-8j4g-w8fx-2239 (5.3) — the one entry here that is NOT
   #     transitive-only: two versions resolved, 4.12.32 from our own packages
   #     and 4.12.33 pulled by @modelcontextprotocol/sdk. The override moves the
@@ -250,7 +255,7 @@ overrides:
   #     peer states what host hono we work against, and a host that pins an old
   #     hono owns that copy; narrowing it fixes nothing here and only breaks
   #     compatibility. check-override-consistency.mjs covers both forms.
-  'fast-uri@<4.0.0': '^3.1.5'
+  'fast-uri@<4.0.0': '^3.1.6'
   'hono@<5.0.0': '^4.12.34'
   # OSV 2026-08-07 (#6407) — transitive-only, and the same "it has a fix, so
   # take the fix" disposition as the batch above:

@@ -120,7 +120,6 @@ import { isModuleNotFoundError } from './module-not-found.js';
  * reads an export off it dynamically, exactly as the bare `import()` it replaces
  * did.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type HostImporter = (pkg: string) => Promise<any>;
 
 /**
@@ -132,7 +131,6 @@ export type HostImporter = (pkg: string) => Promise<any>;
  * `any` for the same reason {@link HostImporter} uses it: the module namespace
  * belongs to a package this repo does not compile against.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type FallbackImport = (specifier: string) => Promise<any>;
 
 /** Options for {@link createHostImporter}. */

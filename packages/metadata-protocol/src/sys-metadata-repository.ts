@@ -1034,7 +1034,6 @@ export class SysMetadataRepository implements MetadataRepository {
         row,
       );
       // Strip body for the header projection.
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { body, ...header } = item;
       yield header;
     }
