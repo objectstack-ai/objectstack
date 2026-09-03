@@ -8,12 +8,25 @@
  * holds on all of them — they are one invariant, not five policies:
  *
  *  1. **`sys_user.banned = true`** (#5892) — how every *disable* lands: the
- *     better-auth admin plugin's ban endpoint writes it, and
- *     `@better-auth/scim` maps a SCIM `active: false` onto that same admin ban
- *     (which is why SCIM forces the admin plugin on — ADR-0071).
- *  2. **deleting the `sys_user` row** (#5941) — how every *remove* lands: SCIM
- *     `DELETE /Users/{id}`, better-auth's `/admin/remove-user` and
- *     `/delete-user`, an import, a script.
+ *     better-auth admin plugin's ban endpoint writes it, and so does the SCIM
+ *     lifecycle. `@better-auth/scim` 1.6.x mapped a SCIM `active: false` onto
+ *     that same admin ban itself; 1.7.0 removed that write and replaced it
+ *     with an OPTIONAL host callback, so since #14360 the ban is landed by
+ *     `plugin-auth`'s own `identity.reconcileUser` (`auth-manager.ts` ->
+ *     `user-ban-write.ts`) — the same column and the same hook, a different
+ *     author. SCIM still forces the admin plugin on (ADR-0071), which is what
+ *     supplies the column and the `BANNED_USER` sign-in refusal.
+ *  2. **deleting the `sys_user` row** (#5941) — how every *remove* lands:
+ *     better-auth's `/admin/remove-user` and `/delete-user`, an import, a
+ *     script. ⚠️ SCIM `DELETE /Users/{id}` is NOT one of them on 1.7.2: the
+ *     vendor tombstones the SCIM source and leaves the better-auth user in
+ *     place, so the user is simply left with no active source, the aggregate
+ *     turns inactive, and the deprovision arrives as shape (1)'s ban write.
+ *     It is therefore refused by `guardBan` on `beforeUpdate` and never
+ *     reaches `guardDelete` — measured by ablation on #14555: removing the
+ *     `beforeDelete` registration leaves the SCIM DELETE face green, removing
+ *     the `beforeUpdate` one reddens it. The row-delete half below still
+ *     holds for every other remove path named here.
  *  3. **revoking the STANDING, leaving the user row untouched** (#5978) — the
  *     shape neither of the first two can see, because "who is an
  *     administrator" is not a fact stored on `sys_user` at all. It lives in the
