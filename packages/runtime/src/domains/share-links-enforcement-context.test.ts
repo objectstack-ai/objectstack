@@ -164,7 +164,7 @@ function matches(row: any, filter: any): boolean {
  * AND-composes Layer 0 + Layer 1 into) and executes the COMPOSED predicate —
  * so a deny verdict here is the production middleware's, not this file's.
  */
-function makeEngine(tables: Record<string, any[]>) {
+function makeEngine(tables: Record<string, any[]>, schemas?: Record<string, any>) {
     const middlewares: Array<(opCtx: any, next: () => Promise<void>) => Promise<void>> = [];
     const runChain = async (opCtx: any, terminal: () => Promise<void>): Promise<void> => {
         const dispatch = async (i: number): Promise<void> =>
@@ -174,7 +174,13 @@ function makeEngine(tables: Record<string, any[]>) {
     return {
         _tables: tables,
         registerMiddleware: (mw: any) => middlewares.push(mw),
-        getSchema: (name: string) => (name === OBJECT ? ACCOUNT_SCHEMA : { name }),
+        // [#14637] With a `schemas` map the double answers from IT and from
+        // nothing else — including `undefined` for a name it does not carry,
+        // which is the engine-cannot-answer case the policy gate must fail
+        // CLOSED on. Omit the map (every caller that predates #14637) and this
+        // is byte-for-byte the previous behaviour.
+        getSchema: (name: string) =>
+            schemas ? schemas[name] : name === OBJECT ? ACCOUNT_SCHEMA : { name },
         async find(object: string, options: any = {}) {
             const opCtx: any = {
                 object,
@@ -670,5 +676,213 @@ describe('[#6649] a security-middleware refusal keeps its own status through the
 
         expect(res.status).toBe(422);
         expect(expectDeclaredEnvelope(res).code).toBe('SHARING_NOT_ENABLED');
+    });
+});
+
+/**
+ * [#14637] The DISPATCHER twin of the share-link route probe, gated on the
+ * standing `publicSharing.enabled` policy.
+ *
+ * ## Why this pin lives here and not only in plugin-sharing
+ *
+ * The probe above `resolveToken` exists twice: once in
+ * `plugin-sharing/src/share-link-routes.ts` and once in the domain under test
+ * here. For cloud's per-environment kernels this one is the DESIGNED PRIMARY
+ * surface (`registerShareLinkRoutes: false`, see this module's header), so a
+ * fix landing only at the plugin site would not close the oracle — it would
+ * move it to whichever embedding uses this one. That is why the maintainer's
+ * ruling (2026-09-03, decision batch #17 item 1, verbatim 「同意」 — option A)
+ * names both sites in one PR, and why both are pinned.
+ *
+ * ## What was wrong
+ *
+ * `resolveToken` refuses a link whose object has `publicSharing.enabled` off,
+ * and refuses it with the undifferentiated `null` that revoked / expired /
+ * unknown / ineligible tokens get, because a distinguishable "sharing is off
+ * for this object" is an existence oracle for a caller who may hold nothing
+ * but a token. This probe then answered from the ROW: a `password_hash` row
+ * drew `401 NEEDS_PASSWORD` / `WRONG_PASSWORD`, an `audience: 'signed_in'` row
+ * drew `401 SIGN_IN_REQUIRED`, and a revoked row on a switched-off object drew
+ * `410 EXPIRED_OR_REVOKED` — three ways to tell a real-but-switched-off token
+ * from an unknown one.
+ *
+ * ## What is asserted
+ *
+ * Byte-equality with the unknown-token answer, not merely "a 404": the claim is
+ * that an anonymous holder cannot tell them apart, and only equality of the
+ * whole answer says that. `JSON.stringify` equality sits beside `toEqual`
+ * because key ORDER is part of what goes on the wire.
+ *
+ * Every case carries its reverse check — with the block ON the 401s and the
+ * 410 are exactly what they were. Without it these pins would also pass
+ * against a probe that answered 404 unconditionally, which is not the ruled
+ * behaviour.
+ *
+ * REAL here: the domain body, `ShareLinkService`, and the ADR-0112 envelope
+ * builder. DOUBLE: storage (`makeEngine` above, whose write verbs open with the
+ * producers' own dispatch predicates) — deliberately WITHOUT `bootSecurity`,
+ * since no verdict below depends on the middleware chain and the resolve route
+ * reads under `SYSTEM_CTX` anyway.
+ */
+describe('[#14637] the dispatcher probe reads the standing policy before it answers from the row', () => {
+    const SHARED_OBJECT = 'kb_article';
+    const SHARED_RECORD = 'kb_1';
+    const UNKNOWN_TOKEN = 'zzzzzzzzzzzzzzzzzzzzzz';
+
+    /** The shareable object, with `signed_in` on the whitelist so that arm is mintable. */
+    const shareableSchema = (enabled: boolean) => ({
+        name: SHARED_OBJECT,
+        fields: {
+            id: { name: 'id' },
+            title: { name: 'title' },
+            owner_id: { name: 'owner_id' },
+        },
+        publicSharing: {
+            enabled,
+            allowedAudiences: ['link_only', 'signed_in'],
+            allowedPermissions: ['view'],
+        },
+    });
+
+    interface Harness {
+        /** Drive `GET /share-links/:token/resolve` on the production domain body. */
+        resolve(token: string, opts?: { password?: string; signedIn?: boolean }): Promise<{ status: number; body: any }>;
+        /** Throw the object's switch, from outside the token's life. */
+        switchOff(): void;
+        /** Take the object's schema away entirely — the unanswerable-policy case. */
+        forgetSchema(): void;
+        mint(input: { audience?: 'link_only' | 'signed_in'; password?: string }): Promise<string>;
+        revoke(token: string): Promise<void>;
+    }
+
+    async function harness(): Promise<Harness> {
+        const schemas: Record<string, any> = { [SHARED_OBJECT]: shareableSchema(true) };
+        const tables: Record<string, any[]> = {
+            [SHARED_OBJECT]: [{ id: SHARED_RECORD, title: 'How to share', owner_id: USER }],
+            sys_share_link: [],
+        };
+        const engine = makeEngine(tables, schemas);
+        const svc = new ShareLinkService({ engine: engine as any });
+        const deps = makeDeps(engine, svc);
+
+        return {
+            switchOff: () => { schemas[SHARED_OBJECT] = shareableSchema(false); },
+            forgetSchema: () => { delete schemas[SHARED_OBJECT]; },
+            mint: async ({ audience = 'link_only', password }) => {
+                const link = await svc.createLink(
+                    {
+                        object: SHARED_OBJECT,
+                        recordId: SHARED_RECORD,
+                        audience,
+                        permission: 'view',
+                        ...(password ? { password } : {}),
+                    },
+                    envelopeFor({ memberOf: [ORG_A], permissions: ['acct_member'] }),
+                );
+                expect(link.token).toBeTruthy();
+                return link.token;
+            },
+            revoke: async (token: string) => { await svc.revokeLink(token, { isSystem: true } as any); },
+            resolve: async (token, opts = {}) => {
+                const res = await handleShareLinksRequest(
+                    deps,
+                    `/${token}/resolve`,
+                    'GET',
+                    undefined,
+                    opts.password ? { password: opts.password } : {},
+                    httpContext(
+                        opts.signedIn
+                            ? envelopeFor({ memberOf: [ORG_A], permissions: ['acct_member'] })
+                            : undefined,
+                    ),
+                );
+                if (!res.handled || !res.response) throw new Error('GET /share-links/:token/resolve was not handled');
+                return res.response as { status: number; body: any };
+            },
+        };
+    }
+
+    /** The ruling's assertion: not "a 404" but the SAME answer a never-minted token gets. */
+    function expectIndistinguishable(actual: { status: number; body: any }, unknown: { status: number; body: any }) {
+        expect(actual).toEqual(unknown);
+        // Byte-equality on the wire, key order included.
+        expect(JSON.stringify(actual)).toBe(JSON.stringify(unknown));
+        expect(actual.status).toBe(404);
+        expect(actual.body?.error?.code).toBe('INVALID_OR_EXPIRED');
+        const wire = JSON.stringify(actual.body).toLowerCase();
+        expect(wire).not.toContain('publicsharing');
+        expect(wire).not.toContain('sharing_not_enabled');
+        expect(wire).not.toContain('password');
+    }
+
+    it('the `password_hash` shape — NEEDS_PASSWORD and WRONG_PASSWORD both become the unknown-token answer', async () => {
+        const h = await harness();
+        const token = await h.mint({ password: 'hunter2' });
+
+        // Reverse check, on the same token: with the block ON the 401
+        // affordance is exactly what it always was, in both arms.
+        const needsOn = await h.resolve(token);
+        expect(needsOn.status).toBe(401);
+        expect(needsOn.body?.error?.code).toBe('NEEDS_PASSWORD');
+        const wrongOn = await h.resolve(token, { password: 'not-it' });
+        expect(wrongOn.status).toBe(401);
+        expect(wrongOn.body?.error?.code).toBe('WRONG_PASSWORD');
+        expect((await h.resolve(token, { password: 'hunter2' })).status).toBe(200);
+
+        h.switchOff();
+        const unknown = await h.resolve(UNKNOWN_TOKEN);
+
+        expectIndistinguishable(await h.resolve(token), unknown);
+        expectIndistinguishable(await h.resolve(token, { password: 'not-it' }), unknown);
+        // THE SHARPEST EDGE: a CORRECT password on a switched-off link answered
+        // `WRONG_PASSWORD` — both an oracle and a lie.
+        expectIndistinguishable(await h.resolve(token, { password: 'hunter2' }), unknown);
+    });
+
+    it("the `audience: 'signed_in'` shape — SIGN_IN_REQUIRED becomes the unknown-token answer", async () => {
+        const h = await harness();
+        const token = await h.mint({ audience: 'signed_in' });
+
+        // Reverse check: an anonymous caller is still told to sign in, a
+        // signed-in one is still served.
+        const on = await h.resolve(token);
+        expect(on.status).toBe(401);
+        expect(on.body?.error?.code).toBe('SIGN_IN_REQUIRED');
+        expect((await h.resolve(token, { signedIn: true })).status).toBe(200);
+
+        h.switchOff();
+        expectIndistinguishable(await h.resolve(token), await h.resolve(UNKNOWN_TOKEN));
+        // The signed-in caller loses it too — a standing policy, not an
+        // authentication affordance.
+        expectIndistinguishable(
+            await h.resolve(token, { signedIn: true }),
+            await h.resolve(UNKNOWN_TOKEN, { signedIn: true }),
+        );
+    });
+
+    it('EVERY arm falls through, the 410 included — option C (gate only the two 401s) is not what shipped', async () => {
+        const h = await harness();
+        const token = await h.mint({});
+        await h.revoke(token);
+
+        // Reverse check: with the block ON the revoked bucket is untouched.
+        const on = await h.resolve(token);
+        expect(on.status).toBe(410);
+        expect(on.body?.error?.code).toBe('EXPIRED_OR_REVOKED');
+
+        h.switchOff();
+        expectIndistinguishable(await h.resolve(token), await h.resolve(UNKNOWN_TOKEN));
+    });
+
+    it('fail-closed: an object whose schema the engine cannot answer for is refused, not probed', async () => {
+        const h = await harness();
+        const token = await h.mint({ password: 'hunter2' });
+
+        // Not "off" — GONE. `getPolicy` calls an unanswerable schema
+        // `enabled: false`, and this probe reaches the same verdict rather than
+        // falling back to the row.
+        h.forgetSchema();
+
+        expectIndistinguishable(await h.resolve(token, { password: 'hunter2' }), await h.resolve(UNKNOWN_TOKEN));
     });
 });
