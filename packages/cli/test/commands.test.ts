@@ -12,6 +12,7 @@ import Generate from '../src/commands/generate';
 import Lint from '../src/commands/lint';
 import Diff from '../src/commands/diff';
 import Explain, { SCHEMAS } from '../src/commands/explain';
+import { FlowSchema } from '@objectstack/spec/automation';
 
 describe('CLI Commands (oclif)', () => {
   it('should have compile command', () => {
@@ -93,5 +94,62 @@ describe('os explain — schema catalog accuracy', () => {
 
     // …and must never regress back to the contribution-kind values.
     expect(ownership!.type).not.toBe('"own" | "extend"');
+  });
+
+  // ── `os explain flow` ───────────────────────────────────────────────────
+  //
+  // The flow entry shipped a sample that could not parse, and the catalog is
+  // hand-maintained (it does NOT derive from FlowSchema), so nothing said so:
+  //   • `steps` and `trigger` are strictObject ALIASES on FlowSchema (for
+  //     `nodes` and `type`) — authoring either is a loud parse error;
+  //   • a node's per-type data lives under `config`, so the sample's top-level
+  //     `field`/`value` pair are undeclared keys on a `.strict()` node, and its
+  //     required `id`/`label` were absent;
+  //   • `edges` is required — a graph with no edges was not expressible;
+  //   • the value `'$currentUser'` was a `$`-prefixed sentinel NO resolver in
+  //     the repo recognises. The flow value dialect is brace-based, and the
+  //     acting user is `{$User.Id}` (template.ts `resolveToken`, whose
+  //     `$User.Id` branch returns `context.userId`). The neighbouring FILTER
+  //     dialect's `{current_user_id}` is a different door and does NOT carry
+  //     over: assignment/`fields` values go through plain `interpolate`, not
+  //     `interpolateFilter`.
+  //
+  // Parsing the sample against the real schema is the guard that cannot itself
+  // drift — it re-derives the truth from the spec on every run, which is what
+  // the hand-maintained catalog otherwise has no way to do.
+  it('ships a flow example that actually parses as a Flow (#14782)', () => {
+    // The catalog stores examples as authored source, so evaluate the literal.
+    const literal = new Function(`return (${SCHEMAS.flow.example});`)() as unknown;
+    const result = FlowSchema.safeParse(literal);
+    expect(
+      result.success,
+      `os explain flow's example must parse as a Flow. Issues: ${
+        result.success ? '' : JSON.stringify(result.error.issues, null, 2)
+      }`,
+    ).toBe(true);
+  });
+
+  it('documents flow.type as the full FlowSchema type enum (#14782)', () => {
+    const type = SCHEMAS.flow.required.find((f) => f.name === 'type');
+    expect(type, 'flow schema should document a `type` field').toBeDefined();
+    const tokens = (type!.type.match(/'[^']+'|"[^"]+"/g) ?? []).map((t) => t.slice(1, -1));
+    expect(new Set(tokens)).toEqual(
+      new Set(['autolaunched', 'record_change', 'schedule', 'screen', 'api']),
+    );
+  });
+
+  it('teaches the acting user as {$User.Id}, and no catalog example revives $currentUser (#14782)', () => {
+    expect(SCHEMAS.flow.example).toContain('{$User.Id}');
+    for (const [key, info] of Object.entries(SCHEMAS)) {
+      expect(info.example, `os explain ${key} example`).not.toContain('$currentUser');
+    }
+  });
+
+  it('never re-teaches `steps` / `trigger` as flow keys — both are aliases, not fields (#14782)', () => {
+    const declared = [...SCHEMAS.flow.required, ...SCHEMAS.flow.optional].map((f) => f.name);
+    expect(declared).not.toContain('steps');
+    expect(declared).not.toContain('trigger');
+    expect(declared).toContain('nodes');
+    expect(declared).toContain('edges');
   });
 });
