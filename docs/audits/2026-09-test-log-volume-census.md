@@ -80,7 +80,7 @@ Every captured line is stripped of ANSI SGR sequences and classified:
 
 ## The instrument writes to `process.stdout` directly — verified, not inferred
 
-`packages/core/src/logger.ts:350-395`:
+`packages/core/src/logger.ts:349-394` (verified at `48d4422e3`):
 
 ```ts
 const isErrorLevel = level === 'error' || level === 'fatal';
@@ -166,8 +166,10 @@ forward of something already being passed.
 
 **A second, un-asked-for finding, relevant to which seam triage picks:** the
 bare `new ObjectKernel()` call in `harness.ts` is not an isolated case.
-Repo-wide, `new ObjectKernel(` appears **85 times across 62 files**
-(`grep -rn 'new ObjectKernel(' --include='*.ts' packages examples`), most of
+Repo-wide, `new ObjectKernel(` appears **78 times across 55 files**
+(`grep -rn 'new ObjectKernel(' --include='*.ts' packages examples`; verified
+at `48d4422e3`, this branch merged with `origin/main` at `fddfc8db0` — re-run
+the command to reproduce, since this file set moves), most of
 them test files constructing a kernel directly rather than through
 `packages/verify`'s harness — `packages/objectql/src/kernel-factory.ts:35`
 (the factory objectql's own suite boots through, contributing 11,326 of the
@@ -175,10 +177,10 @@ them test files constructing a kernel directly rather than through
 with the identical `new ObjectKernel()` — no config — shape. **A `BootOptions`
 field on `packages/verify`'s harness would quiet only the suites that boot
 through that one harness; it would not reach objectql's kernel construction,
-or any of the other ~60 call sites, without each of them being found and
+or any of the other ~53 call sites, without each of them being found and
 updated individually.** An env-level default read inside the kernel or logger
 construction itself (`NO_COLOR`'s existing pattern in the same file is the
-precedent) would cover all 85 call sites without touching any of them. This
+precedent) would cover all 78 call sites without touching any of them. This
 does not choose a seam — it changes what "choosing" would cost.
 
 ### `OS_LOG_LEVEL` is resolved in the CLI and read nowhere below it
@@ -204,7 +206,8 @@ see a level change before trusting that nothing else reads one:
 The function is demonstrably sensitive to its input, so the repo-wide grep is
 not a probe that happened to see nothing: `grep -rn 'OS_LOG_LEVEL\b'` across
 every `.ts`/`.mjs`/`.js` (excluding `dist/`) returns exactly one non-`cli`,
-non-test hit — `scripts/pm/dispatch-gates.mjs:14461`, a string literal inside
+non-test hit — `scripts/pm/dispatch-gates.mjs:14478` (verified at `48d4422e3`
+— this file is edited often, re-check before reuse), a string literal inside
 that script's own self-test fixture, not a read. Every other match is
 `packages/cli/src/**` (the resolver plus the three commands that call it) or
 `packages/cli/test/**` (tests of that resolution — a package testing its own
