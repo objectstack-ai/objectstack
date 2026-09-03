@@ -564,7 +564,6 @@ it, and `defineStack` errors unless the grant declares
 ## Metadata Protection (`protection`)
 
 Package authors can lock shipped metadata against Studio edits / overlays / deletes.
-See ADR-0010 for the full model.
 
 The `protection` block is **declared on the source schema** (`*.object.ts`,
 `*.app.ts`, `*.view.ts`, …) and stripped at load time — it never appears in
@@ -608,7 +607,7 @@ export const SysUserObject = ObjectSchema.create({
   sharingModel: 'public_read',
   protection: {
     lock: 'full',
-    reason: 'Core identity object — see ADR-0010.',
+    reason: 'Core identity object',
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   fields: { username: { type: 'text', required: true } },
