@@ -17,8 +17,9 @@ posture — kept, and given the single meaning "no tenant column" by D1),
 tenancy fails fast — the reason the measured leak's precondition is a refused boot today),
 [ADR-0095](./0095-authz-kernel-tenant-layer-and-posture-ladder.md) D1 (Layer 0, the strict tenant
 wall this record makes agree with the driver by construction),
-[ADR-0105](./0105-group-tenancy-posture-and-first-class-org-scope.md) D2 (the `group` union scope
-that the single computed scope of D6 generalizes),
+[ADR-0105](./0105-group-tenancy-posture-and-first-class-org-scope.md) D2/D6/D9/D10 (the `group`
+union scope that the single computed scope of D6 generalizes; the org-axis red lines D12 keeps; the
+`$root` derivation D12 reuses; the reserved layered-master-data shape whose owner D12 fixes),
 [ADR-0120](./0120-unique-scope-vocabulary-and-null-safe-tenant-uniqueness.md) D3/D4/D7
 (`COALESCE(organization_id, '__global__')`, the migration ceremony, and the 17.x → protocol 18
 staging this record's D11 aligns with),
@@ -80,6 +81,9 @@ This record makes NULL mean **nothing**:
   their real organization — loudly, per table, with no reaping and no guessing.
 - **D9–D11** — Postures differ only in enforcement; the compatibility arms are retired when the data
   is clean; the constraint lands at protocol 18.
+- **D12** — Under the `group` posture, group-shared business rows (ADR-0105 D10's templates) have an
+  owner too: never NULL — the platform organization or the group's root organization, by declaration.
+  The org-axis red lines stand.
 
 The two censuses on #13564 are not discarded by this record — they become its migration inventory.
 
@@ -138,6 +142,18 @@ was the only wall standing on that deployment.
    NULL cannot say which meaning it carries. Two live producers surfaced while it was being written:
    every `sys_record_share` row lands NULL (#14484); a seeded `sys_business_unit` at NULL silently
    defeats sharing rules because a service open-coded the strict equality (#14547).
+6. **The `group` posture has a reserved NULL of its own.**
+   [ADR-0105](./0105-group-tenancy-posture-and-first-class-org-scope.md) D1 defines `group` as
+   "organizations = membership boundaries over one shared dataset", walled by
+   `organization_id IN accessible_org_ids` (D2); D6 draws two lint-enforced red lines (no permission
+   inheritance along `parent_organization_id`; business-unit trees stay org-internal); D9 lets an
+   approver target `$root`, deriving the group root by walking the chain once
+   (`plugin-approvals/src/approver-org-scope.ts`). D10 — layered master data, the SAP
+   material-master / 用友-金蝶 distribution shape — is **reserved, not implemented**, and its reserved
+   wording is "group-level template rows (**platform-global** or group-org-owned, read-shared) plus
+   per-org override rows". The "platform-global" half is a NULL row. A record that retires NULL must
+   say what owns a group template before D10's follow-up ADR is written, or that ADR re-creates the
+   state this one removes.
 
 ### 1.3 Two implementations of one predicate
 
@@ -213,6 +229,14 @@ Platform-level standing stays config-derived (#13514 L4, `OS_PLATFORM_OWNER_EMAI
 that express it today at NULL (the `single`-posture first-user `admin_full_access` row, Choice 4A) are
 owned by the platform organization under D4. Whether platform standing may later be *modelled* as
 membership in the platform organization is deferred (§6 Q2), not decided here.
+
+**The platform organization is not the group root.** On a `group` deployment the top of the
+`parent_organization_id` tree — the headquarters — is an ordinary organization with members, quotas
+and business data. The platform organization owns the **runtime's** rows (registries, templates, the
+environment layer); the group's business rows are owned by the group's organizations (D12). The two
+are operated by the same people on many deployments and are still two owners, because a deployment
+may host more than one group and because business master-data authorship must not require platform
+standing.
 
 ### D3 — The catalog is per-organization in every posture
 
@@ -360,6 +384,51 @@ every-posture refusal and the arm removal (D1/D7/D10) land at **protocol 18**, i
 [ADR-0120](./0120-unique-scope-vocabulary-and-null-safe-tenant-uniqueness.md) D7 set for the
 uniqueness work they compose with. Until D10 runs, ⛔ no card narrows or removes an arm.
 
+### D12 — The `group` posture: group-shared rows have an owner, and the org-axis red lines stand
+
+What this record already covers for `group` without further decision:
+
+- **The wall.** D6's `organizationIds` **is** `accessible_org_ids`
+  ([ADR-0105](./0105-group-tenancy-posture-and-first-class-org-scope.md) D2); the union predicate,
+  the fail-closed empty set and the active organization as write target are unchanged.
+- **The catalog.** D3's per-organization seeding is what #10103 Option C already does under `group`,
+  and it is the only shape consistent with ADR-0105 D6 ①: a headquarters-authored position is **not**
+  inherited by a plant; a declared position reaches every organization from code, one copy each.
+- **Cross-organization approvals** (ADR-0105 D9): the request row is owned by the plant; the `$root`
+  approver reads it through membership union or the system-context mirror. NOT NULL changes nothing.
+- **The cut-line deployment** (ADR-0105 Appendix A: one organization, factories as business units):
+  the Default Organization owns everything under D3/D9.
+
+What this record decides for `group`:
+
+1. **D6's red lines are not amended by D5.** A sharing declaration names a fixed **owner set** for an
+   object; it is not an RLS policy, a sharing rule or a scope that reads `parent_organization_id`
+   per row, and it grants no permission — the reader still needs the object grant. Permission
+   inheritance along the org tree stays retired and lint-enforced
+   (`packages/lint/src/validate-org-axis-red-lines.ts`).
+2. **ADR-0105 D10's group template rows have an owner, and it is never NULL.** Two owners are
+   admissible; D10's follow-up ADR chooses **per distribution policy** (集团统管 / 分级 / 自由) under
+   this constraint:
+   - **(i) the platform organization + D5** — the template is a deployment-level row. Right when the
+     deployment *is* the group and its master data is operated by the group's platform team; wrong
+     for a deployment hosting several groups, and it puts business master-data authorship behind
+     platform standing.
+   - **(ii) the group root organization + a second D5 source, `group-root`** — for an object declared
+     so, the computed scope adds the **caller's root organization** to `sharedOrganizationIds`. The
+     root is derived **once per request** by the same `parent_organization_id` chain walk D9 already
+     performs for `$root` (`approver-org-scope.ts`), inside the scope resolver — never per row, never
+     in a Layer 1 policy — so red line ① is not crossed; the lint gains one allowlisted shape (the D5
+     declaration itself) and keeps refusing every other read of the parent reference. Override rows
+     stay owned by the plant, linked to the template by D10's linkage field; the read-path resolution
+     rule (org override wins) is D10's to detail. Several groups in one deployment each share to their
+     own tree.
+   - **This record recommends (ii) for business master data and keeps (i) for the runtime's own rows.**
+     The choice is the maintainer's (§6 Q6); until it is made, D10's follow-up ADR may not be
+     drafted with a NULL owner.
+3. **Migration.** A deployment that already expresses a group template as a NULL row takes D8 fate 3
+   with the derived owner being the group root (the inventory records the rule per object), or fate
+   1 (column dropped) where the object was never tenant data.
+
 ---
 
 ## 3. Non-goals
@@ -413,7 +482,11 @@ uniqueness work they compose with. Until D10 runs, ⛔ no card narrows or remove
 - `sys_organization` gains a reserved row; any admin surface that lists *all* organizations (not
   membership-derived) must mark or hide it (verified per surface; objectui card if one exists).
 - Under `group`, the driver's `IN` list grows by one id (the platform organization) on declared-shared
-  objects; index shape is unchanged.
+  objects — by two if D12 (ii) is chosen (the group root); index shape is unchanged.
+- If D12 (ii) is chosen, `validateOrgAxisRedLines` gains exactly one allowlisted shape (the D5
+  `group-root` declaration) and its docblock records why that shape is not the inheritance it
+  forbids; the scope resolver gains a per-request root walk with the cycle guard
+  `approver-org-scope.ts` already carries.
 
 **Risks.**
 
@@ -456,6 +529,10 @@ uniqueness work they compose with. Until D10 runs, ⛔ no card narrows or remove
    own reading ("their inbox follows them, not their active workspace") points at D1.
 5. **Staging confirmation.** D11 aligns with ADR-0120 D7 (17.x additive, protocol 18 constraint).
    Confirm, or name a different boundary.
+6. **Owner of group templates under `group` (D12).** (i) platform organization + shared declaration,
+   or (ii) group root organization + a `group-root` sharing source resolved once per request.
+   Recommendation: (ii) for business master data, (i) for the runtime's own rows. This fixes the
+   constraint ADR-0105 D10's follow-up ADR must draft under.
 
 ---
 
@@ -485,7 +562,7 @@ One epic tracks the family. Phases 1–3 are additive (17.x); phase 4 is protoco
 | # | Card | Decisions | Blocked by |
 |---|---|---|---|
 | C1 | Platform organization exists before the first seeder, in every posture | D2, D9 | ADR merge |
-| C2 | One tenant read scope; `platformSharedObjects` threads to Layer 0 and every driver | D5, D6 | ADR merge |
+| C2 | One tenant read scope; `platformSharedObjects` threads to Layer 0 and every driver; the `group-root` source and the lint allowlist if §6 Q6 = (ii) | D5, D6, D12 | ADR merge |
 | C3 | Catalog per-organization in every posture; registry, platform grants, authz reads on the platform organization | D3, D4 | C1, C2 |
 | C4 | ADR-0005 environment layer owned by the platform organization | D4 | C1 |
 | C5 | Every remaining platform writer names its owner — platform organization or no column; U-A/U-B adjudicated | D1, D4, D7 | C1 |
