@@ -52,14 +52,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-09-02 at `e8666e3b1`.
+Measured on 2026-09-02 at `5daab8df0`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 540 |
-| engine-shaped types recognised | 57 |
+| tracked non-test sources scanned | 539 |
+| engine-shaped types recognised | 56 |
 | declared objects in the registry | 297 |
-| same-named calls subtracted as non-engine | 129 |
+| same-named calls subtracted as non-engine | 130 |
 
 ## Every site
 
@@ -139,7 +139,6 @@ Measured on 2026-09-02 at `e8666e3b1`.
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `update` | `sys_audience_binding_suggestion` | enabled | context, elevation undecidable | 3 |
 | `packages/plugins/plugin-security/src/suggested-audience-bindings.ts` | `insert` | `sys_position_permission_set` | enabled | context, elevation undecidable | 1 |
-| `packages/plugins/plugin-sharing/src/backfill-sys-record-share-organizations.ts` | `update` | `sys_record_share` | enabled | elevated | 1 |
 | `packages/plugins/plugin-sharing/src/primary-bu-projection.ts` | `update` | `sys_user` | enabled | elevated | 2 |
 | `packages/plugins/plugin-sharing/src/record-orphan-cleanup.ts` | `delete` | `table` | undecidable | options unreadable | 2 |
 | `packages/plugins/plugin-sharing/src/share-link-service.ts` | `insert` | `sys_share_link` | enabled | elevated | 1 |
@@ -159,7 +158,7 @@ Measured on 2026-09-02 at `e8666e3b1`.
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `update` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/flow-dispatch-store.ts` | `insert` | `sys_flow_dispatch` | enabled | elevated | 1 |
-| `packages/services/service-automation/src/suspended-run-store.ts` | `delete` | `sys_automation_run` | enabled | elevated | 2 |
+| `packages/services/service-automation/src/suspended-run-store.ts` | `delete` | `sys_automation_run` | enabled | elevated | 3 |
 | `packages/services/service-automation/src/suspended-run-store.ts` | `insert` | `sys_automation_run` | enabled | elevated | 2 |
 | `packages/services/service-automation/src/suspended-run-store.ts` | `update` | `sys_automation_run` | enabled | elevated | 2 |
 | `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `delete` | `sys_metadata` | enabled | PROVABLY NONE | 1 |

@@ -49,6 +49,20 @@ export type Owns = (absPath: string) => boolean;
 /** The flag that asks `flush()` to declare its output set. */
 export const MANIFEST_FLAG = '--generated-manifest=';
 
+/**
+ * The in-page half of `manageDir()`'s claim — the ONE spelling of it.
+ *
+ * `manageDir()` deletes what it owns before rewriting, so a hand edit anywhere
+ * under a managed tree is discarded by the next generator run with no gate red
+ * and no conflict: the checker re-derives the tree and then reports it current.
+ * This line is the only signal a contributor opening the page gets, so every
+ * generated page must carry it — and from here, not from a copy, because a
+ * second spelling is how a tree ends up with two populations of page (one
+ * warned, one not) and nothing able to tell them apart.
+ */
+export const AUTO_GENERATED_BANNER =
+  `{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}\n\n`;
+
 /** Where to write the output manifest, or null when the flag is absent. */
 export function manifestPathFromArgv(argv: string[] = process.argv): string | null {
   const flag = argv.find((a) => a.startsWith(MANIFEST_FLAG));

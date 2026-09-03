@@ -34,6 +34,13 @@
  *   objects.<name>._views.<view>.label
  *   objects.<name>._views.<view>.description
  *   objects.<name>._views.<view>.emptyState.title / .message
+ *   objects.<name>._views.<view>.bulkActions.<def>.label / .confirmText
+ *                                                       / .confirmLabel
+ *   objects.<name>._views.<view>.bulkActions.<def>.params.<param>.label
+ *                                                       / .help / .placeholder
+ *     ^ a bulk param spells its hint `help`; an ACTION param spells the same
+ *       idea `helpText` (`ui/bulk-action.zod.ts`'s known divergence)
+ *   objects.<name>._validations.<rule>.message
  *   objects.<name>._actions.<action>.label
  *   objects.<name>._actions.<action>.description
  *   objects.<name>._actions.<action>.confirmText
@@ -48,6 +55,9 @@
  *   apps.<app>.navigation.<id>.label
  *   dashboards.<dash>.label / .description
  *   dashboards.<dash>.widgets.<w>.title / .description
+ *   datasets.<dataset>.label / .description
+ *   datasets.<dataset>.dimensions.<dim>.label
+ *   datasets.<dataset>.measures.<measure>.label
  *   pages.<page>.label / .description
  *   pages.<page>.title / .subtitle   (from the page's `page:header` component)
  *   pages.<page>.components.<id>.<key>  (per-component copy, #6080)
@@ -125,6 +135,7 @@ export interface ExpectedEntry {
     | 'navigation'
     | 'dashboard'
     | 'widget'
+    | 'dataset'
     | 'page'
     | 'flow'
     | 'metadataType'
@@ -274,6 +285,81 @@ function pushViewEntries(out: ExpectedEntry[], objectName: string, viewName: str
   pushDerived(out, [...root, 'label'], view?.label ?? viewName, inlineText(view?.label), 'view', { objectName });
   pushOptional(out, [...root, 'description'], view?.description, 'view', { objectName });
   pushViewEmptyState(out, root, view, objectName);
+  pushBulkActionDefs(out, root, view, objectName);
+}
+
+/**
+ * Emit `_views.<view>.bulkActions.<def>.*` for a list view's authored
+ * `bulkActionDefs[]` (#14253's resolver, #14376's walk).
+ *
+ * **Why this hangs off the VIEW and not the action pass.** A `bulkActionDefs`
+ * entry is authored inside the view and is not an action document, so it never
+ * reaches `translateAction` and no other pass here would ever see it. That is
+ * the same reason `translateView` — not `translateAction` — is where the
+ * resolver overlays it, and the reason `ObjectTranslationDataSchema` puts the
+ * group under `_views.<view>` rather than beside `_actions`.
+ *
+ * **The view key is the caller's, deliberately.** `translateBulkActionDefs` is
+ * called by `translateView` with `viewTranslationKey(view, objectName)` — the
+ * bare `_views` key — so emitting under the same `root` this function already
+ * built for `label` / `description` keeps the two halves keyed by construction
+ * rather than by a second derivation (the #5164 lesson one surface over).
+ *
+ * **Read from the AUTHORED address.** The resolver reads
+ * `config.bulkActionDefs` because a SERVED `ViewItem` nests the whole
+ * `ListViewSchema` under `config`; this walker is handed the authored stack
+ * config, where the defs sit on the list view itself — the same authored
+ * addresses the rest of this file reads (`view.list.data.object`,
+ * `obj.listViews`). Accepting the served spelling here as well would be a
+ * tolerant alias for a shape this walk is never given.
+ *
+ * Three deliberate exclusions, each measured against `BulkActionDefSchema`
+ * rather than mirrored from the report:
+ *
+ *   - `successMessage` — a def declares none (the run reports a per-record
+ *     outcome summary the console words from its own catalog);
+ *   - `description` — a def declares none either; the sentence above the
+ *     affected-record summary IS `confirmText`;
+ *   - per-param `options` — `BulkActionParamTranslationSchema` carries
+ *     `guidance` against them instead of a key, so scaffolding them would
+ *     write keys `.strict()` then rejects.
+ *
+ * ⚠️ `help`, not `helpText`. A bulk param spells its hint `help`
+ * (`BulkActionParamSchema.help`) where an ACTION param spells it `helpText` —
+ * the known divergence `ui/bulk-action.zod.ts` names, and the one spelling the
+ * translation face declares.
+ */
+function pushBulkActionDefs(out: ExpectedEntry[], viewRoot: string[], view: any, objectName: string): void {
+  const defs = view?.bulkActionDefs;
+  if (!Array.isArray(defs)) return;
+  for (const def of defs) {
+    if (!def || typeof def !== 'object') continue;
+    const defName = def.name;
+    if (typeof defName !== 'string' || defName.length === 0) continue;
+    const base = [...viewRoot, 'bulkActions', defName];
+    // The selection bar renders `def.label ?? formatActionLabel(def.name)`
+    // (objectui `BulkActionBar.tsx`), so the humanized name is what a reader
+    // actually sees when the author omitted a label — a usable seed, with
+    // `inline` left unset so coverage never demands a translation of a string
+    // nobody wrote.
+    const authoredLabel = inlineText(def.label);
+    pushDerived(out, [...base, 'label'], authoredLabel ?? humanizeFieldPath(defName), authoredLabel, 'view', { objectName });
+    pushOptional(out, [...base, 'confirmText'], def.confirmText, 'view', { objectName });
+    pushOptional(out, [...base, 'confirmLabel'], def.confirmLabel, 'view', { objectName });
+    if (!Array.isArray(def.params)) continue;
+    for (const param of def.params) {
+      if (!param || typeof param !== 'object') continue;
+      const pname = param.name;
+      if (typeof pname !== 'string' || pname.length === 0) continue;
+      const pbase = [...base, 'params', pname];
+      // The dialog renders `param.label ?? param.name` — the bare name, the
+      // same fallback `pushActionParams` seeds an inline action param from.
+      const literalLabel = inlineText(param.label);
+      pushDerived(out, [...pbase, 'label'], literalLabel ?? pname, literalLabel, 'view', { objectName });
+      pushOptional(out, [...pbase, 'help'], param.help, 'view', { objectName });
+      pushOptional(out, [...pbase, 'placeholder'], param.placeholder, 'view', { objectName });
+    }
+  }
 }
 
 /**
@@ -421,6 +507,65 @@ function pushActionResultDialog(
       if (typeof field.label !== 'string' || field.label.length === 0) continue;
       pushEntry(out, [...base, 'fields', field.path], field.label, kind, { objectName });
     }
+  }
+}
+
+/**
+ * How deep a `conditional` chain is followed. `ValidationRuleSchema` is
+ * recursive with no declared bound, and this walker is handed hand-authored
+ * TypeScript — a shared branch object appearing under its own ancestor would
+ * otherwise loop forever. Real nesting is two or three deep (the schema's own
+ * worked examples stop at two).
+ */
+const MAX_VALIDATION_DEPTH = 10;
+
+/**
+ * Emit `objects.<object>._validations.<rule>.message` for an object's custom
+ * validation rules (#14253's resolver, #14376's walk).
+ *
+ * `object.validations[].message` is the sentence a rejected write returns, and
+ * the ObjectQL rule evaluator now resolves it through the engine's existing
+ * `i18nService` channel at exactly this address
+ * (`objectValidationMessageKey`, `spec/system/i18n-resolver.ts`). Without this
+ * pass the address has a reader and a schema slot but nothing writes the
+ * skeleton, so a deployment gets platform-generated refusals in the caller's
+ * language and author-written ones in the source language, side by side in one
+ * error envelope.
+ *
+ * **A `conditional` wrapper contributes no key of its own.** `checkConditional`
+ * evaluates `when` and then returns `evaluateRule(branch, …)` — the BRANCH
+ * supplies the violation, so the wrapper's own `message` never reaches a user.
+ * Scaffolding it would offer a translator a string no rejected write can ever
+ * show. The branches carry their own `name` and are addressed by it, which is
+ * what both the resolver's JSDoc and `_validations`' schema note state.
+ *
+ * **`active: false` is not a reason to skip a rule.** It is a toggle on a
+ * surface that exists, not the absence of one, and no other family in this
+ * walker consults a runtime toggle — this walk reports what a config
+ * DECLARES. Flipping the toggle back on must not silently owe a translation.
+ */
+function pushValidationMessages(
+  out: ExpectedEntry[],
+  objectName: string,
+  rules: unknown,
+  depth: number,
+): void {
+  if (!Array.isArray(rules) || depth >= MAX_VALIDATION_DEPTH) return;
+  for (const rule of rules) {
+    if (!rule || typeof rule !== 'object') continue;
+    const ruleName = (rule as any).name;
+    if (typeof ruleName !== 'string' || ruleName.length === 0) continue;
+    if ((rule as any).type === 'conditional') {
+      pushValidationMessages(out, objectName, [(rule as any).then, (rule as any).otherwise], depth + 1);
+      continue;
+    }
+    pushEntry(
+      out,
+      ['objects', objectName, '_validations', ruleName, 'message'],
+      inlineText((rule as any).message),
+      'object',
+      { objectName },
+    );
   }
 }
 
@@ -862,6 +1007,9 @@ export function collectExpectedEntries(
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
       }
     }
+
+    // Custom validation-rule rejection messages (`_validations.<rule>.message`).
+    pushValidationMessages(out, objectName, obj.validations, 0);
   }
 
   // ── Top-level views ──────────────────────────────────────────────
@@ -974,6 +1122,9 @@ export function collectExpectedEntries(
     }
   }
 
+  // ── Analytics datasets (`datasets.<name>.…`) ─────────────────────
+  walkDatasets(config, out);
+
   // ── Pages + their `page:header` copy ──────────────────────────────
   const pages: any[] = Array.isArray(config?.pages) ? config.pages : [];
   for (const page of pages) {
@@ -1039,6 +1190,63 @@ export function collectExpectedEntries(
   const warnedGroups = opts.warnedGroups ?? authorWarnedTranslationGroups();
   if (warnedGroups.size === 0) return out;
   return out.filter((entry) => !warnedGroups.has(entry.path[0]));
+}
+
+// ─── Analytics datasets (`datasets.<name>.…`) ──────────────────────────
+
+/**
+ * Emit the dataset copy surface (#14253's resolver, #14376's walk):
+ *
+ *   datasets.<name>.label
+ *   datasets.<name>.description
+ *   datasets.<name>.dimensions.<dimension>.label
+ *   datasets.<name>.measures.<measure>.label
+ *
+ * **Why a dataset is a display surface at all.** It reads like a back-office
+ * definition, but a measure label is drawn ON THE DASHBOARD — under every
+ * metric tile and on every chart axis. `translateDataset` is registered in
+ * `METADATA_DOCUMENT_TRANSLATORS`, so a served dataset is already localized at
+ * the REST boundary; this pass is the half that writes the skeleton.
+ *
+ * **Top level, not under `dashboards`.** A dataset is the one definition every
+ * presentation binds to BY REFERENCE (ADR-0021 D1): the same measure is drawn
+ * by N widgets across M dashboards, so addressing it under a dashboard would
+ * ask for the same string once per presentation and leave a dataset no
+ * dashboard references unaddressable.
+ *
+ * **`pushOptional`, not `pushDerived`, for every key here.** These four are
+ * `I18nLabelSchema` at the authoring site, so a value may already be an inline
+ * `{ en, 'zh-CN' }` map (#5728) — not source text to scaffold from, and
+ * `inlineText` narrows it away. And no renderer fallback is measured for a
+ * member that declares no `label` at all, so there is no reader-visible string
+ * to seed one from: recording the key without an `inline` keeps the coverage
+ * gate quiet about a string nobody wrote while still noticing a bundle that
+ * authors it. It is the same posture the resolver takes — `translateDataset`
+ * writes only where the bundle answered.
+ *
+ * The face stops at `label` below the dataset: `DatasetDimensionSchema` and
+ * `DatasetMeasureSchema` declare no `description` and say so in their own
+ * authoring guidance, so a `dimensions.<d>.description` key would parse clean
+ * and translate nothing.
+ */
+function walkDatasets(config: any, out: ExpectedEntry[]): void {
+  const datasets: any[] = Array.isArray(config?.datasets) ? config.datasets : [];
+  for (const dataset of datasets) {
+    if (!dataset || typeof dataset !== 'object') continue;
+    const name = dataset.name;
+    if (typeof name !== 'string' || name.length === 0) continue;
+    pushOptional(out, ['datasets', name, 'label'], dataset.label, 'dataset');
+    pushOptional(out, ['datasets', name, 'description'], dataset.description, 'dataset');
+    for (const group of ['dimensions', 'measures'] as const) {
+      const members: any[] = Array.isArray(dataset[group]) ? dataset[group] : [];
+      for (const member of members) {
+        if (!member || typeof member !== 'object') continue;
+        const memberName = member.name;
+        if (typeof memberName !== 'string' || memberName.length === 0) continue;
+        pushOptional(out, ['datasets', name, group, memberName, 'label'], member.label, 'dataset');
+      }
+    }
+  }
 }
 
 // ─── Screen flows (`flows.<flow>.screens.<node_id>.…`) ─────────────────

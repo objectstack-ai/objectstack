@@ -160,18 +160,15 @@ All translatable content for a single object is aggregated under
 |:--------|:------|
 | `label` / `pluralLabel` / `description` | Object-level text (every key optional) |
 | `fields.{field_name}` | `label`, `help`, `placeholder`, `options` (option value → label) per field |
-| `_views.{view_name}` | `label`, `description`, `emptyState.title` / `emptyState.message` |
+| `_views.{view_name}` | `label`, `description`, `emptyState.title` / `emptyState.message`, `bulkActions.{def_name}` (`label`, `confirmText`, `confirmLabel`, `params`) |
 | `_actions.{action_name}` | `label`, `description`, `confirmText`, `successMessage`, `params.{param_name}`, `resultDialog` |
 | `_sections.{section_name}` | Form section `label`, `description` |
 | `_tabs.{tab_name}` | Filter-preset tab `label` (`ViewTabSchema.name`) |
+| `_validations.{rule_name}` | `message` only — the sentence a rejected write returns (replaces the retired `validationMessages`) |
 
 Top-level groups alongside `objects`: `apps` (label, description, navigation),
-`messages`, `globalActions` (object-less actions), `dashboards`, `pages`, `flows`,
-`settings`, `metadataForms`, `settingsCommon`.
-
-> `validationMessages` is not a translation group — it was removed in spec 17.0.0.
-> Author the message on the rule itself (`object.validations[].message`), which the
-> engine returns on every rejected write.
+`messages`, `globalActions` (object-less actions), `dashboards`, `datasets`, `pages`,
+`flows`, `settings`, `metadataForms`, `settingsCommon`.
 
 For the exact Zod shape (and any field that may have been added since), read
 `node_modules/@objectstack/spec/src/system/translation.zod.ts` —
@@ -198,9 +195,9 @@ parse, ship, and resolve to nothing.
 
 `os validate` / `os lint` / `os compile` check this direction and report it as
 warnings (`translation-target-unknown`, `translation-option-key-unknown`): a key
-naming an object, field, view, tab, action, param, section, app, nav item,
-dashboard, widget or flow screen that does not exist is listed alongside the names
-that do. A bundle keyed to something since renamed still parses — the label just
+naming an object, field, view, tab, action, param, section, validation rule, app,
+nav item, dashboard, widget or flow screen that does not exist is listed alongside
+the names that do. A bundle keyed to something since renamed still parses — the label just
 renders silently in its source locale while every neighbouring one resolves.
 
 ---
