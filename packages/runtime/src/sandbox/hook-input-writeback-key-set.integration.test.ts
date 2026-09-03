@@ -204,10 +204,14 @@ describe('#14758 — the sandbox write-back carries the keys the body wrote', ()
       expect(seen.map((o) => o.index)).toEqual([0, 1]);
 
       // ADR-0112 envelope: code AND status, plus the key that diverged.
-      expect(err).toBeDefined();
-      expect(err?.code).toBe('MULTI_UPDATE_HOOK_KEY_DIVERGENCE');
-      expect(err?.status).toBe(400);
-      expect(err?.keys).toEqual(['completed_at']);
+      // `expect.soft` so a run where the refusal DOES NOT fire still reaches
+      // the row-state assertions below and reports the corruption that lands,
+      // instead of stopping at the missing envelope. That is the whole finding
+      // of this card, and a pin that hides half of it teaches half of it.
+      expect.soft(err).toBeDefined();
+      expect.soft(err?.code).toBe('MULTI_UPDATE_HOOK_KEY_DIVERGENCE');
+      expect.soft(err?.status).toBe(400);
+      expect.soft(err?.keys).toEqual(['completed_at']);
 
       // #14099's corruption: the already-done row's stamp must not move — and
       // the refusal lands BEFORE any write, so neither row changed at all.
