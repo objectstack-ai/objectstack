@@ -1397,8 +1397,27 @@ const actionObject = () => strictObject({
   ]).optional().describe('Body wrapping: flat (default) or { wrap: key } to nest user-collected params under a key.'),
   /**
    * HTTP method to use when `type: 'api'`. Defaults to `POST`. Use `PATCH` to
-   * call data-API update endpoints (e.g. `/api/v1/sys_api_key/{id}` with
-   * `bodyExtra: { revoked: true }`).
+   * call data-API update endpoints. The shipped data door is
+   * `PATCH {apiBase}/data/:object/:id` — `getApiBasePath()` + `crud.dataPrefix`,
+   * i.e. `/api/v1` + `/data` on a default host — so the endpoint for one
+   * record is e.g. `/api/v1/data/sys_api_key/${ctx.recordId}` with
+   * `bodyExtra: { revoked: true }`. Two things the path depends on: the
+   * `/data` segment (omit it and the action renders, is clickable, and 404s
+   * at the click), and the `${ctx.X}` / `${param.X}` interpolation
+   * {@link target} documents — a bare `{recordId}` placeholder is
+   * {@link newTabUrl}'s convention alone and is not substituted here.
+   *
+   * The full path is host-dependent: under `enableProjectScoping` with
+   * `projectResolution: 'required'` only
+   * `/api/v1/environments/:environmentId/data/:object/:id` is registered, so
+   * an unscoped path 404s on such a host — write `target` against the base
+   * the host actually mounts.
+   *
+   * To write a field on the CURRENT record, prefer the declarative
+   * {@link operation} `'update'` with {@link patch}: the platform performs
+   * the write, so there is no endpoint, method or id placeholder to spell at
+   * all. The `type: 'api'` + `PATCH` form above remains the way to call an
+   * explicit endpoint.
    */
   method: z.enum(['POST', 'PATCH', 'PUT', 'DELETE']).optional().describe('HTTP method for type:"api" actions. Defaults to POST.'),
   /**
