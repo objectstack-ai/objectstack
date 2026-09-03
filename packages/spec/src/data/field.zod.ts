@@ -278,15 +278,13 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * refused it at publish, so the search behaviour was real for a key no
    * author could legally write. The object-definition authoring form
    * (`object.form.ts` options repeater) has offered a `description` input all
-   * along; this declaration is what makes that offer honest. `dependsOn` is
-   * not declared on this option shape today, and neither is `depends_on`
-   * (`field-rows-option-description.test.ts` pins the `dependsOn` refusal).
-   * Measured, the two spellings live apart: this package declares the
-   * camelCase `dependsOn` on the FIELD shape below and refuses `depends_on`
-   * there, while `depends_on` is objectui's field-metadata spelling
-   * (`BaseFieldMetadata.depends_on`, read by `LookupField` alongside
-   * `dependsOn`). Whether this option face should declare a dependency key,
-   * and under which spelling, is pending objectui#6153 — not settled here.
+   * along; this declaration is what makes that offer honest. Per the same
+   * inherited ruling this option shape declares `description` and no cascade
+   * key of its own — `field-rows-option-description.test.ts` pins that
+   * refusal. The cascade key this package declares is the camelCase
+   * `dependsOn`, the `FieldSchema` member below; objectui mirrors that
+   * spelling on its own metadata type (maintainer ruling 2026-09-02 on
+   * objectui#6153).
    */
   description: z.string().optional().describe('Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text.'),
   color: z.string().optional().describe('Color code for badges/charts'),
