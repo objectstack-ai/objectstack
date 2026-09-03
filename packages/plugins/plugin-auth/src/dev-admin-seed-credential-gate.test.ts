@@ -55,21 +55,11 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import type { PluginContext } from '@objectstack/core';
 import { AuthManager } from './auth-manager.js';
+import { authIdentityObjects } from './manifest.js';
 import { AuthPlugin } from './auth-plugin.js';
 import { SELF_REGISTRATION_CLOSED } from './audience-posture.js';
 import { decideDevAdminSeedGate } from './dev-admin-seed-gate.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
-import {
-  SysUser,
-  SysSession,
-  SysAccount,
-  SysVerification,
-  SysOrganization,
-  SysMember,
-  SysInvitation,
-  SysTeam,
-  SysTeamMember,
-} from '@objectstack/platform-objects';
 
 const BASE = 'http://localhost:3000';
 const AUTH_BASE = '/api/v1/auth';
@@ -78,17 +68,12 @@ const SEED_EMAIL = 'admin@objectos.ai';
 const SEED_PASSWORD = 'admin123';
 const SYSTEM = { context: { isSystem: true } } as never;
 
-const AUTH_OBJECTS = [
-  SysUser,
-  SysSession,
-  SysAccount,
-  SysVerification,
-  SysOrganization,
-  SysMember,
-  SysInvitation,
-  SysTeam,
-  SysTeamMember,
-];
+/**
+ * The objects a deployment that mounts plugin-auth registers, imported from the
+ * plugin's own manifest rather than re-spelled here, so this harness cannot
+ * drift from what `auth-plugin.ts` registers at runtime (#14615).
+ */
+const AUTH_OBJECTS = authIdentityObjects;
 
 /** The env the seed is HARD-gated on (`isDevAdminSeedArmed`). */
 const SEED_ENV_KEYS = [

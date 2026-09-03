@@ -46,6 +46,10 @@
  * - `checkboxes` w/o `options` sits between the two: it shares the multi
  *   branch's free-form validator behaviour, but a checkbox group with zero
  *   boxes is almost certainly an omission — so it is a WARNING, not an error.
+ * - a grid view's `rowColor` w/o `colors` → objectui `plugin-grid`'s
+ *   `useRowColor.ts` `if (!config?.field || !config.colors) return undefined;`
+ *   — the row-className resolver bails before it reads a single row, so every
+ *   row keeps the default colour. See {@link VIEW_ROW_COLOR_WITHOUT_COLORS}.
  * - `webhook` w/o `triggers` → `auto-enqueuer.ts` `if (triggers.size === 0) …
  *   return null`. Note this one needed a SECOND source: that skip site's own
  *   comment blesses the empty case as "a manual-only webhook", which reads
@@ -78,6 +82,7 @@ export const FIELD_RELATIONSHIP_WITHOUT_REFERENCE = 'field/relationship-without-
 export const FIELD_CHOICE_WITHOUT_OPTIONS = 'field/choice-without-options';
 export const VIEW_LAYOUT_WITHOUT_BINDING = 'view/layout-without-binding';
 export const VIEW_TREE_WITHOUT_PARENT_FIELD = 'view/tree-without-parent-field';
+export const VIEW_ROW_COLOR_WITHOUT_COLORS = 'view/row-color-without-colors';
 export const WEBHOOK_WITHOUT_TRIGGERS = 'webhook/without-triggers';
 
 /** Every rule id this module can emit — pinned by tests so ids cannot drift. */
@@ -88,6 +93,7 @@ export const FUNCTIONAL_COMPLETENESS_RULES = [
   FIELD_CHOICE_WITHOUT_OPTIONS,
   VIEW_LAYOUT_WITHOUT_BINDING,
   VIEW_TREE_WITHOUT_PARENT_FIELD,
+  VIEW_ROW_COLOR_WITHOUT_COLORS,
   WEBHOOK_WITHOUT_TRIGGERS,
 ] as const;
 
@@ -316,6 +322,59 @@ function hasDetectableParentField(object: AnyRec): boolean {
 }
 
 /**
+ * The view types whose renderer actually READS `rowColor`, measured rather
+ * than inferred from the schema: `rowColor` is declared on every list view,
+ * but objectui's ListView adapter forwards it in exactly one branch of its
+ * per-type props switch — `case 'grid'` (`packages/plugin-list/src/
+ * ListView.tsx`, `...(rowColorConfig ? { rowColor: rowColorConfig } : {})`).
+ * `kanban` / `gallery` / `calendar` / `timeline` / `gantt` / `map` / `tree` /
+ * `chart` each build their own props and never carry the key; `page` mounts a
+ * published page through a different renderer entirely.
+ *
+ * ⛔ So this rule is NOT widened to every list view type, however tempting the
+ * schema's shape makes it. On a `kanban` view a `rowColor` block is inert too
+ * — but it is inert for a DIFFERENT reason, and this rule's prescription
+ * ("declare a `colors` map") would not fix it: the key is never read there
+ * with or without a map. Warning would be a false prescription, the failure
+ * mode the module doc and ADR-0078 §6 exist to prevent. That non-grid
+ * inertness is recorded here, not enforced — the `gallery` disposition in
+ * {@link VIEW_BINDING_BLOCKS} for the same reason.
+ *
+ * The `default:` arm of that switch shares the grid branch, so an unrecognised
+ * view type would carry `rowColor` too — unreachable from this predicate,
+ * which returns early on a view with no string `type` and never sees a
+ * defaulted one (it runs on the NORMALIZED, pre-parse stack).
+ */
+const ROW_COLOR_VIEW_TYPES: ReadonlySet<string> = new Set(['grid']);
+
+/**
+ * Whether a `rowColor` block declares no usable colour map.
+ *
+ * Both spellings of "no map" are flagged, and they reach the same dead end by
+ * two different routes in objectui's `useRowColor.ts` (`plugin-grid`):
+ *
+ * - `colors` ABSENT — the resolver's own guard,
+ *   `if (!config?.field || !config.colors) return undefined;`, returns before
+ *   it reads a row. Nothing is ever coloured.
+ * - `colors: {}` — an empty object is truthy, so it PASSES that guard; the
+ *   lookup one line down (`hasOwnProperty.call(config.colors, value)`) then
+ *   matches no value, `if (!color) return undefined`, and nothing is coloured
+ *   either. Mirroring the guard expression alone would have blessed this one;
+ *   the rule mirrors the OUTCOME the guard produces, which is the same.
+ *
+ * An empty map is not an "I meant it" marker the way an action's
+ * `locations: []` is — turning row colouring off has its own spellings (omit
+ * the `rowColor` block, or leave the toolbar toggle `userActions.rowColor`
+ * off), so `{}` is the same dead shape spelled out. Same reasoning as
+ * `triggers: []` in {@link checkWebhookCompleteness}.
+ *
+ * Any OTHER shape (a string, an array) is left alone: the schema refuses it at
+ * parse, and this module only asserts what it verified.
+ */
+const hasNoColorMap = (colors: unknown): boolean =>
+  colors === undefined || colors === null || (isRec(colors) && Object.keys(colors).length === 0);
+
+/**
  * Completeness of a single list-view definition (a container's `list` /
  * `listViews.*` entry).
  *
@@ -343,6 +402,17 @@ function hasDetectableParentField(object: AnyRec): boolean {
  * rule fires only when BOTH halves fail — `parentField` undeclared AND nothing
  * on the bound object the renderer would detect — so a view that renders
  * correctly by auto-detection is never warned about.
+ *
+ * ## Why `rowColor` gets a rule of its own
+ *
+ * `RowColorConfigSchema` requires `field` and leaves `colors` optional, so
+ * `rowColor: { field: 'status' }` parses, publishes and colours nothing — the
+ * only renderer needs BOTH ({@link ROW_COLOR_VIEW_TYPES},
+ * {@link hasNoColorMap}). It is the same ADR-0078 silent half as a `summary`
+ * with no `summaryOperations`: every key is one we know, so the unknown-key
+ * rejection cannot see it and the liveness ledger cannot either — `rowColor`
+ * IS live, it is this instance that is dead. WARNING rather than error: only
+ * the colouring is lost, the rows still render (ADR-0078 §1).
  */
 export function checkViewCompleteness(view: unknown, boundObject?: unknown): CompletenessFinding[] {
   if (!isRec(view)) return [];
@@ -392,6 +462,25 @@ export function checkViewCompleteness(view: unknown, boundObject?: unknown): Com
           + 'a complete, correct-looking table with an expand slot that never opens, while authoring '
           + 'reports success. Declare `tree.parentField`, or add a self-referencing field to the object.',
         fix: "tree: { parentField: '<self_lookup_field>' }",
+      });
+    }
+  }
+
+  if (ROW_COLOR_VIEW_TYPES.has(type) && isRec(view.rowColor)) {
+    const field = isNonEmptyString(view.rowColor.field) ? view.rowColor.field : undefined;
+    if (field !== undefined && hasNoColorMap(view.rowColor.colors)) {
+      out.push({
+        rule: VIEW_ROW_COLOR_WITHOUT_COLORS,
+        severity: 'warning',
+        path: 'rowColor.colors',
+        message:
+          `A \`${type}\` view whose \`rowColor\` binds \`${field}\` and declares no \`colors\` map never `
+          + 'colours a row: the grid\'s row-className resolver returns before it reads a record (objectui '
+          + '`useRowColor.ts` — `if (!config?.field || !config.colors) return undefined`), so every row keeps '
+          + 'the default background while parsing and publishing report success. An empty `colors: {}` is the '
+          + 'same dead shape spelled out — it passes that guard and then matches no value. The map is what '
+          + 'does the colouring; the field only says which value to look up.',
+        fix: `rowColor: { field: '${field}', colors: { '<field_value>': '<hex_or_token>' } }`,
       });
     }
   }

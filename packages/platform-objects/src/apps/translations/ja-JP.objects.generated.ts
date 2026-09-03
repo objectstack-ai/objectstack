@@ -91,6 +91,10 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       image: {
         label: "プロフィール画像"
       },
+      locale: {
+        label: "言語",
+        help: "通知に使用する優先言語（BCP-47 タグ、例: zh-CN、ja-JP）。配信時に受信者ごとに読み取られ、未設定の場合はデプロイのデフォルト言語が適用されます。objectql が所有します（better-auth はこの列を認識しません）。"
+      },
       manager_id: {
         label: "マネージャー",
         help: "This user's direct manager. Forms the reporting chain the `own_and_reports` hierarchy scope walks (ADR-0057 / @objectstack/security-enterprise)."
@@ -299,6 +303,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
             backupCodes: "バックアップコード"
           }
         }
+      }
+    },
+    _validations: {
+      locale_bcp47_shape: {
+        message: "言語は BCP-47 言語タグ（例: zh-CN、ja-JP）である必要があります。"
       }
     }
   },

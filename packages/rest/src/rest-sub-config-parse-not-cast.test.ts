@@ -42,6 +42,17 @@
  * the normalized config is built from and the schema's own defaults are the
  * defaults. `api` keeps #11637's validate-only posture — its `.omit()`ed
  * tombstone is the reason — and is not this file's subject.
+ *
+ * [#14691] Ten of the keys these pins originally exercised were RETIRED under
+ * ADR-0049 enforce-or-remove (the #14369 liveness census found them normalized
+ * and never read): `crud.patterns` / `objectParamStyle`, `metadata.cacheTtl` /
+ * `endpoints.schema`, `batch.operations.upsertMany` / `defaultAtomic`, and all
+ * of `routes.*`. Each is now a `retiredKey()` tombstone, so the pins below that
+ * used to assert "accepted, read back" for those keys are REVERSED — by design,
+ * not by regression — into refusal pins: the SERVER refuses the key at
+ * construction with the retirement prescription (§E). The regression guards on
+ * the LIVE keys are unchanged, which is what makes this file still measure that
+ * the narrowing is exactly the declared one.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -86,25 +97,19 @@ function refusal(config: RestServerConfig): string {
 type NormalizedView = {
     crud: {
         operations: Record<'create' | 'read' | 'update' | 'delete' | 'list', boolean>;
-        patterns: Record<string, unknown> | undefined;
         dataPrefix: string;
-        objectParamStyle: string;
     };
     metadata: {
         prefix: string;
-        cacheTtl: number;
+        enableCache: boolean;
         maskObjectFields: boolean;
-        endpoints: Record<'types' | 'items' | 'item' | 'schema', boolean>;
+        endpoints: Record<'types' | 'items' | 'item', boolean>;
     };
     batch: {
         maxBatchSize: number;
-        defaultAtomic: boolean;
-        operations: Record<'createMany' | 'updateMany' | 'deleteMany' | 'upsertMany', boolean>;
+        operations: Record<'createMany' | 'updateMany' | 'deleteMany', boolean>;
     };
-    routes: {
-        includeObjects: string[] | undefined;
-        nameTransform: string;
-    };
+    routes: Record<string, never>;
 };
 
 /** Read the normalized config back off a constructed server. */
@@ -134,54 +139,24 @@ describe('[#11984] §A RestServer construction runs the four sibling schemas', (
         expect(refusal({ batch: { maxBatchSize: 2.5 } })).toContain('batch.maxBatchSize');
     });
 
-    it('refuses `routes.nameTransform: "snake_case"` — an option outside the declared enum', () => {
-        const message = refusal({ routes: { nameTransform: 'snake_case' as never } });
-        expect(message).toContain('routes.nameTransform');
-        expect(message).toContain('RouteGenerationConfigSchema');
-        expect(message, 'the declared vocabulary is part of the prescription').toContain('kebab-case');
-    });
-
-    it('refuses `crud.objectParamStyle: "header"` — an option outside the declared enum', () => {
-        const message = refusal({ crud: { objectParamStyle: 'header' as never } });
-        expect(message).toContain('crud.objectParamStyle');
-        expect(message).toContain('CrudEndpointsConfigSchema');
-    });
-
-    it('refuses `metadata.cacheTtl: 2.5` — declared `.int()`', () => {
-        const message = refusal({ metadata: { cacheTtl: 2.5 } });
-        expect(message).toContain('metadata.cacheTtl');
-        expect(message).toContain('MetadataEndpointsConfigSchema');
-    });
+    // `routes.nameTransform`, `crud.objectParamStyle` and `metadata.cacheTtl` used
+    // to be pinned here as "refuses the OUT-OF-CONTRACT value". Since #14691 the
+    // keys themselves are tombstones and EVERY value is refused — see §E.
 
     it('refuses a declared key written with the wrong type', () => {
         expect(refusal({ crud: { dataPrefix: 42 as never } })).toContain('crud.dataPrefix');
         expect(refusal({ metadata: { enableCache: 'yes' as never } })).toContain('metadata.enableCache');
-        expect(refusal({ routes: { includeObjects: 'account' as never } })).toContain('routes.includeObjects');
+        expect(refusal({ batch: { enableBatchEndpoint: 'yes' as never } })).toContain('batch.enableBatchEndpoint');
     });
 
-    it('refuses `crud.patterns` keyed by an operation the CRUD vocabulary does not contain', () => {
-        // `patterns` is `z.record(CrudOperation, ...)`: an enum-keyed record,
-        // which zod validates key by key — so a pattern for an operation that
-        // does not exist is refused, not carried along and never matched.
-        const message = refusal({ crud: { patterns: { bogus: { method: 'GET', path: '/x' } } as never } });
-        expect(message).toContain('crud.patterns');
-        expect(message).toContain('bogus');
-    });
-
-    it('refuses a partial `routes.overrides.<object>.operations` — the declared record is exhaustive over the five operations', () => {
-        // Same enum-keyed record, with a NON-optional value: zod requires
-        // every declared operation, so the missing ones are named one by one.
-        // The input TYPE already demanded all five at typed authoring sites;
-        // this is the day the runtime agrees with `tsc`.
-        const message = refusal({ routes: { overrides: { account: { operations: { list: false } as never } } } });
-        expect(message).toContain('routes.overrides.account.operations.create');
-        expect(message).toContain('routes.overrides.account.operations.read');
-    });
+    // `crud.patterns` (an enum-keyed record) and `routes.overrides.<object>.operations`
+    // (an exhaustive one) used to be pinned here for their key-by-key refusals.
+    // Both records are tombstones since #14691 — see §E.
 
     it('lists every failing key of the sub-object in one refusal', () => {
-        const message = refusal({ batch: { maxBatchSize: 0, defaultAtomic: 'yes' as never } });
+        const message = refusal({ batch: { maxBatchSize: 0, enableBatchEndpoint: 'yes' as never } });
         expect(message).toContain('batch.maxBatchSize');
-        expect(message).toContain('batch.defaultAtomic');
+        expect(message).toContain('batch.enableBatchEndpoint');
     });
 
     it('a sibling refusal never diagnoses `api.version` — a key this config did not write', () => {
@@ -233,10 +208,13 @@ describe('[#11984] §B the refusal survives the plugin path', () => {
         ).rejects.toThrow(/batch\.maxBatchSize/);
     });
 
-    it('rejects `createRestApiPlugin({ api: { routes: { nameTransform: "snake_case" } } }).start()`', async () => {
+    it('rejects `createRestApiPlugin({ api: { routes: { nameTransform: "none" } } }).start()` — a #14691 tombstone, through the plugin path', async () => {
+        // Before #14691 this case drove `'snake_case'`, the out-of-enum value.
+        // The key is retired now, so its former DEFAULT is refused too, with the
+        // prescription rather than the enum text.
         await expect(
-            createRestApiPlugin({ api: { routes: { nameTransform: 'snake_case' as never } } }).start!(bootCtx()),
-        ).rejects.toThrow(/routes\.nameTransform/);
+            createRestApiPlugin({ api: { routes: { nameTransform: 'none' as never } } }).start!(bootCtx()),
+        ).rejects.toThrow(/routes\.nameTransform.*was removed/s);
     });
 });
 
@@ -248,11 +226,15 @@ describe('[#11984] §C regression guards — the narrowing is exactly the declar
     it('an empty config still constructs, with the declared defaults', () => {
         const cfg = normalized({});
         expect(cfg.batch.maxBatchSize).toBe(200);
-        expect(cfg.metadata.cacheTtl).toBe(3600);
         expect(cfg.metadata.prefix).toBe('/meta');
         expect(cfg.crud.dataPrefix).toBe('/data');
-        expect(cfg.crud.objectParamStyle).toBe('path');
-        expect(cfg.routes.nameTransform).toBe('none');
+        // [#14691] the retired keys materialize NO default any more — the
+        // normalized config simply does not carry them.
+        expect(cfg.metadata).not.toHaveProperty('cacheTtl');
+        expect(cfg.crud).not.toHaveProperty('objectParamStyle');
+        expect(cfg.crud).not.toHaveProperty('patterns');
+        expect(cfg.batch).not.toHaveProperty('defaultAtomic');
+        expect(cfg.routes).toEqual({});
     });
 
     it('accepts the declared `maxBatchSize` bounds inclusively', () => {
@@ -260,27 +242,15 @@ describe('[#11984] §C regression guards — the narrowing is exactly the declar
         expect(normalized({ batch: { maxBatchSize: 1000 } }).batch.maxBatchSize).toBe(1000);
     });
 
-    it('accepts every option the declared enums contain, and reads each back', () => {
-        for (const nameTransform of ['none', 'plural', 'kebab-case', 'camelCase'] as const) {
-            expect(normalized({ routes: { nameTransform } }).routes.nameTransform, nameTransform).toBe(nameTransform);
-        }
-        for (const objectParamStyle of ['path', 'query'] as const) {
-            expect(normalized({ crud: { objectParamStyle } }).crud.objectParamStyle, objectParamStyle).toBe(objectParamStyle);
-        }
-    });
-
-    it('KEEPS a negative `metadata.cacheTtl` — declared `.int()` only, with no lower bound', () => {
-        // The bound on the narrowing: the card that filed this defect listed
-        // "a negative TTL" among the values the parse would refuse, and the
-        // schema declares no such rule. This seam enforces the contract as
-        // written; a lower bound is `packages/spec`'s to declare.
-        expect(normalized({ metadata: { cacheTtl: -1 } }).metadata.cacheTtl).toBe(-1);
-        expect(normalized({ metadata: { cacheTtl: 0 } }).metadata.cacheTtl).toBe(0);
-    });
+    // The two enum read-backs (`routes.nameTransform`, `crud.objectParamStyle`)
+    // and the "KEEPS a negative `metadata.cacheTtl`" bound used to live here.
+    // All three keys are tombstones since #14691, so those pins are reversed
+    // in §E; the negative-TTL bound the card once argued about is moot — no
+    // TTL of any sign is accepted.
 
     it('STRIPS an unknown key inside a sub-object rather than refusing it — the schemas are non-strict', () => {
         expect(() => construct({ batch: { bogus: 1 } as never })).not.toThrow();
-        expect(() => construct({ routes: { overrides: { account: { enabled: false, bogus: 1 } as never } } })).not.toThrow();
+        expect(() => construct({ metadata: { endpoints: { types: true, bogus: 1 } as never } })).not.toThrow();
     });
 
     it('KEEPS the retired top-level `openApi31` key at its ignore posture — the whole-config tombstone is not run here', () => {
@@ -305,9 +275,9 @@ describe('[#11984] §C regression guards — the narrowing is exactly the declar
 describe('[#11984] §D the four siblings consume the parsed output', () => {
     it('a declared in-range value is preserved, not replaced by the default', () => {
         expect(normalized({ batch: { maxBatchSize: 500 } }).batch.maxBatchSize).toBe(500);
-        expect(normalized({ metadata: { cacheTtl: 60 } }).metadata.cacheTtl).toBe(60);
+        expect(normalized({ metadata: { prefix: '/metadata' } }).metadata.prefix).toBe('/metadata');
         expect(normalized({ crud: { dataPrefix: '/records' } }).crud.dataPrefix).toBe('/records');
-        expect(normalized({ routes: { includeObjects: ['account'] } }).routes.includeObjects).toEqual(['account']);
+        expect(normalized({ metadata: { enableCache: false } }).metadata.enableCache).toBe(false);
     });
 
     it('KEEPS `metadata.maskObjectFields: false` — the ADR-0106 D8 opt-out survives the parse', () => {
@@ -328,28 +298,89 @@ describe('[#11984] §D the four siblings consume the parsed output', () => {
     });
 
     it('KEEPS a partial `batch.operations` and `metadata.endpoints` the same way', () => {
+        // [#14691] `upsertMany` and `schema` left both shapes: the three live
+        // switches per block are exactly what the normalized config carries.
         expect(normalized({ batch: { operations: { deleteMany: false } } }).batch.operations).toEqual({
-            createMany: true, updateMany: true, deleteMany: false, upsertMany: true,
+            createMany: true, updateMany: true, deleteMany: false,
         });
-        expect(normalized({ metadata: { endpoints: { schema: false } } }).metadata.endpoints).toEqual({
-            types: true, items: true, item: true, schema: false,
+        expect(normalized({ metadata: { endpoints: { item: false } } }).metadata.endpoints).toEqual({
+            types: true, items: true, item: false,
         });
     });
 
-    it('KEEPS a partial `crud.patterns` — the written pattern survives, and no pattern is invented', () => {
-        // `patterns` is `z.record(CrudOperation, CrudEndpointPatternSchema.optional())`,
-        // which zod 4 reads as an EXHAUSTIVE record: the parse walks all five
-        // operations and writes each one's value into the output, so the four
-        // an author did not write come back as explicit `undefined` entries —
-        // exactly the declared shape (`Record<CrudOperation, Pattern | undefined>`,
-        // which is also why this fixture needs `as never`: the input TYPE
-        // demands all five keys while the runtime accepts a partial). That
-        // key-enumeration quirk is the spec's to settle (`z.partialRecord`),
-        // filed separately, so this pin asserts only what the contract
-        // promises whichever way that lands: the one written pattern is
-        // preserved, and no operation gains a pattern it was not given.
-        const cfg = normalized({ crud: { patterns: { list: { method: 'GET', path: '/x' } } as never } });
-        expect(cfg.crud.patterns?.list).toEqual({ method: 'GET', path: '/x' });
-        expect(Object.values(cfg.crud.patterns ?? {}).filter((pattern) => pattern !== undefined)).toHaveLength(1);
+    // The `crud.patterns` preservation pin (and the `z.partialRecord` question it
+    // deferred to #14365) is gone with the key — #14691 retired the record.
+});
+
+// ---------------------------------------------------------------------------
+// §E — [#14691] the retired keys are REFUSED at construction, with the
+// prescription, whatever the value. These are the #11984 pins above, reversed:
+// the SERVER is still what is measured (the schema-level pins live in
+// `packages/spec`'s `rest-server.test.ts`), and `refusal()`'s `''`-on-success
+// keeps every `toContain` its own positive control.
+// ---------------------------------------------------------------------------
+
+describe('[#14691] §E the retired sub-config keys are refused at construction', () => {
+    it('refuses `crud.patterns` and `crud.objectParamStyle` — both former enum values included', () => {
+        const patterns = refusal({ crud: { patterns: { list: { method: 'GET', path: '/x' } } } } as never);
+        expect(patterns).toContain('crud.patterns');
+        expect(patterns).toContain('CrudEndpointsConfigSchema');
+        expect(patterns).toMatch(/was removed in @objectstack\/spec 17/);
+        for (const objectParamStyle of ['path', 'query']) {
+            const message = refusal({ crud: { objectParamStyle } } as never);
+            expect(message, objectParamStyle).toContain('crud.objectParamStyle');
+            expect(message, objectParamStyle).toMatch(/was removed/);
+        }
+    });
+
+    it('refuses `metadata.cacheTtl` — the old default, zero and the negative value the old contract accepted', () => {
+        for (const cacheTtl of [3600, 0, -1]) {
+            const message = refusal({ metadata: { cacheTtl } } as never);
+            expect(message, String(cacheTtl)).toContain('metadata.cacheTtl');
+            expect(message, String(cacheTtl)).toContain('MetadataEndpointsConfigSchema');
+            expect(message, String(cacheTtl)).toMatch(/was removed/);
+        }
+    });
+
+    it('refuses `metadata.endpoints.schema` — a nested tombstone inside a live block', () => {
+        const message = refusal({ metadata: { endpoints: { schema: false } } } as never);
+        expect(message).toContain('metadata.endpoints.schema');
+        expect(message).toMatch(/does not exist/);
+    });
+
+    it('refuses `batch.operations.upsertMany` and `batch.defaultAtomic`', () => {
+        const upsert = refusal({ batch: { operations: { upsertMany: false } } } as never);
+        expect(upsert).toContain('batch.operations.upsertMany');
+        expect(upsert).toMatch(/never built/);
+        for (const defaultAtomic of [true, false]) {
+            const message = refusal({ batch: { defaultAtomic } } as never);
+            expect(message, String(defaultAtomic)).toContain('batch.defaultAtomic');
+            expect(message, String(defaultAtomic)).toMatch(/options\.atomic/);
+        }
+    });
+
+    it('refuses every `routes.*` key — the whole sub-object is tombstones', () => {
+        for (const [key, routes] of Object.entries({
+            includeObjects: { includeObjects: ['account'] },
+            excludeObjects: { excludeObjects: ['system_log'] },
+            nameTransform: { nameTransform: 'none' },
+            overrides: { overrides: { account: { enabled: false } } },
+        })) {
+            const message = refusal({ routes } as never);
+            expect(message, key).toContain(`routes.${key}`);
+            expect(message, key).toContain('RouteGenerationConfigSchema');
+            expect(message, key).toMatch(/was removed/);
+        }
+    });
+
+    it('an empty `routes` sub-object still constructs — the tombstones refuse keys, not the block', () => {
+        expect(() => construct({ routes: {} })).not.toThrow();
+        expect(normalized({ routes: {} }).routes).toEqual({});
+    });
+
+    it('the plugin path refuses the same keys (both cast hops)', async () => {
+        await expect(
+            createRestApiPlugin({ api: { batch: { defaultAtomic: false } } } as never).start!(bootCtx()),
+        ).rejects.toThrow(/batch\.defaultAtomic.*was removed/s);
     });
 });

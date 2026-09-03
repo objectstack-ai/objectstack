@@ -54,20 +54,50 @@ describe.skipIf(!URL)('Field.datetime on MySQL (#3942)', () => {
   let driver: SqlDriver;
   let serverTimeZone = '';
 
+  // ── Why this beforeAll carries an explicit 60_000 budget (#14628) ──
+  // The live cell is one indirection away: this hook builds no driver of its
+  // own, it calls `rawDriver()` above — which hard-codes `MYSQL_CELL.config()`,
+  // unconditionally LIVE, not a parametrised `cell.config()` that would be
+  // SQLite for the sqlite cell. So the probe pays a real live connect, a
+  // `select @@global.time_zone` round trip and a disconnect against the cell's
+  // MySQL server. That one level of indirection is the whole reason the #14213
+  // walk — which read each hook's OWN `new SqlDriver(...)` argument — did not
+  // reach this site while it did reach the three beforeEach hooks below.
+  // ⚠️ A hook inherits `hookTimeout`, NOT `testTimeout`. Measured in this
+  // package's config (which sets neither, so both are vitest's own defaults):
+  // an unbudgeted hook dies at 10000ms ("Hook timed out in 10000ms"), not at
+  // the 5000ms an unbudgeted it() gets.
+  // A beforeAll is the LIGHTEST shape in this class — the cost is paid once
+  // per suite, not once per test — and ⛔ this is NOT a claim that the hook is
+  // known to time out: it was found by an AST walk, never by a measured red.
   beforeAll(async () => {
     const probe = rawDriver();
     const rows = await rowsOf(probe, `select @@global.time_zone as tz`);
     serverTimeZone = String((rows[0] as any).tz);
     await probe.disconnect();
-  });
+  }, 60_000);
 
+  // ── Why this beforeEach carries an explicit 60_000 budget (#14213) ──
+  // The driver argument here is `MYSQL_CELL.config()` — unconditionally LIVE,
+  // not a parametrised `cell.config()` that would be SQLite for the sqlite
+  // cell — so every test in this suite pays a fresh live connect, a
+  // `drop table` and `initObjects(...)` schema-sync DDL against the cell's
+  // MySQL server. A beforeEach is the heaviest shape in this class: the cost is
+  // paid PER TEST, not once.
+  // ⚠️ A hook inherits `hookTimeout`, NOT `testTimeout`. Measured in this
+  // package's config (which sets neither, so both are vitest's own defaults):
+  // an unbudgeted hook dies at 10000ms ("Hook timed out in 10000ms"), not at
+  // the 5000ms an unbudgeted it() gets. Ten seconds is still a ceiling nobody
+  // chose for live work, and the third argument does lift it (measured).
+  // ⛔ NOT a claim that this hook is known to time out: it was found by a
+  // per-site AST walk over the package, never by a measured red.
   beforeEach(async () => {
     driver = new SqlDriver(MYSQL_CELL.config());
     await driver.execute(`drop table if exists ${TABLE}`);
     await driver.initObjects([
       { name: TABLE, fields: { label: { type: 'string' }, at: { type: 'datetime' } } },
     ]);
-  });
+  }, 60_000);
 
   afterEach(async () => {
     await driver.execute(`drop table if exists ${TABLE}`).catch(() => {});
@@ -155,6 +185,12 @@ describe.skipIf(!URL)('MySQL TIMESTAMP → DATETIME(3) migration (#3942)', () =>
   const GOOD = '2026-03-20T12:34:56.000Z';
   let driver: SqlDriver;
 
+  // ── Why this beforeEach carries an explicit 60_000 budget (#14213) ──
+  // Same live-cell reasoning as the #3942 suite's beforeEach above, and this
+  // one is heavier: it opens a SECOND live connection (`rawDriver()`) to build
+  // the legacy fixture — raw DDL plus an insert — before constructing the
+  // driver under test, all per test. A hook inherits `hookTimeout` (measured
+  // 10000ms), not `testTimeout` (5000ms); the third argument lifts it.
   beforeEach(async () => {
     // Build the table the way a pre-#3942 build did: TIMESTAMP columns, rows in
     // it. The legacy connection is pinned to UTC so the fixture's instants are
@@ -178,7 +214,7 @@ describe.skipIf(!URL)('MySQL TIMESTAMP → DATETIME(3) migration (#3942)', () =>
     await legacy.disconnect();
 
     driver = new SqlDriver(MYSQL_CELL.config());
-  });
+  }, 60_000);
 
   afterEach(async () => {
     await driver.execute(`drop table if exists ${LEGACY}`).catch(() => {});
@@ -234,6 +270,12 @@ describe.skipIf(!URL)('os migrate plan lists the MySQL widening (#3954)', () => 
   const SHAPE = { name: LEGACY, fields: { label: { type: 'string' }, at: { type: 'datetime' } } };
   let driver: SqlDriver;
 
+  // ── Why this beforeEach carries an explicit 60_000 budget (#14213) ──
+  // Same live-cell reasoning as the two beforeEach hooks above. Heaviest of the
+  // three: a second live connection builds the legacy fixture with raw DDL and
+  // FIVE inserts before the driver under test is constructed — per test.
+  // A hook inherits `hookTimeout` (measured 10000ms), not `testTimeout`
+  // (5000ms); the third argument lifts it.
   beforeEach(async () => {
     const legacy = rawDriver();
     await legacy.execute(`drop table if exists ${LEGACY}`);
@@ -254,7 +296,7 @@ describe.skipIf(!URL)('os migrate plan lists the MySQL widening (#3954)', () => 
     }
     await legacy.disconnect();
     driver = new SqlDriver(MYSQL_CELL.config());
-  });
+  }, 60_000);
 
   afterEach(async () => {
     await driver.execute(`drop table if exists ${LEGACY}`).catch(() => {});

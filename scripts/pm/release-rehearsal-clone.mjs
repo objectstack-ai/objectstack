@@ -401,7 +401,18 @@ function main(argv) {
     );
     return 0;
   }
-  if (args.includes('--self-test')) return selfTest();
+  if (args.includes('--self-test')) {
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ release-rehearsal-clone self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    return selfTestCode;
+  }
 
   const doPrepare = args.includes('--prepare');
   // `--check` is accepted as an explicit spelling of the default so a caller can
@@ -521,6 +532,13 @@ function cloneOf(root, source, name, { depth = 0 } = {}) {
   git(root, args);
   return dest;
 }
+
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
 
 function selfTest() {
   const root = mkdtempSync(join(tmpdir(), 'rehearsal-clone-selftest-'));
@@ -650,6 +668,8 @@ function selfTest() {
   }
 
   process.stdout.write(failures === 0 ? '\n✓ self-test passed\n' : `\n✗ self-test: ${failures} failure(s)\n`);
+
+  selfTestReachedVerdict = true;
   return failures === 0 ? 0 : 1;
 }
 

@@ -1355,6 +1355,22 @@ export class AnalyticsService implements IAnalyticsService {
           const label = resolveI18nLabel(m.label, requestLocale);
           if (label !== undefined) f.label = label;
         }
+        // #14492 — the built-in aggregate discriminator. A measure that declares
+        // an `aggregate` and NO `label` has nothing but the aggregate to be named
+        // by: whatever header a renderer draws for it is the server's built-in
+        // default, not an author's text, so the column says WHICH aggregate that
+        // is and an i18n-aware renderer may substitute its own localized name
+        // (objectui keys `report.aggregate.*` on it — objectui#7258).
+        // Judged on the AUTHORED key, never on the resolved string: an inline
+        // locale map with no entry for `requestLocale` resolves to nothing above,
+        // yet it IS an author's label and must never be re-labelled — so the
+        // test is `m.label == null`, not `f.label == null`. A derived measure
+        // carries no aggregate and gets nothing; an authored label ("Tasks")
+        // keeps its text and gets nothing. The other spelling that would work
+        // here — a heuristic on the label TEXT ("Count") — was refused on
+        // #14492: it would catch an author who really named a field `Count`,
+        // and break the moment the default is spelled in another language.
+        if (f.builtinAggregate == null && m.label == null && m.aggregate) f.builtinAggregate = m.aggregate;
         if (f.format == null && m.format) f.format = m.format;
         // ADR-0053 currency chain. A MONETARY measure resolves its display
         // currency from: explicit measure `currency` → source-field

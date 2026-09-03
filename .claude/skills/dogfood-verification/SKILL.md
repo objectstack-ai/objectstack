@@ -35,6 +35,7 @@ dev 工作树、dev-server 端口、preview 浏览器全是**共享的**:并行�
       `lsof -nP -iTCP:<port> -sTCP:LISTEN`。在 `.claude/launch.json` 加一条指向**本**
       工作目录的具名配置,例如
       `pnpm -C <abs>/examples/app-showcase exec objectstack dev --ui --seed-admin -p <port> -d file:/tmp/<run>/data.db`。
+      工作树没了就**删掉自己那条** —— 死条目让 `preview_start` 挂在缺失的 `pnpm -C` 上。
 - [ ] **同时导出 `OS_PORT` —— 只给 `-p` 不够。** showcase 的自 ping 连接器读的是*环
       境*(`SHOWCASE_SELF_URL`→`OS_PORT`→`PORT`→3000),于是 `fetch failed` 冒充出口被封。
 - [ ] **自有数据**:`--seed-admin` 在空 DB 上给出 `admin@objectos.ai / admin123`。持

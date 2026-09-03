@@ -74,8 +74,8 @@ export function isObjectLessActionKey(objectName: string | undefined | null): bo
  * Standalone `action` metadata declares `objectName` (spec `ActionSchema`);
  * bundle collectors attach `object`; an object-less action owns the canonical
  * `'global'` key. Three other writers spelled this same three-line ladder —
- * the runtime's `standaloneActionObjectName`, the ObjectQL plugin's private
- * `actionObjectKey`, and an inline copy inside
+ * the runtime's `standaloneActionObjectName`, a private owner-key method on the
+ * ObjectQL plugin, and an inline copy inside
  * {@link collectEngineActionDeclarations}. All of them resolve HERE now: the
  * plugin calls this function directly (same package) and
  * `@objectstack/runtime` re-exports it, keeping `standaloneActionObjectName`

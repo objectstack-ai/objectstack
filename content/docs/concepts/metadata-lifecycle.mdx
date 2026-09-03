@@ -190,11 +190,17 @@ The hash is `sha256:` + 64-hex of a canonical (sorted-keys, no-undefined) JSON s
 > before its own middleware chain runs, so read-your-writes is exact on the node
 > that made the write. A **peer's** write does not: `metadata.changed` invalidates
 > the MetadataManager caches this note is about, but it does not retire the
-> overlay-read cache. What retires that on a peer is the `authz.invalidated`
-> channel — a hint from another node bumps the local write epoch — or, failing
-> that, `OS_METADATA_OVERLAY_CACHE_TTL_MS` (default 30s, `0` disables the cache
-> outright). So on a deployment with no distributed cluster driver attached, a
-> peer's overlay re-read can lag a remote publish by up to that TTL. See
+> overlay-read cache. What retires that on a peer is either of two receipt
+> paths that bump the same local write epoch: the `metadata.mutated`
+> channel's own — `protocol.ts`'s `applyRemoteMetadataMutation` calls
+> `bumpWriteEpoch(engine, 'remote')` right after its registry converges and
+> before local listeners run (#13609, 2026-09-03) — or the `authz.invalidated`
+> channel's bridge, which bumps the same epoch for the authorization cache
+> and retires this one too, as a side effect of sharing it. Failing both, the
+> floor is `OS_METADATA_OVERLAY_CACHE_TTL_MS` (default 30s, `0` disables the cache
+> outright). So only on a deployment with no cluster bridge attached at all —
+> the in-process `memory` driver, with no distributed driver behind it — does
+> a peer's overlay re-read still lag a remote publish by up to that TTL. See
 > [Environment variables](/docs/deployment/environment-variables).
 
 ---

@@ -60,6 +60,19 @@
  * miss empties or mis-selects the view's data gates, one whose miss drops a
  * decoration advises.
  *
+ * `validatePageVisualizationBindings` is the charter's question with the
+ * resolution target one level up (#14073): an interface page's
+ * `appearance.allowedVisualizations` entry names a RENDERER, and
+ * `InterfacePageConfigSchema` carries no per-visualization binding key for the
+ * author to fill in — so the binding is either derived from the source
+ * object's declared fields (objectui's own `InterfaceListPage` derivation,
+ * mirrored) or supplied by the list view the page names through `sourceView`.
+ * An entry that resolves to neither renders NOTHING: leading the whitelist it
+ * becomes the forced view type and every visitor gets the renderer's
+ * "configuration required" refusal screen (`error`); anywhere else it is
+ * dropped from the switcher without a word (`warning`). Both severities, like
+ * the two members above, and the same three skips.
+ *
  * Rules that check SHAPE rather than reference (view containers, responsive
  * styles, seed replay safety, seed state machines, seed/security posture) stay
  * out — they answer a different question and have their own call sites.
@@ -92,6 +105,7 @@ import { validateSortableFields } from './validate-sortable-fields.js';
 import { validateListViewFieldRefs } from './validate-list-view-field-refs.js';
 import { validateActionNameRefs } from './validate-action-name-refs.js';
 import { validatePageFieldBindings } from './validate-page-field-bindings.js';
+import { validatePageVisualizationBindings } from './validate-page-visualization-bindings.js';
 import { validateChartBindings } from './validate-chart-bindings.js';
 import { validateDatasetReferences } from './validate-dataset-references.js';
 import { validateNavAccess } from './validate-nav-access.js';
@@ -220,6 +234,24 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   { name: 'validateListViewFieldRefs', runtimeTypes: ['flow', 'view'], run: validateListViewFieldRefs },
   { name: 'validateActionNameRefs', run: validateActionNameRefs },
   { name: 'validatePageFieldBindings', run: validatePageFieldBindings },
+  // [#14073] The same page, one question out. `validatePageFieldBindings`
+  // above resolves the field NAMES an interface page writes; this member
+  // resolves the BINDING behind each visualization the page whitelists —
+  // `appearance.allowedVisualizations` names a renderer, and the page surface
+  // has no key to bind it with, so the binding is either derived from the
+  // source object's fields (objectui's `InterfaceListPage` derivation,
+  // mirrored) or supplied by the view the page names through `sourceView`.
+  // Squarely the charter's question with the resolution target one level up:
+  // the whitelist entry is a name written in metadata whose binding must
+  // resolve against what the stack declares (the object's fields, that view's
+  // blocks) or it renders nothing.
+  //
+  // NO `runtimeTypes`, i.e. the frozen `flow` default, and deliberately: it
+  // resolves against `stack.pages` and `stack.views`, neither of which the
+  // per-write snapshot carries, so crossing it onto `view` writes would report
+  // every page-door binding as unresolvable. Its page-typed sibling above
+  // takes the default for the same reason.
+  { name: 'validatePageVisualizationBindings', run: validatePageVisualizationBindings },
   { name: 'validateChartBindings', run: validateChartBindings },
   // [#14105] One level BELOW the two members above it. `validateChartBindings`
   // and `validateWidgetBindings` resolve a presentation's binding against the

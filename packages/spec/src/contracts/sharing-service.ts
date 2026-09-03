@@ -425,16 +425,33 @@ export interface ISharingService {
 // ─────────────────────────────────────────────────────────────────────
 
 /**
- * Kinds of principals a rule can target.
+ * Kinds of principals a stored rule row can target —
+ * `sys_sharing_rule.recipient_type`.
  *
- * - `user`       — a specific user id (no expansion)
- * - `team`       — a flat collaboration team (`sys_team` + `sys_team_member`)
- * - `department` — an org-skeleton node (`sys_business_unit` + descendants via
- *                  `parent_business_unit_id` + members from `sys_business_unit_member`)
- * - `role`       — tenant role on `sys_member.role`
- * - `queue`      — opaque queue identifier (resolution left to caller / app)
+ * The authoring enum `ShareRecipientType` (`spec/security`, `sharing.zod.ts`)
+ * is this union minus `queue`: `plugin-sharing`'s declared-rule bootstrap maps
+ * `sharedWith.type` onto this column member-for-member (an unmapped value is
+ * skipped with a warning, never widened), and `sharing-service.test.ts` beside
+ * this file pins the two lists in step.
+ *
+ * - `user`                  — a specific user id (no expansion)
+ * - `team`                  — a flat collaboration team (`sys_team` + `sys_team_member`)
+ * - `business_unit`         — exactly one business unit's members (`sys_business_unit_member`)
+ * - `position`              — every holder of a position (flat; ADR-0090 D3)
+ * - `unit_and_subordinates` — a business unit plus every descendant unit
+ *                             (`parent_business_unit_id` walk; ADR-0057 D5)
+ * - `field`                 — RECORD-RELATIVE (#14103, maintainer ruling
+ *                             2026-09-02): `recipient_id` names a user-typed
+ *                             field on the shared object, and the recipients
+ *                             are the user or users that column holds on EACH
+ *                             matched record (`multiple: true` honoured; an
+ *                             empty column shares with nobody). Expansion is
+ *                             per record, not per rule, and re-materialises on
+ *                             the record's own write. Executor: #15072.
+ * - `queue`                 — reserved: no `sys_queue` yet, `expandRecipient`
+ *                             returns `[]`, deliberately not authorable
  */
-export type SharingRuleRecipientType = 'user' | 'team' | 'business_unit' | 'position' | 'unit_and_subordinates' | 'queue';
+export type SharingRuleRecipientType = 'user' | 'team' | 'business_unit' | 'position' | 'unit_and_subordinates' | 'queue' | 'field';
 
 /**
  * Stored shape of a sharing rule. Maps 1-to-1 to `sys_sharing_rule`

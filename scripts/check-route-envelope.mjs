@@ -147,6 +147,61 @@ const ts = await requireDefaultExport('typescript', () => import('typescript'), 
 import { parseSourceFile } from './ts-parse.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '(1) A `//` inside a string truncated the rest of the line for the regex': 4,
+  '(2) `c.req.json()` READS a request. The regex version counted it as two': 3,
+  'The sibling-`code` dialect (#7035, counted since #7295)': 11,
+  'Dispatcher domains': 5,
+  'Plugin-mounted Hono routes (#9267)': 13,
+  'Surface 4 (#9813): the same grammar under express receivers': 4,
+  'The #9389 ruling: an exemption is a CLOSED list': 1,
+  '(1) A NEW FILE carrying one. Undeclared is an ERROR, never a default — the': 1,
+  '(2) …and the same body added INSIDE a file that is already ruled exempt.': 2,
+  '(3) At exactly the ruled count it is green — the exemption does its job.': 1,
+  '(4) BELOW the count is red too. An enumeration that over-counts describes a': 1,
+  '(5) Tracked drift and a ruled boundary are exclusive claims about one': 1,
+  '(6) An exemption with nothing to exempt is the file-level waiver again,': 1,
+  '(7) NEGATIVE: the ordinary tracked-drift path is untouched by all of the': 1,
+  'The vendor-wire state (maintainer ruling 2026-08-21, #10554)': 1,
+  '(1) Accepted at the pinned count, with the conforming three-part note.': 1,
+  '(2) REJECTED without a note — the ruling makes the note mandatory.': 1,
+  '(3) REJECTED with a note that does not name all three parties — free prose': 1,
+  '(4) REJECTED beside `ratchet` — a conversion that can never happen is not': 1,
+  '(5) REJECTED beside `exempt` — one body sits on exactly ONE ruled boundary': 1,
+  '(6) WIDENING carries the authority marker (#8435): a second vendor-shaped': 2,
+  '(7) BELOW the count is red in the shrink direction, and shrinking needs': 1,
+  '(8) A vendor-wire declaration over NOTHING is the standing-waiver shape,': 1,
+  '(9) NEGATIVE: the #9389 exempt diagnostics are untouched by the new state —': 1,
+  'The read/write discriminator (#9937) — BOTH directions': 8,
+  'The walk (#9937): reproduce before believing': 8,
+  'The declared-vs-discovered correspondence (#11920)': 12,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 27;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
 /**
@@ -2100,7 +2155,22 @@ function audit() {
 const SELF_TEST_VERDICT = 'check-route-envelope self-test reached its verdict';
 
 function selfTest() {
-  const assert = (cond, msg) => { if (!cond) { console.error('✗ self-test: ' + msg); process.exit(1); } };
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  battery('(1) A `//` inside a string truncated the rest of the line for the regex');
+
+  const assert = (cond, msg) => { registerCase(); if (!cond) { console.error('✗ self-test: ' + msg); process.exit(1); } };
 
   const sound = `
     function sendError(res, s, code, message) { res.status(s).json({ success: false, error: { code, message } }); }
@@ -2144,6 +2214,7 @@ function selfTest() {
 
   // (2) `c.req.json()` READS a request. The regex version counted it as two
   // unenveloped responses in hmr-routes.ts.
+  battery('(2) `c.req.json()` READS a request. The regex version counted it as two');
   r = scanSource(`const body = await c.req.json(); const b2 = await req.json();`);
   assert(r.responses === 0, `request reads must not count as responses → ${JSON.stringify(r)}`);
 
@@ -2162,6 +2233,7 @@ function selfTest() {
   // ── The sibling-`code` dialect (#7035, counted since #7295) ───────────────
   // A top-level `code` NEXT TO `error` instead of inside it. Same failure as
   // the bare string one key over: `body.error.code` reads `undefined`.
+  battery('The sibling-`code` dialect (#7035, counted since #7295)');
   r = scanSource(`res.status(400).json({ error: 'Batch too large', code: 'BATCH_TOO_LARGE' });`);
   assert(
     r.siblingCode === 1 && r.stringError === 1,
@@ -2221,6 +2293,7 @@ function selfTest() {
 
   // ── Dispatcher domains ────────────────────────────────────────────────────
   // A domain that answers only through the helpers hand-builds nothing.
+  battery('Dispatcher domains');
   let d = scanDomainSource(`
     if (m === 'GET') return { handled: true, response: deps.success(rows) };
     if (m === 'DELETE') return { handled: true, response: deps.success({ ok: true }) };
@@ -2257,6 +2330,7 @@ function selfTest() {
   // ── Plugin-mounted Hono routes (#9267) ────────────────────────────────────
   // Every case below is a shape measured in the repo when this surface was
   // added, not an invented one.
+  battery('Plugin-mounted Hono routes (#9267)');
 
   // The conformant body: nothing to report, and the write site is still seen.
   let p = scanHonoRouteSource(`
@@ -2344,6 +2418,7 @@ function selfTest() {
   // zero bodies under the default (Hono) receivers and as a bare body under
   // EXPRESS_RESPONSE_RECEIVERS — which is exactly how dispatcher-plugin.ts's
   // discovery bodies sat invisible beside a green surface 3.
+  battery('Surface 4 (#9813): the same grammar under express receivers');
   const expressBare = `res.json({ data: await dispatcher.getDiscoveryInfo(prefix) });`;
   p = scanHonoRouteSource(expressBare, 'x.ts', EXPRESS_RESPONSE_RECEIVERS);
   assert(
@@ -2375,6 +2450,7 @@ function selfTest() {
   // is declared. So these cases drive `auditPluginRouteModule`, which is why it
   // is a pure function; asserting only that `scanHonoRouteSource` still sees a
   // bare body would be pinning the half that was never in doubt.
+  battery('The #9389 ruling: an exemption is a CLOSED list');
 
   // The shape the ruling covers, so every case below is the real one.
   const preAuth = `rawApp.get('/bootstrap-status', async (c) => c.json({ hasOwner: true }));`;
@@ -2388,6 +2464,7 @@ function selfTest() {
   // (1) A NEW FILE carrying one. Undeclared is an ERROR, never a default — the
   // closed list at file granularity. A new pre-auth surface does not inherit the
   // ruling by resembling the three files it named.
+  battery('(1) A NEW FILE carrying one. Undeclared is an ERROR, never a default — the');
   let probs = auditPluginRouteModule('packages/plugins/plugin-new/src/plugin.ts', undefined, scanOf(preAuth));
   assert(
     probs.length === 1 && probs[0].includes('NOT DECLARED'),
@@ -2397,6 +2474,7 @@ function selfTest() {
   // (2) …and the same body added INSIDE a file that is already ruled exempt.
   // This is the case a file-level waiver would have passed in silence, and the
   // reason `exempt` stays counted on this surface.
+  battery('(2) …and the same body added INSIDE a file that is already ruled exempt.');
   probs = auditPluginRouteModule('x.ts', ruled, scanOf(`${preAuth}\n${preAuth}`));
   assert(
     probs.length === 1 && probs[0].includes('CLOSED list'),
@@ -2411,12 +2489,14 @@ function selfTest() {
   );
 
   // (3) At exactly the ruled count it is green — the exemption does its job.
+  battery('(3) At exactly the ruled count it is green — the exemption does its job.');
   probs = auditPluginRouteModule('x.ts', ruled, scanOf(preAuth));
   assert(probs.length === 0, `a ruled-exempt module at its pinned count must pass → ${JSON.stringify(probs)}`);
 
   // (4) BELOW the count is red too. An enumeration that over-counts describes a
   // body the file no longer emits, and the reason is the deliverable here — a
   // reason nobody has to keep true decays into the waiver this is not.
+  battery('(4) BELOW the count is red too. An enumeration that over-counts describes a');
   probs = auditPluginRouteModule('x.ts', ruled, scanOf(`c.json({ success: true, data });`));
   assert(
     probs.length === 1 && probs[0].includes('fewer than pinned'),
@@ -2426,6 +2506,7 @@ function selfTest() {
   // (5) Tracked drift and a ruled boundary are exclusive claims about one
   // number. The fixture carries a `note` so this asserts the exclusivity rule
   // alone rather than tripping the ratchet's own note requirement as well.
+  battery('(5) Tracked drift and a ruled boundary are exclusive claims about one');
   probs = auditPluginRouteModule('x.ts', { ...ruled, ratchet: '#9364', note: 'n' }, scanOf(preAuth));
   assert(
     probs.length === 1 && probs[0].includes('exclusive'),
@@ -2435,6 +2516,7 @@ function selfTest() {
   // (6) An exemption with nothing to exempt is the file-level waiver again,
   // spelled as an empty one: it would sit dormant until the next bare body made
   // it retroactively cover something nobody ruled on.
+  battery('(6) An exemption with nothing to exempt is the file-level waiver again,');
   probs = auditPluginRouteModule('x.ts', { exempt: 'because' }, scanOf(`c.json({ success: true, data });`));
   assert(
     probs.length === 1 && probs[0].includes('pins no non-conforming body'),
@@ -2444,6 +2526,7 @@ function selfTest() {
   // (7) NEGATIVE: the ordinary tracked-drift path is untouched by all of the
   // above — a ratchet gaining a body still says "raising the declared number is
   // not the fix", not the ruling's text.
+  battery('(7) NEGATIVE: the ordinary tracked-drift path is untouched by all of the');
   probs = auditPluginRouteModule('y.ts', { unenveloped: 1, ratchet: '#9364', note: 'n' }, scanOf(`${preAuth}\n${preAuth}`));
   assert(
     probs.length === 1 && probs[0].includes('Raising the declared number is not the fix') &&
@@ -2459,6 +2542,7 @@ function selfTest() {
   // the same closed-list property as the #9389 cases above and is driven
   // through the same pure function; the fixture is the adjudicated body itself
   // (better-auth's `{ session, user }`, escalated on PR #10352).
+  battery('The vendor-wire state (maintainer ruling 2026-08-21, #10554)');
   const vendorBody = `rawApp.post('/admin/impersonate-user', async (ctx) => ctx.json({ session, user }));`;
   const vendorRuled = {
     unenveloped: 1,
@@ -2468,10 +2552,12 @@ function selfTest() {
   assert(scanOf(vendorBody).unenveloped === 1, 'the fixture must be a bare vendor-shaped body');
 
   // (1) Accepted at the pinned count, with the conforming three-part note.
+  battery('(1) Accepted at the pinned count, with the conforming three-part note.');
   probs = auditPluginRouteModule('x.ts', vendorRuled, scanOf(vendorBody));
   assert(probs.length === 0, `a vendor-wire module at its pinned count must pass → ${JSON.stringify(probs)}`);
 
   // (2) REJECTED without a note — the ruling makes the note mandatory.
+  battery('(2) REJECTED without a note — the ruling makes the note mandatory.');
   probs = auditPluginRouteModule('x.ts', { unenveloped: 1, vendorWire: vendorRuled.vendorWire }, scanOf(vendorBody));
   assert(
     probs.length === 1 && probs[0].includes('no `note`'),
@@ -2480,6 +2566,7 @@ function selfTest() {
 
   // (3) REJECTED with a note that does not name all three parties — free prose
   // naming nobody re-checkable is the empty gesture the labels exist to refuse.
+  battery('(3) REJECTED with a note that does not name all three parties — free prose');
   probs = auditPluginRouteModule('x.ts', { ...vendorRuled, note: 'better-auth needs this shape' }, scanOf(vendorBody));
   assert(
     probs.length === 1 && probs[0].includes('all three parties'),
@@ -2488,6 +2575,7 @@ function selfTest() {
 
   // (4) REJECTED beside `ratchet` — a conversion that can never happen is not
   // tracked drift, and an entry claiming both claims neither.
+  battery('(4) REJECTED beside `ratchet` — a conversion that can never happen is not');
   probs = auditPluginRouteModule('x.ts', { ...vendorRuled, ratchet: '#9559' }, scanOf(vendorBody));
   assert(
     probs.length === 1 && probs[0].includes('exclusive') && probs[0].includes('vendorWire'),
@@ -2496,6 +2584,7 @@ function selfTest() {
 
   // (5) REJECTED beside `exempt` — one body sits on exactly ONE ruled boundary
   // (#9389's pre-auth class and this one were ruled on opposite populations).
+  battery('(5) REJECTED beside `exempt` — one body sits on exactly ONE ruled boundary');
   probs = auditPluginRouteModule('x.ts', { ...vendorRuled, exempt: 'pre-auth' }, scanOf(vendorBody));
   assert(
     probs.length === 1 && probs[0].includes('exclusive') && probs[0].includes('exempt'),
@@ -2506,6 +2595,7 @@ function selfTest() {
   // body on a ruled entry is a decision for the maintainer, never a number to
   // raise — and the diagnostic must name the const-hoist as the forbidden move
   // rather than leave the next author to rediscover it as a fix.
+  battery('(6) WIDENING carries the authority marker (#8435): a second vendor-shaped');
   probs = auditPluginRouteModule('x.ts', vendorRuled, scanOf(`${vendorBody}\n${vendorBody}`));
   assert(
     probs.length === 1 && probs[0].includes('CLOSED list') && probs[0].includes(RATCHET_AUTHORITY_MARKER),
@@ -2518,6 +2608,7 @@ function selfTest() {
 
   // (7) BELOW the count is red in the shrink direction, and shrinking needs
   // nobody's leave — the marker guards only the widening direction.
+  battery('(7) BELOW the count is red in the shrink direction, and shrinking needs');
   probs = auditPluginRouteModule('x.ts', vendorRuled, scanOf(`c.json({ success: true, data });`));
   assert(
     probs.length === 1 && probs[0].includes('fewer than pinned'),
@@ -2526,6 +2617,7 @@ function selfTest() {
 
   // (8) A vendor-wire declaration over NOTHING is the standing-waiver shape,
   // refused the same way an empty exempt is.
+  battery('(8) A vendor-wire declaration over NOTHING is the standing-waiver shape,');
   probs = auditPluginRouteModule(
     'x.ts',
     { vendorWire: vendorRuled.vendorWire, note: vendorRuled.note },
@@ -2538,6 +2630,7 @@ function selfTest() {
 
   // (9) NEGATIVE: the #9389 exempt diagnostics are untouched by the new state —
   // an exempt widening still speaks the pre-auth ruling's text, not this one's.
+  battery('(9) NEGATIVE: the #9389 exempt diagnostics are untouched by the new state —');
   probs = auditPluginRouteModule('x.ts', ruled, scanOf(`${preAuth}\n${preAuth}`));
   assert(
     probs.length === 1 && probs[0].includes('#9389') && !probs[0].includes('vendorWire'),
@@ -2553,6 +2646,7 @@ function selfTest() {
   // reddens on `@objectstack/client`. Both directions, and the reject direction
   // asserted POSITIVELY — `reads: 1`, not merely `bodies: 0`, which a scanner
   // that had simply stopped matching the receiver would also produce.
+  battery('The read/write discriminator (#9937) — BOTH directions');
 
   // ACCEPT — the bare express write.
   p = scanHonoRouteSource(`res.json({ success: true, data });`, 'x.ts', EXPRESS_RESPONSE_RECEIVERS);
@@ -2626,6 +2720,7 @@ function selfTest() {
   // the real tree, not a fixture. Everything the walk adds beyond that rests on
   // this: a walk that could not re-find the file somebody had already audited is
   // not one to trust on the files nobody has.
+  battery('The walk (#9937): reproduce before believing');
   const walked = discoverExpressRoutes();
   for (const file of Object.keys(EXPRESS_RESPONSE_MODULES)) {
     assert(
@@ -2687,6 +2782,7 @@ function selfTest() {
   // declares `plugin-a`. Under exact equality that is two findings at once.
   // Under a basename credit it is silently zero, each missing finding covering
   // for the other.
+  battery('The declared-vs-discovered correspondence (#11920)');
   const movedTo = 'packages/plugins/plugin-b/src/thing-routes.ts';
   const declaredAt = 'packages/plugins/plugin-a/src/thing-routes.ts';
   const moveTable = { [declaredAt]: { responses: 0, ok: 0, err: 0 } };
@@ -2771,6 +2867,53 @@ function selfTest() {
     liveDiscovered.some((f) => declarationFor(MODULES, f) !== undefined),
     'no real discovered module resolves through declarationFor — the helper is not wired to the live table',
   );
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    console.error('✗ self-test: ' + message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+    process.exit(1);
+  }
 
   console.log('✓ check-route-envelope self-test passed');
 

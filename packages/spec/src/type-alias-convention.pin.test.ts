@@ -269,7 +269,7 @@ import type * as M170 from './ui/component.zod.js';
 import type * as M183 from './api/sortability.zod.js';
 
 // ---------------------------------------------------------------------------
-// 832 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 829 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -303,12 +303,10 @@ export type Iso13 = Assert<Eq< z.input< typeof M3.KnowledgeChunkSchema >, z.infe
 export type Iso14 = Assert<Eq< z.input< typeof M3.KnowledgeHitSchema >, z.infer< typeof M3.KnowledgeHitSchema > >>;
 
 // ai/knowledge-source.zod.ts
-export type Iso15 = Assert<Eq< z.input< typeof M4.KnowledgeRefreshPolicySchema >, z.infer< typeof M4.KnowledgeRefreshPolicySchema > >>;
 export type Iso16 = Assert<Eq< z.input< typeof M4.ObjectKnowledgeSourceSchema >, z.infer< typeof M4.ObjectKnowledgeSourceSchema > >>;
 export type Iso17 = Assert<Eq< z.input< typeof M4.FileKnowledgeSourceSchema >, z.infer< typeof M4.FileKnowledgeSourceSchema > >>;
 export type Iso18 = Assert<Eq< z.input< typeof M4.HttpKnowledgeSourceSchema >, z.infer< typeof M4.HttpKnowledgeSourceSchema > >>;
 export type Iso19 = Assert<Eq< z.input< typeof M4.KnowledgeSourceKindSchema >, z.infer< typeof M4.KnowledgeSourceKindSchema > >>;
-export type Iso20 = Assert<Eq< z.input< typeof M4.KnowledgeSourceSchema >, z.infer< typeof M4.KnowledgeSourceSchema > >>;
 
 // ai/mcp.zod.ts
 export type Iso21 = Assert<Eq< z.input< typeof M5.MCPTransportSchema >, z.infer< typeof M5.MCPTransportSchema > >>;
@@ -546,7 +544,6 @@ export type Iso186 = Assert<Eq< z.input< typeof M31.RealtimeEventSchema >, z.inf
 
 // api/rest-server.zod.ts
 export type Iso187 = Assert<Eq< z.input< typeof M32.CrudOperation >, z.infer< typeof M32.CrudOperation > >>;
-export type Iso188 = Assert<Eq< z.input< typeof M32.CrudEndpointPatternSchema >, z.infer< typeof M32.CrudEndpointPatternSchema > >>;
 export type Iso189 = Assert<Eq< z.input< typeof M32.GeneratedEndpointSchema >, z.infer< typeof M32.GeneratedEndpointSchema > >>;
 export type Iso190 = Assert<Eq< z.input< typeof M32.EndpointRegistrySchema >, z.infer< typeof M32.EndpointRegistrySchema > >>;
 
@@ -1683,7 +1680,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 832 isomorphic pins', () => {
+  it('still declares all 829 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2088,9 +2085,27 @@ describe('ADR-0122 type-alias convention', () => {
     // `api/plugin-rest-api.handler-status-retirement.test.ts` asserts the
     // absence of all six retired names on every public entry. -3 removed; the
     // Iso numbers stay vacant (ids are claims about pins, not positions).
+    //
+    // 832 -> 831 is #14691's ADR-0049 retirement of `crud.patterns` on
+    // `CrudEndpointsConfigSchema` (api/rest-server.zod.ts): its value def
+    // `CrudEndpointPatternSchema` had no other consumer and left the module
+    // whole (RETIRED_DEFS_BY_MAJOR[18] `api/CrudEndpointPattern`), so its pin
+    // `Iso188` left with it. `CrudOperation` (`Iso187`) stays — the enum is
+    // still read by `GeneratedEndpointSchema.operation`. -1 removed; the Iso
+    // number stays vacant.
+    //
+    // 831 -> 829 is #14825's typing of `KnowledgeRefreshPolicySchema.cron`
+    // (ai/knowledge-source.zod.ts) with `CronExpressionInputSchema`: its
+    // bare-string arm transforms to the `{ dialect: 'cron', source }` envelope,
+    // so input ≠ infer by construction — for the policy itself (`Iso15`) and
+    // for the `KnowledgeSourceSchema` that nests it under `refresh` (`Iso20`).
+    // Both aliases gained their `XParsed` (`KnowledgeRefreshPolicyParsed`,
+    // `KnowledgeSourceParsed`) in the same commit — the ADR-0122 D6 order:
+    // declare the parsed name, THEN delete the pin. -2 removed; the Iso
+    // numbers stay vacant.
     const self = readFileSync(fileURLToPath(import.meta.url), 'utf8');
     const pins = self.match(/^export type Iso\d+ = Assert</gm) ?? [];
-    expect(pins).toHaveLength(832);
+    expect(pins).toHaveLength(829);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until #6605 nothing read either

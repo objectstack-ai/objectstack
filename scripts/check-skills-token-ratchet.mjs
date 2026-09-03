@@ -331,7 +331,7 @@ export const CEILINGS = new Map([
   ['skills/objectstack-platform/SKILL.md', 12984],
   // 14239 -> 14391: the pull-directed split-resolution order joined the decision
   // frame (maintainer ruling 2026-08-27, verbatim and untranslated: 「tong y 4」 —
-  // accepting the four-rule set), and this file carries TWO enforced frame copies
+  // accepting the four-rule set), and this file carries one enforced frame copy
   // (check:skill-frame-sync COPIES), so the rule ships to third-party installers
   // with the frame it amends — the #5130 drift is exactly a frame-semantics change
   // that skipped this mirror. +152 tokens across both copies, compressed to the
@@ -341,8 +341,8 @@ export const CEILINGS = new Map([
   // 2026-09-01, verbatim and untranslated (kept on ONE line, #11106: a governed
   // quotation that soft-breaks stops being findable by the things that grep it):
   // 「四维分析中，长期合理应该权重最高，至少50%」
-  // Same shape and same reason as the +152 row above it: this file carries TWO
-  // enforced frame copies (check:skill-frame-sync COPIES), and a rule that
+  // Same shape and same reason as the +152 row above it: this file carries one
+  // enforced frame copy (check:skill-frame-sync COPIES), and a rule that
   // changes WHICH RECOMMENDATION the frame yields is exactly the #5130 drift
   // class if it ships to third-party installers with only the old tie-break —
   // the customer's agent would weigh the axes co-equally while this repo weighs
@@ -356,7 +356,7 @@ export const CEILINGS = new Map([
   // existing sentence redundant, and a re-wrap moves no tokens and pays nothing.
   // 14549 -> 9708: re-locked at the landed count after the #14296 item-4 split —
   // the developer-agent operating template moved to `rules/dev-template.md`
-  // (its own row below); the two gate-pinned copies of the decision frame stay
+  // (its own row below); the one gate-pinned copy of the decision frame stays
   // in this file (check:skill-frame-sync reads its copies by path). Lowered,
   // not raised: shrink-only, no ruling needed for this direction.
   ['skills/objectstack-pm-dispatch/SKILL.md', 9708],
@@ -704,6 +704,12 @@ function fixtureTree() {
   return { root, cleanup: () => rmSync(root, { recursive: true, force: true }) };
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-skills-token-ratchet self-test reached its verdict';
+
 function selfTest() {
   const rel = 'skills/objectstack-ui/SKILL.md';
   const over = verdict(rel, 26000, 25154).msg;
@@ -922,9 +928,19 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`✓ check-skills-token-ratchet self-test: ${cases.length} cases pass.`);
+
+  return SELF_TEST_VERDICT;
 }
 
 if (isEntrypoint(import.meta.url)) {
-  if (process.argv.includes('--self-test')) selfTest();
-  else run();
+  if (process.argv.includes('--self-test')) {
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ check-skills-token-ratchet self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  } else run();
 }

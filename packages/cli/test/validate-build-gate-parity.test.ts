@@ -76,6 +76,26 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
 
 const sourceOf = (file: string) => readFileSync(join(COMMANDS_DIR, file), 'utf8');
 
+const UTILS_DIR = join(__dirname, '..', 'src', 'utils');
+
+/**
+ * The three authoring commands, as one list. Named once so a rule below cannot
+ * quietly cover a subset of the class it describes — the #12297 failure the
+ * sink guard at the bottom of this file records.
+ */
+const AUTHORING_COMMANDS: readonly string[] = ['compile.ts', 'validate.ts', 'lint.ts'];
+
+/**
+ * The prose fingerprint of the ADR-0087 D2 conversion notice — the part of the
+ * sentence that is neither interpolation nor punctuation, so it survives a
+ * rename of the loop variable and does NOT survive a reword. Matching on this
+ * rather than the whole template is deliberate: a divergence that only reworded
+ * the tail would still be caught by the formatter-call assertion, and a
+ * whole-template match would go vacuously green the day someone reflowed a
+ * line.
+ */
+const NOTICE_PROSE = 'converted at load; conversion';
+
 /** Every `lintFoo(`/`validateFoo(` call site in a command's source. */
 function gateCallsIn(file: string): Set<string> {
   const calls = sourceOf(file).match(/\b(?:lint|validate)[A-Z]\w*(?=\s*\()/g) ?? [];
@@ -154,7 +174,7 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
    * sink is dropped, which is the moment it is cheap to fix.
    */
   it('all three authoring commands pass a conversion-notice sink to normalizeStackInput', () => {
-    for (const file of ['compile.ts', 'validate.ts', 'lint.ts']) {
+    for (const file of AUTHORING_COMMANDS) {
       const src = sourceOf(file);
       const call = src.match(/normalizeStackInput\([\s\S]{0,400}?\)\s*;/);
       expect(call, `${file} must call normalizeStackInput`).not.toBeNull();
@@ -164,6 +184,65 @@ describe('os validate is the read-only superset of os build (#3782, #4409)', () 
           `D2 deprecation notice it raises is discarded. Pass a sink and surface the notices ` +
           `(mirror the other command).`,
       ).toBe(true);
+    }
+  });
+
+  /**
+   * The same drift again, one step past the sink: not "does this command hear
+   * the notice" but "does it SAY THE SAME THING once it has one".
+   *
+   * ⭐ [#13743] The sink guard above is blind here by construction. It asserts
+   * each command PASSES an `onConversionNotice` sink; once all three had one,
+   * each rendered the sentence from its own verbatim copy of the template, held
+   * equal by convention alone. A reword in one command diverged it from the
+   * other two and EVERY GATE STAYED GREEN — including this file, which is the
+   * one place that would have been expected to notice.
+   *
+   * That sentence is close to a contract: a conversion asks the author for
+   * nothing at load, so the notice is the ONLY warning they get before the
+   * conversion retires and their metadata stops loading. An author who runs two
+   * of the three commands over one tree must be told the same thing in the same
+   * words.
+   *
+   * The rule is therefore structural rather than comparative — the three
+   * copies are gone, and what is asserted is that they cannot come back: every
+   * authoring command renders through the ONE formatter, and none of them
+   * spells the sentence out inline. Comparing three literals for equality would
+   * have locked today's three copies together while leaving a fourth free to
+   * appear; requiring the single source forecloses both.
+   */
+  it('all three authoring commands render the conversion notice through ONE formatter', () => {
+    // Positive control FIRST: the sentence must still exist in the formatter.
+    // Without this, deleting `formatConversionNotice` and every inline copy
+    // would satisfy every "no inline copy" assertion below — a rule that is
+    // green precisely when the notice has been silenced.
+    const formatter = readFileSync(join(UTILS_DIR, 'format.ts'), 'utf8');
+    expect(
+      /export function formatConversionNotice\b/.test(formatter),
+      'src/utils/format.ts must export formatConversionNotice — if it moved, move this guard with it.',
+    ).toBe(true);
+    expect(
+      formatter.includes(NOTICE_PROSE),
+      `src/utils/format.ts no longer carries the notice wording ("${NOTICE_PROSE}"), so the ` +
+        `assertions below would pass vacuously on a CLI that says nothing at all.`,
+    ).toBe(true);
+
+    for (const file of AUTHORING_COMMANDS) {
+      expect(
+        calls(file, 'formatConversionNotice'),
+        `${file} must render its ADR-0087 D2 conversion notices with formatConversionNotice() ` +
+          `from src/utils/format.ts. The three commands dispose of the string differently — ` +
+          `os build and os lint print it, os validate pushes it into the --strict warnings list ` +
+          `— but they must SAY the same thing, so the sentence has exactly one source.`,
+      ).toBe(true);
+      expect(
+        sourceOf(file).includes(NOTICE_PROSE),
+        `${file} spells the ADR-0087 D2 conversion notice out inline instead of calling ` +
+          `formatConversionNotice(). That is the #13743 divergence: this sentence is the only ` +
+          `warning an old-shape author gets before the conversion retires and their metadata ` +
+          `stops loading, and a copy here drifts from the other commands silently. Edit the ` +
+          `wording in src/utils/format.ts, where all three read it.`,
+      ).toBe(false);
     }
   });
 });

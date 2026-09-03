@@ -173,6 +173,43 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 import { blank, scanSource } from './js-comment-mask.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the emitter-derived family': 3,
+  'the detector FIRES': 15,
+  'the detector STAYS SILENT': 8,
+  'refusals: the shapes it will not guess at': 11,
+  'the allowlist mechanism, driven on synthetic objects': 10,
+  'the vacuity floors': 5,
+  'provenance: the record must stay reproducible, and visibly so': 7,
+  'the watch-hint declaration vs the repo-wide walk': 4,
+  'package attribution, which the per-package allowlist rests on': 4,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 9;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 
@@ -1153,8 +1190,23 @@ function objectFile(body) {
 let selfTestReachedVerdict = false;
 
 export function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   let failures = 0;
   const t = (name, ok, detail) => {
+    registerCase();
     if (ok) { console.log(`  ok    ${name}`); return; }
     failures += 1;
     console.error(`  FAIL  ${name}${detail === undefined ? '' : ` -- ${detail}`}`);
@@ -1173,6 +1225,7 @@ export function selfTest() {
 
   try {
     // ── the emitter-derived family ────────────────────────────────────────
+    battery('the emitter-derived family');
     const fam = oneObject(`{ name: 'o', fields: {}, indexes: [] }`);
     t('the text family is read off the emitter, and matches this gate\'s witness',
       familyProblem(fam.family) === null, JSON.stringify(fam.family));
@@ -1189,6 +1242,7 @@ export function selfTest() {
       JSON.stringify(movedFamily.family));
 
     // ── the detector FIRES ────────────────────────────────────────────────
+    battery('the detector FIRES');
     for (const type of EXPECTED_TEXT_FAMILY) {
       const r = oneObject(`{ name: 'o', fields: { c: { type: '${type}' } }, indexes: [{ fields: ['c'] }] }`);
       const found = offendersOf(r);
@@ -1224,6 +1278,7 @@ export function selfTest() {
       offendersOf(codeSecondArg).length === 1, JSON.stringify(codeSecondArg.refusals));
 
     // ── the detector STAYS SILENT ─────────────────────────────────────────
+    battery('the detector STAYS SILENT');
     const bounded = oneObject(`{ name: 'o', fields: { c: Field.text({ maxLength: 255 }) }, indexes: [{ fields: ['c'] }] }`);
     t('a bounded keyed text column is NOT a finding', offendersOf(bounded).length === 0);
 
@@ -1253,6 +1308,7 @@ export function selfTest() {
       braceInString.refusals.length === 0 && offendersOf(braceInString).length === 0, JSON.stringify(braceInString.refusals));
 
     // ── refusals: the shapes it will not guess at ─────────────────────────
+    battery('refusals: the shapes it will not guess at');
     const unknownBuilder = oneObject(`{ name: 'o', fields: { c: Field.mystery({}) }, indexes: [{ fields: ['c'] }] }`);
     t('an UNKNOWN `Field.<builder>` on a keyed column REFUSES rather than passing',
       unknownBuilder.refusals.length === 1 && /does not know/.test(unknownBuilder.refusals[0].message),
@@ -1304,6 +1360,7 @@ export function selfTest() {
     // ── the allowlist mechanism, driven on synthetic objects ──────────────
     // ALLOWLIST is empty against the real tree, so the excusing branch is never
     // taken there and would rot unexecuted. Both outcomes are driven here.
+    battery('the allowlist mechanism, driven on synthetic objects');
     const syntheticObjects = [{
       name: 'o',
       file: 'packages/p/src/a.object.ts',
@@ -1339,6 +1396,7 @@ export function selfTest() {
       staleAllowlistRows(syntheticObjects, [{ ...goodRow, why: '  ' }]).length === 1);
 
     // ── the vacuity floors ────────────────────────────────────────────────
+    battery('the vacuity floors');
     const empty = run({});
     t('an EMPTY tree trips a floor rather than reporting clean',
       floorProblem(empty.counts) !== null, JSON.stringify(empty.counts));
@@ -1359,6 +1417,7 @@ export function selfTest() {
     // when the RECORD stops being a self-contained, reproducible claim: a ref
     // that is not a ref, a quotation that restated the ref instead of reading
     // it, or a pass line that stopped showing the reader both censuses.
+    battery('provenance: the record must stay reproducible, and visibly so');
     t('PROVENANCE — the record carries the ref it was measured on, inside the frozen record',
       typeof MEASURED.ref === 'string' && /^[0-9a-f]{7,40}$/.test(MEASURED.ref) && Object.isFrozen(MEASURED),
       JSON.stringify(MEASURED.ref));
@@ -1404,6 +1463,7 @@ export function selfTest() {
       'the pass path in main() no longer calls provenanceLine — the record would stop being reconciled in the log');
 
     // ── the watch-hint declaration vs the repo-wide walk ─────────────────
+    battery('the watch-hint declaration vs the repo-wide walk');
     const outsideHints = run({ 'tools/stray.object.ts': objectFile(`{ name: 'o', fields: { c: Field.text({ maxLength: 5 }) }, indexes: [{ fields: ['c'] }] }`) });
     t('an object file OUTSIDE every watch hint is still SWEPT -- the walk is repo-wide',
       outsideHints.relFiles.includes('tools/stray.object.ts') && outsideHints.objects.length === 1,
@@ -1416,6 +1476,7 @@ export function selfTest() {
       ROOT_DIR_WATCH_HINTS.every((h) => h.includes('/')));
 
     // ── package attribution, which the per-package allowlist rests on ─────
+    battery('package attribution, which the per-package allowlist rests on');
     t('packageOf attributes a plugin path to the plugin',
       packageOf('packages/plugins/plugin-audit/src/objects/x.object.ts') === 'packages/plugins/plugin-audit');
     t('packageOf attributes a service path to the service',
@@ -1426,6 +1487,53 @@ export function selfTest() {
       packageOf('examples/app-crm/src/objects/x.object.ts') === 'examples/app-crm');
   } finally {
     rmSync(tmp, { recursive: true, force: true });
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures += 1;
+      console.error(`  FAIL  ${message}`);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
   }
 
   console.log(`\n${failures === 0 ? 'PASS' : 'FAIL'}  check-keyed-text-bounds --self-test (${failures} failure(s))`);

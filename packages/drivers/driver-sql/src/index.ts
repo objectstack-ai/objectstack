@@ -61,10 +61,17 @@ export {
   CROSS_FIELD_OPERAND_NAMES,
   CROSS_FIELD_REFUSALS,
   CROSS_FIELD_ROWS,
+  // [#14104] The `addDays` offset arm — its own fixture, cases and refusals.
+  CROSS_FIELD_OFFSET_CASES,
+  CROSS_FIELD_OFFSET_OBJECT_FIELDS,
+  CROSS_FIELD_OFFSET_OPERAND_NAMES,
+  CROSS_FIELD_OFFSET_REFUSALS,
+  CROSS_FIELD_OFFSET_ROWS,
 } from './cross-field-conformance-cases.js';
 export type {
   CrossFieldAuthoredCase,
   CrossFieldCase,
+  CrossFieldOffsetRow,
   CrossFieldRefusalCase,
   CrossFieldRow,
 } from './cross-field-conformance-cases.js';

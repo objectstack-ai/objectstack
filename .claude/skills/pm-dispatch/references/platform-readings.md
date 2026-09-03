@@ -15,7 +15,7 @@
   订阅了的会话确实收得到(与 timeline 差 ~1 秒),但推送式**不可重读** —— 新上下文或当时
   没订阅就取不回,故只作旁证,⛔ 不作决策依据。⛔ `auto_merge` 字段不只是空,是**不稳
   定**:同一 PR 一分钟内先 `set` 后 `None`(2026-08-26 实测),入队后又回落为 off(维护者
-  2026-08-11 裁定)—— 永不据它判「没挂上」而重挂(重挂踢队重排)。
+  2026-08-11 裁定;2026-09-01/09-02 又两次)—— 永不据它判「没挂上」而重挂(重挂踢队重排)。
 - **成功序列读间隔不读事件名**:`removed_from_merge_queue` 后 ~1 秒内跟 `merged` 是落地不是被踢;
   真被踢是其后无 `merged`、几分钟后 PR 仍 open。
 - 「不在 `origin/main` 上」是二义读数(在队列里等 / 没入队,处置相反)—— 落地检查永远两个
@@ -61,9 +61,9 @@
   `update_pull_request_branch` 回「Branches that are queued for merging cannot be updated」= 在队,正常返回顺
   带逼出暗冲突(它不踢已挂 PR、只是永不入队);② `merge_pull_request` 回 405「Pull Request is in the
   merge queue」= 在队(2026-08-28 两席各一次,均零 ref),405「Merge commits are not allowed」= 不在队,改
-  挂 auto-merge。`enable_pr_auto_merge` 回应只答本次调用:时戳形有动作、空字段形无动作;⛔
-  enable 与其验证间永不插 `disable`(入队 webhook 乱序迟到,会撤掉真实入队)。**踢出成因两
-  则**:兄弟抢先落地 ⇒ `MERGE_CONFLICT`;缺必需批准 ⇒ 治理守卫 merge_group 腿 `CI_FAILURE`。
+  挂 auto-merge。⛔ enable 与其验证间永不插 `disable`(入队 webhook 乱序迟到,会撤掉真实入
+  队)。**踢出成因两则**:兄弟抢先落地 ⇒ `MERGE_CONFLICT`;缺必需批准 ⇒ 治理守卫 merge_group
+  腿 `CI_FAILURE`。
 - **队列踢出先认签名再决定重投**:已知 flaky 核对失败签名一致 ⇒ 原样重投;
   止血修复合入后**同一签名再现就不再是那条 flaky**,是新问题必须重新诊断,
   ⛔ 禁止条件反射式重投;第三种签名:本 PR 名下**没有任何** `merge_group` run 且批次同伴的 run
@@ -129,12 +129,12 @@
   撞限流的 dev **完不成强制查重**,只能把发现交回 PM 代为归档,⛔ 不盲目开卡。打满时:待
   执行写**排成有序清单挂进巡逻词**(不靠记忆),恢复窗口按序连清;重试对齐整点(REST core 整
   点重置)优于指数退避,⛔ 绝不忙轮询;文档载明未实测:条件请求答 `304` 不计 core 池。
-- **公开仓零配额读法两档,payload 档优先**:单卡页 `/issues/N` 内嵌 JSON 载**原始 body + 全评
-  论**,精确、零配额 —— 取含 `bodyHTML` 的 `script[type="application/json"]` 块,读
-  `payload.preloadedQueries[0].result.data.repository.issue.body` 与 `frontTimelineItems`/`backTimelineItems`;
-  实测一整个 M 档 dev 运行只花 3 次 MCP 调用(同席前轮 MCP-first 烧 10416/5000,~25×)。边界:⛔
-  只因仓库公开成立;⛔ 覆盖单卡读、**不覆盖 issue search**(搜索页无 SSR 结果);⛔ 永不拿渲染
-  列表定规模(静默只显一页,实测 12 vs 权威 147)。渲染层 WebFetch 仍在(~15 分缓存、有损)。
+- **公开仓零配额读法两档,payload 档优先 —— 只有 body 精确**:单卡页 `/issues/N` 内嵌 JSON 载
+  **原始 body**,零配额 —— 取含 `bodyHTML` 的 `script[type="application/json"]` 块,读
+  `payload.preloadedQueries[0].result.data.repository.issue.body` 与 `frontTimelineItems`/`backTimelineItems`。
+  边界:⛔ 只因仓库公开成立;⛔ 覆盖单卡读、**不覆盖 issue search**(搜索页无 SSR 结果);⛔ 永
+  不拿渲染列表定规模(静默只显一页,实测 12 vs 权威 147)。渲染层 WebFetch 仍在(~15 分缓存、
+  有损)。
 - **查重先 `search_issues`**(2026-08-18 实测:单次调用按 issue body 内文本命中且 `total_count` 精确;
   「search 对本会话不可用」的继承说法实测为**假** —— 继承说法不是读数,
   复述必带实测日期):body 文本匹配是 repo-scoped `list` 做不到的,`list` + 对照组降为回退。
@@ -147,7 +147,7 @@
   表端点** `GET /repos/{o}/{r}/issues?state=open&labels=a,b&per_page=N`(core 桶、 `labels` 真 AND;⛔ 完整性
   自证:`&page=N` + 总数核对;`GET /search/issues` **不是**退路,见下条),403 走降级梯 MCP 档(单标签一
   次读全 + 本地求交 —— ⛔ **不是翻页手扫**:实测 226 张 open 只扫了 100 张,**不完整枚举比
-  零结果更危险**)。⛔ 已推翻别再追:「限定符打零」两次实测反证,限定符只收窄不破坏。
+  零结果更危险**)。
 - **会话代理只服务 repo-scoped 路径,`/search/*` 的 403 体解析成净零**:代理回 403 + 体
   `sessions are bound to their configured repositories`,而那是**合法 JSON** —— 读 `total_count` 得 None、
   打印成 `total: None`,与真空集只差一个字符,三连查重于是回三个干净的零,而请求根本没跑
@@ -294,6 +294,16 @@
   降档(那正是降档保险丝要拒的替换),但「本车道 fable 强制」多是过宽的回忆 ——
   `dispatch-gates.mjs --tier PATH` 逐路径现推(实测:`SKILL.md` 与 `.claude/agents/**` 强制,`scripts/pm/**`
   与 `references/**` 无 ⇒ 全阻塞的三卡 fold 拆成 1 阻 3 可跑);路径线是**下限不是放行**。
+- **required checks 的名单是每仓事实**(逐 job 读判定的规则住上面队列段):objectstack 六个 ——
+  `TypeScript Type Check` · `Lint & Repo Gates` · `Test Core` · `Dogfood Regression Gate` ·
+  `Build Core` · `Temporal Conformance (live PG + MySQL)`;`in_progress` 不是过;advisory 门禁
+  红进 main 是共享损伤,照样止血立单。⛔ 聚合命令同样不作判定:`check:type-check-debt` 可在
+  包级 typecheck 绿时红;`check:i18n` 以「PREREQUISITE NOT MET — workspace CLI 未 build」退 3 不是漂移。
+- ⚠️ **计数不是机理读数(被当天推翻的推断的墓碑)**:「`GET .../actions/runs?event=merge_group`
+  计数 0 ⇒ required 集为空」提出当天即被自身推翻 —— 同一姊妹仓 2026-08-24 首现 merge_group
+  run(0 → 8),同日再测 224(阳性对照 `event=pull_request` 全程非零)。计数答「至今发生过没有」,
+  不答「机制在不在」:零计数只作**弱先验**,判 required 集为空要读 ruleset
+  的 required 集本身、或看队列合并是否真在等检查;⛔ 别处写下的计数值一律先复测再用。
 
 ## 闭合关键词解析(PR 正文写侧)
 

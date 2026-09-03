@@ -551,6 +551,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Timeout",
         helpText: "Abort the hook after N milliseconds"
       },
+      runAs: {
+        label: "Run As",
+        helpText: "Identity for ctx.api data operations: inherit the triggering write (default), system (elevated), or user (the triggering user)"
+      },
       condition: {
         label: "Condition",
         helpText: "Optional formula — skip the hook when this evaluates to false"

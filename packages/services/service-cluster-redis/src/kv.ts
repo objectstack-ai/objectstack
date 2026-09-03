@@ -83,7 +83,6 @@ export class RedisKV implements IKV {
 
         // Optimistic-concurrency loop — Redis WATCH aborts the MULTI on
         // any intervening write.
-        // eslint-disable-next-line no-constant-condition
         while (true) {
             await this.client.watch(physical);
             const raw = await this.client.get(physical);
@@ -127,7 +126,6 @@ export class RedisKV implements IKV {
             return removed > 0;
         }
 
-        // eslint-disable-next-line no-constant-condition
         while (true) {
             await this.client.watch(physical);
             const raw = await this.client.get(physical);

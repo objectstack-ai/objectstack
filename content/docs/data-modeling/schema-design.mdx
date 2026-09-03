@@ -129,15 +129,15 @@ To let users search a task list by project name:
 }
 ```
 
-`?search=apollo` now expands to `name $contains 'apollo' OR project_name
-$contains 'apollo'` — one single-table scan, on every driver, with no traversal.
+`?search=apollo` now expands to `name $icontains 'apollo' OR project_name
+$icontains 'apollo'` — one single-table scan, on every driver, with no traversal.
 If the object declares no `searchableFields` at all, a `text` mirror is picked up
 by the auto-default anyway; declare the set explicitly when you want to pin it.
 
 <Callout type="warn">
 **The mirror must be a stored field — a `formula` field does not work.** A
-`formula` field is *virtual*: no driver materializes a column for it, so a
-`$contains` predicate against one has nothing to scan (the SQL driver would emit
+`formula` field is *virtual*: no driver materializes a column for it, so an
+`$icontains` predicate against one has nothing to scan (the SQL driver would emit
 a `WHERE` over a column that does not exist). A CEL formula also only reads this
 record's own fields (`record.<field>`), so it cannot fetch the related title in
 the first place.

@@ -34,22 +34,22 @@ The design intent is a **runtime guardrail**: declare which `status` transitions
 
 | # | Where | Schema | Reference |
 |---|-------|--------|-----------|
-| 1 | Top-level `workflow` metadata type | `StateMachineSchema` (XState-style: hierarchical/parallel states, entry/exit actions, guards, context) | [`metadata-type-schemas.ts:85`](../../packages/spec/src/kernel/metadata-type-schemas.ts#L85), [`metadata-plugin.zod.ts:90`](../../packages/spec/src/kernel/metadata-plugin.zod.ts#L90), [`metadata-plugin.zod.ts:612`](../../packages/spec/src/kernel/metadata-plugin.zod.ts#L612) |
-| 2 | Object-embedded | `object.stateMachines: Record<string, StateMachineSchema>` ("parallel lifecycles: status, payment, approval") | [`object.zod.ts:534`](../../packages/spec/src/data/object.zod.ts#L534) |
-| 3 | Validation rule | `state_machine` rule: `transitions: { fromState: [toStates] }` | [`validation.zod.ts:105`](../../packages/spec/src/data/validation.zod.ts#L105) |
+| 1 | Top-level `workflow` metadata type | `StateMachineSchema` (XState-style: hierarchical/parallel states, entry/exit actions, guards, context) | [`packages/spec/src/kernel/metadata-type-schemas.ts`](../../packages/spec/src/kernel/metadata-type-schemas.ts), [`packages/spec/src/kernel/metadata-plugin.zod.ts`](../../packages/spec/src/kernel/metadata-plugin.zod.ts) |
+| 2 | Object-embedded | `object.stateMachines: Record<string, StateMachineSchema>` ("parallel lifecycles: status, payment, approval") | [`packages/spec/src/data/object.zod.ts`](../../packages/spec/src/data/object.zod.ts) |
+| 3 | Validation rule | `state_machine` rule: `transitions: { fromState: [toStates] }` | [`packages/spec/src/data/validation.zod.ts#transitions`](../../packages/spec/src/data/validation.zod.ts) |
 
 **Zero enforcement — verified across `packages/{runtime,objectql,services,core,metadata*,plugins}` and the whole repo:**
 
-- `IWorkflowService` (`packages/spec/src/contracts/workflow-service.ts:58` — unlinked: the contract file was deleted on 2026-08-01 by #4451 / #4473, which retired the `workflow` service slot outright, closing the follow-up this record left open below) has **no concrete implementation**.
+- `IWorkflowService` (`packages/spec/src/contracts/workflow-service.ts:58` <!-- anchor-exempt: HISTORICAL --> — unlinked: the contract file was deleted on 2026-08-01 by #4451 / #4473, which retired the `workflow` service slot outright, closing the follow-up this record left open below) has **no concrete implementation**.
 - There is **no XState interpreter** anywhere (no `createMachine` / `interpret` / transition engine).
 - The write-path validator [`validateRecord`](../../packages/objectql/src/validation/record-validator.ts#L198) reads only `objectSchema.fields` and validates **field data types** (string/number/date/…). It **never reads `objectSchema.validations`** at all — so *not one* of the nine validation-rule types (`state_machine`, `cross_field`, `script`, `unique`, `format`, `json_schema`, `async`, `custom`, `conditional`) is enforced by it.
 - **Nothing reads `object.stateMachines`.**
 
-So the guardrail goal is currently unmet at runtime. The only artefacts that exist are declarations — e.g. `examples/app-crm/src/workflows/stale-opportunity.workflow.ts:19` (`StateMachineConfig`; unlinked — this file describes the pre-ADR state and was itself removed by this record's own implementation, see the checklist below), which additionally **mixes orchestration into the machine** (it carries `email_alert` / `task_creation` actions that no engine executes — that orchestration belongs to a record-triggered Flow per ADR-0019).
+So the guardrail goal is currently unmet at runtime. The only artefacts that exist are declarations — e.g. `examples/app-crm/src/workflows/stale-opportunity.workflow.ts:19` <!-- anchor-exempt: HISTORICAL --> (`StateMachineConfig`; unlinked — this file describes the pre-ADR state and was itself removed by this record's own implementation, see the checklist below), which additionally **mixes orchestration into the machine** (it carries `email_alert` / `task_creation` actions that no engine executes — that orchestration belongs to a record-triggered Flow per ADR-0019).
 
 #### The prior-state plumbing gap (the real implementation constraint)
 
-A transition check needs **both** the prior and the new state. But the write path can't supply the prior state today: on update, [`engine.ts:1850`](../../packages/objectql/src/engine.ts#L1850) calls `validateRecord(schema, hookContext.input.data, 'update')` — passing only the **PATCH payload**, not the prior record. On `PATCH { status: 'done' }` there is no way to know the *from*-state without a read. So enforcing `state_machine` is not just "add a dispatch branch"; it requires **plumbing the prior (or merged) record into the rule-evaluation step**. This is a shared need: `cross_field` and `script` rules are equally crippled by receiving only the patch — so the fix should land **once for the whole `validations` union**, not as a `state_machine`-only patch (see D3).
+A transition check needs **both** the prior and the new state. But the write path can't supply the prior state today: on update, [`packages/objectql/src/engine.ts#validateRecord`](../../packages/objectql/src/engine.ts) calls `validateRecord(schema, hookContext.input.data, 'update')` — passing only the **PATCH payload**, not the prior record. On `PATCH { status: 'done' }` there is no way to know the *from*-state without a read. So enforcing `state_machine` is not just "add a dispatch branch"; it requires **plumbing the prior (or merged) record into the rule-evaluation step**. This is a shared need: `cross_field` and `script` rules are equally crippled by receiving only the patch — so the fix should land **once for the whole `validations` union**, not as a `state_machine`-only patch (see D3).
 
 ### The design-center shift: AI is the author — optimise naming for the model's priors
 
@@ -84,7 +84,7 @@ The introspectability is the upgrade that serves the two design centers: **UI** 
 
 ### Where it lives: one of nine validation-rule types
 
-`state_machine` is one variant of the `ValidationRuleSchema` discriminated union ([`validation.zod.ts:362`](../../packages/spec/src/data/validation.zod.ts#L362)), alongside `script`, `unique`, `format`, `cross_field`, `json_schema`, `async`, `custom`, and `conditional`. It shares `BaseValidationSchema` (name/label/message/severity) and the same write-time enforcement semantics as its siblings. This is *why it stays in `validations`* (D1) rather than becoming a standalone metadata type or file: it is, precisely, a write-time validation whose payload happens to be a transition graph.
+`state_machine` is one variant of the `ValidationRuleSchema` discriminated union ([`packages/spec/src/data/validation.zod.ts#ValidationRuleSchema`](../../packages/spec/src/data/validation.zod.ts)), alongside `script`, `unique`, `format`, `cross_field`, `json_schema`, `async`, `custom`, and `conditional`. It shares `BaseValidationSchema` (name/label/message/severity) and the same write-time enforcement semantics as its siblings. This is *why it stays in `validations`* (D1) rather than becoming a standalone metadata type or file: it is, precisely, a write-time validation whose payload happens to be a transition graph.
 
 ## Decision
 

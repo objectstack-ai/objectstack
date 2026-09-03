@@ -516,7 +516,53 @@ function runTsc(): string {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-test-typecheck self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES: Readonly<Record<string, number>> = Object.freeze({
+  'the cardinality-preserving control (#13470)': 1,
+  'What a signature must and must not notice (#13470)': 4,
+  'The ratchet-remedy authority convention (#8435)': 7,
+  'The same authority rule, applied to the per-SIGNATURE offer (#13470)': 3,
+  'The ledger\'s own prose (#12624)': 11,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 5;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest(): string {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map<string, number>();
+  let openBattery: string | null = null;
+  const battery = (name: string): void => {
+    openBattery = name;
+  };
+  const registerCase = (): void => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   // The two REAL signatures from the ablation that produced #13470: `packages/
   // rest`'s two call sites passed a bad request AND a bad response, tsc showed
   // only the request error, and PR #13466's repair uncovered the response one.
@@ -632,6 +678,7 @@ function selfTest(): string {
   }
 
   const expect = (label: string, cond: boolean): void => {
+    registerCase();
     if (!cond) failures.push(label);
   };
 
@@ -639,6 +686,7 @@ function selfTest(): string {
   // populations really are the same size, so the number the ledger used to hold
   // is UNCHANGED across the swap. Without this the case would only be proving
   // "a changed count is red", which the per-file count already did.
+  battery('the cardinality-preserving control (#13470)');
   expect(
     '⭐ #13470 — the substitution fixture is cardinality-preserving (else the case above proves nothing '
       + 'the old per-file count could not already see)',
@@ -674,6 +722,7 @@ function selfTest(): string {
   // them must produce an IDENTICAL ledger, or every commit churns a generated
   // file and the gate gets weakened. (ii) IDENTITY-SHARP: a different named
   // type must produce a different key, or the pin is decoration.
+  battery('What a signature must and must not notice (#13470)');
   {
     const atLine = (line: number, type: string): string =>
       `src/rest.test.ts(${line},7): error TS2345: Argument of type '{ json: Mock<Procedure>; `
@@ -735,6 +784,7 @@ function selfTest(): string {
   //
   // (3) is what makes (2) worth having: without it, a predicate that approved
   // everything would keep this block green while the convention is gone.
+  battery('The ratchet-remedy authority convention (#8435)');
   const unledgered = evaluate(observed([['pin.test.ts', [['TS2578: Unused directive.', 1]]]]), {})[0] ?? '';
   expect(
     '#8435 — the ratchet-offer DETECTOR still matches the unledgered-file verdict (else every '
@@ -837,6 +887,7 @@ function selfTest(): string {
   // shrink-only ratchet exactly as adding a whole file does, and it is the more
   // tempting of the two — the file total need not have moved, so it reads like
   // bookkeeping. VANISHED is its opposite and must stay unmarked.
+  battery('The same authority rule, applied to the per-SIGNATURE offer (#13470)');
   const arrived = evaluate(observed([['a.test.ts', [[RES, 2]]]]), { 'a.test.ts': { [REQ]: 2 } });
   const arrivedMsg = arrived.find((m) => m.includes('ARRIVED')) ?? '';
   const vanishedMsg = arrived.find((m) => m.includes('VANISHED')) ?? '';
@@ -868,6 +919,7 @@ function selfTest(): string {
   // that clause. A departure pin alone is decoration: it passes against an
   // empty `_comment`, which is exactly the regression it would be there to
   // catch.
+  battery('The ledger\'s own prose (#12624)');
   const written = buildLedger(observed([['a.test.ts', [[REQ, 3]]]]))._comment;
 
   const omissions = ledgerCommentOmissions(written);
@@ -960,6 +1012,51 @@ function selfTest(): string {
     );
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message: string): void => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     console.error(`✗ check:test-typecheck --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error('  • ' + f);

@@ -7,6 +7,7 @@ import {
   OWDModel,
   type SharingRule,
 } from './sharing.zod';
+import { FieldSchema } from '../data/field.zod';
 
 describe('SharingRuleType', () => {
   it('should accept the enforced rule type', () => {
@@ -26,9 +27,11 @@ describe('SharingRuleType', () => {
 });
 
 describe('ShareRecipientType', () => {
-  it('accepts exactly the enforced runtime recipients', () => {
-    const enforced = ['user', 'team', 'position', 'unit_and_subordinates', 'business_unit'];
-    enforced.forEach((t) => {
+  it('accepts exactly the authorable recipients', () => {
+    // `field` (#14103) is authorable from this release; its per-record executor
+    // is the services half (#15072) — see the `field` describe block below.
+    const authorable = ['user', 'team', 'position', 'unit_and_subordinates', 'business_unit', 'field'];
+    authorable.forEach((t) => {
       expect(() => ShareRecipientType.parse(t)).not.toThrow();
     });
   });
@@ -177,6 +180,7 @@ describe('SharingRuleSchema', () => {
       { type: 'position', value: 'sales_manager' },
       { type: 'unit_and_subordinates', value: 'bu_field_ops' },
       { type: 'business_unit', value: 'bu_finance' },
+      { type: 'field', value: 'assignees' },
     ];
 
     recipients.forEach((sharedWith) => {
@@ -459,5 +463,98 @@ describe('unknown keys are rejected, not stripped (#4001)', () => {
     expect(result.success).toBe(false);
     const issue = result.error!.issues.find((i) => i.code === 'unrecognized_keys');
     expect(issue!.message).toContain('`id` → `value`');
+  });
+});
+
+// [#14103] The record-relative recipient — maintainer ruling 2026-09-02 (B):
+// `ShareRecipientType` gains `field` and ONLY `field`; ⛔ no `manager` member.
+// The schema does not know the object, so these pins assert the SHAPE: what
+// parses, what is refused, and where the refusal points. The runtime semantics
+// (per-record expansion, `multiple: true` honoured, empty column ⇒ nobody,
+// re-materialisation on the record's own write) are the executor's, #15072.
+describe("sharedWith.type: 'field' — the record-relative recipient (#14103)", () => {
+  const rule = (sharedWith: unknown) => ({
+    name: 'assignees_can_read',
+    object: 'duly_assignment',
+    type: 'criteria' as const,
+    condition: 'record.status == "open"',
+    sharedWith,
+  });
+  /** The issue at exactly `path`, or undefined when the value parses or the path is clean. */
+  const issueAt = (value: unknown, path: string[]) => {
+    const result = SharingRuleSchema.safeParse(value);
+    if (result.success) return undefined;
+    return result.error.issues.find((i) => i.path.join('.') === path.join('.'));
+  };
+
+  it('accepts a `field` recipient naming a user-typed field on the record', () => {
+    const parsed = SharingRuleSchema.parse(rule({ type: 'field', value: 'assignees' }));
+    expect(parsed.sharedWith).toEqual({ type: 'field', value: 'assignees' });
+  });
+
+  it('accepts the same shape for a `multiple: true` user field — the schema pins the shape, the executor the fan-out', () => {
+    // The object declaration and the rule are separate documents; the rule
+    // cannot see that `assignees` is multi-valued. What the pair pins: a
+    // multi-user column is authorable (FieldSchema) and a rule can name it
+    // (SharingRuleSchema) — "every user it names" is #15072's contract.
+    const column = FieldSchema.parse({ name: 'assignees', type: 'user', multiple: true });
+    expect(column.multiple).toBe(true);
+    const parsed = SharingRuleSchema.parse(rule({ type: 'field', value: column.name }));
+    expect(parsed.sharedWith.value).toBe('assignees');
+  });
+
+  it("refuses `type: 'manager'` by name — the ruling's ⛔ made falsifiable", () => {
+    const issue = issueAt(rule({ type: 'manager', value: 'x' }), ['sharedWith', 'type']);
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe('invalid_value');
+    expect(issue!.path).toEqual(['sharedWith', 'type']);
+    // First sentence: the enum's own refusal, listing what IS authorable. This
+    // pin stays deliberately independent of the accept set (it does not assert
+    // `"field"` is in the list — the positive control below does) so that
+    // ablating the `field` member reds the accept pins and leaves this one green.
+    const firstSentence = issue!.message.split('. ')[0];
+    expect(firstSentence).toMatch(/^Invalid option: expected one of /);
+    expect(firstSentence).not.toContain('"manager"');
+  });
+
+  it('positive control — the same rule with a `field` recipient parses clean', () => {
+    // Proves the refusal above is the enum's verdict on `manager`, not an
+    // artefact of the fixture around it: the manager IS reachable, as a user
+    // field the application stores on the record.
+    const result = SharingRuleSchema.safeParse(rule({ type: 'field', value: 'manager_user' }));
+    expect(result.success).toBe(true);
+  });
+
+  it('refuses a `field` recipient whose `value` names no field (empty)', () => {
+    // Measured before this member existed: `value` carried no constraint at all
+    // (`{ type: 'user', value: '' }` parses). The refusal below is therefore
+    // scoped to `field` — see the preservation pin at the end of this block.
+    const issue = issueAt(rule({ type: 'field', value: '' }), ['sharedWith', 'value']);
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe('custom');
+    expect(issue!.path).toEqual(['sharedWith', 'value']);
+    const firstSentence = issue!.message.split('. ')[0];
+    expect(firstSentence).toBe(
+      "`sharedWith.value` must name a user-typed field on the record when `type` is 'field' (got \"\")",
+    );
+  });
+
+  it('refuses a dotted path — a graph walk spelled as a value is not a field name', () => {
+    // `owner.manager_id` is the `manager` member by another spelling; the
+    // recipient is READ from one column on the record, never walked from it.
+    const issue = issueAt(rule({ type: 'field', value: 'owner.manager_id' }), ['sharedWith', 'value']);
+    expect(issue).toBeDefined();
+    expect(issue!.code).toBe('custom');
+    expect(issue!.message).toContain('not a dotted path');
+    expect(issue!.message).toContain("owner's manager");
+  });
+
+  it("preserves the other members' `value` contract — the refinement is scoped to `field`", () => {
+    // Accept-set widening only: a rule that parsed before this member existed
+    // parses identically after it. The bare-string `value` on the other members
+    // is the pre-existing contract (measured: no length or shape constraint),
+    // pinned here so the `field`-only refinement cannot quietly become global.
+    expect(SharingRuleSchema.safeParse(rule({ type: 'user', value: '' })).success).toBe(true);
+    expect(SharingRuleSchema.safeParse(rule({ type: 'team', value: 'Team.Sales' })).success).toBe(true);
   });
 });

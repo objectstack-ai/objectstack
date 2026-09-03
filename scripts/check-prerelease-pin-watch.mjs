@@ -114,6 +114,42 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '1. the watch list is derived from the pins': 6,
+  '1b. the ledger rule: a note points at the pin, it does not restate it': 5,
+  '2. the three registry states': 7,
+  '3. the criterion is semver, NOT the `latest` tag': 3,
+  '4. a stable release only in a LATER line is its own case': 3,
+  '5. the reports say what they must': 8,
+  '6. a hit alongside an unreadable pin stays a hit, and says it may be': 2,
+  '7. end-to-end through the real CLI, exit codes included': 16,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 8;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 // This gate's whole population is ONE repo-root file, and the derivation
 // already reaches it — through the trigger key, not through a hint. Read from
 // the source rather than assumed: `prerelease-pin-watch.yml` declares
@@ -649,8 +685,22 @@ async function main(argv) {
 // ---------------------------------------------------------------------------
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   const check = (name, cond, detail = '') => {
+    registerCase();
     if (cond) console.log(`  ✓ ${name}`);
     else {
       failures.push(`${name}${detail ? ` — ${detail}` : ''}`);
@@ -661,6 +711,7 @@ function selfTest() {
   console.log('check-prerelease-pin-watch --self-test');
 
   // --- 1. the watch list is derived from the pins ---------------------------
+  battery('1. the watch list is derived from the pins');
   const YAML = [
     'packages:',
     '  - packages/*',
@@ -710,6 +761,7 @@ function selfTest() {
   // Two correction rounds found one copy each and left the other (#11372 fixed
   // the pin comment, #11761 the note). What forbids a third copy is this check,
   // not the memory of those rounds.
+  battery('1b. the ledger rule: a note points at the pin, it does not restate it');
   const restated = FOLLOW_UPS.flatMap((f) =>
     restatedModelCounts(f.note).map((m) => `${f.match.source} -> "${m.trim()}"`),
   );
@@ -746,6 +798,7 @@ function selfTest() {
   );
 
   // --- 2. the three registry states ----------------------------------------
+  battery('2. the three registry states');
   const entry = watch.find((w) => w.name === 'better-auth');
 
   const onlyPre = judge(entry, {
@@ -780,6 +833,7 @@ function selfTest() {
   // --- 3. the criterion is semver, NOT the `latest` tag --------------------
   // The live shape on 2026-08-05: `latest` sits on the OLD line while the new
   // line is published. A `latest`-watching probe sleeps through this.
+  battery('3. the criterion is semver, NOT the `latest` tag');
   const latestStillOld = judge(entry, {
     versions: ['1.6.26', '1.7.0'],
     distTags: { latest: '1.6.26', rc: '1.7.0-rc.4' },
@@ -799,6 +853,7 @@ function selfTest() {
   );
 
   // --- 4. a stable release only in a LATER line is its own case -----------
+  battery('4. a stable release only in a LATER line is its own case');
   const later = judge(entry, { versions: ['1.7.0-rc.4', '1.8.0', '2.0.0'], distTags: {} });
   check('stable only above the pinned line → AVAILABLE', later.verdict === 'available');
   check('…classified `later`, not `in-line`', later.trigger === 'later', String(later.trigger));
@@ -810,6 +865,7 @@ function selfTest() {
   );
 
   // --- 5. the reports say what they must ----------------------------------
+  battery('5. the reports say what they must');
   const hitText = render(evaluate([judge(entry, { versions: ['1.7.0'], distTags: {} })]));
   check('the AVAILABLE report names its follow-up card', hitText.includes('#3653'), hitText);
   check(
@@ -862,6 +918,7 @@ function selfTest() {
 
   // --- 6. a hit alongside an unreadable pin stays a hit, and says it may be
   //        incomplete (the itemization lesson from check:objectui-pin-fresh) --
+  battery('6. a hit alongside an unreadable pin stays a hit, and says it may be');
   const mixed = evaluate([judge(entry, { versions: ['1.7.0'], distTags: {} }), unreadable]);
   check('a hit is not diluted by a sibling read failure', mixed.verdict === 'available');
   check(
@@ -871,6 +928,7 @@ function selfTest() {
   );
 
   // --- 7. end-to-end through the real CLI, exit codes included -------------
+  battery('7. end-to-end through the real CLI, exit codes included');
   const tmp = mkdtempSync(join(tmpdir(), 'prerelease-pin-watch-selftest-'));
   try {
     const cli = fileURLToPath(import.meta.url);
@@ -1003,6 +1061,51 @@ function selfTest() {
     rmSync(tmp, { recursive: true, force: true });
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     console.error(`\n⛔ check-prerelease-pin-watch --self-test: ${failures.length} failure(s)`);
     for (const f of failures) console.error(`   - ${f}`);

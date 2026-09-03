@@ -36,7 +36,6 @@ export class ComposedClusterService implements IClusterService {
             try {
                 await c.close();
             } catch (err) {
-                // eslint-disable-next-line no-console
                 console.error('[ClusterService] close error:', err);
             }
         }

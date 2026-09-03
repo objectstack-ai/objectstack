@@ -14,28 +14,34 @@ import {
   ObjectKernel,
   PluginHealthMonitor,
   HotReloadManager,
-  DependencyResolver,
   PluginPermissionManager,
   PluginSandboxRuntime,
-  PluginSecurityScanner
-} from '@objectstack/core';
+  PluginSecurityScanner,
+  createLogger
+} from '../src/index.js';
 
-import type { Plugin } from '@objectstack/core';
+import type { Plugin, ObjectLogger } from '../src/index.js';
+// [#14613] The PARSED variants, because that is what the methods below take:
+// `PluginHealthMonitor.registerPlugin` is declared over `PluginHealthCheckParsed`
+// and `HotReloadManager.registerPlugin` over `HotReloadConfigParsed`
+// (`src/health-monitor.ts`, `src/hot-reload.ts`). The unparsed shapes have every
+// key optional, so passing them was a real type error this file carried while no
+// tsc program read it.
 import type {
-  PluginHealthCheck,
-  HotReloadConfig,
-  PermissionSet,
+  PluginHealthCheckParsed,
+  HotReloadConfigParsed,
+  PluginPermissionSet,
   SandboxConfig
-} from '@objectstack/spec/system';
+} from '@objectstack/spec/kernel';
 
 /**
  * Example: Enterprise Plugin Platform with Phase 2 Features
  */
 export class EnterprisePluginPlatform {
   private kernel: ObjectKernel;
+  private logger: ObjectLogger;
   private healthMonitor: PluginHealthMonitor;
   private hotReload: HotReloadManager;
-  private depResolver: DependencyResolver;
   private permManager: PluginPermissionManager;
   private sandbox: PluginSandboxRuntime;
   private scanner: PluginSecurityScanner;
@@ -49,13 +55,18 @@ export class EnterprisePluginPlatform {
       },
     });
 
+    // [#14613] The example's OWN logger. `ObjectKernel.logger` is private, so
+    // every one of the 20 reads this file made of it was a type error --
+    // invisible until this package declared a `typecheck` script, because no
+    // tsc program had ever compiled this directory.
+    this.logger = createLogger({ level: 'info', name: 'EnterprisePluginPlatform' });
+
     // Initialize Phase 2 components
-    this.healthMonitor = new PluginHealthMonitor(this.kernel.logger);
-    this.hotReload = new HotReloadManager(this.kernel.logger);
-    this.depResolver = new DependencyResolver(this.kernel.logger);
-    this.permManager = new PluginPermissionManager(this.kernel.logger);
-    this.sandbox = new PluginSandboxRuntime(this.kernel.logger);
-    this.scanner = new PluginSecurityScanner(this.kernel.logger);
+    this.healthMonitor = new PluginHealthMonitor(this.logger);
+    this.hotReload = new HotReloadManager(this.logger);
+    this.permManager = new PluginPermissionManager(this.logger);
+    this.sandbox = new PluginSandboxRuntime(this.logger);
+    this.scanner = new PluginSecurityScanner(this.logger);
   }
 
   /**
@@ -64,9 +75,9 @@ export class EnterprisePluginPlatform {
   async installPlugin(
     plugin: Plugin,
     config: {
-      health?: PluginHealthCheck;
-      hotReload?: HotReloadConfig;
-      permissions?: PermissionSet;
+      health?: PluginHealthCheckParsed;
+      hotReload?: HotReloadConfigParsed;
+      permissions?: PluginPermissionSet;
       sandbox?: SandboxConfig;
       securityScan?: boolean;
     }
@@ -74,11 +85,11 @@ export class EnterprisePluginPlatform {
     const pluginName = plugin.name;
     const pluginVersion = plugin.version || '1.0.0';
 
-    this.kernel.logger.info(`Installing plugin: ${pluginName} v${pluginVersion}`);
+    this.logger.info(`Installing plugin: ${pluginName} v${pluginVersion}`);
 
     // Step 1: Security Scan
     if (config.securityScan !== false) {
-      this.kernel.logger.info('Running security scan...');
+      this.logger.info('Running security scan...');
       
       const scanResult = await this.scanner.scan({
         pluginId: pluginName,
@@ -86,16 +97,20 @@ export class EnterprisePluginPlatform {
         // In real implementation, would provide actual files and dependencies
       });
 
-      if (!scanResult.passed) {
+      // [#14613] `KernelSecurityScanResult` carries `status` and per-severity
+      // COUNTS; it has never had `passed`, `score`, `summary.critical` or
+      // `summary.high`. This block read four members that do not exist.
+      if (scanResult.status !== 'passed') {
         throw new Error(
-          `Security scan failed: Score ${scanResult.score}/100, ` +
-          `Critical: ${scanResult.summary.critical}, ` +
-          `High: ${scanResult.summary.high}`
+          `Security scan ${scanResult.status}: ` +
+          `${scanResult.summary.totalVulnerabilities} vulnerability(ies), ` +
+          `Critical: ${scanResult.summary.criticalCount}, ` +
+          `High: ${scanResult.summary.highCount}`
         );
       }
 
-      this.kernel.logger.info(
-        `Security scan passed: ${scanResult.score}/100`
+      this.logger.info(
+        `Security scan passed: ${scanResult.summary.totalVulnerabilities} vulnerability(ies)`
       );
     }
 
@@ -106,7 +121,7 @@ export class EnterprisePluginPlatform {
       // Auto-grant all permissions (in production, would prompt user)
       this.permManager.grantAllPermissions(pluginName, 'system');
       
-      this.kernel.logger.info(
+      this.logger.info(
         `Permissions registered: ${config.permissions.permissions.length} permissions`
       );
     }
@@ -114,13 +129,13 @@ export class EnterprisePluginPlatform {
     // Step 3: Create Sandbox
     if (config.sandbox) {
       this.sandbox.createSandbox(pluginName, config.sandbox);
-      this.kernel.logger.info(`Sandbox created: ${config.sandbox.level} level`);
+      this.logger.info(`Sandbox created: ${config.sandbox.level} level`);
     }
 
     // Step 4: Register for Health Monitoring
     if (config.health) {
       this.healthMonitor.registerPlugin(pluginName, config.health);
-      this.kernel.logger.info(
+      this.logger.info(
         `Health monitoring configured: ${config.health.interval}ms interval`
       );
     }
@@ -128,7 +143,7 @@ export class EnterprisePluginPlatform {
     // Step 5: Register for Hot Reload
     if (config.hotReload) {
       this.hotReload.registerPlugin(pluginName, config.hotReload);
-      this.kernel.logger.info(
+      this.logger.info(
         `Hot reload enabled: ${config.hotReload.stateStrategy} state strategy`
       );
     }
@@ -136,7 +151,7 @@ export class EnterprisePluginPlatform {
     // Step 6: Register with Kernel
     this.kernel.use(plugin);
 
-    this.kernel.logger.info(`Plugin ${pluginName} installed successfully`);
+    this.logger.info(`Plugin ${pluginName} installed successfully`);
   }
 
   /**
@@ -153,14 +168,14 @@ export class EnterprisePluginPlatform {
       }
     }
 
-    this.kernel.logger.info('Platform started successfully');
+    this.logger.info('Platform started successfully');
   }
 
   /**
    * Shutdown the platform
    */
   async shutdown(): Promise<void> {
-    this.kernel.logger.info('Shutting down platform...');
+    this.logger.info('Shutting down platform...');
 
     // Stop health monitoring
     this.healthMonitor.shutdown();
@@ -171,7 +186,7 @@ export class EnterprisePluginPlatform {
     // Shutdown kernel
     await this.kernel.shutdown();
 
-    this.kernel.logger.info('Platform shutdown complete');
+    this.logger.info('Platform shutdown complete');
   }
 
   /**
@@ -203,7 +218,7 @@ export class EnterprisePluginPlatform {
    * Perform hot reload of a plugin
    */
   async reloadPlugin(pluginName: string): Promise<void> {
-    this.kernel.logger.info(`Hot reloading plugin: ${pluginName}`);
+    this.logger.info(`Hot reloading plugin: ${pluginName}`);
 
     const plugin = this.kernel['plugins'].get(pluginName);
     if (!plugin) {
@@ -218,7 +233,7 @@ export class EnterprisePluginPlatform {
 
     // Restore state (simplified - would need plugin cooperation)
     const restoreState = (state: Record<string, any>) => {
-      this.kernel.logger.info(`Restoring state from ${new Date(state.timestamp)}`);
+      this.logger.info(`Restoring state from ${new Date(state.timestamp)}`);
       // ... restore plugin state
     };
 
@@ -230,7 +245,7 @@ export class EnterprisePluginPlatform {
       restoreState
     );
 
-    this.kernel.logger.info(`Plugin ${pluginName} reloaded successfully`);
+    this.logger.info(`Plugin ${pluginName} reloaded successfully`);
   }
 }
 
