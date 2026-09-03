@@ -81,6 +81,7 @@ import { describe, it, expect } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import type { RouteHandler } from '@objectstack/spec/contracts';
+import { InstalledPackageSchema } from '@objectstack/spec/kernel';
 import { registerPackageRoutes } from './package-routes.js';
 
 const PKGS = '/api/v1/packages';
@@ -126,25 +127,45 @@ const DB_BASE = 'com.acme.mybase';
 
 
 /**
- * Seat a value on every DECLARED-BUT-UNSET field of a record.
+ * The keys the installed-package RECORD declares, read from the record schema
+ * ITSELF rather than typed out here.
  *
- * `installPackage` leaves the optional lifecycle fields as own properties
- * holding `undefined`, and {@link definedKeys} — correctly — cannot see a key
- * the wire could never carry. The consequence was MEASURED, and it is the
- * reason this helper exists: over a bare install the coverage assertion below
- * observed only 4 of the record's 12 declared fields, and deleting
- * `installedVersion` from the door's allowlist left this gate GREEN. A gate
- * blind to two thirds of the surface it names is the defect it was written to
- * catch, one level up.
+ * ⚠️ Read this before mistaking it for the design the originating card
+ * rejected. What was weighed and rejected there is deriving the **production
+ * allowlist** from `packages/spec` — that would publish a newly declared field
+ * automatically, making the served surface a side effect of a schema edit. The
+ * allowlist stays hand-written and is untouched by this file. What is derived
+ * here is the TEST's EXPECTATION, which is the card's own wording for the
+ * detector: "the projected key set ⊇ the producer's stamped/**declared** key
+ * set minus an explicit, annotated exclusion list". Deriving the expectation is
+ * what turns a newly declared field into a red test — an explicit decision at
+ * the door — instead of a silent omission. It adds no import edge either:
+ * `@objectstack/spec` is already a runtime dependency of this package.
  *
- * The fill is DERIVED from the record's own key set — every own key whose value
- * is `undefined` gets one — so this is still not a hand-written list of field
- * names, and a field added to the record tomorrow is seated without an edit
- * here. The values are deliberately meaningless: this gate compares KEY SETS,
- * and what each field must CONTAIN is pinned by that field's own tests.
+ * Measured, and the reason this exists at all: `installPackage` writes only the
+ * fields an install can know (`manifest`, `status`, `enabled`, `installedAt`,
+ * `updatedAt`, `settings`). The five lifecycle fields the record also declares
+ * — `installedVersion`, `previousVersion`, `statusChangedAt`, `errorMessage`,
+ * `upgradeHistory`, `registeredNamespaces` — are simply ABSENT from a freshly
+ * installed record, so a gate that watched only the producer's live output
+ * could not see them dropped: deleting `installedVersion` from the allowlist
+ * left this gate GREEN on its first ablation.
+ */
+const DECLARED_RECORD_KEYS: readonly string[] = Object.keys(
+  (InstalledPackageSchema as unknown as { shape: Record<string, unknown> }).shape,
+);
+
+/**
+ * Give every DECLARED field a value on this record, so the door can be observed
+ * either carrying it or dropping it.
+ *
+ * Without this the coverage assertion silently shrinks to the handful of fields
+ * a fresh install happens to write, while reading as though it covered the
+ * record. The values are deliberately meaningless — this gate compares KEY
+ * SETS, and what each field must CONTAIN is pinned by that field's own tests.
  */
 function seatDeclaredFields(record: Record<string, unknown>): void {
-  for (const k of Object.keys(record)) {
+  for (const k of DECLARED_RECORD_KEYS) {
     if (record[k] === undefined) record[k] = `__seated__${k}`;
   }
 }
@@ -342,13 +363,19 @@ describe('GATE: REST GET /packages carries every key the producer stamps', () =>
 
     expect([...perRow.keys()].sort()).toEqual([DB_BASE, CODE_PROJECT, SYSTEM_SCOPED].sort());
 
-    // Every declared slot on the record must be OBSERVABLE, or the coverage
-    // assertion silently shrinks to whatever the fixture happened to populate.
-    // Measured before `seatDeclaredFields` existed: 8 of 12 declared fields sat
-    // at `undefined`, and deleting one of them from the allowlist left this
-    // gate green. Stated as a property of the record — never as a count.
+    // The schema read must have WORKED. `InstalledPackageSchema` is a lazy
+    // proxy; a read that silently produced `{}` would make DECLARED_RECORD_KEYS
+    // empty and every assertion below vacuous, in a suite that stayed green.
+    expect(DECLARED_RECORD_KEYS.length).toBeGreaterThanOrEqual(8);
+    expect(DECLARED_RECORD_KEYS).toContain('installedVersion');
+
+    // …and every declared slot must be OBSERVABLE on the record, or the
+    // coverage assertion silently shrinks to whatever a fresh install wrote.
+    // Measured before `seatDeclaredFields` read the schema: 6 of the 12
+    // declared fields were absent from the record, and deleting one of them
+    // from the allowlist left this gate green.
     const record = registry.getPackage(CODE_PROJECT) as unknown as Record<string, unknown>;
-    const unobservable = Object.keys(record).filter((k) => record[k] === undefined);
+    const unobservable = DECLARED_RECORD_KEYS.filter((k) => record[k] === undefined);
     expect(unobservable, 'declared fields the fixture leaves unobservable').toEqual([]);
 
     const recordKeys = definedKeys(record);
