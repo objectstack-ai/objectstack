@@ -539,7 +539,7 @@ section above). See the
 | `lookup` | `reference` | Foreign key integrity |
 | `user` | — | Lookup specialized to `sys_user`; `multiple: true` stores an id array |
 | `master_detail` | `reference` | Cascade delete, ownership |
-| `tree` | `reference` | Self-referencing; no automatic cycle check |
+| `tree` | — | Self-referencing; no automatic cycle check |
 | `image` | — | Common image MIME types; `multiple` for many |
 | `file` | — | Any file type; `multiple` for many (no field-level upload config) |
 | `avatar` | — | Single image, typically square |
