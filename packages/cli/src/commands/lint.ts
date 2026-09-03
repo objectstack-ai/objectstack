@@ -295,15 +295,17 @@ export function lintConfig(config: any, opts: LintConfigOptions = {}): LintIssue
     { key: 'dashboards', label: 'Dashboard' },
     { key: 'flows', label: 'Flow' },
     // An action's engine registration key is `<objectName>:<name>`, NOT the
-    // bare name: `ObjectQLPlugin.actionObjectKey` (and the runtime's
-    // `standaloneActionObjectName`, kept in lockstep with it) resolve the
-    // object half to `objectName`, falling back to the canonical object-less
-    // key `'global'` (#3913). So one package legitimately declaring
-    // `log_call` on each of five objects occupies five distinct keys and
-    // nothing shadows anything — deduping those on the bare name produced 12
-    // fixed false positives per `objectstack lint` run on HotCRM, growing
-    // linearly with the object count (#5510), and "just rename one" would have
-    // broken the shared i18n keys that shape depends on (#592).
+    // bare name: `standaloneActionOwnerKey` in `@objectstack/objectql` — the
+    // single implementation, called directly by the ObjectQL plugin and
+    // re-exported by the runtime, whose `standaloneActionObjectName` is now a
+    // delegating alias for it — resolves the object half to `objectName`,
+    // falling back to the canonical object-less key `GLOBAL_ACTION_OBJECT_KEY`
+    // (`'global'`, #3913). So one package legitimately declaring `log_call` on
+    // each of five objects occupies five distinct keys and nothing shadows
+    // anything — deduping those on the bare name produced 12 fixed false
+    // positives per `objectstack lint` run on HotCRM, growing linearly with the
+    // object count (#5510), and "just rename one" would have broken the shared
+    // i18n keys that shape depends on (#592).
     //
     // `'global'` rather than an inert sentinel like `''` is deliberate: it is
     // the literal the engine really registers under, so an action declared on
