@@ -4456,9 +4456,10 @@ export class AuthManager {
    * entirely and `EmailService`'s ladder resolves its documented `en-US`
    * default exactly as before.
    *
-   * Still NOT a per-recipient stored preference: `sys_user` carries no locale
-   * column and the 2026-09-02 ruling continues to defer one. What is read is
-   * the language this request expressed, not a profile.
+   * Still NOT a per-recipient stored preference: `sys_user.locale` exists
+   * since #13881 (ruling 2026-09-01) but auth mail does not read it yet
+   * (#14762 for this send; #14641 for invitations). What is read is the
+   * language this request expressed, not a profile.
    */
   private async sendChangeEmailNotice(
     from: { email: string; name?: string; id?: string },
@@ -4665,8 +4666,9 @@ export class AuthManager {
    * `kernel:ready` and on every settings change (same pattern as
    * {@link setAppName}). Unset ⇒ the built-in English text.
    *
-   * Per-user locale is not resolved yet — `sys_user` carries no locale
-   * column; when it grows one, resolution should prefer it (#2815).
+   * Per-user locale is not resolved here yet — `sys_user.locale` exists since
+   * #13881 (ruling 2026-09-01) and the messaging channels read it per
+   * recipient; auth SMS adopting it is #14762 (supersedes the #2815 note).
    */
   setDefaultSmsLocale(locale: string | undefined): void {
     this.smsLocale = locale?.trim() || undefined;

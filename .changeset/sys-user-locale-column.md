@@ -30,7 +30,8 @@ D4, so the standard edit form does not advertise a write the runtime refuses)
 and is NOT added to `MANAGED_EXTENSION_EDITABLE_FIELDS` or to the ADR-0092 D2
 self-service whitelist (`{name, image}`). Widening that whitelist so a user can
 set their own language is a security-boundary decision recorded on #13881, not
-made here; until then the column is written by admin / system surfaces.
+made here; until then the column is written only by system-context callers (no
+admin surface writes it today).
 
 Who reads it: the messaging channels, per recipient, after fan-out — see the
 `@objectstack/service-messaging` changeset in the same release.

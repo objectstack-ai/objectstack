@@ -17,9 +17,11 @@
  *
  * ## The chain
  *
- *  1. the recipient's own `sys_user.locale` ({@link RECIPIENT_LOCALE_FIELD}),
- *     read from the SAME `sys_user` row the channel already fetches for the
- *     address (email / phone) — one query per recipient, no second lookup;
+ *  1. the recipient's own `sys_user.locale` ({@link RECIPIENT_LOCALE_FIELD}).
+ *     Email and SMS read it off the SAME `sys_user` row they already fetch
+ *     for the address — one query per recipient, no second lookup there; the
+ *     inbox channel, which never read the row before, makes one read for it
+ *     on the template path only;
  *  2. the deployment default — `II18nService.getDefaultLocale()`, probed
  *     lazily at delivery time by the plugin (`getDefaultTemplateLocale`).
  *
