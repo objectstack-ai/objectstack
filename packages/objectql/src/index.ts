@@ -125,6 +125,20 @@ export {
   MULTI_UPDATE_HOOK_KEY_DIVERGENCE_STATUS,
   divergingHookPayloadKeys,
 } from './multi-update-hook-key-divergence.js';
+// [#14010] `Hook.runAs` — the declared execution identity of a hook's `ctx.api`
+// data operations. The refusal a `runAs: 'user'` hook raises when its trigger
+// resolved no user (ADR-0112 code + status), the api that raises it, and the
+// reader the wrapper applies per hook.
+export {
+  HookUnscopedDataAccessError,
+  HOOK_UNSCOPED_DATA_ACCESS_CODE,
+  HOOK_UNSCOPED_DATA_ACCESS_STATUS,
+  HOOK_RUN_AS_VALUES,
+  UnscopedHookApi,
+  hookRunAs,
+  deriveHookApi,
+} from './hook-run-as.js';
+export type { HookRunAs, HookRunAsRef, RunAsDerivableApi } from './hook-run-as.js';
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Hosts that boot the engine themselves can catch it to
 // render their own "database unreachable" message.

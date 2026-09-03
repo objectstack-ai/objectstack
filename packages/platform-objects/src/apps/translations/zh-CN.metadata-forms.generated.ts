@@ -551,6 +551,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Timeout",
         helpText: "Abort the hook after N milliseconds"
       },
+      runAs: {
+        label: "运行身份",
+        helpText: "ctx.api 数据操作的身份：inherit 继承触发写入的上下文（默认）、system 提权、user 钉到触发用户"
+      },
       condition: {
         label: "条件",
         helpText: "可选公式——求值为 false 时跳过该钩子"

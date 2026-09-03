@@ -71,7 +71,11 @@
  *     permissions" as part of the first-hook vocabulary, which no document
  *     teaches and #5945's ruling did not authorize. The engine's own privileged
  *     writers reach it as the engine, not as a hook. Declaring it is a
- *     maintainer call, not a measurement.
+ *     maintainer call, not a measurement. Since #14010 the DECLARED way for a
+ *     hook to run its data operations elevated is `Hook.runAs: 'system'`
+ *     (`data/hook.zod.ts`), which the engine applies to this very `api` on
+ *     both the in-process and the sandboxed surface — so an author never
+ *     needs `sudo()` here, and the sandbox's lack of it stops being a trap.
  *   - The discrete `beginTransaction` / `commitTransaction` / `rollbackTransaction`
  *     trio, which exists for the sandbox RUNNER — it drives a body's
  *     `ctx.api.transaction(fn)` across host event-loop turns where the ambient
