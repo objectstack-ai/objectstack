@@ -527,8 +527,6 @@ export const zhCNGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_two_factor.fields.locked_until.label": "c7f013ad9b7208d2",
   "objects.sys_two_factor.fields.verified.help": "0d351ba4c31608c2",
   "objects.sys_two_factor.fields.verified.label": "866e3a245ef04734",
-  "objects.sys_user.fields.locale.help": "51a0ce37d494be54",
-  "objects.sys_user.fields.locale.label": "92b39430e88d3b51",
   "objects.sys_user.fields.manager_id.help": "a53dec9ccd9d131f",
   "objects.sys_user.fields.primary_business_unit_id.help": "e01690f4a9b83956",
   "objects.sys_view_definition.fields.id.label": "00b0385c9c152888",
