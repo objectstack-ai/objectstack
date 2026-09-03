@@ -138,6 +138,15 @@ export class DbJobAdapter implements IJobService {
    * later tick during which a business-level de-duplication marker could win, so
    * every replica's copy lands inside the same short window.
    *
+   * **State the guarantee WITH its window.** The lock `CronJobAdapter.runScheduled()`
+   * takes is held for the duration of the fire, not for the deadline — its
+   * mutual-exclusion window is the handler's runtime. So the routing above
+   * de-duplicates *concurrent* fires: exactly-once per deadline holds only
+   * when replica clocks agree to within that window (NTP-synced deployments,
+   * the normal case). A replica whose clock lags past the window finds the
+   * lock already released and reruns the job, and `once` is the sharpest case
+   * because there is no later tick to self-correct that away.
+   *
    * **`once` is AT-MOST-ONCE per cluster, and deliberately so** (maintainer
    * ruling 2026-09-01). Election decides *who* fires, never *that* the fire
    * survives: there is no second deadline, so a leader that dies mid-fire loses

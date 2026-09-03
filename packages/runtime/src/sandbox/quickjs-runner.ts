@@ -411,11 +411,22 @@ export class QuickJSScriptRunner implements ScriptRunner {
           const value = resStr === 'null' ? undefined : safeJsonParse(resStr);
           // Capture mutated ctx.input so the host can write through.
           const mutatedInput = readCtxInputJson(vm);
+          // …and, on the hook path, WHICH of those keys the body actually
+          // wrote (#14758), so the write-back carries the body's own key set
+          // rather than re-asserting the whole dump onto the engine's payload.
+          const mutatedInputKeys =
+            args.origin.kind === 'hook' ? readInputWritesJson(vm) : undefined;
           // …and the ctx.record writes the host will NOT write through, so it
           // can say so instead of dropping them silently (#4345).
           const droppedRecordWrites =
             args.ctx.record !== undefined ? readRecordWritesJson(vm) : undefined;
-          return { value, mutatedInput, droppedRecordWrites, durationMs: Date.now() - start };
+          return {
+            value,
+            mutatedInput,
+            mutatedInputKeys,
+            droppedRecordWrites,
+            durationMs: Date.now() - start,
+          };
         }
 
         const budget = budgetError(pumps);
@@ -858,6 +869,115 @@ export class QuickJSScriptRunner implements ScriptRunner {
       throw new SandboxError(`failed to install ctx.api.transaction: ${formatErr(msg)}`);
     }
     sugar.value.dispose();
+
+    // [#14758] The hook path's INPUT write-recorder — the instrument that lets
+    // `applyMutationsToInput` carry back the keys the body wrote instead of
+    // every key it could see.
+    //
+    // ## What it repairs
+    //
+    // The write-back's only witness used to be `readCtxInputJson`'s dump, which
+    // is the WHOLE `ctx.input`, touched or not. Every key of that dump was then
+    // re-assigned onto the engine's flat-input proxy, and every one of those
+    // assignments is a `set` the #14088 provenance recorder
+    // (`objectql/src/hook-write-provenance.ts`) records. So on the shipped
+    // hook-body path a body that touched NOTHING still "wrote" every payload
+    // key — and #14099's per-row divergence refusal, whose whole criterion is
+    // that recorded key set, could not see a divergence that was there. On D3's
+    // one shared batch payload the outcome depended on the driver's row order:
+    // the row that transitions writes `completed_at` onto the payload, the next
+    // row inherits it, the blanket write-back re-asserts it, both observation
+    // windows match, and the batch proceeds.
+    //
+    // ## Shape copied from the `ctx.record` recorder below, with one inversion
+    //
+    // Same reason it is a recorder and not a post-run dump diff: the traps fire
+    // for computed keys, `Object.assign(ctx.input, …)`, and aliases
+    // (`const i = ctx.input; i.x = 1`), and an idempotent write
+    // (`ctx.input.status = 'done'` on a row already `done`) is a write — which
+    // is exactly the #14088 distinction a value diff cannot make.
+    //
+    // ⛔ The ESCAPE branch is inverted on purpose. `__recordEscaped ⇒ []` is
+    // fail-safe for `record`, where the worst case is an unreported discarded
+    // write. Here `[]` is a TRUSTWORTHY reading — "the recorder was armed and
+    // saw no write" — and narrowing to nothing is the correct answer for it.
+    // The untrustworthy reading is the ABSENT one (`__inputWrites` null or
+    // unreadable), and the host answers that by falling back to today's full
+    // `Object.assign`: narrowing on a key set that cannot speak would silently
+    // drop a write the body really made.
+    //
+    // Installed AFTER the `ctx.dispatch` / `ctx.input.options` graft above, so
+    // the graft's own `defineProperty` is not recorded as a body write. Hooks
+    // only: the action path has no `applyMutationsToInput` counterpart
+    // (`ScriptContext.record`), so there is nothing for a recorder to inform.
+    //
+    // The snippet interpolates no caller data (values crossed via
+    // `setObjectJson`), so a failure here means the VM is broken — fatal, like
+    // the graft and the tx sugar.
+    if (origin.kind === 'hook' && ctx.input !== undefined) {
+      const inputGuard = vm.evalCode(
+        `globalThis.__inputWrites = [];
+         (function () {
+           var snapshot = __ctx.input;
+           if (!snapshot || typeof snapshot !== 'object') {
+             // Nothing to record through; the host falls back to its dump.
+             globalThis.__inputWrites = null;
+             return;
+           }
+           var note = function (k) {
+             if (globalThis.__inputWrites === null) return;
+             // Symbol keys are never payload fields; forward them unrecorded.
+             if (typeof k === 'symbol') return;
+             if (globalThis.__inputWrites.indexOf(k) < 0) globalThis.__inputWrites.push(k);
+           };
+           // Every trap forwards through Reflect and records only what the
+           // forward REPORTED, so a refused write (the frozen, non-writable
+           // 'options' the graft defines) records nothing and still behaves
+           // exactly as it did untrapped.
+           var wrap = function (target) {
+             return new Proxy(target, {
+               set: function (t, k, v) { var ok = Reflect.set(t, k, v); if (ok) note(k); return ok; },
+               defineProperty: function (t, k, d) {
+                 var ok = Reflect.defineProperty(t, k, d); if (ok) note(k); return ok;
+               },
+               deleteProperty: function (t, k) {
+                 var ok = Reflect.deleteProperty(t, k); if (ok) note(k); return ok;
+               },
+             });
+           };
+           var current = wrap(snapshot);
+           // An accessor, not a plain assignment, for the same reason the
+           // record recorder uses one: replacing the input WHOLESALE
+           // ('ctx.input = { status: "done" }') would otherwise swap the proxy
+           // out and leave every later write unrecorded. The replacement's own
+           // keys ARE the write the author is making, so they are noted; keys
+           // the replacement drops are carried by the host's
+           // absence-from-dump deletion leg, unchanged.
+           Object.defineProperty(__ctx, 'input', {
+             configurable: true,
+             enumerable: true,
+             get: function () { return current; },
+             set: function (v) {
+               if (v && typeof v === 'object') {
+                 Object.keys(v).forEach(note);
+                 current = wrap(v);
+               } else {
+                 // Not an object: there is no key set to speak of and the dump
+                 // will not be one either. Say so rather than guess.
+                 globalThis.__inputWrites = null;
+                 current = v;
+               }
+             },
+           });
+         })();`,
+      );
+      if (inputGuard.error) {
+        const msg = vm.dump(inputGuard.error);
+        inputGuard.error.dispose();
+        throw new SandboxError(`failed to install the ctx.input write recorder: ${formatErr(msg)}`);
+      }
+      inputGuard.value.dispose();
+    }
 
     // `ctx.record` is a READ-ONLY snapshot: the action path returns the script's
     // value and never writes the record back, so `ctx.record.x = …` is discarded
@@ -1332,6 +1452,38 @@ function readRecordWritesJson(vm: QuickJSContext): string[] | undefined {
     const r = vm.evalCode(
       `JSON.stringify(globalThis.__recordEscaped ? [] : (globalThis.__recordWrites || null))`,
     );
+    if (r.error) {
+      r.error.dispose();
+      return undefined;
+    }
+    const s = vm.dump(r.value);
+    r.value.dispose();
+    if (typeof s !== 'string' || s === 'null') return undefined;
+    const parsed = safeJsonParse(s);
+    return Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === 'string') : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * [#14758] After the script has settled, dump the keys the write-recorder proxy
+ * saw on `ctx.input` — the keys the BODY assigned, defined or deleted, as
+ * opposed to every key `readCtxInputJson` can see.
+ *
+ * The escape branch is the INVERSE of {@link readRecordWritesJson}'s, and that
+ * is the whole point of having two readers:
+ *
+ *  - `[]` is a real answer here — "the recorder was armed and the body wrote
+ *    nothing" — and the host narrows the carry-back to nothing on it;
+ *  - `undefined` means the recorder cannot speak (never installed, replaced
+ *    with a non-object, or unreadable), and the host falls back to the full
+ *    `Object.assign` it did before this card. Narrowing on a key set that is
+ *    not trustworthy would silently drop a write the body really made.
+ */
+function readInputWritesJson(vm: QuickJSContext): string[] | undefined {
+  try {
+    const r = vm.evalCode(`JSON.stringify(globalThis.__inputWrites || null)`);
     if (r.error) {
       r.error.dispose();
       return undefined;

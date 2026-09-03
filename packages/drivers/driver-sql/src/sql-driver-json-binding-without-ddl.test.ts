@@ -98,6 +98,19 @@ describe.skipIf(!PG_URL)('#10995 — live Postgres, driver told about the object
   let driver: SqlDriver;
   const TABLE = 'os10995_pref';
 
+  // ── Why this beforeAll carries an explicit 60_000 budget (#14213) ──
+  // §1–§3 deliberately reuse the connection this hook opens, so the live cost
+  // of the whole suite is concentrated HERE: a full connect cycle against the
+  // cell's Postgres server plus the out-of-band `create table` in
+  // `migrateOutOfBand(...)`. (The §3 it() below is budgeted separately under
+  // #14100 because it builds a SECOND driver inside its own body.)
+  // ⚠️ A hook inherits `hookTimeout`, NOT `testTimeout`. Measured in this
+  // package's config (which sets neither, so both are vitest's own defaults):
+  // an unbudgeted hook dies at 10000ms ("Hook timed out in 10000ms"), not at
+  // the 5000ms an unbudgeted it() gets — so the 5000ms figure in §3's note
+  // below is correct for that it() and would be wrong for this hook.
+  // ⛔ NOT a claim that this hook is known to time out: it was found by a
+  // per-site AST walk over the package, never by a measured red.
   beforeAll(async () => {
     driver = new SqlDriver(PG_CELL.config());
     await migrateOutOfBand(driver, TABLE);
@@ -105,7 +118,7 @@ describe.skipIf(!PG_URL)('#10995 — live Postgres, driver told about the object
     // CREATE TABLE, no ALTER TABLE and no round-trip — what a `skipSchemaSync`
     // boot now does in place of doing nothing.
     driver.registerObjectMetadata([prefObject(TABLE)]);
-  });
+  }, 60_000);
 
   afterAll(async () => {
     await driver?.disconnect();

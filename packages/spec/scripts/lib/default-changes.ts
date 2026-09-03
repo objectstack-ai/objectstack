@@ -288,5 +288,30 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'surface off, keep `admin: false` (and leave SCIM off); to force it on regardless of '
         + 'SCIM, write `admin: true`; silence keeps following SCIM.',
     },
+    {
+      key: 'data/Field:unique',
+      from: 'false',
+      to: '(none)',
+      reason:
+        'The default became TYPE-CONDITIONAL and the published JSON Schema can only state one '
+        + 'value, so it now states none and the description carries the rule (#13894, maintainer '
+        + 'ruling 2026-08-31 on hotcrm#1301): an `autonumber` field that omits `unique` parses to '
+        + "`unique: 'organization'` — an auto-number is a business identifier, and an identifier "
+        + 'that may repeat is not one — while EVERY other field type still parses to `unique: '
+        + 'false` at the same key position, byte-identical to the `.default(false)` era. The '
+        + 'move is materialized in `FieldSchema`\'s `.overwrite()` tail (the type-conditional '
+        + '`deleteBehavior` precedent) because every driver reads the parsed `unique` value-only '
+        + 'and never sees `type`. Deployed behaviour that moves: an autonumber field with no '
+        + 'authored `unique` gets the NULL-safe tenant-composite unique index '
+        + "`(COALESCE(organization_id, '__global__'), <field>)` on its next serving boot (a plain "
+        + 'unique index on an object with no organization key), and a write that would repeat a '
+        + 'number is refused. A table already holding duplicate auto-numbers cannot take the '
+        + 'index: the SQL driver logs at `error` naming the index and the remedy, the same '
+        + 'boot\'s drift pass names the conflicting key groups with row counts, and `os migrate '
+        + 'plan` reports the blocked `create_index` until the rows are deduplicated (ADR-0120 '
+        + 'D4) — never a silent skip. To keep an autonumber field NON-unique (a display-only '
+        + 'sequence that never identifies a record), write `unique: false` explicitly; to keep '
+        + 'what the schema now does for you, change nothing. Nothing moves for any other type.',
+    },
   ],
 };

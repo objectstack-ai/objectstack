@@ -218,6 +218,15 @@ export class CronJobAdapter implements IJobService {
    * that acquires the per-job lock runs the handler; peers skip. No cluster /
    * in-memory driver => lock always granted => single-node unchanged. Manual
    * `trigger()` bypasses this.
+   *
+   * State the guarantee WITH its window: the lock below is held for the
+   * duration of the fire (acquired here, released in `finally`), so it
+   * de-duplicates *concurrent* fires — its mutual-exclusion window is the
+   * handler's runtime, not the scheduling deadline. Exactly-once per deadline
+   * holds only when replica clocks agree to within that window (the normal
+   * case on an NTP-synced deployment). A replica whose clock lags past the
+   * window finds the lock already released and reruns the job; `once` has no
+   * later tick during which a business-level de-duplication marker could win.
    */
   private async runScheduled(name: string): Promise<void> {
     const record = this.jobs.get(name);

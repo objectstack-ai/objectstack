@@ -959,46 +959,42 @@ const EXEMPT = {
 // sharper instrument, one that also reddens on a wholesale substitution of
 // error IDENTITY at a constant total, which a per-package integer cannot see.
 const TEST_DEBT = {
-  '@objectstack/cli': {
-    errors: 144,
-    note: 'TS7006 x59 (implicit any), TS2835 x56 (NodeNext extensions), TS2339 x24, TS2307 x3, TS18046 x2. '
-      + 'LOWERED 146 -> 144 (#13109) and RE-TALLIED above from the same run, not rescaled: '
-      + 'test/platform-page-i18n-parity.test.ts 2 -> 0 (1 TS2835 + 1 TS7006), from adding the `.js` '
-      + 'extension to its one `../src/utils/i18n-extract` import -- the same one-import repair #8612 made '
-      + 'twice below, taken here because that file gained new tests in the same PR and untyped test code '
-      + 'is what let the cascade grow. FULLY ATTRIBUTED: no other file moved, and the per-code and '
-      + 'per-file tallies below were re-measured whole rather than decremented. '
-      + 'The package #7353 was really about, and the largest single thing the exclude-shaped detector could '
-      + 'not see: `tsconfig.json` says `include: ["src"]` and has no `exclude` AT ALL, so there was never an '
-      + 'exclusion to notice, and the test files in the sibling `test/` tree are read by nothing -- not '
-      + '`pnpm --filter @objectstack/cli typecheck`, which exits 0 on this package today, not CI, only this '
-      + 'ledger. 65 hidden files now, up from 56 at #7353 while the layer itself stayed frozen; the other 57 '
-      + 'test files sit under `src` and always compiled, which is why the file count reads 65 and not 122. '
-      + 'Lowered 188 -> 146 (#8612), both numbers measured on main at 35086781b with the closure built and '
-      + 'the two import extensions as the ONLY difference between the two trees, so the -42 is FULLY '
-      + 'ATTRIBUTED with no unexplained remainder: test/i18n-coverage.test.ts 35 -> 0 '
-      + '(1 TS2835 + 34 TS7006) and test/i18n-extract.test.ts 7 -> 0 (1 TS2835 + 6 TS7006), from adding the '
-      + '`.js` extension to one import each. Outside those two files the before and after diagnostic sets '
-      + 'are identical line for line, and nothing new appeared anywhere. '
-      + 'WHAT THE PILE IS NOW MADE OF, and it is not a nearly-graduated one: 56 of the 59 extension-less '
-      + 'relative imports this layer carried are still there, spread over 23 files, and every one of the 59 '
-      + 'surviving TS7006 sits in a file that also carries a TS2835 -- there is no implicit-any anywhere in '
-      + 'this layer without a broken import above it, and the 23 files carrying a TS2835 are EVERY file in '
-      + 'this layer that carries any error at all. Read the top-of-ledger NodeNext note before sizing it: '
-      + 'TS2835 plus the cascade it causes are 115 of the 144 and are 56 repairs, not 115. Concentrated '
-      + 'rather than spread -- test/data-model-rules.test.ts x26, test/i18n-declared-surface-gate.test.ts '
-      + 'x19, test/i18n-section-coverage.test.ts x18, test/commands.test.ts x15, '
-      + 'test/remote-api-commands.test.ts x12 are 90 of it. '
-      + 'One thing #8612 learned that the next extension fix here should expect: collapsing a cascade can '
-      + 'EXPOSE errors rather than only remove them. Fixing the i18n-extract import took that file from 7 '
-      + 'errors to 4 NEW TS2339, because it carried an `(e: { path: string[] })` parameter annotation '
-      + 'written to dodge the implicit-any while the import was broken, and that annotation narrowed the '
-      + 'real `ExpectedEntry` away; deleting the annotation took the file to 0. Those workaround '
-      + 'annotations are part of this debt and are invisible to the count until the import above them '
-      + 'resolves, so budget for a repair being bigger than its TS2835 line suggests. '
-      + 'RECORDED EXACTLY, no bootstrap margin: this layer has never been gated, so the first new error in '
-      + 'it should go red rather than be absorbed.',
-  },
+// ── #14710: `@objectstack/cli` GRADUATED, and it was not paid down ─────────
+//
+// `cli` (144) left this ledger on 2026-09-03, under the same shape as the five
+// above and for the same reason: it now has a `tsconfig.test.json` its
+// `typecheck` script NAMES, so `hidesTests` is false for it and this gate's
+// per-PACKAGE approximation has nothing left to approximate. ⛔ Read that first
+// — a deleted TEST_DEBT entry normally means the errors are gone, and here it
+// does not. Not one of the 144 was repaired: this change edits no test file.
+//
+// ⚠️ This package reached the hidden state by the OTHER SPELLING, which is the
+// reading worth carrying forward: its `tsconfig.json` has no `exclude` at all.
+// It declares `include: ["src"]`, and its 115 test files live in a sibling
+// `test/` tree that the glob simply never reaches. The exclude-shaped detector
+// this ledger's own note describes could not see it; only `hiddenTests` (which
+// walks the whole package rather than the include roots) could.
+//
+// The identical population is now held one level finer, per FILE and per
+// SIGNATURE, in `packages/cli/test-typecheck-debt.json`: **28 errors across 3
+// of the package's 115 test files**, measured at 5a5336b399 with the closure
+// built. The 144 -> 28 step is the config-tier subtraction this ledger's top
+// note describes, attributed in both directions with no remainder: -120 that
+// dissolve under the test program's vitest-matching module semantics (TS2835
+// x56 extension-less relative imports, the TS7006 x59 cascading above them,
+// TS2307 x3, TS18046 x2) and +4 that collapsing the cascade EXPOSED (TS18048
+// x4 in test/i18n-extract-action-description.test.ts, previously masked by an
+// `any` from two unresolved imports). The 24 TS2339 survive the move
+// unchanged, file for file and count for count. The 144 recorded here was
+// exact and stayed exact to the end — re-measured on the way out at
+// 5a5336b399, the raw program reports 144 class for class.
+//
+// ⚠️ Unlike the four packages above, this one's 115 hidden files sat OUTSIDE
+// the build config's `rootDir` (`src`), so the honest program needed
+// `rootDir` widened the way `packages/client`'s test config already does.
+// Measured: with `rootDir` inherited, the same program reports 116 additional
+// TS6059 — a config-tier pile that says nothing about any test.
+
   '@objectstack/mcp': {
     errors: 53,
     note: 'TS18046 x51 -- `json` is of type unknown, one `await res.json()` idiom repeated across four '
@@ -1252,13 +1248,19 @@ const PHANTOM_PIN_DEBT = {};
 // worse than leaving it: COVERED would start passing on a script that never
 // reads `src`, and RECONCILED would then force out a 51-error DEBT entry whose
 // errors are all still there. It graduates with that entry, not before it.
-const UNCHECKED_SOURCE_DEBT = {
-  'packages/cli/test': 'One non-test module, `test/helpers/serve-process.ts`, the spawn harness the '
-    + '`os serve` e2e tests share. It measures 0 errors on its own, and it is not separate debt: it '
-    + 'sits inside the hidden test tree already measured by TEST_DEBT[\'@objectstack/cli\'] (56 of '
-    + 'that package\'s 110 test files are outside `include`). Repairing it means repairing that '
-    + 'layer, so this entry graduates with the TEST_DEBT one rather than before it.',
-};
+//
+// ── #14710: `packages/cli/test` GRADUATED, exactly as its own entry foretold ──
+//
+// The deleted entry said it: "this entry graduates with the TEST_DEBT one
+// rather than before it." Both happened in the same change. `packages/cli`'s
+// `typecheck` now names `tsconfig.test.json`, whose `include` reaches the whole
+// `test/` tree, so `test/helpers/serve-process.ts` — the spawn harness the
+// `os serve` e2e tests share, and the one non-test module in there — is read by
+// a tsc program for the first time. It still measures 0 errors, as the entry
+// recorded, so nothing was repaired to graduate it: the directory stopped being
+// unread source. ⛔ This list only shrinks, and it is empty now; a new entry
+// needs the same justification any DEBT entry needs.
+const UNCHECKED_SOURCE_DEBT = {};
 
 /**
  * GENERATED_COVERED's declared table (#10880) -- the generated `include` roots

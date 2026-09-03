@@ -378,6 +378,13 @@ function validateLedger(text, today) {
 }
 
 /** @returns {{ passed: boolean, lines: string[] }} */
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest() {
   const today = new Date(Date.UTC(2026, 7, 4)); // 2026-08-04, fixed
   const good = [
@@ -487,12 +494,25 @@ function selfTest() {
         (ok ? '' : `\n      got: ${problems.length === 0 ? '(no problems)' : problems.join('\n           ')}`),
     );
   }
+  selfTestReachedVerdict = true;
   return { passed, lines };
 }
 
 function main() {
   if (process.argv.includes('--self-test')) {
-    const { passed, lines } = selfTest();
+    // Read BEFORE destructuring: an early return yields `undefined`, and
+    // destructuring that throws a TypeError before the handshake is reached —
+    // an accidental non-zero exit is not a verdict handshake (#13798).
+    const selfTestResult = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-osv-exemptions self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    const { passed, lines } = selfTestResult;
     console.log('check-osv-exemptions self-test (both directions):');
     for (const line of lines) console.log(line);
     if (!passed) {

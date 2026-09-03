@@ -113,6 +113,117 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// This self-test used to decide success by "no failure was recorded" and
+// nothing else, so "every case held" and "the cases never ran" printed the same
+// line. Closed the way PR #13487 validated on check-doc-authoring: what is
+// pinned is the registered NAMES, not a number. Every section opens with
+// `battery('<name>')`, every assertion is attributed to the battery most
+// recently opened, and the floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3 keeps
+// a total "right" the moment a sibling grows. A set difference says WHICH
+// battery stopped; a count says only that something did.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+//
+// The machinery lives HERE, at module scope, rather than inside the self-test:
+// this self-test's assertion sink is not a block-bodied helper in its body (it
+// is a concise arrow, or a module-scope function), so there is no in-body
+// helper to thread a per-run ledger through. Module scope is safe because the
+// self-test runs once per process, and it is what lets the existing sink route
+// through `registerCase()` with no case rewritten and no assertion changed.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the id derivation, against a scratch tree (no repo state)': 12,
+  'a KNOWN-BAD literal: a command id that resolves to nothing': 3,
+  'the delimiter rule: the six measured noise shapes stay OUT': 6,
+  'the exemption ledger is site-scoped, not blanket': 3,
+  'the ledger self-retires: a listed entry that stops reproducing REDS': 3,
+  'the dispatch-gates declaration (#12016\'s own landing obligation)': 5,
+  'bin names come from declared data': 3,
+  'the live repo returns a verdict, and it is green': 4,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 8;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// ⚠️ None of these helpers is named with a self-test spelling, deliberately and
+// on the record: `check:pm-dispatch-gates` anchors on a top-level declaration
+// whose NAME spells self-test, and every such name owes a row in that gate's
+// COMPOUND_ANCHOR_LEDGER. These are the battery ROSTER's machinery -- they hold
+// no fixtures to mask and read no path literal -- so the accurate name is the
+// one that says `battery`, not the one that would owe a ledger row for a role
+// this code does not have.
+
+/** Cases registered per battery: `battery()` opens one, `registerCase()` files into it. */
+const batteryCases = new Map();
+let openBattery = null;
+
+/** Open a battery. Every assertion after this line is attributed to it. */
+function battery(name) {
+  openBattery = name;
+}
+
+/** Called by the self-test's own assertion sink, once per assertion. */
+function registerCase() {
+  const name = openBattery ?? UNATTRIBUTED_BATTERY;
+  batteryCases.set(name, (batteryCases.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Evaluated after every battery has had its chance and BEFORE the verdict, so
+ * the success line can only be printed by a run in which the set of batteries
+ * that registered assertions EQUALS the set declared.
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batteryCases) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batteryCases.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  return problems;
+}
+
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OCLIF_COMMANDS_DIR = 'src/commands';
 
@@ -453,9 +564,13 @@ let selfTestReachedVerdict = false;
 
 function selfTest() {
   const cases = [];
-  const t = (name, ok, detail = '') => cases.push({ name, ok, detail });
+  const t = (name, ok, detail = '') => {
+    registerCase();
+    return cases.push({ name, ok, detail });
+  };
 
   // -- the id derivation, against a scratch tree (no repo state) --------------
+  battery('the id derivation, against a scratch tree (no repo state)');
   const dir = mkdtempSync(join(tmpdir(), 'cli-cmd-ids-'));
   try {
     const cmds = join(dir, 'src', 'commands');
@@ -499,6 +614,7 @@ function selfTest() {
   }
 
   // -- a KNOWN-BAD literal: a command id that resolves to nothing -------------
+  battery('a KNOWN-BAD literal: a command id that resolves to nothing');
   const ids = new Set(['migrate apply', 'migrate', 'build']);
   const topics = new Set(['migrate']);
   const bad = literalsOn("throw new Error('run \"os migrate nonexistent-command\" first');", ['os']);
@@ -508,6 +624,7 @@ function selfTest() {
     resolveId(literalsOn('`os migrate apply`', ['os'])[0].words, ids, topics) === 'migrate apply');
 
   // -- the delimiter rule: the six measured noise shapes stay OUT ------------
+  battery('the delimiter rule: the six measured noise shapes stay OUT');
   t('Spanish prose ("envios diarios") is not a literal', literalsOn("label: 'Limite de envios diarios',", ['os']).length === 0);
   t('a Python import example is not a literal', literalsOn("import os from 'os';", ['os']).length === 0);
   t('an unquoted sentence is not a literal', literalsOn('`carry an os validate-clean security posture`,', ['os']).length === 0);
@@ -516,11 +633,13 @@ function selfTest() {
   t('a bin name at a quote IS a literal', literalsOn('via "os migrate apply --allow-destructive".', ['os']).length === 1);
 
   // -- the exemption ledger is site-scoped, not blanket ----------------------
+  battery('the exemption ledger is site-scoped, not blanket');
   t('a declared fixture is exempt', isExempt('scripts/docs-audit/check-drift-comment.mjs', 'os demo'));
   t('the SAME text elsewhere is NOT exempt', !isExempt('packages/drivers/driver-sql/src/schema-drift.ts', 'os demo'));
   t('a DIFFERENT text in an exempt file is NOT exempt', !isExempt('scripts/docs-audit/check-drift-comment.mjs', 'os migrate gone'));
 
   // -- the ledger self-retires: a listed entry that stops reproducing REDS ---
+  battery('the ledger self-retires: a listed entry that stops reproducing REDS');
   t('every ledger entry reproduces in the live scan', audit().stale.length === 0,
     audit().stale.map((e) => `${e.file} "${e.text}"`).join('; '));
   t('a fabricated ledger entry would be reported stale',
@@ -546,6 +665,7 @@ function selfTest() {
   // forever and pays itself out as a dev dispatched on a scripts/ card with this gate
   // missing from the brief. Both directions are pinned, and both matter — a missing
   // declaration is a silent gate, a surplus one is a lying gate.
+  battery('the dispatch-gates declaration (#12016\'s own landing obligation)');
   const separatorless = POPULATION_ROOTS.filter((r) => !r.includes('/'));
   t('every whole-root population entry is declared as a subtree (a bare root is refused by '
     + 'hintCovers as too generic, so it needs the `<root>/**` spelling)',
@@ -588,11 +708,13 @@ function selfTest() {
     && new Set(audit().resolved.filter((x) => x.file.startsWith('scripts/')).map((x) => x.file)).size >= 5);
 
   // -- bin names come from declared data ------------------------------------
+  battery('bin names come from declared data');
   t('oclif.bin is read', binNamesOf({ oclif: { bin: 'os' } }).includes('os'));
   t('bin keys join it', binNamesOf({ oclif: { bin: 'os' }, bin: { objectstack: './bin/run.js' } }).includes('objectstack'));
   t('a package with no oclif block declares no bins', binNamesOf({ bin: { foo: 'x' } }).length === 0);
 
   // -- the live repo returns a verdict, and it is green ----------------------
+  battery('the live repo returns a verdict, and it is green');
   const live = audit();
   t('the live audit returns a verdict', live.refusal === null, live.refusal ?? '');
   t('the live repo has at least one CLI package', live.refusal === null && live.clis.length >= 1);
@@ -601,6 +723,10 @@ function selfTest() {
   t('the finding\'s own constant is in the population',
     live.refusal === null && live.resolved.some((x) =>
       x.file === 'packages/drivers/driver-sql/src/schema-drift.ts' && x.text === 'os migrate multi-value-columns'));
+
+  // The floor runs BEFORE the verdict below, so a success line can only be
+  // printed by a run in which every declared battery registered its cases.
+  for (const message of batteryFloorFailures()) cases.push({ name: message, ok: false, detail: '' });
 
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name}${c.detail ? ` -- ${c.detail}` : ''}`);

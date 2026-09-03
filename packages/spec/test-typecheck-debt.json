@@ -22,7 +22,6 @@
       "TS6133: '…' is declared but its value is never read.": 2
     },
     "src/api/rest-server.test.ts": {
-      "TS18048: 'config.patterns.create' is possibly 'undefined'.": 1,
       "TS6133: 'RestApiConfigType' is declared but its value is never read.": 1
     },
     "src/api/router.test.ts": {

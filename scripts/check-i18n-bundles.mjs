@@ -100,6 +100,7 @@ import {
   resolveCliCommandFile,
   workspaceBuildFix,
 } from './cli-build-prerequisite.mjs';
+import { EXIT_FINDINGS, EXIT_PREREQUISITE_NOT_MET } from './import-prerequisite.mjs';
 import { findExtractConfigs, flagsFromDocstring } from './i18n-bundle-surface.mjs';
 
 /**
@@ -971,9 +972,15 @@ if (process.argv.includes('--self-test')) {
  * ONE prerequisite and ONE command to satisfy it — never per package, and never
  * phrased so it can be mistaken for a verdict about the bundles.
  *
- * Exits 1, the same code the two real verdicts use: any wrapper that treats
- * non-zero as failure keeps behaving identically, and inventing a second failure
- * code would be a new contract nobody asked for.
+ * Exits `EXIT_PREREQUISITE_NOT_MET` — the constant `import-prerequisite.mjs`
+ * exports, imported rather than re-picked, and printed by the advisory in the
+ * same stroke. ⛔ NOT a second failure code invented here: 3 is what every
+ * other gate in this repo already means by these two words (#13983 moved the
+ * 45-gate shared frame onto it), and this site was one of the last three
+ * contradicting them. Nothing mechanical changes — every consumer of these
+ * gates treats any non-zero as failure — so the whole benefit is that a reader
+ * who sees only the number learns what the text already says: nothing was
+ * measured, and this is NOT a finding.
  *
  * `scanned` is how many packages the loop had already attempted when the
  * prerequisite fired, and it is what keeps the closing paragraph TRUE. The
@@ -1005,14 +1012,15 @@ function reportPrerequisiteNotMet(headline, detail, options = {}) {
       `\n\n  Fix:  ${fix}\n` +
       alsoFix.map((l) => `        ${l}\n`).join('') +
       `\n${nothingChecked}\n` +
-      `  (Exit code 1 — capture it BEFORE any pipe: \`pnpm check:i18n > /tmp/i18n.log 2>&1; echo "EXIT=$?"\`.\n` +
+      `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:\n` +
+      `  \`pnpm check:i18n > /tmp/i18n.log 2>&1; echo "EXIT=$?"\`.\n` +
       `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
       `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
       `  this gate's own code: \`| tail\` reads to EOF and forwards it, while \`| head -N\` closes the\n` +
       `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
       `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
   );
-  process.exit(1);
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 /**

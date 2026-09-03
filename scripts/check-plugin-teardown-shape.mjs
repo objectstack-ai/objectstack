@@ -150,6 +150,129 @@ const ts = await requireDefaultExport('typescript', () => import('typescript'), 
 import { isEntrypoint } from './invoked-as.mjs';
 import { parseSourceFile } from './ts-parse.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// This self-test used to decide success by "no failure was recorded" and
+// nothing else, so "every case held" and "the cases never ran" printed the same
+// line. Closed the way PR #13487 validated on check-doc-authoring: what is
+// pinned is the registered NAMES, not a number. Every section opens with
+// `battery('<name>')`, every assertion is attributed to the battery most
+// recently opened, and the floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3 keeps
+// a total "right" the moment a sibling grows. A set difference says WHICH
+// battery stopped; a count says only that something did.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+//
+// The machinery lives HERE, at module scope, rather than inside the self-test:
+// this self-test's assertion sink is not a block-bodied helper in its body (it
+// is a concise arrow, or a module-scope function), so there is no in-body
+// helper to thread a per-run ledger through. Module scope is safe because the
+// self-test runs once per process, and it is what lets the existing sink route
+// through `registerCase()` with no case rewritten and no assertion changed.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the positive control: the REAL pre-#10375 revision': 1,
+  'the negative control from the same file, as REPAIRED': 1,
+  'the delegating alias, both directions': 3,
+  'every roster name reds': 4,
+  'the arrow-property spelling, which a method-only scan misses': 1,
+  'a stored callback handle is not a declared teardown': 2,
+  // ⛔ NOT today's count (18). This battery runs exactly one case per
+  // `DELIBERATELY_EXCLUDED` row and has no structural case of its own, and the
+  // roster it reads is complementary to `TEARDOWN_ALIASES`: promoting one name
+  // from the excluded list onto the teardown roster is a legitimate edit that
+  // SHRINKS this list while growing the sibling battery below. A floor at 18
+  // would redden that edit and train the next author to edit the floor. Pinned
+  // instead is the part that does not move with the list: this battery RAN and
+  // at least one excluded name was actually audited.
+  'the exclusions, pinned as cases rather than asserted in prose': 1,
+  'population boundaries': 5,
+  'the ratchet, in both directions': 4,
+  'refusals, each PAIRED with a tree that still returns a verdict': 4,
+  'the unparseable leg, out of process: ts-parse ends the PROCESS': 2,
+  'and the live tree agrees with the checked-in ratchet': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 12;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// ⚠️ None of these helpers is named with a self-test spelling, deliberately and
+// on the record: `check:pm-dispatch-gates` anchors on a top-level declaration
+// whose NAME spells self-test, and every such name owes a row in that gate's
+// COMPOUND_ANCHOR_LEDGER. These are the battery ROSTER's machinery -- they hold
+// no fixtures to mask and read no path literal -- so the accurate name is the
+// one that says `battery`, not the one that would owe a ledger row for a role
+// this code does not have.
+
+/** Cases registered per battery: `battery()` opens one, `registerCase()` files into it. */
+const batteryCases = new Map();
+let openBattery = null;
+
+/** Open a battery. Every assertion after this line is attributed to it. */
+function battery(name) {
+  openBattery = name;
+}
+
+/** Called by the self-test's own assertion sink, once per assertion. */
+function registerCase() {
+  const name = openBattery ?? UNATTRIBUTED_BATTERY;
+  batteryCases.set(name, (batteryCases.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Evaluated after every battery has had its chance and BEFORE the verdict, so
+ * the success line can only be printed by a run in which the set of batteries
+ * that registered assertions EQUALS the set declared.
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batteryCases) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batteryCases.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  return problems;
+}
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 
@@ -541,7 +664,10 @@ let selfTestReachedVerdict = false;
 
 export function selfTest() {
   const cases = [];
-  const t = (name, ok, detail) => cases.push({ name, ok: Boolean(ok), detail });
+  const t = (name, ok, detail) => {
+    registerCase();
+    return cases.push({ name, ok: Boolean(ok), detail });
+  };
 
   const SELF = fileURLToPath(import.meta.url);
   const dir = mkdtempSync(join(tmpdir(), 'teardown-shape-'));
@@ -564,6 +690,7 @@ export function selfTest() {
 
   try {
     // -- the positive control: the REAL pre-#10375 revision ------------------
+    battery('the positive control: the REAL pre-#10375 revision');
     const show = spawnSync('git', ['show', `${POSITIVE_CONTROL.rev}:${POSITIVE_CONTROL.path}`], {
       cwd: REPO_ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
     });
@@ -589,6 +716,7 @@ export function selfTest() {
     );
 
     // -- the negative control from the same file, as REPAIRED ----------------
+    battery('the negative control from the same file, as REPAIRED');
     const repaired = readFileSync(join(REPO_ROOT, POSITIVE_CONTROL.path), 'utf8');
     const postFix = tree('repaired', { [POSITIVE_CONTROL.path.slice(POPULATION_ROOT.length + 1)]: repaired });
     const postFixResult = audit(postFix);
@@ -599,6 +727,7 @@ export function selfTest() {
     );
 
     // -- the delegating alias, both directions -------------------------------
+    battery('the delegating alias, both directions');
     const aliasForward = audit(tree('alias-forward', {
       'a/src/p.ts': plugin('ForwardPlugin', `  async ${KERNEL_HOOK}(): Promise<void> {}\n  async stop(): Promise<void> { await this.${KERNEL_HOOK}(); }`),
     }));
@@ -615,6 +744,7 @@ export function selfTest() {
     t('destroy() with no alias at all stays GREEN', destroyOnly.findings.length === 0, JSON.stringify(destroyOnly.findings));
 
     // -- every roster name reds --------------------------------------------
+    battery('every roster name reds');
     for (const alias of TEARDOWN_ALIASES) {
       const r = audit(tree(`roster-${alias}`, {
         'a/src/p.ts': plugin('RosterPlugin', `  async ${alias}(): Promise<void> {}`),
@@ -623,6 +753,7 @@ export function selfTest() {
     }
 
     // -- the arrow-property spelling, which a method-only scan misses --------
+    battery('the arrow-property spelling, which a method-only scan misses');
     const arrowProp = audit(tree('arrow-prop', {
       'a/src/p.ts': plugin('ArrowPlugin', '  stop = async (ctx: unknown): Promise<void> => { void ctx; };'),
     }));
@@ -630,6 +761,7 @@ export function selfTest() {
       arrowProp.findings.length === 1 && arrowProp.findings[0].alias === 'stop', JSON.stringify(arrowProp.findings));
 
     // -- a stored callback handle is not a declared teardown ----------------
+    battery('a stored callback handle is not a declared teardown');
     const handleWithHook = audit(tree('handle-with-hook', {
       'a/src/p.ts': plugin('HandlePlugin', `  private close?: () => Promise<void>;\n  async ${KERNEL_HOOK}(): Promise<void> { await this.close?.(); }`),
     }));
@@ -643,6 +775,7 @@ export function selfTest() {
       handleAlone.findings.length === 0, JSON.stringify(handleAlone.findings));
 
     // -- the exclusions, pinned as cases rather than asserted in prose ------
+    battery('the exclusions, pinned as cases rather than asserted in prose');
     for (const name of Object.keys(DELIBERATELY_EXCLUDED)) {
       const r = audit(tree(`excluded-${name}`, {
         'a/src/p.ts': plugin('ExcludedPlugin', `  async ${name}(): Promise<void> {}`),
@@ -651,6 +784,7 @@ export function selfTest() {
     }
 
     // -- population boundaries ---------------------------------------------
+    battery('population boundaries');
     const notAPlugin = audit(tree('not-a-plugin', {
       'a/src/p.ts': `import type { Plugin } from '@objectstack/core';\nexport class NotAPlugin implements Disposable {\n  async stop(): Promise<void> {}\n  [Symbol.dispose]() {}\n}\nexport class RealPlugin implements Plugin {\n  name = 'r';\n  async init(): Promise<void> {}\n  async ${KERNEL_HOOK}(): Promise<void> {}\n}\n`,
     }));
@@ -680,6 +814,7 @@ export function selfTest() {
     t('a .d.ts declaration file is not scanned', declarations.refusal === null && declarations.findings.length === 0, JSON.stringify(declarations));
 
     // -- the ratchet, in both directions -----------------------------------
+    battery('the ratchet, in both directions');
     const known = [{ file: 'a/src/p.ts', cls: 'P', alias: 'stop', repair: '#10371' }];
     const exact = judge([{ file: 'a/src/p.ts', cls: 'P', alias: 'stop' }], known);
     t('a finding already on the known list is held, not fresh', exact.fresh.length === 0 && exact.stale.length === 0 && exact.held === 1);
@@ -692,6 +827,7 @@ export function selfTest() {
       renamed.fresh.length === 1 && renamed.stale.length === 1);
 
     // -- refusals, each PAIRED with a tree that still returns a verdict -----
+    battery('refusals, each PAIRED with a tree that still returns a verdict');
     const emptyTree = tree('refuse-empty', {});
     mkdirSync(join(emptyTree, POPULATION_ROOT), { recursive: true });
     const emptyResult = audit(emptyTree);
@@ -727,6 +863,7 @@ export function selfTest() {
       JSON.stringify(unreadable));
 
     // -- the unparseable leg, out of process: ts-parse ends the PROCESS -----
+    battery('the unparseable leg, out of process: ts-parse ends the PROCESS');
     const wreckRoot = tree('refuse-unparseable', {
       ...READABLE,
       'b/src/wreck.ts': 'export class WreckPlugin implements Plugin {\n<<<<<<< HEAD\n  async stop() {}\n=======\n  async destroy() {}\n>>>>>>> other\n}\n',
@@ -742,6 +879,7 @@ export function selfTest() {
       JSON.stringify({ status: parseable.status, out: (parseable.stdout || '').trim() }));
 
     // -- and the live tree agrees with the checked-in ratchet ---------------
+    battery('and the live tree agrees with the checked-in ratchet');
     const live = audit(REPO_ROOT);
     const liveJudgement = live.refusal ? null : judge(live.findings, KNOWN_TEARDOWN_UNREACHED);
     t('the live tree resolves a real population (not zero, not a refusal)',
@@ -752,6 +890,10 @@ export function selfTest() {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+
+  // The floor runs BEFORE the verdict below, so a success line can only be
+  // printed by a run in which every declared battery registered its cases.
+  for (const message of batteryFloorFailures()) cases.push({ name: message, ok: false });
 
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name}${c.detail ? ` -- ${c.detail}` : ''}`);

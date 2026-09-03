@@ -91,6 +91,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       image: {
         label: "头像"
       },
+      locale: {
+        label: "语言",
+        help: "通知使用的首选语言，BCP-47 标签（如 zh-CN、ja-JP）。投递时按收件人读取；未设置时采用部署默认语言。归 objectql 所有（better-auth 不感知此列）。"
+      },
       manager_id: {
         label: "经理",
         help: "This user's direct manager. Forms the reporting chain the `own_and_reports` hierarchy scope walks (ADR-0057 / @objectstack/security-enterprise)."

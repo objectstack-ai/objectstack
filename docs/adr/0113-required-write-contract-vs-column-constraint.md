@@ -16,8 +16,20 @@ verified sites:
 | Meaning | Where it lives today |
 |---|---|
 | a write must provide the value | `objectql/validation/record-validator.ts` |
-| the COLUMN is `NOT NULL` | `driver-sql/sql-driver.ts:4901` — `if (field.required) col.notNullable()` |
-| required-vs-nullable divergence is DRIFT | `driver-sql/schema-drift.ts:249-277` — metadata-required + nullable column ⇒ expected `NOT NULL`, and imposing `NOT NULL` over possibly-null data is the classifier's `destructive` class |
+| the COLUMN is `NOT NULL` | `packages/drivers/driver-sql/src/sql-driver.ts` — `if (field.required) col.notNullable()` |
+| required-vs-nullable divergence is DRIFT | `packages/drivers/driver-sql/src/schema-drift.ts` — metadata-required + nullable column ⇒ expected `NOT NULL`, and imposing `NOT NULL` over possibly-null data is the classifier's `destructive` class |
+
+> ⚠️ **Anchor note (#13556).** The three anchors above were line numbers into
+> `sql-driver.ts` and had rotted; they are file-level anchors now, per the
+> 2026-09-01 ruling on #13556 (line anchors → symbol anchors, resolver-gated).
+> ⛔ Re-anchoring did **not** touch what this table says, and the row about the
+> `NOT NULL` column is **known to be stale about today's code**: the physical
+> constraint now keys off `storage.notNull`, not `field.required` — the inverse
+> predicate. That is a separate defect, carded as
+> [#14193](https://github.com/objectstack-ai/objectstack/issues/14193), and it is
+> deliberately **not** repaired here: this record's Context describes the
+> PRE-decision state, and rewriting it inside an anchor migration would edit a
+> decision record's substance under cover of a formatting change.
 
 Because all three ride one flag, **tightening any invariant on a deployed
 object is a destructive migration, blocked by the very legacy nulls that
@@ -44,7 +56,7 @@ becomes a recognized posture: *new writes must provide; old rows may rest.*
 ### The tri-binding, concretely
 
 Authoring `required: true` on a field of a **new** object is unremarkable: the
-column is created `NOT NULL` (sql-driver.ts:4901), the validator enforces
+column is created `NOT NULL` (packages/drivers/driver-sql/src/sql-driver.ts), the validator enforces
 presence, the form shows the marker, drift never fires. The knob works —
 until the object has deployed data.
 
@@ -127,7 +139,7 @@ without buying into it.
 
 `required: true` + nullable column stops being drift (it is the D1 posture).
 `storage.notNull: true` + nullable column IS drift, destructive class,
-unchanged. The `schema-drift.ts:249` comparison reads the storage property
+unchanged. The `packages/drivers/driver-sql/src/schema-drift.ts` comparison reads the storage property
 instead of `required`.
 
 ### D4 — the UI marker follows the write contract

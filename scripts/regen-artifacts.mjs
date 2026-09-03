@@ -593,6 +593,32 @@ export const NOT_DRIVER_MANAGED = Object.freeze([
       + 'regeneration can only recompute COUNTS from whatever the half-merged tree compiles to, '
       + 'never re-derive which of those counts a human already chose to defer, or why.',
   },
+  // ── #14710: `packages/cli`'s starting ledger, same instrument ──────────────
+  //
+  // The seventh row this manifest adds for the mechanism, and the SMALLEST
+  // ledger in the family — 28 errors over 3 of the package's 115 test files.
+  // Size is the reason to read this row rather than skim it, and the reason is
+  // the opposite of the runtime row's above: at 28 errors over 3 files, a
+  // recomputation on a half-merged tree does not read as plausible noise, it
+  // reads as a CLEAN result. Three quarters of this package's test files that
+  // carry errors would have to vanish for the ledger to look wrong, and a
+  // recompute that silently drops an entry looks exactly like a repair somebody
+  // landed. The package's `TEST_DEBT` entry in
+  // `scripts/check-type-check-coverage.mjs` graduated in the same change, so
+  // this file is now the ONLY record of that population anywhere in the tree.
+  {
+    path: 'packages/cli/test-typecheck-debt.json',
+    gen: 'gen:test-typecheck-debt',
+    owner: '@objectstack/cli',
+    why:
+      'a SHRINK-ONLY ratchet — see `packages/plugins/plugin-approvals/test-typecheck-debt.json` '
+      + 'above; same generator, same per-package ledger, same reason a merge must never recompute '
+      + 'it: the half-merged tree is not the tree whose type errors this file records, so a file '
+      + 'that GAINED errors would enter the ledger as merge noise instead of as red. This ledger '
+      + 'is the SMALLEST in the family (28 errors over 3 files) and that cuts the other way from '
+      + 'the runtime row above: a recomputed value here reads as a clean, plausible REPAIR rather '
+      + 'than as noise, and a dropped entry is indistinguishable from a file somebody fixed.',
+  },
   {
     path: 'packages/sdui-parser/objectui-lockstep.json',
     gen: 'gen:sdui-lockstep',
