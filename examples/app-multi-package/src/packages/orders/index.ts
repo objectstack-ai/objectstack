@@ -12,10 +12,21 @@ import { defineStack } from '@objectstack/spec';
  *  - It declares the **same namespace** as the App package. That is what
  *    ADR-0130 D1 buys: co-ownership of one namespace inside one artifact, so
  *    `crm_order` keeps its name instead of becoming `orders_order`.
- *  - It carries **no `scope` key**. `ManifestSchema.scope` defaults to
- *    `'project'`, so a scope-less module is the row that separates the server's
- *    writability verdict from a client-side `scope !== 'project'` heuristic
- *    (ADR-0070 D2 / ADR-0130 Consequences row 6).
+ *  - Its served row carries **`writable: false`** — the server's OWN verdict
+ *    (ADR-0070 D2 / ADR-0130 Consequences row 6). `isWritablePackage` reads
+ *    `engine.manifests` FIRST, so a package booted from an artifact is
+ *    read-only whatever its `scope` says.
+ *
+ * ⛔ This module is NOT a scope-less row, and no package of a compiled artifact
+ * can be. It authors no `scope` key, but `defineStack` parses every `packages[]`
+ * entry through `ManifestSchema` (`spec/src/stack.zod.ts`,
+ * `ArtifactPackageEntrySchema`), whose `scope` is `.default('project')` — so
+ * `dist/objectstack.json` and every served row carry `scope: 'project'`. A
+ * genuinely scope-less row exists only where a manifest reaches the registry
+ * WITHOUT that parse: a marketplace / offline-imported package (booted, hence
+ * read-only) or a Studio-created base via `POST /api/v1/packages` (writable).
+ * That discriminating pair is pinned in
+ * `packages/runtime/src/domains/packages-writable-verdict.test.ts`, not here.
  *
  * `crm_order.account` looks up an object this package does NOT own. That is
  * legal and is the whole point of the split: cross-package lookups are accepted
