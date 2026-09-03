@@ -164,6 +164,23 @@ exist is any path from a suite to it. Adding a `BootOptions` field would
 therefore also mean threading it through this call — it is not a one-line
 forward of something already being passed.
 
+**A second, un-asked-for finding, relevant to which seam triage picks:** the
+bare `new ObjectKernel()` call in `harness.ts` is not an isolated case.
+Repo-wide, `new ObjectKernel(` appears **85 times across 62 files**
+(`grep -rn 'new ObjectKernel(' --include='*.ts' packages examples`), most of
+them test files constructing a kernel directly rather than through
+`packages/verify`'s harness — `packages/objectql/src/kernel-factory.ts:35`
+(the factory objectql's own suite boots through, contributing 11,326 of the
+61,980 structured lines measured here — 18.3% of the total) is one of them,
+with the identical `new ObjectKernel()` — no config — shape. **A `BootOptions`
+field on `packages/verify`'s harness would quiet only the suites that boot
+through that one harness; it would not reach objectql's kernel construction,
+or any of the other ~60 call sites, without each of them being found and
+updated individually.** An env-level default read inside the kernel or logger
+construction itself (`NO_COLOR`'s existing pattern in the same file is the
+precedent) would cover all 85 call sites without touching any of them. This
+does not choose a seam — it changes what "choosing" would cost.
+
 ### `OS_LOG_LEVEL` is resolved in the CLI and read nowhere below it
 
 Repo-wide, `OS_LOG_LEVEL` is read in exactly one non-test source file:
