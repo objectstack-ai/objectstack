@@ -8564,12 +8564,12 @@ export const MANDATORY_TIER_GLOBS = [
   {
     glob: '.claude/agents/os-dev.md',
     tier: CONTRACT_REVIEW_TIER,
-    why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and it carries an enforced copy of the decision frame',
+    why: 'clause ① (2026-08-20 narrowing): the dev-agent definition is protocol semantics — every dispatched dev runs under it, and receives the decision frame the PM pastes into its prompt at dispatch time rather than carrying a copy of its own',
   },
   {
     glob: 'skills/objectstack-pm-dispatch/SKILL.md',
     tier: CONTRACT_REVIEW_TIER,
-    why: 'clause ① (2026-08-20 narrowing): the published PM skill carries two enforced copies of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
+    why: 'clause ① (2026-08-20 narrowing): the published PM skill carries one enforced copy of the decision frame (check:skill-frame-sync COPIES) and ships verbatim to third-party projects',
   },
 ];
 
@@ -16397,7 +16397,7 @@ function selfTest() {
   const fableOf = (paths) => deriveTier(paths);
   t('the pm-dispatch SKILL.md MAIN file is fable-mandatory', fableOf(['.claude/skills/pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('the dev-agent definition is fable-mandatory', fableOf(['.claude/agents/os-dev.md']).tier === CONTRACT_REVIEW_TIER);
-  t('the published PM skill (two enforced frame copies) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
+  t('the published PM skill (one enforced frame copy) is fable-mandatory', fableOf(['skills/objectstack-pm-dispatch/SKILL.md']).tier === CONTRACT_REVIEW_TIER);
   t('a pm-dispatch REFERENCES path carries NO path mandate — the 2026-08-20 narrowing, inverted from the pre-narrowing pin', fableOf(['.claude/skills/pm-dispatch/references/review-checklist.md']).mandatory === false);
   const mixed = fableOf(['packages/spec/src/data/filter.zod.ts', '.claude/agents/os-dev.md']);
   t('a MIXED surface is mandatory — one mandatory path decides, ordinary paths do not dilute it', mixed.mandatory && mixed.tier === CONTRACT_REVIEW_TIER);
@@ -17935,6 +17935,27 @@ function selfTest() {
       ['--tier', '--residue', '--commands', '--json', '--ran', '--repo', '--changed', '--self-test']
         .every((flag) => USAGE_LINE.includes(flag)),
     );
+    // ⭐ #14870 — the mirror-image fix: `--changed` sat OUTSIDE the alternation
+    // as a whole-invocation alternative, which reads as excluding every mode
+    // beside it, though `--changed --commands` is legal and answers (CONTROL
+    // below). Moved to the position `<path> ...` occupies, the other path
+    // source it stands in for.
+    t(
+      '⭐ the usage line no longer presents --changed as a whole-invocation alternative that takes no other flag (#14870)',
+      !USAGE_LINE.includes('] | --changed | --self-test'),
+    );
+    t(
+      '…and it still offers --changed where <path> ... sits, combining with the modes before it',
+      USAGE_LINE.includes('[<path> ... | --changed]'),
+    );
+    // CONTROL: --changed really does combine with a stdout-shape flag — the
+    // usage-line fix above would otherwise be cosmetic on a refusal that does
+    // not exist.
+    const changedCommandsRun = runCli(['--changed', '--commands']);
+    t(
+      'CONTROL: --changed --commands is legal and answers, so the moved usage line describes a real combination',
+      changedCommandsRun.status === 0 && (changedCommandsRun.stdout ?? '').length > 0,
+    );
   }
 
   // ── END TO END: the CI-measured family, on the card it was measured on (#14004)
@@ -18304,6 +18325,14 @@ const invokedDirectly = isEntrypoint(import.meta.url);
  * ⛔ Deleting `[--residue]` instead would understate it — the flag really is
  * legal with the other three, and with the plain human rendering.
  *
+ * `--changed` had the mirror-image problem: it sat OUTSIDE the alternation as
+ * a whole-invocation alternative, which reads as excluding every member next
+ * to it — `--commands`/`--json` included, though `--changed --commands` is
+ * legal and answers (it derives the path list `<path> ...` would otherwise
+ * supply, and nothing more). Moved to the position `<path> ...` occupies, the
+ * other path source it stands in for, so the line no longer implies a refusal
+ * the argv chain does not make (#14870).
+ *
  * A CONSTANT rather than a literal at the print site, because the pin belongs
  * beside the refusals it mirrors: reaching the print site needs a checkout
  * where `changedPathsFromGit()` refuses, and a pin that cannot be run in the
@@ -18312,7 +18341,7 @@ const invokedDirectly = isEntrypoint(import.meta.url);
 const USAGE_LINE =
   'usage: node scripts/pm/dispatch-gates.mjs'
   + ' [--tier | [--residue] [--commands | --json | --ran <file>]]'
-  + ' [--repo owner/name] [<path> ...] | --changed | --self-test';
+  + ' [--repo owner/name] [<path> ... | --changed] | --self-test';
 
 /**
  * Executed only as a CLI. Importing this module must have NO side effect.
