@@ -58,8 +58,8 @@ for both corollaries.
 | `capability` | 12 | 0 | 0 | 0 | 0 | 12 |
 | `qa` | 4 | 0 | 0 | 5 | 0 | 9 |
 | `manifest` | 23 | 0 | 1 | 15 | 0 | 39 |
-| `crud_endpoints` | 6 | 0 | 0 | 5 | 0 | 11 |
+| `crud_endpoints` | 6 | 0 | 0 | 2 | 0 | 8 |
 | `metadata_endpoints` | 6 | 0 | 0 | 2 | 0 | 8 |
 | `batch_endpoints` | 5 | 0 | 0 | 2 | 0 | 7 |
-| `route_generation` | 0 | 0 | 0 | 6 | 0 | 6 |
-| **total** | **844** | **5** | **1** | **89** | **10** | **949** |
+| `route_generation` | 0 | 0 | 0 | 4 | 0 | 4 |
+| **total** | **844** | **5** | **1** | **84** | **10** | **944** |
