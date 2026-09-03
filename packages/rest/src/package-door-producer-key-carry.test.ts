@@ -177,13 +177,39 @@ function realProducer(registry: SchemaRegistry): ObjectStackProtocolImplementati
     ]),
     // No `sys_metadata` overlay in this fixture: the subject is the registry
     // half's key set, and an overlay row would only add rows, not keys.
+    //
+    // `find` is the ONLY engine verb `getMetaItems` reaches (the rest of the
+    // read goes through `engine.registry`, which is real here). Deliberately no
+    // `findOne` double: it belongs to the single-item read this file never
+    // drives, and a fake looser than `ObjectQL.findOne` is how a dead REST route
+    // once shipped with its suite green — so the honest fixture omits the verb
+    // rather than stubbing it. `check:engine-double-contract` enforces that.
     find: async () => [],
-    findOne: async () => null,
   };
   return new ObjectStackProtocolImplementation(engine as never, () => new Map());
 }
 
 type ProducerRow = Record<string, unknown> & { manifest?: { id?: unknown } };
+
+/**
+ * The keys of `row` that a RESPONSE can actually carry.
+ *
+ * `Object.keys` alone is the wrong instrument here and the difference is
+ * measured, not theoretical: `SchemaRegistry.installPackage` seats the optional
+ * record fields as own properties holding `undefined`, so a package installed
+ * without settings still answers `'settings' in record === true`. Both doors
+ * omit undefined-valued fields on purpose ("the bytes are unchanged for every
+ * entry that already served fine"), and `JSON.stringify` would drop them
+ * anyway — so a gate counting them would red on every package for a key no
+ * consumer could ever have observed, and the first repair anyone reached for
+ * would be to widen the exclusion register until the real signal was buried.
+ *
+ * What this gate is about is a key that HAS a value and does not reach the
+ * wire. That is the near-miss (`writable: false` is a value), and it is what
+ * this filter keeps in view.
+ */
+const definedKeys = (row: Record<string, unknown>): Set<string> =>
+  new Set(Object.keys(row).filter((k) => row[k] !== undefined));
 
 /** The row id, keyed the way both the producer and the door key it. */
 function rowId(row: ProducerRow): string | undefined {
@@ -200,7 +226,7 @@ async function producerKeysOf(
   const out = new Map<string, Set<string>>();
   for (const item of (res.items ?? []) as ProducerRow[]) {
     const id = rowId(item);
-    if (id) out.set(id, new Set(Object.keys(item)));
+    if (id) out.set(id, definedKeys(item));
   }
   return out;
 }
@@ -285,7 +311,7 @@ describe('GATE: REST GET /packages carries every key the producer stamps', () =>
 
     expect([...perRow.keys()].sort()).toEqual([DB_BASE, CODE_PROJECT, SYSTEM_SCOPED].sort());
 
-    const recordKeys = new Set(Object.keys(registry.getPackage(CODE_PROJECT) as object));
+    const recordKeys = definedKeys(registry.getPackage(CODE_PROJECT) as unknown as Record<string, unknown>);
     const stamped = [...perRow.get(CODE_PROJECT)!].filter((k) => !recordKeys.has(k));
     expect(stamped).toContain('writable');
   });
@@ -309,7 +335,7 @@ describe('GATE: REST GET /packages carries every key the producer stamps', () =>
     for (const [id, producerKeys] of perRow) {
       const row = served.find((p) => rowId(p) === id);
       expect(row, `package ${id} vanished from the response entirely`).toBeDefined();
-      const dropped = droppedKeys(producerKeys, new Set(Object.keys(row as object)), DELIBERATELY_NOT_SERVED);
+      const dropped = droppedKeys(producerKeys, definedKeys(row as ProducerRow), DELIBERATELY_NOT_SERVED);
       if (dropped.length) report.push(`list ${id}: ${dropped.join(', ')}`);
 
       // The DETAIL door runs the same producer through the same projection, and
@@ -318,7 +344,7 @@ describe('GATE: REST GET /packages carries every key the producer stamps', () =>
       expect(one.status, `GET ${PKGS}/${id}`).toBe(200);
       const detail = one.body?.data?.package as ProducerRow | undefined;
       expect(detail, `package ${id} vanished from the detail response`).toBeDefined();
-      const detailDropped = droppedKeys(producerKeys, new Set(Object.keys(detail as object)), DELIBERATELY_NOT_SERVED);
+      const detailDropped = droppedKeys(producerKeys, definedKeys(detail as ProducerRow), DELIBERATELY_NOT_SERVED);
       if (detailDropped.length) report.push(`detail ${id}: ${detailDropped.join(', ')}`);
     }
 
@@ -343,7 +369,7 @@ describe('GATE: REST GET /packages carries every key the producer stamps', () =>
 
     const res = await drive(mount(protocol), 'GET', PKGS);
     const row = (res.body?.data?.packages ?? []).find((p: ProducerRow) => rowId(p) === CODE_PROJECT);
-    const servedKeys = new Set(Object.keys(row as object));
+    const servedKeys = definedKeys(row as ProducerRow);
 
     // A hypothetical next verdict, stamped by the producer and not yet decided
     // about at this door.

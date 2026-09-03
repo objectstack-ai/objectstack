@@ -194,6 +194,26 @@ function dispatcherOver(registry: SchemaRegistry): HttpDispatcher {
 
 type Row = Record<string, unknown> & { manifest?: { id?: unknown } };
 
+/**
+ * The keys of `row` that a RESPONSE can actually carry.
+ *
+ * `Object.keys` alone is the wrong instrument here and the difference is
+ * measured, not theoretical: `SchemaRegistry.installPackage` seats the optional
+ * record fields as own properties holding `undefined`, so a package installed
+ * without settings still answers `'settings' in record === true`. This door
+ * omits undefined-valued fields on purpose ("the response bytes are unchanged
+ * for every record that was already fine"), and `JSON.stringify` would drop
+ * them anyway — so a gate counting them would red on every package for a key no
+ * consumer could ever have observed, and the first repair anyone reached for
+ * would be to widen the exclusion register until the real signal was buried.
+ *
+ * What this gate is about is a key that HAS a value and does not reach the
+ * wire. That is the near-miss (`writable: false` is a value), and it is what
+ * this filter keeps in view.
+ */
+const definedKeys = (row: Record<string, unknown>): Set<string> =>
+    new Set(Object.keys(row).filter((k) => row[k] !== undefined));
+
 const rowId = (row: Row): string | undefined => {
     const fromManifest = row?.manifest?.id;
     if (typeof fromManifest === 'string') return fromManifest;
@@ -202,7 +222,7 @@ const rowId = (row: Row): string | undefined => {
 
 /** MEASURE the record's key set from the real registry — never a literal. */
 const recordKeysOf = (registry: SchemaRegistry, id: string): Set<string> =>
-    new Set(Object.keys(registry.getPackage(id) as object));
+    definedKeys(registry.getPackage(id) as unknown as Record<string, unknown>);
 
 /**
  * THE DETECTOR. Shared in shape with the REST twin: the keys a door drops are
@@ -259,11 +279,11 @@ describe('GATE: runtime /packages carries every declared and stamped key', () =>
 
             const listed = rows.find((p) => rowId(p) === id);
             expect(listed, `package ${id} vanished from GET /packages`).toBeDefined();
-            const listDropped = droppedKeys(record, new Set(Object.keys(listed as object)), DELIBERATELY_NOT_SERVED);
+            const listDropped = droppedKeys(record, definedKeys(listed as Row), DELIBERATELY_NOT_SERVED);
             if (listDropped.length) report.push(`list ${id}: ${listDropped.join(', ')}`);
 
             const detail = await detailRow(registry, id);
-            const detailDropped = droppedKeys(record, new Set(Object.keys(detail)), DELIBERATELY_NOT_SERVED);
+            const detailDropped = droppedKeys(record, definedKeys(detail), DELIBERATELY_NOT_SERVED);
             if (detailDropped.length) report.push(`detail ${id}: ${detailDropped.join(', ')}`);
         }
 
@@ -292,11 +312,11 @@ describe('GATE: runtime /packages carries every declared and stamped key', () =>
             const record = recordKeysOf(registry, id);
 
             const listed = rows.find((p) => rowId(p) === id) as Row;
-            const listStamps = Object.keys(listed).filter((k) => !record.has(k)).sort();
+            const listStamps = [...definedKeys(listed)].filter((k) => !record.has(k)).sort();
             expect(listStamps, `GET /packages stamp set for ${id}`).toEqual(expectedStamps);
 
             const detail = await detailRow(registry, id);
-            const detailStamps = Object.keys(detail).filter((k) => !record.has(k)).sort();
+            const detailStamps = [...definedKeys(detail)].filter((k) => !record.has(k)).sort();
             expect(detailStamps, `GET /packages/${id} stamp set`).toEqual(expectedStamps);
         }
     });
@@ -310,7 +330,7 @@ describe('GATE: runtime /packages carries every declared and stamped key', () =>
 
         const rows = await listRows(registry);
         const listed = rows.find((p) => rowId(p) === CODE_PROJECT) as Row;
-        const served = new Set(Object.keys(listed));
+        const served = definedKeys(listed);
 
         expect(droppedKeys(recordKeysOf(registry, CODE_PROJECT), served, DELIBERATELY_NOT_SERVED))
             .toEqual(['nextDeclaredField']);
