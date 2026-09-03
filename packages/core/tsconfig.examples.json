@@ -1,0 +1,64 @@
+// The EXAMPLES-layer type-check program (#14613), the sibling-config pattern
+// `packages/plugins/plugin-auth/tsconfig.examples.json` (#10869 / #14386) and
+// `packages/spec/tsconfig.scripts.json` (#5475) already run.
+//
+// WHY IT ARRIVED WITH THE `typecheck` SCRIPT AND NOT BEFORE. Until that script
+// existed this package was COVERED by a `check:type-check-coverage` DEBT entry,
+// and `isUncheckedSourceCandidate` does not ask a ledgered package where its
+// source sits. Declaring `typecheck` flips the package to COVERED-BY-SCRIPT and
+// the gate immediately reported what that ledger had been standing in front of:
+// `packages/core/examples` — 2 non-test source files in NO tsc program at all.
+// So this file is not scope creep beside the script; it is the other half of
+// the same invariant, and the gate refuses the tree without it.
+//
+// WHAT THE DIRECTORY TURNED OUT TO CONTAIN, measured at 84b8190ae: 12 errors
+// over the 2 files, and NEITHER FILE COMPILED AT ALL. Both had a broken module
+// specifier at the top — `kernel-features-example.ts` imported `../index.js`,
+// which resolves above the package root and has never existed, and
+// `phase2-integration.ts` imported `@objectstack/core`, i.e. this package
+// self-referencing by a name it declares in no dependency block. An unresolved
+// import makes every symbol it names `any`, which is where 3 of the 12 TS7006
+// came from; the pile was one third module resolution and two thirds its
+// cascade. That is the same shape #14386 found in plugin-auth's example (a
+// published example that could not resolve, compile or run for anyone who
+// copied it) and the reason the repo's answer to an examples directory is a
+// sibling program rather than a debt row — there is no ledger here, on purpose.
+//
+// The 4 remaining were the wrong SPEC SUBPATH, not a missing spec surface:
+// `PluginHealthCheck`, `HotReloadConfig` and `SandboxConfig` are exported from
+// `@objectstack/spec/kernel`, never from `@objectstack/spec/system`, and this
+// package's own source already imports them from `kernel`
+// (`src/health-monitor.test.ts`, `src/hot-reload.test.ts`). The fourth was a
+// name that exists nowhere: `PermissionSet`. The type the demonstrated API
+// actually consumes is `PluginPermissionSet` — read off
+// `src/security/permission-manager.ts`, whose `registerPermissions` takes it —
+// so the example was corrected against this package's own consumer rather than
+// against a guess. ⛔ NOTHING IN `packages/spec` WAS TOUCHED, and nothing here
+// needed it to be.
+//
+// ⚠️ `rootDir` IS DELIBERATELY NOT RE-DECLARED, and this is where this file
+// departs from the plugin-auth precedent it otherwise copies. That one sets
+// `rootDir: "."` because it redirects no specifier; `tsconfig.json` here
+// redirects `@objectstack/types` to its SOURCE (read its #11663 comment), so
+// `packages/types/src/**` enters any program that reaches this package's `src`
+// — which an example importing `../src/index.js` does. Measured: with
+// `rootDir: "."` this program reports a TS6059 pile naming
+// `packages/types/src/*`; inheriting `..` (= `packages/`, the directory that
+// genuinely contains every file in the program) reports ZERO. Emit is
+// unaffected either way — this program sets `noEmit` and the package builds
+// with tsup.
+//
+// STRICTNESS IS INHERITED and deliberately not relaxed: `strict`,
+// `noUnusedLocals`, `noUnusedParameters`, `noImplicitReturns` and the rest come
+// from the root config through `tsconfig.json`. The directory type-checks clean
+// under them — it enters with ZERO recorded debt and there is no ledger here to
+// record any in. A published example that does not compile is the finding, not
+// a line to write down.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["examples/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
