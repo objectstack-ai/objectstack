@@ -52,7 +52,7 @@ apps too).
 ```
 skills/<skill-name>/
 ├── SKILL.md              # frontmatter + prose guide
-├── references/
+├── references/           # may also hold hand-authored reference files linked from SKILL.md
 │   └── _index.md         # generated pointers into @objectstack/spec sources
 │                         # (pnpm --filter @objectstack/spec gen:skill-refs — do not hand-edit)
 ├── rules/                # (optional) detailed per-topic rule files linked from SKILL.md
