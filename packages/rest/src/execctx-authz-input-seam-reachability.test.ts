@@ -5,17 +5,40 @@
  * FAILURE into the same `undefined` an ABSENT wiring produces — and both feed
  * AUTHORIZATION inputs: the tenancy posture and the ADR-0069 auth gate.
  *
- * ## ⛔ This is a MEASUREMENT file. It repairs nothing and proposes nothing.
+ * ## This file WAS a measurement. The ruling landed, and the pins are re-aimed.
  *
- * #13906 records a code reading ("no severity asserted and no direction
- * measured") and its dispatch order was explicit: the first deliverable is a
- * READING, not a repair. Every assertion below pins what the tree DOES today,
- * driven through the real supplier — including the permissive answers.
- * ⛔ A pin on a permissive answer is a measurement, not an endorsement:
- * whether any of it should CHANGE is a ruling this file deliberately does not
- * take. If a later ruling repairs a seam, invert the pin IN PLACE and quote
- * the superseded text beside it, as `package-door-execctx-fault-reachability`
- * did for #13279/#13476.
+ * Phase 1 pinned what the tree DID — including the permissive answers — under
+ * a standing instruction: "if a later ruling repairs a seam, invert the pin IN
+ * PLACE and quote the superseded text beside it". ⭐ That is what happened, and
+ * every re-aimed assertion below carries its SUPERSEDED text in a comment, so
+ * the change is legible from this file alone rather than only from git.
+ *
+ * **Maintainer ruling, 2026-09-02** (director seat, summon #8; verbatim
+ * 「14324 等我发版，其他同意」 adopting the recommendation as presented):
+ *
+ *  - **Decision 1 — tenancy posture: A + B′.** A: absorb ONLY the branded
+ *    not-registered rejection (`isServiceNotRegisteredError`, the
+ *    discriminator the shipped `objectQLProvider` already uses one layer
+ *    down); every unbranded failure fails closed instead of collapsing into
+ *    the absent-posture path. B′: on the single-kernel provider wiring a
+ *    configured wall-enforcing posture is refused LOUDLY AT BOOT — that
+ *    wiring cannot enforce it, so it must not pretend to. ⛔ Option B (wiring
+ *    a tenancy provider into the single-kernel path) was NOT taken.
+ *  - **Decision 2 — ADR-0069 auth gate: B.** Fail closed in the measured
+ *    window ONLY: `isAuthGateActive()` answered `true` AND the gate re-read
+ *    then failed. ⛔ The common inactive path, and a probe that throws, are
+ *    untouched.
+ *
+ * ⚠️ Both halves are runtime authorization behaviour on the MANUAL FLOOR (the
+ * 2026-08-28 negative-boundary ruling); the ruling above is the control. ⛔ Do
+ * not widen either repair on the strength of this file — the narrowness
+ * controls below exist precisely to make widening fail.
+ *
+ * B′'s own half is driven in `rest-api-plugin-tenancy-posture-boot-refusal
+ * .test.ts`, because it is a BOOT refusal in the plugin rather than a
+ * request-time seam. ⚠️ Consequently §3 below still measures 200 on the
+ * provider wiring and that is CORRECT: B′ refuses the composition at boot, it
+ * does not change `computeExecCtx`, which still never reads a posture there.
  *
  * ## Why this card is not its siblings, and why the direction matters
  *
@@ -123,18 +146,36 @@ describe('[#13906] §0 — the two seams are LIVE on today\'s tree, by symbol', 
   const body = computeExecCtxBody(SOURCE);
   const sites = enumerateAbsorbSites(body);
 
-  it('KNOWN POSITIVE: the tenancy-posture seam still absorbs to undefined', () => {
-    // The card's quoted shape, re-derived: the posture read sits in a try
-    // whose catch assigns undefined, and it dereferences the local `kernel`.
+  it('REPAIRED [decision 1 A]: the tenancy-posture seam keeps not-registered apart from failed', () => {
+    // SUPERSEDED PIN, quoted so the change is legible rather than lost.
+    // Before the 2026-09-02 ruling this asserted the collapse:
+    //     expect(body).toMatch(/catch\s*\{\s*\n\s*tenancyPosture = undefined;/);
+    // i.e. EVERY rejection became `undefined`. It now must not match, because
+    // only the branded not-registered rejection may take that path.
     expect(body).toMatch(/tenancyPosture = effectiveTenancyPosture\(await kernel\.getServiceAsync\('tenancy'\)/);
-    expect(body).toMatch(/catch\s*\{\s*\n\s*tenancyPosture = undefined;/);
-    expect(sites.some((s) => s.includes('tenancyPosture = undefined') || /catch/.test(s))).toBe(true);
+    expect(body).not.toMatch(/catch\s*\{\s*\n\s*tenancyPosture = undefined;/);
+    // The discriminator is the REGISTRY's brand, never message text (#13905).
+    expect(body).toMatch(/if \(!isServiceNotRegisteredError\(err\)\) \{\s*\n\s*throw new AuthzStoreUnavailableError\('tenancy', err\);/);
+    // ⛔ And the WIRING fact is asked of `kernel`'s presence, never inferred
+    // from the returned value — the #13476 discipline this repair inherits.
+    expect(body).toMatch(/let tenancyPosture;\s*\n\s*if \(kernel\) \{/);
   });
 
-  it('KNOWN POSITIVE: the auth-gate seam still absorbs to undefined', () => {
-    expect(body).toMatch(/isAuthGateActive === 'function' && authService\.isAuthGateActive\(\)/);
-    // The comment-only swallow, verbatim class: gate is best-effort.
-    expect(body).toMatch(/catch\s*\{\s*\/\*\s*gate is best-effort/);
+  it('REPAIRED [decision 2 B]: the auth-gate seam fails closed in the measured window only', () => {
+    // SUPERSEDED PIN, quoted:
+    //     expect(body).toMatch(/catch\s*\{\s*\/\*\s*gate is best-effort/);
+    // the comment-only swallow that made a FAILED re-read of an ACTIVE gate
+    // indistinguishable from gate-off. That swallow is gone.
+    expect(body).not.toMatch(/catch\s*\{\s*\/\*\s*gate is best-effort/);
+    expect(body).toMatch(/isAuthGateActive === 'function'\s*\n?\s*&& authService\.isAuthGateActive\(\) === true/);
+    // The re-read is loud, and it is the RAW api call — ⛔ not the swallowing
+    // `getSession` closure, which would re-collapse the very same two facts.
+    expect(body).toMatch(/gatedSession = await api\.getSession\(\{ headers \}\);/);
+    expect(body).toMatch(/throw new AuthzStoreUnavailableError\('auth_gate', err\);/);
+    // ⛔ NARROWNESS CONTROL: the probe-throws leg must STAY absorbed — a host
+    // whose probe faults never declared a gate. If this ever flips, the repair
+    // has widened past the window the ruling named.
+    expect(body).toMatch(/\} catch \{\s*\n\s*gateActive = false;\s*\n\s*\}/);
   });
 
   it('KNOWN NEGATIVE: the engine seam #13476 repaired is NOT flagged as absorb', () => {
@@ -409,14 +450,21 @@ describe('[#13906] §2 — the Layer 0 ex-member refusal, and what a failed post
     expect(authz.userId).toBeUndefined();
   });
 
-  it('⚠️ MEASURED PERMISSIVE: tenancy REGISTERED AND FAILING (factory throws) → the refusal is SKIPPED and the ex-member key is served 200', async () => {
+  it('REPAIRED [decision 1 A]: tenancy REGISTERED AND FAILING (factory throws) → 503 outage, no longer a served 200', async () => {
+    // SUPERSEDED PIN, quoted — this is the row the card was filed for:
+    //     expect(captured.status).toBe(200);
+    //     expect(captured.body?.success).toBe(true);
+    // A tenancy service that could not be CONSTRUCTED skipped the Layer 0
+    // refusal, so an ex-member's org-stamped key was SERVED with full grants.
+    //
     // ONE condition changed from the positive control: the tenancy service
-    // fails to construct — the registry's own unbranded rejection reaches the
-    // seam's catch and the posture becomes `undefined`.
+    // fails to construct — the registry's own UNBRANDED rejection.
     const kernel = kernelWith({ ql: qlWith({ memberships: MEMBER_ROWS }), tenancy: 'factory-throws' });
     const captured = await drive(mount(serverWith(viaKernelManager(kernel))), { 'x-api-key': RAW_EXMEMBER_KEY });
-    expect(captured.status).toBe(200);
-    expect(captured.body?.success).toBe(true);
+    expect(captured.status).toBe(503);
+    // ⭐ And it answers as an OUTAGE, not as a permission denial — the
+    // distinction #13279 ruled on and this repair reuses rather than reinvents.
+    expect(captured.body?.success).not.toBe(true);
   });
 
   it('⚠️ MEASURED PERMISSIVE (mechanism): with the posture absent the resolver ADMITS the ex-member as a full principal', async () => {
@@ -435,19 +483,28 @@ describe('[#13906] §2 — the Layer 0 ex-member refusal, and what a failed post
     expect(authz.tenantId).toBe('org_A');
   });
 
-  it('THE COLLAPSE: "registered and failed" and "never registered" answer byte-identically at the door', async () => {
+  it('THE COLLAPSE IS ENDED: "registered and failed" and "never registered" no longer answer alike', async () => {
+    // SUPERSEDED PIN, quoted — the card's subject in one assertion:
+    //     expect(a).toEqual(b);
+    //     expect(a.status).toBe(200);
     const failed = kernelWith({ ql: qlWith({ memberships: MEMBER_ROWS }), tenancy: 'factory-throws' });
     const absent = kernelWith({ ql: qlWith({ memberships: MEMBER_ROWS }), tenancy: 'unregistered' });
     const a = await drive(mount(serverWith(viaKernelManager(failed))), { 'x-api-key': RAW_EXMEMBER_KEY });
     const b = await drive(mount(serverWith(viaKernelManager(absent))), { 'x-api-key': RAW_EXMEMBER_KEY });
-    // The `unregistered` half is the SUPPORTED single-tenant shape (no wall
-    // exists, an org-stamped key still working is by design). The `failed`
-    // half rides the same answer. That equality is the card's subject.
-    expect(a).toEqual(b);
-    expect(a.status).toBe(200);
+    expect(a).not.toEqual(b);
+    // Registered and FAILED ⇒ the outage it is.
+    expect(a.status).toBe(503);
+    // ⭐ THE OTHER HALF, and the one that keeps this repair honest: the
+    // `unregistered` leg is the SUPPORTED no-tenancy composition (no wall
+    // exists; an org-stamped key working there is by design) and it must be
+    // completely UNCHANGED. A repair that made this 503 too would have broken
+    // every single-tenant embedder — that is why the brand, not the catch, is
+    // the discriminator.
+    expect(b.status).toBe(200);
+    expect(b.body?.success).toBe(true);
   });
 
-  it('SIBLING REFUSAL, same gate: the org-less-key refusal under `isolated` is also skipped when the probe fails', async () => {
+  it('SIBLING REFUSAL, same gate [decision 1 A]: the org-less-key refusal under `isolated` is no longer skipped when the probe FAILS', async () => {
     // `resolveApiKeyAdmission` refuses an org-less key under a walled,
     // non-union posture (`organization_required`) — also only when the
     // posture is PRESENT. Note api-key.ts DOCUMENTS absent-posture-admit as a
@@ -459,9 +516,15 @@ describe('[#13906] §2 — the Layer 0 ex-member refusal, and what a failed post
     const refused = await drive(mount(serverWith(viaKernelManager(healthy))), { 'x-api-key': RAW_ORGLESS_KEY });
     expect(refused.status).toBe(ANONYMOUS_DENY_STATUS);
 
+    // SUPERSEDED PIN, quoted:  expect(admitted.status).toBe(200);
+    // The org-less key was ADMITTED when the posture probe failed. api-key.ts
+    // documents absent-posture-admit as deliberate for THIS refusal — and that
+    // reasoning still holds for a tenancy service that is genuinely ABSENT.
+    // What it never meant to cover is a service that FAILED, which is the only
+    // leg this repair moves.
     const failing = kernelWith({ ql: qlWith({ memberships: MEMBER_ROWS }), tenancy: 'factory-throws' });
-    const admitted = await drive(mount(serverWith(viaKernelManager(failing))), { 'x-api-key': RAW_ORGLESS_KEY });
-    expect(admitted.status).toBe(200);
+    const nowLoud = await drive(mount(serverWith(viaKernelManager(failing))), { 'x-api-key': RAW_ORGLESS_KEY });
+    expect(nowLoud.status).toBe(503);
   });
 });
 
@@ -570,7 +633,7 @@ describe('[#13906] §4 — auth gate: failed probe vs inactive gate', () => {
       .toEqual({ authGate: inactive.ctx?.authGate, blocked: inactive.blocked, wire: inactive.state });
   });
 
-  it('⚠️ MEASURED: a FAILED session re-read under an ACTIVE gate is indistinguishable from the inactive gate — the gated user is NOT blocked', async () => {
+  it('REPAIRED [decision 2 B]: a FAILED session re-read under an ACTIVE gate is now a 503 outage, not a silent admission', async () => {
     // The transient class: identity resolution succeeds (first read), the
     // gate's re-read fails (second read) — a session-backend fault between
     // the two reads of one request.
@@ -585,21 +648,36 @@ describe('[#13906] §4 — auth gate: failed probe vs inactive gate', () => {
         },
       },
     };
-    const inactive = await driveGate(gateWiring({
-      isAuthGateActive: () => false,
-      api: { getSession: async () => ({ user: GATED_USER }) },
+    // SUPERSEDED PINS, quoted — the measured fail-OPEN this card was filed for:
+    //     expect(rereadFails.ctx?.authGate).toBeUndefined();
+    //     expect(rereadFails.blocked).toBe(false);
+    //     expect({ authGate, blocked, wire }).toEqual({ …inactive… });
+    // A gate the deployment DECLARED active vanished silently, deep-equal to
+    // gate-off, and the gated user was admitted with no trace on the wire.
+    await expect(driveGate(gateWiring(auth))).rejects.toMatchObject({
+      code: 'SERVICE_UNAVAILABLE',
+      status: 503,
+      object: 'auth_gate',
+    });
+    // The gate DID probe — the counter is what proves the re-read was reached
+    // and is the anti-vacuity control for this leg: without it a repair that
+    // never probed at all would also "pass".
+    expect(reads).toBeGreaterThan(1);
+  });
+
+  it('NARROWNESS CONTROL [decision 2 B]: a SUCCESSFUL re-read carrying no gate still admits — only the FAILED re-read is loud', async () => {
+    // The window the ruling named has two conditions, and this is the leg that
+    // proves the second one is really required rather than approximated. An
+    // ACTIVE gate whose re-read SUCCEEDS but returns a user with no gate is
+    // not a failure — that user is simply not gated — and must still be served.
+    // ⛔ A repair keyed on "active gate + no authGate value" instead of
+    // "active gate + the re-read THREW" would refuse this caller. It does not.
+    const r = await driveGate(gateWiring({
+      isAuthGateActive: () => true,
+      api: { getSession: async () => ({ user: { id: 'u_ungated' } }) },
     }));
-    const rereadFails = await driveGate(gateWiring(auth));
-    expect(reads).toBeGreaterThan(1); // the gate DID probe — and its failure vanished
-    expect(rereadFails.ctx?.userId).toBe('u_gated');
-    expect(rereadFails.ctx?.authGate).toBeUndefined();
-    expect(rereadFails.blocked).toBe(false);
-    expect({ authGate: rereadFails.ctx?.authGate, blocked: rereadFails.blocked, wire: rereadFails.state })
-      .toEqual({ authGate: inactive.ctx?.authGate, blocked: inactive.blocked, wire: inactive.state });
-    // This user's SESSION says the policy gate applies (user.authGate is set,
-    // the gate is ACTIVE) — the block was lost to the re-read failure, and
-    // the wire carries no trace. The code comment names the design
-    // best-effort; whether that stands is a ruling, recorded on #13906, and
-    // deliberately not taken here.
+    expect(r.ctx?.userId).toBe('u_ungated');
+    expect(r.ctx?.authGate).toBeUndefined();
+    expect(r.blocked).toBe(false);
   });
 });
