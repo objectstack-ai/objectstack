@@ -329,11 +329,15 @@ overlay object holding D3 rows — never as a nullable column on the environment
 
 **What this does to ADR-0126.** Its three regimes were the answer to "how is packaged metadata
 customized without being edited"; the maintainer's answer is now "it is not — pick the install mode".
-Regime O and Regime C are paused for managed content; the activation ledger (`sys_metadata_activation`,
-first consumer packaged flows, #11665) has no writer while the door is sealed and is removed at protocol
-18 unless a measured pull returns (D13, [ADR-0049](./0049-no-unenforced-security-properties.md));
-ADR-0126 D3's "org column reserved, written NULL" on that ledger is withdrawn — a reserved nullable
-tenant column is the shape D1 forbids. Regime E stands. ADR-0126 carries the amendment note.
+Regime O and Regime C are paused for managed content. The Regime C machinery that landed for packaged
+flows — the activation ledger `sys_metadata_activation` and its `execute()`-time consult (#12158, PR
+#12296), the flow clone action (#12156), the ledger convergence (#12419) — reached `main` on and after
+2026-08-26, **after the last release** (17.2.0, tagged 2026-08-23; npm serves 17.2.0). Nothing published
+depends on it, so it is **removed now, before the next release**, not sealed and carried
+([ADR-0049](./0049-no-unenforced-security-properties.md): a shape nobody may use is not shipped
+dormant). Clone without disable would in any case be worse than nothing — a cloned flow fires beside the
+managed one it copied. Epic #12150 closes as superseded. ADR-0126 D3's "org column reserved, written
+NULL" is withdrawn with the ledger. Regime E stands. ADR-0126 carries the amendment note.
 
 **Templates** follow the same two modes: a managed template renders from the registry and is immutable;
 a Studio-authored or template-installed template is environment metadata, editable in Studio. There is
@@ -438,10 +442,10 @@ equivalent; the seeders and projector of D2; `per-organization-catalog.ts` inclu
 `meta-write-org-scope.ts`'s NULL layer, `bootstrap-system-capabilities.ts`; the email-template seed
 and `email-template-provenance.ts`; the `__global__` sentinel and ADR-0120 D3's `COALESCE`;
 `platform-object-tenancy.ts` and `isPlatformObjectOutOfTenantAuditScope`; #12699's stand-down
-semantics (replaced by D7's no-column); ADR-0005's org-scoped write path for the five tier-A types;
-the packaged-flow disable/clone door and `sys_metadata_activation` (unless a measured pull has
-returned by then). Each retirement of an authorable shape is an
-[ADR-0087](./0087-metadata-protocol-upgrade-contract.md) entry.
+semantics (replaced by D7's no-column); ADR-0005's org-scoped write path for the five tier-A types.
+The packaged-flow disable/clone door and `sys_metadata_activation` are **not** on this list because they
+do not wait for protocol 18: unreleased, they are removed in C5 before the next release (D6). Each
+retirement of an authorable shape is an [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) entry.
 
 ### D14 — Staging
 
@@ -502,9 +506,9 @@ refusal, mirror deletion, arm removal, retirements (D1/D9/D10/D13), in the stagi
   read in `metadata-protocol` (`getMetaItem`), `meta-write-org-scope.ts`, the ADR-0094 write-through and
   `sys-metadata-repository.ts` all simplify. A live feature is switched off; the maintainer confirms it
   in §6 Q6.
-- **Managed content is sealed** (D6): ADR-0126's disable/clone machinery for packaged flows (#11665)
-  goes dormant behind a refused door and the activation ledger is removed at protocol 18 unless a pull
-  returns; recently landed work is retired rather than kept inert.
+- **Managed content is sealed** (D6): ADR-0126's disable/clone machinery for packaged flows (#12158,
+  #12156, #12419) is removed before the next release — it never shipped (landed after the 17.2.0 tag),
+  so recently landed work is deleted rather than published dormant.
 - **The template install mode is new work** (D6): a manifest declaration of permitted modes, a
   one-time importer into the environment ledger, and the posture refusal on `group` / `isolated`.
 - Tests pinning NULL semantics and seeded rows are rewritten (`deal_p1`, `sql-driver-tenant-scope`,
@@ -555,8 +559,6 @@ refusal, mirror deletion, arm removal, retirements (D1/D9/D10/D13), in the stagi
 6. **Retiring ADR-0005's per-organization overlay axis** (D6): it follows from the sealing ruling and
    removes the need to split `sys_metadata`, but it switches off a live feature (org-scoped writes of
    the five tier-A types, pinned by identity). Confirm.
-7. **The activation ledger and the flow disable/clone door** (#11665, landed): seal the door now and
-   remove the ledger at protocol 18 unless a pull returns (proposed), or remove both now?
 
 ---
 
@@ -588,7 +590,7 @@ One epic tracks the family. Phases 1–3 are additive (17.x); phase 4 is protoco
 | C2 | Registry-first catalog resolution; references by name (id→name columns + rewrite); dangling-name boot report; cross-source uniqueness | D2, D4 | ADR merge |
 | C3 | Retire the seeders and the per-organization catalog machinery; built-ins and audience anchors as declared metadata; platform-admin grant row owned by the Default Organization | D2, D5, D13 | C1, C2 |
 | C4 | Templates: `sendTemplate` resolves the registry; seed and provenance stamp retired; door closed; customized-rows ruling applied | D6, D10 | ADR merge (+ §6 Q1) |
-| C5 | `sys_metadata` family tenant-less (environment definitions, UI-editable by metadata authors); per-organization overlay axis retired (org-scoped writes of the five tier-A types refused); managed content sealed (ADR-0126 O/C doors refused, activation ledger dormant); ADR-0005 and ADR-0126 amended | D6, D7 | C1 |
+| C5 | `sys_metadata` family tenant-less (environment definitions, UI-editable by metadata authors); per-organization overlay axis retired (org-scoped writes of the five tier-A types refused); managed content sealed — the unreleased packaged-flow disable/clone machinery and `sys_metadata_activation` **removed before the next release**; ADR-0005 and ADR-0126 amended | D6, D7 | C1 |
 | C12 | Template install mode: manifest `installModes`, one-time import into the environment ledger with provenance, refusal on `group` / `isolated`, CLI + marketplace surfaces | D6 | C5 |
 | C6 | Deployment-level state has no column: settings global rung leaves `sys_setting`; plumbing objects drop the column; #12699 declaration made total | D7 | ADR merge (+ §6 Q3) |
 | C7 | Inventory + migration: four fates, id→name rewrite verified before mirror deletion, per-table boot report | D10 | C2, C3, C4, C5, C6 |
