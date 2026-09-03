@@ -44,8 +44,8 @@
  *
  * The #13398-class ruling caps this, and is satisfied rather than dodged:
  * what it forbids is GROWING `error?` onto a published sink that lacks it.
- * {@link BootDiagnosticLogger} declares `error?` AND `warn?` from birth and
- * nothing is widened — in particular the neighbouring
+ * {@link BootDiagnosticLogger} declares `error?` AND a required `warn` from
+ * birth and nothing is widened — in particular the neighbouring
  * `WalledOwnerVerificationLogger` (a `warn?`-only sink) is untouched. Spelled
  * the `share-link-service.ts` way: a conditional `error?.(…)` against a host
  * sink without `error` emits nothing, so the `warn` fallback is an explicit
@@ -230,13 +230,23 @@ export function resolveNoSignInAccountReport(facts: SignInReachabilityFacts): st
 
 /**
  * The `error` channel this report needs, with the `warn` fallback the
- * #13398-class ruling requires of a sink that may not declare `error`. Both
- * members are optional and both are declared HERE, at birth: no published sink
- * is widened by this module.
+ * #13398-class ruling requires of a sink that may not declare `error`.
+ *
+ * `warn` is REQUIRED and `error` is optional, which is the #9754 shape
+ * (`check:optional-error-sink`): the fallback channel a durability report
+ * degrades to must be present in EVERY value of the type, or the type still
+ * permits a sink that prints nothing and the guarantee lives only in this
+ * module's call branch. Making `error` required instead is the falsified
+ * option — hosts do inject reduced sinks — and a required `info` would not
+ * do: a lost sign-in path reported at `info` is the reassuring half-truth
+ * AGENTS.md → "Degradation log levels" exists to remove.
+ *
+ * Both members are still declared HERE, at birth: no published sink is
+ * widened by this module.
  */
 export interface BootDiagnosticLogger {
   error?(message: string, ...rest: unknown[]): void;
-  warn?(message: string, ...rest: unknown[]): void;
+  warn(message: string, ...rest: unknown[]): void;
 }
 
 /**
@@ -264,7 +274,7 @@ export function reportIfNoSignInAccountExists(
     // An `error?.(…)` against a sink without `error` emits NOTHING, so the
     // `warn` fallback is an explicit branch rather than an optional call.
     if (logger?.error) logger.error(message);
-    else logger?.warn?.(message);
+    else logger?.warn(message);
   } catch {
     /* a logger that throws must not abort the boot */
   }

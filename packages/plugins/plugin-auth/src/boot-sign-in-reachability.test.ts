@@ -256,8 +256,20 @@ describe('#14353 — the emitter logs ONCE, at `error`, and survives a broken si
   });
 
   it('a logger that throws cannot break the boot', () => {
-    const logger = { error: () => { throw new Error('sink is down'); } };
+    // `warn` is REQUIRED by the sink contract (#9754), so the double carries a
+    // real one rather than a cast — a cast here would re-open exactly the hole
+    // `check:optional-error-sink` closes. The throwing `error` is still the
+    // channel this case exercises: the emitter picks `error` when present, so
+    // `warn` must stay untouched while the boot survives.
+    const warn = vi.fn();
+    const logger = {
+      warn,
+      error: () => {
+        throw new Error('sink is down');
+      },
+    };
     expect(() => reportIfNoSignInAccountExists(DEAD_END, logger)).not.toThrow();
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('no logger at all is not an error', () => {
