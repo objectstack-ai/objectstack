@@ -232,7 +232,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                             ctx.logger.error(
                                 '[security] RestApiPlugin: the `tenancy` service could not be read at boot, so it '
                                 + 'could not be checked against this single-kernel wiring, which carries NO tenancy '
-                                + 'posture into request authorization (#13906). If a wall-enforcing posture is '
+                                + 'posture into request authorization. If a wall-enforcing posture is '
                                 + 'configured here, it is NOT being enforced.',
                                 err as any,
                             );
@@ -242,13 +242,17 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                 }
                 const bootPosture = effectiveTenancyPosture(tenancySource as any);
                 if (bootPosture && postureEnforcesWall(bootPosture)) {
+                    // ⛔ The tracker id stays in THIS comment and out of the
+                    // runtime string: an operator reading a boot failure cannot
+                    // resolve `#NNNN` (maintainer ruling 2026-08-12). The
+                    // reference is #13906 / the 2026-09-02 ruling, decision 1 B′.
                     throw new Error(
                         `[security] RestApiPlugin refuses to start: the kernel's \`tenancy\` service reports the `
                         + `wall-enforcing posture \`${bootPosture}\`, but this deployment has no \`kernel-manager\` `
                         + `service, so the REST transport resolves every request through the single-kernel `
                         + `providers and NEVER reads a tenancy posture. The Layer 0 organization wall — including `
                         + `the \`organization_required\` and \`organization_membership_ended\` API-key refusals — `
-                        + `would silently not be enforced (#13906, maintainer ruling 2026-09-02 decision 1 B'). `
+                        + `would silently not be enforced. `
                         + `Fix by mounting a kernel-manager service (the multi-environment wiring that can carry a `
                         + `posture), or by setting the tenancy posture to \`single\` if this deployment is not `
                         + `meant to run an organization wall.`,

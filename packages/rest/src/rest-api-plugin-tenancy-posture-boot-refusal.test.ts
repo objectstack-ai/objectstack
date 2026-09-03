@@ -209,7 +209,13 @@ describe('[#13906] §2 — B′: the boot refusal', () => {
         expect(text).toContain('isolated');
         expect(text).toContain('kernel-manager');
         expect(text).toMatch(/never reads a tenancy posture/i);
-        expect(text).toContain('#13906');
+        // ⛔ Deliberately NOT asserting a tracker id: `check:doc-authoring`
+        // forbids `#NNNN` in runtime strings (maintainer ruling 2026-08-12 —
+        // an operator reading a boot failure cannot resolve one). The id lives
+        // in the adjacent source comment instead. Assert the REMEDY instead,
+        // which is what the message owes its reader.
+        expect(text).toMatch(/organization wall/i);
+        expect(text).toMatch(/`single`/);
 
         await kernel.shutdown().catch(() => undefined);
     });
