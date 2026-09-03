@@ -614,14 +614,20 @@ export async function selfTest() {
   // card added (the checked-in SDUI manifest artefact @objectstack/lint's
   // production-witness suite reads from the workspace root), covered only
   // through its own single-file `crosspkg` entry the way #10848's SKILL.md is.
-  // Ten plus one plus two plus one plus one: the rollback now uncovers
-  // fifteen. This pin is judged over the LIVE declaration table on
+  // Plus, since #14561, the one NEW root that card opened: @objectstack/rest's
+  // meta-state doc-spelling test discovers its population instead of listing
+  // it, so it declares the three authored-prose roots it reads, and `docs/**`
+  // is the one of the three no earlier declaration had reached. Its two
+  // siblings move nothing here -- `content/**` and `skills/**` were already
+  // unique members of this set from #10015 and #12201.
+  // Ten plus one plus two plus one plus one plus one: the rollback now uncovers
+  // sixteen. This pin is judged over the LIVE declaration table on
   // purpose: a declaration added under a root the rollback keeps leaves the
   // count alone, one under a new root moves it and is recorded here by name.
   const preFix = judge(fixtureWorkflow({ core: real.filters?.core, crosspkg: ['scripts/**'] }), CROSS_PACKAGE_TEST_INPUTS);
   assert(
-    new Set(uncoveredGlobs(preFix)).size === 15,
-    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one -- got ${new Set(uncoveredGlobs(preFix)).size}`,
+    new Set(uncoveredGlobs(preFix)).size === 16,
+    `rolling \`crosspkg\` back to its pre-#10015 list uncovers the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one -- got ${new Set(uncoveredGlobs(preFix)).size}`,
   );
   assert(
     uncoveredGlobs(preFix).includes('skills/**'),
@@ -642,6 +648,10 @@ export async function selfTest() {
   assert(
     uncoveredGlobs(preFix).includes('sdui.manifest.json'),
     `-- and #12924 added the repo-root SDUI manifest artefact, by name`,
+  );
+  assert(
+    uncoveredGlobs(preFix).includes('docs/**'),
+    `-- and #14561 added the authored-prose root the discovered teaching-site population reads, by name`,
   );
 
   // ── (7) WIRING: the gate and its self-test really run in CI ──────────────
@@ -667,7 +677,7 @@ export async function selfTest() {
       `same-root-different-file case observed failing and then covered by naming the file, a glob covered by ` +
       `\`core\`, one covered only by \`crosspkg\` and one covered by neither judged separately in one table, the ` +
       `stale-entry direction, seven refusals over subjects that could not be read, the checked-in ci.yml, the ` +
-      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one, ` +
+      `pre-#10015 rollback uncovering the ten it fixed plus #10848's one plus #10178's two plus #12201's one plus #12924's one plus #14561's one, ` +
       `and the CI wiring read out of lint.yml.`,
   );
   selfTestReachedVerdict = true;
