@@ -523,14 +523,63 @@ async function runPaths(dryRun) {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'pr-labels self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'glob matching, including the zero-segment `**` case': 18,
+  'size bucketing: `<`, not `<=`': 10,
+  'the write plans: POST and DELETE only': 11,
+  'the #10698 interleaving, replayed': 3,
+  'config parsing': 6,
+  'the REAL config, so drift fails lint rather than a PR run': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 6;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   const check = (name, actual, expected) => {
+    registerCase();
     const a = JSON.stringify(actual);
     const e = JSON.stringify(expected);
     if (a !== e) failures.push(`${name}\n    expected: ${e}\n    actual:   ${a}`);
   };
   const throws = (name, fn, needle) => {
+    registerCase();
     try {
       fn();
       failures.push(`${name}: expected a ConfigError, none thrown`);
@@ -543,6 +592,7 @@ function selfTest() {
   };
 
   // --- glob matching, including the zero-segment `**` case -----------------
+  battery('glob matching, including the zero-segment `**` case');
   check('** matches zero segments', matchGlob('content/**/*', 'content/a.md'), true);
   check('** matches many segments', matchGlob('content/**/*', 'content/a/b/c.md'), true);
   check('** does not match the bare prefix', matchGlob('content/**/*', 'content'), false);
@@ -564,6 +614,7 @@ function selfTest() {
   throws('extglob is refused', () => matchGlob('src/+(a|b).ts', 'src/a.ts'), '+');
 
   // --- size bucketing: `<`, not `<=` --------------------------------------
+  battery('size bucketing: `<`, not `<=`');
   const buckets = [
     { max: 10, label: 'size/xs' },
     { max: 100, label: 'size/s' },
@@ -594,6 +645,7 @@ function selfTest() {
   );
 
   // --- the write plans: POST and DELETE only ------------------------------
+  battery('the write plans: POST and DELETE only');
   const sizePlan = planSizeWrites({
     prNumber: 42,
     target: 'size/l',
@@ -647,6 +699,7 @@ function selfTest() {
   // The defect as a TEST rather than a paragraph. `applyPlan` models what the
   // three verbs do to a label set server-side; the PUT branch exists only so
   // the retired behaviour can be replayed next to the new one.
+  battery('the #10698 interleaving, replayed');
   const applyPlan = (labels, plan) => {
     let set = [...labels];
     for (const step of plan) {
@@ -696,6 +749,7 @@ function selfTest() {
   );
 
   // --- config parsing ------------------------------------------------------
+  battery('config parsing');
   const parsed = parseLabelerConfig(
     ["# a comment", "'documentation':", '  - changed-files:', '    - any-glob-to-any-file: ', "      - 'content/**/*'", "      - '**/*.md'", '', "'tests':", '  - changed-files:', '    - any-glob-to-any-file:', "      - '**/*.test.ts'"].join('\n'),
     'fixture.yml'
@@ -721,6 +775,7 @@ function selfTest() {
   throws('a label with no globs is refused', () => parseLabelerConfig("'x':\n"), 'declares no globs');
 
   // --- the REAL config, so drift fails lint rather than a PR run -----------
+  battery('the REAL config, so drift fails lint rather than a PR run');
   try {
     const realConfig = parseLabelerConfig(readFileSync(DEFAULT_LABELER_CONFIG, 'utf8'), DEFAULT_LABELER_CONFIG);
     if (realConfig.size === 0) failures.push('the checked-in .github/labeler.yml parsed to zero labels');
@@ -740,6 +795,51 @@ function selfTest() {
     failures.push(`the checked-in .github/labeler.yml is outside the supported subset: ${error.message}`);
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length > 0) {
     console.error(`pr-labels --self-test: ${failures.length} failure(s)\n`);
     for (const failure of failures) console.error(`  FAIL ${failure}`);

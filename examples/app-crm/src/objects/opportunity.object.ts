@@ -67,9 +67,12 @@ export const Opportunity = ObjectSchema.create({
       min: 0,
       max: 100,
     }),
-    // Mirror target for the Discount Approval flow's approval nodes
-    // (ADR-0019). The approval runtime writes the request status here; it is
-    // readonly to users so only the flow drives it.
+    // Mirror target for an approval node's `approvalStatusField` (ADR-0019):
+    // the approval runtime writes the request status here, so it stays
+    // readonly to users. This app declares no approval flow of its own — the
+    // CRM keeps one flow on purpose (src/flows/index.ts); the worked approval
+    // flows are examples/app-showcase/src/automation/flows/, and the
+    // `approvalStatusField` wiring is shown in skills/objectstack-automation/SKILL.md.
     approval_status: Field.select({
       label: 'Approval Status',
       readonly: true,

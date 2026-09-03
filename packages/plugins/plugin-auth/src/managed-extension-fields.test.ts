@@ -862,8 +862,12 @@ describe('managed extension fields (ADR-0105 D7)', () => {
 
   it('admin-surface-only sys_user fields are declared but NOT generically editable', () => {
     // `manager_id` / `ai_access` drive authorization and AI seating;
-    // `primary_business_unit_id` is a projection plugin-sharing maintains.
-    for (const field of ['manager_id', 'ai_access', 'primary_business_unit_id']) {
+    // `primary_business_unit_id` is a projection plugin-sharing maintains;
+    // `locale` (#13881) is declared as ours so the D7 guard judges it, and
+    // stays off the editable map until a ruling widens the ADR-0092 D2
+    // profile whitelist — an unwidened whitelist is the recorded state, not
+    // an oversight.
+    for (const field of ['manager_id', 'ai_access', 'primary_business_unit_id', 'locale']) {
       expect(managedExtensionFields('sys_user')).toContain(field);
       expect(managedExtensionEditableFields('sys_user')).not.toContain(field);
     }

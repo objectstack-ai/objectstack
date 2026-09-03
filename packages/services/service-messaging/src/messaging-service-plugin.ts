@@ -135,16 +135,17 @@ export class MessagingServicePlugin implements Plugin {
                 return undefined;
             }
         };
-        // #9205 — the recipient locale for `sys_email_template` resolution
-        // on the notify template path. Probed lazily at delivery time (not
-        // captured at boot) so it tracks live `localization.locale` /
-        // stack-config changes; same ruled source as the auth emails
-        // (#8195: `II18nService.getDefaultLocale()`), because the platform
-        // has no per-user locale yet and no request exists at async
-        // delivery time. Both hops probed: `getService` throws for an
-        // unregistered service, and `getDefaultLocale` is optional on the
-        // contract — either missing leaves the locale unset, which lands
-        // the documented en-US default.
+        // #9205 / #13881 — the DEPLOYMENT DEFAULT locale for template
+        // resolution: the second rung of the per-recipient chain
+        // (`recipient-locale.ts`: the recipient's own `sys_user.locale`, else
+        // this). Probed lazily at delivery time (not captured at boot) so it
+        // tracks live `localization.locale` / stack-config changes; same
+        // ruled source as the auth emails' deployment rung (#8195:
+        // `II18nService.getDefaultLocale()`). No request exists at async
+        // delivery time, so `Accept-Language` is not a rung. Both hops
+        // probed: `getService` throws for an unregistered service, and
+        // `getDefaultLocale` is optional on the contract — either missing
+        // leaves the locale unset, which lands the documented en-US default.
         const getDefaultTemplateLocale = (): string | undefined => {
             try {
                 const i18n = ctx.getService<{ getDefaultLocale?: () => string }>('i18n');
@@ -247,7 +248,7 @@ export class MessagingServicePlugin implements Plugin {
             ctx.hook('kernel:ready', async () => {
                 if (getEmail()) {
                     service.registerChannel(createEmailChannel({ getEmail, getData, store: templateStore, getDefaultTemplateLocale }));
-                    ctx.logger.info('[messaging] email channel registered (renders sys_notification_template; notify `template` refs resolve sys_email_template by (name, locale) — one locale per notification: payload.locale, else the deployment default)');
+                    ctx.logger.info('[messaging] email channel registered (renders sys_notification_template; notify `template` refs resolve sys_email_template by (name, locale) — resolved per recipient: sys_user.locale, else the deployment default)');
                 }
             });
 
@@ -264,8 +265,8 @@ export class MessagingServicePlugin implements Plugin {
             };
             ctx.hook('kernel:ready', async () => {
                 if (getSms()) {
-                    service.registerChannel(createSmsChannel({ getSms, getData, store: templateStore }));
-                    ctx.logger.info('[messaging] sms channel registered (renders sys_notification_template)');
+                    service.registerChannel(createSmsChannel({ getSms, getData, store: templateStore, getDefaultTemplateLocale }));
+                    ctx.logger.info('[messaging] sms channel registered (renders sys_notification_template — resolved per recipient: sys_user.locale, else the deployment default)');
                 }
             });
         }

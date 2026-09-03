@@ -715,15 +715,65 @@ function report({ population, findings, censusProblems }) {
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'The positive control, MOVED from the #10288 test file': 4,
+  'The narrowing: a `.data` read BESIDE it is not an exemption': 3,
+  'the `records` on that line is a LOCAL, not a `.records` read -- and it': 16,
+  'The contracts this sweep must NOT fabricate findings on': 4,
+  'The selector': 6,
+  'The fence parser': 5,
+  'The census control refuses to report OK over nothing (ruling 4)': 5,
+  'The sweep wires the detectors to both halves, and NAMES A LINE': 8,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 8;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 export function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   let checked = 0;
-  const assert = (ok, name) => { checked++; if (!ok) failures.push(name); };
+  const assert = (ok, name) => { registerCase(); checked++; if (!ok) failures.push(name); };
 
   // ── The positive control, MOVED from the #10288 test file ────────────────
   // "the scanners fire on a known-bad source" — carried verbatim, because
   // extending a population is exactly when a control quietly stops covering
   // what it used to.
+  battery('The positive control, MOVED from the #10288 test file');
   const bad = `
       const a = await adapter.find('showcase_project', { $filter: ['account', '=', sel], top: 500 });
       const b = await adapter.find('showcase_invoice', { limit: 200 });
@@ -752,6 +802,7 @@ export function selfTest() {
   // used to bless -- the app-showcase one and, worse, the docs sample a
   // customer copies from. Both rendered correctly while teaching a spelling
   // `ObjectStackAdapter.find()` cannot emit, which is what the carve-out cost.
+  battery('The narrowing: a `.data` read BESIDE it is not an exemption');
   assert(
     recordsReads(`const rows = Array.isArray(all) ? all : (all && (all.data || all.records)) || [];`).length === 1,
     'a `data || records` alias IS a finding — the carve-out that blessed it is what let BOTH surviving repairs land as tolerance',
@@ -778,6 +829,7 @@ export function selfTest() {
   // reports exactly these three across the whole population and nothing else.
   // The class survived three rounds (#11585 -> #13705 -> #13969) because
   // nothing pinned it; this block is the pin.
+  battery('the `records` on that line is a LOCAL, not a `.records` read -- and it');
   assert(
     arrayIsArrayLimbs(`const records = result?.data ?? (Array.isArray(result) ? result : []);`).length === 1,
     'the DOCS line #13969 deleted IS a finding — the same string the assertion above pins to zero for `recordsReads`',
@@ -857,6 +909,7 @@ export function selfTest() {
 
   // ── The contracts this sweep must NOT fabricate findings on ─────────────
   // Both are real lines from `content/docs`, and both are CORRECT where they sit.
+  battery('The contracts this sweep must NOT fabricate findings on');
   assert(
     unprefixedQueryKeys(`const customers = await engine.find('customer', { where: { industry: 'tech' }, limit: 10 });`).length === 0,
     'an ObjectQL `engine.find` is a different contract — its unprefixed keys are not findings',
@@ -875,6 +928,7 @@ export function selfTest() {
   );
 
   // ── The selector ────────────────────────────────────────────────────────
+  battery('The selector');
   assert(
     isReactPageSample({ lang: 'jsx', body: `const adapter = useAdapter();` }),
     'a tagged fence holding the adapter is selected on the hook alone',
@@ -901,6 +955,7 @@ export function selfTest() {
   );
 
   // ── The fence parser ────────────────────────────────────────────────────
+  battery('The fence parser');
   const md = [
     'intro', '```jsx', 'const a = 1;', '```', 'mid',
     '````md', '```jsx', 'nested, not a block of its own', '```', '````',
@@ -914,6 +969,7 @@ export function selfTest() {
   assert(fencedBlocks('```jsx\nunterminated').length === 1, 'an unterminated fence still yields its body rather than shrinking the population');
 
   // ── The census control refuses to report OK over nothing (ruling 4) ──────
+  battery('The census control refuses to report OK over nothing (ruling 4)');
   const full = {
     appShowcase: CENSUS_ANCHORS.appShowcase.map((path) => ({ path })),
     docs: CENSUS_ANCHORS.docs.map((file) => ({ path: `${file}:1`, file })),
@@ -939,6 +995,7 @@ export function selfTest() {
   );
 
   // ── The sweep wires the detectors to both halves, and NAMES A LINE ───────
+  battery('The sweep wires the detectors to both halves, and NAMES A LINE');
   const fromPage = sweep({ appShowcase: [{ file: 'p.ts', startLine: 1, source: bad }], docs: [] });
   assert(fromPage.length === 3, 'the sweep reports every finding from the app-showcase half');
   assert(
@@ -972,6 +1029,51 @@ export function selfTest() {
   assert(lineOfIndex('a\nb\nc', 4) === 3 && lineOfIndex('a\nb', 0) === 1, 'lineOfIndex counts newlines before the offset');
   assert(lineOfText('x\n  hit\ny', 'hit') === 2 && lineOfText('x', 'nope') === 1, 'lineOfText matches on the TRIMMED line, and falls back to 1');
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     console.error(`✗ check-react-page-adapter-contract --self-test — ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  • ${f}`);

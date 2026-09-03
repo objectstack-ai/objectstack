@@ -13,7 +13,7 @@ import {
     renderNotification,
     DEFAULT_LOCALE,
 } from './template-renderer.js';
-import { USER_OBJECT } from './email-channel.js';
+import { RECIPIENT_LOCALE_FIELD, USER_OBJECT, resolveRecipientLocale } from './recipient-locale.js';
 
 /**
  * Structural view of the SMS service (`@objectstack/service-sms`'s
@@ -40,8 +40,15 @@ export interface SmsChannelOptions {
     store: NotificationTemplateStore;
     /** User identity object override (default `sys_user`). */
     userObject?: string;
-    /** Locale used when the delivery carries none (default {@link DEFAULT_LOCALE}). */
+    /** Locale used when neither the recipient nor the deployment names one (default {@link DEFAULT_LOCALE}). */
     defaultLocale?: string;
+    /**
+     * The DEPLOYMENT DEFAULT locale (`II18nService.getDefaultLocale()`),
+     * probed lazily — the second rung under the recipient's own
+     * `sys_user.locale` (#13881), composed in `recipient-locale.ts` exactly as
+     * the email channel composes it.
+     */
+    getDefaultTemplateLocale?(): string | undefined;
 }
 
 // Same shape rule as plugin-auth's `normalizePhoneNumber` (kept local; the
@@ -86,22 +93,53 @@ export function createSmsChannel(opts: SmsChannelOptions): MessagingChannel {
     const userObject = opts.userObject ?? USER_OBJECT;
     const defaultLocale = opts.defaultLocale ?? DEFAULT_LOCALE;
 
-    async function resolvePhone(
+    const deploymentLocale = (): string | undefined => opts.getDefaultTemplateLocale?.();
+
+    /**
+     * The recipient, resolved ONCE per delivery: the number to text and the
+     * locale to render in (#13881 — one `sys_user` read yields both).
+     */
+    async function resolveRecipient(
         ctx: MessagingChannelContext,
         data: IDataEngine | undefined,
         recipient: string,
-    ): Promise<string | undefined> {
+    ): Promise<{ phone: string; locale: string | undefined } | undefined> {
         const literal = PHONE_SHAPE(recipient);
-        if (literal) return literal; // already a phone number
-        if (!data) return undefined;
-        try {
-            const user = await data.findOne(userObject, { where: { id: recipient }, fields: ['phone_number'] });
-            const phone = user?.phone_number;
-            return typeof phone === 'string' ? PHONE_SHAPE(phone) : undefined;
-        } catch (err) {
-            ctx.logger.warn(`[sms] phone lookup for '${recipient}' failed (${(err as Error).message})`);
-            return undefined;
+        if (literal) {
+            // A literal number has no `sys_user` row to read a locale from.
+            return { phone: literal, locale: resolveRecipientLocale(undefined, deploymentLocale) };
         }
+        if (!data) return undefined;
+        let user: Record<string, unknown> | null | undefined;
+        // Set only when the row was read WITH the locale projection — after a
+        // retry the column was never asked for, so rung 2 applies.
+        let localeRead = false;
+        try {
+            user = await data.findOne(userObject, {
+                where: { id: recipient },
+                fields: ['phone_number', RECIPIENT_LOCALE_FIELD],
+            });
+            localeRead = true;
+        } catch (err) {
+            // Ruling item 3 (#13881): the locale read must never cost the
+            // delivery — retry the number alone, fall to the deployment default.
+            ctx.logger.warn(
+                `[sms] recipient lookup for '${recipient}' with '${RECIPIENT_LOCALE_FIELD}' failed (${(err as Error).message}); retrying phone-only`,
+            );
+            try {
+                user = await data.findOne(userObject, { where: { id: recipient }, fields: ['phone_number'] });
+            } catch (retryErr) {
+                ctx.logger.warn(`[sms] phone lookup for '${recipient}' failed (${(retryErr as Error).message})`);
+                return undefined;
+            }
+        }
+        const raw = user?.phone_number;
+        const phone = typeof raw === 'string' ? PHONE_SHAPE(raw) : undefined;
+        if (!phone) return undefined;
+        return {
+            phone,
+            locale: resolveRecipientLocale(localeRead ? user?.[RECIPIENT_LOCALE_FIELD] : undefined, deploymentLocale),
+        };
     }
 
     return {
@@ -115,13 +153,18 @@ export function createSmsChannel(opts: SmsChannelOptions): MessagingChannel {
             }
 
             const n = delivery.notification;
-            const phone = await resolvePhone(ctx, opts.getData(), delivery.recipient);
-            if (!phone) {
+            const resolved = await resolveRecipient(ctx, opts.getData(), delivery.recipient);
+            if (!resolved) {
                 return { ok: false, error: `no phone number for recipient '${delivery.recipient}'` };
             }
+            const { phone } = resolved;
 
             const payload = (n.payload ?? {}) as Record<string, unknown>;
-            const locale = typeof payload.locale === 'string' ? payload.locale : defaultLocale;
+            // Per-recipient locale (#13881): the recipient's own
+            // `sys_user.locale`, else the deployment default, else this
+            // channel's static default; the store walks its own ladder
+            // underneath. `payload.locale` is no longer consulted.
+            const locale = resolved.locale ?? defaultLocale;
             const template = await opts.store.load(n.topic ?? '', 'sms', locale);
             const rendered = renderNotification(template, {
                 topic: n.topic ?? '',

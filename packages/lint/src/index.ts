@@ -297,6 +297,7 @@ export {
   SECURITY_GRANT_EXPIRED_AT_AUTHORING,
   SECURITY_DELEGATION_MISSING_REASON,
   SECURITY_CBP_NO_RELATION,
+  SECURITY_CBP_AMBIGUOUS_RELATION,
 } from './validate-security-posture.js';
 export type { SecurityFinding, SecuritySeverity } from './validate-security-posture.js';
 
@@ -623,6 +624,7 @@ export {
   validateAiAgentAuthoring,
   AGENT_AUTHORING_WITHDRAWN,
   DEFAULT_AGENT_OUTSIDE_ROSTER,
+  DEFAULT_AGENT_LEGACY_ALIAS,
 } from './validate-ai-agent-authoring.js';
 export type {
   AiAgentAuthoringFinding,

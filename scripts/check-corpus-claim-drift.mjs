@@ -553,9 +553,67 @@ function ratchetRemedyCarriesAuthority(message) {
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'The table is a table, and it ships exactly one row (#13582 ruling)': 3,
+  'Table hygiene: a claim that matches the empty string': 2,
+  'THE genericity proof, without shipping a second word': 3,
+  'The REAL defect, quoted verbatim from the pre-repair tree': 8,
+  '#13745 row 2: the `(NoSQL)` PORTABILITY gloss': 14,
+  '#13745 row 3: the retired `$regex` spelling': 6,
+  '#13745 row 4: #13532\'s section `visibleWhen` binding claims': 12,
+  'The LEGITIMATE usages, measured on the corpus this gate walks': 9,
+  'Window behaviour, at the boundary': 1,
+  'Overlapping claim members are ONE site': 1,
+  'A row whose subject is unreachable is REFUSED, not silently green': 5,
+  'The green body reports what was READ, not what the ledger holds': 6,
+  'The #8435 authority convention, PLACEMENT': 6,
+  'A missing ROOT is REFUSED, per root (#9932)': 4,
+  'The dispatch-gates declaration (#9964\'s pattern)': 4,
+  'At the PROGRAM level': 10,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 16;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   const expect = (label, cond) => {
+    registerCase();
     if (!cond) failures.push(label);
   };
   const RULE = VOCABULARY[0];
@@ -572,6 +630,7 @@ function selfTest() {
   // FILL IT (so each word pays its own baseline on its own card). A gate that
   // honoured only the first would grow words by drive-by; one that honoured only
   // the second is a hardcoded regex again.
+  battery('The table is a table, and it ships exactly one row (#13582 ruling)');
   const SHIPPED_ROW_IDS = [
     'exists-key-presence',
     'exists-portability',
@@ -602,6 +661,7 @@ function selfTest() {
       && Number.isInteger(r.window) && r.window >= 0 && r.truth && r.refs));
 
   // ── Table hygiene: a claim that matches the empty string ───────────────────
+  battery('Table hygiene: a claim that matches the empty string');
   expect('a shipped row cannot match the EMPTY STRING', zeroWidthClaimRows(VOCABULARY).length === 0);
   expect('and the predicate DISCRIMINATES — a row whose claims CAN match empty is caught (without '
     + 'this, the assertion above passes on a predicate that approves everything)',
@@ -614,6 +674,7 @@ function selfTest() {
   // ever reaches is a single regex wearing a table's clothes, and nothing about
   // the shipped row can distinguish the two. So a SYNTHETIC row is driven through
   // the real engine — the same `analyzeFile` the production path calls.
+  battery('THE genericity proof, without shipping a second word');
   const SYNTHETIC = {
     id: 'synthetic-probe',
     subject: '`$probeop`',
@@ -651,6 +712,7 @@ function selfTest() {
   // git at `75b3bdc86^` and `e51c78f0c^`. They are the gate's reason to exist, so
   // they are pinned as fixtures rather than described: a rule that stopped
   // catching them would still pass every abstract assertion above.
+  battery('The REAL defect, quoted verbatim from the pre-repair tree');
   const WAS_TABLE_ROW = '| `$exists` | Field exists (NoSQL) | `{ metadata: { $exists: true } }` |';
   const WAS_OSCHECK = [
     '{/* os:check */}',
@@ -708,6 +770,7 @@ function selfTest() {
   // table has it in a column header three lines away. A bare /NoSQL/ claim
   // reddens both. So the claim is the RESTRICTION (a parenthesised gloss, or an
   // unnegated "NoSQL-only" / "MongoDB-only"), never the word.
+  battery('#13745 row 2: the `(NoSQL)` PORTABILITY gloss');
   const PORTABILITY = VOCABULARY.find((r) => r.id === 'exists-portability');
   expect('#13745 — the pre-repair table row carries the portability claim as well, and it is a '
     + 'SEPARATE debt from the key-presence one on the same line: two rows, two ledger keys, so '
@@ -775,6 +838,7 @@ function selfTest() {
   // a regression pin — and the whole difficulty is that the pages teaching the
   // retirement say the word on every line. The claim is therefore the
   // LIVE-OPERATOR phrasing, never the mention.
+  battery('#13745 row 3: the retired `$regex` spelling');
   const REGEX_ROW = VOCABULARY.find((r) => r.id === 'regex-retired');
   expect('#13745 — `$regex` inside a live operator list is a site',
     count('**Supported operators:** `$eq`, `$ne`, `$contains`, `$regex`, `$null`',
@@ -817,6 +881,7 @@ function selfTest() {
   // Read verbatim out of git at `b2dea862c^`, the tree #13532 corrected, at the
   // real line spacing — which is the whole reason this row's window is 9: the
   // binding-root table row sits nine lines below the nearest `visibleWhen`.
+  battery('#13745 row 4: #13532\'s section `visibleWhen` binding claims');
   const VW = VOCABULARY.find((r) => r.id === 'section-visiblewhen-unbound');
   const WAS_VW_OSCHECK = [
     '{/* os:check */}',
@@ -915,6 +980,7 @@ function selfTest() {
   // found by sweeping the claim phrases across both roots. Every one is green
   // STRUCTURALLY — none of these files mentions `$exists` — which is a stronger
   // outcome than baselining them: a baselined file carries a budget forever.
+  battery('The LEGITIMATE usages, measured on the corpus this gate walks');
   const LEGITIMATE = [
     ['objectstack-formula `has()` — a genuine key-existence check (the one the dispatch named)',
       '`has(record.x)` is **true whenever the key exists**, even when its value is null.'],
@@ -945,12 +1011,14 @@ function selfTest() {
     count(`${LEGITIMATE[0][1]}\nSee also \`$exists\`.`) === 1);
 
   // ── Window behaviour, at the boundary ──────────────────────────────────────
+  battery('Window behaviour, at the boundary');
   const at = (gap) => ['`$exists`', ...Array(gap).fill(''), 'the field exists'].join('\n');
   expect(`a claim ${RULE.window} lines away is a site, and one ${RULE.window + 1} lines away is `
     + 'not (the boundary is inclusive and it is the shipped row\'s own number)',
     count(at(RULE.window - 1)) === 1 && count(at(RULE.window)) === 0);
 
   // ── Overlapping claim members are ONE site ────────────────────────────────
+  battery('Overlapping claim members are ONE site');
   expect('"Field existence check" beside the spelling is ONE site: `existence`, the '
     + '`field exists` shape and the phrase overlap, and counting each would write an inflated '
     + 'number into a ledger that is only allowed to shrink',
@@ -962,6 +1030,7 @@ function selfTest() {
   // refusal is not the outcome any of them is asserting. Derived from the table
   // so a new row cannot leave these fixtures behind silently, with a positive
   // control proving the derivation really does carry each spelling.
+  battery('A row whose subject is unreachable is REFUSED, not silently green');
   const REACHABLE_LINE = `Reachability fixture: ${VOCABULARY.map((r) => r.subject).join(' ')}`;
   expect('#13745 — the reachability fixture carries EVERY shipped spelling. Derived from each '
     + 'row\'s `subject`, so a row whose subject does not spell its own operator is caught HERE '
@@ -986,6 +1055,7 @@ function selfTest() {
   //
   // Synthetic fixtures, closed over by every assertion, so they stay correct
   // however the real corpus moves. ⛔ Do not "refresh" them against a live scan.
+  battery('The green body reports what was READ, not what the ledger holds');
   const SCANNED = [{ root: 'content/docs', files: 189 }, { root: 'skills', files: 36 }];
   const DEAD_SCAN = [{ root: 'content/docs', files: 0 }, { root: 'skills', files: 0 }];
   const PAID_OFF = {};
@@ -1015,6 +1085,7 @@ function selfTest() {
       !== successSummary(SCANNED, LEDGER_ONE, VOCABULARY));
 
   // ── The #8435 authority convention, PLACEMENT ─────────────────────────────
+  battery('The #8435 authority convention, PLACEMENT');
   const newClaim = newClaimMessage('content/docs/example.mdx', RULE, 2);
   const grew = grewMessage('content/docs/example.mdx', RULE, 4, 5);
   const improved = improvedMessage('content/docs/example.mdx', RULE, 4, 2);
@@ -1041,6 +1112,7 @@ function selfTest() {
     [newClaim, grew].every((m) => m.includes('HAS A VALUE') && m.includes(RULE.refs)));
 
   // ── A missing ROOT is REFUSED, per root (#9932) ───────────────────────────
+  battery('A missing ROOT is REFUSED, per root (#9932)');
   const PRESENT_ROOT = 'alpha/one';
   const ABSENT_ROOT = 'bravo-two';
   expect('#9932 — with NO root present, every one of them is reported',
@@ -1061,6 +1133,7 @@ function selfTest() {
   // dispatched on a skills card with this gate missing from the brief. Derived
   // from ROOTS on both sides, so renaming a root cannot leave the declaration
   // describing the old population.
+  battery('The dispatch-gates declaration (#9964\'s pattern)');
   const separatorless = ROOTS.filter((r) => !r.includes('/'));
   expect('every ROOT the hint extractor cannot see (no path separator) declares the subtree '
     + 'spelling', separatorless.every((r) => ROOT_DIR_WATCH_HINTS.includes(`${r}/**`)));
@@ -1077,6 +1150,7 @@ function selfTest() {
   // Everything above drives predicates. A predicate the program never consults
   // would satisfy all of it, so these build real trees and read a child
   // process's real exit status — never a pipe's.
+  battery('At the PROGRAM level');
   const SELF = fileURLToPath(import.meta.url);
   const runIn = (cwd, args = []) => {
     const r = spawnSync(process.execPath, [SELF, ...args], { cwd, encoding: 'utf8' });
@@ -1178,6 +1252,51 @@ function selfTest() {
     rmSync(sandbox, { recursive: true, force: true });
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     for (const f of failures) console.error(`  x self-test: ${f}`);
     console.error(`\ncheck-corpus-claim-drift --self-test: ${failures.length} failure(s).\n`);

@@ -703,10 +703,59 @@ function main() {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-runtime-services-index self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'The clean tree is silent': 2,
+  'Each limb observed FAILING': 8,
+  'Check 5: declared registry slot vs the real registry (#9630)': 6,
+  'Check 6: the stability matrix vs the pages on disk (#9684)': 3,
+  'Check 7: a WRONG row, not just a missing one (#9684)': 4,
+  'Check 8: the Source-of-Truth canonical-source list (#9629)': 11,
+  'Checks 9-10: the label VOCABULARY (#9751)': 15,
+  'Refuses to report OK over nothing': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 8;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   let checked = 0;
-  const assert = (cond, why) => { checked++; if (!cond) failures.push(why); };
+  const assert = (cond, why) => { registerCase(); checked++; if (!cond) failures.push(why); };
 
   const dir = mkdtempSync(join(tmpdir(), 'rt-services-index-'));
   try {
@@ -803,12 +852,14 @@ function selfTest() {
     const findingsFor = (opts) => { writeTree(opts); return run(dir).findings; };
 
     // ── The clean tree is silent ────────────────────────────────────────────
+    battery('The clean tree is silent');
     const clean = findingsFor();
     assert(clean.length === 0, `a consistent tree reports nothing -- got ${JSON.stringify(clean)}`);
     assert(summarise({ pages: readPages(chapter), chapterList: names, kernelTable: names.map((n) => ({ accessor: n })) }).includes('3 chapter page(s)'), 'the summary names the counts, so a green can be read for its scope');
 
     // ── Each limb observed FAILING ──────────────────────────────────────────
     // This is the #9604 defect itself: page + meta entry, absent from both lists.
+    battery('Each limb observed FAILING');
     const sms = findingsFor({ list: ['data', 'email'], table: ['data', 'email'] });
     assert(sms.some((f) => f.where.endsWith('runtime-services/index.mdx') && f.msg.includes('omits `services.sms`')), `the chapter list omitting a real page is caught -- got ${JSON.stringify(sms)}`);
     assert(sms.some((f) => f.where === KERNEL_INDEX && f.msg.includes('no row for `services.sms`')), `the kernel table omitting a real page is caught -- got ${JSON.stringify(sms)}`);
@@ -824,6 +875,7 @@ function selfTest() {
 
     // ── Check 5: declared registry slot vs the real registry (#9630) ────────
     // The defect itself: a page documenting an accessor that resolves to nothing.
+    battery('Check 5: declared registry slot vs the real registry (#9630)');
     const ghost = findingsFor({ slot: (n) => (n === 'sms' ? 'storage' : n) });
     assert(
       ghost.some((f) => f.where.endsWith(`sms${PAGE_SUFFIX}`) && f.msg.includes('no production registerService() call')),
@@ -856,6 +908,7 @@ function selfTest() {
 
     // ── Check 6: the stability matrix vs the pages on disk (#9684) ─────────
     // The defect itself: seven rows for eight pages.
+    battery('Check 6: the stability matrix vs the pages on disk (#9684)');
     const shortMatrix = findingsFor({ matrix: ['data', 'email'] });
     assert(
       shortMatrix.some((f) => f.where.endsWith(VERSIONING_FILE) && f.msg.includes('no row for `services.sms`')),
@@ -873,6 +926,7 @@ function selfTest() {
     // ── Check 7: a WRONG row, not just a missing one (#9684) ───────────────
     // Membership checking passes both of these: the row is present and names a
     // real page, it just contradicts the label that page declares.
+    battery('Check 7: a WRONG row, not just a missing one (#9684)');
     const wrongMatrix = findingsFor({ matrixLabel: (n) => (n === 'sms' ? 'experimental' : 'stable') });
     assert(
       wrongMatrix.some((f) => f.where.endsWith(VERSIONING_FILE) && f.msg.includes('`experimental`') && f.msg.includes('declares `stable`')),
@@ -905,6 +959,7 @@ function selfTest() {
 
     // The defect this card was filed for: the list advertising a canonical
     // source for a service the chapter never introduces.
+    battery('Check 8: the Source-of-Truth canonical-source list (#9629)');
     const pageless = findingsFor({ sourceRows: [...defaultSourceRows, { label: 'Security', path: REAL_PATH }] });
     assert(
       pageless.some((f) => f.where.endsWith('runtime-services/index.mdx') && f.msg.includes('"Security" names no page')),
@@ -970,6 +1025,7 @@ function selfTest() {
     // with both tables faithfully repeating it. Check 7 is silent by
     // construction here -- the tables agree with the page -- so this is the
     // shape that was green before this limb existed.
+    battery('Checks 9-10: the label VOCABULARY (#9751)');
     const undefinedLabel = findingsFor({ stability: (n) => (n === 'sms' ? 'beta' : 'stable') });
     assert(
       undefinedLabel.some((f) => f.where.endsWith(`sms${PAGE_SUFFIX}`) && f.msg.includes('`beta`')),
@@ -1052,6 +1108,7 @@ function selfTest() {
     }
 
     // ── Refuses to report OK over nothing ───────────────────────────────────
+    battery('Refuses to report OK over nothing');
     let threwVersioning = false;
     try { findingsFor({ versioning: false }); } catch { threwVersioning = true; }
     assert(threwVersioning, 'a chapter with no versioning.mdx is rejected, never reported OK over a matrix that is not there');
@@ -1063,6 +1120,51 @@ function selfTest() {
     rmSync(dir, { recursive: true, force: true });
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     console.error(`✗ check-runtime-services-index --self-test -- ${failures.length} failure(s)\n`);
     for (const f of failures) console.error(`  • ${f}`);

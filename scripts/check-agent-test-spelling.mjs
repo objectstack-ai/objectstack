@@ -818,25 +818,82 @@ function baseFixtureFiles(extra = {}) {
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'classifier — forms that MUST be refused': 10,
+  'classifier — forms that MUST be allowed (a false red here is worse than no gate)': 18,
+  'the multi-line spelling a line-at-a-time reader misses': 2,
+  'the command word is what pnpm would resolve': 5,
+  'measured stripper carve-outs, both named': 2,
+  'the SWEEP over a real temp tree — the walk, not the predicate': 5,
+  'the escape hatch works — a declared counter-example is not a violation': 2,
+  'the same tree WITHOUT the plant is green — the red above is the plant, not the fixture': 3,
+  'anti-vacuity — every way a broken selector could wear a pass is a REFUSAL': 4,
+  'the declared lists cannot quietly become mute buttons': 4,
+  'the dispatch-gates declaration — both directions, derived from the scan roots': 8,
+  'the derivation reads THIS workspace, and reads it non-empty': 4,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 12;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   const t = (name, actual, expected) => {
+    registerCase();
     const ok = JSON.stringify(actual) === JSON.stringify(expected);
     if (!ok) failures.push(`${name}\n    expected ${JSON.stringify(expected)}\n    actual   ${JSON.stringify(actual)}`);
     console.log(`  ${ok ? '✓' : '✗'} ${name}`);
   };
 
   console.log('classifier — forms that MUST be refused');
+  battery('classifier — forms that MUST be refused');
   for (const line of RED_CASES) {
     t(line, scanLine(line, VITEST_SCRIPTS).findings.length > 0, true);
   }
 
   console.log('classifier — forms that MUST be allowed (a false red here is worse than no gate)');
+  battery('classifier — forms that MUST be allowed (a false red here is worse than no gate)');
   for (const line of GREEN_CASES) {
     t(line, scanLine(line, VITEST_SCRIPTS).findings.length, 0);
   }
 
   console.log('the multi-line spelling a line-at-a-time reader misses');
+  battery('the multi-line spelling a line-at-a-time reader misses');
   t(
     'continuation join',
     scanLine(logicalLines('pnpm --filter <pkg> test \\\n  -- --maxWorkers=2 <file>\n')[0].text, VITEST_SCRIPTS).findings.length,
@@ -846,6 +903,7 @@ function selfTest() {
   t('continuation keeps the FIRST line number', logicalLines('a \\\nb\nc\n').map((l) => l.line), [1, 3, 4]);
 
   console.log('the command word is what pnpm would resolve');
+  battery('the command word is what pnpm would resolve');
   t('--filter consumes its value', commandWord(['pnpm', '--filter', 'test', 'build']), 'build');
   t('run keyword is skipped', commandWord(['pnpm', 'run', 'test']), 'test');
   t('bare script', commandWord(['pnpm', 'test']), 'test');
@@ -853,10 +911,12 @@ function selfTest() {
   t('no command word', commandWord(['pnpm']), null);
 
   console.log('measured stripper carve-outs, both named');
+  battery('measured stripper carve-outs, both named');
   t('turbo', judgeRun(['pnpm', 'turbo', 'run', 'test'], VITEST_SCRIPTS).bound, false);
   t('npm', judgeRun(['pnpm', 'npm', 'run', 'test'], VITEST_SCRIPTS).bound, false);
 
   console.log('the SWEEP over a real temp tree — the walk, not the predicate');
+  battery('the SWEEP over a real temp tree — the walk, not the predicate');
   const redTree = makeFixtureTree(
     baseFixtureFiles({ '.claude/agents/bad.md': 'Run `pnpm --filter @objectstack/spec test -- --maxWorkers=2 <file>`.\n' }),
   );
@@ -870,6 +930,7 @@ function selfTest() {
     t('the message names the escape hatch', joined.includes('COUNTER_EXAMPLE_FILES'), true);
 
     console.log('the escape hatch works — a declared counter-example is not a violation');
+    battery('the escape hatch works — a declared counter-example is not a violation');
     const exempted = sweep(redTree, {
       counterExamples: [{ path: '.claude/agents/bad.md', reason: 'quotes the broken form as a warning' }],
     });
@@ -880,6 +941,7 @@ function selfTest() {
   }
 
   console.log('the same tree WITHOUT the plant is green — the red above is the plant, not the fixture');
+  battery('the same tree WITHOUT the plant is green — the red above is the plant, not the fixture');
   const greenTree = makeFixtureTree(baseFixtureFiles());
   try {
     const lines = [];
@@ -896,6 +958,7 @@ function selfTest() {
   }
 
   console.log('anti-vacuity — every way a broken selector could wear a pass is a REFUSAL');
+  battery('anti-vacuity — every way a broken selector could wear a pass is a REFUSAL');
   const noRoot = makeFixtureTree({ 'AGENTS.md': 'x\n' });
   try {
     t('a missing declared root refuses', run(noRoot, () => {}), EXIT_REFUSED);
@@ -946,6 +1009,7 @@ function selfTest() {
   }
 
   console.log('the declared lists cannot quietly become mute buttons');
+  battery('the declared lists cannot quietly become mute buttons');
   t('exactly one rule-owning file', RULE_OWNING_FILES.length, 1);
   t('and it is this file', RULE_OWNING_FILES[0], 'scripts/check-agent-test-spelling.mjs');
   t('every counter-example carries a reason', COUNTER_EXAMPLE_FILES.every((e) => typeof e.reason === 'string' && e.reason.trim().length > 0), true);
@@ -972,6 +1036,7 @@ function selfTest() {
   // The live `hintCovers` results are recorded in the docblock as a
   // MEASUREMENT, taken at the command line where it costs nothing.
   console.log('the dispatch-gates declaration — both directions, derived from the scan roots');
+  battery('the dispatch-gates declaration — both directions, derived from the scan roots');
   {
     const scanRoots = [...INSTRUCTION_ROOTS, ...EXECUTED_ROOTS];
     // A root with no separator is refused by the extractor as too generic, so
@@ -1009,12 +1074,58 @@ function selfTest() {
   }
 
   console.log('the derivation reads THIS workspace, and reads it non-empty');
+  battery('the derivation reads THIS workspace, and reads it non-empty');
   const derived = deriveVitestScripts(REPO_ROOT);
   t('derives a non-empty script set', derived.names.size > 0, true);
   t('derives `test`', derived.names.has('test'), true);
   t('does NOT derive `dev` — the documented dev-server spelling is safe by measurement', derived.names.has('dev'), false);
   t('does NOT derive `dev:crm`', derived.names.has('dev:crm'), false);
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length > 0) {
     console.error(`\n✗ check-agent-test-spelling --self-test -- ${failures.length} failure(s)\n`);
     for (const failure of failures) console.error(`  ${failure}`);
