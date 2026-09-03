@@ -532,7 +532,7 @@ const SELF_TEST_VERDICT = 'check-test-typecheck self-test reached its verdict';
 // The counts are a FLOOR, not an equality — adding cases is ordinary work and
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering.
-const SELF_TEST_BATTERIES = Object.freeze({
+const SELF_TEST_BATTERIES: Readonly<Record<string, number>> = Object.freeze({
   'the cardinality-preserving control (#13470)': 1,
   'What a signature must and must not notice (#13470)': 4,
   'The ratchet-remedy authority convention (#8435)': 7,
@@ -554,12 +554,12 @@ function selfTest(): string {
   // `battery()` opens a battery; every assertion below is attributed to the one
   // most recently opened, so a section that stops running stops registering and
   // names ITSELF at the floor rather than going quiet.
-  const seen = new Map();
-  let openBattery = null;
-  const battery = (name) => {
+  const seen = new Map<string, number>();
+  let openBattery: string | null = null;
+  const battery = (name: string): void => {
     openBattery = name;
   };
-  const registerCase = () => {
+  const registerCase = (): void => {
     const b = openBattery ?? UNATTRIBUTED_BATTERY;
     seen.set(b, (seen.get(b) ?? 0) + 1);
   };
@@ -1018,7 +1018,7 @@ function selfTest(): string {
   // the success line below can only be printed by a run in which the set of
   // batteries that registered assertions EQUALS the set declared. A set
   // difference names WHICH battery stopped; a count says only that something did.
-  const floorFailure = (message) => {
+  const floorFailure = (message: string): void => {
     failures.push(message);
   };
   const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
