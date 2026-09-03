@@ -40,7 +40,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { composeStacks } from '@objectstack/spec';
+import { composeStacks, normalizeStackInput, ObjectStackDefinitionSchema } from '@objectstack/spec';
 import { collectNavGroupInputs, findNavGroupDiagnostics } from './nav-contribution-groups.js';
 
 type AnyRec = Record<string, unknown>;
@@ -103,6 +103,30 @@ const ordersStack = (group: string) => ({
 /** Compose exactly as `examples/app-multi-package/objectstack.config.ts` does. */
 const artifact = (group: string): AnyRec =>
   composeStacks([ordersStack(group), coreStack()], { manifest: 'preserve' }) as unknown as AnyRec;
+
+/**
+ * The composed artifact as `compile.ts` actually hands it to this check —
+ * through the SAME `normalizeStackInput` + `ObjectStackDefinitionSchema`
+ * parse the command runs, and `result.data` is the object it passes.
+ *
+ * ⚠️ Load-bearing, and the one thing a raw `composeStacks` reading cannot
+ * establish. The check walks `parsed.packages[].manifest`, and if the parse
+ * reshaped, renamed or dropped any part of that path the derivation would
+ * silently see an empty artifact — reporting nothing, which is
+ * indistinguishable from a clean stack. This is asserted rather than assumed
+ * because the alternative was a 57-package build of the CLI's dependency
+ * closure to spawn one `os build`.
+ */
+const parsedArtifact = (group: string): AnyRec => {
+  const normalized = normalizeStackInput(artifact(group) as Record<string, unknown>, {
+    onConversionNotice: () => {},
+  });
+  const result = ObjectStackDefinitionSchema.safeParse(normalized);
+  if (!result.success) {
+    throw new Error(`fixture does not parse: ${JSON.stringify(result.error.issues.slice(0, 3))}`);
+  }
+  return result.data as unknown as AnyRec;
+};
 
 /** The artifact's packages, in the `{ index, id, body }` shape `compile.ts` walks. */
 const packagesOf = (parsed: AnyRec) =>
@@ -215,6 +239,25 @@ describe('#14553 — `os build` checks `navigationContributions[].group` across 
     const found = await findNavGroupDiagnostics(single, []);
     expect(found).toHaveLength(1);
     expect(found[0]).toMatchObject({ app: APP, group: 'sales_grp', packageId: 'com.example.single' });
+  });
+
+  it('survives the command\'s own parse — what `compile.ts` passes in is what this reads', async () => {
+    // The end-to-end statement this file can make without spawning the CLI:
+    // run the fixture through the real `normalizeStackInput` +
+    // `ObjectStackDefinitionSchema` chain `os build` runs, hand `result.data`
+    // to the derivation exactly as the command does, and require the SAME
+    // finding the raw composed object produces.
+    //
+    // Both directions matter. The typo'd leg proves the parse does not hide the
+    // path this check walks; the clean leg proves it does not invent findings.
+    const typod = parsedArtifact('sales_grp');
+    const found = await findNavGroupDiagnostics(typod, packagesOf(typod));
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({ app: APP, packageId: ORDERS_ID, group: 'sales_grp', relocated: ['nav_orders'] });
+
+    const clean = parsedArtifact(GROUP);
+    expect(packagesOf(clean).map((pkg) => pkg.id).sort()).toEqual([CORE_ID, ORDERS_ID]);
+    expect(await findNavGroupDiagnostics(clean, packagesOf(clean))).toEqual([]);
   });
 
   it('naming an id that exists but is not a `type: "group"` node reaches the same diagnostic', async () => {
