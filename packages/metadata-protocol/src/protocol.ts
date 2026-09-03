@@ -30,6 +30,7 @@ import { ensureMetadataOverlayIndexes } from './migrations/overlay-index.js';
 import { driverCanRunSql, resolveDriverExec } from './migrations/driver-exec.js';
 import { SysMetadataRepository, type SysMetadataEngine } from './sys-metadata-repository.js';
 import {
+    bumpWriteEpoch,
     metaOverlayCacheTtlMs,
     readMetaOverlayCache,
     readWriteEpoch,
@@ -5169,6 +5170,19 @@ export class ObjectStackProtocolImplementation implements
      * first, listeners second — the #5109 invalidate-before-notify rule: a
      * listener that re-reads must not observe the event and the pre-event
      * registry at the same time.
+     *
+     * [#13609] The convergence above heals THIS replica's registry, but on its
+     * own leaves this replica's `meta-overlay-cache` row set stamped at the
+     * PRE-mutation write epoch — nothing above performs a local engine write,
+     * so nothing retires it. A read of `getMetaItems` landing before that
+     * cache's TTL lapses then re-hydrates the very row this method just healed
+     * the registry of (measured: `protocol.datasource-delete-prolongation.test.ts`).
+     * `bumpWriteEpoch` closes that gap the same way
+     * `authz-invalidation-bridge.ts` already closes it for the authorization
+     * cache on the identical substrate (#11968) — called here, AFTER
+     * convergence and BEFORE {@link notifyMutationListenersLocal}, so a
+     * listener that re-reads through `getMetaItems` sees a cold cache too, not
+     * only a healed registry.
      */
     private async applyRemoteMetadataMutation(evt: MetadataMutationEvent): Promise<void> {
         const type = canonicalMetaType(evt.type);
@@ -5195,6 +5209,10 @@ export class ObjectStackProtocolImplementation implements
         } else {
             await this.restoreArtifactRegistryView(type, evt.name, orgId);
         }
+        // [#13609] Retire this replica's overlay-row cache at the moment of
+        // convergence — never a direct `@objectstack/objectql` import, see
+        // `bumpWriteEpoch`'s header in `meta-overlay-cache.ts`.
+        bumpWriteEpoch(this.engine, 'remote');
         this.notifyMutationListenersLocal({ ...evt, type });
     }
 

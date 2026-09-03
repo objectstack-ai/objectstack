@@ -84,6 +84,7 @@
 import { describe, expect, it } from 'vitest';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import {
+    bumpWriteEpoch,
     META_OVERLAY_CACHE_DEFAULT_TTL_MS,
     metaOverlayCacheEntryCount,
     metaOverlayCacheTtlMs,
@@ -382,6 +383,53 @@ describe('[#11967] §3 a success is cached ONLY when the engine exposes the writ
             .toBeUndefined();
         expect(readWriteEpoch({})).toBeUndefined();
         expect(readWriteEpoch(null)).toBeUndefined();
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// [#13609] bumpWriteEpoch — the structural sibling that retires this cache
+// from OUTSIDE a local engine write, mirroring `authz-invalidation-bridge.ts`'s
+// `epoch.bump('remote')` on the identical substrate. `protocol.ts`'s
+// `applyRemoteMetadataMutation` is the one call site (see
+// `protocol.datasource-delete-prolongation.test.ts` for the end-to-end
+// measurement); this block pins the helper itself, the same way §3 above pins
+// `readWriteEpoch` apart from any one caller.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('[#13609] bumpWriteEpoch — the OUTSIDE-a-write invalidation seam', () => {
+    it('bumps the seam and returns its new value when the engine exposes one', () => {
+        const engine = { writeEpoch: makeEpochSeam() };
+        expect(readWriteEpoch(engine)).toBe(0);
+        expect(bumpWriteEpoch(engine, 'remote')).toBe(1);
+        expect(readWriteEpoch(engine)).toBe(1);
+    });
+
+    it('declines the same way readWriteEpoch does — no seam, or only a partial one', () => {
+        expect(bumpWriteEpoch({ writeEpoch: { current: 3 } }, 'remote')).toBeUndefined();
+        expect(bumpWriteEpoch({ writeEpoch: { current: 3, bump: () => 4 } }, 'remote')).toBeUndefined();
+        expect(bumpWriteEpoch({}, 'remote')).toBeUndefined();
+        expect(bumpWriteEpoch(null, 'remote')).toBeUndefined();
+    });
+
+    it('retires a live cache entry the same way a local engine write does', async () => {
+        const h = makeHarness(clone(OVERLAY_ROWS));
+
+        await h.protocol.getMetaItems({ type: 'object' });
+        const perCall = h.finds.length;
+        expect(perCall).toBeGreaterThan(0);
+
+        // A repeat still hits — the control half of this assertion, paired per
+        // this file's own header rule.
+        await h.protocol.getMetaItems({ type: 'object' });
+        expect(h.finds.length).toBe(perCall);
+
+        // The bump this pin is about: never a local `insert`/`update`/`delete`
+        // on `h.engine` — exactly what a PEER's converged mutation looks like
+        // from this replica's own engine's point of view.
+        bumpWriteEpoch(h.engine, 'remote');
+
+        await h.protocol.getMetaItems({ type: 'object' });
+        expect(h.finds.length).toBe(perCall * 2);
     });
 });
 

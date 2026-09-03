@@ -1,11 +1,12 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#13609] RE-VERIFICATION — how long does a PEER replica keep serving a
- * DELETED datasource on `GET /api/v1/meta/datasource`?
+ * [#13609] THE FIX — a PEER replica no longer re-serves a DELETED datasource
+ * on `GET /api/v1/meta/datasource` after its registry converges.
  *
  * ---------------------------------------------------------------------------
- * What this file is, and why it is a measurement rather than a fix
+ * What this file is: a re-verification pin that FOUND a second gap, and now
+ * pins the fix for it in the same file
  * ---------------------------------------------------------------------------
  * QA observed a deleted datasource still being served by
  * `/api/v1/meta/datasource` on all three replicas of a cluster, prolonging an
@@ -15,6 +16,18 @@
  * close this observation too, and that this card stays open as the
  * re-verification carrier: re-measure the prolongation once that fix lands, and
  * close only on the measurement.
+ *
+ * The re-verification (PR #14431) found that #13331 closes the registry-heal
+ * half but opens a SECOND gap on the read-in-window path (see "Arms" below,
+ * preserved as history). Ruling A′ (2026-09-03, director batch #22, comment
+ * 5528370129) ordered the fix for that gap: `applyRemoteMetadataMutation`
+ * (`protocol.ts`) now retires the peer's `meta-overlay-cache` entry — via
+ * `bumpWriteEpoch`, structurally, the same substrate
+ * `authz-invalidation-bridge.ts` already bumps for its own channel — at the
+ * moment of convergence, before `notifyMutationListenersLocal`. That fix lands
+ * in the same PR as the three pin changes below. This file is therefore both
+ * records at once: the measurement that found the gap (kept as history), and
+ * the pin that now proves it closed.
  *
  * ⭐ The discriminator is DURATION, and it is sharp:
  *
@@ -97,41 +110,62 @@
  *      writes the deleted row straight back into the registry the bridge
  *      just healed — and the registry has no TTL.
  *
- * So the prolongation is neither unconditionally bounded nor unconditionally
- * unbounded, and the discriminator is not time but TRAFFIC:
+ * So the prolongation was — PR #14431's finding, kept as history below —
+ * neither unconditionally bounded nor unconditionally unbounded, and the
+ * discriminator was not time but TRAFFIC:
  *
- *      read lands inside the residue window  -> UNBOUNDED  (cases 4, 6)
- *      no read lands inside it               -> BOUNDED, one TTL window (case 5)
+ *      read lands inside the residue window  -> UNBOUNDED  ("door READ during
+ *                                                the residue window", THEN)
+ *      no read lands inside it               -> BOUNDED, one TTL window
+ *                                                ("door NOT read during the
+ *                                                residue window", unchanged)
  *
- * Both are pinned, side by side and differing in exactly that one step, because
- * either one alone reads as a clean verdict and neither one alone is true.
+ * Both were pinned, side by side, differing in exactly that one step, because
+ * either reading alone looked like a clean verdict and neither alone was true.
+ *
+ * ⭐ Ruling A′'s fix collapses the READ-in-window case to bounded-at-0ms too
+ * (now ✅ below): the traffic discriminator stops mattering once convergence
+ * itself retires the cache, rather than leaving a TTL a read could still race.
  *
  * ⚠️ On a replica actually serving `/api/v1/meta/datasource` — the door QA was
  * watching — a read inside a 30s window is the ordinary case, not the unlucky
  * one. The bounded arm is the quiet-replica arm.
  *
  * ---------------------------------------------------------------------------
- * Why the re-hydration happens, precisely
+ * Why the re-hydration USED TO happen, precisely (history — PR #14431)
  * ---------------------------------------------------------------------------
- * Nothing on the bridge's receipt path touches the WRITE EPOCH that keys the
- * overlay cache. `applyRemoteMetadataMutation` re-reads the row and repairs the
- * registry; it performs no engine write, and a peer replica does no writing of
- * its own on this path, so the peer's epoch does not move and its pre-delete
- * row set stays "fresh" for the rest of its TTL. `getMetaItems` then does what
- * the cache's own header says it always does, hit or miss — it runs
+ * Nothing on the bridge's receipt path touched the WRITE EPOCH that keys the
+ * overlay cache. `applyRemoteMetadataMutation` re-read the row and repaired the
+ * registry; it performed no engine write, and a peer replica does no writing of
+ * its own on this path, so the peer's epoch never moved and its pre-delete row
+ * set stayed "fresh" for the rest of its TTL. `getMetaItems` then did what the
+ * cache's own header says it always does, hit or miss — it ran
  * `hydrateOverlayIntoRegistry` over those rows.
  *
- * ⭐ The comparison that makes this a gap rather than a design: the SIBLING
- * bridge for the same substrate does bump it. `authz-invalidation-bridge.ts`
+ * ⭐ The comparison that made this a gap rather than a design: the SIBLING
+ * bridge for the same substrate already bumped it. `authz-invalidation-bridge.ts`
  * calls `epoch.bump('remote')` when it applies a peer hint, and the overlay
  * cache's own header cites that as the reason cross-node convergence "narrows
- * for free" there. The `metadata.mutated` bridge added for #13331 contains no
- * epoch reference at all. So the two cross-node paths over one substrate
- * disagree, and this door sits on the half that does not invalidate.
+ * for free" there. The `metadata.mutated` bridge added for #13331 carried no
+ * epoch reference at all — the two cross-node paths over one substrate
+ * disagreed, and this door sat on the half that did not invalidate.
  *
- * ⛔ NOT FIXED HERE. This card is a measurement carrier and its source surface
- * is read-only, so the reading is reported and the repair is left to a card
- * that can be decided on it.
+ * ---------------------------------------------------------------------------
+ * ✅ FIXED HERE (ruling A′, 2026-09-03) — why it no longer happens
+ * ---------------------------------------------------------------------------
+ * `applyRemoteMetadataMutation` now calls `bumpWriteEpoch(this.engine,
+ * 'remote')` — the structural sibling `meta-overlay-cache.ts` declares beside
+ * `readWriteEpoch`, never a direct `@objectstack/objectql` import — after the
+ * registry-convergence branch and BEFORE `notifyMutationListenersLocal` (the
+ * #5109 invalidate-before-notify rule that method's own docblock states: a
+ * listener that re-reads must not observe the event and the pre-event registry
+ * at the same time — and the overlay cache is exactly such a re-read). The
+ * bump retires every entry this replica's overlay cache holds in the SAME
+ * synchronous step that heals the registry, so the read that follows finds a
+ * cold cache, re-reads `sys_metadata` fresh (empty, for a deleted row), and
+ * hydrates nothing back in. The metadata channel now gets the write-epoch bump
+ * the authz channel already had — the asymmetry above is closed, not routed
+ * around.
  *
  * ---------------------------------------------------------------------------
  * Four-seam checklist (the card's own elimination list) — verdicts
@@ -144,11 +178,14 @@
  *     boot-only, and it reads the already-corrected DB, so it cannot explain a
  *     steady-state cross-replica prolongation without a restart. Cited, not
  *     re-derived (the dispatch forbids re-deriving that finding).
- *  3. list-cache TTL (#5109) ............. ⛔ NOT the bounded residue the ruling
- *     expected. At this door the cache is `meta-overlay-cache`, not
- *     `MetadataManager.listCache` — and it does not merely delay the correct
- *     answer, it FEEDS the untimed registry, converting a 30s residue into an
- *     unbounded one on any read. That conversion is what this file measures.
+ *  3. list-cache TTL (#5109) ............. RE-MEASURED, then CLOSED. At this
+ *     door the cache is `meta-overlay-cache`, not `MetadataManager.listCache` —
+ *     PR #14431 found it did not merely delay the correct answer, it FED the
+ *     untimed registry, converting a 30s residue into an unbounded one on any
+ *     read landing in the window. Ruling A′'s bump on the receipt path retires
+ *     this cache at the moment of convergence, so the read that follows has
+ *     nothing stale left to feed the registry with. This file measures both
+ *     states, before and after.
  *  4. same class as #13578 ............... ELIMINATED by PR #13883 — same
  *     symptom, opposite mechanism (that driver registry had NO eviction door;
  *     this one's door exists and does broadcast). Cited, not re-derived.
@@ -622,7 +659,7 @@ describe('[#13609] ⭐ the re-verification: how long does the peer keep serving 
         expect(cluster.peer.removedEntries).toContain('datasource|billing_db');
     });
 
-    it('⛔ …but the peer’s very next READ re-hydrates the deleted row from its own stale overlay cache', async () => {
+    it('✅ [FIXED] …and the peer’s very next READ no longer re-hydrates the deleted row', async () => {
         const cluster = makeCluster({ attach: true });
         await seedServedDatasources(cluster, ['billing_db']);
 
@@ -631,21 +668,21 @@ describe('[#13609] ⭐ the re-verification: how long does the peer keep serving 
         expect(cluster.peer.registry.listItems('datasource')).toEqual([]);
 
         // One read of the peer's own door, with the clock untouched.
-        expect(await serves(cluster.peer, 'billing_db')).toBe(true);
+        expect(await serves(cluster.peer, 'billing_db')).toBe(false);
 
-        // ⭐ THE SEAM. The convergence retired the registry entry but did NOT
-        // retire the peer's overlay-cache entry — nothing on the receipt path
-        // touches the write epoch that keys it, and the peer does no writing of
-        // its own, so the pre-delete row set is still "fresh". `getMetaItems`
-        // then does what its cache's own header says it always does, hit or
-        // miss: it runs `hydrateOverlayIntoRegistry` over those rows. The
-        // deleted row is written straight back into the registry the bridge
-        // just cleaned — and the registry has no TTL.
+        // ⭐ THE FIX (ruling A′, #13609). `applyRemoteMetadataMutation` now
+        // bumps the peer's write epoch in the SAME synchronous step that
+        // retires the registry entry, before `notifyMutationListenersLocal`
+        // runs — so the peer's overlay-cache entry (keyed on that epoch) is
+        // ALREADY stale by the time this read arrives, clock untouched or not.
+        // `getMetaItems` misses the cache, re-reads `sys_metadata` fresh (no
+        // active row), and hydrates nothing back in — the registry the bridge
+        // just cleaned stays clean.
         expect(cluster.peer.registry.listItems('datasource').map((i: any) => i.name))
-            .toEqual(['billing_db']);
+            .toEqual([]);
     });
 
-    it('⛔ Arm B measured, door READ during the residue window: UNBOUNDED, past 10 windows', async () => {
+    it('✅ [FIXED] Arm B measured, door READ during the residue window: BOUNDED AT 0 ms', async () => {
         const cluster = makeCluster({ attach: true });
         await seedServedDatasources(cluster, ['billing_db']);
 
@@ -653,14 +690,16 @@ describe('[#13609] ⭐ the re-verification: how long does the peer keep serving 
         await settle();
 
         // `measureProlongationMs` reads the door once BEFORE advancing the
-        // clock — i.e. inside the residue window, which is what a replica under
-        // load does continuously. That read converts the bounded cache residue
-        // into an unbounded registry entry, so waiting the TTL out no longer
-        // helps: once the cache lapses the registry is the only source left,
-        // and it is the one now holding the deleted row.
+        // clock — i.e. inside the residue window, which is what a replica
+        // under load does continuously. Previously (PR #14431) that read
+        // converted the bounded cache residue into an unbounded registry
+        // entry. Now the convergence bump has already retired the cache
+        // before this first read runs, so the read-in-window traffic
+        // discriminator this file's header describes stops mattering: there
+        // is no stale entry left for a read to convert into anything.
         const prolongation = await measureProlongationMs(cluster.peer, 'billing_db');
-        expect(prolongation).toBeNull();
-        expect(await serves(cluster.peer, 'billing_db')).toBe(true);
+        expect(prolongation).toBe(0);
+        expect(await serves(cluster.peer, 'billing_db')).toBe(false);
     });
 
     it('⭐ Arm B measured, door NOT read during the residue window: BOUNDED by one TTL window', async () => {
@@ -708,29 +747,33 @@ describe('[#13609] ⭐ the re-verification: how long does the peer keep serving 
         expect(prolongation).toBeNull();
     });
 
-    it('⭐ SCOPED kernel: the same delete IS bounded — at exactly one overlay-cache TTL window', async () => {
+    it('✅ [FIXED, pin amended by ruling A′] SCOPED kernel: the same delete now converges IMMEDIATELY — 0 ms, not one TTL window', async () => {
         const cluster = makeCluster({ attach: true, environmentId: 'env_prod' });
         await seedServedDatasources(cluster, ['billing_db']);
 
         // On a scoped kernel BOTH hydration seams are gated off — the read-side
         // loop and the write-through alike — so no replica ever holds a local
         // registry copy of an overlay row, and the only local source is the
-        // overlay cache, which does expire.
+        // overlay cache.
         expect(cluster.peer.registry.listItems('datasource')).toEqual([]);
 
         const res = await cluster.writer.protocol.deleteMetaItem({ type: 'datasource', name: 'billing_db' });
         expect(res.success).toBe(true);
         await settle();
 
-        // ⭐ The bound, stated as a number: one window, and the constant is
-        // imported rather than retyped so this tracks whatever ships.
+        // ⭐ PIN AMENDED (ruling A′, 2026-09-03, comment 5528370129). This arm's
+        // bound was `TTL_MS` (30 000 ms) before the fix — on a scoped kernel the
+        // overlay cache is the ONLY local source, so its TTL was the one
+        // residue the original ruling expected to survive. It does not survive:
+        // the convergence bump (`bumpWriteEpoch`, this PR's fix) retires that
+        // same overlay cache at the moment of convergence instead of letting it
+        // lapse on its own clock, so the one local source a scoped kernel has
+        // is already gone before the first read, not merely bounded by a timer
+        // a read could still race. The pin keeps asserting a literal number,
+        // per the ruling — moved to `0`, never loosened to `<=`.
         const prolongation = await measureProlongationMs(cluster.peer, 'billing_db');
-        expect(prolongation).toBe(TTL_MS);
-        expect(TTL_MS).toBe(30_000);
+        expect(prolongation).toBe(0);
 
-        // This is the residue the ruling permits ("listCache TTL is the one
-        // bounded residue that may legitimately remain") — refined to the cache
-        // that actually holds it at this door.
         expect(await serves(cluster.peer, 'billing_db')).toBe(false);
     });
 
