@@ -298,7 +298,7 @@
   `TypeScript Type Check` · `Lint & Repo Gates` · `Test Core` · `Dogfood Regression Gate` ·
   `Build Core` · `Temporal Conformance (live PG + MySQL)`;`in_progress` 不是过;advisory 门禁
   红进 main 是共享损伤,照样止血立单。⛔ 聚合命令同样不作判定:`check:type-check-debt` 可在
-  包级 typecheck 绿时红;`check:i18n` 以「PREREQUISITE NOT MET — workspace CLI 未 build」退 1 不是漂移。
+  包级 typecheck 绿时红;`check:i18n` 以「PREREQUISITE NOT MET — workspace CLI 未 build」退 3 不是漂移。
 - ⚠️ **计数不是机理读数(被当天推翻的推断的墓碑)**:「`GET .../actions/runs?event=merge_group`
   计数 0 ⇒ required 集为空」提出当天即被自身推翻 —— 同一姊妹仓 2026-08-24 首现 merge_group
   run(0 → 8),同日再测 224(阳性对照 `event=pull_request` 全程非零)。计数答「至今发生过没有」,
