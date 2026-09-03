@@ -132,9 +132,9 @@ export const AccountTeamSharingRule = defineSharingRule({
 
 ### Recipient types
 
-`sharedWith` accepts a `{ type, value }` recipient. **Every authorable
-recipient is enforced** — each expands to concrete users at seed time and
-materializes `sys_record_share` grants:
+`sharedWith` accepts a `{ type, value }` recipient. Every recipient expands to
+concrete users and materializes `sys_record_share` grants — once per **rule**
+for the first five, once per **matched record** for `field`:
 
 | `type` | Shares with |
 |:--|:--|
@@ -143,6 +143,7 @@ materializes `sys_record_share` grants:
 | `position` | Everyone assigned that position (flat expansion — positions have no tree) |
 | `unit_and_subordinates` | Everyone in that **business unit and every unit beneath it** (the BU tree is the one hierarchy — ADR-0090 D3) |
 | `business_unit` | Everyone in exactly that business unit (no subtree) |
+| `field` | The user or users named by a **user-typed field on each matched record** — `value` is that field's name (`assignees`). A `multiple: true` field shares with every user it holds; an empty column shares with nobody. There is deliberately no `manager` recipient: "the owner's manager" is a user field the application stores on the record, named here (maintainer ruling 2026-09-02, objectstack#14103). The per-record executor is objectstack#15072 — until it lands, a `field` rule is skipped with a logged warning at seed, never seeded wider |
 
 A criteria `condition` must be compilable by the CEL → filter pushdown
 compiler. A condition the compiler cannot lower is **skipped and logged —

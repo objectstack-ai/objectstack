@@ -70,7 +70,7 @@ export const SharingLevel = z.enum([
  * Recipient Type
  * Who receives the access?
  *
- * Every member maps 1:1 onto an enforced runtime recipient expansion
+ * Every member maps 1:1 onto a runtime recipient expansion
  * (`plugin-sharing` `expandRecipient`) — this enum is the authorable subset of
  * the runtime `SharingRuleRecipientType` contract:
  * - `user` — a single user id.
@@ -80,6 +80,28 @@ export const SharingLevel = z.enum([
  * - `unit_and_subordinates` — a business unit plus every descendant unit's
  *   members (ADR-0057 D5 subtree widening).
  * - `business_unit` — exactly one business unit's members (no subtree).
+ * - `field` — the RECORD-RELATIVE recipient (maintainer ruling 2026-09-02,
+ *   #14103): `value` names a user-typed field ON THE RECORD, and each record
+ *   the rule's criteria match is shared with the user or users that column
+ *   names. A field with `multiple: true` shares with every user it names; an
+ *   empty column shares with nobody (fail-closed — never a match-all
+ *   principal). Unlike every member above, which resolves ONCE PER RULE, a
+ *   `field` recipient expands ONCE PER MATCHED RECORD, and its grants
+ *   re-materialise when the record's own write changes that column. That
+ *   executor half is #15072 (`plugin-sharing`); until it lands, the
+ *   declared-rule bootstrap skips a `field` rule with a logged warning
+ *   (`mapRecipientType` → null) — it never seeds one as anything wider.
+ *
+ * ⛔ No `manager` member (same ruling). "Share with the owner's manager" is
+ * authored as a user field the application stores on the record — a snapshot
+ * or kept in sync, the application's explicit choice — plus a `field`
+ * recipient naming it. A `manager` member would walk `sys_user.manager_id`
+ * from the matched record, re-introducing the obligation that removed the
+ * `owner` recipient type: a change in the graph (someone's manager changes)
+ * would have to re-materialise every row that ever pointed at the old
+ * manager, from a `sys_user` write the record materialiser never sees. With
+ * `field` the recipient stays visible on the record and re-materialisation
+ * rides the record's own writes.
  *
  * Removed (never enforced): `group` (renamed → `team`) and `guest` — anonymous
  * access is served by the public-form grant and share links, not sharing rules;
@@ -93,6 +115,7 @@ export const ShareRecipientType = z.enum([
   'position',
   'unit_and_subordinates',
   'business_unit',
+  'field',
 ]);
 
 /**
@@ -165,8 +188,38 @@ const BaseSharingRuleSchema = strictObject(
   },
   {
     type: ShareRecipientType,
-    value: z.string().describe('ID or code of the recipient (user / team / position / business unit)'),
-  }).describe('The recipient of the shared access'),
+    value: z.string().describe(
+      'The recipient principal: the id or code of the user / team / position / business unit — or, for ' +
+      "`type: 'field'`, the snake_case name of a user-typed field on the record whose value names the " +
+      'user or users to share each matched record with',
+    ),
+  }).superRefine((recipient, ctx) => {
+    // [#14103] A `field` recipient's `value` is a FIELD NAME, not a principal id,
+    // so it has a grammar the other members' opaque ids do not: the machine-name
+    // shape every `FieldSchema.name` carries. Refusing here, at authoring, keeps
+    // two traps out of the executor: an empty name (a rule naming no column would
+    // be skipped at seed — the silent under-share this file's history keeps
+    // closing, ADR-0078) and a dotted path (`owner.manager_id` is a graph walk
+    // spelled as a value — exactly what the ruling's ⛔ on a `manager` member
+    // refuses). Scoped to `field`, so nothing that parsed before parses
+    // differently: the other members' `value` stays the opaque string it was.
+    if (recipient.type !== 'field') return;
+    if (!/^[a-z_][a-z0-9_]*$/.test(recipient.value)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['value'],
+        message:
+          `\`sharedWith.value\` must name a user-typed field on the record when \`type\` is 'field' ` +
+          `(got ${JSON.stringify(recipient.value)}). ` +
+          'A field name is snake_case (`assignees`, `manager_user`) — not a principal id and not a dotted ' +
+          'path: the recipient is read from that one column on each matched record, never walked from it. ' +
+          "To share with the owner's manager, store the manager in a user field on the record and name that field.",
+      });
+    }
+  }).describe(
+    'The recipient of the shared access: a principal resolved once per rule, or — `type: field` — the ' +
+    'user or users named by a field on each matched record',
+  ),
 
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   //
@@ -203,7 +256,10 @@ export const CriteriaSharingRuleSchema = lazySchema(() => BaseSharingRuleSchema.
  * records matching the criteria materialise `sys_record_share` grants for the
  * resolved recipients. Supported recipients: `user` / `team` / `position` /
  * `unit_and_subordinates` / `business_unit` (ADR-0057 D5; ADR-0090 D3) — every
- * authorable recipient expands at runtime (`plugin-sharing` `expandRecipient`).
+ * authorable recipient expands at runtime (`plugin-sharing` `expandRecipient`)
+ * — plus `field`, the record-relative recipient (#14103): resolved per matched
+ * record from a user-typed column on it; its executor is the services half,
+ * #15072, and until that lands a `field` rule is skipped LOUDLY at seed.
  *
  * The whole authorable surface is enforced — nothing here validates and then
  * silently does nothing (ADR-0078). Removed to keep it that way: `owner`-type
