@@ -232,12 +232,13 @@ instrument drift.
 
 ## The census
 
-**IN PROGRESS — 32/72 measured, this is a checkpoint commit, not the final
-reading.** Continuing under the shared verify lock with tighter per-batch
-budgets so the lock cycles for other agents on this container; the ledger this
-table is generated from is `/tmp/os-log-volume-census/ledger.json`, one row
-per package written the moment that package finishes, so no completed
-measurement is lost if this run is interrupted.
+**IN PROGRESS — 45/72 measured, this is a checkpoint commit, not the
+final reading.** Continuing under the shared verify lock with tighter
+per-batch budgets so the lock cycles for other agents on this container;
+the ledger this table is generated from is
+`/tmp/os-log-volume-census/ledger.json`, one row per package written the
+moment that package finishes, so no completed measurement is lost if this
+run is interrupted.
 
 | package | console | structured | reporter | total | exit |
 |---|---:|---:|---:|---:|---|
@@ -269,19 +270,19 @@ measurement is lost if this run is interrupted.
 | `packages/metadata-fs` | 0 | 0 | 13 | 13 | ok |
 | `packages/metadata-protocol` | 308 | 0 | 13 | 321 | ok |
 | `packages/objectql` | 533 | 11,326 | 16 | 11,875 | ok |
-| `packages/observability` | — | — | — | — | **NOT MEASURED** |
-| `packages/platform-objects` | — | — | — | — | **NOT MEASURED** |
-| `packages/plugins/embedder-openai` | — | — | — | — | **NOT MEASURED** |
-| `packages/plugins/knowledge-memory` | — | — | — | — | **NOT MEASURED** |
-| `packages/plugins/knowledge-ragflow` | — | — | — | — | **NOT MEASURED** |
-| `packages/plugins/plugin-approvals` | — | — | — | — | **NOT MEASURED** |
-| `packages/plugins/plugin-audit` | — | — | — | — | **NOT MEASURED** |
-| `packages/plugins/plugin-auth` | — | — | — | — | **NOT MEASURED** |
-| `packages/plugins/plugin-dev` | — | — | — | — | **NOT MEASURED** |
-| `packages/plugins/plugin-email` | — | — | — | — | **NOT MEASURED** |
-| `packages/plugins/plugin-hono-server` | — | — | — | — | **NOT MEASURED** |
-| `packages/plugins/plugin-pinyin-search` | — | — | — | — | **NOT MEASURED** |
-| `packages/plugins/plugin-reports` | — | — | — | — | **NOT MEASURED** |
+| `packages/observability` | 0 | 0 | 13 | 13 | ok |
+| `packages/platform-objects` | 0 | 0 | 13 | 13 | ok |
+| `packages/plugins/embedder-openai` | 0 | 0 | 13 | 13 | ok |
+| `packages/plugins/knowledge-memory` | 0 | 0 | 13 | 13 | ok |
+| `packages/plugins/knowledge-ragflow` | 0 | 0 | 13 | 13 | ok |
+| `packages/plugins/plugin-approvals` | 428 | 300 | 13 | 741 | ok |
+| `packages/plugins/plugin-audit` | 658 | 889 | 13 | 1,560 | ok |
+| `packages/plugins/plugin-auth` | 2,678 | 2,149 | 13 | 4,840 | ok |
+| `packages/plugins/plugin-dev` | 0 | 0 | 13 | 13 | ok |
+| `packages/plugins/plugin-email` | 6 | 60 | 13 | 79 | ok |
+| `packages/plugins/plugin-hono-server` | 0 | 1 | 13 | 14 | ok |
+| `packages/plugins/plugin-pinyin-search` | 0 | 0 | 13 | 13 | ok |
+| `packages/plugins/plugin-reports` | 247 | 8 | 13 | 268 | ok |
 | `packages/plugins/plugin-security` | — | — | — | — | **NOT MEASURED** |
 | `packages/plugins/plugin-sharing` | — | — | — | — | **NOT MEASURED** |
 | `packages/plugins/plugin-webhooks` | — | — | — | — | **NOT MEASURED** |
@@ -313,18 +314,20 @@ measurement is lost if this run is interrupted.
 | `packages/triggers/trigger-schedule` | — | — | — | — | **NOT MEASURED** |
 | `packages/types` | — | — | — | — | **NOT MEASURED** |
 | `packages/verify` | 221 | 3,171 | 13 | 3,405 | ok |
-| **total, 32/72 suites measured** | **10,828** | **55,372** | **467** | **66,667** | |
+| **total, 45/72 suites measured** | **14,845** | **58,779** | **636** | **74,260** | |
 
-structured share of total (structured / (structured+console+reporter)): 83.1%
-structured share of console+structured (comparable to the 5-suite framing): 83.6%
-measured: 32/72 — NOT MEASURED (40): packages/observability, packages/platform-objects, packages/plugins/embedder-openai, packages/plugins/knowledge-memory, packages/plugins/knowledge-ragflow, packages/plugins/plugin-approvals, packages/plugins/plugin-audit, packages/plugins/plugin-auth, packages/plugins/plugin-dev, packages/plugins/plugin-email, packages/plugins/plugin-hono-server, packages/plugins/plugin-pinyin-search, packages/plugins/plugin-reports, packages/plugins/plugin-security, packages/plugins/plugin-sharing, packages/plugins/plugin-webhooks, packages/qa/downstream-contract, packages/qa/http-conformance, packages/sdui-parser, packages/services/service-analytics, packages/services/service-automation, packages/services/service-cache, packages/services/service-cluster, packages/services/service-cluster-redis, packages/services/service-datasource, packages/services/service-i18n, packages/services/service-job, packages/services/service-knowledge, packages/services/service-messaging, packages/services/service-package, packages/services/service-queue, packages/services/service-realtime, packages/services/service-settings, packages/services/service-sms, packages/services/service-storage, packages/spec, packages/triggers/trigger-api, packages/triggers/trigger-record-change, packages/triggers/trigger-schedule, packages/types
+structured share of total (structured / (structured+console+reporter)): 79.2%
+
+structured share of console+structured (comparable to the 5-suite framing): 79.8%
+
+measured: 45/72 — NOT MEASURED (27): `packages/plugins/plugin-security`, `packages/plugins/plugin-sharing`, `packages/plugins/plugin-webhooks`, `packages/qa/downstream-contract`, `packages/qa/http-conformance`, `packages/sdui-parser`, `packages/services/service-analytics`, `packages/services/service-automation`, `packages/services/service-cache`, `packages/services/service-cluster`, `packages/services/service-cluster-redis`, `packages/services/service-datasource`, `packages/services/service-i18n`, `packages/services/service-job`, `packages/services/service-knowledge`, `packages/services/service-messaging`, `packages/services/service-package`, `packages/services/service-queue`, `packages/services/service-realtime`, `packages/services/service-settings`, `packages/services/service-sms`, `packages/services/service-storage`, `packages/spec`, `packages/triggers/trigger-api`, `packages/triggers/trigger-record-change`, `packages/triggers/trigger-schedule`, `packages/types`
+
 non-zero exit: 0
-
 
 ## The answer
 
-Not yet — see "IN PROGRESS" above. Provisional read at 32/72 (do not cite):
-structured share of console+structured is already ~84%, nowhere near the
+Not yet — see "IN PROGRESS" above. Provisional read at 45/72 (do not cite):
+structured share of console+structured is ~80%, nowhere near the
 five-suite ~45%, in the direction the earlier reading's own explanation
 predicts (see "What is NOT claimed here" / the five-suite table above): most
 of the *unmeasured* population never boots a kernel at all, so it was always
