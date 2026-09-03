@@ -37,8 +37,9 @@ than an omission because it reads as evidence.
 
 **Why `minor` and not `patch`.** No export is added or removed, no declared type
 narrows, and `GetMetaItemsRequest` still accepts `organizationId?: string` — so
-this is not the `**BREAKING**` published-type narrowing shape. But it is also not
-the patch shape: an envelope on an existing refusal or an accept-set widening
+this is not the published-type-narrowing shape that would carry a major bump plus
+an explicit incompatibility marker (#13925). Nothing here is incompatible. But it
+is also not the patch shape: an envelope on an existing refusal or an accept-set widening
 leaves what a successful read *returns* untouched, and this changes it. On a
 deployment carrying pre-#6190 phantom rows, a session with an active organization
 gets **fewer rows** back from published read doors that pass the raw active
