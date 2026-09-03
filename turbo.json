@@ -155,6 +155,9 @@
         "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/capability-map.page.ts",
         "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/command-center-jsx.page.ts",
         "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/start-here.page.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/pages/task-visualizations.pages.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/data/objects/task.object.ts",
+        "$TURBO_ROOT$/examples/app-showcase/src/ui/views/task.view.ts",
         "$TURBO_ROOT$/sdui.manifest.json"
       ]
     },

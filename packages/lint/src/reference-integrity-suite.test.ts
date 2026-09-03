@@ -24,6 +24,11 @@ describe('reference-integrity suite — membership', () => {
       'validateListViewFieldRefs',
       'validateActionNameRefs',
       'validatePageFieldBindings',
+      // [#14073] The same page, one question out: the BINDING behind each
+      // visualization `appearance.allowedVisualizations` whitelists, resolved
+      // against the source object's fields or the view named by `sourceView`.
+      // Placed beside the member that resolves the same page's field names.
+      'validatePageVisualizationBindings',
       'validateChartBindings',
       // [#14105] The dataset's OWN references, one level below the two binding
       // rules above it — the conscious edit this written-out list exists to
