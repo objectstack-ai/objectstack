@@ -242,7 +242,22 @@ export default class SecretOrphans extends Command {
         return;
       }
 
-      const rawSecrets = rowsOf(await secretDriver.find('sys_secret', {}));
+      // Read as an ARRAY, with no normalizer in front of it. `IDataDriver.find`
+      // resolves to `Record<string, unknown>[]`, and the union's driver port
+      // now says so too, so there is no `{ records }` / `{ data }` / bare-row
+      // envelope for a limb to unwrap: every concrete driver behind
+      // `getDriverForObject()` — SqlDriver (and SqliteWasmDriver, which extends
+      // it), TursoDriver local and remote, MongoDBDriver, InMemoryDriver —
+      // returns an array on every path it can return on, `[]` included.
+      //
+      // ⛔ Do not reintroduce one "just in case". A normalizer here is not a
+      // safety net: its limbs are unreachable, so nothing exercises them, and
+      // its filter would silently DROP a row the drivers cannot produce anyway
+      // — dropping a `sys_secret` row from this read is dropping it from the
+      // report, and this command's whole safety property is that no row goes
+      // unmentioned. A driver that ever answered something else is a contract
+      // violation to fix at that driver, not to absorb here.
+      const rawSecrets = await secretDriver.find('sys_secret', {});
       const rawById = new Map(rawSecrets.map((r) => [String(r.id), r]));
       // ⛔ `ciphertext` is dropped here and not carried into the plan: the plan
       // is printed and serialised, and cipher material must not be reachable
@@ -259,7 +274,7 @@ export default class SecretOrphans extends Command {
 
       const settingDriver = engine.getDriverForObject('sys_setting');
       const settingRows: SettingRowSnapshot[] = settingDriver
-        ? rowsOf(await settingDriver.find('sys_setting', {})).map((r) => ({
+        ? (await settingDriver.find('sys_setting', {})).map((r) => ({
           namespace: String(r.namespace ?? ''),
           key: String(r.key ?? ''),
           scope: (r.scope as string | null | undefined) ?? null,
@@ -432,17 +447,6 @@ export function asDeletingDriver(driver: unknown): SecretDeleteDriverLike | null
   return candidate && typeof candidate.delete === 'function'
     ? (candidate as SecretDeleteDriverLike)
     : null;
-}
-
-/** Normalise a driver result (`T[]` or `{ data: T[] }` or a single row). */
-function rowsOf(result: unknown): Array<Record<string, unknown>> {
-  if (!result) return [];
-  const list = Array.isArray(result)
-    ? result
-    : Array.isArray((result as { data?: unknown }).data)
-      ? (result as { data: unknown[] }).data
-      : [result];
-  return list.filter((r): r is Record<string, unknown> => !!r && typeof r === 'object');
 }
 
 /**
