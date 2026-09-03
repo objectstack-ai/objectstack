@@ -62,10 +62,14 @@
  * - `SECURITY_OWD_ALIAS` / `SECURITY_EXTERNAL_WIDER` fire only on values that
  *   are static strings (the rule itself requires `typeof === 'string'`; the
  *   sentinel is not a string).
- * - `SECURITY_CBP_NO_RELATION` reads the `fields` subtree, so when that
- *   subtree is not fully static its findings are SUPPRESSED with a printed
- *   notice — a `Field.master_detail(...)` factory call must not read as "no
- *   relation". (No marked block declares `controlled_by_parent` today; the
+ * - `SECURITY_CBP_NO_RELATION` and `SECURITY_CBP_AMBIGUOUS_RELATION` read the
+ *   `fields` subtree, so when that subtree is not fully static their findings
+ *   are SUPPRESSED with a printed notice — a `Field.master_detail(...)` factory
+ *   call must not read as "no relation", and it must not read as "absent from
+ *   the master_detail tiers" either: an opaque field is invisible to every tier
+ *   predicate, so a single real `master_detail` masked by a factory call would
+ *   hand the win to a lower tier and report a tie the platform never resolves
+ *   (#14747). (No marked block declares `controlled_by_parent` today; the
  *   suppression exists so the first one that does cannot false-red.)
  *
  * Two shapes are refused loudly rather than skipped, because a silent skip is
@@ -125,7 +129,7 @@ import { tmpdir } from 'node:os';
 
 import { requireDefaultExport, requireDependency } from '../../../scripts/import-prerequisite.mjs';
 const ts = await requireDefaultExport('typescript', () => import('typescript'), import.meta.url);
-const { validateSecurityPosture, SECURITY_CBP_NO_RELATION } = await requireDependency('@objectstack/lint', () => import('@objectstack/lint'), import.meta.url);
+const { validateSecurityPosture, SECURITY_CBP_NO_RELATION, SECURITY_CBP_AMBIGUOUS_RELATION } = await requireDependency('@objectstack/lint', () => import('@objectstack/lint'), import.meta.url);
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '../../..');
@@ -344,10 +348,10 @@ export function judgeFile(fileAbs, relPath, marker) {
               const findings = validateSecurityPosture({ objects: [obj] }).filter((f) => f.severity === 'error');
               const kept = [];
               for (const f of findings) {
-                if (f.rule === SECURITY_CBP_NO_RELATION && !fieldsComplete) {
+                if ((f.rule === SECURITY_CBP_NO_RELATION || f.rule === SECURITY_CBP_AMBIGUOUS_RELATION) && !fieldsComplete) {
                   notices.push(
                     `${relPath}:${pageLine}  object "${obj.name}": ${f.rule} suppressed — ` +
-                      `the fields subtree is not statically evaluable (factory calls), so "no relation" would be a guess`,
+                      `the fields subtree is not statically evaluable (factory calls), so the verdict would be a guess`,
                   );
                   continue;
                 }
