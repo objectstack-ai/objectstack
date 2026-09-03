@@ -287,6 +287,7 @@
     "RECORD_CONTEXT_BLOCK_TAGS (const)",
     "RECORD_CONTEXT_TYPE_PREFIX (const)",
     "RESERVED_COMPONENT_TYPE_NAMESPACES (const)",
+    "RETIRED_PAGE_COMPONENT_TYPES (const)",
     "ReactBlockDef (interface)",
     "ReactInteractionProp (interface)",
     "ReactPropKind (type)",
