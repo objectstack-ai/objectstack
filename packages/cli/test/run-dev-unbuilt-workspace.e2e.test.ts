@@ -70,7 +70,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFile, spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -96,6 +96,12 @@ interface Run {
   code: number;
   stdout: string;
   stderr: string;
+  /**
+   * Wall clock for the whole child, spawn to callback. Read by case 5, which
+   * sizes its own ceiling against a run of the SAME child on the SAME runner
+   * rather than against a constant measured somewhere else.
+   */
+  elapsedMs: number;
 }
 
 /**
@@ -105,9 +111,11 @@ interface Run {
  * started with — and the control legs' whole job is to be un-simulated.
  */
 function runCli(args: string[], cwd: string, nodeOptions: string | undefined): Promise<Run> {
+  const started = Date.now();
   return new Promise((resolvePromise) => {
     execFile(TSX, [CLI, ...args], { cwd, maxBuffer: 32 * 1024 * 1024, env: childEnv({ NO_COLOR: '1', NODE_OPTIONS: nodeOptions }) }, (err, stdout, stderr) => {
       resolvePromise({
+        elapsedMs: Date.now() - started,
         // `err.code` is the real exit status; `null`/undefined means the child
         // was signalled — a failure of a different kind, never reported as 0.
         code: err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as unknown as { code: number }).code : 1) : 0,
@@ -147,10 +155,79 @@ const PIPE_BUFFER_BYTES = 65_536;
 const STALL_MS = 10_000;
 
 /**
- * Ceiling for case 5: comfortably above the worst child runtime plus the shim's
- * 15 s bound (~22 s measured), so reaching it means a HANG rather than a wait.
+ * The shim's own no-progress bound, mirrored from `bin/run-dev.js`
+ * (`STDERR_DRAIN_STALL_MS`) and held equal to it by a case below rather than
+ * trusted. Case 5's ceiling no longer budgets it — that ceiling is a constant
+ * now — but two cases here are still sized against it and would quietly stop
+ * discriminating if it moved:
+ *
+ *   • `STALL_MS` above must stay strictly BELOW it, or case 4's stalled reader
+ *     outlasts the shim's own give-up and reds against a WORKING fix;
+ *   • case 6 reads the closed-reader path as released in less than `STALL_MS`,
+ *     which is evidence of a fast path only while `STALL_MS` is itself below
+ *     the bound.
  */
-const UNREAD_HARD_CAP_MS = 40_000;
+const SHIM_DRAIN_STALL_MS = 15_000;
+
+/** Where that constant is written — read by the parity case, never imported. */
+const SHIM = resolve(HERE, '../bin/run-dev.js');
+
+/**
+ * Case 5's ceiling — a CONSTANT, and deliberately this file's existing
+ * per-child budget rather than a number of its own.
+ *
+ * ⚠️ Two ceilings have been tried here and both failed the same way, so the
+ * history is written down instead of left to be rediscovered:
+ *
+ *   • `UNREAD_HARD_CAP_MS = 40_000`, read as "comfortably above the worst child
+ *     runtime plus the shim's 15 s bound (~22 s measured)". Merge-queue shards
+ *     running the full suite six ways sharded went over it three times in a
+ *     day, on three trees that cannot reach this file.
+ *   • then a per-run derivation, `clamp(40_000, RUN_TIMEOUT_MS, 4 x a case-1
+ *     calibration + 2 x the shim's bound)`, on the theory that a contended
+ *     shard can calibrate itself. It was evicted from the queue by its own new
+ *     assertion at `cap 61464 ms = clamp(40000, 180000, 4 x 7866 ms measured
+ *     child runtime + 2 x 15000 ms shim bound)`: the child outlived a ceiling
+ *     built from a sample taken minutes earlier on that same runner by more
+ *     than 7.8x that sample, against a FACTOR of 4.
+ *
+ * Raising the factor would be the same move a third time. Both ceilings were
+ * sized comfortably above the worst thing on record when they were written, and
+ * both were beaten by a runner that got busier afterwards. Nothing measures the
+ * spread between a calibration and a later run on a shared, six-way-sharded
+ * queue runner, so no factor can be justified as ENOUGH — only as not beaten
+ * yet, which is what the constant it replaced could also say.
+ *
+ * ⭐ What removes the choice is the property this case actually pins. The
+ * failure it was written against is an UNBOUNDED wait: a drain wait with no
+ * bound armed at all, observed alive at 25 s, 30 s and 60 s and ending only
+ * when something else killed it. ANY finite ceiling catches that. Tightening a
+ * ceiling buys no detection at all — it buys false reds, and each one here
+ * costs a queue rebuild. So the ceiling wants to be the LARGEST value that
+ * keeps the failure legible, and it must not track load: a term tracking load
+ * is a prediction about contention drawn from a sample of the past, which is
+ * the one thing a shared runner will not honour.
+ *
+ * `RUN_TIMEOUT_MS` is that largest legible value, and it is not a new number:
+ *
+ *   • past it this case stops reporting a SIGKILL and starts reporting the
+ *     `beforeAll` timeout, which reds all six cases and names none of them. So
+ *     it is where legibility ends, not a preference;
+ *   • it is already this file's budget for ONE child of this suite, and cases
+ *     1-4 run the same child. A child here that legitimately needs more than
+ *     180 s has broken the whole file, not this case — one number to get
+ *     wrong instead of two;
+ *   • every load figure on record clears it by an order of magnitude: 23x the
+ *     7.9 s calibration, and 3.4x the worst legitimate lifetime yet measured
+ *     (22.6 s of contended work against 8 competing copies of this child, plus
+ *     both of the shim's 15 s bounds).
+ *
+ * The measurement is KEPT — as evidence in the failure message, never as an
+ * input to the threshold. That is the whole correction: case 1's wall clock
+ * tells a triage whether a red is a hang or a runner on fire, and it decides
+ * nothing.
+ */
+const UNREAD_HARD_CAP_MS = RUN_TIMEOUT_MS;
 
 interface Lifetime {
   code: number | null;
@@ -168,6 +245,7 @@ function runCliAgainstDeadReader(
   cwd: string,
   nodeOptions: string,
   mode: 'never-read' | 'destroy-read-end',
+  capMs: number,
 ): Promise<Lifetime> {
   return new Promise((resolvePromise) => {
     const child = spawn(TSX, [CLI, ...args], {
@@ -183,7 +261,7 @@ function runCliAgainstDeadReader(
     const started = Date.now();
     // Ours, and it must be the ONLY thing that can end a hang — a child that
     // reaches it is the failure this case exists to catch.
-    const cap = setTimeout(() => child.kill('SIGKILL'), UNREAD_HARD_CAP_MS);
+    const cap = setTimeout(() => child.kill('SIGKILL'), capMs);
     child.once('exit', (code, signal) => {
       clearTimeout(cap);
       resolvePromise({ code, signal, elapsedMs: Date.now() - started });
@@ -213,7 +291,13 @@ let unbuilt: Run;
 let built: Run;
 let genuinelyMissing: Run;
 let stalled: Run;
-let unread: Lifetime;
+// Definite-assignment assertion for the duration of the QUARANTINE below: the
+// `'never-read'` spawn in `beforeAll` is commented out, so nothing assigns this
+// and `strict` reports TS2454 at each of the three reads inside the skipped
+// case. Restoring that spawn makes the `!` redundant again, so it goes when the
+// quarantine is lifted. (Measured: the package's own `typecheck` is
+// `include: ["src"]`, so it never compiles this file and would not have said.)
+let unread!: Lifetime;
 let closedEnd: Lifetime;
 
 beforeAll(async () => {
@@ -222,8 +306,19 @@ beforeAll(async () => {
   built = await runCli(REAL_COMMAND, dir, undefined);
   genuinelyMissing = await runCli(['definitely-not-a-command'], dir, undefined);
   stalled = await runCliWhileParentStalls(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`);
-  unread = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'never-read');
-  closedEnd = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'destroy-read-end');
+  // ⛔ QUARANTINED — the `'never-read'` child is NOT spawned while the case it
+  // feeds is skipped. See the quarantine note on
+  // `it.skip('gives up and exits instead of waiting forever')` further down:
+  // this spawn is where the 180 s `UNREAD_HARD_CAP_MS` is paid under CI load,
+  // and that one case is its ONLY consumer — `unread` is read nowhere else in
+  // this file. The PR that fixes the hang in `bin/run-dev.js` un-skips that case
+  // and restores these four lines verbatim, in the same change:
+  //
+  //   // ⛔ Nothing measured above is consulted here. Case 1's wall clock is read by
+  //   // the failure message below, as evidence; the ceiling is a constant, so a
+  //   // slow sample can no longer size the instrument that judges the next run.
+  //   unread = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'never-read', UNREAD_HARD_CAP_MS);
+  closedEnd = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'destroy-read-end', UNREAD_HARD_CAP_MS);
 }, RUN_TIMEOUT_MS * 6);
 
 afterAll(() => {
@@ -311,12 +406,47 @@ describe('the mirror direction: a reader that is never coming back', () => {
    * this replaces armed no bound at all (`write()` returned true, so an early
    * return skipped it) and read as correct in every stalled-reader test.
    */
-  it('gives up and exits instead of waiting forever', () => {
+  // ⛔ QUARANTINED under the maintainer's ruling A of 2026-09-03 on
+  // objectstack#14832 — do not un-skip it on its own.
+  //
+  // WHY. The `'never-read'` child this case reads HANGS under CI load. The
+  // defect is in the product — `bin/run-dev.js`, the other half of #14832 —
+  // and NOT a cap that is set too low, so raising `UNREAD_HARD_CAP_MS` would buy
+  // nothing and would only make each failure slower. On `Test Core (1/6)` the
+  // harness SIGKILLed the child at the 180 s cap and this assertion red, and
+  // every occurrence EJECTED A WHOLE MERGE-QUEUE BATCH: `main` could not advance
+  // for hours behind this one case, which is what the ruling weighed.
+  //
+  // RE-ENABLE CONDITION. The PR that fixes the hang in `bin/run-dev.js` un-skips
+  // this case in the SAME change, and restores the `'never-read'` spawn in
+  // `beforeAll` (kept there verbatim, commented). The body below and all of its
+  // comments are untouched, so lifting the quarantine is `it.skip` -> `it` plus
+  // that one spawn line — nothing here has to be reconstructed.
+  it.skip('gives up and exits instead of waiting forever', () => {
     // A child still alive at the cap was SIGKILLed: signal set, code null.
     // That is the hang, and it is the whole point of this case.
-    expect(unread.signal).toBeNull();
-    expect(unread.code).toBe(2);
-    expect(unread.elapsedMs).toBeLessThan(UNREAD_HARD_CAP_MS);
+    //
+    // ⚠️ Both surviving assertions are about the PRODUCT: the child ends on
+    // its OWN, and it ends with the status any other reader would have got.
+    //
+    // ⛔ The third assertion this case used to carry — `elapsedMs` below the
+    // ceiling — is deliberately gone. Against a constant cap it asserts nothing
+    // the first line does not: the harness kills at exactly that cap, so a
+    // child that was not killed ran less than it. What it added was a race, at
+    // the one instant where a child exiting on its own and the timer firing
+    // are simultaneous, and it was the only reading here that a slower box
+    // could move on its own. Detection unchanged, one fewer way to red.
+    //
+    // The numbers move into the message, because `expected 'SIGKILL' to be
+    // null` alone does not tell a merge-queue triage which of two readings it
+    // has. A child killed at 180 s whose calibration was 8 s is a hang; one
+    // whose calibration was also minutes indicts the runner, not this code.
+    const evidence =
+      `cap ${UNREAD_HARD_CAP_MS} ms (RUN_TIMEOUT_MS, constant and load-independent by design); ` +
+      `this child ran ${unread.elapsedMs} ms; case 1 measured the same child at ` +
+      `${unbuilt.elapsedMs} ms on this runner minutes earlier`;
+    expect(unread.signal, `the harness SIGKILLed the child — it was still alive at the ceiling. ${evidence}`).toBeNull();
+    expect(unread.code, `the child did not exit 2 on its own. ${evidence}`).toBe(2);
   });
 
   // ⛔ There is deliberately NO assertion here that the child WAITED for the
@@ -332,6 +462,30 @@ describe('the mirror direction: a reader that is never coming back', () => {
   // process ENDS. That the bound itself runs and trips is shown out of band,
   // by tracing a run whose reader blocks its loop for the whole run — see the
   // PR for the `BOUND TRIPPED` trace.
+  //
+  // ⚠️ The same nondeterminism means an ABLATION of the bound can come back
+  // GREEN, and a single green one here is a ZERO READING rather than evidence
+  // this case has stopped discriminating. Measured on one box minutes apart,
+  // same tree: disabling the no-progress branch red this case at 180072 ms
+  // once, and passed it in 31.9 s the run before — that run's backlog fit in
+  // what the kernel and node happened to absorb, so the write callback
+  // resolved on its own and the branch was never reached. Re-run it, or drive
+  // the child OUT OF BAND (`spawn`, `stderr.pause()`, never read) where the
+  // pending bytes can actually be counted: 135408 bytes still held at a clean
+  // exit 2 in 19271 ms, against 145638 held by a child still alive at 90 s
+  // with the branch disabled.
+
+  it("keeps its mirror of the shim's bound equal to the shim's own", () => {
+    // The derivation above is only as good as `SHIM_DRAIN_STALL_MS` still being
+    // what `bin/run-dev.js` waits. There is no import to take it from — that
+    // file runs the CLI at module top — so it is mirrored, and a mirror with
+    // nothing holding it is how a ceiling ends up sized around a bound that
+    // moved. Same discipline as `INVOCATION_PREFIX` vs `CLI_NAME`: kept in
+    // sync by a case, not by an import.
+    const declared = /const STDERR_DRAIN_STALL_MS = ([\d_]+);/.exec(readFileSync(SHIM, 'utf8'))?.[1];
+    expect(declared, `no STDERR_DRAIN_STALL_MS declaration found in ${SHIM}`).toBeDefined();
+    expect(Number(String(declared).replaceAll('_', ''))).toBe(SHIM_DRAIN_STALL_MS);
+  });
 
   it('a CLOSED read end is released at once, not held for the bound (EPIPE reaches the callback)', () => {
     // Pins the fast path measured alongside the hang: when the reader is gone

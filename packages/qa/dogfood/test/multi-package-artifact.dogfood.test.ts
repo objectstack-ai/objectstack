@@ -94,14 +94,34 @@ describe('dogfood: one artifact, two co-owning packages (ADR-0130 D4)', () => {
     expect(orders?.manifest?.namespace).toBe('crm');
   });
 
+  it('both rows carry the schema default `scope: "project"` — nothing here is scope-less', () => {
+    // [#14597] This file used to document `orders` as being SERVED with no
+    // `scope` key. It authors none, but `defineStack` parses every `packages[]`
+    // entry through `ManifestSchema` (`ArtifactPackageEntrySchema`), whose
+    // `scope` is `.default('project')` — so the default is materialised at
+    // compile time, into `dist/objectstack.json` and into both served rows.
+    // Pinned on a real boot because that is the only place the old claim could
+    // ever have been checked, and it never was: every unit pin around it
+    // asserted a hand-built scope-less manifest instead of this artifact's.
+    const core = rows.find((r) => r.manifest?.id === CORE);
+    const orders = rows.find((r) => r.manifest?.id === ORDERS);
+
+    expect(core?.manifest?.scope).toBe('project');
+    expect(orders?.manifest?.scope).toBe('project');
+  });
+
   it('both rows are read-only — the server\'s own verdict, not a scope heuristic', () => {
     // ADR-0070 D2 / ADR-0130 Consequences row 6: a package booted from an
     // artifact through `registerApp` is read-only whatever its scope says,
-    // because `isWritablePackage` reads `engine.manifests` FIRST. The module is
-    // the row that separates that verdict from Studio's client-side
-    // `scope !== 'project'` heuristic — it is authored with no `scope` key at
-    // all, and a client rule reading the row alone cannot tell it from a
-    // Studio-created writable base.
+    // because `isWritablePackage` reads `engine.manifests` FIRST. That is the
+    // whole content of the verdict here — and it is NOT reproducible from these
+    // rows, which carry `scope: 'project'` (pinned above). ⛔ This fixture is
+    // therefore not the row that separates the server rule from a client-side
+    // `scope !== 'project'` one: the scope-less pair that does (a booted
+    // marketplace import, read-only, vs a Studio-created base, writable) only
+    // arises where a manifest reaches the registry without a `ManifestSchema`
+    // parse, and is pinned in
+    // `packages/runtime/src/domains/packages-writable-verdict.test.ts` (#14597).
     const core = rows.find((r) => r.manifest?.id === CORE);
     const orders = rows.find((r) => r.manifest?.id === ORDERS);
 

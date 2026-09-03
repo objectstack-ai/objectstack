@@ -161,12 +161,23 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
       // The try region (and any retries) failed. Run the catch handler if present.
       if (catchRegion != null) {
         variables.set(errorVariable, { nodeId: node.id, message: lastError });
+        // #14222: sink for the catch region's OWN partial steps, filled by
+        // `runRegion` only if the handler itself throws. Without it the catch
+        // region's completed steps unwound with the stack exactly as the try
+        // region's did before #7546 — see the failing-catch return below.
+        const catchAttemptSteps: StepLogEntry[] = [];
         try {
           // #1479: surface the catch handler region's steps.
-          const catchSteps = await engine.runRegion(catchRegion, variables, ctxOrEmpty, {
-            parentNodeId: node.id,
-            regionKind: 'catch',
-          });
+          const catchSteps = await engine.runRegion(
+            catchRegion,
+            variables,
+            ctxOrEmpty,
+            {
+              parentNodeId: node.id,
+              regionKind: 'catch',
+            },
+            catchAttemptSteps,
+          );
           return {
             success: true,
             output: { attempts: maxRetries + 1, caught: true, error: lastError },
@@ -177,7 +188,34 @@ export function registerTryCatchNode(engine: AutomationEngine, ctx: PluginContex
           };
         } catch (catchErr) {
           const catchMsg = catchErr instanceof Error ? catchErr.message : String(catchErr);
-          return { success: false, error: `try_catch '${node.id}': catch region failed — ${catchMsg}` };
+          // #14222 — the THIRD returned-failure path, and the last one still
+          // discarding its record. #13803 taught the engine to fold a dying
+          // container's steps off the THROW channel and #14184 taught the
+          // returned-failure branch the same, but only the no-`catch` producer
+          // was taught to supply them. This return is the worst of the three
+          // for an operator, because TWO regions ran: the try region may have
+          // written rows before it failed, the handler may have written more
+          // before IT failed, and the run log kept a step for neither — so the
+          // #4354 summary folded over that log reported `acted: 0` over writes
+          // that had genuinely landed. `acted: 0` on a failed run reads as
+          // "nothing happened, safe to re-run".
+          //
+          // Ordering mirrors the successful-catch return directly above: the
+          // failed try attempts come FIRST because they happened first, then
+          // whatever the handler got through. `runRegion` has already tagged
+          // both sets (`parentNodeId`, `regionKind: 'try'` / `'catch'`) on its
+          // failure path as well as its success path, so the two halves stay
+          // distinguishable in the log without anything being tagged here.
+          //
+          // Additive to the RECORD only: this return already reported failure
+          // with this error text, already produced a `NODE_FAILURE` step and
+          // was already routable by a `fault` edge. No engine change — the
+          // #14184 fold on `if (!result.success)` is already the reader.
+          return {
+            success: false,
+            error: `try_catch '${node.id}': catch region failed — ${catchMsg}`,
+            childSteps: [...failedAttemptSteps, ...catchAttemptSteps],
+          };
         }
       }
 

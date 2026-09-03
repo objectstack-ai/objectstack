@@ -762,85 +762,103 @@ function baseFiles() {
   };
 }
 
+// RED_CASES/GREEN_CASES below reuse three REAL tracked paths as their sandbox
+// keys (`scripts/check-nul-bytes.mjs`, `scripts/build-console.sh`,
+// `.github/workflows/ci.yml`) rather than invented names (`scripts/w.mjs`,
+// `scripts/writer.sh`, `.github/workflows/w.yml`, pre-#14695). The fixture's
+// own content is written into an isolated temp directory (`writeTree`) either
+// way, so which real path stands in for "a script" or "a workflow" makes no
+// difference to what any RED/GREEN case here asserts — but the KEY is a
+// string literal in THIS module's own source, and `RED_CASES`/`GREEN_CASES`
+// are top-level exports, not bodies inside a `selfTest()`-shaped function, so
+// `maskSelfTests` never hides them from `extractWatchHints`: every key here
+// already entered this gate's own declared-population hint set. An invented
+// name that exists in no tracked tree is therefore a DEAD lead — exactly the
+// shape `check:declared-population-live` exists to refuse — and it read as
+// live only because that gate's liveness bar is per-FAMILY (at least one hint
+// live) rather than per-hint; a real path clears the same bar honestly at
+// full precision instead of by accident (#14695). The two paths chosen for
+// the `.mjs`/`.sh` cases are deliberately UNRELATED scripts, picked only to be
+// tracked and short — not files this gate has any real interest in reading.
 /** Every spelling that MUST be refused. */
 export const RED_CASES = {
   'curl -X PUT, one line': {
-    'scripts/writer.sh': 'curl -X PUT -H "auth" "https://api.github.com/repos/o/r/issues/1/labels" -d "{}"\n'
+    'scripts/build-console.sh': 'curl -X PUT -H "auth" "https://api.github.com/repos/o/r/issues/1/labels" -d "{}"\n'
   },
   'curl -X PUT, backslash-continued onto the path line': {
-    'scripts/writer.sh': 'curl -X PUT \\\n  -H "auth" \\\n  "https://api.github.com/repos/o/r/issues/1/labels"\n'
+    'scripts/build-console.sh': 'curl -X PUT \\\n  -H "auth" \\\n  "https://api.github.com/repos/o/r/issues/1/labels"\n'
   },
   'gh api -X PUT': {
-    '.github/workflows/w.yml': 'jobs:\n  j:\n    steps:\n      - run: gh api -X PUT "repos/$R/issues/$N/labels" -f labels[]=a\n'
+    '.github/workflows/ci.yml': 'jobs:\n  j:\n    steps:\n      - run: gh api -X PUT "repos/$R/issues/$N/labels" -f labels[]=a\n'
   },
   'gh api --method PUT': {
-    '.github/workflows/w.yml': 'jobs:\n  j:\n    steps:\n      - run: gh api --method PUT repos/o/r/issues/1/labels\n'
+    '.github/workflows/ci.yml': 'jobs:\n  j:\n    steps:\n      - run: gh api --method PUT repos/o/r/issues/1/labels\n'
   },
   'github-script issues.setLabels': {
-    '.github/workflows/w.yml':
+    '.github/workflows/ci.yml':
       'jobs:\n  j:\n    steps:\n      - uses: actions/github-script@v9\n        with:\n          script: |\n' +
       '            await github.rest.issues.setLabels({ owner, repo, issue_number: 1, labels });\n'
   },
   'octokit.request route string': {
-    'scripts/w.mjs': "await octokit.request('PUT /repos/{owner}/{repo}/issues/{issue_number}/labels', { labels });\n"
+    'scripts/check-nul-bytes.mjs': "await octokit.request('PUT /repos/{owner}/{repo}/issues/{issue_number}/labels', { labels });\n"
   },
   'fetch with a multi-line options object': {
-    'scripts/w.mjs': 'await fetch(`${api}/repos/${repo}/issues/${n}/labels`, {\n  headers,\n  method: "PUT",\n  body\n});\n'
+    'scripts/check-nul-bytes.mjs': 'await fetch(`${api}/repos/${repo}/issues/${n}/labels`, {\n  headers,\n  method: "PUT",\n  body\n});\n'
   },
   'a bare .put( onto the endpoint': {
-    'scripts/w.mjs': "await client.put(`/issues/${n}/labels`, { labels });\n"
+    'scripts/check-nul-bytes.mjs': "await client.put(`/issues/${n}/labels`, { labels });\n"
   },
   'uses: actions/labeler at the version #10703 read': {
-    '.github/workflows/w.yml': 'jobs:\n  j:\n    steps:\n      - uses: actions/labeler@v7.0.0\n'
+    '.github/workflows/ci.yml': 'jobs:\n  j:\n    steps:\n      - uses: actions/labeler@v7.0.0\n'
   },
   'uses: actions/labeler at ANY other version': {
-    '.github/workflows/w.yml': 'jobs:\n  j:\n    steps:\n      - uses: actions/labeler@a1b2c3d4\n'
+    '.github/workflows/ci.yml': 'jobs:\n  j:\n    steps:\n      - uses: actions/labeler@a1b2c3d4\n'
   },
   'uses: codelytv/pr-size-labeler': {
-    '.github/workflows/w.yml': 'jobs:\n  j:\n    steps:\n      - uses: codelytv/pr-size-labeler@v1.10.4\n'
+    '.github/workflows/ci.yml': 'jobs:\n  j:\n    steps:\n      - uses: codelytv/pr-size-labeler@v1.10.4\n'
   },
   'the method slot WINDOW_LINES-1 lines from the path': {
-    'scripts/w.mjs': `const url = '/issues/1/labels';\n${'// filler\n'.repeat(WINDOW_LINES - 2)}await go({ method: 'PUT', url });\n`
+    'scripts/check-nul-bytes.mjs': `const url = '/issues/1/labels';\n${'// filler\n'.repeat(WINDOW_LINES - 2)}await go({ method: 'PUT', url });\n`
   }
 };
 
 /** Forms that MUST stay clean. Every one is correct as written. */
 export const GREEN_CASES = {
   'the additive POST': {
-    'scripts/w.mjs': "await gh('POST', `/issues/${n}/labels`, { labels: ['size/l'] });\n"
+    'scripts/check-nul-bytes.mjs': "await gh('POST', `/issues/${n}/labels`, { labels: ['size/l'] });\n"
   },
   'the targeted DELETE': {
-    'scripts/w.mjs': "await gh('DELETE', `/issues/${n}/labels/${encodeURIComponent(name)}`);\n"
+    'scripts/check-nul-bytes.mjs': "await gh('DELETE', `/issues/${n}/labels/${encodeURIComponent(name)}`);\n"
   },
   'the ban documented in a YAML comment': {
-    '.github/workflows/w.yml': '# never `curl -X PUT .../issues/1/labels`, and never issues.setLabels\njobs:\n  j:\n    steps:\n      - run: true\n'
+    '.github/workflows/ci.yml': '# never `curl -X PUT .../issues/1/labels`, and never issues.setLabels\njobs:\n  j:\n    steps:\n      - run: true\n'
   },
   'the ban documented in a JS block comment': {
-    'scripts/w.mjs': '/**\n * `PUT /issues/{n}/labels` and `issues.setLabels` are both banned.\n * Not `curl -X PUT .../issues/1/labels` either.\n */\nexport const ok = 1;\n'
+    'scripts/check-nul-bytes.mjs': '/**\n * `PUT /issues/{n}/labels` and `issues.setLabels` are both banned.\n * Not `curl -X PUT .../issues/1/labels` either.\n */\nexport const ok = 1;\n'
   },
   'the ban documented in a JS line comment': {
-    'scripts/w.mjs': "// await octokit.request('PUT /repos/o/r/issues/1/labels') -- BANNED\nexport const ok = 1;\n"
+    'scripts/check-nul-bytes.mjs': "// await octokit.request('PUT /repos/o/r/issues/1/labels') -- BANNED\nexport const ok = 1;\n"
   },
   'a comparison REFUSING the verb': {
-    'scripts/w.mjs': "if (step.method === 'PUT') throw new Error(`refused for /issues/${n}/labels`);\n"
+    'scripts/check-nul-bytes.mjs': "if (step.method === 'PUT') throw new Error(`refused for /issues/${n}/labels`);\n"
   },
   'the verb named in a test name next to a labels path': {
-    'scripts/w.mjs': "const plan = { path: '/issues/10698/labels' };\ncheck('the retired whole-set PUT destroys the label', plan);\n"
+    'scripts/check-nul-bytes.mjs': "const plan = { path: '/issues/10698/labels' };\ncheck('the retired whole-set PUT destroys the label', plan);\n"
   },
   'an unrelated action pin': {
-    '.github/workflows/w.yml': 'jobs:\n  j:\n    steps:\n      - uses: actions/checkout@v7\n      - uses: actions/stale@v11.0.0\n'
+    '.github/workflows/ci.yml': 'jobs:\n  j:\n    steps:\n      - uses: actions/checkout@v7\n      - uses: actions/stale@v11.0.0\n'
   },
   'a PUT to a different endpoint entirely': {
-    'scripts/w.mjs': "await gh('PUT', `/repos/${repo}/actions/variables/${name}`);\n"
+    'scripts/check-nul-bytes.mjs': "await gh('PUT', `/repos/${repo}/actions/variables/${name}`);\n"
   },
   'a label READ, no write': {
-    '.github/workflows/w.yml': 'jobs:\n  j:\n    steps:\n      - run: gh api "repos/$R/issues/$N/labels" --jq ".[].name"\n'
+    '.github/workflows/ci.yml': 'jobs:\n  j:\n    steps:\n      - run: gh api "repos/$R/issues/$N/labels" --jq ".[].name"\n'
   },
   'steps.labels output references': {
-    '.github/workflows/w.yml': "jobs:\n  j:\n    steps:\n      - if: steps.labels.outputs.skip != 'true'\n        run: true\n"
+    '.github/workflows/ci.yml': "jobs:\n  j:\n    steps:\n      - if: steps.labels.outputs.skip != 'true'\n        run: true\n"
   },
   'the method slot WINDOW_LINES lines from the path (a STATED miss)': {
-    'scripts/w.mjs': `const url = '/issues/1/labels';\n${'// filler\n'.repeat(WINDOW_LINES - 1)}await go({ method: 'PUT', url });\n`
+    'scripts/check-nul-bytes.mjs': `const url = '/issues/1/labels';\n${'// filler\n'.repeat(WINDOW_LINES - 1)}await go({ method: 'PUT', url });\n`
   }
 };
 
@@ -899,9 +917,9 @@ export function selfTest() {
 
   // Refusal 3 -- an allowlist entry with no stated reason. Assertion 3.
   withTree(RED_CASES['gh api -X PUT'], (dir) => {
-    const noReason = [{ path: '.github/workflows/w.yml', rule: 'endpoint', reason: 'too short' }];
+    const noReason = [{ path: '.github/workflows/ci.yml', rule: 'endpoint', reason: 'too short' }];
     expect('REFUSE allowlist entry without a reason', run(dir, { allowlist: noReason }, silent), EXIT_REFUSED);
-    const noRule = [{ path: '.github/workflows/w.yml', rule: 'whatever', reason: 'a'.repeat(MIN_REASON_LENGTH) }];
+    const noRule = [{ path: '.github/workflows/ci.yml', rule: 'whatever', reason: 'a'.repeat(MIN_REASON_LENGTH) }];
     expect('REFUSE allowlist entry with no valid rule', run(dir, { allowlist: noRule }, silent), EXIT_REFUSED);
   });
 
@@ -916,7 +934,7 @@ export function selfTest() {
   withTree(RED_CASES['gh api -X PUT'], (dir) => {
     const reasoned = [
       {
-        path: '.github/workflows/w.yml',
+        path: '.github/workflows/ci.yml',
         rule: /** @type {'endpoint'} */ ('endpoint'),
         reason: 'fixture: a deliberate exception recorded with a real sentence explaining itself.'
       }
