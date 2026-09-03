@@ -491,12 +491,49 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/service-analytics', '@objectstack/service-datasource', '@objectstack/service-package',
     '@objectstack/spec', '@objectstack/types',
   ],
+  // ── #14504 re-baseline, on the onboarding limb above ─────────────────────
+  //
+  // This package's `typecheck` script began naming `tsconfig.test.json`, which
+  // is what onboarding a test layer IS, so the PROGRAM SET moved and this entry
+  // is re-measured rather than widened. The nine deps after `@objectstack/core`
+  // that are new here -- `driver-memory`, `driver-sqlite-wasm`,
+  // `platform-objects`, `plugin-hono-server`, `plugin-sharing`,
+  // `service-analytics`, `service-job`, `service-messaging`, `service-package`
+  // -- satisfy CONDITION 1 by measurement and not by assertion: the gate's own
+  // failure text annotates every one of them `(via tsconfig.test.json)`, and a
+  // `--list` taken with the wiring reverted (the ONLY difference between the
+  // two trees) reports this entry WITHOUT any of the nine. They are reached
+  // only through the program this change onboarded. Six of the nine are this
+  // package's devDependencies, which its `src/**` cannot import at all and its
+  // test layer does; the other three (`driver-memory`, `driver-sqlite-wasm`,
+  // `plugin-hono-server`) are runtime deps whose bare specifier only the test
+  // layer names.
+  //
+  // CONDITION 2 -- the numbers, both from `--list` on the same checkout, the
+  // wiring in `packages/runtime/package.json` the only difference:
+  //
+  //   before   114 programs / 78 packages, 56 non-clean, 270 package-dep pairs
+  //   after    115 programs / 78 packages, 56 non-clean, 279 package-dep pairs
+  //
+  // so +1 program, +9 pairs, +0 entries and +0 non-clean packages: this entry
+  // already existed, and nothing that was clean stopped being clean. The
+  // ratchet is shrink-only from 279.
+  //
+  // CONDITION 3 -- reviewed as a re-baseline. `paths` is deliberately NOT the
+  // tool here, on the onboarding limb's own measured grounds (PR #12570):
+  // redirecting these specifiers to source would bill other packages' source
+  // diagnostics into `packages/runtime/test-typecheck-debt.json`, a ledger
+  // those packages cannot see and nobody can pay down -- and that ledger is
+  // this change's whole deliverable.
   '@objectstack/runtime': [
-    '@objectstack/core', '@objectstack/driver-sql', '@objectstack/metadata', '@objectstack/metadata-core',
+    '@objectstack/core', '@objectstack/driver-memory', '@objectstack/driver-sql',
+    '@objectstack/driver-sqlite-wasm', '@objectstack/metadata', '@objectstack/metadata-core',
     '@objectstack/metadata-protocol', '@objectstack/objectql', '@objectstack/observability',
-    '@objectstack/plugin-auth', '@objectstack/plugin-security', '@objectstack/rest',
-    '@objectstack/service-cluster', '@objectstack/service-datasource', '@objectstack/spec',
-    '@objectstack/types',
+    '@objectstack/platform-objects', '@objectstack/plugin-auth', '@objectstack/plugin-hono-server',
+    '@objectstack/plugin-security', '@objectstack/plugin-sharing', '@objectstack/rest',
+    '@objectstack/service-analytics', '@objectstack/service-cluster', '@objectstack/service-datasource',
+    '@objectstack/service-job', '@objectstack/service-messaging', '@objectstack/service-package',
+    '@objectstack/spec', '@objectstack/types',
   ],
   // #14386 re-baseline (the onboarding limb above): a NEW entry, reached ONLY
   // through `tsconfig.typecheck.json` -- a program that card ADDED (this

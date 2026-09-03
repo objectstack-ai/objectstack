@@ -550,7 +550,7 @@ real deployments use it today. "It reads like it would be useful" does not
 count. This axis **changes verdicts** rather than decorating them: two findings
 of identical technical shape can be ruled opposite ways on it alone — one
 declared surface retired for lack of pull, another kept and made to *reject
-loudly* because a real app proved the direction. On the other three axes they
+loudly* because a real app proved the direction. On the other axes they
 would read the same, and that would be the wrong answer.
 
 **Axis ② — long-term architectural soundness for *this* project.** Which option
@@ -589,11 +589,11 @@ the AI-safety axis breaks remaining ties toward the loud option; security and
 destructive actions stay with the human. The order ranks recommendations
 only — a split still escalates.
 
-**Axis ② carries the highest weight — at least 50%** when the axes conflict:
-lead with the long-term reading, and the other three together cannot outvote
-it. Read that weight through axis ②'s own definition — shrink special-cases
-and contract accretion, never grow them — so it never underwrites speculative
-expansion. It ranks recommendations only, never authority.
+**Axis ② carries the highest weight — at least 50%.** Lead with the long-term
+reading; when the axes conflict, the others together cannot outvote it. Read
+that weight as shrinking special-cases and contract accretion, never growing
+them — so it never underwrites speculative expansion. It ranks recommendations
+only, never authority.
 
 ### 9. Round report, then next round
 
@@ -656,10 +656,10 @@ trade-off and let the maintainer decide, ranking the recommendation pull-first
 (real pull → long-term shape; zero pull → non-proliferation; the AI-safety
 axis breaks ties; security/destructive → always the maintainer); the ranking
 orders recommendations only — a split still escalates. Long-term soundness
-carries the highest weight, at least 50%: lead with it, the other three
-together cannot outvote it, and read it as shrinking special-cases rather than
-as licence to expand speculatively; weight ranks recommendations only, never
-authority.
+carries the highest weight, at least 50%: lead with it, the others together
+cannot outvote it, and read it as shrinking special-cases and contract
+accretion rather than as licence to expand speculatively; weight ranks
+recommendations only, never authority.
 ```
 
 **Report contract.** The JSON in the template's final-message block is the
