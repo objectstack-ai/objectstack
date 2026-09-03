@@ -551,6 +551,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Timeout",
         helpText: "Abort the hook after N milliseconds"
       },
+      runAs: {
+        label: "运行身份",
+        helpText: "ctx.api 数据操作的身份：inherit 继承触发写入的上下文（默认）、system 提权、user 钉到触发用户"
+      },
       condition: {
         label: "条件",
         helpText: "可选公式——求值为 false 时跳过该钩子"
@@ -891,19 +895,19 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     sections: {
       basics: {
         label: "基础信息",
-        description: "名称与图标"
+        description: "仪表板标识与描述"
       },
       layout: {
         label: "布局",
-        description: "栅格与响应式"
+        description: "栅格尺寸与刷新间隔"
       },
       widgets: {
         label: "组件",
-        description: "图表、指标、列表等"
+        description: "放置在栅格上的卡片与图表"
       },
       filters: {
         label: "筛选",
-        description: "全局筛选与日期范围"
+        description: "应用到所有组件的默认筛选与全局筛选"
       },
       advanced: {
         label: "高级设置",
@@ -936,7 +940,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       header: {
         label: "页眉",
-        helpText: "标题、操作按钮与筛选"
+        helpText: "仪表板页眉配置（title、subtitle、actions）"
       },
       widgets: {
         label: "组件",

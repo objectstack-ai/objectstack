@@ -21,7 +21,7 @@ import {
   PluginMetadata, 
   ServiceLifecycle,
   PluginContext 
-} from '../index.js';
+} from '../src/index.js';
 
 // ============================================================================
 // Example 1: Database Plugin with Health Checks
@@ -49,7 +49,7 @@ const databasePlugin: PluginMetadata = {
         ctx.logger.info('Disconnecting from database...');
         this.connected = false;
       },
-      async query(sql: string) {
+      async query(_sql: string) {
         if (!this.connected) {
           throw new Error('Database not connected');
         }
