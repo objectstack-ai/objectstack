@@ -7345,7 +7345,85 @@ export class ObjectStackProtocolImplementation implements
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
         let item: unknown;
-        const orgId = request.organizationId;
+        // ── [#14770] The registry read gate, resolved ONCE, HERE ────────────────────
+        //
+        // {@link organizationIdForMetaRead} — the read-side twin of
+        // `organizationIdForMetaWrite` (#6190 / #7018), which the REST `/meta`
+        // read doors have applied since #9454 and which #14683 moved INSIDE the
+        // plural verb, `getMetaItems` above. Until this line the SINGULAR verb
+        // applied no gate of its own: whatever organization arrived was spent on
+        // whatever type arrived.
+        //
+        // ⭐ THE SHARPER HALF, and why the plural verb's fix did not cover it.
+        // `getMetaItems` UNIONs its two `queryByOrg` reads, so an ungated
+        // organization can only ADD rows — the resurrection #14683 is about.
+        // The two `findOverlay` reads below combine with `??`, which is
+        // PRECEDENCE: an ungated organization can SUBSTITUTE. On a type the
+        // registry declares `allowOrgOverride: false`, a pre-#6190 phantom
+        // org-scoped row — the kind `loadMetaFromDb` walks past and
+        // {@link reportUnhydratableOrgScopedRows} exists to warn about — was
+        // served INSTEAD OF the live env-wide document, to a caller that asked
+        // for the live one. Not an extra row in a list: the served document.
+        //
+        // ── ⛔ The `??` is the RULING, not the defect ────────────────────────
+        //
+        // Do not "repair" this by turning the precedence read into a layering or
+        // union of the org overlay OVER the env-wide row. ADR-0005's decision
+        // block names THIS method and rules the resolution order:
+        // `RUNTIME READ getMetaItem(type, name)` → `1. sys_metadata … ← overlay
+        // (wins)`, `2. SchemaRegistry / MetadataService ← artifact default`.
+        // Overlay WINS; it does not merge. Its design principle 3 stores the
+        // ENTIRE item document per overlay row, and the field-level patch model
+        // that would have given "layering" a meaning was retired and deleted
+        // whole under ADR-0049 (#13185, PR #13186, maintainer ruling
+        // 2026-08-29), with ADR-0126 §6 ruling the phase it was held for out.
+        // ADR-0029 D9 spells the `object` overlay the same way — `base =
+        // overlay ?? own`. ⇒ The defect is which ROW `orgId` selects, never how
+        // the two rows combine.
+        //
+        // ── The idempotence proof this change was made conditional on ───────
+        //
+        // Let `f(t, o) = organizationIdForMetaRead(t, o)`.
+        //
+        //  • `f(t, undefined) === undefined` for every `t`, so every caller that
+        //    names no organization — `import-mapping.ts`, `import-prepare.ts`,
+        //    plugin-email's template read, service-analytics' draft probe,
+        //    plugin-auth's `metaReader` — reads exactly what it reads today.
+        //  • `f(t, f(t, o)) === f(t, o)`, so a caller that already gated on the
+        //    same type sees no change. The REST by-name door computes
+        //    `organizationIdForMetaRead(canonicalMetaUrlType(req.params.type),
+        //    ctx?.tenantId)` and then passes `type: req.params.type`, the RAW
+        //    segment; the first statement of this method folds that segment
+        //    through {@link canonicalizeMetaRequestType}, which IS
+        //    `canonicalMetaUrlType` — so `request.type` here is the identical
+        //    STRING the door gated on, and this is the algebraic no-op.
+        //  • That door's CACHED arm reaches here through `getMetaItemCached`,
+        //    which folds first and forwards the same hoisted `readOrganizationId`
+        //    — the same no-op, one hop later.
+        //  • `organizationIdForMetaWrite` has the identical body, so the
+        //    write-side pre-reads (`saveMetaItem`'s destructive-change probe,
+        //    `publishMetaItem`'s seed-loader adapter, `publishPackageDrafts`'
+        //    build probes) now read the partition their write LANDS in. Read
+        //    scope and write scope cannot disagree — the property #9454 chose
+        //    this predicate for.
+        //
+        // ⇒ What is left to move is the ungated runtime callers in
+        // `runtime/src/domains/meta.ts`, which hand this method a raw active
+        // organization; two of them are hard-coded to type `'object'`, which is
+        // `allowOrgOverride: false` — callers that cannot be right about scope,
+        // by construction.
+        //
+        // ⚠️ ONE resolution for BOTH arms, deliberately — the ADR-0033
+        // `previewDrafts` read below and the active-overlay read under it both
+        // spend this binding. A gate threaded into only one would leave the
+        // draft preview serving exactly the phantom the active read had just
+        // stopped serving, the half-fix shape #9454's hoist comment refuses.
+        //
+        // ⛔ Gate AFTER the fold, never before it. `declaresOrgOverride`
+        // tolerates the MANIFEST plurals and not the URL-only ones
+        // (`translations` / `email_templates` have no manifest key); #10340
+        // measured what that costs when a raw segment reaches the predicate.
+        const orgId = organizationIdForMetaRead(request.type, request.organizationId);
         // Studio's editor opens a draft buffer with `state: 'draft'`;
         // runtime loaders omit it and get the live published row.
         const readState: 'active' | 'draft' = request.state === 'draft' ? 'draft' : 'active';
