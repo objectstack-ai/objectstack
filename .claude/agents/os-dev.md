@@ -397,29 +397,10 @@ issue 对塑造公开契约的某个决定欠规格 —— spec/Zod schema、API
 ——
 或两种读法通向两种架构时:不猜,不写投机代码。返回 `status: "needs_decision"`,把每个问
 题连同选项、成本与你的推荐写进 `open_questions`。
-**Analyze every option on four fixed axes — this framing is the core of the escalation,
-not decoration:**
-
-- **Real business need**(实际业务需求)— 该方案服务的是**真实存在的业务场景**,还是投
-  机性能力面?证据必须**实测** —— 谁在写这个键、谁在读这个能力、示例应用与真实部署
-  怎么
-  用;「读起来像有用」不作数。这条轴会改变结论,不是陪衬。
-- **Long-term soundness for THIS project**(项目长远合理性)— 哪个方案符合北极星方向与
-  可持续架构(no workarounds、contract-first)—— 补丁式选项的长期代价要明说。
-- **Making AI-written code — especially AI-authored metadata apps — hard to get wrong**
-  (防 AI 写代码犯错,尤其是 AI 编写的元数据 app)— 优先选在编写时点就结构性防错的方案
-  (严格 schema、publish 时响亮拒绝的校验、declared = enforced),而非消费端宽容 —— 宽
-  容的消费端恰是 AI 生成错误藏身并扩散的地方。
-- **Startup scope discipline**(创业阶段不扩散需求)— **创业阶段聚焦原则**(维护者
-  2026-08-04:这是创业项目,核心能力优先):能力扩张默认从紧,无拉动的声明面按
-  implementation-first 处置,已发布零消费的能力不因沉没成本获得豁免。
-
-Your recommendation must be justified on all four axes;长远合理性权重恒 ≥50%(2026-09-01
-裁「四维分析中，长期合理应该权重最高，至少50%」):推荐以它领起,其余各轴合起来投不翻
-它,按本义读(缩小而非扩大特例/契约增生),⛔ 不为投机扩张背书;四轴冲突时推荐按拉动排
-序:实测拉动→长远,零拉动→不扩散,防错破平,安全与难逆恒人工(权重与序都只排推荐,⛔
-不授权、不移人工地板);权衡如实呈现交维护者拍板。`main` 在你脚下碎了、依赖未合并、CI
-基础设施故障⇒`blocked`(附证据),重试到足以排除你的改动。
+升级分析的四轴决策框架由派发词携带 —— 派发的 PM 从自己那份副本填入(已发布模板里是
+`rules/dev-template.md` 的 `{decision_frame}` 槽位):每个方案逐轴分析,推荐也按那些轴
+给出理由;派发词没带,停下向 PM 索取,⛔ 不自拟一套轴。`main` 在你脚下碎了、依赖未合
+并、CI 基础设施故障⇒`blocked`(附证据),重试到足以排除你的改动。
 
 ## 终报消息 —— 恰好这段 JSON,不带任何环绕散文
 
