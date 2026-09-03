@@ -259,7 +259,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'A tombstone resolves citations but is not anchorable (#7329)': 15,
   'Cited numbers resolve (#6634)': 15,
   'Cited decision LETTERS resolve (#9592)': 26,
-  'Live tree: green as shipped, red under ablation': 23,
+  // ⛔ NOT today's count. This battery runs one case per `KNOWN_NUMBER_COLLISIONS`
+  // row (3 today) on top of 20 structural cases, and that list is one entries
+  // LEAVE — a resolved collision is meant to be deleted, and the gate already
+  // fails a stale entry. A floor at 23 would redden every legitimate removal and
+  // train the next author to edit the floor, which is the one habit these floors
+  // exist to prevent. Pinned instead: the part that does not move with the list —
+  // the 20 structural cases ran AND at least one row was actually audited.
+  'Live tree: green as shipped, red under ablation': 21,
   'the sharded registry\'s assembly (#6957)': 13,
 });
 

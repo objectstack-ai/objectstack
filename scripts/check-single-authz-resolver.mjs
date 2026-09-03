@@ -562,7 +562,12 @@ let selfTestReachedVerdict = false;
 // must not red. A battery BELOW its floor means cases stopped running; the
 // remedy is to find what stopped registering.
 const SELF_TEST_BATTERIES = Object.freeze({
-  'Every exemption carries its reason.': 3,
+  // ⛔ NOT today's count. One case per `ALLOW` entry (2 today) plus the one
+  // structural case, and `ALLOW` is a shrink-only exemption list — an exemption
+  // that stops exempting anything is meant to be deleted (see the comment over
+  // the declaration). Pinned instead: the structural case ran AND at least one
+  // exemption was actually audited.
+  'Every exemption carries its reason.': 2,
   'POSITIVE CONTROL, on the REAL repo.': 5,
   'The two ALLOW steps are separable, which is what makes them assertable.': 1,
   'The criterion is query-shaped, not mention-shaped (#6286).': 4,
