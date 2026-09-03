@@ -11,15 +11,29 @@
 // the pin is a copy of a copy, and the showcase run cannot see a predicate the
 // showcase happens not to exercise.
 //
-// The live imports are a declared cross-package coupling (`turbo.json`'s
-// `@objectstack/lint#test` inputs and `scripts/cross-package-test-inputs.mjs`),
-// which puts them in `check:examples-live-imports`' `inputs-declared` tier —
-// both of CI's scoping layers move when the showcase moves.
+// The showcase reads are a DECLARED cross-package coupling — the three modules
+// are named on `@objectstack/lint#test`'s inputs in `turbo.json` and in
+// `scripts/cross-package-test-inputs.mjs`, so both of CI's scoping layers move
+// when the showcase moves.
+//
+// ⛔ They are loaded through a path built from `import.meta.url`, NOT by a
+// static relative `import`, and that is not a style choice: a static import
+// puts the example module inside this package's tsc program, where it is
+// outside `rootDir` and reports TS6059. `tsconfig.test.json` inherits `rootDir`
+// deliberately and must not loosen it, and `test-typecheck-debt.json` is an
+// EXACT, shrink-only ratchet whose expansion is maintainer-only — so a static
+// import here would have to buy its way past that ratchet. The path expression
+// below is the shape `check:cross-package-test-inputs` recognises
+// (`resolve(HERE, '<rel>')` seeded from `import.meta.url`, per AGENTS.md), so
+// the coupling stays visible to the gate that scopes CI. Do not "tidy" it back
+// into an import statement.
 //
 // ⚠️ These pins assert the shipped app is CLEAN, which is the direction #8515's
 // ruling allows to stay live: nothing here needs the showcase to keep a defect.
 // If a showcase edit turns one red, the app is what changed.
 
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, it, expect } from 'vitest';
 
 import {
@@ -29,9 +43,19 @@ import {
 } from './validate-page-visualization-bindings.js';
 import { REFERENCE_INTEGRITY_RULES } from './reference-integrity-suite.js';
 
-import { Task } from '../../../examples/app-showcase/src/data/objects/task.object.js';
-import { TaskViews } from '../../../examples/app-showcase/src/ui/views/task.view.js';
-import {
+type AnyRec = Record<string, unknown>;
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const SHOWCASE_TASK_OBJECT = resolve(HERE, '../../../examples/app-showcase/src/data/objects/task.object.ts');
+const SHOWCASE_TASK_VIEWS = resolve(HERE, '../../../examples/app-showcase/src/ui/views/task.view.ts');
+const SHOWCASE_TASK_PAGES = resolve(HERE, '../../../examples/app-showcase/src/ui/pages/task-visualizations.pages.ts');
+
+const loadShowcase = async (path: string): Promise<AnyRec> =>
+  (await import(pathToFileURL(path).href)) as AnyRec;
+
+const { Task } = await loadShowcase(SHOWCASE_TASK_OBJECT);
+const { TaskViews } = await loadShowcase(SHOWCASE_TASK_VIEWS);
+const {
   TaskBoardPage,
   TaskCalendarPage,
   TaskGalleryPage,
@@ -39,9 +63,7 @@ import {
   TaskTimelinePage,
   TaskMapPage,
   TaskAllViewsPage,
-} from '../../../examples/app-showcase/src/ui/pages/task-visualizations.pages.js';
-
-type AnyRec = Record<string, unknown>;
+} = await loadShowcase(SHOWCASE_TASK_PAGES);
 
 /** A `list` page with an `interfaceConfig`, spelled once. */
 function listPage(name: string, cfg: AnyRec): AnyRec {
@@ -141,7 +163,7 @@ describe('the shipped showcase interface pages (regression pin)', () => {
     TaskTimelinePage,    // ['timeline']
     TaskMapPage,         // ['map'], bound through `sourceView: 'map'`
     TaskAllViewsPage,    // the full switcher
-  ] as unknown as AnyRec[];
+  ] as AnyRec[];
 
   const stack: AnyRec = {
     objects: [Task],
@@ -179,11 +201,11 @@ describe('the shipped showcase interface pages (regression pin)', () => {
     // The other direction on the same corpus: strip `showcase_task`'s date
     // fields and the calendar / timeline / gantt pages must go red. Without
     // this, "zero findings" is compatible with a rule that never fires.
-    const fields = { ...((Task as unknown as AnyRec).fields as AnyRec) };
+    const fields = { ...((Task as AnyRec).fields as AnyRec) };
     for (const dateField of ['due_date', 'start_date', 'end_date', 'created_at']) delete fields[dateField];
     const dated = validatePageVisualizationBindings({
       ...stack,
-      objects: [{ ...(Task as unknown as AnyRec), fields }],
+      objects: [{ ...(Task as AnyRec), fields }],
     });
     expect(dated.map((f) => `${f.severity}:${f.path}`)).toEqual([
       // ['calendar'] — leading, so the page IS the refusal screen
