@@ -17216,6 +17216,16 @@ function selfTest() {
     t('and a STALE name still renders its warning through the shared shape', changeKindLines(['a.ts'], () => null, kinds).some((l) => l.includes('STALE')));
   }
 
+  // The whole-tree channel is in `--commands` and NOT in the matched block
+  // the published snippet harvests, so the two agree only once it is
+  // subtracted (#14189). Read off the REAL rendering, like everything else
+  // in this block: a hardcoded count here would be a second copy of a fact
+  // the tool derives, drifting the day a gate declares or stops declaring.
+  const declaredWholeTreeCommands = (humanText) => (humanText ?? '')
+    .split('\n')
+    .filter((l) => l.includes('   declared whole-tree population — '))
+    .map((l) => l.replace(/^ {2}- (.*?) {3}\[.*$/, '$1'));
+
   // ── END TO END, on the real CLI and the real tree ─────────────────────────
   //
   // Everything above drives the pure halves, and all of it stays green if the
@@ -17236,15 +17246,6 @@ function selfTest() {
     // no check family runs.
     const seamCard = 'scripts/measure-partial-retirement-annotation.mjs';
     const humanRun = runCli([seamCard]);
-    // The whole-tree channel is in `--commands` and NOT in the matched block
-    // the published snippet harvests, so the two agree only once it is
-    // subtracted (#14189). Read off the REAL rendering, like everything else
-    // in this block: a hardcoded count here would be a second copy of a fact
-    // the tool derives, drifting the day a gate declares or stops declaring.
-    const declaredWholeTreeCommands = (humanText) => (humanText ?? '')
-      .split('\n')
-      .filter((l) => l.includes('   declared whole-tree population — '))
-      .map((l) => l.replace(/^ {2}- (.*?) {3}\[.*$/, '$1'));
     const humanOut = humanRun.stdout ?? '';
     t('the seam card still derives at all', humanRun.status === 0 && humanOut.trim().length > 0);
     // 形 2, in the DEFAULT output. No flag: the footer is the control for
