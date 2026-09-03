@@ -366,7 +366,38 @@ export const CEILINGS = new Map([
   // 120-byte cap, and no sixth-line spelling exists that keeps 不是出货缺陷, the
   // ruling's own justification for declining the taxonomy. Landed count, headroom
   // 0, same convention.
-  ['.claude/skills/pm-dispatch/references/contract-review.md', 65],
+  // Raised 65 → 68 by the review-INDEPENDENCE carrier — the template half of
+  // direction A, whose guard half (finding row C4 in
+  // `check-clause2-carriers.mjs`) landed on its own and has been INERT ever
+  // since, because no verdict on the board carries the two lines it compares.
+  // The addition is one bullet in 复核归属与资格(席内): the verdict declares
+  // `Implemented-by:` (the identity that produced the diff — a `mode:subagent`
+  // dev's BRANCH, since a subagent has no session of its own, and a
+  // `mode:remote` dev's session id) and `Reviewed-by:` (the reviewing seat's
+  // session); the same session on both lines is a SELF-REVIEW and is not an
+  // independent review, while a verdict carrying neither line stays silent
+  // forever. Two rulings authorise it, both verbatim and untranslated. The
+  // direction (maintainer, 2026-09-01, live session with the director seat):
+  //   「同意 A」
+  // and the raise itself together with the spelling reading (maintainer,
+  // 2026-09-02, live PM chat, decision batch #12, adopting the recommendation
+  // "(i) approve the raise, (ii) reading a"):
+  //   「同意」
+  // The 2026-09-02 batch #1 ruling 「14324 等我发版，其他同意」 authorised the
+  // same raise on the branch that has since merged guard-only; ruling (i) above
+  // re-issues it for THIS patch round, which is why the raise is not a seat's
+  // own judgement about its own diff — the one act this card exists to record.
+  // Paid in place FIRST, and the payment is not available: the file's 64 lines
+  // hold 2,007 bytes of slack under the 120-byte cap (mean width 88.6), so the
+  // 436 bytes of ruled addition would fit only by re-flowing the whole file —
+  // re-wrap funding is refused per the 2026-08-17 rule, exactly as on the two
+  // raises above — and the only other in-place payment is deleting a ruled
+  // clause, refused on the state-machine precedent. The CROSS-FILE MOVE path
+  // below does not apply either: no other ceilinged file holds this fact, so
+  // there is no source deletion to pay with, and manufacturing one to dodge a
+  // ruled raise would grow the corpus by exactly the same lines with the
+  // warrant hidden. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/contract-review.md', 68],
   // Business-perspective decision-analysis writing guide (maintainer ruling
   // 2026-08-20: the four-facet analysis must argue from the business
   // standpoint). Set at landed line count (headroom 0, same convention).

@@ -36,6 +36,15 @@ the **failure** condition — validation **fails** when it evaluates to `true`.
 
 ## Script Validation
 
+**Tool choice — this is the invariant tool.** `script` and `cross_field`
+are judged against the *merged* record on every write, with no pre-state
+exemption, so a row that already violates the rule is refused on any edit until
+a repairing write lands (frozen, not bricked). A condition that must hold only
+from a transition onward is not this tool: use `requiredWhen` or a field bound
+(`min` / `max` / `minLength` / `maxLength`), which judge the write, not the
+stored row (see **Choose by intent — invariant or transition gate** in
+`SKILL.md`).
+
 ```typescript
 import { P } from '@objectstack/spec';
 
