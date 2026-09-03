@@ -137,9 +137,19 @@ export const ExplainRecordAttributionSchema = lazySchema(() => z.object({
   /** Whether this layer admitted the record, excluded it, or did not evaluate it. */
   outcome: z.enum(['admitted', 'excluded', 'not_evaluated'])
     .describe('This layer\'s row-level outcome for the record: admitted, excluded, or not_evaluated (skipped/not row-scoped).'),
-  /** The effective row predicate this layer contributed (`null` = unrestricted, `{ id: "__deny_all__" }` = zero rows). */
+  /**
+   * The effective row predicate this layer contributed, published exactly as
+   * the layer composed it (`null` = unrestricted). **Two** shapes mean zero
+   * rows: `{ id: '__deny_all__' }`, the composed deny-all sentinel, and
+   * plugin-security's fail-closed RLS denial — an `id` equality against
+   * `__rls_deny__`, a colon, and a UUID-shaped suffix no record can carry.
+   * Neither shape is the DECISION: this attribution's `outcome` /
+   * `matchesRecord` and the layer's `verdict` are, and they answer correctly
+   * for both. A consumer that pattern-matches this payload ALONE to detect
+   * "zero rows" must match both shapes.
+   */
   rowFilter: z.unknown().optional()
-    .describe('The effective row predicate this layer contributed for the record set (null = unrestricted, __deny_all__ = zero rows).'),
+    .describe('The effective row predicate this layer contributed for the record set, published as composed (null = unrestricted). Two shapes mean zero rows — `{ id: "__deny_all__" }` and the fail-closed RLS denial (`__rls_deny__` plus a colon and a UUID-shaped suffix) — so a consumer pattern-matching this payload alone must match both; the decision itself is outcome/matchesRecord plus the layer verdict.'),
   /** Whether THIS record satisfies `rowFilter` — the row-level judgement behind `outcome`. */
   matchesRecord: z.boolean().optional()
     .describe('Whether the specific record satisfies rowFilter — the judgement behind outcome.'),
@@ -359,11 +369,20 @@ export const ExplainDecisionSchema = lazySchema(() => z.object({
   /** Per-layer breakdown, in pipeline order. */
   layers: z.array(ExplainLayerSchema),
   /**
-   * For `read`: the composed row filter the caller would be served with —
-   * the machine artifact behind the prose (`null` = unrestricted,
-   * `{ id: '__deny_all__' }` = zero rows).
+   * For `read` and `export` (#3544): the composed row filter the caller would
+   * be served with — the machine artifact behind the prose (`null` =
+   * unrestricted). **Two** shapes mean zero rows: `{ id: '__deny_all__' }`,
+   * the composed deny-all sentinel, and plugin-security's fail-closed RLS
+   * denial — an `id` equality against `__rls_deny__`, a colon, and a
+   * UUID-shaped suffix no record can carry. Only the first is rewritten to the
+   * deny-all spelling when it is composed in; the RLS denial is published as
+   * composed, so it can also ride inside an `$and` composite. Neither shape is
+   * the DECISION: `allowed` and the `rls` layer's `verdict` are, and they
+   * answer correctly for both. A consumer that pattern-matches this payload
+   * ALONE to detect "zero rows" must match both shapes.
    */
-  readFilter: z.unknown().optional(),
+  readFilter: z.unknown().optional()
+    .describe('The composed row filter the caller would be served with — the machine artifact behind the prose (null = unrestricted). Two shapes mean zero rows — `{ id: "__deny_all__" }` and the fail-closed RLS denial (`__rls_deny__` plus a colon and a UUID-shaped suffix, which can also ride inside an $and composite) — so a consumer pattern-matching this payload alone must match both; the decision itself is allowed plus the rls layer verdict.'),
   /**
    * [C2 / ADR-0090 D6] Record-grained verdict — present only when the request
    * carried a `recordId`. The row-level bottom line for the one concrete record:
