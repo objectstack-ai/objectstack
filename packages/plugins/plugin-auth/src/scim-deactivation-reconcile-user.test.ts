@@ -61,27 +61,8 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
-import {
-  SysUser,
-  SysSession,
-  SysAccount,
-  SysVerification,
-  SysOrganization,
-  SysMember,
-  SysInvitation,
-  SysTeam,
-  SysTeamMember,
-  SysScimConnectionBinding,
-  SysScimConnectionCredential,
-  SysScimGroup,
-  SysScimGroupMember,
-  SysScimIdentityTombstone,
-  SysScimProjectionGrant,
-  SysScimSubject,
-  SysScimUser,
-  SysJwks,
-} from '@objectstack/platform-objects';
 import { AuthManager } from './auth-manager.js';
+import { authIdentityObjects } from './manifest.js';
 import { createTenancyService } from './tenancy-service.js';
 import { mintScimConnectionCredential } from './scim-connection-service.js';
 import { registerLastAdminGuard, type LastAdminGuardEngine } from './last-admin-guard.js';
@@ -102,27 +83,17 @@ const SCIM_ERROR_SCHEMA = 'urn:ietf:params:scim:api:messages:2.0:Error';
 /** Every read below is a safety-proof read, never RLS-scoped to a caller. */
 const SYSTEM = { context: { isSystem: true } } as const;
 
-/** The identity surface the org + admin (forced by SCIM) + scim plugins touch. */
-const AUTH_OBJECTS = [
-  SysUser,
-  SysSession,
-  SysAccount,
-  SysVerification,
-  SysOrganization,
-  SysMember,
-  SysInvitation,
-  SysTeam,
-  SysTeamMember,
-  SysScimConnectionBinding,
-  SysScimConnectionCredential,
-  SysScimGroup,
-  SysScimGroupMember,
-  SysScimIdentityTombstone,
-  SysScimProjectionGrant,
-  SysScimSubject,
-  SysScimUser,
-  SysJwks,
-];
+/**
+ * The objects a deployment that mounts plugin-auth registers, imported from the
+ * plugin's own manifest rather than re-spelled here, so this harness cannot
+ * drift from what `auth-plugin.ts` registers at runtime (#14615). The
+ * hand-written list this replaced omitted the OAuth objects, and the
+ * oauth-provider's `session.delete.before` hook reads two of them
+ * (`sys_oauth_access_token`, `sys_oauth_refresh_token`) on every session
+ * revocation — which made every revocation this suite drives log a Better Auth
+ * ERROR about a missing table.
+ */
+const AUTH_OBJECTS = authIdentityObjects;
 
 /**
  * The two tables the break-glass guard enumerates platform administrators

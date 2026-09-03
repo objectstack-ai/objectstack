@@ -299,6 +299,22 @@ describe('validateTranslationReferences — cross-package objects (§4 ladder)',
     expect(findings[0].path).toBe('translations[0]["zh-CN"].objects.task');
     expect(findings[0].message).toContain('Did you mean "todo_task"?');
   });
+
+  // #14577 — the namespace-segment pre-pass stays rule-local (it is knowledge
+  // about how this stack prefixes object names, not the shared helper's
+  // business), but a miss now falls through to `suggestName` (#14268) instead
+  // of a private Levenshtein copy. "amountsummary" is not a `_`-segment match
+  // for "amount" (no underscore boundary), so the segment pre-pass misses;
+  // `suggestName`'s containment scan still catches it — 7 edits apart, far
+  // outside the `max(2, floor(len/3))` budget the private copy was bound by.
+  it('falls through to suggestName (containment) when the namespace-segment pre-pass misses', () => {
+    const findings = validateTranslationReferences({
+      objects: [{ name: 'amountsummary', fields: { total: { type: 'number' } } }],
+      translations: bundleFor('amount'),
+    });
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('Did you mean "amountsummary"?');
+  });
 });
 
 describe('validateTranslationReferences — apps, dashboards, global actions', () => {
