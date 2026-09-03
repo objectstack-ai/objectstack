@@ -261,6 +261,45 @@ const { parse, parseDocument } = await requireDependency('yaml', () => import('y
 
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '(1) the corpus\'s ordinary shape is CLEAN': 5,
+  '(2) THE defect, verbatim': 5,
+  '(3) other ways the block fails to parse': 3,
+  '(4) the block that is not there': 3,
+  '(5) the two keys `pageSchema` types': 11,
+  '(6) REFUSALS, against real directories': 12,
+  '(6b) THE per-root floor: an empty root refuses ON ITS OWN': 10,
+  '(7) the extraction agrees with the docs build\'s OWN extractor': 10,
+  '(9) the blog root\'s OWN keys, each observed firing': 16,
+  '(10) ROOTS is pinned to `apps/docs/source.config.ts`': 8,
+  '(8) WIRING: the gate and its self-test really run in CI': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 11;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const REPO_ROOT = resolve(HERE, '..');
 
@@ -864,9 +903,24 @@ export function main(roots = ROOTS) {
 let selfTestReachedVerdict = false;
 
 export async function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   const failures = [];
   let checked = 0;
   const assert = (ok, what) => {
+    registerCase();
     checked++;
     if (!ok) failures.push(what);
   };
@@ -895,6 +949,7 @@ export async function selfTest() {
   };
 
   // ── (1) the corpus's ordinary shape is CLEAN ─────────────────────────────
+  battery('(1) the corpus\'s ordinary shape is CLEAN');
   assert(kinds(page('title: A\ndescription: B')).length === 0, 'a well-formed page is clean');
   assert(
     kinds('---\r\ntitle: A\r\ndescription: B\r\n---\r\nBody\r\n').length === 0,
@@ -916,6 +971,7 @@ export async function selfTest() {
   // ── (2) THE defect, verbatim ─────────────────────────────────────────────
   // The `description` that reached `Build Docs` on the card, character for
   // character. Everything else in this battery is a generalisation of it.
+  battery('(2) THE defect, verbatim');
   const THE_DEFECT = page(
     'title: Declarative Endpoints\n' +
       'description: Expose your app to systems outside the platform by declaring an apis: endpoint as metadata.',
@@ -937,11 +993,13 @@ export async function selfTest() {
   );
 
   // ── (3) other ways the block fails to parse ──────────────────────────────
+  battery('(3) other ways the block fails to parse');
   assert(kinds(page('title: A\n\tdescription: B'))[0] === 'frontmatter-parse', 'a tab as indentation is a parse failure');
   assert(kinds(page('title: A\n  description: B'))[0] === 'frontmatter-parse', 'a stray indent is a parse failure');
   assert(kinds(page('- a\n- b'))[0] === 'frontmatter-not-a-mapping', 'a sequence where a mapping belongs is named as such');
 
   // ── (4) the block that is not there ──────────────────────────────────────
+  battery('(4) the block that is not there');
   assert(kinds('# A page with no frontmatter\n')[0] === 'frontmatter-missing', 'no block at all is named directly');
   assert(kinds('---\n---\nBody\n')[0] === 'frontmatter-missing', 'an EMPTY block does not match the extractor either');
   assert(
@@ -950,6 +1008,7 @@ export async function selfTest() {
   );
 
   // ── (5) the two keys `pageSchema` types ──────────────────────────────────
+  battery('(5) the two keys `pageSchema` types');
   assert(kinds(page('description: B'))[0] === 'title-missing', 'a missing title is caught');
   const numTitle = only(page('title: 42\ndescription: B'));
   assert(numTitle?.kind === 'title-not-a-string', 'an unquoted numeric title is caught');
@@ -974,6 +1033,7 @@ export async function selfTest() {
   assert(kinds(page('title: 1\ndescription: [x]')).length === 2, 'both key violations are reported in one pass');
 
   // ── (6) REFUSALS, against real directories ───────────────────────────────
+  battery('(6) REFUSALS, against real directories');
   const { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const tmp = mkdtempSync(join(tmpdir(), 'doc-frontmatter-'));
@@ -1075,6 +1135,7 @@ export async function selfTest() {
     // arithmetic rather than as intent -- the surviving root is deliberately
     // LARGE, and the assertion below records that the run refused while the
     // global count was 12. A union gate is green in exactly that state.
+    battery('(6b) THE per-root floor: an empty root refuses ON ITS OWN');
     const rootA = join(tmp, 'root-a'); // stands in for content/docs
     const rootB = join(tmp, 'root-b'); // stands in for content/blog
     mkdirSync(rootA);
@@ -1127,6 +1188,7 @@ export async function selfTest() {
     assert(quietly(() => main([])) === 1, 'main() refuses when no roots are declared at all');
 
     // ── (7) the extraction agrees with the docs build's OWN extractor ──────
+    battery('(7) the extraction agrees with the docs build\'s OWN extractor');
     const { createRequire: cr } = await import('node:module');
     const { pathToFileURL } = await import('node:url');
     let extract = null;
@@ -1175,6 +1237,7 @@ export async function selfTest() {
   }
 
   // ── (9) the blog root's OWN keys, each observed firing ──────────────────
+  battery('(9) the blog root\'s OWN keys, each observed firing');
   const bkinds = (s) => judgeSource(s, BLOG_KEYS).violations.map((v) => v.kind);
   const bonly = (s) => {
     const v = judgeSource(s, BLOG_KEYS).violations;
@@ -1237,6 +1300,7 @@ export async function selfTest() {
   // ── (10) ROOTS is pinned to `apps/docs/source.config.ts` ────────────────
   // This card exists because a root was added there and nothing noticed. The
   // parity below is what stops a THIRD one arriving unowned.
+  battery('(10) ROOTS is pinned to `apps/docs/source.config.ts`');
   let config = null;
   try {
     config = readFileSync(join(REPO_ROOT, 'apps/docs/source.config.ts'), 'utf8');
@@ -1292,6 +1356,7 @@ export async function selfTest() {
   // ── (8) WIRING: the gate and its self-test really run in CI ──────────────
   // A gate that exists and is not scheduled is the same dormant shape from the
   // other side. Asserted against the workflow text, not remembered.
+  battery('(8) WIRING: the gate and its self-test really run in CI');
   const SELF = 'scripts/check-doc-frontmatter.mjs';
   let lint = null;
   try {
@@ -1302,6 +1367,52 @@ export async function selfTest() {
   if (lint !== null) {
     assert(lint.includes(`node ${SELF}\n`), `wiring: lint.yml invokes ${SELF} directly (lint.yml's GATE INVOCATION IDIOM note, not a package.json fence)`);
     assert(lint.includes(`node ${SELF} --self-test`), 'wiring: lint.yml runs the --self-test leg too');
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
   }
 
   if (failures.length > 0) {

@@ -105,6 +105,46 @@ import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'Both shapes, in sync, are silent': 2,
+  'Set, direction A: a page in meta.json with no row': 2,
+  'Set, direction B: a row for a page meta.json does not declare': 1,
+  'Order': 2,
+  'The real `ui` defect, reproduced: the shape this gate was written for': 1,
+  'Curation survives: out-of-section links are ignored, not counted': 1,
+  'A sub-heading does not end the block (the `ui` "### Recipes" shape)': 2,
+  'Masking: a fence cannot end the block, and neither fences nor MDX': 3,
+  'meta.json shapes: index and group labels are not pages': 1,
+  'Opt-in: a landing page with no heading is skipped, not judged': 1,
+  'Refusals: none of these may be reported OK': 8,
+  'The real run() path, over a temp fixture on disk': 7,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 12;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const repoRoot = () => join(HERE, '..');
 
@@ -438,9 +478,24 @@ function main() {
 const SELF_TEST_VERDICT = 'check-section-landing-index self-test reached its verdict';
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   const failures = [];
   let checked = 0;
   const assert = (cond, what) => {
+    registerCase();
     checked++;
     if (!cond) failures.push(what);
   };
@@ -461,22 +516,26 @@ function selfTest() {
     `</Cards>\n\n## Related\n\n- x\n`;
 
   // ── Both shapes, in sync, are silent ──────────────────────────────────────
+  battery('Both shapes, in sync, are silent');
   assert(one(section('m', ['a', 'b', 'c'], bullets('m', ['a', 'b', 'c']))).length === 0, 'a synced BULLET list is reported OK');
   assert(one(section('m', ['a', 'b', 'c'], cards('m', ['a', 'b', 'c']))).length === 0, 'a synced CARD grid is reported OK');
 
   // ── Set, direction A: a page in meta.json with no row ─────────────────────
+  battery('Set, direction A: a page in meta.json with no row');
   for (const shape of [bullets, cards]) {
     const p = one(section('m', ['a', 'b', 'c'], shape('m', ['a', 'c'])));
     assert(p.length === 1 && /omits 1 page\(s\)/.test(p[0]) && /: b\./.test(p[0]), `a MISSING page is named (${shape === bullets ? 'bullets' : 'cards'})`);
   }
 
   // ── Set, direction B: a row for a page meta.json does not declare ─────────
+  battery('Set, direction B: a row for a page meta.json does not declare');
   {
     const p = one(section('m', ['a', 'b'], bullets('m', ['a', 'b', 'gone']), ['a', 'b', 'gone']));
     assert(p.length === 1 && /does not declare/.test(p[0]) && /gone/.test(p[0]), 'an UNDECLARED row is named');
   }
 
   // ── Order ─────────────────────────────────────────────────────────────────
+  battery('Order');
   {
     const p = one(section('m', ['a', 'b', 'c'], bullets('m', ['b', 'a', 'c'])));
     assert(p.length === 1 && /wrong order/.test(p[0]), 'a REORDERED block fails');
@@ -484,6 +543,7 @@ function selfTest() {
   }
 
   // ── The real `ui` defect, reproduced: the shape this gate was written for ──
+  battery('The real `ui` defect, reproduced: the shape this gate was written for');
   {
     const uiMeta = ['apps', 'pages', 'react-pages', 'views', 'actions', 'dashboards', 'reports', 'translations', 'forms', 'doc-pages', 'setup-app'];
     const uiHas = ['apps', 'views', 'pages', 'dashboards', 'forms', 'doc-pages', 'setup-app'];
@@ -493,12 +553,14 @@ function selfTest() {
   }
 
   // ── Curation survives: out-of-section links are ignored, not counted ──────
+  battery('Curation survives: out-of-section links are ignored, not counted');
   {
     const text = `# T\n\n## ${INDEX_HEADING}\n\n- [a](/docs/m/a)\n- [b](/docs/m/b)\n- Spec: [x](/docs/protocol/kernel/plugin-spec)\n- Ref: [y](/docs/references/kernel)\n\n## Related\n`;
     assert(one(section('m', ['a', 'b'], text)).length === 0, 'FOREIGN links are ignored, never counted or ordered');
   }
 
   // ── A sub-heading does not end the block (the `ui` "### Recipes" shape) ───
+  battery('A sub-heading does not end the block (the `ui` "### Recipes" shape)');
   {
     const text = `# T\n\n## ${INDEX_HEADING}\n\n<Cards>\n  <Card href="/docs/m/a" title="a" />\n</Cards>\n\n### Recipes\n\n<Cards>\n  <Card href="/docs/m/b" title="b" />\n</Cards>\n\n## Related\n`;
     assert(one(section('m', ['a', 'b'], text)).length === 0, 'a `###` sub-heading does NOT truncate the block');
@@ -508,6 +570,7 @@ function selfTest() {
 
   // ── Masking: a fence cannot end the block, and neither fences nor MDX ─────
   //     comments may satisfy a row.
+  battery('Masking: a fence cannot end the block, and neither fences nor MDX');
   {
     const fenced = `# T\n\n## ${INDEX_HEADING}\n\n- [a](/docs/m/a)\n\n\`\`\`md\n## Not a heading\n\`\`\`\n\n- [b](/docs/m/b)\n\n## Related\n`;
     assert(one(section('m', ['a', 'b'], fenced)).length === 0, 'a `## ` line INSIDE a fence does not end the block');
@@ -520,6 +583,7 @@ function selfTest() {
   }
 
   // ── meta.json shapes: index and group labels are not pages ────────────────
+  battery('meta.json shapes: index and group labels are not pages');
   {
     const s = {
       id: 'm',
@@ -531,6 +595,7 @@ function selfTest() {
   }
 
   // ── Opt-in: a landing page with no heading is skipped, not judged ─────────
+  battery('Opt-in: a landing page with no heading is skipped, not judged');
   {
     const r = judge({ sections: [{ id: 'curated', metaText: JSON.stringify({ pages: ['index', 'a', 'b'] }), indexText: `# T\n\n## For Implementers\n\n- [a](/docs/curated/a)\n`, filesOnDisk: ['a', 'b'] }], minSections: 0 });
     assert(r.problems.length === 0 && r.skipped.includes('curated') && !r.covered.includes('curated'),
@@ -538,6 +603,7 @@ function selfTest() {
   }
 
   // ── Refusals: none of these may be reported OK ────────────────────────────
+  battery('Refusals: none of these may be reported OK');
   {
     const empty = one(section('m', ['a'], `# T\n\n## ${INDEX_HEADING}\n\nProse, no links.\n\n## Related\n`));
     assert(empty.length === 1 && /links to no/.test(empty[0]) && /#4690/.test(empty[0]), 'an EMPTY index block is refused');
@@ -563,6 +629,7 @@ function selfTest() {
   }
 
   // ── The real run() path, over a temp fixture on disk ──────────────────────
+  battery('The real run() path, over a temp fixture on disk');
   const dir = mkdtempSync(join(tmpdir(), 'section-landing-'));
   try {
     const mk = (id, pages, indexText) => {
@@ -589,6 +656,52 @@ function selfTest() {
     assert(run(dir).covered.includes('nest/deep'), 'run() finds a NESTED section');
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
   }
 
   if (failures.length) {
