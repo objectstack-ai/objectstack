@@ -56,8 +56,20 @@ choice. `scripts/check-changeset-no-major.mjs` refuses `major` outright, so
 during the launch window a genuinely breaking change ships as `minor` (pre-1.0,
 whole-stack lockstep) — #13925 is exactly that, `"@objectstack/core": minor`
 carrying a bolded incompatibility banner and an `adr-0087:` marker for a
-narrowed published accept set. `minor` therefore *means* "breaking" here, and
-claiming it for this change would signal an incompatibility that does not exist.
+narrowed published accept set. But the implication runs ONE WAY ONLY, and the
+gate's own header is explicit that it does: during the window `minor` is the
+union of ordinary new-functionality bumps and banner-marked breaking ones
+(`87ad30c10`, `3c1bbd2a8` are new-export `minor`s carrying no banner at all),
+so the bump level "tells a consumer nothing about whether the release breaks
+them". The carriers of breaking-ness are the bolded banner in the body and the
+ADR-0087 disposition — "during the window they are the only signal there is".
+
+⇒ So `minor` here would not claim an incompatibility; it would claim NOTHING
+about compatibility, which is precisely the cost the header names. This change
+carries neither carrier because it owes neither — nothing is retired, no accept
+set narrows, and `check-adr-0087-registration` reads it as non-breaking. The
+level is `patch` because the lineage above is `patch` and no export is added,
+not because `patch` rebuts something `minor` would have asserted.
 
 **Nothing here is incompatible, and the reason is what the withheld rows are.**
 They are the #6190 phantoms: org-scoped rows of types with no per-org read
