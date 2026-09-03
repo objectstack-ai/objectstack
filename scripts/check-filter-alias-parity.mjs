@@ -91,6 +91,41 @@ const ts = await requireDefaultExport('typescript', () => import('typescript'), 
 import { parseSourceFile } from './ts-parse.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+    '1. The tree as it stands: both sides name the same four spellings.': 2,
+    '2. A fifth spelling on the NORMALIZER side only — the direction #8002 is about, and the one nothing else in the repo refuses.': 3,
+    '3. The same fifth spelling on BOTH sides is green again — the gate judges parity, not the size of the set.': 1,
+    '4. A fifth spelling on the INGRESS side only.': 2,
+    '5. A `$` alias folding INTO a filter spelling is a filter spelling. It reaches `where` through two hops, which is exactly the shape a reader comparing only the slot tables would miss.': 2,
+    '6. Rot: an unreadable shape must fail LOUDLY. A reader that matches nothing would otherwise compare two empty sets and report a pass.': 5,
+    '7. The wiring this gate depends on to run at all.': 3,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 7;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 
 /** The three files that declare a filter-slot spelling, by repo-relative path. */
@@ -491,14 +526,29 @@ export const FILTER_SLOT_QUERY_PARAMS: readonly string[] = (() => {
 const SELF_TEST_VERDICT = 'check-filter-alias-parity self-test reached its verdict';
 
 function selfTest() {
+    // The battery ledger this self-test's floor is evaluated against (#13489).
+    // `battery()` opens a battery; every assertion below is attributed to the one
+    // most recently opened, so a section that stops running stops registering and
+    // names ITSELF at the floor rather than going quiet.
+    const batterySeen = new Map();
+    let openBattery = null;
+    const battery = (name) => {
+        openBattery = name;
+    };
+    const registerCase = () => {
+        const b = openBattery ?? UNATTRIBUTED_BATTERY;
+        batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+    };
     const failures = [];
     const check = (name, condition, detail) => {
+        registerCase();
         if (!condition) failures.push(`${name}${detail ? ` — ${detail}` : ''}`);
     };
     const run = (protocolText, restText, specText = FIXTURE_SPEC) =>
         judge({ specText, protocolText, restText });
 
     // 1. The tree as it stands: both sides name the same four spellings.
+    battery('1. The tree as it stands: both sides name the same four spellings.');
     {
         const { problems, protocolSet, restSet } = run(fixtureProtocol(), fixtureRest());
         check('agreeing sides are green', problems.length === 0, problems[0]);
@@ -512,6 +562,7 @@ function selfTest() {
 
     // 2. A fifth spelling on the NORMALIZER side only — the direction #8002 is
     //    about, and the one nothing else in the repo refuses.
+    battery('2. A fifth spelling on the NORMALIZER side only — the direction #8002 is about, and the one nothing else in the repo refuses.');
     {
         const { problems } = run(fixtureProtocol(['filters', '$filter', 'where_clause']), fixtureRest());
         check('a normalizer-only fifth spelling is red', problems.length === 1, `saw ${problems.length}`);
@@ -529,6 +580,7 @@ function selfTest() {
 
     // 3. The same fifth spelling on BOTH sides is green again — the gate judges
     //    parity, not the size of the set.
+    battery('3. The same fifth spelling on BOTH sides is green again — the gate judges parity, not the size of the set.');
     {
         const { problems } = run(
             fixtureProtocol(['filters', '$filter', 'where_clause']),
@@ -538,6 +590,7 @@ function selfTest() {
     }
 
     // 4. A fifth spelling on the INGRESS side only.
+    battery('4. A fifth spelling on the INGRESS side only.');
     {
         const { problems } = run(fixtureProtocol(), fixtureRest(['filters', '$filter', 'where_clause']));
         check('an ingress-only fifth spelling is red', problems.length === 1, `saw ${problems.length}`);
@@ -551,6 +604,7 @@ function selfTest() {
     // 5. A `$` alias folding INTO a filter spelling is a filter spelling. It
     //    reaches `where` through two hops, which is exactly the shape a reader
     //    comparing only the slot tables would miss.
+    battery('5. A `$` alias folding INTO a filter spelling is a filter spelling. It reaches `where` through two hops, which is exactly the shape a reader comparing only the slot tables would miss.');
     {
         const { problems } = run(
             fixtureProtocol(['filters', '$filter'], [['$top', 'top'], ['$filters', 'filters']]),
@@ -562,6 +616,7 @@ function selfTest() {
 
     // 6. Rot: an unreadable shape must fail LOUDLY. A reader that matches
     //    nothing would otherwise compare two empty sets and report a pass.
+    battery('6. Rot: an unreadable shape must fail LOUDLY. A reader that matches nothing would otherwise compare two empty sets and report a pass.');
     {
         const { problems } = run(fixtureProtocol(), '\nexport const SOMETHING_ELSE = [];\n');
         check('a missing ingress declaration is red', problems.length === 1, `saw ${problems.length}`);
@@ -595,6 +650,7 @@ function selfTest() {
     }
 
     // 7. The wiring this gate depends on to run at all.
+    battery('7. The wiring this gate depends on to run at all.');
     {
         const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
         const entry = pkg.scripts?.['check:filter-alias-parity'];
@@ -607,6 +663,50 @@ function selfTest() {
         const lint = readFileSync(join(ROOT, '.github/workflows/lint.yml'), 'utf8');
         const wired = lint.split('\n').filter((l) => /run: pnpm check:filter-alias-parity\s*$/.test(l));
         check('lint.yml runs the gate exactly once', wired.length === 1, `found ${wired.length}`);
+    }
+
+    // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+    //
+    // Evaluated after every battery has had its chance and BEFORE the verdict, so
+    // the success line below can only be printed by a run in which the set of
+    // batteries that registered assertions EQUALS the set declared. A set
+    // difference names WHICH battery stopped; a count says only that something did.
+    const floorFailure = (message) => { failures.push(message); };
+    const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+    let floorBreached = false;
+    if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+        floorBreached = true;
+        floorFailure(
+            `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+                `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+        );
+    }
+    for (const [name, count] of batterySeen) {
+        if (declaredBatteries.includes(name)) continue;
+        floorBreached = true;
+        floorFailure(
+            `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+                'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+        );
+    }
+    for (const name of declaredBatteries) {
+        const count = batterySeen.get(name) ?? 0;
+        if (count >= SELF_TEST_BATTERIES[name]) continue;
+        floorBreached = true;
+        floorFailure(
+            count === 0
+                ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+                    'The verdict below would have claimed those cases hold.'
+                : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+                    `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+        );
+    }
+    if (floorBreached) {
+        floorFailure(
+            'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+                'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+                'skips) and restore it.',
+        );
     }
 
     if (failures.length) {

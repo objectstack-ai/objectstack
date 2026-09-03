@@ -80,6 +80,37 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { isEntrypoint } from '../invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'pure decisions': 10,
+  'real repos': 15,
+  'historyHorizon: the read-only reading the #9902 adopters call': 12,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 3;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const DEFAULT_REF = 'origin/main';
 /** Slack applied below `--since` when deepening, absorbing commit-date skew. */
 const DEFAULT_MARGIN_DAYS = 7;
@@ -435,14 +466,29 @@ function main(argv) {
 let selfTestReachedVerdict = false;
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
   let failures = 0;
   const t = (name, ok, detail = '') => {
+    registerCase();
     if (ok) { process.stdout.write(`  ✓ ${name}\n`); return; }
     failures += 1;
     process.stdout.write(`  ✗ ${name}${detail ? `\n      ${detail}` : ''}\n`);
   };
 
   // ── pure decisions ────────────────────────────────────────────────────────
+  battery('pure decisions');
   const day = 24 * 60 * 60 * 1000;
   const t0 = Date.parse('2026-08-01T00:00:00Z');
 
@@ -485,6 +531,7 @@ function selfTest() {
   // available — between it and the nearest commit stamp. `collect-release-notes.sh
   // --self-test`, which runs over an identical fixture in the same `lint.yml`
   // step, has always spelled its window this way.
+  battery('real repos');
   const FIXTURE_EPOCH = '2026-06-01T12:00:00Z';
   const FIXTURE_COMMITS = 40;
   const WINDOW_SINCE = '2026-06-20T00:00:00Z';
@@ -586,6 +633,7 @@ function selfTest() {
       + 'not the shallow flag', isShallow(shallowDeep) === true);
 
     // ── historyHorizon: the read-only reading the #9902 adopters call ───────
+  battery('historyHorizon: the read-only reading the #9902 adopters call');
     const hFull = historyHorizon({ cwd: full, ref: 'origin/main', sinceMs: Date.parse(WINDOW_SINCE) });
     t('historyHorizon clears a complete clone and reports no floor',
       hFull.covered === true && hFull.shallow === false && hFull.floor === null && hFull.remedy === null,
@@ -636,6 +684,50 @@ function selfTest() {
       JSON.stringify(ens));
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => { failures += 1; process.stdout.write(`  ✗ ${message}\n`); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
   }
 
   process.stdout.write(failures === 0 ? '\ngit-history --self-test: all cases passed.\n' : `\ngit-history --self-test: ${failures} FAILED.\n`);

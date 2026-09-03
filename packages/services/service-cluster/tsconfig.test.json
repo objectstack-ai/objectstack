@@ -1,0 +1,78 @@
+// The TEST-layer type-check program (#14181 — the `packages/services/**`
+// instance of the class #14062 settled for `packages/plugins/**`, itself
+// adopting the mechanism #5286 set for `packages/spec`, #5449 generalised,
+// #12542 carried to `packages/rest` and #13176 to `packages/plugins/
+// plugin-security`). `tsconfig.json` beside this one stays exactly as it is: it
+// is the BUILD config. This sibling puts the test layer in front of tsc under
+// the module semantics vitest really executes it with, and `package.json`'s
+// `typecheck` script NAMES it (via `check:test-typecheck --project`), because a
+// config no script invokes is exactly the phantom this whole change is about.
+//
+// ⚠️ WHAT WAS DIFFERENT HERE, and why this package was the worst case in the
+// family rather than one more of it: `service-cluster` had NO `typecheck`
+// script at all — its scripts were `build` and `test`. The other members hid
+// their tests behind an `exclude` in a config some script still ran; this one
+// ran no tsc anywhere. Its build config does NOT exclude tests and never did,
+// so the program that would have read them already existed and simply was
+// never invoked, while turbo/CI typecheck lanes skipped the package silently (a
+// zero-matching filter run exits 0). `tsup` type-strips, `vitest` type-strips.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - MODULE SEMANTICS ONLY, plus `lib`. The tests are written and executed as
+//     ESM by vitest (esbuild/vite). Matching that is FIDELITY, not laxity: it is
+//     the same subtraction `packages/spec`, `packages/rest` and the
+//     `packages/plugins/**` family each made.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`,
+//     `rootDir`, `paths` and `types` are all INHERITED from `tsconfig.json`
+//     (and through it the root config), and none of them is re-declared here.
+//     ⚠️ A child that declared its own `paths` would REPLACE the parent map
+//     rather than merge into it, silently sending a source-resolved specifier
+//     back to `dist/` — a BUILD ARTIFACT — so this file declares none.
+//     Nothing here may loosen a type rule; if a test does not compile, that is
+//     the finding.
+//   - `lib: ["ES2022"]`, for the same reason `packages/rest` states: the root
+//     config's `lib` is ES2020 and vitest runs on a Node that has es2022
+//     builtins, so the gap is reported as TS2550 about the CHECK. No `DOM`:
+//     nothing in this layer touches a browser global.
+//
+// MEASURED at 44ffa2103, workspace closure built first (`tsc --noEmit --pretty
+// false --listFiles -p tsconfig.test.json`, and the same command without
+// `--listFiles`):
+//
+//   files in this program        410
+//   own `src/**/*.test.ts` in it 7
+//   errors under BUILD semantics 1
+//   errors under THIS config     1
+//
+// The two readings agree, so this package carried no config-tier pile at all —
+// the single error is code-tier, and it is REPAIRED in the same PR rather than
+// ledgered. It was a TS2322 at `src/memory/memory.contract.test.ts:26`:
+// `(m) => received.push(m.payload)` passed as a `PubSubHandler`, whose contract
+// return type is `void | Promise<void>`. A concise arrow body returns
+// `Array.prototype.push`'s `number`, and the void-return assignability
+// relaxation does NOT forgive it because the target is a UNION rather than bare
+// `void`. That is the same shape `@objectstack/metadata` graduated on (#14342),
+// and the fix is a block body — the handler is side-effect-only by contract.
+// Triage was explicit that this one is to be fixed, not ledgered.
+//
+// There is NO `test-typecheck-debt.json` beside this config, and its ABSENCE is
+// the zero: `check:test-typecheck` reads a missing ledger as `{ entries: {} }`,
+// under which ANY error in ANY file here is red immediately, with no entry to be
+// added to. That is strictly stronger than a ledger holding nothing, and it is
+// the same call `plugin-webhooks` and `plugin-security` (#13176) each recorded
+// for themselves. If this package ever acquires residue that cannot be fixed in
+// the PR that causes it, THAT is when a ledger and a `gen:test-typecheck-debt`
+// script are owed — and adding one is maintainer-only (#5286), exactly as the
+// gate says when it refuses.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

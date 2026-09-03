@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { AnalyticsQuerySchema } from '../data/analytics.zod';
+import { AggregationFunction } from '../data/query.zod';
 import { BaseResponseSchema } from './contract.zod';
 import { retiredKey } from '../shared/retired-key';
 
@@ -109,6 +110,13 @@ export const AnalyticsResultResponseSchema = lazySchema(() => BaseResponseSchema
         + 'renders as "1%"). Resolved from metadata; absent when the column is '
         + 'not a percentage. Renderers that receive it must scale by it instead '
         + 'of guessing from the value.',
+      ),
+      builtinAggregate: AggregationFunction.optional().describe(
+        'Closed aggregate discriminator for a measure column whose display name '
+        + 'is the server\'s built-in default: the dataset measure declared an '
+        + '`aggregate` and no `label`. A renderer may substitute its own localized '
+        + 'name for the aggregate. Absent whenever the author declared a label, and '
+        + 'on dimension / derived columns.',
       ),
     })).describe('Column metadata'),
     sql: z.string().optional().describe('Executed SQL (if debug enabled)'),

@@ -17443,6 +17443,29 @@ function selfTest() {
     // own message — the fix adds a refusal and rewords none.
     const allThreeRun = runCli(['--tier', '--commands', '--json', seamCard]);
     t('CONTROL: all three together keep the pair rule that was already enforced', allThreeRun.status === 2 && (allThreeRun.stderr ?? '').includes('--commands and --json'));
+    // ⭐ The MODIFIER axis (#14753), which neither pair above reaches: --residue
+    // is read only by the `derive` call the --tier branch never makes, so the
+    // flag was evaluated nowhere at exit 0.
+    //
+    // ⛔ The CONTROL is not optional and must not be dropped as redundant: under
+    // --tier the two runs are byte-IDENTICAL, and byte-identical is
+    // indistinguishable from "the flag had nothing to add here" unless the same
+    // flag is first shown to change the answer when the derivation does run.
+    // The plain side of that control is `humanOut` above — the identical
+    // invocation, already spawned; a second run of it would be a full
+    // derivation of this tree to re-measure what that one measured, and two
+    // runs could disagree.
+    const residueRun = runCli(['--residue', seamCard]);
+    t(
+      'CONTROL: --residue changes the derivation output when the derivation runs',
+      residueRun.status === 0 && (residueRun.stdout ?? '').length > 0 && (residueRun.stdout ?? '') !== humanOut,
+    );
+    const tierResidueRun = runCli(['--tier', '--residue', seamCard]);
+    t('⭐ --tier against --residue refuses instead of dropping the modifier in silence', tierResidueRun.status === 2 && (tierResidueRun.stdout ?? '').trim() === '');
+    t(
+      'and that refusal names --tier AND --residue, so the dropped one is never left to be guessed',
+      (tierResidueRun.stderr ?? '').includes('--tier') && (tierResidueRun.stderr ?? '').includes('--residue'),
+    );
   }
 
   // ── END TO END: the CI-measured family, on the card it was measured on (#14004)
@@ -17866,6 +17889,36 @@ if (invokedDirectly) {
     console.error(
       `dispatch-gates: --tier and ${process.argv.includes('--commands') ? '--commands' : '--json'} are two spellings of stdout — pass one.`,
     );
+    process.exit(2);
+  } else if (process.argv.includes('--tier') && process.argv.includes('--residue')) {
+    // The other axis, and the one neither pair above reaches: --residue is not
+    // a spelling of stdout, it is a MODIFIER of the derivation — and it is read
+    // in exactly ONE place, the `derive(...)` call at the bottom of this block.
+    // The `--tier` branch beside that call never makes it, so under --tier the
+    // flag was evaluated nowhere: exit 0, the tier verdict printed, and nothing
+    // on either stream saying the flag had been dropped. Measured byte-identical
+    // stdout with and without it — a reading that means nothing on its own, and
+    // means this only because the CONTROL beside it shows the same flag growing
+    // the derivation's own output by more than a factor of three when the
+    // derivation actually runs.
+    //
+    // The ground is the `--ran --tier` refusal's, one flag over: --tier reads no
+    // workflow and no check script, so it derives no gate family — the same
+    // sentence that leaves a run record nothing to reconcile against leaves
+    // --residue no residue to list.
+    //
+    // REFUSED, not re-routed, as the pairs above are. Nothing here is
+    // load-bearing for a machine: --residue only ever ADDS accounting to a
+    // human-read stream, so a dropped one costs a reader information, never a
+    // parse. What it costs is a caller who typed a flag, got exit 0, and has no
+    // way to learn the flag did nothing — the same information loss the
+    // refusals above prevent, and refusing is the only remedy that does not
+    // change what --tier MEANS when combined.
+    //
+    // Ordered AFTER the stdout-shape pair for the reason that branch states
+    // about itself: `--tier --commands --residue` keeps the message it already
+    // had, so this branch adds a refusal and rewords none.
+    console.error('dispatch-gates: --tier derives no gate family, so --residue would have nothing to list. Pass one.');
     process.exit(2);
   } else if (wantsChanged && argvPaths.length > 0) {
     // The two input modes answer different questions and must never be blended:

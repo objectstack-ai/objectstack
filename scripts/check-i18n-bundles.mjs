@@ -103,6 +103,38 @@ import {
 import { EXIT_FINDINGS, EXIT_PREREQUISITE_NOT_MET } from './import-prerequisite.mjs';
 import { findExtractConfigs, flagsFromDocstring } from './i18n-bundle-surface.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'Third classifier (#5217): the build prerequisite. Same anti-#4690 duty as': 34,
+  'Fourth classifier (#7681): the OTHER prerequisite — a workspace package this': 24,
+  'Fifth classifier (#11647): the POPULATION — is there anything to grade, and': 11,
+  'The other cause, and the reason `=== 0` alone is not the whole condition: a': 8,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 4;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 /**
  * The module this gate's POPULATION is enumerated by, declared as a whole
  * literal so the derivation can see it (#9116).
@@ -436,8 +468,23 @@ function populationVerdict(population, activeFilter) {
 const SELF_TEST_VERDICT = 'check-i18n-bundles self-test reached its verdict';
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+  battery('Third classifier (#5217): the build prerequisite. Same anti-#4690 duty as');
   const failures = [];
   const expect = (name, cond, detail) => {
+    registerCase();
     if (!cond) failures.push(`${name} — ${detail}`);
   };
 
@@ -635,6 +682,7 @@ function selfTest() {
   // send the reader to a rebuild that changes nothing — the #5862 defect (a
   // confident diagnosis pointing somewhere innocent) rebuilt one layer down.
   // -------------------------------------------------------------------------
+  battery('Fourth classifier (#7681): the OTHER prerequisite — a workspace package this');
 
   // The failure #7681 reported, as node actually prints it: produced locally by
   // importing a name that a package's built ESM does not export — a fixture
@@ -794,6 +842,7 @@ function selfTest() {
   // classifier in this file is proven red against a recorded string, but "did
   // this gate look at anything at all?" can only be proven by looking.
   // -------------------------------------------------------------------------
+  battery('Fifth classifier (#11647): the POPULATION — is there anything to grade, and');
 
   const popCwdBefore = process.cwd();
   let offRootPopulation;
@@ -896,6 +945,7 @@ function selfTest() {
 
   // The other cause, and the reason `=== 0` alone is not the whole condition: a
   // filter that matched nothing is a typo, not an environment fact.
+  battery('The other cause, and the reason `=== 0` alone is not the whole condition: a');
   const filterVerdict = populationVerdict(onRootPopulation, 'no-such-package');
   expect('#11647 an unmatched --filter is refused', !!filterVerdict, 'a filter matching nothing must not render as OK (0 package(s))');
   expect(
@@ -935,6 +985,50 @@ function selfTest() {
   );
   const longWalkError = unreadablePopulationDetail(new Error('E'.repeat(400))).join('\n');
   expect('#11647 long walk errors are truncated', longWalkError.includes(`${'E'.repeat(160)}…`), 'a 400-char message must not be pasted whole');
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => { failures.push(message); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
 
   if (failures.length) {
     console.error(`✗ check:i18n --self-test — ${failures.length} failure(s)\n`);

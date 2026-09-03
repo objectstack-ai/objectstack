@@ -156,6 +156,49 @@ import { requireDependency } from './import-prerequisite.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 import { WORKFLOW_DIR, guardDefaults, scan } from './check-stall-guard-budget.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'The declared population, held against the constant the sweep READS': 4,
+  '1. GREEN: a short healthy run clears both paths.': 2,
+  '2. RED, deferred only: p+s big enough to lose the cap path but not the window path. With W=10 C=20 T=30 that is any p+s in (10, 20).': 3,
+  '3. RED, both paths: a run longer than T - W.': 2,
+  '4. REFUSAL: a payload with no guarded step at all must not read as green.': 2,
+  '5. No input at all is a refusal, not a vacuous pass.': 1,
+  '6. The margin is NAMED, never folded in silently.': 1,
+  '7. A step whose timestamps are unusable is DROPPED, never counted as zero.': 1,
+  '8. The population claim this whole card rests on, CHECKED not assumed: the step name resolves a site here only because it is unique across the sweep. The day that stops being true, this assertion is the alarm.': 2,
+  '9. ASYMMETRIC OBSERVATIONS -- the sharpest direction, and the one that is not conservative. Only the LOOSE job ran, and it ran fast. Keyed on the name, the TIGHT site (T 30m) was handed that 2m reading and printed `COVERED, 8m00s to spare` while quoting `worst on \\`Loose Job\\`` -- a confident green for a step these runs never executed. It must now say it was not observed, and nothing else.': 3,
+  '10. Both observed, with wildly different readings. Keyed on the name the tight site inherited the loose job\'s 60m and was reported UNCOVERED; each site must now be judged against its OWN observation.': 3,
+  '11. REFUSAL: a payload that carries neither `workflow_name` nor a job name cannot separate the two candidates. Nothing here is resolvable, so nothing is picked -- not the worst, not the first, not the average.': 4,
+  '12. REFUSAL when the TRIPLE ITSELF collides -- two guarded steps sharing a name inside ONE job. A fully identified payload does not help: the two sites are indistinguishable on (file, job, step), so a fourth component would be needed and there is none. The refusal branch has to know that, which is why this case exists and does not assert a resolution.': 2,
+  '13. The matcher has to accept the shapes THIS tree really produces -- matrix job names expanded from a `${{ ... }}` template under the workflow\'s own `name:`. A join that only works on fixtures is not one, and this sweeps EVERY site rather than a hand-picked easy one.': 3,
+  '14. The other side of the same matcher: an observation whose runner identity CONTRADICTS the only site carrying that step name is excluded and said out loud, and the site reads NOT OBSERVED. That is the safe direction -- an excluded observation cannot invent headroom -- but the old join attributed it, which is this defect with the collision size fixed at one.': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 15;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 /** Refusal to measure, kept distinct from a finding -- see check-stall-guard-budget. */
 export const EXIT_REFUSED = 2;
 
@@ -719,9 +762,23 @@ export async function main(argv, io = {}) {
 let selfTestReachedVerdict = false;
 
 export async function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   let checked = 0;
   const assert = (name, ok, detail) => {
+    registerCase();
     checked += 1;
     if (!ok) failures.push(detail ? `${name} -- ${detail}` : name);
   };
@@ -737,6 +794,7 @@ export async function selfTest() {
   // `WORKFLOW_DIR`, the constant `scan` joins every workflow path from: move the
   // read and this reds, in this file, rather than in a dispatch brief nobody
   // reads as evidence.
+  battery('The declared population, held against the constant the sweep READS');
   assert(
     'the declared watch-hint population is exactly the workflow directory this tool sweeps',
     ROOT_DIR_WATCH_HINTS.length === 1 && ROOT_DIR_WATCH_HINTS[0] === `${WORKFLOW_DIR}/**`,
@@ -855,12 +913,14 @@ export async function selfTest() {
     const site = swept.sites.find((s) => s.step === "Run this shard's tests") ?? swept.sites[0];
 
     // 1. GREEN: a short healthy run clears both paths.
+  battery('1. GREEN: a short healthy run clears both paths.');
     const green = await drive(['--from', write(payload(site, 30, 60))]);
     assert('a short healthy run reports covered on both paths', green.code === 0, green.out);
     assert('...and the green is a MEASUREMENT: it names the observation it made', /worst observed: p /.test(green.out), green.out);
 
     // 2. RED, deferred only: p+s big enough to lose the cap path but not the window path.
     //    With W=10 C=20 T=30 that is any p+s in (10, 20).
+  battery('2. RED, deferred only: p+s big enough to lose the cap path but not the window path. With W=10 C=20 T=30 that is any p+s in (10, 20).');
     const midSec = Math.round((site.budget - site.cap + (site.budget - site.window)) / 2 * 60);
     const mid = await drive(['--from', write(payload(site, 30, midSec - 30))]);
     assert('a run that only loses the DEFERRED path is reported red', mid.code === 1, mid.out);
@@ -868,24 +928,29 @@ export async function selfTest() {
     assert('...while still reporting the undeferred path as covered', /undeferred.*COVERED/.test(mid.out), mid.out);
 
     // 3. RED, both paths: a run longer than T - W.
+  battery('3. RED, both paths: a run longer than T - W.');
     const both = await drive(['--from', write(payload(site, 30, (site.budget - site.window) * 60))]);
     assert('a run that loses BOTH paths is reported red', both.code === 1, both.out);
     assert('...and says the undeferred path is uncovered too', /undeferred.*UNCOVERED/.test(both.out), both.out);
 
     // 4. REFUSAL: a payload with no guarded step at all must not read as green.
+  battery('4. REFUSAL: a payload with no guarded step at all must not read as green.');
     const empty = await drive(['--from', write(payload(site, 30, 60, 'Some Unrelated Step'))]);
     assert('a payload with no guarded step REFUSES rather than printing green', empty.code === EXIT_REFUSED, empty.out);
     assert('...and says nothing was measured', /REFUSING/.test(empty.out), empty.out);
 
     // 5. No input at all is a refusal, not a vacuous pass.
+  battery('5. No input at all is a refusal, not a vacuous pass.');
     const none = await drive([]);
     assert('no --run and no --from refuses', none.code === EXIT_REFUSED, none.out);
 
     // 6. The margin is NAMED, never folded in silently.
+  battery('6. The margin is NAMED, never folded in silently.');
     const withMargin = await drive(['--from', write(payload(site, 30, 60)), '--margin-minutes', '5']);
     assert('a supplied margin is disclosed in the output', /margin:\s+\+5m/.test(withMargin.out), withMargin.out);
 
     // 7. A step whose timestamps are unusable is DROPPED, never counted as zero.
+  battery('7. A step whose timestamps are unusable is DROPPED, never counted as zero.');
     const broken = payload(site, 30, 60);
     broken.jobs[0].steps[1].completed_at = null;
     const dropped = await drive(['--from', write(broken)]);
@@ -896,6 +961,7 @@ export async function selfTest() {
     // 8. The population claim this whole card rests on, CHECKED not assumed: the
     //    step name resolves a site here only because it is unique across the
     //    sweep. The day that stops being true, this assertion is the alarm.
+  battery('8. The population claim this whole card rests on, CHECKED not assumed: the step name resolves a site here only because it is unique across the sweep. The day that stops being true, this assertion is the alarm.');
     const names = swept.sites.map((s) => s.step);
     assert(
       'every guard-wrapped step in this tree carries a distinct name (the name-as-key premise)',
@@ -923,6 +989,7 @@ export async function selfTest() {
     //    `COVERED, 8m00s to spare` while quoting `worst on \`Loose Job\`` -- a
     //    confident green for a step these runs never executed. It must now say
     //    it was not observed, and nothing else.
+  battery('9. ASYMMETRIC OBSERVATIONS -- the sharpest direction, and the one that is not conservative. Only the LOOSE job ran, and it ran fast. Keyed on the name, the TIGHT site (T 30m) was handed that 2m reading and printed `COVERED, 8m00s to spare` while quoting `worst on \\`Loose Job\\`` -- a confident green for a step these runs never executed. It must now say it was not observed, and nothing else.');
     const onlyLoose = await drive([
       '--root', coNamed,
       '--from', write({ jobs: [runnerJob({ job: 'Loose Job', workflow: 'Loose', step: SHARED, prepSec: 60, runSec: 60 })] }),
@@ -942,6 +1009,7 @@ export async function selfTest() {
     // 10. Both observed, with wildly different readings. Keyed on the name the
     //     tight site inherited the loose job's 60m and was reported UNCOVERED;
     //     each site must now be judged against its OWN observation.
+  battery('10. Both observed, with wildly different readings. Keyed on the name the tight site inherited the loose job\'s 60m and was reported UNCOVERED; each site must now be judged against its OWN observation.');
     const bothSeen = await drive([
       '--root', coNamed,
       '--from', write({
@@ -966,6 +1034,7 @@ export async function selfTest() {
     // 11. REFUSAL: a payload that carries neither `workflow_name` nor a job name
     //     cannot separate the two candidates. Nothing here is resolvable, so
     //     nothing is picked -- not the worst, not the first, not the average.
+  battery('11. REFUSAL: a payload that carries neither `workflow_name` nor a job name cannot separate the two candidates. Nothing here is resolvable, so nothing is picked -- not the worst, not the first, not the average.');
     const blind = write({
       jobs: [{
         conclusion: 'success',
@@ -985,6 +1054,7 @@ export async function selfTest() {
     //     sites are indistinguishable on (file, job, step), so a fourth component
     //     would be needed and there is none. The refusal branch has to know that,
     //     which is why this case exists and does not assert a resolution.
+  battery('12. REFUSAL when the TRIPLE ITSELF collides -- two guarded steps sharing a name inside ONE job. A fully identified payload does not help: the two sites are indistinguishable on (file, job, step), so a fourth component would be needed and there is none. The refusal branch has to know that, which is why this case exists and does not assert a resolution.');
     const sameJob = fixtureRoot({
       'c.yml':
         `name: Twin\non: push\njobs:\n  twin:\n    name: Twin Job\n    timeout-minutes: 30\n    runs-on: ubuntu-latest\n    steps:\n` +
@@ -1002,6 +1072,7 @@ export async function selfTest() {
     //     matrix job names expanded from a `${{ ... }}` template under the
     //     workflow's own `name:`. A join that only works on fixtures is not one,
     //     and this sweeps EVERY site rather than a hand-picked easy one.
+  battery('13. The matcher has to accept the shapes THIS tree really produces -- matrix job names expanded from a `${{ ... }}` template under the workflow\'s own `name:`. A join that only works on fixtures is not one, and this sweeps EVERY site rather than a hand-picked easy one.');
     const wholeTree = await drive([
       '--from', write({ jobs: swept.sites.map((s) => runnerJob({ job: runnerNameFor(s), workflow: workflowNameFor(s), step: s.step, prepSec: 30, runSec: 60 })) }),
     ]);
@@ -1019,6 +1090,7 @@ export async function selfTest() {
     //     direction -- an excluded observation cannot invent headroom -- but the
     //     old join attributed it, which is this defect with the collision size
     //     fixed at one.
+  battery('14. The other side of the same matcher: an observation whose runner identity CONTRADICTS the only site carrying that step name is excluded and said out loud, and the site reads NOT OBSERVED. That is the safe direction -- an excluded observation cannot invent headroom -- but the old join attributed it, which is this defect with the collision size fixed at one.');
     const foreign = await drive([
       '--from', write({ jobs: [runnerJob({ job: 'Some Other Job', workflow: 'Some Other Workflow', step: site.step, prepSec: 30, runSec: 60 })] }),
     ]);
@@ -1026,6 +1098,50 @@ export async function selfTest() {
     assert('...and the exclusion is reported, not swallowed', /EXCLUDED/.test(foreign.out) || /REFUSING/.test(foreign.out), foreign.out);
   } finally {
     for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => { failures.push(message); };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
   }
 
   if (failures.length) {

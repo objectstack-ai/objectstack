@@ -23,7 +23,6 @@
     "ai/KnowledgeRefreshPolicy:onRecordChange = true",
     "ai/KnowledgeSource:adapterConfig = {}",
     "ai/KnowledgeSource:aiExposed = true",
-    "ai/KnowledgeSource:refresh = {}",
     "ai/MCPServerRef:active = true",
     "ai/MCPToolBinding:approval = \"never\"",
     "ai/ModelCapability:codeGeneration = false",
