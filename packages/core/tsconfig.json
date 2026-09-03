@@ -26,5 +26,18 @@
     }
   },
   "include": ["src/**/*"],
-  "exclude": []
+  // [#14613] The TEST layer moved to the `tsconfig.test.json` sibling, which
+  // `package.json`'s `typecheck` NAMES via `check:test-typecheck --project`.
+  // This stays the BUILD config. Splitting the two is what let a `typecheck`
+  // script exist here at all: this package carried a `check:type-check-coverage`
+  // DEBT entry of 98, and all 98 sat in `src/**/*.test.ts` while the 63
+  // non-test source files measured ZERO — so the build program graduates as it
+  // stands, and the test layer keeps a per-file, shrink-only ledger instead of
+  // being repaired in the PR that opens the gate.
+  //
+  // ⚠️ 22 of the 98 were TS2835 ("dynamic import needs .js") and are an
+  // artifact of checking vitest-executed ESM under this config's NodeNext, not
+  // a fact about the tests. The sibling config answers that with vitest's own
+  // module semantics; ⛔ it loosens no strictness flag.
+  "exclude": ["node_modules", "dist", "**/*.spec.ts", "**/*.test.ts"]
 }
