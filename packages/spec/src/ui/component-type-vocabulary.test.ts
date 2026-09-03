@@ -25,8 +25,12 @@ describe('RESERVED_COMPONENT_TYPE_NAMESPACES is derived from the enum', () => {
     // A new namespace appearing here is a NEW VOCABULARY CLAIM — the
     // `component-type-unknown` rule starts refusing undeclared strings under
     // it the day the enum member lands. Update this list consciously.
+    // `user` LEFT this list at #14159: `user:profile` was the namespace's only
+    // member and is retired by name (refused at the parse through
+    // `RETIRED_PAGE_COMPONENT_TYPES`), so the enum no longer populates `user:`
+    // and the `component-type-unknown` rule no longer claims it.
     expect([...RESERVED_COMPONENT_TYPE_NAMESPACES].sort()).toEqual([
-      'ai', 'app', 'element', 'global', 'nav', 'page', 'record', 'user',
+      'ai', 'app', 'element', 'global', 'nav', 'page', 'record',
     ]);
   });
 
@@ -65,6 +69,20 @@ describe('KNOWN_COMPONENT_TYPES covers every declared face', () => {
     expect(PageComponentType.options).toContain('global:notifications');
     expect(isKnownComponentType('global:search')).toBe(true);
     expect(isKnownComponentType('global:notifications')).toBe(true);
+  });
+
+  /**
+   * #14159 (ruling B): `user:profile` is retired BY NAME — out of the enum, so
+   * `user:` is no longer a reserved namespace, but still KNOWN through its kept
+   * `ComponentPropsMap` row (the `element:filter` / `element:form` shape), so
+   * every reader that dispatches on the row keeps recognising the name. What
+   * refuses it is the schema door (`PageComponentSchema.type`), not this
+   * vocabulary — pinned in `component.test.ts`.
+   */
+  it('user:profile is known through its kept row and refused by name at the parse (#14159)', () => {
+    expect(PageComponentType.options).not.toContain('user:profile');
+    expect(hasReservedComponentNamespace('user:profile')).toBe(false);
+    expect(isKnownComponentType('user:profile')).toBe(true);
   });
 });
 

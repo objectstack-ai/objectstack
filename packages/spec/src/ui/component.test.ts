@@ -22,7 +22,7 @@ import {
   ElementTextInputPropsSchema,
   ObjectMetricPropsSchema,
 } from './component.zod';
-import { PageComponentSchema, PageSchema, ElementDataSourceSchema } from './page.zod';
+import { PageComponentSchema, PageSchema, PageComponentType, ElementDataSourceSchema } from './page.zod';
 
 describe('PageHeaderProps', () => {
   it('should accept minimal header', () => {
@@ -1022,7 +1022,123 @@ describe('ComponentPropsMap', () => {
   it('should parse empty props schemas for utility components', () => {
     expect(() => ComponentPropsMap['page:footer'].parse({})).not.toThrow();
     expect(() => ComponentPropsMap['global:search'].parse({})).not.toThrow();
-    expect(() => ComponentPropsMap['user:profile'].parse({})).not.toThrow();
+    // `user:profile` LEFT this pin at #14159 — see the describe below: it is
+    // not author-placeable, so its row refuses even the empty bag.
+  });
+
+  // #14159 — ruling B (director seat 2026-09-01, batch #26, maintainer verbatim
+  // 「同意」): `user:profile` is shell chrome (the avatar menu), not an
+  // author-placeable element, and no renderer is built for it (objectui#7135
+  // measured the zero with a positive control). The member is refused BY NAME
+  // with one located prescription at every door; `code` + `path` + the first
+  // sentence are the pin — never a bare `toThrow()`, which greens on any error.
+  describe('user:profile is not author-placeable (#14159, ruling B)', () => {
+    const FIRST_SENTENCE =
+      /^`user:profile` is not a page-placeable element — it is shell chrome \(the signed-in user's avatar menu, which the app shell renders itself on every page\), no renderer for it exists anywhere by ruling \(objectstack#14159, objectui#7135\), and there is nothing to put in its place: delete the component node and let the shell render the profile\./;
+
+    it('the ComponentPropsMap row refuses even the empty bag — the flipped accept pin', () => {
+      const r = ComponentPropsMap['user:profile'].safeParse({});
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      const issue = r.error.issues[0]!;
+      // The `retiredKey` channel at element grain: `expected: 'never'`.
+      expect(issue.code).toBe('invalid_type');
+      expect(issue.path).toEqual([]);
+      expect(issue.message).toMatch(FIRST_SENTENCE);
+      // A populated bag gets the same prescription, not an unknown-key verdict.
+      const populated = ComponentPropsMap['user:profile'].safeParse({ showAvatar: true });
+      expect(populated.success).toBe(false);
+      if (!populated.success) {
+        expect(populated.error.issues[0]!.code).toBe('invalid_type');
+        expect(populated.error.issues[0]!.message).toMatch(FIRST_SENTENCE);
+      }
+    });
+
+    it('PageComponentSchema refuses the node by name at `type` — the door the open string arm used to defeat', () => {
+      const r = PageComponentSchema.safeParse({ type: 'user:profile' });
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      expect(r.error.issues).toHaveLength(1);
+      const issue = r.error.issues[0]!;
+      expect(issue.code).toBe('custom');
+      expect(issue.path).toEqual(['type']);
+      expect(issue.message).toMatch(FIRST_SENTENCE);
+      expect((issue as { params?: Record<string, unknown> }).params).toEqual({ retiredComponentType: 'user:profile' });
+    });
+
+    it('PageSchema refuses an authored page at the element path — the door `os validate` parses', () => {
+      const r = PageSchema.safeParse({
+        name: 'home',
+        label: 'Home',
+        regions: [{
+          name: 'main',
+          components: [
+            { type: 'page:header', properties: { title: 'Home' } },
+            { type: 'user:profile' },
+          ],
+        }],
+      });
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      const located = r.error.issues.filter((i) => i.code === 'custom');
+      expect(located).toHaveLength(1);
+      expect(located[0]!.path).toEqual(['regions', 0, 'components', 1, 'type']);
+      expect(located[0]!.message).toMatch(FIRST_SENTENCE);
+
+      // A slot-mounted node goes through the same node schema.
+      const slotted = PageSchema.safeParse({
+        name: 'home',
+        label: 'Home',
+        regions: [],
+        slots: { header: { type: 'user:profile' } },
+      });
+      expect(slotted.success).toBe(false);
+      if (!slotted.success) {
+        const atSlot = slotted.error.issues.filter((i) => i.code === 'custom');
+        expect(atSlot).toHaveLength(1);
+        expect(atSlot[0]!.path).toEqual(['slots', 'header', 'type']);
+        expect(atSlot[0]!.message).toMatch(FIRST_SENTENCE);
+      }
+    });
+
+    it('PageComponentType itself refuses the member with the prescription — the enum error map', () => {
+      expect(PageComponentType.options).not.toContain('user:profile');
+      const r = PageComponentType.safeParse('user:profile');
+      expect(r.success).toBe(false);
+      if (r.success) return;
+      expect(r.error.issues[0]!.code).toBe('invalid_value');
+      expect(r.error.issues[0]!.message).toMatch(FIRST_SENTENCE);
+      // Only a value that USED to be legal gets the prescription — a stranger
+      // keeps zod's own enum message.
+      const stranger = PageComponentType.safeParse('user:avatar');
+      expect(stranger.success).toBe(false);
+      if (!stranger.success) expect(stranger.error.issues[0]!.message).not.toContain('shell chrome');
+    });
+
+    it('positive control: the two shipped shell singletons still parse at every door', () => {
+      for (const type of ['global:search', 'global:notifications'] as const) {
+        expect(() => ComponentPropsMap[type].parse({})).not.toThrow();
+        expect(PageComponentSchema.safeParse({ type }).success, type).toBe(true);
+        expect(PageComponentType.safeParse(type).success, type).toBe(true);
+      }
+    });
+
+    it('preservation: the other three shell singletons are unchanged', () => {
+      for (const type of ['app:launcher', 'nav:menu', 'nav:breadcrumb'] as const) {
+        expect(() => ComponentPropsMap[type].parse({})).not.toThrow();
+        expect(PageComponentSchema.safeParse({ type }).success, type).toBe(true);
+        expect(PageComponentType.safeParse(type).success, type).toBe(true);
+        const r = ComponentPropsMap[type].safeParse({ zzUndeclared: 1 });
+        expect(r.success, type).toBe(false);
+        if (!r.success) expect(r.error.issues.map((i) => i.message).join('\n')).toContain(type);
+      }
+    });
+
+    it('the open string arm stays open — only the retired NAME is refused', () => {
+      for (const type of ['custom.widget', 'mcp:connect-agent', 'object-grid', 'user:avatar']) {
+        expect(PageComponentSchema.safeParse({ type }).success, type).toBe(true);
+      }
+    });
   });
 
   // #11575 — the two `@objectstack/cloud-connection` console widgets. Rows
@@ -2165,6 +2281,10 @@ describe('批 17 / #5068 — the carrier stays an open bag; the gate is on the l
       // zod records an unknown-key policy on the object def; `.strict()` sets a
       // `never` catchall. Anything else means the site is still open.
       if (def.catchall?._zod?.def?.type === 'never') continue;
+      // #14159 — a row retired at element grain is `z.never` itself: no shape,
+      // no catchall, refuses every bag including `{}`. Closed by construction;
+      // the positive control below still exercises it through the parse.
+      if (def.type === 'never') continue;
       stillOpen.push(type);
     }
     expect(stillOpen).toEqual([]);
