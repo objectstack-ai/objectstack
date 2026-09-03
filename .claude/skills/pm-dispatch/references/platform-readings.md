@@ -129,12 +129,12 @@
   撞限流的 dev **完不成强制查重**,只能把发现交回 PM 代为归档,⛔ 不盲目开卡。打满时:待
   执行写**排成有序清单挂进巡逻词**(不靠记忆),恢复窗口按序连清;重试对齐整点(REST core 整
   点重置)优于指数退避,⛔ 绝不忙轮询;文档载明未实测:条件请求答 `304` 不计 core 池。
-- **公开仓零配额读法两档,payload 档优先**:单卡页 `/issues/N` 内嵌 JSON 载**原始 body + 全评
-  论**,精确、零配额 —— 取含 `bodyHTML` 的 `script[type="application/json"]` 块,读
-  `payload.preloadedQueries[0].result.data.repository.issue.body` 与 `frontTimelineItems`/`backTimelineItems`;
-  实测一整个 M 档 dev 运行只花 3 次 MCP 调用(同席前轮 MCP-first 烧 10416/5000,~25×)。边界:⛔
-  只因仓库公开成立;⛔ 覆盖单卡读、**不覆盖 issue search**(搜索页无 SSR 结果);⛔ 永不拿渲染
-  列表定规模(静默只显一页,实测 12 vs 权威 147)。渲染层 WebFetch 仍在(~15 分缓存、有损)。
+- **公开仓零配额读法两档,payload 档优先 —— 只有 body 精确**:单卡页 `/issues/N` 内嵌 JSON 载
+  **原始 body**,零配额 —— 取含 `bodyHTML` 的 `script[type="application/json"]` 块,读
+  `payload.preloadedQueries[0].result.data.repository.issue.body` 与 `frontTimelineItems`/`backTimelineItems`。
+  边界:⛔ 只因仓库公开成立;⛔ 覆盖单卡读、**不覆盖 issue search**(搜索页无 SSR 结果);⛔ 永
+  不拿渲染列表定规模(静默只显一页,实测 12 vs 权威 147)。渲染层 WebFetch 仍在(~15 分缓存、
+  有损)。
 - **查重先 `search_issues`**(2026-08-18 实测:单次调用按 issue body 内文本命中且 `total_count` 精确;
   「search 对本会话不可用」的继承说法实测为**假** —— 继承说法不是读数,
   复述必带实测日期):body 文本匹配是 repo-scoped `list` 做不到的,`list` + 对照组降为回退。
