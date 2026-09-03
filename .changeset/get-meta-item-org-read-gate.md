@@ -6,14 +6,17 @@ fix(metadata-protocol): `getMetaItem` gates its own overlay read, so a phantom o
 
 The singular `/meta` read verb applied no organization gate of its own — whatever
 `organizationId` a caller passed was spent on whatever type it passed. On the
-plural verb (`getMetaItems`, gated in the previous release) the two overlay reads
-are UNIONed, so an ungated organization could only add rows. On this one they
+plural verb (`getMetaItems`, gated by #14683 / PR #14767, which lands in the
+SAME release as this change) the two overlay reads are UNIONed, so an ungated
+organization could only add rows. On this one they
 combine with `??` — precedence — so it could **substitute**: for a type the
 registry declares `allowOrgOverride: false`, a pre-#6190 phantom org-scoped row
 was served *instead of* the live env-wide document, to a caller that asked for
 the live one. Those rows are the ones boot hydration deliberately walks past and
-`reportUnhydratableOrgScopedRows` warns about, so the served document also
-vanished at the next restart.
+`reportUnhydratableOrgScopedRows` warns about — and nothing deletes them, so a
+restart did NOT clear the substitution: the same phantom was served again. What
+a restart drops is the row's *registry* presence, and this door does not consult
+the registry while a `sys_metadata` row answers.
 
 `getMetaItem` now resolves its read scope through `organizationIdForMetaRead`
 itself — the same registry-derived predicate the REST `/meta` doors and the

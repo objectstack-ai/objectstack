@@ -27,16 +27,24 @@
  * ── ⛔ §2 is the half that must NOT move ──────────────────────────────────
  *
  * The card's title names the `??` as precedence-not-union, and that is the
- * DEFECT STATEMENT, not a licence to convert the combinator. ADR-0005's
- * decision block names this method and rules the resolution order —
- * `RUNTIME READ getMetaItem(type, name)` → `1. sys_metadata … ← overlay
- * (wins)`, `2. SchemaRegistry / MetadataService ← artifact default`. Overlay
- * WINS; it does not merge. Its design principle 3 stores the ENTIRE item
- * document per overlay row, and the field-level patch model that would have
- * given a "layering" any meaning was retired and deleted whole under ADR-0049
- * (#13185, PR #13186, maintainer ruling 2026-08-29), with ADR-0126 §6 ruling
- * out the phase it was held for. ADR-0029 D9 spells the `object` overlay the
- * same way (`base = overlay ?? own`). ⇒ §2 pins precedence for a type that
+ * DEFECT STATEMENT, not a licence to convert the combinator.
+ *
+ * ⚠️ Each citation at its real scope. ADR-0005's decision block DOES name this
+ * method — `RUNTIME READ getMetaItem(type, name)` → `1. sys_metadata … ←
+ * overlay (wins)`, `2. SchemaRegistry / MetadataService ← artifact default` —
+ * but the pair it ranks is overlay-vs-artifact-default, not
+ * org-row-vs-env-wide-row. It settles that an overlay WINS rather than merges.
+ * The inner precedence rests on two other things: ADR-0005 design principle 3
+ * stores the ENTIRE item document per overlay row (so a layering has nothing
+ * to layer), and the field-level patch model that would have given "layering"
+ * any meaning was retired and deleted whole under ADR-0049 (#13185, PR #13186,
+ * maintainer ruling 2026-08-29), with ADR-0126 §6 ruling out the phase it was
+ * held for; and `organizationIdForMetaRead`'s own docblock quotes this very
+ * expression as the intended shape while defining #9454. ADR-0029 D9 reaches
+ * the same shape one type over — quoted, not paraphrased: `resolveObject`
+ * "selects its base layer as `overlay ?? owner` instead of `owner`" — though
+ * its status line reads "Design only — nothing is implemented yet", so it
+ * corroborates rather than rules. ⇒ §2 pins precedence for a type that
  * legitimately HAS a per-org channel, so a future reading of the title as
  * "make it a union" fails a test instead of landing.
  *
@@ -200,7 +208,9 @@ describe('§0 the org-overridable set', () => {
 
     it("`object` — the type the ungated runtime callers hard-code — is NOT overridable", () => {
         // The premise of §1. `runtime/src/domains/meta.ts` reaches this verb
-        // three times, twice hard-coded to `'object'`. If this ever flips,
+        // three times, twice hard-coded to `'object'`; a FOURTH raw-org caller
+        // lives in `runtime/src/domains/packages.ts` (`applyPublishedSeeds`,
+        // `type: 'seed'`, equally non-overridable). If either type ever flips,
         // §1 is measuring something else and must be re-derived.
         expect(OVERRIDABLE).not.toContain('object');
         expect(organizationIdForMetaRead('object', ORG)).toBeUndefined();
