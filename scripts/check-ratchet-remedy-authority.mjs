@@ -718,6 +718,20 @@ const CONTROL = {
     why: 'PR for #11927, and the second .mts instance after check-test-typecheck.mts. Its per-site ledger is shrink-only and the message says so in the same breath; adding a site is a real remedy when no contract exists to bind (#11924), so the path is named with its owner rather than denied.',
   },
 
+  // The tenth, and the fourth to join as a NEW gate rather than by retrofit
+  // (#14653). Same reading as the seventh, eighth and ninth: the gate hands out
+  // two remedies with two different owners. Emitting the group in the CLI
+  // extractor is the landing author's and touches no ratchet, so it is offered
+  // freely and first. The other path adds a group to a shrink-only exemption
+  // ledger that ships EMPTY by triage ruling — the author excusing themselves
+  // from the parity check they just failed — so it is named with its owner.
+  // `refused` would be untrue: a group keyed by strings no stack config declares
+  // genuinely has no extractor face, so there IS a legitimate act here.
+  'check-i18n-walk-parity.mjs': {
+    expect: 'marked',
+    why: 'PR for #14653. Its exemption ledger ships empty and only shrinks; emitting the group is the author\'s remedy and is offered first, while exempting one is a decision with an owner, so that path is named with its owner rather than denied.',
+  },
+
   'check-adr-links.mjs': {
     expect: 'refused',
     why: 'Refuses by binding a negation to the verb, over a shrink-only registry.',

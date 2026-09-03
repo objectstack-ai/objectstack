@@ -99,10 +99,14 @@
  *      ratchet are enforced — a ceiling above the real size fails too, so the
  *      number can only be walked down.
  *
- * ⛔ A red is not a ledger entry. "This group legitimately has no extractor
- * face" is a decision with a reason attached, made by whoever owns the walker;
- * putting a group in here to get to green is the same silence this gate exists
- * to break, now with a comment on it.
+ * ⛔ A red is not a ledger entry, and the ledger path is MAINTAINER-ONLY. "This
+ * group legitimately has no extractor face" is a decision with a reason
+ * attached, owned by whoever owns the walker; putting a group in here to get to
+ * green is the same silence this gate exists to break, now with a comment on
+ * it. The unwalked-group message names that owner beside the offer, which is
+ * what `check:ratchet-remedy-authority` requires of a remedy that expands a
+ * shrink-only registry (#8435) — remedy 1, emitting the group, is the landing
+ * author's and is offered freely.
  *
  * ## What it requires, and what it refuses to do without
  *
@@ -372,11 +376,13 @@ function reportUnwalked(unwalked) {
     + `\n         (\`collectExpectedEntries\`) and author a member of it in ${FIXTURE},`
     + '\n         in the same change. This is the remedy for every instance so far.'
     + '\n'
-    + '\n      2. LEDGER IT, with the reason it has no extractor face — a group keyed'
-    + '\n         by strings no stack config declares cannot be scaffolded from one.'
-    + '\n         Add it to KNOWN_NO_EXTRACTOR_FACE in this file and raise'
-    + '\n         LEDGER_CEILING in the same diff. Both edits are deliberate; that is'
-    + '\n         the point.'
+    + '\n      2. LEDGER IT — ⛔ MAINTAINER-ONLY. Adding an entry to'
+    + '\n         KNOWN_NO_EXTRACTOR_FACE (and raising LEDGER_CEILING to fit it)'
+    + '\n         EXPANDS a shrink-only exemption ledger, which is the author'
+    + '\n         excusing themselves from the check they just failed. "This group'
+    + '\n         legitimately has no extractor face" is a decision with a reason and'
+    + '\n         an owner — the maintainer of the walker — not a step the landing'
+    + '\n         author takes to get to green. Report the red and let it be ruled on.'
     + '\n'
     + '\n    ⛔ Not a remedy: deleting the group from the fixture. That answers "does'
     + '\n    the walker produce this group" with "no" for a perfectly healthy walker.'
