@@ -298,6 +298,9 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
    *
    * #14547 therefore REMAINS as in 17.2.0: an org-stamped rule naming a seeded
    * unit expands to nobody. That is a real defect and it is not fixed here.
+   * (#14547 is CLOSED as completed — by #14949, whose unit half this reverts —
+   * so its tracker state no longer matches the runtime; reopening it is the
+   * maintainer's call.)
    * Its root cause is the seed loader's `sys_` exemption plus first-boot
    * ordering, and it is fixed STRUCTURALLY on the v18 line by ADR-0131 C1 —
    * the Default Organization exists before application seed datasets load, and

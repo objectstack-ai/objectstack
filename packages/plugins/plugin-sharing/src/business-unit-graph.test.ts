@@ -16,7 +16,7 @@
  *     organization predicate at all — completely unscoped by organization —
  *     which is the cross-tenant hole #14949 closed and this file still pins.
  *
- * ## #14547 is OPEN, and these tests reproduce it rather than fix it
+ * ## #14547's symptom STANDS in 17.x, and these tests reproduce it
  *
  * #14547 is the external report of the unit half: an org admin creating a rule
  * at runtime gets an org-stamped rule, the seeded unit carries no
@@ -28,7 +28,11 @@
  * the duplication ADR-0131 exists to retire — and it had not shipped.
  *
  * So 17.3 behaves exactly as 17.2.0 does here, and the cases below name
- * **#14547** as the open defect they reproduce. It is fixed structurally on
+ * **#14547** as the defect they reproduce. ⚠️ #14547 is CLOSED as completed —
+ * closed by #14949, whose unit half this reverts — so its GitHub state no
+ * longer matches the 17.x runtime. Whether it is reopened is the maintainer's
+ * call, not this file's; what the tests assert is the behaviour, which is
+ * 17.2.0's. It is fixed structurally on
  * the v18 line by ADR-0131 C1 (the Default Organization exists before
  * application seed datasets load, and the seed loader stamps
  * `sys_business_unit` seeds), so the row this screen reads carries an
@@ -198,7 +202,7 @@ describe('BusinessUnitGraphService — the two widths are actually two widths (#
   });
 
   it('[#14547] NEITHER width reaches a SEEDED unit tree, even with stamped members', async () => {
-    // ⚠️ This reproduces the OPEN defect #14547 — it does not assert a fix.
+    // ⚠️ This reproduces the defect #14547 reports — it does not assert a fix.
     // The membership rows are stamped exactly as a REST/session write stamps
     // them, so the MEMBER screen would admit every one of them; the units stay
     // seeded, so the strict UNIT screen hides the tree before the member read
@@ -288,10 +292,10 @@ describe('BusinessUnitGraphService — org scoping (#3807)', () => {
 
 /**
  * [#14547] The UNIT screen is STRICT — the divergence from `plugin-approvals`
- * (#3807) is OPEN, and 17.3 ships it exactly as 17.2.0 did.
+ * (#3807) STANDS, and 17.3 ships it exactly as 17.2.0 did.
  *
- * ⚠️ Every case in this block reproduces the OPEN defect **#14547**. None of
- * them asserts a fix. #14949 closed the defect by giving this screen the
+ * ⚠️ Every case in this block reproduces the defect **#14547** reports, which
+ * 17.x still has. None of them asserts a fix. #14949 closed the defect by giving this screen the
  * platform's NULL-inclusive arm; that was reverted before the 17.3 tag
  * (ADR-0131 D8) because it wrote `SqlDriver.applyTenantScope`'s own predicate
  * a second time, in a second place, and had not shipped. The structural fix is

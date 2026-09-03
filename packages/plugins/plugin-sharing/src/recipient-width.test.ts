@@ -362,8 +362,10 @@ describe('#14547 — an org-stamped rule against a SEEDED business unit', () => 
   });
 
   /**
-   * ⚠️ #14547 is OPEN in 17.x and these two cases REPRODUCE it — they do not
-   * assert a fix. #14949 closed it by widening the unit screen with the
+   * ⚠️ #14547's symptom stands in 17.x and these two cases REPRODUCE it — they
+   * do not assert a fix. (#14547 itself is CLOSED as completed, closed by
+   * #14949 whose unit half this reverts; reopening it is the maintainer's
+   * call. These tests assert the behaviour, which is 17.2.0's.) #14949 closed it by widening the unit screen with the
    * platform's NULL arm; that was reverted before the 17.3 tag (ADR-0131 D8)
    * because it re-implemented `SqlDriver.applyTenantScope`'s own predicate a
    * second time in a second place, and had not shipped. The structural fix is
