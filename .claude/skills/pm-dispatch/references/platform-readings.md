@@ -61,9 +61,9 @@
   `update_pull_request_branch` 回「Branches that are queued for merging cannot be updated」= 在队,正常返回顺
   带逼出暗冲突(它不踢已挂 PR、只是永不入队);② `merge_pull_request` 回 405「Pull Request is in the
   merge queue」= 在队(2026-08-28 两席各一次,均零 ref),405「Merge commits are not allowed」= 不在队,改
-  挂 auto-merge。`enable_pr_auto_merge` 回应只答本次调用:时戳形有动作、空字段形无动作;⛔
-  enable 与其验证间永不插 `disable`(入队 webhook 乱序迟到,会撤掉真实入队)。**踢出成因两
-  则**:兄弟抢先落地 ⇒ `MERGE_CONFLICT`;缺必需批准 ⇒ 治理守卫 merge_group 腿 `CI_FAILURE`。
+  挂 auto-merge。⛔ enable 与其验证间永不插 `disable`(入队 webhook 乱序迟到,会撤掉真实入
+  队)。**踢出成因两则**:兄弟抢先落地 ⇒ `MERGE_CONFLICT`;缺必需批准 ⇒ 治理守卫 merge_group
+  腿 `CI_FAILURE`。
 - **队列踢出先认签名再决定重投**:已知 flaky 核对失败签名一致 ⇒ 原样重投;
   止血修复合入后**同一签名再现就不再是那条 flaky**,是新问题必须重新诊断,
   ⛔ 禁止条件反射式重投;第三种签名:本 PR 名下**没有任何** `merge_group` run 且批次同伴的 run
