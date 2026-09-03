@@ -1,6 +1,7 @@
 # ADR-0126: The platform customization model for packaged metadata — three regimes, one activation ledger
 
-**Status**: Proposed (2026-08-25) — awaiting the maintainer's hand-merge, which is itself the
+**Status**: **Superseded** (2026-09-04) by [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6 — maintainer, verbatim: 「ADR-0126 可以先作废」. The regimes below are replaced by the install mode (managed = sealed, template = copied in and editable); the activation ledger and the packaged-flow disable/clone machinery are reverted before 17.3 (never released). Kept as the record of the survey (ADR-0131 §1.7 summarizes it). Original status line follows.
+**Original status**: Proposed (2026-08-25) — awaiting the maintainer's hand-merge, which is itself the
 acceptance act for a governed surface (Prime Directive #14) **and the ruling that settles the
 tentative flow-instance directions in §7** (chartered on
 [#12049](https://github.com/objectstack-ai/objectstack/issues/12049); ⛔ none of §7 is settled
@@ -40,7 +41,7 @@ re-cited inline; the survey carries the instruments and positive controls.
 
 ---
 
-> **Amended 2026-09-04 by [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6.** Maintainer ruling, verbatim and untranslated: 「你这么说还不如先完全封死。flow 也先不让改。然后软件包应该有两种安装方式，有一种是模版形式直接进库，那就是所有都可以修改。但是单库多租户禁止安装这种模版软件包；有一种是受管软件包，什么都以软件包中的为准，就是不让改。」 Regimes **O** (overlay) and **C** (disable + clone) are **paused for managed content — packaged flows (§7) included**; customization is expressed by the **install mode** instead: *managed* (sealed, upgradeable; the only mode a shared-DB multi-tenant deployment accepts) or *template* (copied once into the environment ledger, fully editable, no upgrade channel, refused on `group` / `isolated`). D3's reserved `organization_id` on `sys_metadata_activation` is withdrawn (ADR-0131 D1: no nullable tenant column); the Regime C machinery landed for flows (#12158 / PR #12296, #12156, #12419) reached `main` after the last release (17.2.0, 2026-08-23) and is **removed before the next release** — nothing published depends on it; epic #12150 closes as superseded. Regime **E** stands. §7 remains the contract the regimes consume **if** they return.
+> **Superseded 2026-09-04 by [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D6.** Maintainer ruling, verbatim and untranslated: 「你这么说还不如先完全封死。flow 也先不让改。然后软件包应该有两种安装方式，有一种是模版形式直接进库，那就是所有都可以修改。但是单库多租户禁止安装这种模版软件包；有一种是受管软件包，什么都以软件包中的为准，就是不让改。」 Regimes **O** (overlay) and **C** (disable + clone) are **paused for managed content — packaged flows (§7) included**; customization is expressed by the **install mode** instead: *managed* (sealed, upgradeable; the only mode a shared-DB multi-tenant deployment accepts) or *template* (copied once into the environment ledger, fully editable, no upgrade channel, refused on `group` / `isolated`). D3's reserved `organization_id` on `sys_metadata_activation` is withdrawn (ADR-0131 D1: no nullable tenant column); the Regime C machinery landed for flows (#12158 / PR #12296, #12156, #12419) reached `main` after the last release (17.2.0, 2026-08-23) and is **removed before the next release** — nothing published depends on it; epic #12150 closes as superseded. Regime **E** stands. §7 remains the contract the regimes consume **if** they return.
 
 ## TL;DR
 

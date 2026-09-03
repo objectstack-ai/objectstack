@@ -3,6 +3,7 @@
 **Status**: Proposed (2026-09-04) — awaiting the maintainer's hand-merge, which is itself the
 acceptance act for a governed surface (Prime Directive #14). ⛔ Nothing below is settled until
 this record merges; the implementation cards are cut **from** the merged ADR, never ahead of it.
+**Supersedes**: [ADR-0126](./0126-packaged-metadata-customization-model.md) (maintainer, 2026-09-04: 「ADR-0126 可以先作废」— its regimes are replaced by the install mode of D6, its activation ledger is removed before 17.3; §1.7 keeps what its survey found so the superseded record need not be read).
 **Deciders**: ObjectStack maintainer, 2026-09-03/04, live chat on
 [#13564](https://github.com/objectstack-ai/objectstack/issues/13564), verbatim and untranslated,
 in the order the model was built: the premise 「我理解只有代码定义的元数据是跨租户的，对象、字段、视图等
@@ -194,6 +195,21 @@ plain data field, not the tenancy anchor (D7). Once the column is gone there is 
 a declared-NULL mechanism would keep alive exactly the state D1 removes. #14923 therefore does not
 merge; #13636 closes as superseded when this record merges (§8, C11).
 
+### 1.7 What ADR-0126 found, kept here so the superseded record need not be read
+
+ADR-0126 (2026-08-25) surveyed every metadata type for post-install customization pull and found
+three mechanisms already in the tree, each invented per type with its own ledger: an **organization
+overlay** for exactly five presentational types (ADR-0005 tier A), **clone-to-customize** for permission
+sets (the 2026-08-24 lock-the-base ruling), and **package-grain extend** for objects and app navigation
+(`objectExtensions`, ADR-0029 D7). It recorded that two shipped documentation pages promised "install
+with one click, then customize in Studio" while the platform refused nearly every post-install change;
+that a tenant had once switched a shipped flow off environment-wide through an unscoped in-process map
+(#10243); and that behavioral types must never gain an org overlay (the #6190 wall). Its answer was a
+per-type regime table plus a generic activation ledger. This record keeps the findings and replaces the
+answer: the extend mechanism stands because it is a package; the #10243 class is closed by sealing
+managed content rather than by a durable switch; and the documentation promise is rewritten as "install
+managed, or install as a template" (C11).
+
 ---
 
 ## 2. Decision
@@ -356,7 +372,7 @@ Regime O and Regime C are paused for managed content. The Regime C machinery tha
 flows — the activation ledger `sys_metadata_activation` and its `execute()`-time consult (#12158, PR
 #12296), the flow clone action (#12156), the ledger convergence (#12419) — reached `main` on and after
 2026-08-26, **after the last release** (17.2.0, tagged 2026-08-23; npm serves 17.2.0). Nothing published
-depends on it, so it is **removed now, before the next release**, not sealed and carried
+depends on it, so it is **removed before 17.3 is cut** — a revert of #12296, #12419 and the clone action (#12156) — not sealed and carried
 ([ADR-0049](./0049-no-unenforced-security-properties.md): a shape nobody may use is not shipped
 dormant). Clone without disable would in any case be worse than nothing — a cloned flow fires beside the
 managed one it copied. Epic #12150 closes as superseded. ADR-0126 D3's "org column reserved, written
@@ -472,15 +488,25 @@ The packaged-flow disable/clone door and `sys_metadata_activation` are **not** o
 do not wait for protocol 18: unreleased, they are removed in C5 before the next release (D6). Each
 retirement of an authorable shape is an [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) entry.
 
-### D14 — Staging
+### D14 — Staging: one pre-17.3 removal, everything else on the v18 line
 
-**17.x, additive**: the Default Organization made load-bearing (D3); registry-first resolution and
-name-keyed references added beside the id columns (D4); refusals behind the existing #13491 gate (D9);
-D7's no-column declarations; the D10 inventory and attribution migration; the template door closed
-(D6). The driver arms stay as the compatibility path. **Protocol 18**: NOT NULL, every-posture
-refusal, mirror deletion, arm removal, retirements (D1/D9/D10/D13), in the staging
-[ADR-0120](./0120-unique-scope-vocabulary-and-null-safe-tenant-uniqueness.md) D7 set. Until D13 runs,
-⛔ no card narrows or removes an arm.
+Maintainer, 2026-09-04: 「我发 17.3，然后后续这么大的改动应该放到 v18」. Two consequences:
+
+- **Before 17.3 is cut**, the unreleased ADR-0126 flow machinery is reverted (D6; C0). Nothing else of
+  this record ships in 17.x. The #13491 tenant-audit ledger (#13635, also unreleased) **may** ship in
+  17.3: it is internal protection with no authorable surface, refuses org-less system writes on walled
+  postures, and retires in v18 as machinery, not as a contract.
+- **Everything else is the v18 line** — one major, one migration: D1's constraint, D2/D3's retirements,
+  D4's name references, D6's sealing and template mode, D7's column drops, D8's single predicate, D9's
+  refusals, D10's four-fate migration, D13's retirements. Within the line the order of §8 still holds
+  (C1–C6 before C7 before C8), and the migration keeps its per-table gate (D10) — the customer database
+  is never asked to satisfy a constraint its report has not cleared. The driver arms are removed in the
+  same major, after C7. ⛔ No 17.x card narrows or removes an arm, adds a name column beside an id
+  column, or ships a half of this record.
+
+Doing it in one major rather than additively across 17.x avoids carrying dual id/name columns, a
+registry-first-then-rows resolution, and a sealed-but-present flow ledger through a public release —
+compatibility shims for a shape nobody has used yet.
 
 ---
 
@@ -583,12 +609,11 @@ refusal, mirror deletion, arm removal, retirements (D1/D9/D10/D13), in the stagi
 3. **Deployment-level settings** (D7): configuration file/environment, or a tenant-less
    `sys_platform_setting` object? Proposed: configuration for infrastructure values, a tenant-less
    object only for values an operator must change without a restart.
-4. **Staging** (D14): confirm the 17.x / protocol 18 boundary aligned with ADR-0120 D7.
-5. **Who chooses the install mode** (D6): proposed — the package **declares** the modes it permits
+4. **Who chooses the install mode** (D6): proposed — the package **declares** the modes it permits
    (`installModes: ['managed'] | ['managed','template'] | ['template']`, default `['managed']`), the
    installer picks one at install time, and a shared-DB multi-tenant deployment refuses `template`
    whatever the package permits. Confirm, or name a different rule.
-6. **Retiring ADR-0005's per-organization overlay axis** (D6): it follows from the sealing ruling and
+5. **Retiring ADR-0005's per-organization overlay axis** (D6): it follows from the sealing ruling and
    removes the need to split `sys_metadata`, but it switches off a live feature (org-scoped writes of
    the five tier-A types, pinned by identity). Confirm.
 
@@ -614,10 +639,11 @@ refusal, mirror deletion, arm removal, retirements (D1/D9/D10/D13), in the stagi
 
 ## 8. Execution plan (cards are cut from the merged record)
 
-One epic tracks the family. Phases 1–3 are additive (17.x); phase 4 is protocol 18.
+One epic tracks the family. C0 lands before 17.3; every other card is on the **v18** line (D14), in this order.
 
 | # | Card | Decisions | Blocked by |
 |---|---|---|---|
+| C0 | Revert the unreleased ADR-0126 flow machinery (#12296, #12419, #12156) so 17.3 does not publish it | D6, D14 | ADR merge; **before 17.3** |
 | C1 | Default Organization load-bearing under `single`; `resolveSystemInsertOrganization` derives it, refuses elsewhere | D3, D9, D11 | ADR merge |
 | C2 | Catalog resolution reads the registry; assignment tables reference by name (id→name columns + rewrite); dangling-name boot report; every reader of the four catalog tables enumerated and converted | D2, D3, D4 | ADR merge |
 | C3 | Retire the seeders, the per-organization catalog machinery and the four catalog objects; built-ins and audience anchors as declared metadata; Setup catalog creation = environment metadata write under `single`, refused under a wall; platform-admin grant row owned by the Default Organization | D2, D3, D5, D13 | C1, C2 |
