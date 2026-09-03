@@ -168,11 +168,16 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
         }
         if (!data) return undefined;
         let user: Record<string, unknown> | null | undefined;
+        // Set only when the row was read WITH the locale projection: after a
+        // retry the column was never asked for, so whatever the row carries
+        // under that key is not a read — rung 2 applies.
+        let localeRead = false;
         try {
             user = await data.findOne(userObject, {
                 where: { id: recipient },
                 fields: ['email', RECIPIENT_LOCALE_FIELD],
             });
+            localeRead = true;
         } catch (err) {
             // Ruling item 3: NO path may dead-letter because of the locale
             // read. A `userObject` override that lacks the column must still
@@ -193,7 +198,7 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
         if (!(typeof email === 'string' && EMAIL_SHAPE(email))) return undefined;
         return {
             address: email,
-            locale: resolveRecipientLocale(user?.[RECIPIENT_LOCALE_FIELD], deploymentLocale),
+            locale: resolveRecipientLocale(localeRead ? user?.[RECIPIENT_LOCALE_FIELD] : undefined, deploymentLocale),
         };
     }
 

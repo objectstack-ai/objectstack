@@ -396,14 +396,14 @@ describe('email channel', () => {
             const data = fakeData({ users: {} });
             await build(data, email, 'ja-JP').send(silentCtx(), templated('bob@example.com'));
             expect(email.templated[0]).toMatchObject({ to: 'bob@example.com', locale: 'ja-JP' });
-            expect(data.findOnes.filter((q) => q.object === 'sys_user')).toHaveLength(0);
+            expect(data.findOnes.filter((q: { object: string }) => q.object === 'sys_user')).toHaveLength(0);
         });
 
         it('reads the locale off the SAME sys_user row as the address — one query per recipient, no second read point', async () => {
             const email = templateEmail();
             const data = fakeData({ users: { user_1: { email: 'ada@example.com', locale: 'zh-CN' } } });
             await build(data, email, 'ja-JP').send(silentCtx(), templated());
-            const userReads = data.findOnes.filter((q) => q.object === 'sys_user');
+            const userReads = data.findOnes.filter((q: { object: string }) => q.object === 'sys_user');
             expect(userReads).toHaveLength(1);
             expect(userReads[0].query).toEqual({ where: { id: 'user_1' }, fields: ['email', 'locale'] });
         });

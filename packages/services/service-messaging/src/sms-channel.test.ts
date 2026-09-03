@@ -130,7 +130,7 @@ describe('sms channel', () => {
             await ch.send(silentCtx(), delivery());
             expect(sms.sent[0].body).toBe('成交: Deal closed');
             // One row read, both columns — no second read point.
-            const userReads = data.findOnes.filter((q) => q.object === 'sys_user');
+            const userReads = data.findOnes.filter((q: { object: string }) => q.object === 'sys_user');
             expect(userReads).toHaveLength(1);
             expect(userReads[0].query).toEqual({ where: { id: 'user_1' }, fields: ['phone_number', 'locale'] });
         });

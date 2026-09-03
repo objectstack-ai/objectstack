@@ -354,13 +354,13 @@ describe('inbox channel', () => {
         });
 
         it('surfaces renderTemplate failure codes on the delivery row and grades them permanent', async () => {
-            const data = fakeData();
+            const data = fakeData(undefined, userWithLocale('zh-CN'));
             const r = fakeRenderer(() => {
                 throw new Error('TEMPLATE_NOT_FOUND: deal.won_email (locale=zh-CN)');
             });
             const ch = createInboxChannel({ getData: () => data.engine, getEmail: () => r.email });
 
-            const result = await ch.send(silentCtx(), templateDelivery('zh-CN'));
+            const result = await ch.send(silentCtx(), templateDelivery());
 
             expect(result.ok).toBe(false);
             expect(result.error).toMatch(/^TEMPLATE_NOT_FOUND:/);

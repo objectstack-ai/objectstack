@@ -111,11 +111,15 @@ export function createSmsChannel(opts: SmsChannelOptions): MessagingChannel {
         }
         if (!data) return undefined;
         let user: Record<string, unknown> | null | undefined;
+        // Set only when the row was read WITH the locale projection — after a
+        // retry the column was never asked for, so rung 2 applies.
+        let localeRead = false;
         try {
             user = await data.findOne(userObject, {
                 where: { id: recipient },
                 fields: ['phone_number', RECIPIENT_LOCALE_FIELD],
             });
+            localeRead = true;
         } catch (err) {
             // Ruling item 3 (#13881): the locale read must never cost the
             // delivery — retry the number alone, fall to the deployment default.
@@ -132,7 +136,10 @@ export function createSmsChannel(opts: SmsChannelOptions): MessagingChannel {
         const raw = user?.phone_number;
         const phone = typeof raw === 'string' ? PHONE_SHAPE(raw) : undefined;
         if (!phone) return undefined;
-        return { phone, locale: resolveRecipientLocale(user?.[RECIPIENT_LOCALE_FIELD], deploymentLocale) };
+        return {
+            phone,
+            locale: resolveRecipientLocale(localeRead ? user?.[RECIPIENT_LOCALE_FIELD] : undefined, deploymentLocale),
+        };
     }
 
     return {
