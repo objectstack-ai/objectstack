@@ -586,6 +586,49 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/lint', '@objectstack/mcp', '@objectstack/platform-objects',
     '@objectstack/plugin-auth', '@objectstack/spec', '@objectstack/types',
   ],
+  // #14181 re-baseline (the onboarding limb above): a NEW entry, reached ONLY
+  // through `tsconfig.test.json` -- a program this card ADDED. This is the
+  // limb's cleanest case rather than a borderline one: `service-cluster` had NO
+  // `typecheck` script AT ALL before (its scripts were `build` and `test`), so
+  // it ran ZERO counted programs and there is no pre-existing program for a dep
+  // to be laundered through. Both deps here are annotated `via
+  // tsconfig.test.json` by this gate's own failure text.
+  //
+  // Provenance measured four ways on one checkout, by varying only what the
+  // `typecheck` script NAMES (`--list`, totals as printed):
+  //
+  //   no `typecheck` script (origin/main)  absent   118 programs / 288 pairs
+  //   names `tsconfig.json` only           absent   118 programs / 288 pairs
+  //   names `tsconfig.test.json` only      PRESENT  119 programs / 290 pairs
+  //   names both (this card)               PRESENT  119 programs / 290 pairs
+  //
+  // Row 2 is the load-bearing one: the BUILD program carries no dist-resolved
+  // workspace type import at all, so the exposure is not merely first SEEN
+  // through the onboarded program, it is only REACHABLE through it. (The two
+  // programs put the same files in -- this package's `tsconfig.json` has never
+  // excluded tests -- so module semantics, NodeNext vs bundler, is the only
+  // axis that differs.)
+  //
+  // Numbers, `--list` before/after on the same checkout (before at 44ffa2103,
+  // after with this card applied):
+  //
+  //   before   57 of 78 packages, 118 programs, 288 pairs, 21 clean
+  //   after    58 of 78 packages, 119 programs, 290 pairs, 20 clean
+  //
+  // so +1 package, +1 program, +2 pairs -- this entry and nothing else.
+  //
+  // Why the entry and not `paths`, which is what this gate's failure text asks
+  // for: MEASURED both ways on the same checkout, and `paths` is decisively the
+  // wrong tool here. Redirecting these two deps to source takes this package's
+  // test layer from 0 errors to 435, ALL of them TS6059 (`not under rootDir`)
+  // and every one of them in ANOTHER package's source -- `packages/spec/src/**`
+  // and `packages/core/src/**` -- billed to a package that cannot pay them down.
+  // That is the PR #12570 finding (+5 TS6133 for `rest`) and the #8021 one (247
+  // TS6059) reproduced at a much larger scale, on a package whose entire point
+  // in this card was to reach ZERO test-layer errors. Note the direction: the
+  // #5286 route it took makes its OWN test files compile clean, and `paths`
+  // would immediately re-bury that result under other packages' diagnostics.
+  '@objectstack/service-cluster': ['@objectstack/core', '@objectstack/spec'],
   // #14386 re-baseline (the onboarding limb above): a NEW entry, reached ONLY
   // through `tsconfig.typecheck.json` -- a program that card ADDED (this
   // package's `typecheck` was a bare `tsc --noEmit` before it, with no sibling

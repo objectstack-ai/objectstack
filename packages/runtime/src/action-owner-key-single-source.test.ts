@@ -150,8 +150,20 @@ describe('standalone-action owner key — half C: no bare literal (#14678)', () 
         // exactly the wrong reason — the can-never-fail property this whole
         // file was written to replace. Both controls are positive assertions
         // against text the converged file must carry.
+        //
+        // [#14864] The second control used to be the `seedFlowActionParams`
+        // comparison `objectName !== GLOBAL_ACTION_OBJECT_KEY`. That guard is
+        // gone — it was one of the two rival answers to "is this route
+        // object-less", and it now delegates to `isObjectLessActionKey` like
+        // its neighbours. Re-anchored rather than deleted, and deliberately
+        // onto a site this file's own subject does not move: the warn-once log
+        // key in `enforceActionParams`, which is the SECOND of the three bare
+        // literals #14678 converged and is untouched by the predicate work.
+        // ⛔ Do not re-anchor a control onto the thing the next change is most
+        // likely to edit — a control that moves with its subject stops being a
+        // control.
         expect(src).toContain('GLOBAL_ACTION_OBJECT_KEY');
-        expect(src).toContain('objectName !== GLOBAL_ACTION_OBJECT_KEY');
+        expect(src).toContain('where.objectName ?? GLOBAL_ACTION_OBJECT_KEY');
 
         for (const literal of BARE_LITERALS) {
             expect(
