@@ -50,6 +50,19 @@ import { registerLogicNodes } from './logic-nodes.js';
  * contents and the same fault-edge routing. This is a record fix; it does not
  * touch accept/reject. The nesting group pins the other risk the new fold
  * introduces — that a carried step could now reach the log twice.
+ *
+ * ## The third returned-failure path (#14222)
+ *
+ * `try_catch` returns failure from THREE sites, and #14184 taught only one of
+ * them (no `catch` region) to carry its steps. The second — a `catch` region
+ * that itself fails — kept discarding the record, and this file pinned that as
+ * current behaviour rather than endorsing it. #14222 closed it by giving the
+ * catch region the same `partialSteps` sink the try region already had, so the
+ * failing-catch return now carries `[...failedTryAttempts, ...catchAttempts]`.
+ * That pin is INVERTED in place below, comment and all: what it used to assert
+ * is written out there, because the boundary it recorded is what makes the
+ * change legible. (The third site is the config-parse refusal, where nothing
+ * ran and there is no record to carry.)
  */
 
 function silentLogger(): any {
@@ -322,7 +335,7 @@ describe('#14184 a no-catch try_catch keeps the record of the writes its try reg
       expectNeverUnderReports(res.summary?.acted);
     });
 
-    it('a failing `catch` region still fails with the catch error and carries no try steps', async () => {
+    it('a failing `catch` region fails with the catch error AND carries both regions\' steps', async () => {
       const { res, record } = await run({
         try: WRITE_WRITE_BOOM,
         catch: { nodes: [{ id: 'handler', type: 'boom', label: 'Handler' }], edges: [] },
@@ -333,13 +346,77 @@ describe('#14184 a no-catch try_catch keeps the record of the writes its try reg
         "Node 'guard' failed: try_catch 'guard': catch region failed — "
           + "Node 'handler' failed: boom: at least one recipient is required",
       );
-      // A DIFFERENT return, and this card does not touch it: it still carries
-      // no `childSteps`, so the log keeps no try-region steps. That is the same
-      // defect one path over and it is filed as #14222, not endorsed here —
-      // closing it needs a `partialSteps` sink for the catch region, which is a
-      // new seam rather than a mirror of this change. Whoever fixes #14222
-      // updates this pin deliberately.
-      expect((record?.steps ?? []).filter(s => s.regionKind === 'try')).toHaveLength(0);
+
+      // INVERTED by #14222 — and the record of what it used to say is the point.
+      // Until then this case asserted the OPPOSITE:
+      //
+      //     expect((record?.steps ?? []).filter(s => s.regionKind === 'try'))
+      //       .toHaveLength(0);
+      //
+      // with a comment saying that was a DIFFERENT return which #14184 did not
+      // touch: it carried no `childSteps`, so the log kept no try-region steps,
+      // and closing that gap needed a `partialSteps` sink for the catch region
+      // — a new seam rather than a mirror of #14184's change. The assertion was
+      // a deliberate record of the boundary #14184 stopped at, never an
+      // endorsement, and it named #14222 as the card that would move it.
+      //
+      // #14222 moved it. It added the sink (the fifth `runRegion` argument the
+      // try region already received), and the triage ruling that closed it is a
+      // restore-invariant: the run log must carry every step that ran,
+      // whichever region ran it. So the pin now reads the other way — and reads
+      // the full shape rather than just presence: ordering is failed try
+      // attempts FIRST (they happened first), which is the same rule the
+      // successful-catch return has always used, and `runRegion`'s own tagger
+      // supplies `regionKind` on its failure path as well as its success path.
+      const grouped = (record?.steps ?? [])
+        .filter(s => s.parentNodeId === 'guard')
+        .map(s => `${s.regionKind}:${s.nodeId}:${s.status}`);
+      expect(grouped).toEqual([
+        'try:w1:success',
+        'try:w2:success',
+        'try:bang:failure',
+        'catch:handler:failure',
+      ]);
+    });
+
+    it('a `catch` region that writes before failing reports the writes from BOTH regions', async () => {
+      const { res, record } = await run({
+        try: WRITE_WRITE_BOOM,
+        catch: {
+          nodes: [
+            { id: 'cw1', type: 'write', label: 'Compensating write' },
+            { id: 'handler', type: 'boom', label: 'Handler' },
+          ],
+          edges: [{ id: 'c1', source: 'cw1', target: 'handler' }],
+        },
+      });
+
+      // The shape the card calls the worst of the three for an operator: TWO
+      // regions ran and both wrote before failing. Three rows are in the store.
+      expect(res.success).toBe(false);
+      expect(written).toEqual(['w1', 'w2', 'cw1']);
+      expect(realWrites()).toBe(3);
+      expectNeverUnderReports(res.summary?.acted);
+      expect(res.summary?.acted).toBe(realWrites());
+
+      // This is the half the sink adds. The try region's steps alone — the
+      // one-liner #14184 could have written here — would leave `cw1`
+      // unrecorded and `acted` stuck at 2 over three writes that landed.
+      const grouped = (record?.steps ?? [])
+        .filter(s => s.parentNodeId === 'guard')
+        .map(s => `${s.regionKind}:${s.nodeId}:${s.status}`);
+      expect(grouped).toEqual([
+        'try:w1:success',
+        'try:w2:success',
+        'try:bang:failure',
+        'catch:cw1:success',
+        'catch:handler:failure',
+      ]);
+
+      // Two sinks feed one return now, so pin what that risks: each carried
+      // step still reaches the log exactly once.
+      const steps = record?.steps ?? [];
+      expect(new Set(steps).size).toBe(steps.length);
     });
   });
 
