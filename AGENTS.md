@@ -1151,7 +1151,7 @@ registry? Add it to `OPEN_CAPABILITY_REGISTRIES` in the same PR that fixes it.
    pinned SHA before merging.
 5. **Touched `packages/spec`? Regenerate and commit its artifacts before pushing** — § *Touched `packages/spec`*
    above is the authority; note `OS_SKIP_DTS=1` greens `check:api-surface` locally and reds it in CI.
-6. Update `CHANGELOG.md` / `ROADMAP.md` if user-facing or architectural.
+6. Update `ROADMAP.md` if user-facing or architectural.
 7. **Delete temporary artifacts** — screenshots, traces, scratch logs, `.playwright-mcp/`, throwaway `tmp*.ts`, ad-hoc
    scripts. Repo must look identical to before, minus intended changes.
 
