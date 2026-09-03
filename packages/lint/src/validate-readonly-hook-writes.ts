@@ -65,10 +65,19 @@
 //     is a gating rule pointing at a dead feature. The exclusion stands (an
 //     elevated write is genuinely not stripped); the ADVICE does not.
 //
-//     A hook still has no DECLARED elevation knob - there is no hook-side
-//     `runAs` - so the honest hint is the own-hook stamp, and #14010 is where
-//     the missing knob is argued. Issue ids stay in this comment, out of the
-//     message an author reads and cannot act on.
+//     [#14010] A hook now HAS a declared elevation knob: `runAs: 'system'`,
+//     which the engine applies to `ctx.api` on BOTH surfaces (the in-process
+//     handler and the sandboxed body). That changes this rule twice over:
+//
+//       - a hook declaring `runAs: 'system'` is SKIPPED entirely, because the
+//         static strip skips a system context and the write genuinely lands.
+//         Gating a build over a write that works would be the mirror of the
+//         defect above - a rule punishing the very shape it should teach;
+//       - the hint now names `runAs: 'system'` beside the own-hook stamp, and
+//         still says why `sudo()` is not the answer from a body.
+//
+//     Issue ids stay in this comment, out of the message an author reads and
+//     cannot act on.
 //
 //   - Only a LITERAL object name and a LITERAL payload key. A dynamic object
 //     (`ctx.api.object(name)`) or a non-literal payload yields no extraction at
@@ -100,18 +109,24 @@
 //     local and visible, which is the flow sibling's epistemic position
 //     (`flow-update-readonly-field`, `error`), not the unknown-field rule's.
 //
-// The honest caveat, measured rather than glossed: a hook has NO declared run
-// identity. A flow declares `runAs`, which is what lets its rule call the strip
-// a certainty; a hook inherits its context from whoever triggered the write, so
-// this write is dropped whenever the triggering operation is non-system - the
-// default, and the only path a user-reachable object can rely on - and lands on
-// the system-triggered path. The residual case (a hook whose `ctx.api` write
-// only ever runs under a system-triggered operation) is not a stable invariant:
-// nothing declares or enforces it, and the first user-context write silently
-// voids the stamp. Its remedy is the same `.sudo()` this rule points at, which
-// makes the elevation explicit instead of accidental - so the flagged code is
-// worth changing under BOTH readings, which is what makes gating defensible
-// here where it would not be for an existence check.
+// The caveat this rule was written under, and how #14010 closed it: a hook used
+// to have NO declared run identity. A flow declares `runAs`, which is what lets
+// its rule call the strip a certainty; a hook inherited its context from whoever
+// triggered the write, so the write was dropped whenever the triggering
+// operation was non-system - the default, and the only path a user-reachable
+// object can rely on - and landed on the system-triggered path. The residual
+// case (a hook whose `ctx.api` write only ever runs under a system-triggered
+// operation) was not a stable invariant: nothing declared or enforced it, and
+// the first user-context write silently voided the stamp.
+//
+// Since #14010 a hook declares `runAs` too, so that residual case became a
+// DECLARATION - which is why this rule now skips a `runAs: 'system'` hook
+// outright (the guard beside `extractHookBodyWriteSet` below) instead of
+// grading it. What stays flagged is the undeclared write, whose outcome still
+// depends on who triggered it; the remedy is to declare the elevation, which
+// makes it explicit instead of accidental - so the flagged code is worth
+// changing under BOTH readings, which is what makes gating defensible here
+// where it would not be for an existence check.
 //
 // Measured field data before choosing to gate: 0 findings across every example
 // app in this repo (`examples/app-crm`, `app-showcase`, `app-todo`) - the
@@ -239,6 +254,16 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
     const source = body.source;
     if (typeof source !== 'string' || source.trim() === '') return;
 
+    // [#14010] A hook that DECLARES elevation is not writing through a
+    // caller-shaped payload at all: `runAs: 'system'` gives its `ctx.api` a
+    // system context, and the static-`readonly` strip skips a system context
+    // entirely (`stripReadonlyFields` — the same exemption an action body has
+    // always had). So the write this rule exists to catch — the one that is
+    // silently dropped — does not happen, and reporting it would fail a build
+    // over working code. Only `'system'` is exempt: `'user'` and `'inherit'`
+    // both reach the strip as an ordinary caller payload.
+    if (hook.runAs === 'system') return;
+
     const extracted = extractHookBodyWriteSet(source);
     // A body that did not parse yields whatever error recovery left readable,
     // and this rule GATES - so a mis-extraction here would break a build over a
@@ -304,9 +329,11 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
           hint:
             `If automation is meant to maintain '${w.field}', stamp it on the record's OWN hook - ` +
             `ctx.input.${w.field} = ... in beforeInsert/beforeUpdate survives the strip, and is the ` +
-            `recommended shape. Note that ctx.api.sudo() is NOT an option from a body: sudo() lives on ` +
-            `the in-process ScopedContext and is not marshalled into the sandbox, so calling it here is a ` +
-            `TypeError at run time. Otherwise drop readonly:true from '${w.field}'.`,
+            `recommended shape. To keep writing it CROSS-OBJECT from here, declare runAs: 'system' on ` +
+            `this hook: the strip skips a system context, so the write lands, and the triggering user ` +
+            `is still stamped on the record. Note that ctx.api.sudo() is NOT an option from a body: ` +
+            `sudo() lives on the in-process ScopedContext and is not marshalled into the sandbox, so ` +
+            `calling it here is a TypeError at run time. Otherwise drop readonly:true from '${w.field}'.`,
         });
       } else if (meta.readonlyWhen) {
         reported.add(dedupeKey);
@@ -326,8 +353,9 @@ export function validateReadonlyHookWrites(stack: AnyRec): ReadonlyHookWriteFind
             `Either confirm this call only targets records whose readonlyWhen predicate is FALSE, or ` +
             `derive '${w.field}' in a beforeUpdate hook on '${objectName}' - a hook-derived value is not ` +
             `caller-supplied and does land, even on a locked record. Elevation is not a workaround here: ` +
-            `ctx.api.sudo() is not marshalled into the sandbox (calling it from a body is a TypeError at ` +
-            `run time), and a system context does not waive the conditional lock in any case. Otherwise ` +
+            `a system context does not waive the conditional lock (unlike the static readonly strip), so ` +
+            `neither runAs: 'system' nor ctx.api.sudo() helps - and sudo() is not marshalled into the ` +
+            `sandbox in any case (calling it from a body is a TypeError at run time). Otherwise ` +
             `drop '${w.field}' from this payload. This warning never blocks a build.`,
         });
       }

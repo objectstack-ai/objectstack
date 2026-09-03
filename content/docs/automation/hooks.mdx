@@ -141,6 +141,39 @@ Because `record` now means the record's *state*, `record.done == true` alone is 
 on **every** update of an already-done row. If you wrote a condition under the old
 payload semantics expecting "the write that changed it", add the `previous` half.
 
+## Elevation — `runAs`
+
+A hook's `ctx.api` runs with the context of the write that **fired** it. That is usually what you want, and it is the one thing that makes a column both *guarded* and *maintained* impossible to express: author `editable: false` (or `readonly: true`) so nobody hand-writes the column, and the hook that computes it is refused by the very same check. The guard and the legitimate writer are the same door.
+
+`runAs` is the declaration that separates them. It is the same key a [flow](/docs/automation/flows) declares, and `'system'` and `'user'` mean there exactly what they mean here, plus one value only a hook can have — a flow establishes its identity from nothing, so it has no context to inherit:
+
+| `runAs` | The hook's `ctx.api` runs as |
+|:---|:---|
+| `'inherit'` *(default)* | the context of the triggering write — the behaviour every hook had before this key existed. |
+| `'system'` | elevated: a full-access, RLS-bypassing system principal. Row and field permissions do not apply, and the static `readonly` strip is skipped. |
+| `'user'` | the triggering **user**, so the hook can never exceed that user's grants. A hook fired by a write that carried no user has no identity to scope to, so its `ctx.api` data operations are **refused** (`HOOK_UNSCOPED_DATA_ACCESS`) rather than run unscoped. |
+
+```ts
+{
+  name: 'stamp_account_grade',
+  object: 'rating',
+  events: ['afterInsert'],
+  runAs: 'system',            // this hook maintains a column nobody may hand-write
+  body: {
+    language: 'js',
+    source: `await ctx.api.object('account').update({ id: ctx.input.account_id, current_grade: ctx.input.grade });`,
+    capabilities: ['api.read', 'api.write'],
+  },
+}
+```
+
+Four things worth knowing before you reach for it:
+
+- **It scopes `ctx.api`, and nothing else.** The `condition` gate, `ctx.session`, the `readonly` strip applied to the hook's own `ctx.input` payload, and `async` behaviour all still read the triggering operation's context. Declaring `runAs: 'system'` does **not** elevate the write that fired the hook.
+- **Elevation is authorization, not anonymity.** The triggering user rides along, so an elevated write still stamps `created_by` / `updated_by` with the operator and still appears under their name in the audit log. You do not trade the audit trail for the write.
+- **Both surfaces honour it** — an in-process `handler` and a sandboxed `body` alike. This is the reason `runAs` exists rather than `ctx.api.sudo()`: `sudo()` is real only in-process, so the same source passed a unit test and threw in production.
+- **`'user'` is a narrowing, and it fails closed.** It cannot resolve to a grant: a hook that declares it and finds no trigger user refuses its data operations instead of running them with no principal at all.
+
 ## Before Hook
 
 Mutate the incoming record before it is saved. The engine exposes the pending
