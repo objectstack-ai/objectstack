@@ -781,11 +781,19 @@ export class AuthPlugin implements Plugin {
           // localized `sys_email_template` rows are reachable through the
           // platform's own send path instead of sitting dormant.
           //
-          // Maintainer ruling 2026-08-13: the recipient locale is the
-          // **deployment default**, resolved here at the plugin layer.
-          // `Accept-Language` is rejected — auth mail is routinely sent
-          // outside the triggering request (invitations, admin-initiated
-          // resets), so a per-device request header is the wrong authority.
+          // This binds the DEPLOYMENT rung, resolved here at the plugin
+          // layer. Since the 2026-09-02 ruling (#14319) it is the SECOND rung:
+          // a request-triggered send whose recipient IS the requester takes
+          // that caller's own `Accept-Language` first, resolved at send time in
+          // `AuthManager` (`authEmailLocaleFromRequest`, which carries the
+          // ruling text). What is bound here answers when the request named no
+          // locale this platform ships a row for, or when there is no request
+          // at all — invitations, scheduled and admin-initiated mail.
+          //
+          // ⚠️ The superseded 2026-08-13 ruling made this rung the WHOLE answer
+          // and rejected `Accept-Language` outright. Do not restore that
+          // reading here; the single place the history is recorded is
+          // `AuthManager.setDefaultEmailLocale`.
           //
           // #14319 measured that "the deployment default" has TWO producers,
           // and that auth email was reading the weaker one:
@@ -1863,9 +1871,25 @@ export class AuthPlugin implements Plugin {
       // accounts. The ticket says what this creation IS (the deployment's own
       // boot command provisioning its admin — the operator class) for exactly
       // this address, and is cleared whatever happens.
-      this.authManager.stageOperatorProvisioning(email);
+      //
+      // [#14373] The address alone is not the ticket — it is the documented
+      // default and the boot banner prints it, so it does not narrow a
+      // concurrent stranger's guess. `stageOperatorProvisioning` also returns
+      // a random value that exists only in this process's memory; threading
+      // it into THIS SAME call's body (under `AuthManager
+      // .OPERATOR_PROVISIONING_TICKET_FIELD`) is what a stranger's own
+      // concurrent sign-up for this address cannot replay, however it times
+      // the window — see that method's doc for the full argument.
+      const provisioningTicket = this.authManager.stageOperatorProvisioning(email);
       try {
-        await api.signUpEmail({ body: { email, password, name } });
+        await api.signUpEmail({
+          body: {
+            email,
+            password,
+            name,
+            [AuthManager.OPERATOR_PROVISIONING_TICKET_FIELD]: provisioningTicket,
+          },
+        });
       } finally {
         this.authManager.clearOperatorProvisioning(email);
       }

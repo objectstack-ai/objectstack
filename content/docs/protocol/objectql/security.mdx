@@ -467,6 +467,31 @@ reclassification, widen the predicate rather than relying on the old
 behaviour.
 </Callout>
 
+**When `publicSharing.enabled` is off** (#14033). The block's own switch is
+the same standing-policy shape as `eligibility` above, one level up: it too
+is held at every redemption, not only at mint. Turning it off stops every
+existing link on the object immediately, with no revocation step to
+remember; turning it back on restores them, with no link needing to be
+re-minted. Turning the block off silences everything inside it —
+`eligibility` is not evaluated, `redactFields` is not computed — so the
+bypass some callers have at mint (a late schema scan, or a system context)
+buys only the mint: it still succeeds while the block is off, but what it
+mints does not resolve until the block is enabled. What an anonymous holder
+sees is the same "invalid or expired" answer `eligibility` already gives;
+the readable reason is written to the server log, never to the response.
+
+<Callout type="warn">
+**Upgrade note.** Before this, `publicSharing.enabled` gated only the mint —
+once a link was issued it kept resolving after the object's switch was
+turned off. Deployments upgrading across that change can feel it: links
+that used to keep serving after `enabled` was flipped off now stop
+immediately, and resume as soon as it is flipped back on. That is the
+intent — the alternative was a declared switch the platform did not hold —
+but there is no way to keep an already-minted link serving through the
+object being switched off; the object must stay opted in for its links to
+serve.
+</Callout>
+
 ---
 
 ## 6. Field-Level Encryption

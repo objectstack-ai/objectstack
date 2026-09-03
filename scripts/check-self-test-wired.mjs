@@ -117,6 +117,41 @@ const RATCHET_AUTHORITY_MARKER = '⛔ MAINTAINER-ONLY';
 const SCRIPT_EXT = /\.(mjs|mts|js|sh)$/;
 
 /**
+ * POPULATION DECLARATION -- what `scripts/pm/dispatch-gates.mjs` is told this
+ * gate reads, in the subtree spelling that tool compares in. Provenance ONLY:
+ * nothing in this file reads this array.
+ *
+ * That tool builds every dispatch's gate list by scanning a gate's own source
+ * for the path literals it operates on, and "looks like a path" there means
+ * "carries a separator". This gate's corpus root arrives as
+ * `join(ROOT, 'scripts')` -- a bare single-segment word -- so the only literals
+ * the extractor could recover from this file were the workflow directory and
+ * the handful of individual scripts the ledger below cites BY NAME. That is an
+ * artifact roster, not a population: a list of the files that already exist can
+ * never contain the one added tomorrow. The measured result was a family that
+ * walks all of `scripts/` and appeared on no card that edited any of it.
+ *
+ * ⛔ NOT the bare subtree. One hint per admitted extension, following
+ * `check-ratchet-remedy-authority.mjs` at this same root: `scripts/**` would
+ * name this gate for the JSON, Markdown and text files under the root that
+ * `walkScripts` never opens. The declared set is SET-EQUAL to that walk --
+ * nothing walked left uncovered, nothing covered left unwalked -- which is what
+ * `--self-test` pins, in both directions and against the live tree.
+ *
+ * An extension `SCRIPT_EXT` admits but the tree does not yet HOLD is
+ * deliberately absent: a hint reaching nothing tracked is a dead lead, which
+ * the consumer reports as a population and is not one. The pin below reddens
+ * the day such a file lands, which is the coupling that keeps this honest.
+ *
+ * Spelled as a LITERAL array, never computed from `SCRIPT_EXT`: the extractor
+ * reads SOURCE TEXT, so a built spelling keeps this value identical at runtime,
+ * keeps every assertion about it green, and contributes ZERO hints.
+ * `check-watch-hint-literal.mjs` holds that rule fleet-wide; the self-test
+ * below holds the own-source half.
+ */
+const ROOT_DIR_WATCH_HINTS = ['scripts/**/*.mjs', 'scripts/**/*.mts', 'scripts/**/*.sh'];
+
+/**
  * A `scripts/...` path, optionally followed by `--self-test`.
  *
  * The trailing `(?![\w-])` is the right boundary: without it `--self-test-extra`
@@ -463,6 +498,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'right boundary': 4,
   'alias resolution': 4,
   'population verdict': 4,
+  'population declaration': 7,
   'ledger hygiene': 9,
   'live ledger': 4,
 });
@@ -470,7 +506,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the registry's own size is pinned too. Adding a battery raises
 // this number; removing one is the same ⛔ deliberate edit as lowering a count.
-const SELF_TEST_BATTERY_FLOOR = 6;
+const SELF_TEST_BATTERY_FLOOR = 7;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -594,6 +630,75 @@ function selfTest() {
     ok(
       run('    - run: node scripts/g.mjs\n', [{ script: 'scripts/g.mjs', via: 'drives', evidence: 'scripts/t.mjs', why: 'x' }]).length === 0,
       'a ledgered script still reddened the population audit',
+    );
+  }
+
+  // ── POPULATION DECLARATION: what the dispatch derivation is told this gate reads ──
+  //
+  // Nothing in this file can ENFORCE the declaration: `ROOT_DIR_WATCH_HINTS` is
+  // read by another tool entirely (`extractWatchHints` in
+  // `scripts/pm/dispatch-gates.mjs`), so a stale or wrong one runs green here
+  // forever and pays itself out as a dev dispatched on a `scripts/` card with
+  // this gate absent from the brief -- the exact round this declaration was
+  // added to end. So the pins below hold it against the LIVE WALK rather than
+  // against a fixture: a sandbox tree would keep them green while the real
+  // declaration drifted.
+  battery('population declaration');
+  {
+    const walked = walkScripts(join(ROOT, 'scripts'));
+    const extOf = (path) => path.slice(path.lastIndexOf('.'));
+    // Written INDEPENDENTLY of `hintCovers` on purpose: a pin that reuses the
+    // consumer's own matcher cannot catch the consumer changing under it.
+    const declares = (path) =>
+      path.startsWith('scripts/') && ROOT_DIR_WATCH_HINTS.includes(`scripts/**/*${extOf(path)}`);
+
+    ok(
+      walked.length > 0,
+      'the population pin walked NO files — a broken walk proves nothing about the declaration (#4690)',
+    );
+    ok(
+      walked.every(declares),
+      'a file this gate WALKS is left undeclared — the declaration under-names the population it exists '
+        + 'to publish, which is the silence it was added to end',
+    );
+    ok(
+      ROOT_DIR_WATCH_HINTS.every((hint) => walked.some((path) => declares(path) && `scripts/**/*${extOf(path)}` === hint)),
+      'a declared hint reaches nothing this gate walks — a dead lead, which the consumer reports as a '
+        + 'population and is not one',
+    );
+    ok(
+      ROOT_DIR_WATCH_HINTS.every((hint) => SCRIPT_EXT.test(hint)),
+      'a declared hint names an extension SCRIPT_EXT does not admit — the declaration over-names the walk, '
+        + 'and a declaration that can drift from the walk is worse than none',
+    );
+    ok(
+      !ROOT_DIR_WATCH_HINTS.some((hint) => hint === 'scripts' || hint.endsWith('/**') || hint === '.' || hint === '**'),
+      'the bare subtree or the repo root was declared — it would name this gate for every JSON, Markdown '
+        + 'and text file under the root that this gate never opens',
+    );
+    ok(
+      ROOT_DIR_WATCH_HINTS.every((hint) => hint.includes('/')),
+      'a declared literal carries no separator, so the consumer refuses it as too generic and it reaches nothing',
+    );
+    // The literal SPELLING is the whole mechanism: a value built from
+    // SCRIPT_EXT would keep the runtime value identical, keep every assertion
+    // above green, and contribute ZERO hints. `check-watch-hint-literal` owns
+    // that rule fleet-wide; this is the own-source half.
+    let ownSource = null;
+    try {
+      ownSource = readFileSync(join(ROOT, 'scripts/check-self-test-wired.mjs'), 'utf8');
+    } catch {
+      ownSource = null;
+    }
+    const declSites = ownSource === null
+      ? []
+      : [...ownSource.matchAll(/\bconst\s+ROOT_DIR_WATCH_HINTS\s*=\s*([^;]*);/g)];
+    ok(
+      declSites.length === 1
+        && ROOT_DIR_WATCH_HINTS.every((hint) => declSites[0][1].includes(`'${hint}'`))
+        && !/[A-Za-z_$][\w$]*\s*\./.test(declSites[0][1]),
+      'the declaration is not a single literal array of quoted strings — the extractor reads SOURCE TEXT, '
+        + 'so a computed spelling contributes nothing while every assertion above stays green',
     );
   }
 

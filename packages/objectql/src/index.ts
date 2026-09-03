@@ -9,6 +9,7 @@ export {
   isObjectLessActionKey,
   actionHandlerObjectKeys,
   resolveActionHandlerKeys,
+  standaloneActionOwnerKey,
   reconcileActionRegistrations,
   collectEngineActionDeclarations,
   runActionGovernanceInventory,
@@ -109,6 +110,21 @@ export { ReadonlyFieldRejectedError } from './readonly-strict-errors.js';
 // 'DUPLICATE_RECORD'` is the boundary-crossing identity, the class is the
 // in-process convenience.
 export { DuplicateRecordError, DUPLICATE_RECORD_CODE } from './duplicate-record-error.js';
+// [#14099] Thrown by `engine.update` when a `multi: true` batch's per-row
+// `beforeUpdate` dispatches assigned DIFFERENT sets of payload keys — the
+// enforcement half of ADR-0058 Addendum II D3. Exported for the same reason as
+// its neighbour above: an application whose hook has to switch to a per-row
+// `ctx.api` write (or to by-id updates) needs to NAME the condition, and
+// `code === 'MULTI_UPDATE_HOOK_KEY_DIVERGENCE'` is the boundary-crossing
+// identity. `divergingHookPayloadKeys` rides along because it is the whole
+// criterion, pure and total, and a consumer reasoning about the refusal should
+// be able to read it rather than re-derive it.
+export {
+  MultiUpdateHookKeyDivergenceError,
+  MULTI_UPDATE_HOOK_KEY_DIVERGENCE_CODE,
+  MULTI_UPDATE_HOOK_KEY_DIVERGENCE_STATUS,
+  divergingHookPayloadKeys,
+} from './multi-update-hook-key-divergence.js';
 // Boot guard: thrown by `ObjectQL.init()` when a registered driver's connect()
 // fails (framework#3741). Hosts that boot the engine themselves can catch it to
 // render their own "database unreachable" message.
@@ -423,5 +439,10 @@ export type { AuthzInvalidationBridgeOptions } from './authz-invalidation-bridge
 // door that grows an artifact-loading seam (the CLI, the marketplace install
 // path, the metadata dev-artifact loader) adopts the SAME read of both shapes
 // and the SAME single sorter, instead of each re-deriving one.
-export { resolveArtifactPackageOrder } from './artifact-packages.js';
-export type { ArtifactPackageError } from './artifact-packages.js';
+// ADR-0130 D4/D5. The implementation moved to `@objectstack/core` when the
+// metadata artifact door became its second reader (#14599) — `@objectstack/
+// objectql` cannot host a module `@objectstack/metadata` has to import, since
+// this package depends on that one. Re-exported, not re-declared: this
+// package's published surface is exactly what it was.
+export { resolveArtifactPackageOrder } from '@objectstack/core';
+export type { ArtifactPackageError } from '@objectstack/core';

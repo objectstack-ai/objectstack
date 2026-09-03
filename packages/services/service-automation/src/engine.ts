@@ -1323,6 +1323,56 @@ export interface SuspensionRestoreResult {
     consumedAt?: string;
 }
 
+/**
+ * [#14333] Where a suspension was parked when the caller READ it — the
+ * condition a {@link SuspendedRunStore.claimSuspension} compare-and-set is
+ * taken against.
+ *
+ * Both fields come off the {@link SuspendedRun} the caller loaded, never off
+ * live engine state: the whole point is to ask the shared store whether the
+ * row still says what this replica last saw it say.
+ */
+export interface SuspensionParkedAt {
+    /** The node the row said the run was parked at. */
+    nodeId: string;
+    /**
+     * The correlation the pausing executor minted, when the row carries one.
+     * A store compares it only when it is set: a row persisted with no
+     * correlation has nothing to compare, and the node condition still holds.
+     */
+    correlation?: string;
+}
+
+/**
+ * [#14333] What {@link SuspendedRunStore.claimSuspension} answers.
+ *
+ * Three values, not a boolean, because "I cannot express this condition" is a
+ * different fact from "you lost" — and an implementation that answered `false`
+ * for it would stall every resume, while one that answered `true` would offer
+ * no guarantee while claiming one. The third value is how a store says so out
+ * loud; the engine turns it into a declared, one-time degradation.
+ */
+export type SuspensionClaimOutcome =
+    /** THIS call consumed the durable row — the caller owns the advance. */
+    | 'claimed'
+    /** The row was already gone, or had moved on — another advance won it. */
+    | 'lost'
+    /** This store cannot express the condition; no guarantee was offered. */
+    | 'unsupported';
+
+/**
+ * [#14333] What {@link AutomationEngine.claimAdvance} concluded — the engine's
+ * reading of a {@link SuspensionClaimOutcome} once the cases a store never
+ * sees are folded in (no store attached, a run the store never accepted, a
+ * store that cannot express the condition, a store that could not be reached).
+ * Module-private: it is a control-flow verdict, not a contract.
+ */
+type AdvanceClaim =
+    | { kind: 'claimed' }
+    | { kind: 'lost' }
+    | { kind: 'unguarded' }
+    | { kind: 'unavailable'; message: string };
+
 export interface SuspendedRunStore {
     /** Persist (insert or replace) a suspended run. */
     save(run: SuspendedRun): Promise<void>;
@@ -1332,6 +1382,31 @@ export interface SuspendedRunStore {
     delete(runId: string): Promise<void>;
     /** List all currently-stored suspended runs. */
     list(): Promise<SuspendedRun[]>;
+    /**
+     * [#14333] CONDITIONALLY consume a suspension: remove the durable record
+     * only if it is still parked where the caller read it — "delete only if
+     * still at node N".
+     *
+     * This is the cross-replica half of the resume idempotency guard. The
+     * engine's own `resuming` set is per-PROCESS, so two decisions on one run
+     * arriving in the same instant on two replicas each pass their own check,
+     * both read the same fresh row, and both traverse forward — running every
+     * downstream side effect twice. The compare-and-set belongs where the
+     * shared state lives, so it lives here.
+     *
+     * The condition, normatively: the stored row for `runId` is still parked
+     * at `parkedAt.nodeId`, AND — when `parkedAt.correlation` is set — still
+     * carries that correlation. An implementation MUST perform the test and
+     * the removal as ONE atomic operation against the shared state; a read
+     * followed by a separate delete re-opens the very window this closes.
+     *
+     * OPTIONAL, and its absence is a DECLARED degradation rather than a silent
+     * one: the engine says once per store that the advance guarantee is
+     * in-process only and then resumes exactly as it did before this member
+     * existed. Same posture as {@link FlowDispatchStore}'s missing-ledger
+     * branch — a weakened guarantee is announced, never assumed.
+     */
+    claimSuspension?(runId: string, parkedAt: SuspensionParkedAt): Promise<SuspensionClaimOutcome>;
     /**
      * Persist a TERMINAL run (completed / failed) as durable history for the
      * "Runs" observability surface. Optional — the in-memory / test defaults
@@ -1729,6 +1804,15 @@ export class AutomationEngine implements IAutomationService {
      * weakened guarantee, but repeating it every sweep tick is log spam.
      */
     private dispatchClaimDegradationWarned = false;
+    /**
+     * [#14333] Whether this engine has already said that its cross-replica
+     * advance guarantee is missing — the attached {@link SuspendedRunStore}
+     * has no {@link SuspendedRunStore.claimSuspension}, or answered
+     * `'unsupported'`. Once per instance, for the reason one field up: a
+     * silent fallback hides a permanently weakened guarantee, and repeating it
+     * per resume is log spam.
+     */
+    private advanceClaimDegradationWarned = false;
 
     constructor(logger: Logger, store?: SuspendedRunStore, options?: AutomationEngineOptions) {
         this.logger = logger;
@@ -1892,13 +1976,27 @@ export class AutomationEngine implements IAutomationService {
      * reads as terminal now and as still-suspended after a restart. See the
      * catch below for the full verdict.
      */
-    private async forgetSuspendedRun(run: SuspendedRun, reason: SuspensionReleaseReason): Promise<void> {
+    private async forgetSuspendedRun(
+        run: SuspendedRun,
+        reason: SuspensionReleaseReason,
+        /**
+         * [#14333] Set only by the resume path, and only when
+         * {@link claimAdvance} has ALREADY removed the durable row as its
+         * compare-and-set. The unconditional delete below would then be a
+         * second round-trip that can only re-delete what is gone — while the
+         * rest of this choke point (the cache entry, the cache-only
+         * qualifier, and the executor's release notification) is still owed
+         * exactly once. Nothing else may pass it: for every other consumption
+         * the durable row is still there and this method is what removes it.
+         */
+        durableRecordAlreadyConsumed = false,
+    ): Promise<void> {
         this.suspendedRuns.delete(run.runId);
         // [#13617] The qualifier goes with the entry it qualifies — this is the
         // one choke point every consumption passes through, so nothing can leave
         // a run marked "the store never took this" after its map entry is gone.
         this.cacheOnlySuspensions.delete(run.runId);
-        if (this.store) {
+        if (this.store && !durableRecordAlreadyConsumed) {
             try {
                 await this.store.delete(run.runId);
             } catch (err) {
@@ -1951,6 +2049,103 @@ export class AutomationEngine implements IAutomationService {
             }
         }
         await this.releaseSuspension(run, reason);
+    }
+
+    /**
+     * [#14333] Claim the right to advance this run past the node it is parked
+     * at — the CROSS-REPLICA half of the resume idempotency guard.
+     *
+     * {@link resuming} is a per-PROCESS `Set`, which is a complete guard for
+     * exactly one deployment shape: a single process. Put two replicas behind
+     * a load balancer over one store and two decisions on one run arriving in
+     * the same instant each pass their OWN `resuming` check, both read the
+     * same fresh row through {@link loadSuspendedRunStrict}, both consume it,
+     * and both traverse forward — every downstream side effect runs twice.
+     * Measured on the two-engines-over-one-shared-store harness at 25/25
+     * raced runs before this claim existed.
+     *
+     * So the decision is taken where the shared state lives:
+     * {@link SuspendedRunStore.claimSuspension} removes the row only if it is
+     * still parked at the node this replica read, atomically, and the loser is
+     * TOLD. `resuming` stays as the cheap first gate — it is not replaced, and
+     * it still refuses a same-process duplicate without any store round-trip.
+     *
+     * Four cases never reach the store, and each is a deliberate `unguarded`:
+     *  - **no store** — nothing is shared, so there is no second replica to
+     *    race and `resuming` is already the whole guarantee. Not a
+     *    degradation: there is no cross-replica guarantee to weaken.
+     *  - **a run the store never accepted** ({@link cacheOnlySuspensions},
+     *    #13617) — the store holds no row for it, so a compare-and-set would
+     *    answer `lost` for a run that is legitimately resumable in this
+     *    process, converting {@link persistSuspendedRun}'s documented
+     *    degradation (a failed save costs cross-RESTART durability, not
+     *    in-process resumability) into an unresumable run.
+     *  - **a store without the member** — a third-party store predating it.
+     *  - **a store answering `'unsupported'`** — one that cannot express the
+     *    condition against its backing engine.
+     *
+     * The last two are announced once per engine rather than assumed silently,
+     * which is the whole difference between a degradation and a lie.
+     */
+    private async claimAdvance(run: SuspendedRun): Promise<AdvanceClaim> {
+        const store = this.store;
+        if (!store) return { kind: 'unguarded' };
+        if (this.cacheOnlySuspensions.has(run.runId)) return { kind: 'unguarded' };
+        if (typeof store.claimSuspension !== 'function') {
+            this.warnAdvanceClaimDegraded('the attached suspended-run store has no claimSuspension()');
+            return { kind: 'unguarded' };
+        }
+        let outcome: SuspensionClaimOutcome;
+        try {
+            outcome = await store.claimSuspension(run.runId, {
+                nodeId: run.nodeId,
+                ...(run.correlation !== undefined ? { correlation: run.correlation } : {}),
+            });
+        } catch (err) {
+            // Handed to the CALLER, so not a degradation and deliberately NOT a
+            // log site (AGENTS.md "Degradation log levels": a failure the
+            // requester was told about does not look normal from the outside).
+            // The envelope is the same STORE_UNAVAILABLE the strict load
+            // answers, for the same reason — existence is UNKNOWN, not "gone
+            // for good" (#4420).
+            //
+            // ⛔ What this branch may NOT claim is that the suspension was not
+            // consumed. A throw can arrive AFTER a committed delete — a dropped
+            // connection on the way back from a landed statement — so the one
+            // thing known here is that THIS resume did not continue the run.
+            // The result text says exactly that and no more; a retry is what
+            // resolves the ambiguity, answering RUN_NOT_FOUND if the row is in
+            // fact gone.
+            return { kind: 'unavailable', message: (err as Error).message };
+        }
+        if (outcome === 'unsupported') {
+            this.warnAdvanceClaimDegraded("the attached suspended-run store answered 'unsupported'");
+            return { kind: 'unguarded' };
+        }
+        return outcome === 'claimed' ? { kind: 'claimed' } : { kind: 'lost' };
+    }
+
+    /**
+     * [#14333] Say ONCE, per engine instance, that resume idempotency is
+     * in-process only.
+     *
+     * #4632 verdict: FUNCTIONAL — `warn`, not `error`. Nothing that claims to
+     * be persisted fails to land here; what is smaller than advertised is a
+     * GUARANTEE, and the next person to run two replicas finds out the way
+     * this line says they will. Byte-for-byte the call {@link claim}'s
+     * missing-ledger branch makes one screen up, and for the same reason: a
+     * silent fallback hides a permanently weakened guarantee, while an
+     * `error` here would train everyone to skim `error`.
+     */
+    private warnAdvanceClaimDegraded(cause: string): void {
+        if (this.advanceClaimDegradationWarned) return;
+        this.advanceClaimDegradationWarned = true;
+        this.logger.warn(
+            `[automation] no cross-replica advance guarantee (${cause}) — resume idempotency is ` +
+                `IN-PROCESS ONLY: two decisions on one run arriving at the same moment on two replicas ` +
+                `can both advance it, running every downstream side effect twice. Attach a suspended-run ` +
+                `store that implements claimSuspension() to close it.`,
+        );
     }
 
     /**
@@ -4964,7 +5159,66 @@ export class AutomationEngine implements IAutomationService {
             // signal above is pure in-memory work, not downstream work.)
             // This is also where the paused node learns its pause is over and
             // disarms what it armed on entry (#5512) — see forgetSuspendedRun.
-            await this.forgetSuspendedRun(run, 'resumed');
+            //
+            // [#14333] And the consumption is now a CLAIM, not an assertion.
+            // `resuming` above answered "is this process already resuming it";
+            // this answers "did any process get here first", against the shared
+            // store, atomically. Placed exactly where the unconditional consume
+            // was: every refusal above it still refuses without consuming, and
+            // the ordering #13937 has not ruled on is untouched.
+            const claim = await this.claimAdvance(run);
+            if (claim.kind === 'lost') {
+                // An ORDINARY outcome, not a degradation: this is the guard
+                // doing its job, and the caller is told in the result. `debug`
+                // rather than `warn` for exactly that reason — a losing racer
+                // per approval on a busy any-of level would otherwise be a
+                // steady `warn` stream describing correct behaviour.
+                this.logger.debug(
+                    `[automation] resume of run '${runId}' lost the advance claim at node '${run.nodeId}' — ` +
+                        `another replica consumed this suspension first; nothing was dispatched here.`,
+                );
+                // The SAME code the in-process guard answers, deliberately: the
+                // observation differs (another process, not this one) but the
+                // remedy is identical — a concurrent resume already has this
+                // run, the caller's own recorded outcome stands, and nothing
+                // here should be retried. `plugin-approvals` already branches
+                // on it that way (`resumeRecordedOutcome`), and the transport
+                // already maps it to 409. A distinct code would be vocabulary
+                // nothing reads — add one the day a caller needs the
+                // difference.
+                return {
+                    success: false,
+                    code: 'RESUME_IN_PROGRESS',
+                    error:
+                        `Run '${runId}' is already being resumed — another replica consumed its suspension ` +
+                        `at node '${run.nodeId}' first`,
+                };
+            }
+            if (claim.kind === 'unavailable') {
+                // Same envelope, same reason as the strict load's failure
+                // above: existence is UNKNOWN, not "gone for good", and the
+                // identical call is expected to work once the store recovers
+                // (#4420).
+                //
+                // The text states only what is KNOWN. The strict load's failure
+                // can say the suspension was not consumed, because it fails
+                // before anything is consumed; this one cannot — a claim throws
+                // just as readily after a committed delete as before one, so
+                // "NOT consumed" would be a claim about a fact this seam does
+                // not have. What it does know is that this resume did not
+                // continue the run, and that a retry settles the rest.
+                return {
+                    success: false,
+                    code: 'STORE_UNAVAILABLE',
+                    error:
+                        `Durable suspended-run store unreachable while claiming the advance for run '${runId}' — ` +
+                        `this resume did NOT continue the run, and whether the store consumed the suspension is ` +
+                        `UNKNOWN (a failure can arrive after a committed delete). Retry once the store is ` +
+                        `available: a retry that finds the run still parked continues it, and one that finds the ` +
+                        `suspension gone answers RUN_NOT_FOUND: ${claim.message}`,
+                };
+            }
+            await this.forgetSuspendedRun(run, 'resumed', claim.kind === 'claimed');
 
             const steps = run.steps;
             const context = run.context;
@@ -5330,54 +5584,73 @@ export class AutomationEngine implements IAutomationService {
      * indistinguishable to the caller, so the run may still be parked and
      * resumable. That path is reported at `error` (#4632/#6299) precisely
      * because nothing above it can tell the difference; see the catch below.
+     *
+     * [#14332] WHERE THE RUN IS READ FROM: {@link loadSuspendedRunStrict} —
+     * the same store-authoritative read `resumeInternal` takes, and the STRICT
+     * loader by deliberate choice rather than the degrading
+     * {@link loadSuspendedRun}. NOT FOUND (the store answered and holds no row
+     * for this id) reads as "already terminal / unknown" and returns `false`,
+     * exactly as before; a store that cannot be READ throws out of the loader
+     * into the catch below, which keeps this site's own #4632 DURABILITY record
+     * at `error`. The degrading loader would have answered `null` under its own
+     * best-effort `warn` and silently downgraded that verdict — the posture is
+     * preserved here by picking the loader that preserves it.
+     *
+     * ⚠️ The consequence of a store-authoritative read, stated rather than left
+     * to be discovered: while a store is configured this process's map is no
+     * longer an answer, so a store outage reaches the `error` record above even
+     * for a run THIS replica is holding — where the old cache-first read
+     * cancelled from the local snapshot instead. That snapshot is the defect:
+     * the row delete is by id and is therefore right either way, but
+     * {@link forgetSuspendedRun} notifies the executor of the node recorded on
+     * the SNAPSHOT, so a stale replica tore down the pause of a node the run had
+     * already left and left the live one's armed.
      */
     async cancelRun(runId: string, reason?: string): Promise<boolean> {
-        let run = this.suspendedRuns.get(runId) ?? null;
-        if (!run && this.store) {
-            try {
-                run = await this.store.load(runId);
-            } catch (err) {
-                // #6299 — same family, same mechanism as `forgetSuspendedRun`
-                // above: the driver's uncontrolled text goes to the structured
-                // slot so the record stays one physical line.
-                //
-                // #4632 verdict: DURABILITY — raised from `warn` to `error`. The
-                // failed read is silently turned into "no such suspended run"
-                // and this method returns `false`, which its own contract
-                // documents as idempotent success (already terminal / unknown),
-                // so the cancellation is SKIPPED while the call reads clean. The
-                // only in-repo caller measures the cost: plugin-approvals'
-                // revise-window recall
-                // (`packages/plugins/plugin-approvals/src/approval-service.ts`)
-                // never reads the boolean at all — it only catches a THROW, and
-                // grades that throw `error` with "the run may be stranded"
-                // (#4420). A store-read failure produces precisely that stranded
-                // run WITHOUT firing that alarm: the request is marked
-                // `recalled`, the record lock is released, `resumeError` stays
-                // undefined — and the run stays parked in the store, to be
-                // re-armed and resumed by the next restart, inside a flow whose
-                // approval has already been withdrawn.
-                //
-                // This is why #6230's verdict must not be copied here.
-                // `loadSuspendedRun` is a DECLARED best-effort reader for
-                // incidental callers (a gate lookup, a screen fetch), and
-                // `resumeInternal` takes the strict form exactly where the
-                // difference matters. `cancelRun` has no strict alternative, and
-                // its degradation decides a WRITE.
-                //
-                // THIRD argument (`error(message, error?, meta?)`), `Error` slot
-                // deliberately empty (#5575).
-                this.logger.error(
-                    `[automation] cancelRun('${runId}') could not read the durable suspended-run store, so the ` +
-                        `cancellation was SKIPPED and reported as idempotent success — this call returns false, which ` +
-                        `its callers read as "no such suspended run". The run is NOT cancelled: if it is parked in the ` +
-                        `store it stays parked, and the next restart re-arms and resumes it while the caller has ` +
-                        `already recorded the cancellation. Fix the store failure in this record's meta, then re-issue ` +
-                        `cancelRun('${runId}').`,
-                    undefined,
-                    describeThrownForLog(err),
-                );
-            }
+        let run: SuspendedRun | null = null;
+        try {
+            run = await this.loadSuspendedRunStrict(runId);
+        } catch (err) {
+            // #6299 — same family, same mechanism as `forgetSuspendedRun`
+            // above: the driver's uncontrolled text goes to the structured
+            // slot so the record stays one physical line.
+            //
+            // #4632 verdict: DURABILITY — raised from `warn` to `error`. The
+            // failed read is silently turned into "no such suspended run"
+            // and this method returns `false`, which its own contract
+            // documents as idempotent success (already terminal / unknown),
+            // so the cancellation is SKIPPED while the call reads clean. The
+            // only in-repo caller measures the cost: plugin-approvals'
+            // revise-window recall
+            // (`packages/plugins/plugin-approvals/src/approval-service.ts`)
+            // never reads the boolean at all — it only catches a THROW, and
+            // grades that throw `error` with "the run may be stranded"
+            // (#4420). A store-read failure produces precisely that stranded
+            // run WITHOUT firing that alarm: the request is marked
+            // `recalled`, the record lock is released, `resumeError` stays
+            // undefined — and the run stays parked in the store, to be
+            // re-armed and resumed by the next restart, inside a flow whose
+            // approval has already been withdrawn.
+            //
+            // This is why #6230's verdict must not be copied here.
+            // `loadSuspendedRun` is a DECLARED best-effort reader for
+            // incidental callers (a gate lookup, a screen fetch), and
+            // `resumeInternal` takes the strict form exactly where the
+            // difference matters. `cancelRun` has no strict alternative, and
+            // its degradation decides a WRITE.
+            //
+            // THIRD argument (`error(message, error?, meta?)`), `Error` slot
+            // deliberately empty (#5575).
+            this.logger.error(
+                `[automation] cancelRun('${runId}') could not read the durable suspended-run store, so the ` +
+                    `cancellation was SKIPPED and reported as idempotent success — this call returns false, which ` +
+                    `its callers read as "no such suspended run". The run is NOT cancelled: if it is parked in the ` +
+                    `store it stays parked, and the next restart re-arms and resumes it while the caller has ` +
+                    `already recorded the cancellation. Fix the store failure in this record's meta, then re-issue ` +
+                    `cancelRun('${runId}').`,
+                undefined,
+                describeThrownForLog(err),
+            );
         }
         if (!run) return false;
         await this.forgetSuspendedRun(run, 'cancelled');
@@ -5747,9 +6020,19 @@ export class AutomationEngine implements IAutomationService {
         let parentId = (context as Record<string, unknown> | undefined)?.$parentRunId;
         let hops = 0;
         while (typeof parentId === 'string' && parentId && hops++ < 32) {
-            const parent =
-                this.suspendedRuns.get(parentId) ??
-                (this.store ? await this.store.load(parentId).catch(() => null) : null);
+            // [#14332] The DEGRADING loader, by deliberate choice: this walk runs
+            // inside the catch arm that is already handling a run's failure, so it
+            // must not throw, and its recorded posture is exactly
+            // `loadSuspendedRun`'s — a store failure reads as "no ancestor here"
+            // and stops the walk. What changes is only WHICH suspension is read:
+            // the shared store's, not this replica's memory of where the parent
+            // was last parked. The old `??` chain had #13617's own harm shape —
+            // a stale parent failed at a node it had already left, so
+            // `forgetSuspendedRun` released the wrong node's pause. The one thing
+            // gained beyond that: the bare `.catch(() => null)` swallowed a store
+            // failure in total silence, and the loader records it (at `warn`,
+            // its declared best-effort level — no new `error` seam here).
+            const parent = await this.loadSuspendedRun(parentId);
             if (!parent) return;
             await this.failSuspendedRun(parent, `subflow descendant failed: ${error}`);
             parentId = (parent.context as Record<string, unknown> | undefined)?.$parentRunId;
@@ -5776,9 +6059,14 @@ export class AutomationEngine implements IAutomationService {
 
     /**
      * Like {@link listSuspendedRuns} but includes runs held only in the durable
-     * {@link SuspendedRunStore} (e.g. suspended before a restart). The in-memory
-     * cache takes precedence on id collisions. Falls back to the in-memory list
-     * when no store is configured.
+     * {@link SuspendedRunStore} (e.g. suspended before a restart). Falls back to
+     * the in-memory list when no store is configured.
+     *
+     * [#14332] The DURABLE row wins an id collision — the store is the shared
+     * answer to "where is this run parked" and this process's map is only its
+     * own memory of it. A run present in the map but absent from the durable
+     * listing is still included, because a capped or failed enumeration is not
+     * the per-id "no row" the strict loader rests on; see the merge below.
      */
     async listSuspendedRunsDurable(): Promise<Array<{ runId: string; flowName: string; nodeId: string; correlation?: string }>> {
         const byId = new Map<string, { runId: string; flowName: string; nodeId: string; correlation?: string }>();
@@ -5831,8 +6119,28 @@ export class AutomationEngine implements IAutomationService {
                 );
             }
         }
-        // In-memory entries win — they are the freshest copy.
+        // [#14332] The DURABLE row wins a collision. The comment this replaces
+        // said the opposite — "In-memory entries win — they are the freshest
+        // copy" — which is true of exactly one deployment shape, a single
+        // process. Put several replicas over one store and this map is a
+        // per-replica snapshot of the node a run was parked at THE LAST TIME
+        // THIS REPLICA TOUCHED IT, with no invalidation channel to it at all
+        // (the mechanism is in {@link loadSuspendedRunStrict}), so preferring it
+        // reported a run at a node it had already left.
+        //
+        // Map entries the durable list does not carry are still appended, and
+        // that is NOT the strict loader's rule being softened: a LIST is not a
+        // per-id answer. `store.list()` is a capped, best-effort enumeration
+        // (`ObjectStoreSuspendedRunStore` reads at most 1000 `paused` rows) and
+        // this line is also reached on the DEGRADED path above, where the
+        // enumeration failed outright and `byId` is empty. So "absent from the
+        // list" is not the evidence "the store answered and has no row" is,
+        // which is what {@link loadSuspendedRunStrict} rests on when it lets
+        // only {@link cacheOnlySuspensions} answer out of the map. Applying that
+        // qualifier here would let a truncated or failed enumeration silently
+        // drop live runs from an operability listing.
         for (const r of this.suspendedRuns.values()) {
+            if (byId.has(r.runId)) continue;
             byId.set(r.runId, { runId: r.runId, flowName: r.flowName, nodeId: r.nodeId, correlation: r.correlation });
         }
         return [...byId.values()];

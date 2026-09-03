@@ -614,9 +614,19 @@ describe('[#5574 / D3] the payload stays BATCH-scoped, and that IS the merge rul
   });
 
   it('a rewrite made on ONE row’s dispatch applies to the WHOLE batch', async () => {
-    let firstOnly = true;
+    // [#14099] The fixture — never the contract — changed here. It used to
+    // stamp `owner` on the FIRST row only (`if (firstOnly) …`), which is now
+    // REFUSED: writing a key for some matched rows and not others is precisely
+    // the divergence D3's enforcement rejects before any write, because it can
+    // only mean the handler is deciding per record. The contract this case
+    // pins is untouched and is still the reason the refusal exists — one
+    // `updateMany` carries one SET clause, so whichever dispatch produces a
+    // value, EVERY row gets it. So the handler writes the same key on every
+    // row, and the batch still carries ONE value: the last dispatch's.
+    let dispatches = 0;
     const { engine } = await boot([hook('stamp', 'beforeUpdate', (ctx) => {
-      if (firstOnly) { (ctx.input as any).data.owner = 'stamped'; firstOnly = false; }
+      dispatches += 1;
+      (ctx.input as any).data.owner = `stamped-${dispatches}`;
     })]);
     await seedTasks(engine, [
       { title: 'a', status: 'todo', owner: 'u1' },
@@ -625,10 +635,12 @@ describe('[#5574 / D3] the payload stays BATCH-scoped, and that IS the merge rul
 
     await engine.update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } });
 
-    // Both rows got it, including the one whose dispatch did not make it. This
-    // is the contract, not a leak: one `updateMany` carries one SET clause.
+    // Both rows carry the SECOND dispatch's value, including the row whose own
+    // dispatch produced `stamped-1`. That is the contract, not a leak — and it
+    // is the residual hazard #14099's ruling names openly and does not close:
+    // same key, per-row values still applies one row's value to all of them.
     const rows: any[] = await engine.find('task', {});
-    expect(rows.map((r) => r.owner)).toEqual(['stamped', 'stamped']);
+    expect(rows.map((r) => r.owner)).toEqual(['stamped-2', 'stamped-2']);
   });
 
   it('rewrites ACCUMULATE in dispatch order, including a REPLACED payload', async () => {

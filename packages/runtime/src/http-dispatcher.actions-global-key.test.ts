@@ -8,7 +8,8 @@
  *
  *  1. **Registration key vs lookup key.** Both writers register an
  *     objectName-less action under the literal `'global'` — `AppPlugin`
- *     (`action.object || 'global'`) and `ObjectQLPlugin.actionObjectKey`. The
+ *     (`action.object || 'global'`) and the ObjectQL plugin (whose copy of the
+ *     ladder was converged into `standaloneActionOwnerKey` by #14422). The
  *     REST fallback probed `'*'`, and `engine.executeAction` is an
  *     exact-string `Map` lookup with no wildcard semantics, so the probe could
  *     only ever miss: `Action 'log_call' on object '*' not found`.

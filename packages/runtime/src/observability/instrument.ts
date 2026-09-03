@@ -120,6 +120,24 @@ export function instrumentRouteHandler(
             }
         }
 
+        // [#14310] Side-channel: the request coordinates a 5xx log line needs,
+        // parked where the RESPONSE exits can reach them.
+        //
+        // `sendResultBase` / `errorResponseBase` are called as `(result, res)`
+        // from ~50 route handlers through locally-shadowed wrappers, so they
+        // never see `req`. Threading a third argument through every one of
+        // those call sites would be a fifty-file diff whose only content is
+        // passing a parameter — and the one place that already holds the
+        // method, the route PATTERN (lower cardinality than a raw path, the
+        // same string the metrics labels use) and the resolved request id is
+        // right here. Same shape and same lifetime as `__obsRecordedError`,
+        // which the error exit has parked on `res` since #3867.
+        try {
+            (res as any).__obsRequest = { method, path: route, requestId };
+        } catch {
+            // frozen / proxy res — the log line degrades to status + code
+        }
+
         // Capture the final status. We start at 200 (the adapter default
         // when no status() is called) and override on status() calls via
         // a tiny proxy.

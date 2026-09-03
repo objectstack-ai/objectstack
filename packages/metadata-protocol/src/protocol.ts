@@ -2252,6 +2252,32 @@ export function clientFacingFailureText(err: unknown, fallback: string): string 
  * persisted was silently dropped (the row reports `success: false` and the
  * counters reconcile), which is the AGENTS.md judgment question the durability
  * levels turn on.
+ *
+ * ## [#14403] …and the DISCLOSED row deliberately logs NOTHING
+ *
+ * Since #14095 a driver unique violation arrives here already wrapped in the
+ * engine's `DUPLICATE_RECORD` envelope, which declares `status: 409` — so the
+ * row is disclosed and this function returns before the `console.warn` above.
+ * That was filed as a possibly LOST diagnostic: withholding used to be what
+ * carried the driver's own sentence to an operator, and disclosure removes
+ * that carrier.
+ *
+ * Measured on the real stack rather than reasoned about — a real `SqlDriver`
+ * over better-sqlite3 through this very sink, in `@objectstack/runtime`'s
+ * `batch-row-driver-text-real-driver.integration.test.ts` — the sentence is
+ * NOT lost: the engine's own insert door logs the envelope's `cause`
+ * (#14095 / #14390, `e instanceof DuplicateRecordError ? e.cause : e`,
+ * because the platform logger serializes only `message` and `stack`), so
+ * `UNIQUE constraint failed: bd_note.email` is in the server log with the
+ * failing column intact. The diagnostic moved one hop; it was not deleted.
+ *
+ * ⛔ So do NOT add a log line to the disclosed branch. It would restate what
+ * the engine already logged, once per duplicate row of a batch, at a site
+ * where the failure was handed to the CALLER — the third answer AGENTS.md's
+ * degradation rule names, which is "not a degradation at all". The invariant
+ * this function owes is one-directional and is pinned in BOTH directions by
+ * that integration file: it logs when it WITHHOLDS, and is silent when it
+ * does not.
  */
 function clientFacingRowFailureText(err: unknown, fallback: string): string {
     // 500 as the fallback status: an error that declared nothing is a server
@@ -6742,6 +6768,78 @@ export class ObjectStackProtocolImplementation implements
         // overlay row shadowed the entire code-authored listing.
         request = canonicalizeMetaRequestType(request);
         const { packageId } = request;
+        // ── [#14683] The registry read gate, resolved ONCE, HERE ──────────────────
+        //
+        // {@link organizationIdForMetaRead} — the predicate the REST `/meta`
+        // read doors have applied since #9454, twin of the write side's
+        // `organizationIdForMetaWrite` (#6190 / #7018). Until this line
+        // `getMetaItems` applied NO gate of its own: whatever organization
+        // arrived was used for whatever type arrived, so the scope of a
+        // metadata sweep was decided per type, BY THE CALLER — and a request
+        // carrying ONE `organizationId` can only be correct when it sweeps ONE
+        // type. Three live callers sweep more than one: `getMetaDiagnostics`'
+        // untyped arm walks the whole registry; `findReferencesToMeta` spends
+        // the request's organization on `matcher.fromType` — the SOURCES —
+        // while `request.type` is the TARGET, so the target's own flag says
+        // nothing about the types actually read; and the runtime's package
+        // export sweep (`domains/packages.ts`) walks every plural key with one
+        // raw active organization.
+        //
+        // ⭐ THE HARM IS RESURRECTION, NOT CONCEALMENT, and which one it is
+        // decides that the registry-gated predicate is the right instrument.
+        // `SysMetadataRepository.history()` filters `organization_id` by strict
+        // equality, so naming the tenant THERE hides an `allowOrgOverride:
+        // false` type's rows. Here the two `queryByOrg` reads are UNIONed, so
+        // naming it can only ADD — and what it adds are the pre-#6190
+        // phantoms: org-scoped rows of types with no per-org read channel,
+        // which `loadMetaFromDb` walks past and
+        // {@link reportUnhydratableOrgScopedRows} exists to say out loud. Read
+        // back, they surface in the admin "Used by" panel and the Studio
+        // governance directory — inside a clearance shown before a
+        // destructive action, where a resurrected row is worse than an
+        // omission because it reads as evidence.
+        //
+        // ── Why this is a repair, not a tenancy read-scope change ───────────
+        //
+        // Let `f(t, o) = organizationIdForMetaRead(t, o)`. `f` answers `o` when
+        // the registry declares `t` per-org overridable and `undefined`
+        // otherwise, so `f(t, f(t, o)) === f(t, o)` for EVERY `t` and `o`. A
+        // caller that already gates therefore sees no change, provided it gated
+        // on the same type this line gates on. Every such caller does:
+        //
+        //  • `packages/rest`'s `GET /meta/:type` list door — the only door
+        //    that both gates and reaches this method — computes
+        //    `organizationIdForMetaRead(canonicalMetaUrlType(req.params.type),
+        //    ctx?.tenantId)` and then passes `type: req.params.type`, the RAW
+        //    segment. The first statement of this method folds that segment
+        //    through {@link canonicalizeMetaRequestType}, which IS
+        //    `canonicalMetaUrlType` — so `request.type` here is the identical
+        //    STRING the door gated on, and the second application is the
+        //    algebraic no-op above.
+        //  • the search sweep's page read below gates on `'page'` and passes
+        //    `'page'`; `page` is non-overridable, so both readings are
+        //    `undefined` whatever the session holds.
+        //  • the four remaining `organizationIdForMetaRead` call sites in
+        //    `rest-server.ts` (`/layers`, the by-name read, `/history`,
+        //    `/diff`) reach `getMetaItemLayered` / `getMetaItem` /
+        //    `historyMetaItem` / `diffMetaItem` — never this method — so this
+        //    line cannot move them at all.
+        //
+        // ⛔ Gate AFTER the fold, never before it. `declaresOrgOverride`
+        // tolerates the MANIFEST plurals and not the URL-only ones
+        // (`translations` / `email_templates` have no manifest key), and
+        // #10340 measured what that costs when the raw segment reaches the
+        // predicate: one item in two partitions, addressed by spelling. Folding
+        // happens at the boundary and only there; this line reads what the
+        // boundary produced.
+        //
+        // ⚠️ ONE resolution for BOTH arms, deliberately — the active-overlay
+        // read below and the `previewDrafts` read further down both spend it.
+        // A gate threaded into only one arm would leave the draft preview
+        // resurrecting exactly the phantoms the active list had just stopped
+        // serving, which is the half-fix shape #9454's own hoist comment
+        // refuses one package over.
+        const orgId = organizationIdForMetaRead(request.type, request.organizationId);
         let items: unknown[] = [];
 
         // Unscoped kernels (control plane): read everything from SchemaRegistry.
@@ -6782,7 +6880,6 @@ export class ObjectStackProtocolImplementation implements
         // (when an active org is provided) and env-wide (organization_id IS NULL)
         // overlays; org-scoped rows win on name collision.
         try {
-            const orgId = (request as any).organizationId as string | undefined;
             const queryByOrg = async (oid: string | null): Promise<any[]> => {
                 const whereClause: Record<string, unknown> = {
                     type: request.type,
@@ -7014,7 +7111,6 @@ export class ObjectStackProtocolImplementation implements
         // process-wide registry or to non-preview reads.
         if (request.previewDrafts) {
             try {
-                const orgId = (request as any).organizationId as string | undefined;
                 const queryDrafts = async (oid: string | null): Promise<any[]> => {
                     const whereClause: Record<string, unknown> = { type: request.type, state: 'draft', organization_id: oid };
                     if (packageId) whereClause.package_id = packageId;
