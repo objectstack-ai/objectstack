@@ -203,6 +203,7 @@ import {
   divergingHookPayloadKeys,
   MultiUpdateHookKeyDivergenceError,
 } from './multi-update-hook-key-divergence.js';
+import { UnscopedHookApi, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
 import type { HookWriteRecording } from './hook-write-provenance.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 // [#6457] The master-detail header a `parent`-scoped predicate reads is made
@@ -14098,7 +14099,7 @@ export class ObjectRepository implements IScopedObjectRepository {
  * begin/commit/rollback trio and the identity getters stay off it, so this
  * class is deliberately wider than what it implements.
  */
-export class ScopedContext implements IScopedContext {
+export class ScopedContext implements IScopedContext, RunAsDerivableApi {
   constructor(
     private executionContext: ExecutionContext,
     private engine: IDataEngine
@@ -14113,6 +14114,35 @@ export class ScopedContext implements IScopedContext {
   sudo(): ScopedContext {
     return new ScopedContext(
       { ...this.executionContext, isSystem: true },
+      this.engine
+    );
+  }
+
+  /**
+   * [#14010] The api a hook that declared `runAs` is handed — derived from the
+   * engine-built one (`buildHookApi(opCtx.context)`) at dispatch, by
+   * `wrapDeclarativeHook`, for the duration of the handler call. `'inherit'`
+   * never reaches here (the wrapper hands the original through by reference).
+   *
+   *  - `'system'` → {@link sudo}: `{ ...triggering context, isSystem: true }`.
+   *    The same envelope the in-process `ctx.api.sudo()` idiom produced, so a
+   *    hook that used to elevate by hand elevates identically by declaration
+   *    — and now on the sandboxed surface too. `userId` / `tenantId` /
+   *    `transaction` ride along: elevation is authorization, not anonymity
+   *    (#5494), and the hook's writes stay inside the triggering transaction.
+   *  - `'user'` → `{ ...triggering context, isSystem: false }` when the
+   *    trigger resolved a user — the pin de-elevates a hook fired by a
+   *    `runAs:'system'` flow node or an `isSystem` service write that still
+   *    named its operator. With NO `userId` there is nothing to scope to, so
+   *    the api is an {@link UnscopedHookApi}: every data door refuses
+   *    (`HOOK_UNSCOPED_DATA_ACCESS`, the #3760 posture — never a silent
+   *    fall-open, never a silent re-badge as system).
+   */
+  withRunAs(runAs: Exclude<HookRunAs, 'inherit'>, ref: HookRunAsRef): IScopedContext {
+    if (runAs === 'system') return this.sudo();
+    if (!this.executionContext.userId) return new UnscopedHookApi(ref);
+    return new ScopedContext(
+      { ...this.executionContext, isSystem: false },
       this.engine
     );
   }
