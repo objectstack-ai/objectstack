@@ -186,10 +186,15 @@ export class OrgLessWriteDeclarationRefusedError extends Error {
     public readonly object: string,
     public readonly detail: string,
   ) {
+    // [#13636] The message below is a RUNTIME string — it reaches operators
+    // and generated surfaces, where a tracker id resolves to nothing
+    // (maintainer ruling 2026-08-12). The date stays; the id anchors here
+    // instead, for the reader who can resolve it and is already looking at
+    // the source.
     super(
       `Insert on '${object}' was REFUSED: its 'orgLessWrite' declaration is not admitted — ${detail}. ` +
         `A declaration asserts that the rows of this write belong to an ADJUDICATED org-less population ` +
-        `(#13636, maintainer ruling 2026-08-31), so it is checked against the platform tenancy ledger ` +
+        `(maintainer ruling 2026-08-31), so it is checked against the platform tenancy ledger ` +
         `(PLATFORM_OBJECT_TENANCY, 'platform-object-tenancy.ts') and never taken on trust. Nothing was ` +
         `written. Fix it by declaring the object this write targets with a reason that object admits, or ` +
         `— if this object really does hold a ruled org-less population — by admitting it in the ledger ` +
