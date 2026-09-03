@@ -5591,6 +5591,130 @@ console.log(
 // clean: a ledger entry naming a package that no longer exists has nothing to
 // measure, and a wall of tsc output would bury the real failure. Reported after
 // the summary so the two verdicts read in the order they were reached.
+// ── TEMPORARY runner-memory probe (#14569) ──────────────────────────────────
+// Emits this job's memory readings as workflow-command annotations so they can
+// be read back through the check-run annotations API from an agent container
+// that cannot download job logs. ⛔ NOT part of the shipped change: this block
+// and the workflow step that calls it are reverted before the PR's final diff.
+if (process.argv.includes('--runner-reading')) {
+  const PROBE_PKG = '@objectstack/http-conformance';
+  const notice = (title, body) => {
+    const text = String(body).trim();
+    console.log(`::notice title=${title}::${text.replace(/\r?\n/g, '%0A').slice(0, 3800)}`);
+    console.log(`[probe] ${title}\n${text}\n`);
+  };
+  const meminfoKb = (key) => {
+    const m = readFileSync('/proc/meminfo', 'utf8').match(new RegExp(`^${key}:\\s+(\\d+) kB`, 'm'));
+    return m === null ? null : Number(m[1]);
+  };
+  const psSnapshot = () => {
+    const run = spawnSync('ps', ['-eo', 'rss=,comm='], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+    const rows = String(run.stdout ?? '')
+      .trim()
+      .split('\n')
+      .map((l) => l.trim().split(/\s+/))
+      .map(([rss, ...c]) => ({ rss: Number(rss), comm: c.join(' ') }))
+      .filter((r) => Number.isFinite(r.rss));
+    rows.sort((a, b) => b.rss - a.rss);
+    return { total: rows.reduce((s, r) => s + r.rss, 0), rows: rows.slice(0, 12), count: rows.length };
+  };
+  const childHeapLimit = (mb) => {
+    const run = spawnSync(process.execPath, ['-e', 'console.log(require("node:v8").getHeapStatistics().heap_size_limit)'], {
+      encoding: 'utf8',
+      env: { ...process.env, NODE_OPTIONS: `--max-old-space-size=${mb}` },
+    });
+    return Math.floor(Number(String(run.stdout ?? '0').trim()) / (1024 * 1024));
+  };
+
+  const snap = psSnapshot();
+  notice('probe-runner-env', [
+    `date=${new Date().toISOString()}`,
+    `runner os=${process.env.RUNNER_OS} arch=${process.env.RUNNER_ARCH} image=${process.env.ImageOS} ${process.env.ImageVersion}`,
+    `node=${process.version} nproc=${String(spawnSync('nproc', { encoding: 'utf8' }).stdout ?? '').trim()}`,
+    `MemTotal=${meminfoKb('MemTotal')} kB MemAvailable=${meminfoKb('MemAvailable')} kB SwapTotal=${meminfoKb('SwapTotal')} kB SwapFree=${meminfoKb('SwapFree')} kB`,
+    `gate process heap_size_limit=${Math.floor(getHeapStatistics().heap_size_limit / (1024 * 1024))} MB (runner V8 default)`,
+    `child heap_size_limit under --max-old-space-size=6144 = ${childHeapLimit(6144)} MB`,
+    `child heap_size_limit under --max-old-space-size=4096 = ${childHeapLimit(4096)} MB`,
+    `NODE_OPTIONS=${JSON.stringify(process.env.NODE_OPTIONS ?? '')}`,
+    `REMEASURE_HEAP=${JSON.stringify(REMEASURE_HEAP)}`,
+  ].join('\n'));
+  notice('probe-consumers', [
+    `processes=${snap.count} total_rss=${snap.total} kB (${(snap.total / 1024).toFixed(0)} MB) at the point the re-measure starts`,
+    ...snap.rows.map((r) => `${String(r.rss).padStart(9)} kB  ${r.comm}`),
+  ].join('\n'));
+
+  // The generated TEST_DEBT program for the probe package -- the same project
+  // `measureTestDebt` writes, run directly so the heap cap can be varied.
+  const probePkg = packages.find((p) => p.name === PROBE_PKG);
+  const probeDir = probePkg.dir;
+  const probeRootAbs = ROOT.replaceAll('\\', '/').replace(/\/$/, '');
+  const probePkgAbs = join(ROOT, probeDir).replaceAll('\\', '/').replace(/\/$/, '');
+  const probeParsed = JSON.parse(
+    readFileSync(join(ROOT, probeDir, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, ''),
+  );
+  const probeRoots = readTsconfig(probeDir, 'tsconfig.json').roots;
+  const probeHidden = probePkg.hiddenTests ?? [];
+  const probeUnreachable = probeHidden.filter(
+    (rel) => !probeRoots.some((r) => r === '' || rel === r || rel.startsWith(`${r}/`)),
+  );
+  const probeProject = remeasureProject({
+    pkgAbs: probePkgAbs,
+    rootAbs: probeRootAbs,
+    parsed: probeParsed,
+    unreachable: probeUnreachable,
+    chain: tsconfigChainFacts(probeDir),
+  });
+  const probeHolder = mkdtempSync(join(tmpdir(), 'objectstack-probe-'));
+  const probeConfig = join(probeHolder, REMEASURE_CONFIG);
+  writeFileSync(probeConfig, `${JSON.stringify(probeProject, null, 2)}\n`);
+  const probeTsc = join(ROOT, 'node_modules', '.bin', 'tsc');
+  const hasTime = existsSync('/usr/bin/time');
+
+  for (const capMb of [4096, 6144]) {
+    const out = join(probeHolder, `tsc-${capMb}.out`);
+    const err = join(probeHolder, `tsc-${capMb}.err`);
+    const sample = join(probeHolder, `mem-${capMb}.txt`);
+    const shell = [
+      'set -u',
+      `( while :; do awk '/^MemAvailable:/{print $2}' /proc/meminfo; sleep 0.5; done > ${sample} ) &`,
+      'SAMPLER=$!',
+      `${hasTime ? '/usr/bin/time -v ' : ''}${probeTsc} --noEmit --pretty false --extendedDiagnostics -p ${probeConfig} > ${out} 2> ${err}`,
+      'STATUS=$?',
+      'kill "$SAMPLER" 2>/dev/null || true',
+      'wait "$SAMPLER" 2>/dev/null || true',
+      'echo "status=$STATUS"',
+    ].join('\n');
+    const started = Date.now();
+    const run = spawnSync('bash', ['-c', shell], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      env: { ...process.env, NODE_OPTIONS: `--max-old-space-size=${capMb}` },
+    });
+    const wall = ((Date.now() - started) / 1000).toFixed(1);
+    const stdout = existsSync(out) ? readFileSync(out, 'utf8') : '';
+    const stderr = existsSync(err) ? readFileSync(err, 'utf8') : '';
+    const pick = (re) => ((stdout.match(re) ?? stderr.match(re) ?? [null, null])[1]);
+    const samples = existsSync(sample)
+      ? readFileSync(sample, 'utf8').trim().split('\n').map(Number).filter(Number.isFinite)
+      : [];
+    const errs = stdout.match(/error TS\d+/g) ?? [];
+    notice(`probe-tsc-${capMb}`, [
+      `cap=--max-old-space-size=${capMb} wall=${wall}s ${String(run.stdout ?? '').trim()}`,
+      `Files=${pick(/^Files:\s+(\d+)/m)} LinesOfDefinitions=${pick(/^Lines of Definitions:\s+(\d+)/m)}`,
+      `Types=${pick(/^Types:\s+(\d+)/m)} Instantiations=${pick(/^Instantiations:\s+(\d+)/m)}`,
+      `MemoryUsed=${pick(/^Memory used:\s+([\d,]+K)/m)}`,
+      `CheckTime=${pick(/^Check time:\s+([\d.]+)s/m)}s TotalTime=${pick(/^Total time:\s+([\d.]+)s/m)}s`,
+      `MaximumRSS=${pick(/Maximum resident set size \(kbytes\):\s+(\d+)/m)} kB`,
+      `MemAvailable during run: min=${samples.length ? Math.min(...samples) : 'n/a'} kB max=${samples.length ? Math.max(...samples) : 'n/a'} kB samples=${samples.length}`,
+      `heapOOM=${/JavaScript heap out of memory/.test(`${stdout}${stderr}`)} errCount=${errs.length}`,
+      `stderrTail=${stderr.trim().split('\n').slice(-3).join(' | ').slice(0, 400)}`,
+    ].join('\n'));
+  }
+  rmSync(probeHolder, { force: true, recursive: true });
+  process.exit(0);
+}
+
 if (process.argv.includes('--re-measure')) {
   // The ceiling FIRST, before the four minutes of tsc it shapes (#12856). Two
   // jobs, and the second is the one that keeps the constant honest: on CI this

@@ -4737,6 +4737,12 @@ jobs:
       - name: Build the ledgered packages' dependencies
         run: pnpm exec turbo run build --filter='./packages/*' --filter='./packages/*/*'
 
+      # TEMPORARY measurement probe (#14569) — reverted before this PR's final
+      # diff. Prints this runner's memory readings as workflow-command
+      # annotations, which are readable through the check-run annotations API.
+      - name: Runner memory probe (TEMPORARY, #14569)
+        run: node scripts/check-type-check-coverage.mjs --runner-reading
+
       - name: Re-measure the type-check DEBT / TEST_DEBT ledger
         run: pnpm check:type-check-debt
 
