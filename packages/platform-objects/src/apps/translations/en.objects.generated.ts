@@ -304,6 +304,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       }
+    },
+    _validations: {
+      locale_bcp47_shape: {
+        message: "Locale must be a BCP-47 language tag, such as zh-CN or ja-JP."
+      }
     }
   },
   sys_session: {
