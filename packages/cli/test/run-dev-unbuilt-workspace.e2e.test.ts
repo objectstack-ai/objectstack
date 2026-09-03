@@ -291,7 +291,13 @@ let unbuilt: Run;
 let built: Run;
 let genuinelyMissing: Run;
 let stalled: Run;
-let unread: Lifetime;
+// Definite-assignment assertion for the duration of the QUARANTINE below: the
+// `'never-read'` spawn in `beforeAll` is commented out, so nothing assigns this
+// and `strict` reports TS2454 at each of the three reads inside the skipped
+// case. Restoring that spawn makes the `!` redundant again, so it goes when the
+// quarantine is lifted. (Measured: the package's own `typecheck` is
+// `include: ["src"]`, so it never compiles this file and would not have said.)
+let unread!: Lifetime;
 let closedEnd: Lifetime;
 
 beforeAll(async () => {
