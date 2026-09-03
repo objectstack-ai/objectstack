@@ -294,6 +294,16 @@
   降档(那正是降档保险丝要拒的替换),但「本车道 fable 强制」多是过宽的回忆 ——
   `dispatch-gates.mjs --tier PATH` 逐路径现推(实测:`SKILL.md` 与 `.claude/agents/**` 强制,`scripts/pm/**`
   与 `references/**` 无 ⇒ 全阻塞的三卡 fold 拆成 1 阻 3 可跑);路径线是**下限不是放行**。
+- **required checks 的名单是每仓事实**(逐 job 读判定的规则住上面队列段):objectstack 六个 ——
+  `TypeScript Type Check` · `Lint & Repo Gates` · `Test Core` · `Dogfood Regression Gate` ·
+  `Build Core` · `Temporal Conformance (live PG + MySQL)`;`in_progress` 不是过;advisory 门禁
+  红进 main 是共享损伤,照样止血立单。⛔ 聚合命令同样不作判定:`check:type-check-debt` 可在
+  包级 typecheck 绿时红;`check:i18n` 以「PREREQUISITE NOT MET — workspace CLI 未 build」退 3 不是漂移。
+- ⚠️ **计数不是机理读数(被当天推翻的推断的墓碑)**:「`GET .../actions/runs?event=merge_group`
+  计数 0 ⇒ required 集为空」提出当天即被自身推翻 —— 同一姊妹仓 2026-08-24 首现 merge_group
+  run(0 → 8),同日再测 224(阳性对照 `event=pull_request` 全程非零)。计数答「至今发生过没有」,
+  不答「机制在不在」:零计数只作**弱先验**,判 required 集为空要读 ruleset
+  的 required 集本身、或看队列合并是否真在等检查;⛔ 别处写下的计数值一律先复测再用。
 
 ## 闭合关键词解析(PR 正文写侧)
 

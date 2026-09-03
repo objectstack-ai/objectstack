@@ -16,6 +16,49 @@
 // precedents are check-type-source-resolution.mjs, check-test-source-alias.mjs,
 // check-adr-links.mjs and check-driver-memory-census.mjs.
 //
+// ── The ruled EXCEPTION: an authorised cross-file move (2026-09-03) ─────────
+//
+// The disjunction above asks WHO may take a registry-growing remedy, and on a
+// shrink-only ratchet the answer was always "a maintainer, per instance". One
+// class of act is now authorised generally instead of one PR at a time.
+// Maintainer ruling, 2026-09-03, adopting option A of item 5 in the skills
+// optimization programme's third decision batch (#14685, comment 5520452691) —
+// verbatim and untranslated: 「同意」; the text it adopts:
+//
+//   the per-file line ratchet admits a cross-file move in one PR when the
+//   destination's allowance rises by no more than the source's net decrease and
+//   total lines do not increase, with the ruling cited in the ratchet comment;
+//   `check:ratchet-remedy-authority`'s self-description gains this exception
+//
+// So: a cross-file MOVE in the per-file line ratchet is NOT a maintainer-only
+// remedy while all three conditions hold — the destination's raise is covered by
+// the named sources' net decrease, the map-wide total does not increase, and the
+// raised entry cites that ruling. The scope is exactly the act the ruling names,
+// in the gate the ruling names. A raise failing any condition is an ordinary
+// raise and belongs to a maintainer as before, and no other ratchet in this farm
+// gains anything: the reason a move is not a weakening is that the corpus SHRANK
+// on net, which is a property of the act, not of the author.
+//
+// ⚠️ TODAY THE EXCEPTION IS DOCUMENTARY, and recording that is half the point of
+// writing it here. The corpus walk is a NON-RECURSIVE readdir of `scripts/` (see
+// corpusFiles), and the gate the ruling amends lives one directory down, in
+// scripts/pm/ — it has never been in this sweep, so no verdict of this gate
+// moves. A self-test assertion pins that, so a wider walk reds HERE and makes
+// the class a decision someone takes rather than one that lands in silence.
+//
+// ⛔ NO NEW VERDICT CLASS. `marked` / `refused` / `unmarked` / `excluded` stay as
+// they are. A fifth class for "authorised by standing ruling" would have a
+// population of zero in this corpus, and an unreachable class is a claim of
+// enforcement nobody has — the same defect this file's control corpus exists to
+// prevent, one level up. If the walk ever reaches a gate offering this act, the
+// honest first move is to read that gate's own verdict and record it in CONTROL,
+// the way every instance in this file arrived.
+//
+// ⛔ THIS SECTION IS COMMENT, never a string literal — the header warning above,
+// applied to itself. It describes an act that grows a registry, so in
+// author-facing text it would make this gate an instance of the convention it
+// enforces and flip its own verdict off `excluded`.
+//
 // WHY A SWEEP AND NOT A SHARED MODULE. #8519 proposed a shared helper module as
 // the enforcement route. It is not one: a module is reachable only from gates
 // that choose to import it, so it standardises the gates that already agreed and
@@ -146,11 +189,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(19) …and the mirror: the token in a string literal DOES count. Paired with': 1,
   '(17) This gate must not be an instance of its own convention.': 1,
   '(20) The declared population, held to the walk in BOTH directions (#13813)': 7,
+  '(21) The ruled cross-file-move exception (2026-09-03)': 2,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 20;
+const SELF_TEST_BATTERY_FLOOR = 21;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1347,6 +1391,29 @@ function selfTest() {
     + 'nothing, and a dead declaration prints as the same silence as declaring nothing)',
     !ROOT_DIR_WATCH_HINTS.some((h) => h.includes('{')));
 
+  // ── (21) The ruled cross-file-move exception (2026-09-03) ───────────────
+  //
+  // Two assertions, and both are about THIS FILE rather than about the ratchet
+  // the ruling amends: where the exception is written down, and whether it is
+  // doing anything yet. Neither can be held by the run — a header section runs
+  // green whatever it says, which is exactly how a documented exception drifts
+  // into a claimed one.
+  battery('(21) The ruled cross-file-move exception (2026-09-03)');
+  const selfSrc = readFileSync(join(SCRIPTS_DIR, SELF_FILE), 'utf8');
+  // ⛔ The phrase is ASSEMBLED, never spelled, for the reason the ADD hoist above gives in
+  // its own case: a literal spelling would put the phrase into THIS file's author-facing text
+  // and falsify the assertion below by the act of making it.
+  const EXCEPTION_PHRASE = ['cross-file', 'MOVE'].join(' ');
+  expect('the ruled exception is recorded in COMMENT space only — written into author-facing text '
+    + 'it would describe a registry-growing act, and this gate would then read as an instance of '
+    + 'the convention it enforces, which is what assertion (17) catches',
+    selfSrc.includes(EXCEPTION_PHRASE)
+    && !authorFacingMessages(selfSrc).some((m) => m.includes(EXCEPTION_PHRASE)));
+
+  expect('the ruled exception is documentary today: the amended line ratchet lives one directory '
+    + 'down and this walk is non-recursive, so a wider walk reds HERE rather than admitting a new '
+    + 'remedy class in silence',
+    !corpusFiles().includes('check-skill-line-ratchet.mjs'));
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so

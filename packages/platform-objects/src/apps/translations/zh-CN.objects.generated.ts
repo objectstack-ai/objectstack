@@ -304,6 +304,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       }
+    },
+    _validations: {
+      locale_bcp47_shape: {
+        message: "语言必须是 BCP-47 语言标签，如 zh-CN 或 ja-JP。"
+      }
     }
   },
   sys_session: {
