@@ -35,7 +35,11 @@ import type { IHttpServer, IHttpRequest, RouteHandler } from '@objectstack/spec/
 import { sendOk, sendError } from '@objectstack/types';
 import type { ShareLinkExecutionContext } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { ShareLinkService } from './share-link-service.js';
+// [#14637] `isPublicSharingEnabled` is the service's OWN reading of the
+// standing switch, imported rather than restated here. A second spelling of
+// `publicSharing.enabled` at this layer is how the probe below came to
+// contradict the gate inside `resolveToken` in the first place.
+import { isPublicSharingEnabled, type ShareLinkService } from './share-link-service.js';
 import type { SharingEngine } from './sharing-service.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
@@ -236,6 +240,12 @@ export function registerShareLinkRoutes(
         providedPassword,
       });
       if (!resolved) {
+        // The ONE generic refusal this route answers with. Written once so the
+        // arms that fall through to it are byte-identical to it by
+        // construction rather than by three copies staying in step (#14637).
+        const invalidOrExpired = () =>
+          sendError(res, 404, 'INVALID_OR_EXPIRED', 'Share link is invalid, expired, or revoked');
+
         // Probe row to give a more useful status code (401 vs 404 vs 410).
         const probe = await engine.find('sys_share_link', {
           where: { token: req.params.token },
@@ -243,6 +253,38 @@ export function registerShareLinkRoutes(
           context: SYSTEM_CTX,
         } as any);
         const row = Array.isArray(probe) && probe[0] ? (probe[0] as any) : null;
+        // [#14637 — maintainer ruling 2026-09-03, decision batch #17 item 1,
+        // verbatim 「同意」 — option A] The standing policy is read BEFORE this
+        // probe answers from the row.
+        //
+        // `resolveToken` refuses a link whose object has `publicSharing.enabled`
+        // off, and refuses it with the undifferentiated `null` that revoked /
+        // expired / unknown / ineligible tokens get, because — in its own words
+        // — for a caller who may hold nothing but a token, a distinguishable
+        // "sharing is off for this object" is an existence oracle. This probe
+        // then re-opened exactly that oracle one layer up: it answered from the
+        // ROW, with no knowledge of the object's block, so a `password_hash`
+        // row still drew `401 NEEDS_PASSWORD` / `WRONG_PASSWORD` and an
+        // `audience: 'signed_in'` row still drew `401 SIGN_IN_REQUIRED` — a
+        // real-but-switched-off token, told apart from an unknown one by an
+        // anonymous caller. A security property stated in one layer and
+        // defeated in the layer above it is worse than one never claimed,
+        // because the next reader believes the comment.
+        //
+        // EVERY arm falls through, the 410 included: gating only the two 401s
+        // was option C and was rejected as proliferation — it would leave a
+        // third class of link answer and a rule about which arms are gated.
+        // The accepted product consequence: on a switched-off object the viewer
+        // sees "link invalid" rather than a password prompt, which is correct,
+        // since a correct password on such a link yields nothing.
+        //
+        // Fail-closed on an unreadable policy is deliberate and costs nothing
+        // real: `getPolicy` calls a schema the engine cannot return
+        // `enabled: false` by the same definition, so `resolveToken` on this
+        // same engine has already refused every token on that object.
+        if (row && !isPublicSharingEnabled(engine.getSchema?.(row.object_name))) {
+          return invalidOrExpired();
+        }
         if (row && !row.revoked_at && (!row.expires_at || Date.parse(row.expires_at) > Date.now())) {
           if (row.password_hash) {
             return sendError(
@@ -259,7 +301,7 @@ export function registerShareLinkRoutes(
         if (row && (row.revoked_at || (row.expires_at && Date.parse(row.expires_at) <= Date.now()))) {
           return sendError(res, 410, 'EXPIRED_OR_REVOKED', 'Share link has expired or been revoked');
         }
-        return sendError(res, 404, 'INVALID_OR_EXPIRED', 'Share link is invalid, expired, or revoked');
+        return invalidOrExpired();
       }
 
       // Fetch the underlying record with system context — the token

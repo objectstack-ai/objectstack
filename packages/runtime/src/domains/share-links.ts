@@ -40,6 +40,29 @@ import { SHARE_LINK_SERVICE } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 
+/**
+ * [#14637] Is `publicSharing` switched ON for this object schema?
+ *
+ * A deliberate MIRROR of `isPublicSharingEnabled` in
+ * `plugin-sharing/src/share-link-service.ts`, which is the canonical
+ * definition and the one `resolveToken`'s own gate reads. It is copied rather
+ * than imported because `@objectstack/plugin-sharing` is a **dev** dependency
+ * of this package: importing it here would invert the dependency direction to
+ * make one boolean read shared. The two spellings are held equal by the pins
+ * in `share-links-probe-policy-gate.test.ts` on this side and
+ * `share-link-eligibility.test.ts` on the other, which assert the SAME
+ * observable answer on both surfaces rather than trusting the copy.
+ *
+ * An absent block, an absent schema, and an engine that cannot answer
+ * `getSchema` at all are one answer: `false`. `enabled` defaults to off, so a
+ * surface that cannot read the policy must refuse rather than answer from the
+ * token row.
+ */
+function isPublicSharingEnabled(schema: unknown): boolean {
+    return (schema as { publicSharing?: { enabled?: unknown } } | null | undefined)
+        ?.publicSharing?.enabled === true;
+}
+
 export function createShareLinksDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
         prefix: '/share-links',
@@ -104,6 +127,11 @@ export async function handleShareLinksRequest(
         handled: true,
         response: deps.error(msg, status, { code }),
     });
+    // The ONE generic refusal the resolve route answers with. Written once so
+    // the arms that fall through to it are byte-identical to it by
+    // construction rather than by copies staying in step (#14637).
+    const invalidOrExpired = (): HttpDispatcherResult =>
+        sendErr(404, 'INVALID_OR_EXPIRED', 'Share link is invalid, expired, or revoked');
     // Engine for fetching the shared record + token probes — the same
     // per-env ObjectQL the shareLinks service is bound to. Read from the
     // request's RESOLVED (per-env) kernel first: `resolveService('objectql',
@@ -149,6 +177,37 @@ export async function handleShareLinksRequest(
                     ? asArray(await engine.find('sys_share_link', { where: { token }, limit: 1, context: SYSTEM_CTX } as any))
                     : [];
                 const row = probe[0] ?? null;
+                // [#14637 — maintainer ruling 2026-09-03, decision batch #17
+                // item 1, verbatim 「同意」 — option A] The standing policy is
+                // read BEFORE this probe answers from the row.
+                //
+                // This is the dispatcher twin of the same probe in
+                // `plugin-sharing/src/share-link-routes.ts`, and for cloud's
+                // per-environment kernels it is the DESIGNED PRIMARY surface
+                // (`registerShareLinkRoutes: false`) — so fixing only the other
+                // site would not close the oracle, it would move it to
+                // whichever embedding uses this one.
+                //
+                // `resolveToken` refuses a link whose object has
+                // `publicSharing.enabled` off with the undifferentiated `null`
+                // revoked / expired / unknown / ineligible tokens get, because
+                // a distinguishable "sharing is off for this object" is an
+                // existence oracle for a caller who may hold nothing but a
+                // token. Answering from the ROW re-opened it: a `password_hash`
+                // row still drew `401 NEEDS_PASSWORD` / `WRONG_PASSWORD`, an
+                // `audience: 'signed_in'` row still drew `401
+                // SIGN_IN_REQUIRED`. EVERY arm falls through here, the 410
+                // included — gating only the two 401s was option C and was
+                // rejected as proliferation.
+                //
+                // Fail-closed on an unreadable policy is deliberate: an object
+                // whose schema the engine cannot return is `enabled: false` by
+                // the canonical definition, which is the same answer the
+                // service's own gate reaches.
+                if (row) {
+                    const schema = engine?.getSchema(row.object_name);
+                    if (!isPublicSharingEnabled(schema)) return invalidOrExpired();
+                }
                 const live = row && !row.revoked_at && (!row.expires_at || Date.parse(row.expires_at) > Date.now());
                 if (live && row.password_hash) {
                     return sendErr(401, providedPassword ? 'WRONG_PASSWORD' : 'NEEDS_PASSWORD',
@@ -160,7 +219,7 @@ export async function handleShareLinksRequest(
                 if (row && (row.revoked_at || (row.expires_at && Date.parse(row.expires_at) <= Date.now()))) {
                     return sendErr(410, 'EXPIRED_OR_REVOKED', 'Share link has expired or been revoked');
                 }
-                return sendErr(404, 'INVALID_OR_EXPIRED', 'Share link is invalid, expired, or revoked');
+                return invalidOrExpired();
             }
 
             const engine = await getEngine();
