@@ -590,9 +590,25 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     // org-scoped flip was a phantom: the app looked published for
                     // the life of the process and went back to `_unpublished:
                     // true` on the next restart, because the env-wide row it left
-                    // untouched is the only one cold boot loads. The READ above is
-                    // left org-aware on purpose — a layered read is a superset,
-                    // never a loss.
+                    // untouched is the only one cold boot loads. The
+                    // `getMetaItems` read below is env-wide for the same
+                    // reason, and since #14683 it is so by construction: that
+                    // method applies `organizationIdForMetaRead` to
+                    // `request.type` itself, and the predicate answers
+                    // `undefined` for every type the registry declares
+                    // non-overridable — `app` among them, rolled back to
+                    // `allowOrgOverride: false` in #6483. The `organizationId`
+                    // this route still hands that call is dropped at the gate.
+                    //
+                    // ⛔ Dropping it is the REPAIR, not an oversight to undo.
+                    // An org-scoped `app` row is an unhydratable phantom —
+                    // `loadMetaFromDb` walks past it, and
+                    // `reportUnhydratableOrgScopedRows` exists to say so — so
+                    // an org-aware read here would resurrect rows that vanish
+                    // at the next restart and flip `_unpublished` on them
+                    // instead of on the row cold boot hydrates. Read scope and
+                    // write scope now answer one question through one registry
+                    // flag; ⛔ never "restore" the organization to this read.
                     const flipped: string[] = [];
                     const flipOrganizationId = organizationIdForMetaWrite('app', organizationId);
                     try {
