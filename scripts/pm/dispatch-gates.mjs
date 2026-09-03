@@ -11024,7 +11024,23 @@ function selfTest() {
   // never earned, so nothing in the output would say so. Measured here: the
   // only newly-promoted module that declares a literal at all is pr-labels.mjs
   // (`.github/labeler.yml`), and no family imports it.
-  const promoted = liveSelfTestFamilies.flatMap(([, e]) => e.files ?? []);
+  // ⚠️ Narrowed by #14880, and the narrowing is what keeps this case measuring
+  // its own claim. A `check-`named script invoked with `--self-test` is now a
+  // self-test family too, but its file was ALREADY a gate file — CI also runs
+  // it plainly, or the direct matcher admits it under a `check-` basename
+  // either way — so counting it as "promoted BY the self-test admission" reads
+  // a refusal that predates that admission as a loss it caused. Measured: with
+  // the raw list, four families reported hints "lost" to modules
+  // (`check-adr-links.mjs`, `check-self-test-wired.mjs`) that were gate files
+  // on the base tree as well, and the follow had already been refusing them.
+  // What this case is about is the module a self-test family is the ONLY
+  // reason to treat as a gate file, so that is what it takes.
+  const namedByWorkFamilies = new Set(
+    [...discoverFamilies().byCheck.values()].filter((e) => !e.selfTest).flatMap((e) => e.files ?? []),
+  );
+  const promoted = liveSelfTestFamilies
+    .flatMap(([, e]) => e.files ?? [])
+    .filter((f) => !namedByWorkFamilies.has(f));
   const subtracted = [];
   for (const [check, entry] of discoverFamilies().byCheck) {
     if (entry.selfTest) continue;
@@ -17130,9 +17146,23 @@ function selfTest() {
     const withOut = withChangeset.stdout ?? '';
     t('a run whose surface ALREADY carries a changeset answers at all', withChangeset.status === 0 && withOut.trim().length > 0);
     t('and prints no pending section — there is no temporal gap left to disclose', !/^Once a changeset exists,/m.test(withOut));
+    // ⚠️ Counted per COMMAND, not per substring (#14880). `check-empty-changeset`
+    // is invoked two ways by CI — `--self-test` beside a `--base` run — and
+    // since the derivation key became (script, args) those are two families,
+    // so a substring count of 2 is the tree being described correctly. The
+    // invariant this case protects is unchanged and is what is asserted: each
+    // family appears ONCE, in the matched list, and never also in the pending
+    // section whose heading makes a different claim about time.
+    const changesetCommands = withOut
+      .split('\n')
+      .filter((l) => l.startsWith('  - '))
+      .map((l) => l.slice(4).split('   ')[0].trim())
+      .filter((c) => c.includes('check-empty-changeset'));
     t(
       'because those families are in the MATCHED list instead, each one exactly once',
-      withOut.split('\n').filter((l) => l.startsWith('  - ') && l.includes('check-empty-changeset')).length === 1,
+      changesetCommands.length > 0
+        && new Set(changesetCommands).size === changesetCommands.length
+        && changesetCommands.filter((c) => c === 'node scripts/check-empty-changeset.mjs').length === 1,
     );
 
     // REACHED THROUGH A SYMLINK — the form a plain path equality gets wrong.
