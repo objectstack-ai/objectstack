@@ -304,6 +304,11 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       }
+    },
+    _validations: {
+      locale_bcp47_shape: {
+        message: "言語は BCP-47 言語タグ（例: zh-CN、ja-JP）である必要があります。"
+      }
     }
   },
   sys_session: {
