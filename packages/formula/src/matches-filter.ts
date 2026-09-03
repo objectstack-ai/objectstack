@@ -216,6 +216,10 @@ function evalField(record: Record<string, unknown>, field: string, spec: unknown
 
 function evalOp(actual: unknown, op: string, raw: unknown, record: Record<string, unknown>): boolean {
   const v = resolveValue(raw, record);
+  // [#14104] An offset reference whose base is NULL is FALSE for every
+  // operator — see {@link NO_OFFSET_BASE}. Before the switch, so `$ne`'s
+  // complement arm and `$eq`'s null arm never see it.
+  if (v === NO_OFFSET_BASE) return false;
   switch (op) {
     case '$eq': return v === null ? actual == null : looseEq(actual, v);
     case '$ne': return v === null ? actual != null : !looseEq(actual, v);
@@ -378,12 +382,99 @@ function order(actual: unknown, bound: unknown, cmp: (a: never, b: never) => boo
   return cmp(actual as never, bound as never);
 }
 
-/** Resolve a `{ $field: 'path' }` reference against the record; else passthrough. */
+/**
+ * [#14104] The resolved comparand of a `{ $field, addDays }` reference whose
+ * referenced column is NULL — or whose offset cannot be read as a number, or
+ * whose base cannot be read as a date. The ruling states it in words rather
+ * than inheriting it from SQL: "a NULL `due_date` makes the comparison FALSE
+ * (no deadline, never on time)" — for EVERY operator, `$ne` included. A
+ * `null` return would have handed `$eq` its `actual == null` arm (a both-NULL
+ * row would MATCH) and `$ne` its complement, so the absence is carried as a
+ * sentinel that {@link evalOp} answers `false` for before any operator runs.
+ * The SQL twin is the `(<base> IS NOT NULL AND …)` conjunct
+ * `SqlDriver.applyCrossFieldComparison` writes; the shared corpus pins the
+ * two to the same rows.
+ */
+const NO_OFFSET_BASE: unique symbol = Symbol('matches-filter:no-offset-base');
+
+/**
+ * Resolve a `{ $field: 'path' }` reference against the record; else passthrough.
+ *
+ * [#14104] A reference carrying `addDays` — an integer literal or a nested
+ * `{ $field }` reference to a numeric column (dot-paths walked, as for `$field`)
+ * — resolves to the referenced value shifted by that many WHOLE days. A NULL
+ * offset contributes zero days; a NULL base resolves to {@link NO_OFFSET_BASE}.
+ * `resolveValue`'s own test of "is this a reference" is unchanged (`'$field' in
+ * raw`, any extra key ignored) so the three faces keep agreeing on what a
+ * reference IS; only what is done with one grew.
+ */
 function resolveValue(raw: unknown, record: Record<string, unknown>): unknown {
   if (raw && typeof raw === 'object' && !Array.isArray(raw) && '$field' in (raw as Record<string, unknown>)) {
-    return getPath(record, String((raw as Record<string, unknown>).$field));
+    const ref = raw as Record<string, unknown>;
+    const base = getPath(record, String(ref.$field));
+    if (!('addDays' in ref) || ref.addDays === undefined) return base;
+    return addWholeDays(base, resolveDayOffset(ref.addDays, record));
   }
   return raw;
+}
+
+/**
+ * [#14104] The `addDays` operand as a whole number of days: a literal, or the
+ * value of the referenced column. `null`/`undefined` (a duty with no grace) is
+ * ZERO days by the ruling; a fractional value is truncated toward zero, the
+ * same reading every SQL dialect's arm applies (`cast(… as integer)` on
+ * SQLite, `trunc` on Postgres, `truncate` on MySQL); a value that is not a
+ * number at all is `NaN`, which {@link addWholeDays} turns into the
+ * fail-closed sentinel.
+ */
+function resolveDayOffset(spec: unknown, record: Record<string, unknown>): number {
+  const value = spec && typeof spec === 'object' && !Array.isArray(spec) && '$field' in (spec as Record<string, unknown>)
+    ? getPath(record, String((spec as Record<string, unknown>).$field))
+    : spec;
+  if (value == null) return 0;
+  const n = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+  return Number.isFinite(n) ? Math.trunc(n) : NaN;
+}
+
+const DAY_MS = 86_400_000;
+const CALENDAR_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * [#14104] `base` shifted by `days` whole days, in the shape it arrived in, so
+ * the comparison that follows reads exactly as it would against a stored
+ * value of the same column:
+ *
+ *   - a bare calendar day (`YYYY-MM-DD`, the `Field.date` storage form) stays a
+ *     calendar day — which is what keeps {@link lteBound}'s half-open rule
+ *     ("through that whole day") in force for a `$lte` against a shifted day;
+ *   - an ISO instant string (the `Field.datetime` canonical form) stays an ISO
+ *     string with its time of day intact;
+ *   - a `Date` stays a `Date`; an epoch number stays a number.
+ *
+ * `null`/`undefined` (no deadline) and anything that cannot be read as a
+ * date — or a `NaN` offset — resolve to {@link NO_OFFSET_BASE}: the comparison
+ * is false rather than guessed.
+ */
+function addWholeDays(base: unknown, days: number): unknown {
+  if (base == null || !Number.isFinite(days)) return NO_OFFSET_BASE;
+  if (typeof base === 'string' && CALENDAR_DAY_RE.test(base)) {
+    const ms = Date.parse(`${base}T00:00:00.000Z`);
+    if (Number.isNaN(ms)) return NO_OFFSET_BASE;
+    return new Date(ms + days * DAY_MS).toISOString().slice(0, 10);
+  }
+  if (base instanceof Date) {
+    const ms = base.getTime();
+    return Number.isNaN(ms) ? NO_OFFSET_BASE : new Date(ms + days * DAY_MS);
+  }
+  if (typeof base === 'number') {
+    return Number.isFinite(base) ? base + days * DAY_MS : NO_OFFSET_BASE;
+  }
+  if (typeof base === 'string') {
+    const ms = Date.parse(base);
+    if (Number.isNaN(ms)) return NO_OFFSET_BASE;
+    return new Date(ms + days * DAY_MS).toISOString();
+  }
+  return NO_OFFSET_BASE;
 }
 
 function getPath(record: Record<string, unknown>, path: string): unknown {
