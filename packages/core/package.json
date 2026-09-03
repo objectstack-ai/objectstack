@@ -20,6 +20,9 @@
   },
   "scripts": {
     "build": "tsup && node ../../scripts/check-dts-emitted.mjs",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.examples.json && pnpm check:test-typecheck",
+    "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/core --project tsconfig.test.json",
+    "gen:test-typecheck-debt": "tsx ../../scripts/check-test-typecheck.mts --update --package packages/core --project tsconfig.test.json",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -1537,6 +1537,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository-14037-event-ts-canonicalisation.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository-14037-event-ts-canonicalisation.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/sys-metadata-repository-14037-event-ts-canonicalisation.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/sys-metadata-repository.contract.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1639,6 +1654,11 @@
     {
       "file": "packages/metadata-protocol/src/view-container-runtime-expansion.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata/src/loaders/database-loader-14037-adapter-boundary-iso.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {

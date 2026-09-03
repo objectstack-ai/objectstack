@@ -1,0 +1,64 @@
+// The TEST-layer type-check program (#14613), adopting the mechanism #5286 set
+// for `packages/spec`, #5449 generalised, and `packages/rest` / `packages/objectql`
+// already run. `tsconfig.json` beside it stays the BUILD config; this sibling
+// puts the layer that config excludes back in front of tsc, and `package.json`'s
+// `typecheck` script NAMES it (via `check:test-typecheck --project`), because a
+// config no script invokes is exactly the phantom this mechanism exists to close.
+//
+// BEFORE THIS FILE, NO PACKAGE SCRIPT COMPILED ANY FILE IN THIS PACKAGE. There
+// was no `typecheck` script at all — the ~20 sibling packages declare one and
+// `@objectstack/core` did not — so `turbo run typecheck`, which selects only
+// packages declaring the task, could not reach it. The package was not invisible:
+// `check:type-check-coverage` carried it as a DEBT entry of 98 and had already
+// re-measured it once (91 -> 98). What was missing was a script anyone working
+// in the package could RUN, which is what cost a dispatched task a step.
+//
+// WHY THE SPLIT RATHER THAN ONE PROGRAM. Measured at 84b8190ae with the
+// dependency closure built: `tsc --noEmit -p tsconfig.json` over the undivided
+// program reports 98 errors across 12 files, and EVERY ONE of the 12 is a
+// `.test.ts`. The same program restricted to the 63 non-test source files
+// reports ZERO. So the build layer graduates exactly as it stands, and adding
+// the script does not require repairing 98 errors first — the test layer is
+// ledgered per file in `test-typecheck-debt.json` beside this config instead,
+// EXACT and shrink-only.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - module semantics ONLY, plus `lib`. These tests are written and executed as
+//     ESM by vitest (esbuild/vite), and this package IS `"type": "module"`, so
+//     the build config's NodeNext compiles them as ESM too — and then demands
+//     explicit `.js` extensions on relative imports, which vitest does not.
+//     That single mismatch is 22 of the 98 (TS2835) plus the TS2347 beside them,
+//     and a share of the 71 TS7006 they cause: an import that does not resolve
+//     makes every symbol it names `any`. Those diagnostics are about the CHECK,
+//     never about the code. Matching vitest is fidelity, not laxity. No `DOM` in
+//     `lib`: nothing in this layer touches a browser global.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
+//     are inherited from the root config and `types: ["node"]` from
+//     `tsconfig.json`. Nothing here may loosen a type rule; if a test does not
+//     compile, that is the finding.
+//
+// ⚠️ WHAT THIS PROGRAM INHERITS FROM `tsconfig.json`, both load-bearing and
+// neither re-declared here (read that file's #11663 comment first):
+//   - `rootDir: ".."`. Already widened to `packages/` there as a CONSEQUENCE of
+//     the `paths` rule, not a preference. Re-declaring it as `"."` — as
+//     `packages/objectql`'s sibling config can, because it redirects nothing —
+//     would put `packages/types/src/**` outside the program's root and reopen
+//     the TS6059 pile that comment was written to close.
+//   - `paths: { "@objectstack/types": ["../types/src/index.ts"] }`. A child that
+//     declared its own `paths` would REPLACE this map rather than merge into it,
+//     silently sending that specifier back to `dist/` — i.e. making this layer's
+//     verdict a function of build state rather than of the source in the
+//     checkout, which `check:type-source-resolution` refuses. This file declares
+//     no `paths` at all, so the rule stands.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
