@@ -12,9 +12,9 @@
 // showcase happens not to exercise.
 //
 // The showcase reads are a DECLARED cross-package coupling — the three modules
-// are named on `@objectstack/lint#test`'s inputs in `turbo.json` and in
-// `scripts/cross-package-test-inputs.mjs`, so both of CI's scoping layers move
-// when the showcase moves.
+// are named on `@objectstack/lint#test`'s inputs in `turbo.json` and in the
+// `check:cross-package-test-inputs` registry beside it, so both of CI's scoping
+// layers move when the showcase moves.
 //
 // ⛔ They are loaded through a path built from `import.meta.url`, NOT by a
 // static relative `import`, and that is not a style choice: a static import
@@ -26,7 +26,9 @@
 // below is the shape `check:cross-package-test-inputs` recognises
 // (`resolve(HERE, '<rel>')` seeded from `import.meta.url`, per AGENTS.md), so
 // the coupling stays visible to the gate that scopes CI. Do not "tidy" it back
-// into an import statement.
+// into an import statement — and note that the gate reads PATH LITERALS out of
+// this file's source, comments included, so a prose reference to a repo file
+// this test does not actually read would be reported as an undeclared input.
 //
 // ⚠️ These pins assert the shipped app is CLEAN, which is the direction #8515's
 // ruling allows to stay live: nothing here needs the showcase to keep a defect.
