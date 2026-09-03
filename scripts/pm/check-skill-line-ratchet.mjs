@@ -896,7 +896,7 @@ export function crossFileMoveTotalVerdict(moves, ceilings) {
     }
   }
   if (net > 0) {
-    return { ok: false, msg: `the declared cross-file moves raise the map's total by ${net} lines. The ruling admits a move only while total lines do not increase: pay the difference by deleting more at a source, or take the raise the ordinary way — a maintainer ruling quoted in the raising PR.` };
+    return { ok: false, msg: `the declared cross-file moves raise the map's total by ${net} line${net === 1 ? '' : 's'}. The ruling admits a move only while total lines do not increase: pay the difference by deleting more at a source, or take the raise the ordinary way — a maintainer ruling quoted in the raising PR.` };
   }
   return { ok: true, msg: `declared cross-file moves: ${moves.size}, total ceilings ${net === 0 ? 'unchanged' : `down ${-net} line${net === -1 ? '' : 's'}`}.` };
 }
