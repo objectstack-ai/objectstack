@@ -300,10 +300,18 @@ beforeAll(async () => {
   built = await runCli(REAL_COMMAND, dir, undefined);
   genuinelyMissing = await runCli(['definitely-not-a-command'], dir, undefined);
   stalled = await runCliWhileParentStalls(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`);
-  // ⛔ Nothing measured above is consulted here. Case 1's wall clock is read by
-  // the failure message below, as evidence; the ceiling is a constant, so a
-  // slow sample can no longer size the instrument that judges the next run.
-  unread = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'never-read', UNREAD_HARD_CAP_MS);
+  // ⛔ QUARANTINED — the `'never-read'` child is NOT spawned while the case it
+  // feeds is skipped. See the quarantine note on
+  // `it.skip('gives up and exits instead of waiting forever')` further down:
+  // this spawn is where the 180 s `UNREAD_HARD_CAP_MS` is paid under CI load,
+  // and that one case is its ONLY consumer — `unread` is read nowhere else in
+  // this file. The PR that fixes the hang in `bin/run-dev.js` un-skips that case
+  // and restores these four lines verbatim, in the same change:
+  //
+  //   // ⛔ Nothing measured above is consulted here. Case 1's wall clock is read by
+  //   // the failure message below, as evidence; the ceiling is a constant, so a
+  //   // slow sample can no longer size the instrument that judges the next run.
+  //   unread = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'never-read', UNREAD_HARD_CAP_MS);
   closedEnd = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'destroy-read-end', UNREAD_HARD_CAP_MS);
 }, RUN_TIMEOUT_MS * 6);
 
@@ -392,7 +400,23 @@ describe('the mirror direction: a reader that is never coming back', () => {
    * this replaces armed no bound at all (`write()` returned true, so an early
    * return skipped it) and read as correct in every stalled-reader test.
    */
-  it('gives up and exits instead of waiting forever', () => {
+  // ⛔ QUARANTINED under the maintainer's ruling A of 2026-09-03 on
+  // objectstack#14832 — do not un-skip it on its own.
+  //
+  // WHY. The `'never-read'` child this case reads HANGS under CI load. The
+  // defect is in the product — `bin/run-dev.js`, the other half of #14832 —
+  // and NOT a cap that is set too low, so raising `UNREAD_HARD_CAP_MS` would buy
+  // nothing and would only make each failure slower. On `Test Core (1/6)` the
+  // harness SIGKILLed the child at the 180 s cap and this assertion red, and
+  // every occurrence EJECTED A WHOLE MERGE-QUEUE BATCH: `main` could not advance
+  // for hours behind this one case, which is what the ruling weighed.
+  //
+  // RE-ENABLE CONDITION. The PR that fixes the hang in `bin/run-dev.js` un-skips
+  // this case in the SAME change, and restores the `'never-read'` spawn in
+  // `beforeAll` (kept there verbatim, commented). The body below and all of its
+  // comments are untouched, so lifting the quarantine is `it.skip` -> `it` plus
+  // that one spawn line — nothing here has to be reconstructed.
+  it.skip('gives up and exits instead of waiting forever', () => {
     // A child still alive at the cap was SIGKILLed: signal set, code null.
     // That is the hang, and it is the whole point of this case.
     //
