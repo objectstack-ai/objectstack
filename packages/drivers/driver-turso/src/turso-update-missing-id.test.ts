@@ -62,14 +62,32 @@
  *  - **The type pin** reads the transport's declared return type, the shape
  *    #13878's `memory-update-declared-null.test.ts` established.
  *
- * # Reverse verification, direction predicted BEFORE running
+ * # Reverse verification — predicted direction, then what was OBSERVED
  *
  * Predicted: restoring `return rows[0] || { id, ...data };` reds the transport
- * miss pin, the `bulkUpdate` pin, the REMOTE half of the parity pin and the
- * pass-through pin, and reds the type pin's `Equals` const at COMPILE time
- * (the whole file then fails to typecheck). The positive control, the
- * write-still-issued pin and the LOCAL half of the parity pin stay GREEN —
- * they exercise arms the revert does not touch.
+ * miss pin, the no-fabrication pin, the `bulkUpdate` pin, the parity pin and
+ * the pass-through pin. The positive control, the write-still-issued pin, the
+ * parity positive control and the fixture premise stay GREEN — they exercise
+ * arms the revert does not touch.
+ *
+ * ⚠️ The type pin is NOT on either list, and that is the point of writing this
+ * paragraph from the measurement rather than from the shape of the fix. The
+ * mutation restores an EXPRESSION; the declared return type stays
+ * `Promise[Record[string, unknown] | null]`, so `Equals` still holds and the
+ * const cannot red. Nothing here fails at compile time, and all ten cases run.
+ * The parity pin is likewise ONE assertion over both faces, not two halves that
+ * can red independently — that indivisibility is the whole reason it exists.
+ *
+ * Observed, with the mutation proved on disk (injected text counted, deleted
+ * text absent) and the restore proved by a `git hash-object` match against the
+ * HEAD blob: `Test Files 1 failed (1)`, `Tests 5 failed | 5 passed (10)`. The
+ * five reds, by name: `resolves null when no row carries that id`,
+ * `fabricates nothing — the id is not stapled onto the payload`,
+ * `bulkUpdate() SKIPS the missing ids`, `PARITY — one missing id, two faces,
+ * one answer`, and `the remote branch passes 'null' through formatRemoteRow
+ * untouched`. The five greens: `pins the declared return type`, `seeded the
+ * fixture (the premise)`, `still ISSUES the write`, `POSITIVE CONTROL` and
+ * `PARITY POSITIVE CONTROL`.
  *
  * ⚠️ One measured trap for whoever runs that verification: the LOCAL face
  * arrives here through the BUILT `@objectstack/driver-sql` (this package

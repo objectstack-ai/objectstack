@@ -23,7 +23,7 @@
  * # Why this file exists at all
  *
  * The card measured that NO landed test pinned the miss posture on this driver
- * — `mongodb-driver.test.ts:157,171` read `update()` results over rows that
+ * — `mongodb-driver.test.ts:157,175` read `update()` results over rows that
  * EXIST. So this is net-new coverage, and the fabricating posture could have
  * come back without reddening anything.
  *
@@ -54,23 +54,38 @@
  *    `updateOne` is still sent. A "fix" that short-circuited on a miss by
  *    reading FIRST would answer `null` correctly and quietly stop writing.
  *
- * # ⚠️ There is deliberately NO type-level pin in this file — MEASURED
+ * # ⚠️ There is deliberately NO type-level pin in this file — and NOT because
+ * # nothing would read one
  *
  * #13878's `memory-update-declared-null.test.ts` pins the declared return type
- * with `Equals`/`IsAny` consts. That instrument does not work HERE and would be
- * a phantom: this package's `tsconfig.json` carries
- * `"exclude": [..., "**\/*.test.ts"]` (escaped here so this very comment does
- * not terminate early), so no test file is in its tsc program and
- * a `const x: Equals[A, B] = true` here is never checked by anything — vitest
- * transpiles without typechecking, and the root `tsconfig.json` excludes
- * `packages` entirely, so no repo-wide program picks it up either. Measured,
- * not assumed: `tsc --noEmit --listFiles` in this package lists 0 files ending
- * `.test.ts` (the sibling `driver-turso`, whose tsconfig excludes only
- * `node_modules`/`dist`, lists 43 — which is why the twin file
- * `turso-update-missing-id.test.ts` DOES carry the type pin).
+ * with `Equals`/`IsAny` consts. That instrument reaches this file through only
+ * ONE program, and it is not the one whose name is on the package:
  *
- * The declared type is nevertheless pinned, in both directions, by instruments
- * that DO run:
+ *  - **This package's own `typecheck` script cannot see it.** `tsconfig.json`
+ *    here carries `"exclude": [..., "**\/*.test.ts"]` (escaped so this comment
+ *    does not terminate early), and `tsc --noEmit` reads that config. Measured,
+ *    not assumed: `tsc --noEmit --listFiles` in this package lists 0 files
+ *    ending `.test.ts` (the sibling `driver-turso`, whose tsconfig excludes
+ *    only `node_modules`/`dist`, lists 43). vitest transpiles without
+ *    typechecking, and the root `tsconfig.json` excludes `packages` entirely,
+ *    so neither of those picks it up either. That exclusion is itself a filed
+ *    defect (#14917), not a design.
+ *  - **`pnpm check:type-check-debt` DOES compile it.** The ratchet's
+ *    `--re-measure` leg generates a project that drops the test exclusion and
+ *    runs `tsc` over this package with its tests un-hidden, then compares the
+ *    error count to the frozen `TEST_DEBT['@objectstack/driver-mongodb']` entry
+ *    (10: `TS1309` x7 + `TS2550` x3). ⭐ Not theory: the first head of this
+ *    branch widened `update()`'s declaration, the three found-arm reads in
+ *    `mongodb-driver.test.ts` became `TS18047 'result' is possibly 'null'`, and
+ *    that lane went red at 13 (+3) while `pnpm typecheck` stayed green. CI
+ *    caught in this file's layer exactly what the package's own typecheck is
+ *    blind to.
+ *
+ * So a type pin here would not be a phantom — it would be checked, once, in a
+ * lane that reports a break as a ledger COUNT moving rather than as a named
+ * assertion failure, and that reports it only when someone runs the whole-repo
+ * re-measure. The declaration is pinned by better instruments instead, both of
+ * which run in this package's own `typecheck`:
  *
  *  - **narrowing the declaration back** to `Promise[Record[string, unknown]]`
  *    is a `tsc` error in `mongodb-driver.ts` itself — that file IS in the
@@ -82,13 +97,20 @@
  *  - **reverting the behaviour** while keeping the signature reds the runtime
  *    pins below.
  *
- * # Reverse verification, direction predicted BEFORE running
+ * # Reverse verification — predicted direction, then what was OBSERVED
  *
  * Predicted: restoring the `|| withoutUndefinedOwnKeys({ id: String(id),
- * ...updateData })` fallback reds the miss pin and the no-fabrication pin, and
- * reds the type pin's `Equals` const at COMPILE time (so the whole file fails
- * to typecheck) while the positive control and the write-still-issued pin stay
- * GREEN — they exercise the found arm, which the revert does not touch.
+ * ...updateData })` fallback reds the miss pin and the no-fabrication pin,
+ * while the positive control and the write-still-issued pin stay GREEN — they
+ * exercise the found arm, which the revert does not touch.
+ *
+ * Observed, with the mutation proved on disk (injected text counted, deleted
+ * text absent) and the restore proved by a `git hash-object` match against the
+ * HEAD blob: `Test Files 1 failed (1)`, `Tests 2 failed | 2 passed (4)`. The
+ * two reds are the miss pin and the no-fabrication pin, by name. ⚠️ All FOUR
+ * cases ran — there is no compile-time leg here, because there is no type pin
+ * in this file to red; a prediction that the file would fail to typecheck as a
+ * whole would have been wrong for exactly that reason.
  */
 
 import { describe, it, expect } from 'vitest';
