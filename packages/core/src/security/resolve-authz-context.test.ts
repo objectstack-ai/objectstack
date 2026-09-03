@@ -1162,12 +1162,35 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
     sys_user_permission_set: [],
   });
 
+  /**
+   * [#14273] Both refusals are observable ONLY as the absence of a principal.
+   * The envelope used to name the refusal (`authRefusal.reason`); that member
+   * was measured at zero production readers on every transport and removed
+   * under ADR-0049 enforce-or-remove (maintainer ruling 2026-09-03). So every
+   * pin below asserts the refusal on BEHAVIOUR, and separates it from the two
+   * neighbours a bare `userId === undefined` could be confused with:
+   *
+   *  - "the key was simply unknown" — an unknown key FALLS THROUGH to the
+   *    session path, so a `getSession` answering a DIFFERENT user is the
+   *    control: a refusal leaves `userId` undefined, an unknown key would have
+   *    resolved `u_session`;
+   *  - "the refusal was skipped" — the same key over the same rows is ADMITTED
+   *    as `u1` when the membership holds, or when the posture enforces no wall
+   *    (`single`).
+   */
+  const REFUSED_ENVELOPE = {
+    positions: [],
+    permissions: [],
+    systemPermissions: [],
+    org_user_ids: [],
+    accessible_org_ids: [],
+  };
+
   it('adopts the key organization as the request tenant when membership holds', async () => {
     const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_a', role: 'member' }]));
     const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
     expect(ctx.userId).toBe('u1');
     expect(ctx.tenantId).toBe('org_a');
-    expect(ctx.authRefusal).toBeUndefined();
   });
 
   /**
@@ -1182,27 +1205,37 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
    */
   it('refuses a key whose owner is no longer a member of its organization', async () => {
     const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_other', role: 'member' }]));
-    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
+    const ctx = await resolveAuthzContext({
+      ql,
+      headers: keyHeaders(),
+      // The unknown-key control: an unknown key would fall through to THIS
+      // session and resolve `u_session`; a refusal never consults it.
+      getSession: session('u_session'),
+      tenancyPosture: 'isolated',
+    });
     expect(ctx.userId).toBeUndefined();
     expect(ctx.tenantId).toBeUndefined();
-    expect(ctx.permissions).toEqual([]);
-    expect(ctx.authRefusal?.reason).toBe('organization_membership_ended');
+    expect(ctx).toEqual(REFUSED_ENVELOPE);
   });
 
   it('refuses when the membership row exists but its ADR-0091 window has lapsed', async () => {
     const ql = makeQl(tables([
       { user_id: 'u1', organization_id: 'org_a', role: 'member', valid_until: '2000-01-01T00:00:00Z' },
     ]));
-    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'isolated' });
+    const ctx = await resolveAuthzContext({
+      ql, headers: keyHeaders(), getSession: session('u_session'), tenancyPosture: 'isolated',
+    });
     expect(ctx.userId).toBeUndefined();
-    expect(ctx.authRefusal?.reason).toBe('organization_membership_ended');
+    expect(ctx).toEqual(REFUSED_ENVELOPE);
   });
 
   it('the same key under `group` is refused too — the wall is membership-derived there as well', async () => {
     const ql = makeQl(tables([{ user_id: 'u1', organization_id: 'org_other', role: 'member' }]));
-    const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'group' });
+    const ctx = await resolveAuthzContext({
+      ql, headers: keyHeaders(), getSession: session('u_session'), tenancyPosture: 'group',
+    });
     expect(ctx.userId).toBeUndefined();
-    expect(ctx.authRefusal?.reason).toBe('organization_membership_ended');
+    expect(ctx).toEqual(REFUSED_ENVELOPE);
   });
 
   /**
@@ -1214,7 +1247,7 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
     const ql = makeQl(tables([]));
     const ctx = await resolveAuthzContext({ ql, headers: keyHeaders(), tenancyPosture: 'single' });
     expect(ctx.userId).toBe('u1');
-    expect(ctx.authRefusal).toBeUndefined();
+    expect(ctx.tenantId).toBe('org_a');
   });
 
   /**
@@ -1237,8 +1270,39 @@ describe('resolveAuthzContext — API-key organization (#8287)', () => {
       getSession: session('u1', { org: 'org_a' }),
       tenancyPosture: 'isolated',
     });
+    // A fall-through would have resolved the session's `u1`; an admission of
+    // the org-less key would have resolved the key's `u1`. Neither happened.
     expect(ctx.userId).toBeUndefined();
-    expect(ctx.authRefusal?.reason).toBe('organization_required');
+    expect(ctx).toEqual(REFUSED_ENVELOPE);
+  });
+
+  /**
+   * [#14273] The pin that the reason member is GONE — by key existence, never
+   * by `undefined`, which cannot tell a removed key from one left behind
+   * holding nothing. Both refusal paths resolve to an envelope deep-equal to
+   * the anonymous one: the refusal discloses nothing on the context, so no
+   * transport can disclose it on the wire by accident. Reverse check: re-add
+   * the member at either write site and this goes red.
+   */
+  it('a refused key resolves to the anonymous envelope — no reason member on the context (#14273)', async () => {
+    const anonymous = await resolveAuthzContext({ ql: makeQl(tables([])), headers: H() });
+    const membershipEnded = await resolveAuthzContext({
+      ql: makeQl(tables([{ user_id: 'u1', organization_id: 'org_other', role: 'member' }])),
+      headers: keyHeaders(),
+      tenancyPosture: 'isolated',
+    });
+    const organizationRequired = await resolveAuthzContext({
+      ql: makeQl({ ...tables([]), sys_api_key: [{ key: hashApiKey(raw), revoked: false, user_id: 'u1' }] }),
+      headers: keyHeaders(),
+      tenancyPosture: 'isolated',
+    });
+    expect(anonymous.userId).toBeUndefined();
+    for (const refused of [membershipEnded, organizationRequired]) {
+      expect(refused.userId).toBeUndefined();
+      expect('authRefusal' in refused).toBe(false);
+      expect(Object.keys(refused).sort()).toEqual(Object.keys(REFUSED_ENVELOPE).sort());
+      expect(refused).toEqual(anonymous);
+    }
   });
 
   /**

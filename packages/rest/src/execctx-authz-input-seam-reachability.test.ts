@@ -394,19 +394,30 @@ describe('[#13906] §2 — the Layer 0 ex-member refusal, and what a failed post
     expect(captured.body?.error?.code).toBe(ANONYMOUS_DENY_CODE);
   });
 
-  it('POSITIVE CONTROL (mechanism): the 401 above IS the membership refusal — the resolver names it', async () => {
-    // Same fixtures, same real resolver, posture present: the refusal fires
-    // and carries its reason. This is what distinguishes "the refusal was
-    // skipped" (§ next) from "the refusal never applied to this fixture".
-    const headers = new Headers({ 'x-api-key': RAW_EXMEMBER_KEY });
-    const authz = await resolveAuthzContext({
+  it('POSITIVE CONTROL (mechanism): the 401 above IS the membership refusal — the resolver yields NO principal with the posture present and a full one with it absent', async () => {
+    // Same fixtures, same real resolver, posture present: the refusal fires.
+    // [#14273] The resolver no longer NAMES the refusal on the envelope (the
+    // `authRefusal` member was removed — zero production readers, ADR-0049),
+    // so the mechanism is pinned as a behavioural CONTRAST on the one changed
+    // input: the SAME key over the SAME rows is refused with the posture
+    // present and admitted as `u_exmember` with it absent. That is what
+    // distinguishes "the refusal was skipped" (§ next) from "the refusal never
+    // applied to this fixture" — an unknown or revoked key would resolve to no
+    // principal in BOTH legs.
+    const resolveWith = (tenancyPosture: 'isolated' | undefined) => resolveAuthzContext({
       ql: qlWith({ memberships: MEMBER_ROWS }),
-      headers,
+      headers: new Headers({ 'x-api-key': RAW_EXMEMBER_KEY }),
       getSession: async () => undefined,
-      tenancyPosture: 'isolated',
+      tenancyPosture,
     } as any);
-    expect(authz.authRefusal?.reason).toBe('organization_membership_ended');
-    expect(authz.userId).toBeUndefined();
+    const refused = await resolveWith('isolated');
+    expect(refused.userId).toBeUndefined();
+    expect(refused.tenantId).toBeUndefined();
+    expect(refused.systemPermissions).toEqual([]);
+    expect(refused.accessible_org_ids).toEqual([]);
+    const admitted = await resolveWith(undefined);
+    expect(admitted.userId).toBe('u_exmember');
+    expect(admitted.tenantId).toBe('org_A');
   });
 
   it('⚠️ MEASURED PERMISSIVE: tenancy REGISTERED AND FAILING (factory throws) → the refusal is SKIPPED and the ex-member key is served 200', async () => {
@@ -427,7 +438,6 @@ describe('[#13906] §2 — the Layer 0 ex-member refusal, and what a failed post
       getSession: async () => undefined,
       tenancyPosture: undefined,
     } as any);
-    expect(authz.authRefusal).toBeUndefined();
     expect(authz.userId).toBe('u_exmember');
     // The membership fact is IN HAND and says "not a member of org_A" — the
     // refusal was gated off by the missing posture, not by missing data.

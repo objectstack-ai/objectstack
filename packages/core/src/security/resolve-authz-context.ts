@@ -61,7 +61,6 @@ import type { AuthzPosture, TenancyPosture } from '@objectstack/spec/security';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 
 import { resolveApiKeyAdmission } from './api-key.js';
-import type { ApiKeyRefusalReason } from './api-key.js';
 import { isGrantActive, nextGrantValidityBoundary } from './grant-validity.js';
 import { openUserGrantsCache } from './resolve-user-grants-cache.js';
 import {
@@ -104,21 +103,6 @@ export interface ResolvedAuthzContext {
    * anonymous requests carry no rung.
    */
   posture?: AuthzPosture;
-  /**
-   * [#8287] Set when an inbound API key was REFUSED — a real, intact
-   * credential this deployment's tenancy posture cannot admit. The context is
-   * otherwise EMPTY (no `userId`), so every transport already fails it closed
-   * to 401 with no change; this field only lets a transport that wants to say
-   * WHY do so, instead of answering the operator with a bare "unauthenticated"
-   * for a key they can see is neither revoked nor expired.
-   *
-   * ⚠️ `reason` is NOT an `error.code`. The wire vocabulary is closed
-   * (ADR-0112: `StandardErrorCode ∪ ERROR_CODE_LEDGER`, both in `packages/spec`)
-   * and a refused credential's standard member is `UNAUTHENTICATED`. This is a
-   * diagnostic discriminator for the message, deliberately lowercase so it can
-   * never be mistaken for one.
-   */
-  authRefusal?: { reason: ApiKeyRefusalReason; message: string };
 }
 
 export interface ResolveAuthzInput {
@@ -273,10 +257,18 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   // path. Falling through would be more permissive than the behaviour this
   // replaced (an API key already outranks a session), and a refusal that
   // quietly becomes a session login is not a refusal.
-  if (admission.outcome === 'refused') {
-    ctx.authRefusal = { reason: admission.reason, message: admission.message };
-    return ctx;
-  }
+  //
+  // [#14273] The refusal is observable ONLY as the absence of a principal: the
+  // envelope returned here is the EMPTY context, deep-equal to an anonymous
+  // request's. It used to also carry `authRefusal: { reason, message }` (the
+  // admission's own verdict). That member was measured at ZERO production
+  // readers on every transport — every door answers a refused key from
+  // `userId` alone, as the anonymous 401 — and was removed under ADR-0049
+  // enforce-or-remove (maintainer ruling 2026-09-03). ⛔ Do not re-add a reason
+  // member here to say WHY on the wire: that is a security-boundary decision
+  // the ruling explicitly did not take; the recorded fallback if a reader ever
+  // appears is an audit-only outlet on the server side, never this envelope.
+  if (admission.outcome === 'refused') return ctx;
   const keyPrincipal = admission.outcome === 'admitted' ? admission.principal : undefined;
   if (keyPrincipal) {
     userId = keyPrincipal.userId;
@@ -338,6 +330,11 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
   // Degrading would hand back exactly the `200 + total 0` silent-empty this
   // card exists to kill — an ex-member's automation would keep answering
   // success while reading nothing.
+  //
+  // [#14273] The EMPTY context, and nothing else. This refusal used to name
+  // itself on the envelope (`authRefusal.reason = 'organization_membership_ended'`
+  // plus an operator-facing message); the member was removed for the reason
+  // recorded at the admission refusal above — zero readers, ADR-0049.
   if (keyPrincipal?.tenantId && input.tenancyPosture) {
     const posture = input.tenancyPosture;
     if (postureEnforcesWall(posture) && !grants.accessible_org_ids.includes(keyPrincipal.tenantId)) {
@@ -347,12 +344,6 @@ export async function resolveAuthzContext(input: ResolveAuthzInput): Promise<Res
         systemPermissions: [],
         org_user_ids: [],
         accessible_org_ids: [],
-        authRefusal: {
-          reason: 'organization_membership_ended',
-          message:
-            'This API key authenticates into an organization its owner is no longer a member of. '
-            + 'The key was not revoked — the membership that backed it ended.',
-        },
       };
     }
   }

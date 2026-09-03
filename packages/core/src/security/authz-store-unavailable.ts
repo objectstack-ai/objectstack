@@ -45,14 +45,19 @@
  *
  * ## Why a THROW, and not a field on the envelope
  *
- * The alternative was a discriminator field on `ResolvedAuthzContext` — the
- * shape `authRefusal` already has. That was rejected on a MEASUREMENT, not a
- * preference: `authRefusal` has existed since #8287 and, outside this module
- * and its own unit test, has **zero** consumers anywhere in the repo. A
- * diagnostic field on this envelope is demonstrably not read by any door. Every
- * transport reads `userId` and `systemPermissions`; a new sibling field would
- * have to be taught to eight separate call sites before it made a single door
- * louder, and would answer the old quiet 403 at every site that was missed.
+ * The alternative was a discriminator field on `ResolvedAuthzContext`. That
+ * was rejected on a MEASUREMENT, not a preference: the envelope carried exactly
+ * such a field from #8287 until #14273 — `authRefusal`, the API-key refusal
+ * reason — and it was measured at **zero** production readers on every
+ * transport: eight non-test consumers of the resolver, none reading it; its
+ * only readers were the resolver's own unit test and one cross-package
+ * measurement test. The measurement was acted on — the member was REMOVED
+ * under ADR-0049 enforce-or-remove (maintainer ruling 2026-09-03), so the
+ * envelope carries no diagnostic field today. A diagnostic field on this
+ * envelope is demonstrably not read by any door. Every transport reads
+ * `userId` and `systemPermissions`; a new sibling field would have to be
+ * taught to eight separate call sites before it made a single door louder,
+ * and would answer the old quiet 403 at every site that was missed.
  *
  * A field is quiet by default and must be deliberately made loud. A throw is
  * loud by default and must be deliberately silenced. On a security surface
