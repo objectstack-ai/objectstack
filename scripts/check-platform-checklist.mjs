@@ -704,6 +704,45 @@ function foldedCallMessage(path, call, spelling, singular) {
   );
 }
 
+// ── Self-test verdict handshake ─────────────────────────────────────────────
+//
+// Five batteries, each returning `{ checked, failures }` for a caller to
+// report. A `return` above a battery's own end prints nothing, registers no
+// failure, and yields a SMALLER `checked` that both legs below read as a pass.
+// Measured on this file: a section that stopped running took the `--self-test`
+// verdict from 141 assertions to 119, exited 0, and still claimed in prose that
+// the direction it had skipped "REFUSES an empty/renamed/reshaped" table. A
+// bare `return` is no better — it yields `undefined` and CRASHES the combine
+// below, and an exit code alone reads that crash as a handshake rather than as
+// the accident it is.
+//
+// So each battery sets its own flag as its last act and every caller checks it.
+// The return value is load-bearing here (it carries `checked` and `failures`),
+// so the handshake is a flag rather than a returned sentinel — the spelling
+// `check-durability-degradation-log-level.mjs` and
+// `check-dispatcher-error-vocabulary.mjs` carry, for that same reason.
+let trapReachedVerdict = false;
+let provisioningReachedVerdict = false;
+let unreferencedReachedVerdict = false;
+let metaCallReachedVerdict = false;
+let citationsReachedVerdict = false;
+
+/**
+ * One wording, ten call sites — five batteries across the two legs that run
+ * them. The check, the message and the exit code are the landed ones; only the
+ * duplication is factored out.
+ */
+function requireReachedVerdict(name, reached) {
+  if (reached) return;
+  console.error(
+    `\n✗ check-platform-checklist self-test: ${name}() returned without reaching its verdict,\n`
+      + 'so its assertions did not all run and no failure of theirs could be reported.\n'
+      + 'Running the gate on top of a self-test that never finished would report an\n'
+      + 'unverified gate as a verified one.\n',
+  );
+  process.exit(1);
+}
+
 /**
  * The positive control. Proves the extractor reads a good table AND refuses an
  * empty / renamed / reshaped one, and that the item-side checker catches both
@@ -770,6 +809,7 @@ function selfTestTrapVocabulary() {
   t('C8 an empty-string trap is flagged', trapProblems({ traps: [''] }, vocab).length === 1);
   t('C9 a trap listed twice on one item is flagged', trapProblems({ traps: ['stale-dist', 'stale-dist'] }, vocab).some((m) => m.includes('twice')));
 
+  trapReachedVerdict = true;
   return { checked, failures };
 }
 
@@ -877,6 +917,7 @@ function selfTestProvisioningUse() {
   const hintedEmpty = check('qa-contributor-bound-member', 'records-forms');
   t('Q20 the same hint reaches an area that has no recipe block of its own', hintedEmpty.length === 1 && hintedEmpty[0].includes('`search:qa-contributor-bound-member`'));
 
+  provisioningReachedVerdict = true;
   return { checked, failures };
 }
 
@@ -978,6 +1019,7 @@ function selfTestUnreferencedRecipes() {
   t('R18 a `$comment` is never reported unreferenced', flag(ALL).length === 0 && none.every((r) => !r.recipe.startsWith('$')));
   t('R19 an area that defines no recipes contributes nothing to flag', !none.some((r) => r.area === 'records-forms'));
 
+  unreferencedReachedVerdict = true;
   return { checked, failures };
 }
 
@@ -1136,6 +1178,7 @@ export const NEIGHBOURING_MAP: Readonly<Record<string, string>> = Object.freeze(
   t('M52 the live map is a bijection-free lookup: no folded spelling is ALSO a canonical singular — so the refusal can never fire on a canonical `/meta/<type>` segment',
     live.refusal === null && !live.folded.some((f) => live.canonical.includes(f)));
 
+  metaCallReachedVerdict = true;
   return { checked, failures };
 }
 
@@ -1216,6 +1259,7 @@ function selfTestSourceLineCitations() {
   t('S6 an ADR section reference is not a citation', n('ADR-0025 §3.3 and #13479') === 0);
   t('S7 the README placeholder spelling of the ban is not itself a citation', n('never pin `file.ts:NNN` or a bare `:NNN`') === 0);
 
+  citationsReachedVerdict = true;
   return { failures, checked };
 }
 
@@ -1225,6 +1269,11 @@ if (process.argv.slice(2).includes('--self-test')) {
   const unref = selfTestUnreferencedRecipes();
   const metaCall = selfTestMetaCallSpelling();
   const cites = selfTestSourceLineCitations();
+  requireReachedVerdict('selfTestTrapVocabulary', trapReachedVerdict);
+  requireReachedVerdict('selfTestProvisioningUse', provisioningReachedVerdict);
+  requireReachedVerdict('selfTestUnreferencedRecipes', unreferencedReachedVerdict);
+  requireReachedVerdict('selfTestMetaCallSpelling', metaCallReachedVerdict);
+  requireReachedVerdict('selfTestSourceLineCitations', citationsReachedVerdict);
   const failures = [...trap.failures, ...prov.failures, ...unref.failures, ...metaCall.failures, ...cites.failures];
   if (failures.length === 0) {
     console.log(
@@ -1243,6 +1292,7 @@ if (process.argv.slice(2).includes('--self-test')) {
 
 // The extractor's own positive control, before it is trusted with anything.
 const trapControl = selfTestTrapVocabulary();
+requireReachedVerdict('selfTestTrapVocabulary', trapReachedVerdict);
 if (trapControl.failures.length) {
   console.error("check-platform-checklist: the trap-vocabulary extractor's own positive control FAILED — this check cannot be trusted, and a green from it would mean nothing.\n");
   for (const f of trapControl.failures) console.error(`  ✗ ${f}`);
@@ -1252,6 +1302,7 @@ if (trapControl.failures.length) {
 // Same, for the provisioning resolve: a green from a check that cannot fire is
 // indistinguishable from the green this gate printed before it existed.
 const provisioningControl = selfTestProvisioningUse();
+requireReachedVerdict('selfTestProvisioningUse', provisioningReachedVerdict);
 if (provisioningControl.failures.length) {
   console.error("check-platform-checklist: the provisioning-resolve check's own positive control FAILED — a `use` that resolves to nothing would pass, which is the exact defect this check was added to close.\n");
   for (const f of provisioningControl.failures) console.error(`  ✗ ${f}`);
@@ -1263,6 +1314,7 @@ if (provisioningControl.failures.length) {
 // recipes on the real ledger are referenced, so this direction's output is
 // permanently empty and its green says nothing on its own.
 const unreferencedControl = selfTestUnreferencedRecipes();
+requireReachedVerdict('selfTestUnreferencedRecipes', unreferencedReachedVerdict);
 if (unreferencedControl.failures.length) {
   console.error('check-platform-checklist: the unreferenced-recipe direction\'s own positive control FAILED — a recipe no item references would pass unreported, and because every real recipe IS referenced, nothing else in this gate would ever notice.\n');
   for (const f of unreferencedControl.failures) console.error(`  ✗ ${f}`);
@@ -1275,6 +1327,7 @@ if (unreferencedControl.failures.length) {
 // subject population is zero — so nothing but this battery can tell a working
 // direction from a deleted one.
 const metaCallControl = selfTestMetaCallSpelling();
+requireReachedVerdict('selfTestMetaCallSpelling', metaCallReachedVerdict);
 if (metaCallControl.failures.length) {
   console.error("check-platform-checklist: the `/meta` call-spelling refusal's own positive control FAILED — an executable step instructing a folded plural spelling would pass unreported, which is the exact defect this check was added to close.\n");
   for (const f of metaCallControl.failures) console.error(`  ✗ ${f}`);
@@ -1288,6 +1341,7 @@ if (metaCallControl.failures.length) {
 // from the ledger staying clean — which is precisely the exit-0-by-construction
 // shape this check was added to end.
 const citationControl = selfTestSourceLineCitations();
+requireReachedVerdict('selfTestSourceLineCitations', citationsReachedVerdict);
 if (citationControl.failures.length) {
   console.error('check-platform-checklist: the source-line-citation refusal\'s own positive control FAILED — a rotting `file:line` pointer would pass unreported, and because the ledger is clean nothing else here would ever notice.\n');
   for (const f of citationControl.failures) console.error(`  ✗ ${f}`);

@@ -640,7 +640,6 @@ export function createDeclarationBootWriteGuard(): DeclarationBootWriteGuard {
       else refusals.set(key, { driver: driverName, method, object, count: 1 });
       if (!warned.has(key)) {
         warned.add(key);
-        // eslint-disable-next-line no-console
         console.warn(
           `[migrate] ⚠ Refused ${method}() on ${object} via ${driverName}: a declaration `
           + 'boot refuses row writes. The plugin that issued it registers a writing hook '
@@ -667,7 +666,6 @@ export function createDeclarationBootWriteGuard(): DeclarationBootWriteGuard {
       else rawExecutions.set(driverName, { driver: driverName, count: 1 });
       if (!warnedExec.has(driverName)) {
         warnedExec.add(driverName);
-        // eslint-disable-next-line no-console
         console.warn(
           `[migrate] ⚠ Raw execute() called via ${driverName} during the declaration boot. `
           + 'A raw command cannot be classified as read or write, so it was FORWARDED, not '
@@ -699,7 +697,6 @@ export function createDeclarationBootWriteGuard(): DeclarationBootWriteGuard {
       else immediateDdl.set(key, { driver: driverName, method, object, count: 1 });
       if (!warnedDdl.has(driverName)) {
         warnedDdl.add(driverName);
-        // eslint-disable-next-line no-console
         console.warn(
           `[migrate] ⚠ ${method}() on ${object} called via ${driverName} during the declaration boot. `
           + 'Immediate DDL is not held back by the schema deferral, so it was FORWARDED, not '
@@ -1137,7 +1134,6 @@ export async function buildSchemaMigrationPlugins(opts: {
         + 'The plan below covers ONLY the objects the data stack registered — it does NOT '
         + "cover this deployment's own objects, so an empty plan here is UNMEASURED, not "
         + '"in sync". Fix the config (or its environment) and re-run.';
-      // eslint-disable-next-line no-console
       console.warn(`[migrate] ⚠ ${line}`);
       notes.push(line);
       hostConfigError = message;
@@ -1280,7 +1276,6 @@ export function refuseWhenHostConfigUnloadable(
 ): boolean {
   const line = describeUnloadableHostConfig(composition, options);
   if (line === null) return false;
-  // eslint-disable-next-line no-console
   console.error(`[migrate] ✗ ${line}`);
   process.exitCode = 1;
   return true;

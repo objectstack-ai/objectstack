@@ -735,6 +735,42 @@ export const SysUser = ObjectSchema.create({
       group: 'Profile',
     }),
 
+    // #13881 — the user's own notification language, a first-class column
+    // (maintainer ruling 2026-09-01: 「`sys_user` 加 `locale` 一等列」; the
+    // preference-bag shape was rejected, so nothing falls back to
+    // sys_user_preference). BCP-47 tag (`zh-CN`, `ja-JP`). Read PER RECIPIENT
+    // by the messaging channels after fan-out (`service-messaging/src/
+    // recipient-locale.ts` — the one read point), with the deployment default
+    // (`II18nService.getDefaultLocale()`) underneath: absent / empty /
+    // malformed always falls back, never dead-letters a delivery.
+    //
+    // Owned by objectql, exactly like `ai_access`: better-auth is oblivious
+    // to this column, and it is DELIBERATELY not a better-auth
+    // `additionalFields` entry — better-auth SELECTs explicit columns, so
+    // declaring it there would make getSession query a column an env that has
+    // not yet run schema-sync does not have (the `ai_access` note in
+    // auth-manager.ts). Registered as an extension field in plugin-auth's
+    // MANAGED_EXTENSION_FIELDS, whose ADR-0105 D7 guard proves the name does
+    // not collide with better-auth's own user schema at the pinned version.
+    //
+    // `readonly` for the same reason as every non-whitelisted field above
+    // (ADR-0092 D4): the identity write guard's self-service whitelist is
+    // {name, image}, this column is not on it, so a form edit would be
+    // stripped server-side; rendering it editable would advertise a write the
+    // runtime refuses. Widening that whitelist is a security-boundary decision
+    // recorded as an open question on #13881, not made here.
+    locale: Field.text({
+      label: 'Locale',
+      required: false,
+      readonly: true,
+      maxLength: 35,
+      group: 'Profile',
+      description:
+        'Preferred language for notifications, as a BCP-47 tag (e.g. zh-CN, ja-JP). ' +
+        'Read per recipient at delivery time; when unset the deployment default applies. ' +
+        'Owned by objectql (better-auth is oblivious to this column).',
+    }),
+
     // ── Organization ─────────────────────────────────────────────
     manager_id: Field.lookup('sys_user', {
       label: 'Manager',

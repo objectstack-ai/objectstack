@@ -188,6 +188,53 @@ const ts = await requireDefaultExport('typescript', () => import('typescript'), 
 import { parseSourceFile } from './ts-parse.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '1. THE POSITIVE CONTROL: the pre-#11750 table must produce exactly 4.': 6,
+  '2. The corrected table must be green on BOTH legs.': 3,
+  '3. A ONE-LEGGED gate would have shipped 3 of the 4. Pinned so that': 1,
+  '4. AST vs REGEX on the fixture: the numbers must differ, in the': 3,
+  '5. Comments are not entries. `grep -c` over the fixture inflates both': 2,
+  '6. MULTI-TYPE CELL control: five names in one cell become five types.': 2,
+  '7. A mismatch inside a MULTI-TYPE cell is caught per type, not per row.': 1,
+  '8. STRUCTURAL refusals. Each must be RED, none may read as clean.': 7,
+  '9. REGISTRY structural refusals -- the route-around clause.': 7,
+  '10. A duplicated type in the table is caught.': 1,
+  '11. A retired type left behind in the table is caught.': 1,
+  '12. An entry that OMITS the optional flag counts as false, not as a': 1,
+  '13a. Number-word reading: both spellings, the compound, and the refusal.': 20,
+  '13b. POSITIVE CONTROL for green: a sentence true of FIXTURE_REGISTRY': 3,
+  '13c. THE CARD\'S SCENARIO, both halves — and each isolated by the other': 2,
+  '13d. Digits and words are interchangeable on both claims, and dropping the': 3,
+  '13e. EVERY match is checked, not just the first. A second copy of the same': 1,
+  '13f. STRUCTURAL refusals. An absent or unreadable claim is RED — draining': 5,
+  '13g. The refusals above must be refusals, not silent empties: a fixture': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 19;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const ROOT = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 
 const REGISTRY_FILE = 'packages/spec/src/kernel/metadata-plugin.zod.ts';
@@ -847,12 +894,28 @@ function run(registryText, tableText) {
 let selfTestReachedVerdict = false;
 
 export function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   const failures = [];
   const check = (name, ok, detail = '') => {
+    registerCase();
     if (!ok) failures.push(`${name}${detail ? ` — ${detail}` : ''}`);
   };
 
   // ---- 1. THE POSITIVE CONTROL: the pre-#11750 table must produce exactly 4.
+  battery('1. THE POSITIVE CONTROL: the pre-#11750 table must produce exactly 4.');
   const before = run(FIXTURE_REGISTRY, FIXTURE_TABLE_BEFORE);
   check('before/structure-clean', before.structure.length === 0, JSON.stringify(before.structure));
   const beforeTotal = before.leg1.length + before.leg2.length;
@@ -875,6 +938,7 @@ export function selfTest() {
   );
 
   // ---- 2. The corrected table must be green on BOTH legs.
+  battery('2. The corrected table must be green on BOTH legs.');
   const after = run(FIXTURE_REGISTRY, FIXTURE_TABLE_AFTER);
   check('after/structure-clean', after.structure.length === 0, JSON.stringify(after.structure));
   check('after/leg1=0', after.leg1.length === 0, JSON.stringify(after.leg1));
@@ -882,10 +946,12 @@ export function selfTest() {
 
   // ---- 3. A ONE-LEGGED gate would have shipped 3 of the 4. Pinned so that
   //         deleting leg 2 cannot pass this battery.
+  battery('3. A ONE-LEGGED gate would have shipped 3 of the 4. Pinned so that');
   check('leg2 is load-bearing (3 != 4)', before.leg1.length !== beforeTotal);
 
   // ---- 4. AST vs REGEX on the fixture: the numbers must differ, in the
   //         direction the header documents.
+  battery('4. AST vs REGEX on the fixture: the numbers must differ, in the');
   const regexEntryCount = (FIXTURE_REGISTRY.match(/^ {2}\{ type: '/gm) || []).length;
   const astEntryCount = before.entries.length;
   check('fixture/ast=14', astEntryCount === 14, `got ${astEntryCount}`);
@@ -901,6 +967,7 @@ export function selfTest() {
 
   // ---- 5. Comments are not entries. `grep -c` over the fixture inflates both
   //         flags; the AST count must be the smaller, correct one.
+  battery('5. Comments are not entries. `grep -c` over the fixture inflates both');
   const grepTrue = (FIXTURE_REGISTRY.match(new RegExp(`${COL_FLAG}: true`, 'g')) || []).length;
   const astTrue = before.entries.filter((e) => e.allowOrgOverride).length;
   check('fixture/ast true-set = 5', astTrue === 5, `got ${astTrue}`);
@@ -911,6 +978,7 @@ export function selfTest() {
   );
 
   // ---- 6. MULTI-TYPE CELL control: five names in one cell become five types.
+  battery('6. MULTI-TYPE CELL control: five names in one cell become five types.');
   const multi = readTable(FIXTURE_TABLE_AFTER);
   const rowWith5 = multi.rows.find((r) => r.types.length === 5);
   check(
@@ -925,6 +993,7 @@ export function selfTest() {
     `${flatCount} types / ${multi.rows.length} rows`);
 
   // ---- 7. A mismatch inside a MULTI-TYPE cell is caught per type, not per row.
+  battery('7. A mismatch inside a MULTI-TYPE cell is caught per type, not per row.');
   const oneWrongInCell = FIXTURE_TABLE_AFTER.replace(
     `| \`view\`, \`dashboard\`, \`report\`, \`email_template\`, \`translation\` | ${YES} |`,
     `| \`view\`, \`dashboard\`, \`report\`, \`email_template\`, \`translation\`, \`hook\` | ${YES} |`,
@@ -937,6 +1006,7 @@ export function selfTest() {
   );
 
   // ---- 8. STRUCTURAL refusals. Each must be RED, none may read as clean.
+  battery('8. STRUCTURAL refusals. Each must be RED, none may read as clean.');
   const structural = [
     ['renamed heading', FIXTURE_TABLE_AFTER.replace(HEADING, '## Overlay whitelist')],
     ['no table', `${HEADING}\n\nJust prose now.\n\n## Next\n`],
@@ -958,6 +1028,7 @@ export function selfTest() {
   }
 
   // ---- 9. REGISTRY structural refusals -- the route-around clause.
+  battery('9. REGISTRY structural refusals -- the route-around clause.');
   const registryStructural = [
     ['spread element', FIXTURE_REGISTRY.replace("  { type: 'agent'", '  ...EXTRA_ENTRIES,\n  { type: \'agent\'')],
     [
@@ -983,6 +1054,7 @@ export function selfTest() {
   }
 
   // ---- 10. A duplicated type in the table is caught.
+  battery('10. A duplicated type in the table is caught.');
   const dup = run(
     FIXTURE_REGISTRY,
     FIXTURE_TABLE_AFTER.replace(`| \`job\` | ${NO} |`, `| \`job\` | ${NO} |\n| \`job\` | ${NO} |`),
@@ -994,6 +1066,7 @@ export function selfTest() {
   );
 
   // ---- 11. A retired type left behind in the table is caught.
+  battery('11. A retired type left behind in the table is caught.');
   const retired = run(FIXTURE_REGISTRY, FIXTURE_TABLE_AFTER.replace('| `job` |', '| `validation` |'));
   check(
     'a table row for an undeclared type is caught',
@@ -1003,6 +1076,7 @@ export function selfTest() {
 
   // ---- 12. An entry that OMITS the optional flag counts as false, not as a
   //          structural refusal (the schema's documented default).
+  battery('12. An entry that OMITS the optional flag counts as false, not as a');
   const omitted = readRegistry(
     FIXTURE_REGISTRY.replace(`{ type: 'agent', label: 'AI Agent', supportsOverlay: false, ${COL_FLAG}: false, loadOrder: 90 }`,
       `{ type: 'agent', label: 'AI Agent', supportsOverlay: false, loadOrder: 90 }`),
@@ -1022,6 +1096,7 @@ export function selfTest() {
 
   // 13a. Number-word reading: both spellings, the compound, and the refusal.
   //      `null` is the refusal channel and must never collide with 0.
+  battery('13a. Number-word reading: both spellings, the compound, and the refusal.');
   const tokenCases = [
     ['0', 0], ['5', 5], ['27', 27], ['28', 28],
     ['zero', 0], ['five', 5], ['Five', 5], ['six', 6], ['nineteen', 19], ['twenty', 20],
@@ -1040,6 +1115,7 @@ export function selfTest() {
 
   // 13b. POSITIVE CONTROL for green: a sentence true of FIXTURE_REGISTRY
   //      parses cleanly, yields BOTH claims, and drifts zero.
+  battery('13b. POSITIVE CONTROL for green: a sentence true of FIXTURE_REGISTRY');
   const proseOk = readProseCounts(proseSentence('five', 14));
   check('prose/ok structure-clean', proseOk.findings.length === 0, JSON.stringify(proseOk.findings));
   check(
@@ -1054,6 +1130,7 @@ export function selfTest() {
 
   // 13c. THE CARD'S SCENARIO, both halves — and each isolated by the other
   //      staying right, so neither red can be produced by the wrong claim.
+  battery('13c. THE CARD\'S SCENARIO, both halves — and each isolated by the other');
   const staleTotal = compareProse(before.entries, readProseCounts(proseSentence('five', 27)).claims);
   check(
     'prose/a stale TOTAL is caught, alone',
@@ -1069,6 +1146,7 @@ export function selfTest() {
 
   // 13d. Digits and words are interchangeable on both claims, and dropping the
   //      bold from `**complete**` is not a false red.
+  battery('13d. Digits and words are interchangeable on both claims, and dropping the');
   check(
     'prose/digit true-set accepted',
     compareProse(before.entries, readProseCounts(proseSentence('5', 14)).claims).length === 0,
@@ -1084,6 +1162,7 @@ export function selfTest() {
 
   // 13e. EVERY match is checked, not just the first. A second copy of the same
   //      claim elsewhere on the page is a second hand-kept copy.
+  battery('13e. EVERY match is checked, not just the first. A second copy of the same');
   const twoCopies = readProseCounts(
     `${proseSentence('five', 14)}\n\nElsewhere: of the 27 types in \`${REGISTRY_CONST}\`, most are inert.`,
   );
@@ -1096,6 +1175,7 @@ export function selfTest() {
 
   // 13f. STRUCTURAL refusals. An absent or unreadable claim is RED — draining
   //      this leg to vacuum is precisely the failure it exists to stop.
+  battery('13f. STRUCTURAL refusals. An absent or unreadable claim is RED — draining');
   const proseStructural = [
     ['claim sentence deleted', 'The table above is the whitelist. Nothing else to say.'],
     ['total claim missing', `Those five are the **complete** \`${COL_FLAG}: true\` set.`],
@@ -1110,10 +1190,57 @@ export function selfTest() {
 
   // 13g. The refusals above must be refusals, not silent empties: a fixture
   //      that refuses must also surrender no claim it could not check.
+  battery('13g. The refusals above must be refusals, not silent empties: a fixture');
   check(
     'prose/an unreadable count yields NO claim (never a default of 0)',
     readProseCounts(proseSentence('five', 'several')).claims.every((c) => c.what !== 'total'),
   );
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
 
   if (failures.length > 0) {
     console.error('\n✗ check-overlay-whitelist-table self-test failed:\n');

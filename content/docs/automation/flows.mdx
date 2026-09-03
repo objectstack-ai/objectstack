@@ -1080,7 +1080,7 @@ The handler reads what went wrong from two variables:
 | Variable | Scope | Use |
 | :--- | :--- | :--- |
 | `{<nodeId>.error}` | the failing node | `{charge_card.error}` — addressable by name, so one handler shared by several fault edges can tell which node it is handling |
-| `{$error}` | run-wide | `{$error.nodeId}` / `{$error.message}` — the most recent failure only |
+| `{$error}` | run-wide | `{$error.nodeId}` / `{$error.message}` — the most recent failure only. `{$error.code}` is also present when the failing node's own result carried a platform-classified error code (e.g. `create_record`'s `DUPLICATE_RECORD`, ADR-0112) — absent otherwise, so a handler branching on it should treat "unset" as "no classified code", not as "nothing failed" |
 
 A run that takes a fault branch and completes reports **success**, but the
 failed step stays in the run trace with `status: 'failure'` and its message —

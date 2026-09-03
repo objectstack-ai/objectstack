@@ -91,6 +91,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       image: {
         label: "Profile Image"
       },
+      locale: {
+        label: "Locale",
+        help: "Preferred language for notifications, as a BCP-47 tag (e.g. zh-CN, ja-JP). Read per recipient at delivery time; when unset the deployment default applies. Owned by objectql (better-auth is oblivious to this column)."
+      },
       manager_id: {
         label: "Manager",
         help: "This user's direct manager. Forms the reporting chain the `own_and_reports` hierarchy scope walks (ADR-0057 / @objectstack/security-enterprise)."

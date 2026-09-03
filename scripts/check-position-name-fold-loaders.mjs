@@ -297,10 +297,56 @@ function report(loaders) {
 // handshake is a flag rather than a returned sentinel.
 let selfTestReachedVerdict = false;
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'REVERSE CONTROL. A zero from a scan that cannot report anything is not a': 3,
+  'The allowed dispositions, each for its own stated reason.': 5,
+  'The text matcher, both directions. A matcher that never matches turns': 5,
+  'The permission-set extractor, on the real artifact shape.': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 4;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   let failed = 0;
   let cases = 0;
   const check = (label, actual, expected) => {
+    registerCase();
     cases++;
     const ok = JSON.stringify(actual) === JSON.stringify(expected);
     if (!ok) {
@@ -315,6 +361,7 @@ function selfTest() {
 
   // ── REVERSE CONTROL. A zero from a scan that cannot report anything is not a
   //    reading. These are the adversarial inputs a clean tree does not contain.
+  battery('REVERSE CONTROL. A zero from a scan that cannot report anything is not a');
   check(
     'REVERSE: a non-test loader is a finding',
     classifyReference('packages/runtime/src/seed-marketplace-apps.ts'),
@@ -332,6 +379,7 @@ function selfTest() {
   );
 
   // ── The allowed dispositions, each for its own stated reason.
+  battery('The allowed dispositions, each for its own stated reason.');
   check('test file is allowed', classifyReference('packages/metadata/src/plugin-artifact-forward-conversion.test.ts'), 'test');
   check('file under test/ is allowed', classifyReference('packages/qa/dogfood/test/shared-showcase.ts'), 'test');
   check('declared instrument is allowed', classifyReference('scripts/measure-position-name-fold-census.mjs'), 'instrument');
@@ -341,6 +389,7 @@ function selfTest() {
   // ── The text matcher, both directions. A matcher that never matches turns
   //    every loader into a silent pass, and it is the half a clean tree cannot
   //    exercise from the negative side alone.
+  battery('The text matcher, both directions. A matcher that never matches turns');
   check('matcher sees the basename', referencesArtifact(`join(HERE, '__fixtures__/${ARTIFACT_BASENAME}')`), true);
   check('matcher sees a fixtures-directory glob', referencesArtifact(`glob('${FIXTURES_DIR}/*.artifact.json')`), true);
   check('matcher ignores an unrelated hotcrm mention', referencesArtifact("// the HotCRM shape from hotcrm#788"), false);
@@ -352,6 +401,7 @@ function selfTest() {
   );
 
   // ── The permission-set extractor, on the real artifact shape.
+  battery('The permission-set extractor, on the real artifact shape.');
   check(
     'extractor finds both folded names in the shipped artifact',
     FOLDED_NAMES.every((n) => collectPermissionSetNames(JSON.parse(readFileSync(join(REPO_ROOT, ARTIFACT), 'utf8'))).includes(n)),
@@ -363,6 +413,52 @@ function selfTest() {
     [],
   );
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+      failed += 1;
+      console.error(`  FAIL ${message}`);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failed > 0) {
     console.error(`\n✗ check-position-name-fold-loaders self-test failed (${failed} of ${cases} case(s)).`);
     process.exit(1);

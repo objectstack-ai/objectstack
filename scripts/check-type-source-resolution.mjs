@@ -535,6 +535,57 @@ const KNOWN_DIST_RESOLVED_TYPE_IMPORTS = {
     '@objectstack/service-job', '@objectstack/service-messaging', '@objectstack/service-package',
     '@objectstack/spec', '@objectstack/types',
   ],
+  // ── #14710 re-baseline, on the onboarding limb above ─────────────────────
+  //
+  // A NEW entry, and this package was CLEAN before it -- unlike #14504's
+  // `runtime`, which already had one to re-measure. Read that first, because a
+  // package leaving the clean list normally means something regressed and here
+  // it does not: nothing about the code or the build state changed. This
+  // package's `typecheck` script began naming `tsconfig.test.json`, which is
+  // what onboarding a test layer IS, so a program that was always there became
+  // one this gate can SEE. The `packages/cli/test/` tree reached these nine
+  // deps on every vitest run already; no tsc program had ever been pointed at
+  // it, so no `--list` ever counted the pairs.
+  //
+  // CONDITION 1 by measurement, not assertion: the gate's own failure text
+  // annotates all nine `(via tsconfig.test.json)`, and a `--list` taken with
+  // the `package.json` wiring reverted -- the ONLY difference between the two
+  // trees, restored and verified by blob-hash equality -- reports NO
+  // `@objectstack/cli` entry at all. Every one of the nine is reached only
+  // through the program this change onboarded.
+  //
+  // CONDITION 2 -- the numbers, both from `--list` on the same checkout with
+  // the closure built:
+  //
+  //   before   115 programs / 78 packages, 56 non-clean, 279 package-dep pairs
+  //   after    116 programs / 78 packages, 57 non-clean, 288 package-dep pairs
+  //
+  // so +1 program, +9 pairs, +1 ENTRY and +1 non-clean package. The +1s are
+  // the honest cost of making an unseen program visible, and the ratchet is
+  // shrink-only from 288.
+  //
+  // CONDITION 3 -- reviewed, and `paths` is deliberately NOT the tool here, on
+  // the onboarding limb's own measured grounds (PR #12570, restated for
+  // `packages/rest` above): redirecting these specifiers to source would bill
+  // OTHER packages' source diagnostics into `packages/cli/test-typecheck-debt.json`,
+  // a ledger those packages cannot see and nobody can pay down -- and that
+  // ledger is this change's whole deliverable.
+  //
+  // ⚠️ One asymmetry recorded rather than repaired, because it is a property of
+  // this family and not of this card: `packages/cli/vitest.config.ts` aliases
+  // exactly four specifiers to source (`service-cache`, `plugin-auth`,
+  // `metadata-core`, and `create-objectstack/created-summary`), and
+  // `@objectstack/plugin-auth` is among the nine below -- so vitest reads it
+  // from `src` while this program reads its `dist`. That is the same trade
+  // `packages/rest`'s block above names (vitest aliases 2 of its 6), and it is
+  // why blanket `paths` would not be fidelity to vitest either. The
+  // source-vs-dist ledger for aliases is `scripts/check-test-source-alias.mjs`,
+  // which owns this question; this registry only records that the pair exists.
+  '@objectstack/cli': [
+    '@objectstack/cloud-connection', '@objectstack/core', '@objectstack/driver-sql',
+    '@objectstack/lint', '@objectstack/mcp', '@objectstack/platform-objects',
+    '@objectstack/plugin-auth', '@objectstack/spec', '@objectstack/types',
+  ],
   // #14386 re-baseline (the onboarding limb above): a NEW entry, reached ONLY
   // through `tsconfig.typecheck.json` -- a program that card ADDED (this
   // package's `typecheck` was a bare `tsc --noEmit` before it, with no sibling
@@ -1724,6 +1775,12 @@ function buildFixtureTree() {
   return root;
 }
 
+// Returned by `selfTest()` only after its verdict is printed. The dispatch
+// refuses anything else: a `return` that leaves the function above that line
+// prints nothing and still exits 0 — a self-test that never finished, reported
+// as one that passed (#13798).
+const SELF_TEST_VERDICT = 'check-type-source-resolution self-test reached its verdict';
+
 function selfTest() {
   const root = buildFixtureTree();
   const problems = [];
@@ -2062,13 +2119,22 @@ function selfTest() {
     process.exit(1);
   }
   console.log('check-type-source-resolution --self-test OK');
+
+  return SELF_TEST_VERDICT;
 }
 
 // ── entry point ─────────────────────────────────────────────────────────────
 
 const argv = process.argv.slice(2);
 if (argv.includes('--self-test')) {
-  selfTest();
+  if (selfTest() !== SELF_TEST_VERDICT) {
+    console.error(
+      '\n✗ check-type-source-resolution self-test: selfTest() returned without reaching its verdict,\n'
+        + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+        + 'that never finished as a self-test that passed.\n',
+    );
+    process.exit(1);
+  }
 } else if (argv.includes('--list')) {
   printList(REPO_ROOT);
 } else {

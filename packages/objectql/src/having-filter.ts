@@ -361,7 +361,6 @@ function checkCondition(
     || condition instanceof Date
     || Array.isArray(condition)
   ) {
-    // eslint-disable-next-line eqeqeq
     return value == condition;
   }
 
@@ -391,9 +390,7 @@ function checkCondition(
     }
     if (value === undefined && !NO_VALUE_ANSWERED_BY_OPERATOR.has(op)) return false;
     switch (op) {
-      // eslint-disable-next-line eqeqeq
       case '$eq': if (value != target) return false; break;
-      // eslint-disable-next-line eqeqeq
       case '$ne': if (value == target) return false; break;
       case '$gt': if (!(value > target)) return false; break;
       case '$gte': if (!(value >= target)) return false; break;

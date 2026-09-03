@@ -3,12 +3,17 @@
 /**
  * [#2926 ③] Boot backfill of sharing-rule grants.
  *
- * Rule grants are materialized by write hooks, which deliberately skip
- * `isSystem` writes (rule-hooks.ts) — so records created by the boot-time
- * seed loader (always `isSystem`) never produced `sys_record_share` rows:
- * demo data shipping with matching sharing rules was broken out of the box
- * until an admin "touched" each record at runtime. `backfillRuleGrants`
- * reconciles every active rule once per boot, idempotently.
+ * Rule grants are materialized by write hooks, and this pass reconciles every
+ * rule once per boot, idempotently, for the rows those hooks did not reach.
+ *
+ * [#13533] The original reason for that gap was that the hooks skipped
+ * `isSystem` writes, so boot-time seed rows (always `isSystem`) never produced
+ * `sys_record_share` rows and demo data shipped inert. That skip is gone — a
+ * system write now materialises like any other — but this pass is NOT
+ * obsolete, and the two remaining reasons are what these tests cover: rows
+ * written while a rule was inactive or before its hooks were bound are still
+ * unreached by any hook, and this is the only pass that PURGES a deactivated
+ * rule's grants (#4433), which no write-path hook can do.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
