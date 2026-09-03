@@ -1,7 +1,7 @@
 ---
 "@objectstack/platform-objects": minor
 "@objectstack/plugin-auth": minor
-"@objectstack/service-messaging": patch
+"@objectstack/service-messaging": minor
 ---
 
 feat(platform-objects,plugin-auth): a user may set their own `sys_user.locale` (#14787)
