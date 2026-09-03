@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"]
+  },
+  "include": ["test/**/*", "vitest.config.ts", "vitest-tiers.ts", "vitest-tiers.fixtures.ts"],
+  "exclude": ["node_modules", "dist"]
+}
