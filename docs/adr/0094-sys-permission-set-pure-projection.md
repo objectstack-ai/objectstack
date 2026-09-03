@@ -484,3 +484,48 @@ two rules the `object` authoring gate (`objectPostureGate`,
 Door order, as pinned in `packages/rest/src/meta-object-owd-gate.test.ts`:
 the 422 lint gate answers first; this seam's 403 R1 door answers for writes
 that pass lint.
+
+## Amendment (2026-09-03): D2's door enumeration extends to the recovery doors
+
+Maintainer ruling, director seat summon #11, decision batch #17, item 2
+(verbatim reply: 「同意」 — adopts the recommendation).
+
+D2 named the projector's call sites as `saveMetaItem` (active saves),
+`publishMetaItem`, and `deleteMetaItem`. Three RECOVERY doors write the same
+metadata row — a rollback, a commit revert's two limbs, and the code-only
+legacy delete path — and were not in that list, even though each restores or
+removes exactly the row D2's invariant says the projector is the only writer
+of. A `permission` row rolled back to a previous version left `sys_permission_set`
+on the rolled-back-FROM body: the stored row and the in-memory registry both
+served the restored body, and D2's own sentence — the projector is the
+record's only writer — stopped being true for these three doors specifically,
+until an unrelated save/publish/delete on the same name, or D3's boot
+reconciliation, re-derived it.
+
+**D2's enumeration is extended.** The projector now also runs, awaited,
+BEFORE the fire-and-forget `emitMetadataMutation` listeners — the same
+order D2's `saveMetaItem` implementation follows — at:
+
+- `rollbackMetaItem`, after its registry write-through: `state: 'active'`
+  with the restored body.
+- `revertCommit`'s per-item RESTORE limb: `state: 'active'` with the
+  pre-commit body it wrote back.
+- `revertCommit`'s per-item SOFT-REMOVE limb: `state: 'deleted'` — the same
+  shape `deleteMetaItem`'s repository branch already sends for a removed row.
+- `deleteMetaItem`'s legacy raw-engine exit (the code-only, control-plane
+  bootstrap path `deleteMetaItem`'s repository branch cannot serve):
+  `state: 'deleted'`, the same call the repository branch already makes.
+
+D3 (boot reconciliation) is unchanged and stays the healing path for a
+projector that failed or was never registered for a type at write time — it
+is no longer the ONLY path a recovery door's projection can take to become
+current. Option B (documenting that recovery doors deliberately do not
+project, leaving D3 as the sole healer for them) was considered and not
+taken: the four call sites are the same already-registered, awaited,
+best-effort hook D2 already defines, so extending its enumeration closes the
+gap without a new mechanism.
+
+No change to Clause-② carriers: the projector remains an internal,
+already-registered hook (`registerMutationProjector` / `runMutationProjector`,
+`@objectstack/metadata-protocol`), never part of the wire contract — no
+published schema or wire shape moves with this amendment.
