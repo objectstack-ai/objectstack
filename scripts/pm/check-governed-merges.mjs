@@ -669,7 +669,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '#13424: every ref resolves in ITS OWN repo, never only in self': 8,
   'the words an operator reads about the window': 4,
   'classification + replay fixtures': 11,
-  'multi-repo scope (#9619)': 15,
+  'multi-repo scope (#9619)': 17,
   'remote reachability + mirror freshness (#13307)': 12,
   'the REAL prober, on real git fixtures (#13307)': 11,
   '#13836, the shallow-clone path, both directions': 6,
