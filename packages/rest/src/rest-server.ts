@@ -2388,8 +2388,18 @@ export class RestServer {
             // answer. That path carries no posture at all; its half of this
             // ruling (decision 1 option B′) is refused at BOOT instead — see
             // `rest-api-plugin.ts`.
+            //
+            // ⚠️ The ASYNC ACCESSOR's presence is part of the wiring fact, for
+            // the same reason the shipped `objectQLProvider` splits on it: a
+            // `KernelBase`-shaped host (`LiteKernel`) has no `getServiceAsync`
+            // at all, so dereferencing it would raise a `TypeError` — unbranded,
+            // and therefore LOUD — turning "this host shape has no async
+            // registry" into an outage. Such a host also has no service
+            // factories (`registerServiceFactory` throws "not supported"), so
+            // absence is the only fault it could report anyway. It keeps the
+            // previous quiet answer, unchanged.
             let tenancyPosture;
-            if (kernel) {
+            if (kernel && typeof kernel.getServiceAsync === 'function') {
                 try {
                     tenancyPosture = effectiveTenancyPosture(await kernel.getServiceAsync('tenancy') as any);
                 } catch (err) {

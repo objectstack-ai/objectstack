@@ -156,9 +156,13 @@ describe('[#13906] §0 — the two seams are LIVE on today\'s tree, by symbol', 
     expect(body).not.toMatch(/catch\s*\{\s*\n\s*tenancyPosture = undefined;/);
     // The discriminator is the REGISTRY's brand, never message text (#13905).
     expect(body).toMatch(/if \(!isServiceNotRegisteredError\(err\)\) \{\s*\n\s*throw new AuthzStoreUnavailableError\('tenancy', err\);/);
-    // ⛔ And the WIRING fact is asked of `kernel`'s presence, never inferred
-    // from the returned value — the #13476 discipline this repair inherits.
-    expect(body).toMatch(/let tenancyPosture;\s*\n\s*if \(kernel\) \{/);
+    // ⛔ And the WIRING fact is asked of `kernel`'s presence AND of the async
+    // accessor's — never inferred from the returned value (the #13476
+    // discipline this repair inherits). The accessor half matters on its own:
+    // a `KernelBase`-shaped host (`LiteKernel`) has no `getServiceAsync`, and
+    // without this guard the dereference would raise an unbranded `TypeError`
+    // and turn that host shape into a 503.
+    expect(body).toMatch(/let tenancyPosture;\s*\n\s*if \(kernel && typeof kernel\.getServiceAsync === 'function'\) \{/);
   });
 
   it('REPAIRED [decision 2 B]: the auth-gate seam fails closed in the measured window only', () => {
