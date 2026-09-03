@@ -342,7 +342,10 @@ function createColumnArm(type: string): string | null {
   const body = createColumnSwitch();
   const at = body.indexOf(`case '${type}':`);
   if (at < 0) return null;
-  const arm = body.slice(at).match(/^[\s\S]*?(?:break;|return;)/);
+  // `.*` after the terminator keeps a trailing same-line comment — the driver
+  // states this arm's whole reason there (`return; // Virtual — no column`) —
+  // while `.` still cannot cross the newline that ends the arm.
+  const arm = body.slice(at).match(/^[\s\S]*?(?:break;|return;).*/);
   if (!arm) throw new Error(`unterminated createColumn arm for '${type}' in driver-sql`);
   return arm[0];
 }
@@ -423,7 +426,8 @@ describe('#14828 — the SQL answers are the platform’s, not this file’s inv
   it('driver-sql answers `formula` with no column at all', () => {
     const arm = createColumnArm('formula');
     expect(arm, 'formula lost its arm in createColumn').not.toBeNull();
-    expect(arm, 'createColumn no longer returns without emitting for `formula`').toMatch(/return;$/);
+    expect(arm, 'createColumn no longer returns without emitting for `formula`').toMatch(/\breturn;/);
+    expect(arm, 'the formula arm now assigns a column').not.toContain('col =');
     expect(arm).toContain('Virtual');
     // The second statement of the same rule, in the differ.
     const at = SCHEMA_DRIFT_SOURCE.indexOf('export function fieldHasColumn(');
@@ -536,23 +540,34 @@ describe('#14828 — the SQL answers are the platform’s, not this file’s inv
     expect(arrayTyped).not.toContain('text');
   });
 
-  it('a member typed as a STRING on the record takes a character column', () => {
+  it('a member typed as a STRING on the record never takes a NUMERIC column', () => {
+    // ⚠️ Deliberately "not numeric" rather than "is a character column".
+    // `date` / `datetime` / `time` are strings on the record and take DATE /
+    // TIMESTAMP / TIME columns, which is correct — a rule demanding a varchar
+    // would report those three as defects. What `autonumber` did is the
+    // narrower thing: a rendered string in a column that only accepts numbers.
+    const NUMERIC_COLUMN = /^(SERIAL|BIGSERIAL|SMALLSERIAL|INTEGER|INT|BIGINT|SMALLINT|DECIMAL|NUMERIC|REAL|FLOAT|DOUBLE)\b/i;
     const stringTyped = [...REAL_FIELD_TYPES].filter((t) => tsInterfaceType(t) === 'string');
     expect(stringTyped.length).toBeGreaterThanOrEqual(10);
     expect(stringTyped, 'autonumber is a rendered string on the record').toContain('autonumber');
     for (const type of stringTyped) {
       expect(
         sqlColumn(type),
-        `${type} is a string on the record but its column is not a character type. ` +
-        'That is the within-file contradiction #14828 was filed for: `autonumber` carried ' +
-        "`string` in FIELD_TYPE_MAP and `SERIAL` — an integer column — in FIELD_TYPE_SQL_MAP, " +
-        'so the runtime’s rendered `INV-0001` met a Postgres `22P02 invalid input syntax for ' +
-        'type integer` on the first write.',
-      ).toMatch(/^(VARCHAR\(\d+\)|TEXT)$/);
+        `${type} is a string on the record but its column only accepts numbers. That is the ` +
+        'within-file contradiction #14828 was filed for: `autonumber` carried `string` in ' +
+        'FIELD_TYPE_MAP and `SERIAL` — an integer column with a sequence — in ' +
+        'FIELD_TYPE_SQL_MAP, so the runtime’s rendered `INV-0001` met a Postgres ' +
+        '`22P02 invalid input syntax for type integer` on the first write.',
+      ).not.toMatch(NUMERIC_COLUMN);
     }
+    // Anti-vacuity: the predicate really does fire on a numeric column, and a
+    // genuinely numeric member really has one.
+    expect('SERIAL').toMatch(NUMERIC_COLUMN);
+    expect(sqlColumn('number')).toMatch(NUMERIC_COLUMN);
+    expect(tsInterfaceType('number')).toBe('number');
     // The driver's own answer for the headline member, read where it lives.
-    const arm = createColumnArm('autonumber');
-    expect(arm).toContain('table.string(name)');
+    expect(createColumnArm('autonumber')).toContain('table.string(name)');
+    expect(sqlColumn('autonumber')).toBe(sqlColumn('text'));
     expect(tsColumn('autonumber')).toBe("table.string('f_autonumber')");
   });
 

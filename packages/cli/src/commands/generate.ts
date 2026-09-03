@@ -1126,14 +1126,21 @@ const FIELD_TYPE_SQL_MAP: Record<string, string | null> = {
  * driver's order: `multiple` still wins first, so a flagged field of any type
  * is a JSON column and never reaches the lookup at all.
  *
- * ⚠️ `??`, not `||`: the default is for a `type` string that is NOT a field
- * type (the unvalidated authoring door), and `||` would swallow the explicit
- * `null` above and hand a virtual field a TEXT column again — the exact defect
- * this card closes, one operator to the left.
+ * ⚠️ The default is selected by OWN-PROPERTY PRESENCE, not by the value being
+ * falsy or nullish, because `null` is now a meaningful ANSWER and every other
+ * spelling swallows it: `||` and `??` both fall through on `null` and hand a
+ * virtual field a TEXT column again — the exact defect this card closes, one
+ * operator to the left. (Measured: the first cut of this fix used `??` and
+ * still emitted `"f" TEXT`.) `hasOwnProperty` rather than `in` for the second
+ * half of the same care — `in` answers true for `toString` and every other
+ * inherited key, and the unvalidated authoring door can deliver one as a
+ * `type` string.
  */
 function fieldTypeToSql(fieldType: string, multiple?: boolean): string | null {
   if (multiple) return FIELD_TYPE_SQL_MAP.json;
-  return FIELD_TYPE_SQL_MAP[fieldType] ?? 'TEXT';
+  return Object.prototype.hasOwnProperty.call(FIELD_TYPE_SQL_MAP, fieldType)
+    ? FIELD_TYPE_SQL_MAP[fieldType]
+    : 'TEXT';
 }
 
 export function generateMigrationSql(config: Record<string, unknown>): string {
