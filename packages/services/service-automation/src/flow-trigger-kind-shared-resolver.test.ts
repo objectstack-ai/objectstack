@@ -42,6 +42,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { FLOW_TRIGGER_KINDS, resolveFlowTriggerKind } from '@objectstack/spec/automation';
 import { AutomationEngine } from './engine.js';
+import type { FlowTrigger, FlowTriggerBinding } from './engine.js';
 
 function createTestLogger() {
     return { debug() {}, info() {}, warn() {}, error() {} } as any;
@@ -244,14 +245,20 @@ describe('[#14328] the ARRAY-form divergence is PRESERVED, not unified away', ()
         // raw array (so the trigger can name the offending shape) and `event` is the
         // joined string that maps to NO hook (so the trigger's single-token mapper
         // reports it verbatim and binds nothing).
-        const started: Array<{ event?: string; config?: Record<string, unknown> }> = [];
-        engine.registerTrigger({
+        // Typed as the real `FlowTrigger`, NOT `… as never`: the cast erases the
+        // contextual type for `start`, which leaves `binding` implicitly `any`
+        // (TS7006). This package has no `typecheck` script, so its `tsc --noEmit`
+        // runs only in the type-check DEBT lane — which compiles `src/**`, tests
+        // included, and is a shrink-only ratchet. Same shape as `engine.test.ts`.
+        const started: FlowTriggerBinding[] = [];
+        const trigger: FlowTrigger = {
             type: 'record_change',
             start: (binding) => {
-                started.push(binding as (typeof started)[number]);
+                started.push(binding);
             },
             stop: () => {},
-        } as never);
+        };
+        engine.registerTrigger(trigger);
         engine.registerFlow('array_flow', arrayFlow('array_flow') as never);
 
         expect(started).toHaveLength(1);
