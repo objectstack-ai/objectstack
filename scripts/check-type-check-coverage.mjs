@@ -937,29 +937,35 @@ const EXEMPT = {
 // prior note already excluded them ("never this package's debt ... reporting on
 // its own inherited rootDir").
 //
+// ── #14504: `@objectstack/runtime` GRADUATED, and it was not paid down ──────
+//
+// `runtime` (206) left this ledger on 2026-09-03, under the same shape as the
+// four above and for the same reason: it now has a `tsconfig.test.json` its
+// `typecheck` script NAMES, so `hidesTests` is false for it and this gate's
+// per-PACKAGE approximation has nothing left to approximate. ⛔ Read that first
+// — a deleted TEST_DEBT entry normally means the errors are gone, and here it
+// does not. Not one of the 206 was repaired.
+//
+// The identical population is now held one level finer, per FILE and per
+// SIGNATURE, in `packages/runtime/test-typecheck-debt.json`: **191 errors
+// across 27 of the package's 214 test files**, measured at 224f8ea4a0 with the
+// closure built. The 206 -> 191 step is the config-tier subtraction this
+// ledger's top note describes, attributed in both directions with no
+// remainder: -19 that dissolve under the test program's vitest-matching module
+// semantics (TS2835 x13, the TS7006 x4 cascading above them, TS2550 x2) and
+// +4 that collapsing the cascade EXPOSED (TS2322 x4 in
+// src/seed-loader.test.ts, previously masked by an `any` from the unresolved
+// import). The 206 recorded here was exact and stayed exact to the end.
+//
+// ⚠️ The pin half of this gate reported nothing for `runtime` in either
+// direction and still does not: measured on the way out, this package's test
+// layer holds ZERO `@ts-expect-error` directives, so PINS_CHECKED had no
+// subject here. The hole was the 206 errors nothing read, not a dead pin.
+//
 // So the shrink-only guarantee did not loosen here; it moved to a strictly
 // sharper instrument, one that also reddens on a wholesale substitution of
 // error IDENTITY at a constant total, which a per-package integer cannot see.
 const TEST_DEBT = {
-  '@objectstack/runtime': {
-    errors: 206,
-    note: 'TS18048 x91 (possibly-undefined), TS18046 x27, TS2339 x17, TS2493 x15, TS2835 x13, TS2345 x10, '
-      + 'TS7006 x8, TS6133 x6, TS2554 x4, TS2353 x4, TS2571 x3, TS2550 x2 -- RE-TALLIED at 206 (#13408). '
-      + 'The previous note carried its composition from a 227-era sweep that measured per-entry TOTALS '
-      + 'only and said so; this one is a fresh per-code count of the same program the ratchet measures. '
-      + 'LOWERED 217 -> 206 (#13408), and the -11 is fully attributed to ONE file: '
-      + 'src/http-dispatcher.ready.test.ts held 30 TS18048 reads of the optional '
-      + '`HttpDispatcherResult.response` -- 19 added by that card\'s own new /ready suite and 11 that '
-      + 'pre-dated it -- and all 30 were replaced by a `responseOf()` narrowing helper, the shape already '
-      + 'used by the #8287 suite in src/http-dispatcher.keys.test.ts. That card found them the hard way: '
-      + 'the package `typecheck` excludes test files, so its green said nothing about the 19 it had just '
-      + 'added, and only this ratchet saw them. Nothing else in the package moved. Earlier lineage: 220 -> '
-      + '218 (5ab08428, one of only two entries that ever shrank; TS6133 x25 collapsed to x7 while '
-      + 'possibly-undefined grew, so that net -2 hid a much larger churn in both directions) -> 227 '
-      + '(e8db1a230, +9 all TS18048 in src/domains/meta-item-envelope.test.ts from #5563 / PR #5895) -> '
-      + '217 (ead731756, #12723). Src graduated in #4311 (declares `typecheck`); this is purely the '
-      + 'hidden test layer.',
-  },
   '@objectstack/cli': {
     errors: 144,
     note: 'TS7006 x59 (implicit any), TS2835 x56 (NodeNext extensions), TS2339 x24, TS2307 x3, TS18046 x2. '

@@ -1,0 +1,109 @@
+// The TEST-layer type-check program (#14504), adopting the mechanism #5286 set
+// for `packages/spec` and #5449 generalised. `tsconfig.json` beside this file
+// stays exactly as it is: it is the BUILD config, and its `**/*.test.ts` /
+// `**/*.spec.ts` exclusion has a reason — ci.yml gates that no test file
+// reaches the published artifact. This sibling puts the excluded layer back in
+// front of tsc, and `package.json`'s `typecheck` script NAMES it (via
+// `check:test-typecheck --project`), because a config no script invokes is
+// exactly the phantom this whole change is about.
+//
+// BEFORE THIS FILE, NO tsc PROGRAM COMPILED A SINGLE TEST FILE HERE, and that
+// is measured rather than read off the config. At 224f8ea4a0 with the workspace
+// closure built first, `tsc --noEmit --listFiles -p tsconfig.json` puts 899
+// files in the program and **0** of this package's 214 `src/**/*.test.ts` among
+// them — while 79 of its non-test `src/**` files ARE there, so the zero is the
+// `exclude` line and not a probe that sees nothing. The directional control is
+// `packages/drivers/driver-memory`, whose tsconfig carries no test exclusion:
+// the same probe puts **40 of its 40** test files in the program. Under this
+// file the count is **214 of 214** (1148 files total).
+// `pnpm --filter @objectstack/runtime typecheck` exiting 0 was a true sentence
+// carrying no information about any test file in this package.
+//
+// ⚠️ ONE THING THE FILING OVERSTATED, recorded so the next reader does not go
+// looking for it: the card's sharpest line — "a `@ts-expect-error` written in
+// any `packages/runtime` test today is a phantom check" — is a statement about
+// what WOULD happen, not about an existing pin. Measured here: this layer holds
+// **zero** `@ts-expect-error` directives across all 214 files, so no pin was
+// silently dead and none reports TS2578 under this program. What the gap really
+// cost is the other half: 191 real type errors in the test layer that no gate
+// has ever reported, and no way to write a type-level pin here at all. The
+// first half is now ledgered; the second is now possible.
+//
+// What differs from the build config, and what deliberately does NOT:
+//   - module semantics ONLY, plus `lib`. The tests are written and executed as
+//     ESM by vitest (esbuild/vite), and this package IS `"type": "module"`, so
+//     the build config's NodeNext compiles them as ESM too — and then demands
+//     explicit `.js` extensions on relative imports, which vitest does not.
+//     Measured cost of that mismatch here: 19 of the 206 raw diagnostics —
+//     TS2835 x13 (extension-less relative import), the TS7006 x4 sitting above
+//     them (an import that does not resolve makes every symbol it names `any`),
+//     and TS2550 x2 (`Array.prototype.at` against a `lib` older than ES2022).
+//     Those 19 are about the CHECK, never about the code. Matching vitest is
+//     fidelity, not laxity. No `DOM` in `lib`, unlike `packages/client`:
+//     nothing in this layer touches a browser global.
+//   - ⚠️ Collapsing that cascade EXPOSES errors as well as removing them, so
+//     206 − 19 is 191 and not 187: `src/seed-loader.test.ts` gains 4 x TS2322
+//     that the unresolved import had been hiding behind `any`. The two
+//     directions are attributed file by file below; there is no unexplained
+//     remainder.
+//   - ⛔ STRICTNESS IS UNTOUCHED. `strict`, `noUnusedLocals`,
+//     `noUnusedParameters`, `noImplicitReturns`, `noFallthroughCasesInSwitch`
+//     are inherited from the root config, and `types: ["node"]` restates
+//     `tsconfig.json`'s. Nothing here may loosen a type rule; if a test does not
+//     compile, that is the finding. ⛔ Not one `any` and not one
+//     `@ts-expect-error` was added to any test file to open this gate — that
+//     shape is what turns a real gate into a phantom one.
+//   - `rootDir` is INHERITED as `./src` and deliberately not widened. Unlike
+//     `packages/client` and `packages/rest`, this layer produces no TS6059:
+//     measured, every file this program admits is already under `src`. Widening
+//     it "to be safe" would admit files the build config does not and change
+//     what the gate judges, so it stays as the build config has it.
+//
+// `include` stops at `src`, matching the build config's root and covering all
+// 214 test files. This package has no sibling `scripts/` program to keep
+// separate, so unlike `objectql` and `spec` the `typecheck` chain is two links
+// and not three.
+//
+// MEASURED at 224f8ea4a0, workspace closure built first (an error count taken
+// against an unbuilt closure is not a reading — unresolved-import cascades
+// inflate it): this program reports **191 errors across 27 files**, from a raw
+// 206 under the inherited NodeNext semantics. That 206 is the same number
+// `scripts/check-type-check-coverage.mjs` recorded for this package in its
+// per-PACKAGE `TEST_DEBT` ledger, which is why that entry GRADUATES in this
+// change rather than being paid down — the identical population is now held one
+// level finer, per file and per signature, in `test-typecheck-debt.json` beside
+// this config. By code: TS18048 x91 (possibly-undefined), TS18046 x27, TS2339
+// x17, TS2493 x15, TS2345 x10, TS2322 x6, TS6133 x6, TS7006 x4, TS2554 x4,
+// TS2353 x4, TS2571 x3, plus 4 singletons (TS7053, TS6196, TS2352, TS2348).
+// The five heaviest files are `src/http-dispatcher.actions-type-dispatch.test.ts`
+// x30, `src/http-dispatcher.test.ts` x18,
+// `src/notifications.hono.integration.test.ts` x16,
+// `src/http-dispatcher.actions-identity-addressing.test.ts` x14 and
+// `src/action-body-identity.test.ts` x14 — 92 of the 191 between them.
+//
+// Every one of the 191 is PRE-EXISTING: this change edits no test file, and each
+// would have been reported on `origin/main` had this program always existed.
+// They are ledgered per file and per signature in `test-typecheck-debt.json`
+// beside this config, EXACT and shrink-only — a file that gains an error is red,
+// one that loses one is red until re-recorded, one that reaches zero is red
+// until its entry is deleted, a signature that arrives or vanishes is red even
+// at a constant total, and a file NOT listed there may have no errors at all.
+// ⛔ The 191 are NOT repaired here, per this card's triage ruling: seeding the
+// ledger and letting the ratchet shrink is the deliverable, and turning the
+// onboarding into a 191-error cleanup is how it stops landing at all.
+//
+// ⚠️ 187 of the 214 files carry NO ledger entry, and that is load-bearing rather
+// than incidental: any error any one of them ever gains is red on arrival. That
+// is the half of this gate that starts working today.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
