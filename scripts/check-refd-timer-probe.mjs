@@ -95,6 +95,8 @@
  * never stand for "there was nothing to find".
  */
 
+// dispatch-gates: whole-tree-population -- `readTree` is the tracked-plus-untracked sweep of the entire repository, so no card's file surface can narrow this gate; the literals below are its skip set and its testkit anchor.
+
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname, resolve, relative, sep } from 'node:path';

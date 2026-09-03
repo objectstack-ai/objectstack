@@ -385,6 +385,13 @@ function readLedger(target: Target): Ledger {
  * nested type-literal namespaces), so it exercises the walk and not just the
  * predicate.
  */
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 function selfTest(): never {
   const fail = (msg: string): never => {
     console.error(`✗ self-test: ${msg}`);
@@ -484,6 +491,7 @@ function selfTest(): never {
     '✅  self-test: flags awaited-`any` returns through nested namespaces, and NOT caller-supplied generics, ' +
       '`any`-containing types, or named data properties. Ledger is exact in both directions.',
   );
+  selfTestReachedVerdict = true;
   process.exit(0);
 }
 
@@ -492,7 +500,17 @@ function selfTest(): never {
 // Both modes live behind the guard: `--self-test` calls `process.exit` too, so
 // running it on import would be the same defect wearing a friendlier name.
 if (isEntrypoint(import.meta.url)) {
-  if (SELF_TEST) selfTest();
+  if (SELF_TEST) {
+    selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-exported-any-returns self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+  }
 
   const target = resolveTarget();
 

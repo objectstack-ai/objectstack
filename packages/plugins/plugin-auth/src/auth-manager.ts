@@ -236,7 +236,6 @@ function installWebContainerRequestStatePolyfill(): void {
   if (!g[sym].context) g[sym].context = {};
   if (!g[sym].context.requestStateAsyncStorage) {
     g[sym].context.requestStateAsyncStorage = new WebContainerRequestStateAsyncLocalStorage();
-    // eslint-disable-next-line no-console
     console.warn(
       '[AuthManager] WebContainer detected: installed synchronous request-state polyfill ' +
         '(node:async_hooks AsyncLocalStorage does not propagate context across await in WebContainer).',
@@ -3038,8 +3037,12 @@ export class AuthManager {
               // very card one seat over. The 2026-09-02 ruling enumerates
               // signup, sign-in and password reset — sends where the requester
               // IS the recipient — and the superseded 2026-08-13 ruling named
-              // invitations as its own counterexample. So an invitee gets the
-              // deployment default until a per-user language exists to read.
+              // invitations as its own counterexample. A per-user language
+              // now EXISTS to read — `sys_user.locale` (#13881, ruling
+              // 2026-09-01) — but an invitee has no `sys_user` row until they
+              // accept, so this send keeps the deployment rung; reading the
+              // invitee's column where one exists is #14641's rung, not this
+              // card's.
               ...this.emailLocaleArg(),
               data: {
                 inviter: {
@@ -4543,9 +4546,10 @@ export class AuthManager {
    * entirely and `EmailService`'s ladder resolves its documented `en-US`
    * default exactly as before.
    *
-   * Still NOT a per-recipient stored preference: `sys_user` carries no locale
-   * column and the 2026-09-02 ruling continues to defer one. What is read is
-   * the language this request expressed, not a profile.
+   * Still NOT a per-recipient stored preference: `sys_user.locale` exists
+   * since #13881 (ruling 2026-09-01) but auth mail does not read it yet
+   * (#14762 for this send; #14641 for invitations). What is read is the
+   * language this request expressed, not a profile.
    */
   private async sendChangeEmailNotice(
     from: { email: string; name?: string; id?: string },
@@ -4752,8 +4756,9 @@ export class AuthManager {
    * `kernel:ready` and on every settings change (same pattern as
    * {@link setAppName}). Unset ⇒ the built-in English text.
    *
-   * Per-user locale is not resolved yet — `sys_user` carries no locale
-   * column; when it grows one, resolution should prefer it (#2815).
+   * Per-user locale is not resolved here yet — `sys_user.locale` exists since
+   * #13881 (ruling 2026-09-01) and the messaging channels read it per
+   * recipient; auth SMS adopting it is #14762 (supersedes the #2815 note).
    */
   setDefaultSmsLocale(locale: string | undefined): void {
     this.smsLocale = locale?.trim() || undefined;
@@ -4797,9 +4802,12 @@ export class AuthManager {
    * the request rung applies only where the requester IS the recipient, and
    * why the invitation send below still reads this rung.
    *
-   * Per-user locale is STILL deferred by the 2026-09-02 ruling — `sys_user`
-   * carries no locale column and none is added here. When one arrives it
-   * layers on top as a third rung, so nothing here is wasted.
+   * Per-user locale EXISTS since #13881 (maintainer ruling 2026-09-01):
+   * `sys_user.locale`, resolved per recipient by service-messaging for
+   * notification mail (`recipient-locale.ts`). Auth mail does NOT read it
+   * yet — this ladder stays request rung → deployment rung. Layering the
+   * user's own column on top as a third rung is #14641 (invitations) and
+   * its own card for the other sends; nothing here is wasted by that.
    */
   setDefaultEmailLocale(locale: string | undefined): void {
     this.emailLocale = normalizeAuthEmailLocale(locale);

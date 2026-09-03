@@ -996,10 +996,63 @@ function report(findings, stats, expected, proseStats, driverStats) {
 // as one that passed (#13798).
 const SELF_TEST_VERDICT = 'check-docs-image-tag self-test reached its verdict';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'Clean fixture: every shape that MUST stay silent': 9,
+  'Dirty fixture: one control per limb, each a distinct failure': 12,
+  'The classifier, asserted directly': 9,
+  'The extractor\'s anchoring and position reporting': 6,
+  'The expectation refuses to be unusable': 4,
+  'The LIVE false-positive control (#9018\'s named risk, in situ)': 3,
+  'The PROSE limb (#10229)': 22,
+  'The LIVE prose control (#10229, in situ)': 2,
+  'The driver-promise limb (#14510)': 20,
+  'The LIVE driver control (#14510, in situ)': 2,
+  'The green states its own scope': 5,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 11;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 async function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   let checked = 0;
   const assert = (condition, message) => {
+    registerCase();
     checked++;
     if (!condition) failures.push(message);
   };
@@ -1019,6 +1072,7 @@ async function selfTest() {
     // The tag-table rows are copied VERBATIM from docker/README.md, because the
     // point of this control is the exact text living in the corpus today, not a
     // paraphrase of it that might differ in the one character that matters.
+    battery('Clean fixture: every shape that MUST stay silent');
     write(
       'clean/docs.md',
       [
@@ -1113,6 +1167,7 @@ async function selfTest() {
     );
 
     // ── Dirty fixture: one control per limb, each a distinct failure ────────
+    battery('Dirty fixture: one control per limb, each a distinct failure');
     write(
       'dirty/stale.md',
       [
@@ -1207,6 +1262,7 @@ async function selfTest() {
     );
 
     // ── The classifier, asserted directly ───────────────────────────────────
+    battery('The classifier, asserted directly');
     assert(isConcreteVersion('17.0.0'), 'a plain X.Y.Z is concrete');
     assert(isConcreteVersion('17.0.0-beta.1'), 'a prerelease is concrete (and compared as the WHOLE token)');
     assert(isConcreteVersion('17.0.0.0'), 'a four-group typo is concrete, so it is compared rather than skipped');
@@ -1218,6 +1274,7 @@ async function selfTest() {
     assert(!isConcreteVersion('17.0.x'), "'17.0.x' is not concrete");
 
     // ── The extractor's anchoring and position reporting ────────────────────
+    battery('The extractor\'s anchoring and position reporting');
     const positions = extractOccurrences('a\nb ghcr.io/objectstack-ai/objectstack:1.2.3 c\n');
     assert(positions.length === 1, `an anchored tag mid-line is found once -- got ${positions.length}`);
     assert(positions[0].line === 2 && positions[0].column === 3, `line/column are 1-based -- got ${positions[0].line}:${positions[0].column}`);
@@ -1237,6 +1294,7 @@ async function selfTest() {
     );
 
     // ── The expectation refuses to be unusable ──────────────────────────────
+    battery('The expectation refuses to be unusable');
     const rejects = (relative, contents, why) => {
       write(relative, contents);
       let threw = false;
@@ -1258,6 +1316,7 @@ async function selfTest() {
     // The hermetic fixture above proves the classifier excludes 'X.Y.Z'. This
     // proves the metavariable is still IN the corpus and still excluded there --
     // the assertion that would actually catch the gate going wrong on real data.
+    battery('The LIVE false-positive control (#9018\'s named risk, in situ)');
     const root = scriptRepoRoot();
     const controlPath = join(root, LIVE_CONTROL.file);
     if (existsSync(controlPath)) {
@@ -1292,6 +1351,7 @@ async function selfTest() {
     // The DIRTY fixture: the corpus as `origin/main` actually stood at 17.1.0,
     // copied from the real files rather than paraphrased. This is the state #10229
     // measured, so the control is a reproduction, not a hypothetical.
+    battery('The PROSE limb (#10229)');
     write(
       'prose/stale.mdx',
       [
@@ -1462,6 +1522,7 @@ async function selfTest() {
     // The fixtures prove the limb can go red. This proves it is pointed at real
     // claims that still exist -- the assertion that catches the enumeration
     // rotting after a docs rewrite, which is how all five claims got past 17.1.0.
+    battery('The LIVE prose control (#10229, in situ)');
     const liveProse = checkProseClaims({ claims: PROSE_CLAIMS, root: scriptRepoRoot() });
     assert(
       liveProse.findings.length === 0,
@@ -1486,6 +1547,7 @@ async function selfTest() {
     // table naming drivers the image does NOT carry. Each of those has been a
     // plausible way to mis-parse this pair, so each is asserted rather than
     // reasoned about.
+    battery('The driver-promise limb (#14510)');
     const driverDockerfile = (installLines) => [
       '# comment mentioning pg and mysql2, which must not be parsed',
       'FROM node:22-slim',
@@ -1696,6 +1758,7 @@ async function selfTest() {
     // real pair, which still carries a real list -- the assertion that catches
     // both files being rewritten past their anchors at once, which no hermetic
     // fixture can see.
+    battery('The LIVE driver control (#14510, in situ)');
     const liveDrivers = checkDriverPromise({ root: scriptRepoRoot() });
     assert(
       liveDrivers.findings.length === 0,
@@ -1708,6 +1771,7 @@ async function selfTest() {
     );
 
     // ── The green states its own scope ──────────────────────────────────────
+    battery('The green states its own scope');
     const line = summarise(clean.stats, expected, proseClean.stats, driverClean.stats);
     assert(
       line.includes('3 concrete pin(s) compared') && line.includes('4 rolling/floating tag(s) skipped'),
@@ -1739,6 +1803,51 @@ async function selfTest() {
     rmSync(dir, { recursive: true, force: true });
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     console.error(`✗ check-docs-image-tag --self-test -- ${failures.length} failure(s)\n`);
     for (const failure of failures) console.error(`  • ${failure}`);

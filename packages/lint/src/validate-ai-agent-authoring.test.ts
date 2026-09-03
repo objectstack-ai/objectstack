@@ -5,6 +5,7 @@ import {
   validateAiAgentAuthoring,
   AGENT_AUTHORING_WITHDRAWN,
   DEFAULT_AGENT_OUTSIDE_ROSTER,
+  DEFAULT_AGENT_LEGACY_ALIAS,
 } from './validate-ai-agent-authoring.js';
 
 describe('validate-ai-agent-authoring', () => {
@@ -86,20 +87,78 @@ describe('validate-ai-agent-authoring', () => {
       });
       // Names the offending value.
       expect(findings[0].message).toContain('"sales_copilot"');
-      // Names the allowed set (canonical + legacy aliases).
+      // Names the allowed set — the CANONICAL two only (#14461). The legacy
+      // aliases must not appear here: this string is the prescription, and
+      // offering `metadata_assistant` as a thing to write is the very defect
+      // #14461 closed.
       expect(findings[0].message).toContain('ask');
       expect(findings[0].message).toContain('build');
-      expect(findings[0].message).toContain('data_chat');
-      expect(findings[0].message).toContain('metadata_assistant');
+      expect(findings[0].message).not.toContain('data_chat');
+      expect(findings[0].message).not.toContain('metadata_assistant');
       expect(findings[0].hint).toContain('ask');
       expect(findings[0].hint).toContain('build');
+      expect(findings[0].hint).not.toContain('metadata_assistant');
     });
 
-    it('passes every canonical platform agent name and every legacy alias', () => {
-      for (const defaultAgent of ['ask', 'build', 'data_chat', 'metadata_assistant']) {
+    it('passes the canonical platform agent names', () => {
+      for (const defaultAgent of ['ask', 'build']) {
         const stack = { apps: [{ name: 'app', defaultAgent }] };
         expect(validateAiAgentAuthoring(stack), defaultAgent).toEqual([]);
       }
+    });
+
+    describe('legacy alias values (issue #14461)', () => {
+      // Studio itself pinned `metadata_assistant` while the published skill
+      // told authors never to write it, and this rule — reusing the four-name
+      // roster — waved the alias through. The value limb now judges against
+      // the canonical two, and an alias gets its own id and prescription.
+      it.each([
+        ['metadata_assistant', 'build'],
+        ['data_chat', 'ask'],
+      ])('flags %s and prescribes %s', (alias, canonical) => {
+        const findings = validateAiAgentAuthoring({
+          apps: [{ name: 'studio', defaultAgent: alias }],
+        });
+        expect(findings).toHaveLength(1);
+        expect(findings[0]).toMatchObject({
+          severity: 'warning',
+          rule: DEFAULT_AGENT_LEGACY_ALIAS,
+          where: 'app "studio".defaultAgent',
+          path: 'apps[0].defaultAgent',
+        });
+        expect(findings[0].message).toContain(`"${alias}"`);
+        expect(findings[0].message).toContain(`"${canonical}"`);
+        expect(findings[0].hint).toContain(`defaultAgent: '${canonical}'`);
+      });
+
+      it('says the alias RESOLVES — it is a spelling defect, not a broken pin', () => {
+        // The distinction the separate rule id exists to carry: an unknown
+        // name is inert at runtime, an alias is not. A message that described
+        // the alias as "no effect" would be false, and an author who read it
+        // would go looking for a bug that is not there.
+        const [alias] = validateAiAgentAuthoring({
+          apps: [{ name: 'studio', defaultAgent: 'metadata_assistant' }],
+        });
+        const [unknown] = validateAiAgentAuthoring({
+          apps: [{ name: 'crm', defaultAgent: 'sales_copilot' }],
+        });
+        expect(alias.message).toContain('still resolves');
+        expect(alias.message).not.toContain('has no effect');
+        expect(unknown.message).toContain('has no effect');
+      });
+
+      it('leaves the DECLARATION limb reading all four names', () => {
+        // The two limbs ask different questions, so they keep different
+        // rosters: declaring `metadata_assistant` shadows the `build` record
+        // through the alias exactly as declaring `build` does, and that
+        // judgement is unchanged by #14461.
+        for (const name of ['ask', 'build', 'data_chat', 'metadata_assistant']) {
+          const findings = validateAiAgentAuthoring({ agents: [{ name }] });
+          expect(findings, name).toHaveLength(1);
+          expect(findings[0].rule, name).toBe(AGENT_AUTHORING_WITHDRAWN);
+          expect(findings[0].message, name).toContain('PLATFORM agent id');
+        }
+      });
     });
 
     it('is silent when defaultAgent is absent, empty, or not a string', () => {

@@ -219,6 +219,124 @@ import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// This self-test used to decide success by "no failure was recorded" and
+// nothing else, so "every case held" and "the cases never ran" printed the same
+// line. Closed the way PR #13487 validated on check-doc-authoring: what is
+// pinned is the registered NAMES, not a number. Every section opens with
+// `battery('<name>')`, every assertion is attributed to the battery most
+// recently opened, and the floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3 keeps
+// a total "right" the moment a sibling grows. A set difference says WHICH
+// battery stopped; a count says only that something did.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+//
+// The machinery lives HERE, at module scope, rather than inside the self-test:
+// this self-test's assertion sink is not a block-bodied helper in its body (it
+// is a concise arrow, or a module-scope function), so there is no in-body
+// helper to thread a per-run ledger through. Module scope is safe because the
+// self-test runs once per process, and it is what lets the existing sink route
+// through `registerCase()` with no case rewritten and no assertion changed.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the declaration itself': 4,
+  'the exports resolver': 8,
+  'the types resolver: what a `require` consumer actually READS': 6,
+  'module kind: the reason the invariant is not "must end in .d.cts"': 6,
+  'diagnostics classification': 3,
+  'the fixture tree': 7,
+  'the ledger, both directions': 10,
+  'AGREES: the cross-format behaviour probe, both directions': 5,
+  'TYPED: the #13112 class, in both directions': 9,
+  'TYPED_EXEMPTIONS, both directions': 8,
+  'prerequisite, never a silent green': 1,
+  'a built tree missing one declared target IS a finding': 1,
+  'the vacuity floors, each driven to zero': 13,
+  'provenance: the record must stay reproducible, and visibly so': 6,
+  'the real ledger is well-formed and shrink-only in shape': 6,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 15;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// ⚠️ None of these helpers is named with a self-test spelling, deliberately and
+// on the record: `check:pm-dispatch-gates` anchors on a top-level declaration
+// whose NAME spells self-test, and every such name owes a row in that gate's
+// COMPOUND_ANCHOR_LEDGER. These are the battery ROSTER's machinery -- they hold
+// no fixtures to mask and read no path literal -- so the accurate name is the
+// one that says `battery`, not the one that would owe a ledger row for a role
+// this code does not have.
+
+/** Cases registered per battery: `battery()` opens one, `registerCase()` files into it. */
+const batteryCases = new Map();
+let openBattery = null;
+
+/** Open a battery. Every assertion after this line is attributed to it. */
+function battery(name) {
+  openBattery = name;
+}
+
+/** Called by the self-test's own assertion sink, once per assertion. */
+function registerCase() {
+  const name = openBattery ?? UNATTRIBUTED_BATTERY;
+  batteryCases.set(name, (batteryCases.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Evaluated after every battery has had its chance and BEFORE the verdict, so
+ * the success line can only be printed by a run in which the set of batteries
+ * that registered assertions EQUALS the set declared.
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batteryCases) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batteryCases.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  return problems;
+}
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
 const SCAN_ROOT = 'packages';
@@ -1083,9 +1201,13 @@ let selfTestReachedVerdict = false;
 
 export async function selfTest() {
   const cases = [];
-  const t = (name, ok, detail) => cases.push({ name, ok: Boolean(ok), detail });
+  const t = (name, ok, detail) => {
+    registerCase();
+    return cases.push({ name, ok: Boolean(ok), detail });
+  };
 
   // ── the declaration itself ────────────────────────────────────────────────
+  battery('the declaration itself');
   const selfSrc = readFileSync(fileURLToPath(import.meta.url), 'utf8');
   t('the watch hints are spelled as literals the extractor can read', ROOT_DIR_WATCH_HINTS.every((h) => selfSrc.includes(`'${h}'`)));
   t('the watch hints cover the manifest and the tsup config', ROOT_DIR_WATCH_HINTS.length === 2 && ROOT_DIR_WATCH_HINTS.every((h) => h.startsWith(`${SCAN_ROOT}/`)));
@@ -1093,6 +1215,7 @@ export async function selfTest() {
   t('no hint collapses to the bare scan root', !ROOT_DIR_WATCH_HINTS.some((h) => h.replace(/\/\*+$/, '') === SCAN_ROOT));
 
   // ── the exports resolver ──────────────────────────────────────────────────
+  battery('the exports resolver');
   t('a plain string under `require` resolves', resolveRequireTarget({ types: './x.d.ts', import: './x.js', require: './x.cjs' }) === './x.cjs');
   t('a NESTED {types, default} under `require` resolves (the @objectstack/spec spelling)', resolveRequireTarget({ import: { types: './a.d.mts', default: './a.mjs' }, require: { types: './a.d.ts', default: './a.js' } }) === './a.js');
   t('an `import`-only entry contributes nothing', resolveRequireTarget({ types: './x.d.ts', import: './x.js' }) === null);
@@ -1103,6 +1226,7 @@ export async function selfTest() {
   t('a wildcard subpath is skipped (no single file to probe)', requireEntries({ exports: { './x/*': { require: './x/*.cjs' } } }).length === 0);
 
   // ── the types resolver: what a `require` consumer actually READS ──────────
+  battery('the types resolver: what a `require` consumer actually READS');
   t('THE #13112 shape: a SIBLING `types` answers for the require condition too',
     resolveRequireTypes({ types: './x.d.ts', import: './x.js', require: './x.cjs' }) === './x.d.ts');
   t('a nested `types` inside the require branch wins over nothing else',
@@ -1114,6 +1238,7 @@ export async function selfTest() {
   t('`browser` is not a types source', resolveRequireTypes({ browser: { types: './b.d.ts' }, require: { types: './n.d.cts', default: './n.cjs' } }) === './n.d.cts');
 
   // ── module kind: the reason the invariant is not "must end in .d.cts" ────
+  battery('module kind: the reason the invariant is not "must end in .d.cts"');
   t('`.d.cts` is CommonJS whatever the package type', declarationModuleKind('./x.d.cts', true) === 'commonjs' && declarationModuleKind('./x.d.cts', false) === 'commonjs');
   t('`.d.mts` is ESM whatever the package type', declarationModuleKind('./x.d.mts', false) === 'module');
   t('GREEN CONTROL — `.d.ts` in a CJS-first package is CommonJS-flavoured and correct under require',
@@ -1123,11 +1248,13 @@ export async function selfTest() {
   t('requireTypesFor falls back to the root `types` for a (main) row', requireTypesFor({ types: 'dist/index.d.ts' }, '(main)') === './dist/index.d.ts');
 
   // ── diagnostics classification ────────────────────────────────────────────
+  battery('diagnostics classification');
   t('a SyntaxError diagnostic is a parse failure', isParseFailure("foo.cjs:1\nSyntaxError: Cannot use 'import.meta' outside a module"));
   t('a plain Error diagnostic is NOT a parse failure', !isParseFailure('Error: Vitest cannot be imported in a CommonJS module using require().'));
   t('firstErrorLine picks the error, not the source echo', firstErrorLine("dist/index.cjs:810\n  const x = import.meta.url\nSyntaxError: Cannot use 'import.meta' outside a module") === "SyntaxError: Cannot use 'import.meta' outside a module");
 
   // ── the fixture tree ──────────────────────────────────────────────────────
+  battery('the fixture tree');
   const root = mkdtempSync(join(tmpdir(), 'dual-cjs-'));
   try {
     // The shape the TYPED invariant demands: each condition names its own
@@ -1187,6 +1314,7 @@ export async function selfTest() {
     t('the load finding carries the real message', r1.findings.some((f) => f.includes('nope at load')));
 
     // ── the ledger, both directions ───────────────────────────────────────────
+    battery('the ledger, both directions');
     const withLedger = { '@t/throws#.': { reason: 'declared for the self-test' } };
     const r2 = await scan(root, withLedger, []);
     t('a ledgered load failure is declared, not a finding', !r2.findings.some((f) => f.startsWith('@t/throws#.')) && r2.ledgerHits.some((h) => h.startsWith('@t/throws#.')), JSON.stringify(r2.ledgerHits));
@@ -1216,6 +1344,7 @@ export async function selfTest() {
       && orphanLedgerRows({ 'b#.': {}, 'a#.': {} }, [{ id: 'a#.' }])[0].startsWith('b#.'));
 
     // ── AGREES: the cross-format behaviour probe, both directions ────────────
+    battery('AGREES: the cross-format behaviour probe, both directions');
     writePkg(root, 'agree', { name: '@t/agree', version: '0.0.0', ...dual }, {
       'dist/index.js': "export const v = () => 'same';\n",
       'dist/index.cjs': "exports.v = () => 'same';\n",
@@ -1244,6 +1373,7 @@ export async function selfTest() {
     //
     // Every case below emits real declaration files, because the invariant is
     // partly "is it on disk" and a modelled file answers nothing.
+    battery('TYPED: the #13112 class, in both directions');
     const siblingTypes = { type: 'module', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js', require: './dist/index.cjs' } } };
     writePkg(root, 'sibling', { name: '@t/sibling', version: '0.0.0', ...siblingTypes }, {
       'dist/index.js': 'export const ok = 1;\n', 'dist/index.cjs': 'exports.ok = 1;\n',
@@ -1297,6 +1427,7 @@ export async function selfTest() {
     t('…and three of the fixtures are the reported ones', typedFindingCount === 3, String(typedFindingCount));
 
     // ── TYPED_EXEMPTIONS, both directions ───────────────────────────────────
+    battery('TYPED_EXEMPTIONS, both directions');
     const exemptSibling = { '@t/sibling#.': { reason: 'self-test: a declared, measured reason long enough to be real' } };
     const rExempt = await scan(root, empty, [], exemptSibling);
     t('an exempted TYPED entry is DECLARED, not a finding',
@@ -1322,6 +1453,7 @@ export async function selfTest() {
     t('every shipped behaviour probe states why it exists', DUAL_FORMAT_BEHAVIOUR_PROBES.every((p) => typeof p.why === 'string' && p.why.length > 20));
 
     // ── prerequisite, never a silent green ───────────────────────────────────
+    battery('prerequisite, never a silent green');
     const bare = mkdtempSync(join(tmpdir(), 'dual-cjs-bare-'));
     try {
       writePkg(bare, 'unbuilt', { name: '@t/unbuilt', version: '0.0.0', ...dual }, {});
@@ -1333,6 +1465,7 @@ export async function selfTest() {
     }
 
     // ── a built tree missing one declared target IS a finding ────────────────
+    battery('a built tree missing one declared target IS a finding');
     const half = mkdtempSync(join(tmpdir(), 'dual-cjs-half-'));
     try {
       writePkg(half, 'half', { name: '@t/half', version: '0.0.0', ...dual }, { 'dist/index.js': 'export const ok = 1;\n' });
@@ -1351,6 +1484,7 @@ export async function selfTest() {
   // driven down individually AND the measured tuple is asserted to clear them
   // all — a floor accidentally set above its own measurement would red every
   // real run, which is the opposite failure and just as invisible in review.
+  battery('the vacuity floors, each driven to zero');
   const full = { entries: MEASURED.entries, packages: MEASURED.packages, cjsFiles: MEASURED.cjsFiles, probes: MEASURED.probes, typedJudged: MEASURED_TYPED.typedJudged };
   t('FLOOR — the values in the records clear every floor', floorProblem(full) === null, JSON.stringify(floorProblem(full)));
   t('FLOOR — a dead manifest walk refuses', floorProblem({ ...full, entries: 0 }) !== null);
@@ -1387,6 +1521,7 @@ export async function selfTest() {
   // point. They red when the RECORD stops being a self-contained, reproducible
   // claim: a ref that is not a ref, a quotation that restated the ref instead
   // of reading it, or a pass line that stopped showing the reader both numbers.
+  battery('provenance: the record must stay reproducible, and visibly so');
   t('PROVENANCE — the record carries the ref it was measured on',
     typeof MEASURED.ref === 'string' && /^[0-9a-f]{7,40}$/.test(MEASURED.ref), JSON.stringify(MEASURED.ref));
   t('PROVENANCE — the refusal reads the ref from the record rather than restating it',
@@ -1412,6 +1547,7 @@ export async function selfTest() {
   // ── the real ledger is well-formed and shrink-only in shape ───────────────
   // The SHIPPED exemption table against the REAL population — the half a
   // fixture tree cannot give, and the one that goes stale silently.
+  battery('the real ledger is well-formed and shrink-only in shape');
   const realEntries = collectEntries(REPO_ROOT);
   t('every shipped TYPED exemption names a live require entry point',
     Object.keys(TYPED_EXEMPTIONS).every((id) => realEntries.some((r) => r.id === id)),
@@ -1432,6 +1568,10 @@ export async function selfTest() {
   t('every shipped ledger row names a live require entry point',
     orphanLedgerRows(realLedger, collectEntries(REPO_ROOT)).length === 0,
     JSON.stringify(orphanLedgerRows(realLedger, collectEntries(REPO_ROOT))));
+
+  // The floor runs BEFORE the verdict below, so a success line can only be
+  // printed by a run in which every declared battery registered its cases.
+  for (const message of batteryFloorFailures()) cases.push({ name: message, ok: false });
 
   const failed = cases.filter((c) => !c.ok);
   for (const c of failed) console.error(`  ✗ ${c.name}${c.detail ? ` — ${c.detail}` : ''}`);

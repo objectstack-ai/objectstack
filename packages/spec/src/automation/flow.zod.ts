@@ -591,11 +591,28 @@ export const FlowSchema = lazySchema(() => strictObject(
       connections: 'edges',
       transitions: 'edges',
       links: 'edges',
-      trigger: 'type',
-      triggertype: 'type',
       title: 'label',
     },
     guidance: {
+      // `trigger` / `triggerType` were ALIASES pointing at `type` until an
+      // author took the advice: `type` is the flow KIND
+      // (`z.enum(['autolaunched', 'record_change', …])`), so the rename lands
+      // on `Invalid option: expected one of "autolaunched"|…` one round later,
+      // with the binding still nowhere — the `inputSchema.optional` case this
+      // file already names, where a rename would be actively wrong. The trigger
+      // does not move to `type`; it moves to the START node's `config`, which
+      // is where `resolveFlowTriggerKind` (`automation/flow-trigger-kind.ts`)
+      // and the engine's `AutomationEngine.resolveTriggerBinding` read it from.
+      trigger:
+        '`trigger` is not a Flow field — a record-change flow binds its trigger on the ' +
+        'START node\'s `config` (`{ objectName, triggerType, condition }`, where `triggerType` ' +
+        'is a `record-*` token such as `record-after-create`), not at the flow top level; the ' +
+        'flow-level `type` names the flow kind (`record_change`), not the binding.',
+      triggerType:
+        '`triggerType` is not a Flow field — it belongs on the START node\'s `config` ' +
+        '(`{ objectName, triggerType, condition }`), where a `record-*` token such as ' +
+        '`record-after-create` binds the lifecycle event; the flow-level `type` names the ' +
+        'flow kind (`record_change`), not an event token.',
       object:
         '`object` is not a Flow field — a record-change flow binds its object on the ' +
         'START node\'s `config` (`{ objectName, triggerType, condition }`), not at the ' +

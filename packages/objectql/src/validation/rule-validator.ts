@@ -2417,7 +2417,6 @@ function matchesNamedFormat(format: FormatRule['format'], str: string): boolean 
       return PHONE_RE.test(str);
     case 'url':
       try {
-        // eslint-disable-next-line no-new
         new URL(str);
         return true;
       } catch {

@@ -30,7 +30,6 @@ export type { Hono } from 'hono';
  * Minimal structural interface matching KernelManager from @objectstack/service-cloud.
  * Declared locally to avoid a circular build dependency.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type KernelManager = any;
 
 /**
@@ -38,7 +37,6 @@ export type KernelManager = any;
  * Declared locally to avoid a circular build dependency. Pass an instance
  * of DefaultEnvironmentDriverRegistry from @objectstack/service-cloud at runtime.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type EnvironmentDriverRegistry = any;
 import {
   createOriginMatcher,

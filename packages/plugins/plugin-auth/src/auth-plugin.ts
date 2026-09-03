@@ -78,6 +78,10 @@ import {
   warnIfWalledOwnerCannotVerify,
   type WalledOwnerAccountState,
 } from './walled-owner-verification-path.js';
+import {
+  probeSignInReachability,
+  reportIfNoSignInAccountExists,
+} from './boot-sign-in-reachability.js';
 import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   runAdminBanUser,
@@ -1036,6 +1040,19 @@ export class AuthPlugin implements Plugin {
       // hook below (registration order), so the probe reads the pre-seed
       // store — the predicate's dev-seed clauses are written for exactly
       // that reading.
+      let ql: IDataEngine | undefined;
+      try { ql = ctx.getService<IDataEngine>('objectql'); } catch { ql = undefined; }
+
+      // [#14353] "Can ANYONE sign in?" — asked UNCONDITIONALLY, because it is
+      // independent of all four preconditions below: a deployment that is
+      // unwalled, or declares no owner, or wires an email transport is just as
+      // unrecoverable when it has human rows and no `sys_account` row. This is
+      // the family's ONE store read: the human-population page is paged here
+      // and the answer handed to the walled-owner probe, so no boot pages
+      // `sys_user` twice. Cost on a fresh store is a single bounded page.
+      const reachability = await probeSignInReachability(ql);
+      const deadEnd = reportIfNoSignInAccountExists(reachability, ctx.logger);
+
       let ownerAccountState: WalledOwnerAccountState = 'unknown';
       if (
         !hasEmailTransport &&
@@ -1043,14 +1060,22 @@ export class AuthPlugin implements Plugin {
         postureEnforcesWall(resolveTenancyPosture()) &&
         resolvePlatformOwnerEmail()
       ) {
-        let ql: IDataEngine | undefined;
-        try { ql = ctx.getService<IDataEngine>('objectql'); } catch { ql = undefined; }
-        ownerAccountState = await probeWalledOwnerAccountState(ql);
+        ownerAccountState = await probeWalledOwnerAccountState(ql, {
+          humanUsers: reachability.humanUsers,
+        });
       }
-      warnIfWalledOwnerCannotVerify(
-        { hasEmailTransport, hasFederatedSignIn, ownerAccountState },
-        ctx.logger,
-      );
+      // [#14353] ONE report per boot. A deployment can match both shapes at
+      // once (no accounts AND a declared owner that cannot verify); the
+      // no-sign-in error strictly subsumes the walled-owner warning there —
+      // an owner who cannot reach platform-admin standing is moot when nobody
+      // can sign in at all — so the warning is suppressed rather than stacked
+      // on top of it. When the error did not fire, the warning is untouched.
+      if (!deadEnd) {
+        warnIfWalledOwnerCannotVerify(
+          { hasEmailTransport, hasFederatedSignIn, ownerAccountState },
+          ctx.logger,
+        );
+      }
     });
 
     // Dev-only: provision a known, loginable platform admin on an empty DB.
@@ -1322,7 +1347,14 @@ export class AuthPlugin implements Plugin {
         // fields stay rejected. `managed-extension-fields.test.ts` proves the two
         // populations are disjoint at the pinned better-auth version.
         for (const [object, fields] of Object.entries(MANAGED_EXTENSION_EDITABLE_FIELDS)) {
-          if (object === SystemObjectName.USER) continue; // sys_user tiering above
+          // `sys_user` is registered ABOVE, from the tiered constant, and is
+          // skipped here rather than merged: this map has one tier and that
+          // table has two (form vs. admin bulk import). Its entry there is a
+          // declaration that must stay a SUBSET of what was registered above —
+          // pinned in `managed-extension-fields.test.ts`, because a name that
+          // reaches this map but never the whitelist is a write the platform
+          // advertises and the guard refuses (ADR-0049).
+          if (object === SystemObjectName.USER) continue;
           registerManagedUpdateWhitelist(object, fields);
         }
         // [#8317] Canonicalise `sys_member.role` on every ObjectQL write, at

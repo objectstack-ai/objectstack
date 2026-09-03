@@ -12,12 +12,12 @@
 // ruled explicitly that they stay two scripts, and the reason is worth stating
 // because "just add it to the other script" is the obvious wrong move:
 //
-//   check:skill-frame-sync       "are the FOUR COPIES IN THIS TREE isomorphic?"
+//   check:skill-frame-sync       "are THIS TREE's COPIES isomorphic to each other?"
 //                                 → compares copy against copy, one tree.
 //   check:skill-frame-freshness  "is THIS TREE's frame current with origin/main?"
 //                                 → compares this tree against a remote ref.
 //
-// They are independent: a tree that is 173 commits behind, whose four copies are
+// They are independent: a tree that is 173 commits behind, whose copies are
 // CONSISTENTLY the old two-axis frame, is **green** on the sync gate — correctly
 // so, the copies really are isomorphic — while being exactly the defect #5866
 // reports. The self-test pins that independence rather than asserting it: the
@@ -37,10 +37,15 @@
 // hypothetical, and the channel is still live — at the time this gate was
 // written the shared checkout was 59 commits behind on a different branch.
 //
-// The frame lives in three files / four copies; COPIES and AXIS_MAP are imported
-// from check-skill-frame-sync.mjs so that "the frame's structure" has exactly ONE
-// definition. Forking those anchors into this script would reproduce, in the
-// gates themselves, the hand-copied-text disease they exist to police.
+// COPIES and AXIS_MAP are imported from check-skill-frame-sync.mjs so that "the
+// frame's structure" has exactly ONE definition — how many copies there are, and
+// which files hold them, is that table's answer and never a second list here.
+// Forking those anchors into this script would reproduce, in the gates
+// themselves, the hand-copied-text disease they exist to police. (It was four
+// copies in three files until the 2026-09-03 batch-3 ruling, item 4 option B,
+// dropped the two dev-side copies; nothing in this file had to move for that
+// except the self-test fixtures below, which used to SPELL one of the dropped
+// files instead of deriving it.)
 //
 // STRUCTURE, NEVER BYTES
 // ----------------------
@@ -130,6 +135,21 @@ const REMEDY = 'git fetch origin main && git merge --ff-only origin/main';
 const DEFAULT_FETCH_TIMEOUT_MS = 20_000;
 
 const FRAME_FILES = [...new Set(COPIES.map((c) => c.file))];
+
+/**
+ * The copy the self-test's file-level fixtures operate on — the one they delete,
+ * withhold from a ref, or make unparseable. DERIVED, never spelled: these cases
+ * named `.claude/agents/os-dev.md` until the 2026-09-03 reduction stopped it
+ * being a frame file, and a spelled path would have gone on asserting about a
+ * document the frame no longer lives in. Same rule as everything else in this
+ * file (#8024): locate the fixture the way the gate locates the real thing.
+ *
+ * First entry, so the choice is deterministic and non-empty for any COPIES table
+ * the sync gate can start up with (an empty one fails that gate first).
+ */
+const SAMPLE_COPY_ID = COPIES[0].id;
+const SAMPLE_FRAME_FILE = COPIES[0].file;
+const SAMPLE_FRAME_FILE_RX = new RegExp(SAMPLE_FRAME_FILE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
 
 // ---------------------------------------------------------------------------
 // git plumbing
@@ -827,13 +847,13 @@ function selfTest() {
       label: 'stale tree + authoritative ref → ERROR naming the stale files (the #5866 shape)',
       run: () => evaluate({ root: dir, ref: current }),
       expect: 'error',
-      wants: [/STRUCTURALLY BEHIND/, /\.claude\/agents\/os-dev\.md/, /3 axes: long-term-soundness/, /4 axes: business-need/, new RegExp(REMEDY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))],
+      wants: [/STRUCTURALLY BEHIND/, SAMPLE_FRAME_FILE_RX, /3 axes: long-term-soundness/, /4 axes: business-need/, new RegExp(REMEDY.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))],
     });
     cases.push({
       label: 'the SAME stale tree, fetch impossible → degrades to WARN, exit 0, same diagnosis',
       run: () => evaluate({ root: dir }),
       expect: 'warn',
-      wants: [/STRUCTURALLY BEHIND/, /\.claude\/agents\/os-dev\.md/],
+      wants: [/STRUCTURALLY BEHIND/, SAMPLE_FRAME_FILE_RX],
       alsoAssert: (v) => (v.clamped ? null : 'expected the verdict to be marked as clamped'),
     });
     // The independence proof: the sync gate is GREEN on this very fixture.
@@ -894,14 +914,14 @@ function selfTest() {
   // --- 6: a framework file main has and we do not --------------------------
   {
     const { dir, b: current } = linear('missing-here', real, real);
-    git(['rm', '-q', '.claude/agents/os-dev.md'], { cwd: dir });
+    git(['rm', '-q', SAMPLE_FRAME_FILE], { cwd: dir });
     const without = commitAll(dir, 'drop a framework file');
     setOriginMain(dir, current);
     cases.push({
       label: 'a framework file exists on the ref but not in the tree → ERROR',
       run: () => evaluate({ root: dir, ref: current }),
       expect: 'error',
-      wants: [/MISSING from this working tree/, /os-dev\.md/],
+      wants: [/MISSING from this working tree/, SAMPLE_FRAME_FILE_RX],
       alsoAssert: () => (without ? null : 'fixture did not commit'),
     });
   }
@@ -910,9 +930,9 @@ function selfTest() {
   {
     const dir = makeRepo('missing-there');
     temps.push(dir);
-    const partial = new Map([...real].filter(([f]) => f !== '.claude/agents/os-dev.md'));
+    const partial = new Map([...real].filter(([f]) => f !== SAMPLE_FRAME_FILE));
     writeFiles(dir, partial);
-    const refSha = commitAll(dir, 'main without the dev-agent definition');
+    const refSha = commitAll(dir, 'main without one framework file');
     writeFiles(dir, real);
     commitAll(dir, 'tree adds it');
     setOriginMain(dir, refSha);
@@ -926,7 +946,7 @@ function selfTest() {
 
   // --- 8: the frame moved on main, our anchors predate it ------------------
   {
-    const moved = withUnreadableCopy(real, 'internal-dev');
+    const moved = withUnreadableCopy(real, SAMPLE_COPY_ID);
     const { dir, b: current } = linear('anchors', real, moved);
     git(['checkout', '-q', git(['rev-parse', 'HEAD~1'], { cwd: dir }).stdout.trim()], { cwd: dir });
     setOriginMain(dir, current);
@@ -940,7 +960,7 @@ function selfTest() {
 
   // --- 9: our own tree does not parse --------------------------------------
   {
-    const broken = withUnreadableCopy(real, 'internal-dev');
+    const broken = withUnreadableCopy(real, SAMPLE_COPY_ID);
     const { dir, b: current } = linear('broken-here', broken, real);
     git(['checkout', '-q', git(['rev-parse', 'HEAD~1'], { cwd: dir }).stdout.trim()], { cwd: dir });
     setOriginMain(dir, current);

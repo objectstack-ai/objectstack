@@ -636,7 +636,14 @@ function main() {
         }
         return;
     }
-    selfTest();
+    if (selfTest() !== SELF_TEST_VERDICT) {
+        console.error(
+            '\n✗ check-filter-alias-parity self-test: selfTest() returned without reaching its verdict,\n'
+                + 'so no success line was printed. Running the gate on top of a self-test\n'
+                + 'that never finished would report an unverified gate as a verified one.\n',
+        );
+        process.exit(1);
+    }
 
     const read = (rel) => readFileSync(join(ROOT, rel), 'utf8');
     const { problems, protocolSet, restSet } = judge({

@@ -358,7 +358,18 @@ function resolveSince(opts) {
 }
 
 function main(argv) {
-  if (argv.includes('--self-test')) return selfTest();
+  if (argv.includes('--self-test')) {
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ git-history self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    return selfTestCode;
+  }
   const { cmd, opts } = parseArgs(argv);
   if (cmd === null) usage('a command is required');
   if (!['count', 'log', 'ensure'].includes(cmd)) usage(`unknown command '${cmd}'`);
@@ -415,6 +426,13 @@ function main(argv) {
 }
 
 // ── self-test ────────────────────────────────────────────────────────────────
+
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
 
 function selfTest() {
   let failures = 0;
@@ -621,6 +639,8 @@ function selfTest() {
   }
 
   process.stdout.write(failures === 0 ? '\ngit-history --self-test: all cases passed.\n' : `\ngit-history --self-test: ${failures} FAILED.\n`);
+
+  selfTestReachedVerdict = true;
   return failures === 0 ? 0 : 1;
 }
 

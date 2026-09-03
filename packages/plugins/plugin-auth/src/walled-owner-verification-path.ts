@@ -103,6 +103,11 @@ import { isConfiguredPlatformAdminEmail, resolvePlatformAdminEmails } from '@obj
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { SystemObjectName } from '@objectstack/spec/system';
 import { isHumanUserRow } from './audience-posture.js';
+import {
+  type BootProbeEngine,
+  type BootStorePresence,
+  probeHumanUsersPresence,
+} from './boot-sign-in-reachability.js';
 
 /**
  * The stable NAME of this warning — the "named" half of the ruled "loud, named
@@ -163,10 +168,13 @@ export type WalledOwnerAccountState =
   /** The store could not be consulted (no engine, probe failure) — treated as the dead end, loudly. */
   | 'unknown';
 
-/** The bounded read this module's probe performs — every data engine satisfies it. */
-export interface WalledOwnerProbeEngine {
-  find(object: string, query: Record<string, unknown>, options?: unknown): Promise<unknown>;
-}
+/**
+ * The bounded read this module's probe performs — every data engine satisfies
+ * it. [#14353] Now an alias of the family's one probe-engine shape
+ * ({@link BootProbeEngine}), so the walled-owner probe and the
+ * sign-in-reachability probe cannot drift apart on what they ask of a store.
+ */
+export type WalledOwnerProbeEngine = BootProbeEngine;
 
 /**
  * What this deployment has wired that could ever verify an address. All
@@ -225,11 +233,11 @@ export interface VerificationPathWiring {
  */
 export async function probeWalledOwnerAccountState(
   engine: WalledOwnerProbeEngine | undefined,
+  known?: { humanUsers?: BootStorePresence },
 ): Promise<WalledOwnerAccountState> {
   const config = resolvePlatformAdminEmails();
   if (config.emails.length === 0 || !engine || typeof engine.find !== 'function') return 'unknown';
   const SYSTEM = { context: { isSystem: true } };
-  const PROBE_LIMIT = 50;
   const asRows = (raw: unknown): Record<string, unknown>[] => {
     if (Array.isArray(raw)) return raw as Record<string, unknown>[];
     const records = (raw as { records?: unknown } | null | undefined)?.records;
@@ -256,9 +264,15 @@ export async function probeWalledOwnerAccountState(
     if (owners.length > 0) {
       return owners.some(isEmailVerifiedUserRow) ? 'owner-verified' : 'owner-unverified';
     }
-    const page = asRows(await engine.find(SystemObjectName.USER, { limit: PROBE_LIMIT }, SYSTEM));
-    const humansExist = page.some(isHumanUserRow) || page.length >= PROBE_LIMIT;
-    return humansExist ? 'owner-absent' : 'no-human-users';
+    // [#14353] ONE human-population page read per boot. The caller's
+    // `kernel:ready` hook already needs this fact for the sign-in-reachability
+    // report, so it hands the answer in and the store is not paged twice; a
+    // caller that has not read it (every direct caller, and every test)
+    // passes nothing and the probe reads it here. Either way the predicate is
+    // `isHumanUserRow` and the page semantics are the family's own.
+    const humans = known?.humanUsers ?? (await probeHumanUsersPresence(engine));
+    if (humans === 'unknown') return 'unknown';
+    return humans === 'present' ? 'owner-absent' : 'no-human-users';
   } catch {
     return 'unknown';
   }

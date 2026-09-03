@@ -8,8 +8,9 @@
  * caller's own `Accept-Language` first (only when it names a locale in
  * `AUTH_EMAIL_TEMPLATE_LOCALES`), and the deployment default second. The
  * 2026-08-13 ruling had made the deployment default the whole answer and
- * rejected `Accept-Language` outright. Still no `sys_user.locale` column —
- * that half stayed deferred. The ruling text of record lives on
+ * rejected `Accept-Language` outright. `sys_user.locale` exists since #13881
+ * (2026-09-01) but auth mail does not read it yet — that is #14641's rung,
+ * and this file asserts nothing about it. The ruling text of record lives on
  * `AuthManager.setDefaultEmailLocale` / `authEmailLocaleFromRequest`; the
  * request rung's own cases are the last describe block in this file.
  *

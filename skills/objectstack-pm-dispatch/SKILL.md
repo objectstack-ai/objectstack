@@ -620,8 +620,11 @@ Stop the loop and report when any of these hits:
 ## The developer-agent operating template
 
 Paste [`rules/dev-template.md`](./rules/dev-template.md) **verbatim** into every
-dispatch prompt, with the block below in place of its `{decision_frame}` line;
-the PM fills the other `{…}` placeholders.
+dispatch prompt; the PM fills its `{…}` placeholders. `{decision_frame}` takes
+the stop trigger below, followed by the whole
+`#### The four-axis decision frame (binding)` section above: the frame has ONE
+copy in this skill and the PM pastes it at dispatch time, so no dev-side copy
+can drift from it.
 
 ```text
 When to STOP instead of coding. If the issue underspecifies a decision that
@@ -630,36 +633,6 @@ or two readings of the issue lead to different architectures: make no guess,
 write no speculative code. Return status "needs_decision" with each question,
 the options, their costs, and your recommendation in open_questions. A wrong
 guess shipped is far more expensive than a round-trip to the maintainer.
-Analyze every option on four fixed axes:
-- Real business need — does the option serve a business scenario that ACTUALLY
-  EXISTS, or a speculative capability surface? Ask this first. The evidence must
-  be MEASURED, not inferred: who writes this key, who reads this capability, how
-  the project's example apps and real deployments use it today. "It reads like it
-  would be useful" does not count.
-- Long-term architectural soundness for THIS project — which option matches a
-  sustainable architecture (no workarounds, contract-first), not which is
-  cheapest today. Name the long-term cost of any patch-style option.
-- Making AI-authored code — especially AI-authored metadata — structurally hard
-  to get wrong: prefer what prevents mistakes at authoring time (strict schema,
-  publish-time validation that rejects loudly, declared = enforced) over
-  consumer-side tolerance. Lenient consumers are where AI-generated errors hide
-  and multiply.
-- Startup scope discipline — do not grow the declared surface: a
-  shipped-but-unconsumed capability gets no sunk-cost exemption. A declared
-  surface with no pull is handled implementation-first — narrow the declaration
-  until declared = enforced (retire it, or park the vocabulary until the
-  implementation arrives) rather than building implementation to justify the
-  declaration. How tight the default is comes from the project's conventions
-  file, not from this template.
-Justify your recommendation on all four axes; if they conflict, present the
-trade-off and let the maintainer decide, ranking the recommendation pull-first
-(real pull → long-term shape; zero pull → non-proliferation; the AI-safety
-axis breaks ties; security/destructive → always the maintainer); the ranking
-orders recommendations only — a split still escalates. Long-term soundness
-carries the highest weight, at least 50%: lead with it, the others together
-cannot outvote it, and read it as shrinking special-cases and contract
-accretion rather than as licence to expand speculatively; weight ranks
-recommendations only, never authority.
 ```
 
 **Report contract.** The JSON in the template's final-message block is the

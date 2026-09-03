@@ -168,6 +168,44 @@ import {
 } from './console-spec-probes.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '1. Clean pass: fresh witness in the bundle, stale detector nowhere.': 1,
+  '2. THE DEFECT: the restored bundle carries the published spec.': 1,
+  '3. Partial restore: the stamp\'s own witness is missing from the assets.': 1,
+  '4. Probe expiry: this tree\'s spec now carries the stale detector too.': 3,
+  '7. No dist at all: nothing to verify, unless one was required.': 2,
+  '7b. THE SECOND VACUITY PATH (objectstack#10428): an unbuilt spec means the': 4,
+  '7c. THE THIRD VACUITY PATH (objectstack#10595): a well-formed stamp whose': 4,
+  '7d. The producer cannot emit that stamp in the first place. writeStamp is': 2,
+  '8. A build that found no skew records it, and this gate says so honestly.': 3,
+  '12. ROUND TRIP against the real assert script: whatever it stamps, this gate': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 10;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
@@ -515,11 +553,26 @@ function stampFor({ skew = true, freshWitness = FRESH, staleDetector = STALE } =
 const SELF_TEST_VERDICT = 'check-console-injection self-test reached its verdict';
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   const failures = [];
   let checked = 0;
   const root = tmpdir('check-console-injection');
 
   const expect = (label, actual, wanted) => {
+    registerCase();
     checked += 1;
     if (actual !== wanted) failures.push(`${label}: expected ${wanted}, got ${actual}`);
   };
@@ -527,6 +580,7 @@ function selfTest() {
   const specDir = makeSpecPkg(path.join(root, 'spec-ahead'), [FRESH, 'A shared description both specs carry always']);
 
   // 1. Clean pass: fresh witness in the bundle, stale detector nowhere.
+  battery('1. Clean pass: fresh witness in the bundle, stale detector nowhere.');
   {
     const dist = makeDist(path.join(root, 'ok'), `console(${JSON.stringify(FRESH)})`, stampFor());
     expect('clean pass', evaluate({ distDir: dist, specDir }).code, 0);
@@ -541,6 +595,7 @@ function selfTest() {
   // was found to be vacuous. Both strings present is also the real shape: the
   // console bundle holds a second, transitive copy of this tree's spec via the
   // injected client, which is exactly why the check is two-sided.
+  battery('2. THE DEFECT: the restored bundle carries the published spec.');
   {
     const dist = makeDist(
       path.join(root, 'stale'),
@@ -563,6 +618,7 @@ function selfTest() {
   }
 
   // 3. Partial restore: the stamp's own witness is missing from the assets.
+  battery('3. Partial restore: the stamp\'s own witness is missing from the assets.');
   {
     const dist = makeDist(path.join(root, 'partial'), 'console("unrelated bundle text")', stampFor());
     const r = evaluate({ distDir: dist, specDir });
@@ -574,6 +630,7 @@ function selfTest() {
   }
 
   // 4. Probe expiry: this tree's spec now carries the stale detector too.
+  battery('4. Probe expiry: this tree\'s spec now carries the stale detector too.');
   {
     const caught = makeSpecPkg(path.join(root, 'spec-caught-up'), [FRESH, STALE]);
     const dist = makeDist(path.join(root, 'expired'), `console(${JSON.stringify(FRESH)})`, stampFor());
@@ -591,6 +648,7 @@ function selfTest() {
   }
 
   // 7. No dist at all: nothing to verify, unless one was required.
+  battery('7. No dist at all: nothing to verify, unless one was required.');
   {
     const dist = path.join(root, 'absent');
     expect('no dist passes', evaluate({ distDir: dist, specDir }).code, 0);
@@ -605,6 +663,7 @@ function selfTest() {
   //     before the fix this fixture exited 0 with an `ℹ`, which is precisely a
   //     green that asserts nothing, so only a red and its branch-unique wording
   //     can tell the fixed script from the broken one.
+  battery('7b. THE SECOND VACUITY PATH (objectstack#10428): an unbuilt spec means the');
   {
     const unbuilt = makeUnbuiltSpecPkg(path.join(root, 'spec-unbuilt'));
     const dist = makeDist(path.join(root, 'unbuilt-tree'), `console(${JSON.stringify(FRESH)})`, stampFor());
@@ -652,6 +711,7 @@ function selfTest() {
   //     and every substantive verdict is derived per entry, so the gate asserts
   //     nothing at all — strictly more vacuous than 7b, which still ran the two
   //     bundle assertions.
+  battery('7c. THE THIRD VACUITY PATH (objectstack#10595): a well-formed stamp whose');
   {
     const empty = { stampVersion: 1, generatedBy: 'scripts/assert-console-spec-injection.mjs', packages: [] };
     const dist = makeDist(path.join(root, 'empty-stamp'), `console(${JSON.stringify(FRESH)})`, empty);
@@ -708,6 +768,7 @@ function selfTest() {
   //     the one call site every producer passes, and the entries array is meant
   //     to GROW (objectstack#9659) — the day it is derived rather than literal,
   //     an empty result becomes producible. Refused at the write.
+  battery('7d. The producer cannot emit that stamp in the first place. writeStamp is');
   {
     const dir = fs.mkdtempSync(path.join(root, 'writestamp-'));
     checked += 1;
@@ -728,6 +789,7 @@ function selfTest() {
   }
 
   // 8. A build that found no skew records it, and this gate says so honestly.
+  battery('8. A build that found no skew records it, and this gate says so honestly.');
   {
     const dist = makeDist(
       path.join(root, 'noskew'),
@@ -767,6 +829,7 @@ function selfTest() {
   // 12. ROUND TRIP against the real assert script: whatever it stamps, this gate
   //     must accept. This is the drift the shared module exists to prevent, and
   //     the only assertion here that proves the two halves still agree.
+  battery('12. ROUND TRIP against the real assert script: whatever it stamps, this gate');
   {
     const injected = makeSpecPkg(path.join(root, 'rt-injected'), [FRESH, 'Shared text in both specs for the round trip']);
     const vendored = makeSpecPkg(path.join(root, 'rt-vendored'), [STALE, 'Shared text in both specs for the round trip']);
@@ -787,6 +850,52 @@ function selfTest() {
   }
 
   fs.rmSync(root, { recursive: true, force: true });
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
 
   if (failures.length > 0) {
     console.error(`✗ check-console-injection --self-test -- ${failures.length} failure(s)\n`);

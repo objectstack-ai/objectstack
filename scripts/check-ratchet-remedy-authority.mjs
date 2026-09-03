@@ -16,6 +16,49 @@
 // precedents are check-type-source-resolution.mjs, check-test-source-alias.mjs,
 // check-adr-links.mjs and check-driver-memory-census.mjs.
 //
+// ── The ruled EXCEPTION: an authorised cross-file move (2026-09-03) ─────────
+//
+// The disjunction above asks WHO may take a registry-growing remedy, and on a
+// shrink-only ratchet the answer was always "a maintainer, per instance". One
+// class of act is now authorised generally instead of one PR at a time.
+// Maintainer ruling, 2026-09-03, adopting option A of item 5 in the skills
+// optimization programme's third decision batch (#14685, comment 5520452691) —
+// verbatim and untranslated: 「同意」; the text it adopts:
+//
+//   the per-file line ratchet admits a cross-file move in one PR when the
+//   destination's allowance rises by no more than the source's net decrease and
+//   total lines do not increase, with the ruling cited in the ratchet comment;
+//   `check:ratchet-remedy-authority`'s self-description gains this exception
+//
+// So: a cross-file MOVE in the per-file line ratchet is NOT a maintainer-only
+// remedy while all three conditions hold — the destination's raise is covered by
+// the named sources' net decrease, the map-wide total does not increase, and the
+// raised entry cites that ruling. The scope is exactly the act the ruling names,
+// in the gate the ruling names. A raise failing any condition is an ordinary
+// raise and belongs to a maintainer as before, and no other ratchet in this farm
+// gains anything: the reason a move is not a weakening is that the corpus SHRANK
+// on net, which is a property of the act, not of the author.
+//
+// ⚠️ TODAY THE EXCEPTION IS DOCUMENTARY, and recording that is half the point of
+// writing it here. The corpus walk is a NON-RECURSIVE readdir of `scripts/` (see
+// corpusFiles), and the gate the ruling amends lives one directory down, in
+// scripts/pm/ — it has never been in this sweep, so no verdict of this gate
+// moves. A self-test assertion pins that, so a wider walk reds HERE and makes
+// the class a decision someone takes rather than one that lands in silence.
+//
+// ⛔ NO NEW VERDICT CLASS. `marked` / `refused` / `unmarked` / `excluded` stay as
+// they are. A fifth class for "authorised by standing ruling" would have a
+// population of zero in this corpus, and an unreachable class is a claim of
+// enforcement nobody has — the same defect this file's control corpus exists to
+// prevent, one level up. If the walk ever reaches a gate offering this act, the
+// honest first move is to read that gate's own verdict and record it in CONTROL,
+// the way every instance in this file arrived.
+//
+// ⛔ THIS SECTION IS COMMENT, never a string literal — the header warning above,
+// applied to itself. It describes an act that grows a registry, so in
+// author-facing text it would make this gate an instance of the convention it
+// enforces and flip its own verdict off `excluded`.
+//
 // WHY A SWEEP AND NOT A SHARED MODULE. #8519 proposed a shared helper module as
 // the enforcement route. It is not one: a module is reachable only from gates
 // that choose to import it, so it standardises the gates that already agreed and
@@ -108,6 +151,55 @@ import { join, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 import { isEntrypoint } from './invoked-as.mjs';
+
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '(1) The lexer. A regex literal containing a quote must not desync it — the': 1,
+  '(2) Message boundaries. Two unrelated diagnostics must not compose into one': 1,
+  '(3) Concatenation is ONE message. The mirror of (2): if `+`-joined literals': 1,
+  '(4) Offer grammar, word order A: the registry FOLLOWS a preposition.': 1,
+  '(5) Offer grammar, word order B — #8540 miss ①. The fixture carries NO': 1,
+  '(6) The dot. A registry named by PATH must match — the measured `[^.;]` bug.': 1,
+  '(7) The descriptive-modal guard — the measured regen-artifacts.mjs case.': 1,
+  '(8) Stage 2 discriminates. Same offer shape, no testimony → not a ratchet.': 1,
+  '(9) Stage 2 reaches a real ratchet, by each limb, so (8) is not vacuous.': 2,
+  '(10) NON-CIRCULARITY. The authority token must never be its own anchor: a': 1,
+  '(11) Refusal, BOUND shape — check-adr-links.mjs / check-driver-memory-census.mjs.': 1,
+  '(12) Refusal, PREDICATION shape — check-type-source-resolution.mjs / check-test-source-alias.mjs.': 1,
+  '(13) Refusal DISCRIMINATES. A marking gate\'s closing discouragement is not a': 1,
+  '(14) End-to-end: an anchored, unrefused, unmarked offer is a VIOLATION. This': 1,
+  '(15) …and the same text carrying the token classifies as MARKED. Paired with': 1,
+  '(16) The corpus-scale positive control, asserted here as well as in the run:': 1,
+  '(18) Compliance is carried in AUTHOR-FACING text, not in commentary. Found by': 1,
+  '(19) …and the mirror: the token in a string literal DOES count. Paired with': 1,
+  '(17) This gate must not be an instance of its own convention.': 1,
+  '(20) The declared population, held to the walk in BOTH directions (#13813)': 7,
+  '(21) The ruled cross-file-move exception (2026-09-03)': 2,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 21;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..');
@@ -1019,8 +1111,22 @@ function main() {
 let selfTestReachedVerdict = false;
 
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   const failures = [];
-  const expect = (label, cond) => { if (!cond) failures.push(label); };
+  const expect = (label, cond) => { registerCase(); if (!cond) failures.push(label); };
 
   // ⛔ THE OFFER VERB IS HOISTED OUT OF EVERY FIXTURE THAT CARRIES TESTIMONY.
   // A fixture spelling `add …` inline, beside the words "shrink-only", would make
@@ -1033,6 +1139,7 @@ function selfTest() {
   // (1) The lexer. A regex literal containing a quote must not desync it — the
   // measured first-cut bug, which silently swapped comment and string space for
   // the rest of the file.
+  battery('(1) The lexer. A regex literal containing a quote must not desync it — the');
   const lexFixture = 'const RE = /[\'"]/g; // add an entry to THE_LEDGER\nconst m = "real message";\n';
   const lexed = authorFacingMessages(lexFixture);
   expect('lexer — a regex literal containing a quote does not desync comment/string space '
@@ -1041,6 +1148,7 @@ function selfTest() {
 
   // (2) Message boundaries. Two unrelated diagnostics must not compose into one
   // offer — the measured check-adr-anchors.mjs false positive.
+  battery('(2) Message boundaries. Two unrelated diagnostics must not compose into one');
   const twoMessages = 'push(`first: add \\`.vN\\` to the filename.`);\npush(`second: the KNOWN_THING entry is stale.`);\n';
   expect('message boundary — a verb in one diagnostic does not reach a registry named in the '
     + 'NEXT diagnostic (the measured check-adr-anchors.mjs false positive)',
@@ -1048,6 +1156,7 @@ function selfTest() {
 
   // (3) Concatenation is ONE message. The mirror of (2): if `+`-joined literals
   // were split, every real multi-part remedy would lose its testimony.
+  battery('(3) Concatenation is ONE message. The mirror of (2): if `+`-joined literals');
   expect('message boundary — literals joined only by `+` stay ONE message, so a remedy built '
     + 'from three literals keeps the testimony written beside it',
     authorFacingMessages(`const m = '${ADD} an entry to ' + 'the ledger. It is ' + 'shrink-only.';`).length === 1);
@@ -1055,6 +1164,7 @@ function selfTest() {
   const offersIn = (src) => findOffers(src);
 
   // (4) Offer grammar, word order A: the registry FOLLOWS a preposition.
+  battery('(4) Offer grammar, word order A: the registry FOLLOWS a preposition.');
   expect('offer grammar — word order "… to … REGISTRY" is an offer',
     offersIn(`const m = 'Fix it properly. Or ${ADD} a MEASURED entry to scripts/x.baseline.json saying why not.';`).length > 0);
 
@@ -1065,12 +1175,14 @@ function selfTest() {
   // draft of this fixture read "… entry in the ledger", which the prototype's
   // defect would have matched happily — the assertion would have passed while
   // pinning nothing. Fixtures for a word-order bug have to be word-ordered.
+  battery('(5) Offer grammar, word order B — #8540 miss ①. The fixture carries NO');
   expect('offer grammar — a registry named BEFORE the noun, with no preposition leading to it, is '
     + 'an offer (#8540 miss ①: the prototype demanded "add … to/in … REGISTRY" and so missed '
     + 'check-type-check-coverage.mjs entirely)',
     offersIn(`const TEST_DEBT = {};\nconst m = 'Fix it properly. Or ${ADD} a TEST_DEBT entry saying why not.';`).length > 0);
 
   // (6) The dot. A registry named by PATH must match — the measured `[^.;]` bug.
+  battery('(6) The dot. A registry named by PATH must match — the measured `[^.;]` bug.');
   const byPath = offersIn("const m = 'add it to scripts/role-word-baseline.json to admit the case.';");
   expect('offer grammar — an offer naming its ledger by PATH is matched (a gap class excluding '
     + 'the dot silently loses every path-named registry while the gate still reports clean)',
@@ -1084,6 +1196,7 @@ function selfTest() {
   // modal guard was never consulted at all. Mutation-testing caught it: deleting
   // the guard left this assertion green. An assertion whose fixture cannot reach
   // the mechanism it names is worse than no assertion, because it reads as cover.
+  battery('(7) The descriptive-modal guard — the measured regen-artifacts.mjs case.');
   expect('offer grammar — "can WIDEN it" DESCRIBES a hazard and is not an offer '
     + '(the measured regen-artifacts.mjs false positive)',
     offersIn("const m = 'a SHRINK-ONLY ratchet. Regenerating it can WIDEN it — a fresh gap gets a "
@@ -1092,6 +1205,7 @@ function selfTest() {
   // (8) Stage 2 discriminates. Same offer shape, no testimony → not a ratchet.
   // This is what keeps the ~20 declaration registries out, and it is what makes
   // (9) worth having: an anchor that fired on everything would keep (9) green.
+  battery('(8) Stage 2 discriminates. Same offer shape, no testimony → not a ratchet.');
   const declSrc = `const INHERIT_JUSTIFIED = []; const m = 'write model: inherit AND ${ADD} an entry to INHERIT_JUSTIFIED saying why.';`;
   const declOffers = findOffers(declSrc);
   if (declOffers.length === 0) {
@@ -1104,6 +1218,7 @@ function selfTest() {
   }
 
   // (9) Stage 2 reaches a real ratchet, by each limb, so (8) is not vacuous.
+  battery('(9) Stage 2 reaches a real ratchet, by each limb, so (8) is not vacuous.');
   const shrinkSrc = `const m = '${ADD} a MEASURED entry to the baseline saying why not. That baseline is shrink-only.';`;
   const shrinkOffers = findOffers(shrinkSrc);
   expect('stage 2 — the SHRINK limb anchors an offer whose message testifies the registry only shrinks',
@@ -1117,6 +1232,7 @@ function selfTest() {
   // (10) NON-CIRCULARITY. The authority token must never be its own anchor: a
   // detector anchored by the compliance token can only ever examine gates that
   // already comply, and can never report a violation.
+  battery('(10) NON-CIRCULARITY. The authority token must never be its own anchor: a');
   const tokenOnly = `const m = 'add an entry to the ledger. ${RATCHET_AUTHORITY_MARKER}, not a co-equal option.';`;
   const tokenOffers = findOffers(tokenOnly);
   if (tokenOffers.length === 0) {
@@ -1129,23 +1245,27 @@ function selfTest() {
   }
 
   // (11) Refusal, BOUND shape — check-adr-links.mjs / check-driver-memory-census.mjs.
+  battery('(11) Refusal, BOUND shape — check-adr-links.mjs / check-driver-memory-census.mjs.');
   expect('refusal — a negation bound to the verb is a refusal ("do not add it to …"), the shape '
     + 'check-adr-links.mjs and check-driver-memory-census.mjs use',
     offerIsRefused({ context: 'fix the link; do not add it to KNOWN_DEAD_TARGETS to make this green.' }));
 
   // (12) Refusal, PREDICATION shape — check-type-source-resolution.mjs / check-test-source-alias.mjs.
+  battery('(12) Refusal, PREDICATION shape — check-type-source-resolution.mjs / check-test-source-alias.mjs.');
   expect('refusal — an act named as subject and denied is a refusal ("widening the registry entry '
     + 'is not the fix"), the shape the two registry gates use',
     offerIsRefused({ context: 'Add the rules to its tsconfig.json — widening the registry entry is not the fix.' }));
 
   // (13) Refusal DISCRIMINATES. A marking gate's closing discouragement is not a
   // refusal; if it were, any gate could shed the token by appending a sentence.
+  battery('(13) Refusal DISCRIMINATES. A marking gate\'s closing discouragement is not a');
   expect('refusal — a marking gate\'s closing discouragement is NOT a refusal ("do not take this '
     + 'path to get CI green" negates `take`, not the expanding act)',
     !offerIsRefused({ context: 'add a MEASURED entry to the baseline saying why not — do not take this path to get CI green.' }));
 
   // (14) End-to-end: an anchored, unrefused, unmarked offer is a VIOLATION. This
   // is the assertion that proves the gate can fail at all.
+  battery('(14) End-to-end: an anchored, unrefused, unmarked offer is a VIOLATION. This');
   const violation = `const m = 'Fix it properly. Or ${ADD} a MEASURED entry to the baseline saying why not. That baseline is shrink-only.';`;
   expect('end-to-end — an anchored, unrefused offer with no authority token classifies as UNMARKED '
     + '(proves the gate discriminates rather than approving every script it reads)',
@@ -1153,6 +1273,7 @@ function selfTest() {
 
   // (15) …and the same text carrying the token classifies as MARKED. Paired with
   // (14) by construction: exactly one of the two can fire on a broken predicate.
+  battery('(15) …and the same text carrying the token classifies as MARKED. Paired with');
   expect('end-to-end — the same offer carrying the authority token classifies as MARKED',
     classify(`const T = '${RATCHET_AUTHORITY_MARKER}';\n${violation}`).verdict === 'marked');
 
@@ -1160,6 +1281,7 @@ function selfTest() {
   // the sweep must still REACH every instance the control names. This is the
   // assertion that fails when the detector goes blind — the failure mode that a
   // control-less detector reports as a clean run.
+  battery('(16) The corpus-scale positive control, asserted here as well as in the run:');
   const results = sweep();
   const unreached = Object.entries(CONTROL)
     .filter(([, d]) => d.expect === 'marked' || d.expect === 'refused')
@@ -1172,6 +1294,7 @@ function selfTest() {
   // (18) Compliance is carried in AUTHOR-FACING text, not in commentary. Found by
   // reverse verification: stripping the token from a real gate left this detector
   // green, because that gate's header mentions the token in a comment.
+  battery('(18) Compliance is carried in AUTHOR-FACING text, not in commentary. Found by');
   const commentaryOnly = `// this gate marks the path ${RATCHET_AUTHORITY_MARKER} per #8435\n`
     + `const m = 'Fix it properly. Or ${ADD} a MEASURED entry to the baseline saying why not. That baseline is shrink-only.';`;
   expect('compliance — a gate that only MENTIONS the token in a comment does not count as carrying '
@@ -1181,6 +1304,7 @@ function selfTest() {
 
   // (19) …and the mirror: the token in a string literal DOES count. Paired with
   // (18) by construction, so exactly one of the two can fire on a broken check.
+  battery('(19) …and the mirror: the token in a string literal DOES count. Paired with');
   const inLiteral = `const T = '${RATCHET_AUTHORITY_MARKER}';\n`
     + `const m = 'Fix it properly. Or ${ADD} a MEASURED entry to the baseline saying why not. That baseline is shrink-only.';`;
   expect('compliance — the token declared as a string literal DOES count as carrying it, which is '
@@ -1188,6 +1312,7 @@ function selfTest() {
     classify(inLiteral).verdict === 'marked');
 
   // (17) This gate must not be an instance of its own convention.
+  battery('(17) This gate must not be an instance of its own convention.');
   expect('self-classification — this gate is NOT an instance of the convention it enforces (its '
     + 'control is a declaration registry, and its offer-shaped quotes live in comments)',
     results.get(SELF_FILE) !== undefined && results.get(SELF_FILE).verdict === 'excluded');
@@ -1207,6 +1332,7 @@ function selfTest() {
   // "it names the root" is true of `scripts/**`, which is the FALSE spelling
   // here. What is asserted is that the hints are a function of the two constants
   // the walk is a function of — move the read and this reds, in this file.
+  battery('(20) The declared population, held to the walk in BOTH directions (#13813)');
   const CORPUS_ROOT = relative(REPO_ROOT, SCRIPTS_DIR).split('\\').join('/');
   expect('declaration — one hint per admitted extension, each the flat-directory glob under the '
     + `very root the walk reads from (declared: ${JSON.stringify(ROOT_DIR_WATCH_HINTS)}, root: `
@@ -1264,6 +1390,75 @@ function selfTest() {
   expect('declaration — the brace form the messages spell is NOT what is declared (it reaches '
     + 'nothing, and a dead declaration prints as the same silence as declaring nothing)',
     !ROOT_DIR_WATCH_HINTS.some((h) => h.includes('{')));
+
+  // ── (21) The ruled cross-file-move exception (2026-09-03) ───────────────
+  //
+  // Two assertions, and both are about THIS FILE rather than about the ratchet
+  // the ruling amends: where the exception is written down, and whether it is
+  // doing anything yet. Neither can be held by the run — a header section runs
+  // green whatever it says, which is exactly how a documented exception drifts
+  // into a claimed one.
+  battery('(21) The ruled cross-file-move exception (2026-09-03)');
+  const selfSrc = readFileSync(join(SCRIPTS_DIR, SELF_FILE), 'utf8');
+  // ⛔ The phrase is ASSEMBLED, never spelled, for the reason the ADD hoist above gives in
+  // its own case: a literal spelling would put the phrase into THIS file's author-facing text
+  // and falsify the assertion below by the act of making it.
+  const EXCEPTION_PHRASE = ['cross-file', 'MOVE'].join(' ');
+  expect('the ruled exception is recorded in COMMENT space only — written into author-facing text '
+    + 'it would describe a registry-growing act, and this gate would then read as an instance of '
+    + 'the convention it enforces, which is what assertion (17) catches',
+    selfSrc.includes(EXCEPTION_PHRASE)
+    && !authorFacingMessages(selfSrc).some((m) => m.includes(EXCEPTION_PHRASE)));
+
+  expect('the ruled exception is documentary today: the amended line ratchet lives one directory '
+    + 'down and this walk is non-recursive, so a wider walk reds HERE rather than admitting a new '
+    + 'remedy class in silence',
+    !corpusFiles().includes('check-skill-line-ratchet.mjs'));
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
 
   if (failures.length > 0) {
     for (const f of failures) console.error(`  x self-test: ${f}`);

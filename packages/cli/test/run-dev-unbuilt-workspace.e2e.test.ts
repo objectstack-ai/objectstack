@@ -158,14 +158,12 @@ const STALL_MS = 10_000;
  * The shim's own no-progress bound, mirrored from `bin/run-dev.js`
  * (`STDERR_DRAIN_STALL_MS`) and held equal to it by a case below rather than
  * trusted. Case 5's ceiling no longer budgets it — that ceiling is a constant
- * now — but two cases here are still sized against it and would quietly stop
+ * now — and case 6 no longer reads it either, having stopped judging by a wall
+ * clock at all. ONE case is still sized against it and would quietly stop
  * discriminating if it moved:
  *
  *   • `STALL_MS` above must stay strictly BELOW it, or case 4's stalled reader
- *     outlasts the shim's own give-up and reds against a WORKING fix;
- *   • case 6 reads the closed-reader path as released in less than `STALL_MS`,
- *     which is evidence of a fast path only while `STALL_MS` is itself below
- *     the bound.
+ *     outlasts the shim's own give-up and reds against a WORKING fix.
  */
 const SHIM_DRAIN_STALL_MS = 15_000;
 
@@ -291,13 +289,7 @@ let unbuilt: Run;
 let built: Run;
 let genuinelyMissing: Run;
 let stalled: Run;
-// Definite-assignment assertion for the duration of the QUARANTINE below: the
-// `'never-read'` spawn in `beforeAll` is commented out, so nothing assigns this
-// and `strict` reports TS2454 at each of the three reads inside the skipped
-// case. Restoring that spawn makes the `!` redundant again, so it goes when the
-// quarantine is lifted. (Measured: the package's own `typecheck` is
-// `include: ["src"]`, so it never compiles this file and would not have said.)
-let unread!: Lifetime;
+let unread: Lifetime;
 let closedEnd: Lifetime;
 
 beforeAll(async () => {
@@ -306,18 +298,10 @@ beforeAll(async () => {
   built = await runCli(REAL_COMMAND, dir, undefined);
   genuinelyMissing = await runCli(['definitely-not-a-command'], dir, undefined);
   stalled = await runCliWhileParentStalls(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`);
-  // ⛔ QUARANTINED — the `'never-read'` child is NOT spawned while the case it
-  // feeds is skipped. See the quarantine note on
-  // `it.skip('gives up and exits instead of waiting forever')` further down:
-  // this spawn is where the 180 s `UNREAD_HARD_CAP_MS` is paid under CI load,
-  // and that one case is its ONLY consumer — `unread` is read nowhere else in
-  // this file. The PR that fixes the hang in `bin/run-dev.js` un-skips that case
-  // and restores these four lines verbatim, in the same change:
-  //
-  //   // ⛔ Nothing measured above is consulted here. Case 1's wall clock is read by
-  //   // the failure message below, as evidence; the ceiling is a constant, so a
-  //   // slow sample can no longer size the instrument that judges the next run.
-  //   unread = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'never-read', UNREAD_HARD_CAP_MS);
+  // ⛔ Nothing measured above is consulted here. Case 1's wall clock is read by
+  // the failure message below, as evidence; the ceiling is a constant, so a
+  // slow sample can no longer size the instrument that judges the next run.
+  unread = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'never-read', UNREAD_HARD_CAP_MS);
   closedEnd = await runCliAgainstDeadReader(REAL_COMMAND, dir, `--import ${UNBUILT_HOOK}`, 'destroy-read-end', UNREAD_HARD_CAP_MS);
 }, RUN_TIMEOUT_MS * 6);
 
@@ -406,23 +390,7 @@ describe('the mirror direction: a reader that is never coming back', () => {
    * this replaces armed no bound at all (`write()` returned true, so an early
    * return skipped it) and read as correct in every stalled-reader test.
    */
-  // ⛔ QUARANTINED under the maintainer's ruling A of 2026-09-03 on
-  // objectstack#14832 — do not un-skip it on its own.
-  //
-  // WHY. The `'never-read'` child this case reads HANGS under CI load. The
-  // defect is in the product — `bin/run-dev.js`, the other half of #14832 —
-  // and NOT a cap that is set too low, so raising `UNREAD_HARD_CAP_MS` would buy
-  // nothing and would only make each failure slower. On `Test Core (1/6)` the
-  // harness SIGKILLed the child at the 180 s cap and this assertion red, and
-  // every occurrence EJECTED A WHOLE MERGE-QUEUE BATCH: `main` could not advance
-  // for hours behind this one case, which is what the ruling weighed.
-  //
-  // RE-ENABLE CONDITION. The PR that fixes the hang in `bin/run-dev.js` un-skips
-  // this case in the SAME change, and restores the `'never-read'` spawn in
-  // `beforeAll` (kept there verbatim, commented). The body below and all of its
-  // comments are untouched, so lifting the quarantine is `it.skip` -> `it` plus
-  // that one spawn line — nothing here has to be reconstructed.
-  it.skip('gives up and exits instead of waiting forever', () => {
+  it('gives up and exits instead of waiting forever', () => {
     // A child still alive at the cap was SIGKILLed: signal set, code null.
     // That is the hang, and it is the whole point of this case.
     //
@@ -487,12 +455,60 @@ describe('the mirror direction: a reader that is never coming back', () => {
     expect(Number(String(declared).replaceAll('_', ''))).toBe(SHIM_DRAIN_STALL_MS);
   });
 
-  it('a CLOSED read end is released at once, not held for the bound (EPIPE reaches the callback)', () => {
-    // Pins the fast path measured alongside the hang: when the reader is gone
-    // rather than idle, the write callback fires with EPIPE and the wait ends
-    // immediately. A future change to the bound must not quietly make the
-    // closed-reader paths pay it.
-    expect(closedEnd.signal).toBeNull();
-    expect(closedEnd.elapsedMs).toBeLessThan(STALL_MS);
+  it('a CLOSED read end ends the child on its own — by an uncaught EPIPE, never by the bound', () => {
+    // ⚠️ This case used to read `elapsedMs < STALL_MS`, and its name used to
+    // say "released at once … EPIPE reaches the callback". BOTH were wrong
+    // about this shape, and the trace that settles it is worth more than the
+    // assertion it replaces.
+    //
+    // What the child ACTUALLY does with its read end destroyed: oclif's
+    // `displayWarnings()` makes the first stderr write, the pipe is already
+    // gone, node raises `write EPIPE` as an `error` event on `process.stderr`,
+    // NOTHING IS LISTENING, and the process dies of an uncaught exception —
+    // exit 1, ~1.4 s in. `writeStderr()` is never called, so the bound this
+    // case was named after is never armed, let alone paid. Traced on one box
+    // with a `--import` observer: the shim's own 415-byte write is #175, at
+    // 9250 ms, behind 174 oclif writes that all EPIPE — 7.8 s after the
+    // unobserved child is already dead.
+    //
+    // ⛔ So the wall-clock bound was not merely fragile, it was a PHANTOM: it
+    // could not fail for the reason it named. Ablated on `bin/run-dev.js`,
+    // same box, same probe, with the old bound's verdict in brackets:
+    //
+    //   pristine                                  exit 1, 1387-1711 ms   [green]
+    //   write callback REMOVED, so a closed path
+    //     could only finish on the bound — the
+    //     regression this case named               exit 1, 1517-1633 ms   [GREEN]
+    //   EPIPE made non-fatal, callback kept       exit 2, 8787-8979 ms   [green, 1.2 s spare]
+    //   both, so the path really pays the bound   exit 2, 23601-23712 ms [red]
+    //
+    // The bound moved only on lines 3 and 4, which change the EXIT CODE too;
+    // against its own regression it stayed green. And its whole measured term
+    // is child cold start, which is elastic — 1.4 s here, 8.9 s the moment
+    // anything lets the child run further — judged against 10 s borrowed from
+    // case 4's parent stall, a number with no relationship to this case.
+    //
+    // ⭐ The exit status IS the observation the wall clock was standing in for,
+    // and it carries no load term at all. 1 means the child died on its first
+    // write and never reached the drain; 2 means it got through to `handle()`,
+    // which is only reachable THROUGH `writeStderr()` — bound paid or not. Every
+    // ablation above that reaches the drain flips it, including the one the old
+    // assertion could not see.
+    //
+    // ⚠️ 1 is what the CLI DOES, not what anyone contracted: a caller whose
+    // stderr is closed gets 1 where every other reader gets 2, and cannot tell a
+    // failed command from a crashed CLI. Filed as #14858. If that is fixed to
+    // exit 2 this case reds, which is the point — the fixing PR flips the number
+    // here and says why. ⛔ Do not "repair" a red by loosening this to
+    // `not.toBeNull()`; that is the phantom check all over again.
+    const evidence =
+      `closed-read-end child ran ${closedEnd.elapsedMs} ms (harness cap ${UNREAD_HARD_CAP_MS} ms); ` +
+      `case 1 measured the same child at ${unbuilt.elapsedMs} ms on this runner minutes earlier`;
+    expect(closedEnd.signal, `the harness SIGKILLed the child — it was still alive at the ceiling. ${evidence}`).toBeNull();
+    expect(
+      closedEnd.code,
+      `the child did not die on its first stderr write — it reached the shim's drain, so something now ` +
+        `tolerates EPIPE on stderr (see #14858 and the ablation table above this assertion). ${evidence}`,
+    ).toBe(1);
   });
 });
