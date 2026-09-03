@@ -180,7 +180,7 @@ a reader tracing where elevation travels needs them.
 | # | Site | Package | What it does |
 |:--|:---|:---|:---|
 | 62 | `objectql/src/engine.ts:3543` | objectql | Propagates `isSystem` into the hook session so hooks can tell engine self-writes from user writes |
-| 63 | `objectql/src/engine.ts:14463` | objectql | `ScopedContext.isSystem` getter — re-exposes the underlying execution context's flag |
+| 63 | `objectql/src/engine.ts:14496` | objectql | `ScopedContext.isSystem` getter — re-exposes the underlying execution context's flag |
 | 64 | `plugin-reports/src/report-service.ts:556` | plugin-reports | Threads the flag into the engine call that runs a report |
 | 65 | `body-runner.ts:279` | runtime | Rebuilds an `ExecutionContext` from a hook session, carrying the flag across |
 
