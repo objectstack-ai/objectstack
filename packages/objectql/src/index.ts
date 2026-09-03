@@ -66,6 +66,25 @@ export {
 } from './registry.js';
 export type { InjectedColumnProvenance } from './registry.js';
 
+// [#14553] The navigation-contribution group diagnostic (ADR-0029 D7,
+// ADR-0112 D6c). Exported because `os build` is the SECOND door that has to
+// answer "does this group id resolve?" — over a composed artifact, at compile
+// time, where an AI author sees the mis-aim first — and the whole point of the
+// ruling is that the two doors report the same finding in the same words. A
+// consumer asks these; it does not re-derive the walk.
+export {
+  NAV_CONTRIBUTION_GROUP_MISSING,
+  findNavGroup,
+  navContributionGroupDiagnostic,
+  formatNavContributionGroupDiagnostic,
+  checkNavContributionGroups,
+} from './nav-contribution-diagnostics.js';
+export type {
+  NavContributionGroupDiagnostic,
+  NavGroupHostApp,
+  NavGroupContribution,
+} from './nav-contribution-diagnostics.js';
+
 // Search-normalization companion column (#2486 — pinyin recall). Shared by
 // the registry's compile-time provisioning seam, the engine's `$search`
 // expansion, and plugin-pinyin-search's populate hooks.

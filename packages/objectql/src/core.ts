@@ -24,6 +24,26 @@ export {
 } from './registry.js';
 export type { ObjectContributor, SchemaRegistryOptions } from './registry.js';
 
+// [#14553] The navigation-contribution group diagnostic. Belongs on the LEAN
+// entry as well as the barrel: it is a pure derivation over authored metadata
+// with no imports of its own, so it costs this entry nothing and stays clear of
+// the ADR-0076 D2 boundary ratchet. `os build` reaches it from here rather
+// than through the batteries-included barrel, which would pull
+// `@objectstack/metadata-protocol` into the compile path for a check that
+// reads two arrays.
+export {
+  NAV_CONTRIBUTION_GROUP_MISSING,
+  findNavGroup,
+  navContributionGroupDiagnostic,
+  formatNavContributionGroupDiagnostic,
+  checkNavContributionGroups,
+} from './nav-contribution-diagnostics.js';
+export type {
+  NavContributionGroupDiagnostic,
+  NavGroupHostApp,
+  NavGroupContribution,
+} from './nav-contribution-diagnostics.js';
+
 // Search-normalization companion column (#2486 — pinyin recall)
 export {
   SEARCH_COMPANION_FIELD,

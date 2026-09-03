@@ -42,6 +42,10 @@ import {
   errorCodeFields,
 } from '../utils/format.js';
 import { checkProtocolVersionGap } from '../utils/protocol-version-gap.js';
+// [#14553] The compile-time half of the navigation-contribution group ruling.
+// Reports; never refuses — the runtime still relocates, deliberately.
+import { findNavGroupDiagnostics } from '../utils/nav-contribution-groups.js';
+import type { NavContributionGroupDiagnostic } from '@objectstack/objectql';
 
 /**
  * The artifact's package entries, as `{ index, id, body }` (ADR-0130 D4).
@@ -177,6 +181,12 @@ export default class Compile extends Command {
     let capProviderWarnings: Array<{ token: string; message: string }> = [];
     let unknownKeyWarnings: string[] = [];
     let docWarnings: DocIssue[] = [];
+    // [#14553] Build-only, so a SEPARATE payload key rather than a member of
+    // `warningsSoFar()` — the `bodyExtractionWarnings` precedent one field
+    // over, and for its stated reason: `os validate` never computes these, and
+    // folding a shape only ONE command can ship into the cross-command
+    // `warnings` key teaches consumers a shape the other command never emits.
+    let navGroupDiagnostics: NavContributionGroupDiagnostic[] = [];
     const warningsSoFar = () => [
       ...ruleAdvisories,
       ...docWarnings,
@@ -444,6 +454,40 @@ export default class Compile extends Command {
           printAuthoringRuleErrors(perPackageErrors, { remedy: JSON_FULL_LIST_REMEDY });
           this.exit(1);
         }
+      }
+
+      // 3b-bis. [#14553] Navigation contributions whose `group` names no group
+      //     in the target app. RUNS ON EVERY BUILD, artifact or not — the block
+      //     above is skipped for a single-package stack, but a stack that
+      //     declares an app AND contributes into it has the identical defect
+      //     and `collectNavGroupInputs` reads it from the top-level manifest.
+      //
+      //     ⛔ REPORTS, NEVER REFUSES. The maintainer ruled option B: the
+      //     runtime keeps relocating the items to the app's top level (the fold
+      //     stays order-independent, contributions into optional groups keep
+      //     working) and the failure becomes VISIBLE instead. Making this exit
+      //     non-zero would be option A wearing a warning's clothes, and would
+      //     narrow what `os build` accepts — which the ruling explicitly does
+      //     not do.
+      //
+      //     A contribution whose target app is NOT in this compilation unit
+      //     yields nothing: contributing into an app another artifact ships is
+      //     the supported cross-artifact case, and is precisely why the merge
+      //     is a read-time fold. Only the composed case can be judged here.
+      navGroupDiagnostics = await findNavGroupDiagnostics(
+        result.data as Record<string, unknown>,
+        packageEntries,
+      );
+      if (navGroupDiagnostics.length > 0 && !flags.json) {
+        console.log('');
+        printWarning(
+          `Navigation contributions aimed at a group the target app does not declare ` +
+            `(${navGroupDiagnostics.length}) — the items still install, RELOCATED to the app's top level`,
+        );
+        printBulletList(
+          navGroupDiagnostics.map((d) => `[${d.code}] ${d.message} Fix: ${d.fix}`),
+          { noun: 'navigation-contribution diagnostic' },
+        );
       }
 
       // 3c. [#3366] Installable-provider preflight. Every capability the app
@@ -795,6 +839,16 @@ export default class Compile extends Command {
           // callable lowered cleanly, so a CI consumer can read the key
           // unconditionally.
           bodyExtractionWarnings: lowering.bodyExtractionWarnings,
+          // [#14553] Navigation contributions relocated past a missing group.
+          // A SEPARATE key for the same reason as the one above: `os validate`
+          // computes nothing of the kind, so folding these records into the
+          // cross-command `warnings` list would teach a consumer a shape only
+          // this command can ever ship. Empty array when every contribution
+          // resolved, so CI can read the key unconditionally — the records are
+          // the ADR-0038 BuildIssue-family entries the runtime fold raises
+          // (ADR-0112 D6c: a diagnostics code, lowercase and out of the error
+          // ledger), so one consumer reads one shape from either door.
+          navigationGroupDiagnostics: navGroupDiagnostics,
           // Same key `os validate --json` uses, so a CI consumer reads one shape
           // from either command rather than learning two.
           conversions: conversionNotices,
