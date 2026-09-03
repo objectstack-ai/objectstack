@@ -5089,6 +5089,75 @@ export function artifactOnlyNote({ artifacts, dir, coversYourPath }) {
   ];
 }
 
+/**
+ * The artifact-roster families, as their own labelled block — printed on every
+ * run, never counted among the derived families (#14880).
+ *
+ * ## What this block is for, and what it deliberately does not say
+ *
+ * `artifactOnlyNote` above says all of this per family, but only under
+ * `--residue`, and only inside the silent listing a dev reading a dispatch
+ * brief is not told to ask for. Measured twice on this card: a dev derived the
+ * families for a diff, ran every one, and shipped a CI red carried by a gate
+ * whose declared literals are its own artifacts — `check:optional-error-sink`
+ * on PR #14866, then `check:error-code-provenance` on PR #14930, whose residue
+ * text names the remedy in its own words. Both are invisible to a `--commands`
+ * harvest by construction, for every card, not just theirs.
+ *
+ * So the block states the one thing that is true of every member and is not a
+ * guess about intent: this derivation scores them `silent` for EVERY card in
+ * the tree, so their silence is a fact about a LIST rather than a verdict about
+ * your paths.
+ *
+ * ⛔ It does NOT call them repo-wide scanners, and the refusal is the same one
+ * `artifactOnlyNote`'s docblock prices: whether a roster is a baseline sitting
+ * in a directory or a census taken OF that directory is exactly the intent this
+ * tool refuses to read out of the tree, and the two live side by side here
+ * (`check:where-matcher` names one baseline and walks `packages/**`;
+ * `check-entry-guard` named ten files under `scripts/` and walked all of it).
+ * A block asserting "these are scanners you must run" would be a fabricated
+ * lead over the members for which it is false — the expensive direction.
+ *
+ * ⛔ And it is NEVER merged into the derived list or into any count. The rows
+ * are `silent`, and `commandsFor`/`familyReconciliation` read only the matched,
+ * convention and always-runs rows, so the separation is structural rather than
+ * a filter someone has to remember. In `--commands` the block goes to STDERR
+ * for the reason every other accounting there does: stdout carries commands and
+ * nothing else, and a labelled block in that stream is prose for a harvest to
+ * pattern-match.
+ *
+ * The ⛔ subset is the correlation the card asks for by name — the rosters
+ * whose common directory contains one of THIS card's paths, where the silence
+ * is not evidence in either direction.
+ */
+export function artifactRosterLines(rosters = []) {
+  if (rosters.length === 0) return [];
+  const inverted = rosters.filter((r) => r.coversYourPath);
+  const lines = [
+    `Artifact rosters — ${rosters.length} famil(ies) whose \`silent\` verdict is a fact about a LIST, not about your paths:`,
+    '  Each declares only tracked FILES — a baseline, an allowlist of the members it already has. A list of the files that',
+    '  already exist can never contain one added tomorrow, so this derivation scores them silent for EVERY card in the tree,',
+    '  and no path you pass can move them. ⛔ They are NOT in the runnable total above and are NOT counted among the derived',
+    '  families. Run them, or read them — but ⛔ never read their silence as a clearance.',
+    '  ⇒ The fix is the gate\'s, not this tool\'s: declare the scan surface beside the roster (the subtree spelling), after',
+    '  which the family is MATCHED here and leaves this block.',
+  ];
+  if (inverted.length) {
+    lines.push(
+      `  ⛔ ${inverted.length} of them keep that roster in a directory one of YOUR paths is in (marked ⛔ below) — there the`,
+      '  silence is not evidence in EITHER direction. Read those gates before treating them as passed.',
+    );
+  } else {
+    lines.push('  None of their rosters sits in a directory your paths are in, so none of them is a lead about this card.');
+  }
+  for (const r of [...rosters].sort((a, b) => a.command.localeCompare(b.command))) {
+    lines.push(
+      `  - ${r.command}${r.coversYourPath ? `   ⛔ roster under ${r.dir}, which one of your paths is in` : ''}`,
+    );
+  }
+  return lines;
+}
+
 // ---------------------------------------------------------------------------
 // The reachability sweep — a declared population that matches NOTHING (#9883)
 // ---------------------------------------------------------------------------
@@ -9574,7 +9643,7 @@ export function runReconciliationLines(recon) {
  * That distinction is the card's own subject matter: what is left out of a list
  * must be visible in the list.
  */
-export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [] }) {
+export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], rosters = [] }) {
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const { otherCommands, ...spelling } = spellingSplit(commands);
   return {
@@ -9593,6 +9662,15 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
     // (that would be a lead on every card) and must not have to infer it from
     // the commands list either (#14189).
     alwaysRunsPopulation: alwaysRunsRows,
+    // IN this document and ⛔ NOT in `commands`, for the reason
+    // `artifactRosterLines` states: these families are `silent`, so no path a
+    // caller passes can move them, and merging them into the runnable union
+    // would make every card's total a different number for a reason unrelated
+    // to the card. Their own key instead, so a machine consumer reads the same
+    // omission the human block names rather than inferring it (#14880).
+    artifactRosterSilences: rosters.map(({ check, command, workflows, artifacts, dir, coversYourPath }) => ({
+      check, command, workflows, artifacts, dir, coversYourPath,
+    })),
     pendingChangeset: {
       probePath: CHANGESET_PROBE_PATH,
       families: pending.map(({ check, entry }) => ({
@@ -9621,13 +9699,13 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
  * LOUD. A quiet omission is the defect this mode was added to fix, and adding a
  * new one inside the fix is how that defect reproduces itself one layer up.
  */
-function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [] }) {
+function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], rosters = [] }) {
   const identity = repoIdentity();
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const split = spellingSplit(commands);
 
   if (mode === 'json') {
-    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows }), null, 2));
+    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, rosters }), null, 2));
   } else {
     for (const command of commands) console.log(command);
   }
@@ -9666,6 +9744,12 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
         'they are derived against a path that does not exist yet. Write the changeset, then derive again.',
     );
   }
+  // The FOURTH thing stdout deliberately omits (#14880), on stderr for exactly
+  // the reason the three above are: the block is prose, and prose in the stream
+  // a consumer executes is the harvest hazard this mode exists to make
+  // unreachable. ⛔ Never merged into the command list — these families are
+  // `silent`, and no path a caller passes can move them.
+  for (const line of artifactRosterLines(rosters)) console.error(`  ${line}`);
   console.error(
     '  ⛔ Not a complete account of what CI runs on this PR: the always-runs tail (workflows with no path filter) is NOT here. Run without --commands/--json for it.',
   );
@@ -9708,7 +9792,17 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     else if (verdict === 'undetermined') undetermined.push([check, entry]);
     else silent.push([check, entry]);
   }
-  const rosters = silent.map(([, entry]) => artifactOnlySilence(entry, paths, tree)).filter(Boolean);
+  // The roster classification travels ON the row, for the same reason the
+  // matched provenance does: the human block, the `--commands` stderr
+  // accounting and the `--json` document are three readings of THESE rows, so
+  // none of them can name a different set than the residue summary counts
+  // (#14880).
+  const rosters = silent
+    .map(([check, entry]) => {
+      const roster = artifactOnlySilence(entry, paths, tree);
+      return roster ? { check, command: runnableInvocation(entry), workflows: [...entry.workflows], ...roster } : null;
+    })
+    .filter(Boolean);
 
   // ONE structured answer, rendered three ways below. The human block, the
   // `--commands` list and the `--json` document are readings of these same
@@ -9784,6 +9878,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       kindGroups,
       pending,
       alwaysRunsRows,
+      rosters,
       counts: {
         discovered: byCheck.size,
         workflows: workflows.length,
@@ -9878,6 +9973,19 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // Here it closes the runnable answer and the section boundary is the claim.
   console.log('');
   for (const line of familyReconciliationLines(recon)) console.log(line);
+
+  // Directly BELOW that total and above everything else it excludes (#14880).
+  // The placement IS the claim: the reconciliation line closes the runnable
+  // answer, and every section under it names something outside the answer. This
+  // one names the families no path can ever move — printed on every run, not
+  // only under `--residue`, because a dev reading a dispatch brief is never
+  // told to pass that flag and both measured CI reds on this card were carried
+  // by families of exactly this shape.
+  const rosterOut = artifactRosterLines(rosters);
+  if (rosterOut.length) {
+    console.log('');
+    for (const line of rosterOut) console.log(line);
+  }
 
   const pendingOut = pendingChangesetLines(pending);
   if (pendingOut.length) {
@@ -12955,6 +13063,59 @@ function selfTest() {
     artifactOnlyNote(artifactOnlySilence(rosterFam(['scripts/a.mjs', 'scripts/b.mjs']), ['packages/spec/src/index.ts'], rosterTree))
       .join('\n')
       .includes('ordinary one'),
+  );
+
+  // ── The roster block, printed where a dev without --residue will see it (#14880)
+  //
+  // The note above is per family and prints only inside the silent listing,
+  // which is behind a flag no dispatch brief tells anyone to pass. Two measured
+  // CI reds on this card were carried by families of exactly this shape
+  // (`check:optional-error-sink`, `check:error-code-provenance`), invisible to
+  // a `--commands` harvest for EVERY card. The block states the standing fact
+  // and names the families — and its whole contract is that it is a block
+  // BESIDE the derived list, never a part of it.
+  const blockRows = [
+    { check: 'check:b', command: 'pnpm check:b', workflows: ['lint.yml'], artifacts: ['scripts/a.mjs'], dir: 'scripts', coversYourPath: true },
+    { check: 'check:a', command: 'pnpm check:a', workflows: ['lint.yml'], artifacts: ['docs/x.md'], dir: 'docs', coversYourPath: false },
+  ];
+  const blockOut = artifactRosterLines(blockRows);
+  t('no rosters, no block — an empty section is never printed', artifactRosterLines([]).length === 0);
+  t('the block sizes itself and names every family, sorted by the command a dev would run', blockOut[0].includes('2 famil(ies)')
+    && blockOut.filter((l) => l.startsWith('  - ')).join('|') === '  - pnpm check:a|  - pnpm check:b   ⛔ roster under scripts, which one of your paths is in');
+  t(
+    '⭐ it says out loud that these are OUTSIDE the derived total, which is the whole reason it is a separate block',
+    blockOut.some((l) => l.includes('NOT counted among the derived')) && blockOut.some((l) => l.includes('NOT in the runnable total')),
+  );
+  t(
+    'and it marks the correlated subset — the rosters sitting in a directory one of the card\'s paths is in',
+    blockOut.some((l) => l.includes('1 of them keep that roster in a directory one of YOUR paths is in')),
+  );
+  t(
+    'a card no roster touches gets the standing fact instead of a warning about none of them',
+    artifactRosterLines([{ ...blockRows[1] }]).some((l) => l.includes('None of their rosters sits in a directory your paths are in')),
+  );
+  // ⛔ The refusal, and it is the one that keeps this block from being the
+  // fabricated lead `artifactOnlyNote`'s docblock prices: whether a roster is a
+  // baseline in a directory or a census OF it is intent, and intent is not in
+  // the tree. The block must not call them scanners, and must not tell anyone
+  // the gate reads their file.
+  t(
+    '⛔ and it never calls them scanners or claims they read your file — the half the tree cannot answer',
+    !/scanner|reads your file|very likely reads/.test(blockOut.join('\n')),
+    blockOut.join('\n'),
+  );
+  t(
+    'it names the producer-side remedy the residue already carries, so the block points at a fix and not only at work',
+    blockOut.some((l) => l.includes('declare the scan surface beside the roster')),
+  );
+  // ⛔ STRUCTURAL, not a filter someone has to remember: `commandsFor` reads the
+  // matched, convention and always-runs rows only, and a roster family is
+  // `silent`. Asserted against the real union so a future edit that started
+  // feeding rosters into it reddens here rather than in a dev's harvest.
+  t(
+    '⛔ a roster command is not in the runnable union, whatever the block prints',
+    !commandsFor({ matchedRows: [{ check: 'check:m', command: 'pnpm check:m', ciOnly: null }], kindGroups: [], alwaysRunsRows: [] })
+      .some((c) => c === 'pnpm check:a' || c === 'pnpm check:b'),
   );
 
   // ── The classifier returned a plausible WRONG CATEGORY (#13520) ───────────
@@ -17816,6 +17977,25 @@ function selfTest() {
       );
       t('and every command still on the list is one a dev can actually run here', cmdRows.length > 0 && cmdRows.every((l) => /^(pnpm|node) \S/.test(l)));
       t('the stderr accounting says the omission out loud, where it cannot corrupt the harvest', (cmdRun.stderr ?? '').includes('CI-MEASURED ONLY'));
+      // ⭐ #14880's block, on the same real run. Three claims, and the third is
+      // the one a unit case cannot make: the block exists, it is on STDERR, and
+      // not one of the families it names leaked into the stream a consumer
+      // executes. A block on stdout would be prose in the harvest — the exact
+      // hazard `--commands` exists to make unreachable.
+      const rosterBlockStart = (cmdRun.stderr ?? '').indexOf('Artifact rosters —');
+      t('⭐ the artifact-roster block is printed for a real card (#14880)', rosterBlockStart >= 0);
+      t('…on stderr, never in the stream a harvest executes', !(cmdRun.stdout ?? '').includes('Artifact rosters —'));
+      const rosterBlockCommands = (cmdRun.stderr ?? '')
+        .slice(rosterBlockStart < 0 ? 0 : rosterBlockStart)
+        .split('\n')
+        .filter((l) => /^\s+- (pnpm|node) /.test(l))
+        .map((l) => l.trim().slice(2).split('   ')[0].trim());
+      t('…and it really names families, so the two cases above judge something', rosterBlockCommands.length > 0);
+      t(
+        '⛔ and not one of them is in the runnable list — the block sits BESIDE the derivation, never inside it',
+        rosterBlockCommands.every((c) => !cmdRows.includes(c)),
+        rosterBlockCommands.filter((c) => cmdRows.includes(c)).join(', '),
+      );
     } finally {
       rmSync(harvestTmp, { recursive: true, force: true });
     }
