@@ -1592,6 +1592,30 @@ function joinDeclarationOrigins(origins: readonly string[]): string {
  * standalone declaration) is documented on the `actions` collection, not
  * changed here.
  */
+/**
+ * An `operation: 'update'` action writes ONE record — the current one — on the
+ * object it belongs to (#14092). Which object that is, `ActionSchema` cannot
+ * tell: the same schema parses an action embedded on an object (the object is
+ * implicit) and a standalone one in `stack.actions`, where only `objectName`
+ * can say. So the standalone form is judged here, the one place standalone-
+ * ness is knowable: a GLOBAL action (no `objectName`) has no current record
+ * and nothing to write to, and is refused with the two spellings that do. An
+ * embedded action is never visited — the object it is written on binds it.
+ */
+function collectGlobalUpdateActionErrors(config: ObjectStackDefinition): string[] {
+  const errors: string[] = [];
+  for (const [i, action] of (config.actions ?? []).entries()) {
+    if (action.operation !== 'update' || action.objectName) continue;
+    errors.push(
+      `Action '${action.name}' (stack.actions[${i}]) is \`operation: 'update'\` — a single-record field write — `
+      + 'but declares no `objectName`, so there is no object to write to: a global action has no current record. '
+      + "Set `objectName: 'the_object'` (defineStack merges it into that object's actions) or declare it inside "
+      + "the object's own `actions`.",
+    );
+  }
+  return errors;
+}
+
 function collectDuplicateActionKeyErrors(config: ObjectStackDefinition): string[] {
   const originsByKey = new Map<string, string[]>();
   const note = (scope: string, name: string, origin: string): void => {
@@ -1640,6 +1664,9 @@ function validateCrossReferences(config: ObjectStackDefinition): string[] {
   // stack that declares two globals under one name collides on exactly the
   // same runtime key, and this check needs no object to resolve against.
   errors.push(...collectDuplicateActionKeyErrors(config));
+  // Same placement, same reason: a global `operation: 'update'` action is
+  // wrong whether or not the stack declares any objects.
+  errors.push(...collectGlobalUpdateActionErrors(config));
 
   if (objectNames.size === 0) return errors;
 
