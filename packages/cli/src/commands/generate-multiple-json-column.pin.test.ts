@@ -156,10 +156,18 @@ describe('#14829 — `multiple: true` is one answer across all three surfaces', 
   it('control — the SAME type without the flag still gets its scalar column', () => {
     // THE discriminating control. If this file could be satisfied by emitting a
     // JSON column for everything, the arms below would prove nothing.
-    expect(sqlColumn('single_lookup')).toBe('VARCHAR(36)');
-    expect(tsColumn('single_lookup')).toBe("table.uuid('single_lookup')");
+    //
+    // #14828 moved the unflagged `lookup` answers — `VARCHAR(36)` /
+    // `table.uuid` became `VARCHAR(255)` / `table.string`, the driver's own
+    // answer for a reference column. The control is unweakened by that: what it
+    // discriminates is scalar-vs-JSON, and both spellings are scalar. `select`
+    // is swept alongside because it is a scalar of a DIFFERENT family, so the
+    // control cannot be satisfied by one column shape for everything either.
+    expect(sqlColumn('single_lookup')).toBe('VARCHAR(255)');
+    expect(tsColumn('single_lookup')).toBe("table.string('single_lookup')");
     expect(sqlColumn('single_text')).toBe('VARCHAR(255)');
     expect(tsColumn('single_text')).toBe("table.string('single_text')");
+    expect(sqlColumn('single_file')).toBe('VARCHAR(2048)');
     expect(tsInterfaceType('single_lookup')).toBe('string');
   });
 
@@ -239,27 +247,58 @@ describe('#14829 — `multiple: true` is one answer across all three surfaces', 
     expect(source.slice(start, start + 300)).toMatch(/if \(field\?\.multiple\) return true;/);
   });
 
-  // ── SCOPE FENCE for #14828 — NOT an endorsement ─────────────────────────
+  // ── The former SCOPE FENCE for #14828 — DISCHARGED, and kept as the seam ──
   //
-  // These five scalar answers disagree with what the platform stores and were
-  // left byte-for-byte on purpose (correcting them changes DDL already-generated
-  // apps have RUN). #14828 owns them. They are asserted here so that changing
-  // one is a deliberate edit to this block rather than a side effect of a card
-  // about the `multiple` flag — #14828 must update it when it corrects them.
-  it('#14828 fence — the five disputed SCALAR answers are untouched by this card', () => {
-    expect(sqlColumn('single_lookup')).toBe('VARCHAR(36)');
-    expect(tsColumn('single_lookup')).toBe("table.uuid('single_lookup')");
+  // This block was written by #14829 as a fence, not an endorsement: the five
+  // scalar answers disagreed with what the platform stores, #14829 left them
+  // byte-for-byte because they were a different card, and asserted them here so
+  // that changing one would have to be a deliberate edit to this block rather
+  // than a side effect of a card about the `multiple` flag. #14828 is that card
+  // and this is that deliberate edit — the values below are now the platform's,
+  // each read from `driver-sql`.
+  //
+  // ⛔ The block stays rather than being deleted, and its job is unchanged: it
+  // is still the one place where the scalar answers are stated next to the
+  // flagged ones, so a future card that moves either half has to move it here,
+  // in view of the other. The rule BEHIND these values — derived from the spec
+  // value classes and the driver's own switch, never retyped — lives in
+  // `generate-field-type-vocabulary.pin.test.ts`; this block is the record of
+  // what that rule resolves to today, and the two go red together.
+  it('#14828 discharged — the five disputed SCALAR answers are the platform’s', () => {
+    // A reference column holds the target's `id`: `table.string(name)`, knex's
+    // varchar(255). `table.uuid` was the one HARD failure of the five — a
+    // platform id is 26 characters and Postgres refuses one in a `uuid` column.
+    expect(sqlColumn('single_lookup')).toBe('VARCHAR(255)');
+    expect(tsColumn('single_lookup')).toBe("table.string('single_lookup')");
 
-    const other = generateMigrationSql({
+    const config = () => ({
       objects: { probe: { name: 'probe', fields: {
         a: { type: 'autonumber' }, f: { type: 'formula' },
         m: { type: 'multiselect' }, v: { type: 'vector' }, d: { type: 'master_detail' },
+        t: { type: 'text' },
       } } },
     });
-    expect(other).toContain('"a" SERIAL');
-    expect(other).toContain('"f" TEXT');
-    expect(other).toContain('"m" TEXT');
-    expect(other).toContain('"v" VECTOR');
-    expect(other).toContain('"d" VARCHAR(36)');
+    const other = generateMigrationSql(config());
+    const otherTs = generateMigrationTs(config());
+
+    // Non-vacuity: the probe really produced a table, and a control field that
+    // this card does NOT touch is present in both outputs. Without it, "does
+    // not contain" would pass on an empty string.
+    expect(other).toContain('CREATE TABLE IF NOT EXISTS "probe" (');
+    expect(other).toContain('"t" VARCHAR(255)');
+    expect(otherTs).toContain("table.string('t')");
+
+    // A RENDERED string (prefix + counter + suffix), never an integer sequence.
+    expect(other).toContain('"a" VARCHAR(255)');
+    // MULTI_OPTION_TYPES and STRUCTURED_JSON_TYPES both seed the driver's
+    // JSON_COLUMN_TYPES. `VECTOR` was additionally pgvector-only.
+    expect(other).toContain('"m" JSONB');
+    expect(other).toContain('"v" JSONB');
+    // The other half of the reference class.
+    expect(other).toContain('"d" VARCHAR(255)');
+    // VIRTUAL — no column at all, in either format. `createColumn` answers
+    // `case 'formula': return;` and `fieldHasColumn` answers false.
+    expect(other).not.toContain('"f" ');
+    expect(otherTs).not.toContain("('f')");
   });
 });
