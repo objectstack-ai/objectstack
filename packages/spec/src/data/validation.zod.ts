@@ -52,8 +52,35 @@ import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
  *   a `delete` event was a proven silent no-op — the enum value was removed rather than left
  *   advertised-but-unenforced (#3184; see docs/audits/2026-06-validationschema-property-liveness.md).
  *
+ * ## Transition gate vs invariant — which tool enforces what
+ *
+ * A rule declared here is an INVARIANT. `script` (and `cross_field`, which shares its
+ * evaluation path) is re-evaluated against the MERGED record — the prior row overlaid
+ * with the incoming patch — on every write, with no exemption for a violation that was
+ * already stored. A row that already violates is therefore refused on ANY edit until a
+ * repairing write lands: **frozen, not bricked**.
+ *
+ * The FIELD-level checks are the other half of the boundary and are deliberately not
+ * invariants. `Field.requiredWhen` is a **transition gate**: the write is refused only
+ * when the merged record violates AND the pre-write record complied, so a row that
+ * predates the rule keeps passing unrelated edits and state moves that stay inside the
+ * gate. The field bounds (`min` / `max` / `minLength` / `maxLength`) are checked on the
+ * WRITTEN value only, so a stored out-of-bound value is never re-read at all. Both are
+ * what lets a new rule land on a deployed object without bricking existing rows
+ * (ADR-0113 non-regression).
+ *
+ * Choosing between them: need an INVARIANT ("X may never exceed Y") ⇒ a `validations[]`
+ * `script` rule, at the price of freezing existing violators until they are repaired.
+ * Need a TRANSITION CONDITION ("by the time it reaches state S, X must be present") ⇒
+ * `Field.requiredWhen` or a field bound, at the price of letting rows that predate the
+ * rule through. "Required when X" reads like an invariant and is not one — that
+ * mis-read is what this section exists to prevent. The rules here and the field
+ * predicates are both evaluated by `evaluateValidationRules`
+ * (`objectql/src/validation/rule-validator.ts`); the field bounds by `validateRecord`
+ * (`objectql/src/validation/record-validator.ts`).
+ *
  * ## Salesforce Comparison
- * 
+ *
  * ObjectStack validation rules are inspired by Salesforce validation rules but enhanced:
  * - Salesforce: Formula-based validation with `Error Condition Formula`
  * - ObjectStack: Multiple validation types with composable rules
@@ -150,7 +177,7 @@ export const ScriptValidationSchema = lazySchema(() => strictObject({
 }, {
   ...BASE_VALIDATION_SHAPE,
   type: z.literal('script'),
-  condition: ExpressionInputSchema.describe('Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0`'),
+  condition: ExpressionInputSchema.describe('Predicate (CEL). If TRUE, validation fails. e.g. P`record.amount < 0`. A TRUE INVARIANT, not a transition gate: re-evaluated against the merged record (the prior row overlaid with this write) on every write, with no exemption for a violation that was already stored — a row that already violates is refused on ANY edit until a repairing write lands (frozen, not bricked). Need a transition condition instead — one that only has to hold from a given state onward — use `Field.requiredWhen` or a field bound (`min` / `max` / `maxLength`), which judge the write rather than the stored row.'),
 }));
 
 /**

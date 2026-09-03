@@ -17407,6 +17407,25 @@ function selfTest() {
     // Two answers to "what shape is stdout" is no answer.
     const bothRun = runCli(['--commands', '--json', seamCard]);
     t('passing both stdout spellings refuses instead of silently preferring one', bothRun.status === 2 && (bothRun.stdout ?? '').trim() === '');
+    // ⭐ The THIRD stdout shape (#14294). The pair above was enforced and this
+    // one was not: `mode` was computed and then discarded, so these two exited
+    // 0 with tier prose sitting in the file a consumer had redirected because
+    // `--commands` promises commands and nothing else. Driven on the real CLI
+    // for the same reason the pair above is — the defect was in the argv chain,
+    // which no pure half reaches. Both halves of the refusal are asserted: the
+    // STATUS, and the stdout a redirecting consumer would have kept, because a
+    // refusal that still prints an answer is the bug wearing an exit code.
+    const tierCmdRun = runCli(['--tier', '--commands', seamCard]);
+    t('⭐ --tier against --commands refuses instead of silently preferring the tier', tierCmdRun.status === 2 && (tierCmdRun.stdout ?? '').trim() === '');
+    t('and its refusal names BOTH flags, so the dropped one is never left to be guessed', (tierCmdRun.stderr ?? '').includes('--tier') && (tierCmdRun.stderr ?? '').includes('--commands'));
+    const tierJsonRun = runCli(['--tier', '--json', seamCard]);
+    t('⭐ --tier against --json refuses the same way, on the other machine-readable shape', tierJsonRun.status === 2 && (tierJsonRun.stdout ?? '').trim() === '');
+    t('and that refusal names --json, never the flag this run is not about', (tierJsonRun.stderr ?? '').includes('--json') && !(tierJsonRun.stderr ?? '').includes('--commands'));
+    // CONTROL: green before this fix and after it. The new branch is ordered
+    // after the pair, so all three flags together still answer with the pair's
+    // own message — the fix adds a refusal and rewords none.
+    const allThreeRun = runCli(['--tier', '--commands', '--json', seamCard]);
+    t('CONTROL: all three together keep the pair rule that was already enforced', allThreeRun.status === 2 && (allThreeRun.stderr ?? '').includes('--commands and --json'));
   }
 
   // ── END TO END: the CI-measured family, on the card it was measured on (#14004)
@@ -17792,8 +17811,35 @@ if (invokedDirectly) {
     // Two answers to "what shape is stdout" is no answer. Blending them — or
     // silently preferring one — is the class of failure this whole file is
     // about, and it would be a poor place to commit it: these two flags exist
-    // because a consumer could not tell what it was reading.
+    // because a consumer could not tell what it was reading. The rule is about
+    // how many answers the stream carries, not about which two flags happened
+    // to be named when it was written: `--tier` is a THIRD shape of that same
+    // stdout, and it is refused against each of these two in the branch below.
     console.error('dispatch-gates: --commands and --json are two spellings of stdout — pass one.');
+    process.exit(2);
+  } else if (process.argv.includes('--tier') && (process.argv.includes('--commands') || process.argv.includes('--json'))) {
+    // The third shape, and the one the pair above did not reach: `mode` was
+    // computed from --commands/--json and then DISCARDED by the `--tier` branch
+    // at the bottom of this block, so the tier PROSE landed in a stream whose
+    // caption promises one runnable command per line, or one JSON document —
+    // at exit 0, with nothing on either stream saying the flag had been
+    // dropped. That is the silent preference the rule above forbids, committed
+    // one flag over from where it is enforced.
+    //
+    // REFUSED, not re-routed. Sending the tier verdict to stderr whenever a
+    // machine-readable mode is asked for is defensible — `--tier` answers a
+    // different question and reads no tree — but it changes what `--tier`
+    // MEANS when combined, and that is a design call for this file's owner,
+    // not a repair to a silent-drop bug. Same shape as the two refusals above
+    // it and the `--ran --tier` refusal above them: one line, exit 2, both
+    // flags named so the caller never has to guess which one was dropped.
+    //
+    // Ordered AFTER the pair deliberately: `--tier --commands --json` keeps
+    // the message it already had, so this branch adds a refusal and changes
+    // none.
+    console.error(
+      `dispatch-gates: --tier and ${process.argv.includes('--commands') ? '--commands' : '--json'} are two spellings of stdout — pass one.`,
+    );
     process.exit(2);
   } else if (wantsChanged && argvPaths.length > 0) {
     // The two input modes answer different questions and must never be blended:
@@ -17862,7 +17908,7 @@ if (invokedDirectly) {
         derived = changedPathsFromGit();
       } catch (err) {
         console.error(`dispatch-gates: could not derive the change set — ${err.message}`);
-        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [--commands | --json | --ran <file>] [--repo owner/name] [<path> ...] | --changed | --self-test');
+        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier | --commands | --json | --ran <file>] [--repo owner/name] [<path> ...] | --changed | --self-test');
         process.exit(2);
       }
       if (derived.paths.length === 0) {
