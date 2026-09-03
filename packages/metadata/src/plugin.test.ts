@@ -1,8 +1,8 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi } from 'vitest';
-import { MetadataPlugin } from './plugin';
-import { NodeMetadataManager } from './node-metadata-manager';
+import { MetadataPlugin } from './plugin.js';
+import { NodeMetadataManager } from './node-metadata-manager.js';
 
 vi.mock('@objectstack/core', async (orig) => {
     const real = (await orig()) as any;
