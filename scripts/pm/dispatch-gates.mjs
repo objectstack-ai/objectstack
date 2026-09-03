@@ -1076,6 +1076,86 @@ const SELF_TEST_INVOCATION =
   /node[ \t]+(scripts\/[\w./-]+\.mjs)(?:[ \t]+-{1,2}[A-Za-z0-9][\w-]*)*[ \t]+--self-test\b/g;
 
 /**
+ * A `run:` step that invokes a `check-`named repo script directly, WITH the
+ * argument tail that belongs to that invocation. The tail stops at the first
+ * shell construct that ENDS an argv — a separator, a redirection, a subshell —
+ * because everything past one of those belongs to a different command, or to
+ * the shell, and never to this argv.
+ *
+ * ⚠️ A line-continuation backslash is deliberately NOT a terminator: it is
+ * INSIDE the tail, so a continued invocation carries a character that is not
+ * flag-shaped and `renderableArgv` refuses the whole tail. That is the point.
+ * Ending the tail at the backslash would hand back a tail that looks complete
+ * and is not — `node scripts/check-shard-attestation.mjs --emit` reads as the
+ * whole argv while `ci.yml` continues it with
+ * `--job test --shard N --total 6 --out "$RUNNER_TEMP/…"` on the next two
+ * lines. A truncated argv that LOOKS runnable is the one outcome worse than
+ * the bare path key those invocations keep.
+ */
+const DIRECT_CHECK_INVOCATION =
+  /node[ \t]+(scripts\/[\w./-]*check-[\w.-]+\.mjs)([^\n;|&<>()]*)/g;
+
+/**
+ * The captured tail, rendered as the argv half of a derivation key — or null
+ * when this tool cannot render it as a command a dev could paste.
+ *
+ * ## Why a key of (script, args) at all (#14880)
+ *
+ * The key used to be the script PATH, so CI's two invocations of one script
+ * collapsed into a single entry, and the entry kept was whichever the matcher
+ * saw first — the PLAIN one, because the old matcher captured the path and
+ * dropped the tail. Measured on PR #14958: `lint.yml` runs
+ * `node scripts/check-tenant-audit-census.mjs --self-test` beside
+ * `node scripts/check-tenant-audit-census.mjs`, the CI red was carried
+ * ENTIRELY by the `--self-test` invocation (exit 1, `1 of 19 case(s) failed`)
+ * while the plain one exited 0 — and the derived list named only the plain
+ * one. A dev following that list verbatim runs the green invocation of a
+ * script that is red in CI, with nothing on either stream saying an invocation
+ * had been elided. That is worse than an omission: the list returns a PASS for
+ * a family CI fails.
+ *
+ * The collapse was not rare. Read from this tree's workflow text rather than
+ * argued: 28 scripts in `lint.yml` are invoked more than once under different
+ * argv, and every one of them carries a `check-` basename, so every one of
+ * them collapsed. 41 across all workflow files.
+ *
+ * ## Why the tail must be a COMPLETE run of flag-shaped tokens
+ *
+ * `--commands` promises one runnable command per line, so a key is only worth
+ * splitting on when this tool can render the invocation faithfully. A tail
+ * carrying a VALUE cannot be rendered: `--base "$MERGE_BASE"` and
+ * `--days 90` and a bare `"$RUNNER_TEMP/test-core.log"` are argv this file
+ * would have to either truncate (`… --base`, which is not runnable) or emit
+ * with an unset workflow variable in it (which is not runnable either). Those
+ * keep the bare path key they have today — a runnable command, and the same
+ * answer this tool already gave — and the refusal is stated here rather than
+ * discovered by a dev pasting a broken line.
+ *
+ * Live specimens of the refused shape on this tree, none of them invented:
+ * `check-adr-0087-registration.mjs --base "$MERGE_BASE"`,
+ * `check-engine-split-ratio.mjs --days 90`,
+ * `check-test-completeness.mjs "$RUNNER_TEMP/test-core.log"`,
+ * `check-shard-attestation.mjs --emit` continued across two more lines that
+ * carry `--job`, `--shard`, `--total` and `--out "$RUNNER_TEMP/…"`, and
+ * `check-cross-package-test-inputs.mjs` continued into `--union-into`/
+ * `--changed` with quoted values — both refused by the continuation
+ * backslash the tail keeps, which is why the matcher above does not treat one
+ * as a terminator.
+ *
+ * ⛔ The direction NOT taken: keying on the truncated flag run. It splits the
+ * family — which reads as the fix — and hands the dev `node scripts/…
+ * --base`, a command that exits non-zero for a reason that has nothing to do
+ * with the tree. A missing lead, never a fabricated one, is the direction this
+ * file errs in everywhere.
+ */
+export function renderableArgv(tail) {
+  const text = String(tail ?? '');
+  if (!/^(?:[ \t]+-{1,2}[A-Za-z0-9][\w-]*)*[ \t]*$/.test(text)) return null;
+  const args = text.trim();
+  return args.length > 0 ? args : null;
+}
+
+/**
  * Pull every `check:*` invocation out of a workflow file's `run:` steps,
  * with the pnpm --filter package (if any) and the workflow's file name.
  *
@@ -1112,14 +1192,28 @@ const SELF_TEST_INVOCATION =
  * in `ci.yml` / `pr-automation.yml`. The flag separates the gate invocation
  * from the work invocation of one script, which no filename rule can.
  *
- * ## Why a `check-` basename is skipped here rather than re-keyed
+ * ## Why a `check-` basename is skipped HERE — and where the split moved to (#14880)
  *
- * 21 of the 30 scripts invoked this way on this tree already have a `check-`
- * basename and are therefore already families under their BARE path key. Admitting them again under a `… --self-test` key would SPLIT each into
- * two families and move its matches to the new key — a re-attribution reported
- * as a gain, which is the error this repo keeps catching. Skipping them makes
- * zero re-attribution a property of the code rather than a number that happened
- * to come out right (measured: 0 of the 52774 existing pairs changed key).
+ * A `check-` basename is admitted by `DIRECT_CHECK_INVOCATION` above, which
+ * since #14880 captures the invocation's argv tail too. So the flagged and the
+ * plain invocation of one `check-` script already arrive as two entries under
+ * two keys, and this matcher would produce a key byte-identical to the one the
+ * direct matcher just produced: one invocation counted twice, not a second
+ * family. That is the whole reason for the skip now.
+ *
+ * ⚠️ It is NOT the reason it originally carried. The skip landed (#11404)
+ * arguing that a `check-` script "is already a family under its BARE path key"
+ * and that splitting it would re-attribute matches — measured then at 0 of
+ * 52774 pairs changed. That argument held only while the bare key was the
+ * whole key: with the plain invocation and the `--self-test` invocation
+ * sharing one entry, the entry kept was the plain one, and CI's failing
+ * invocation had no entry at all (PR #14958, measured; `renderableArgv`'s
+ * docblock carries it). The split is the repair, not the hazard. What survives
+ * of the old argument is its standard of proof, and it is met the same way: a
+ * family whose invocation this tool can render keeps every pair it had — the
+ * plain entry is unchanged and the flagged entry is NEW, so the change adds
+ * families and re-attributes none, except where CI never ran the bare
+ * invocation at all and the bare key was therefore a command nobody runs.
  *
  * ## The price, measured the way #11512 priced import-following
  *
@@ -1170,12 +1264,31 @@ export function extractCheckInvocations(workflowText, workflowFile) {
     for (const m of cmd.matchAll(/pnpm\s+(?:--filter\s+(\S+)\s+)?(?:run\s+)?(check:[\w:-]+)/g)) {
       out.push({ check: m[2], filter: m[1] ?? null, workflow: workflowFile });
     }
-    for (const m of cmd.matchAll(/node\s+(scripts\/[\w./-]*check-[\w.-]+\.mjs)/g)) {
-      out.push({ check: m[1], script: m[1], filter: null, workflow: workflowFile, direct: true });
+    for (const m of cmd.matchAll(DIRECT_CHECK_INVOCATION)) {
+      const script = m[1];
+      // The KEY is (script, args), never the path alone — `renderableArgv`'s
+      // docblock carries the measurement and the one shape it refuses.
+      const args = renderableArgv(m[2]);
+      out.push({
+        check: args ? `${script} ${args}` : script,
+        script,
+        filter: null,
+        workflow: workflowFile,
+        direct: true,
+        // The same declaration the matcher below reads, on the same flag: this
+        // invocation runs the script's SELF-TEST rather than its work, and two
+        // narrowings downstream turn on knowing that (the import/spawn/manifest
+        // follows in `discoverFamilies`, and `ciOnlyMeasurement`). Before the
+        // key carried the argv there was nothing here to read it off.
+        selfTest: Boolean(args) && args.split(/[ \t]+/).includes('--self-test'),
+      });
     }
     for (const m of cmd.matchAll(SELF_TEST_INVOCATION)) {
       const script = m[1];
-      // Already admitted above, under its bare path key. See the docblock.
+      // Admitted above, under the SAME (script, args) key this matcher would
+      // produce — so re-admitting it here would be one invocation counted
+      // twice, not a second family. The skip is what keeps the two matchers
+      // from disagreeing; the split into two families is done by the key.
       if (nodePath.basename(script).includes('check-')) continue;
       out.push({
         // The flag is part of the KEY because it is part of the runnable
@@ -1814,6 +1927,17 @@ export function payloadEnvDependence(scriptSource) {
 export function ciOnlyMeasurement(entry, rootScripts = {}) {
   const env = entry?.payloadEnv ?? null;
   if (!env) return null;
+  // A `--self-test` invocation is never CI-measured-only, and the argument is
+  // the invocation-shaped one `discoverFamilies` already makes about the import
+  // follow (#14880). `payloadEnvDependence` reads the gate's module body with
+  // self-test bodies MASKED OUT, so the payload access it finds belongs to the
+  // script's WORK — the invocation this one is not. Suppressing the self-test
+  // entry from `--commands` on the strength of a read its run never performs
+  // would hide a command a dev CAN run, which is the direction this whole file
+  // refuses. Costs nothing on the tree today: all twelve self-test families
+  // score `payloadEnv` null and never reach this line; it is the split key
+  // above that first lets a payload-reading gate have a self-test entry at all.
+  if (entry.selfTest) return null;
   // A `check:*` family is invocable by name by construction — limb 2 fails
   // before the manifest is consulted at all.
   if (!entry.direct) return null;
@@ -4963,6 +5087,75 @@ export function artifactOnlyNote({ artifacts, dir, coversYourPath }) {
     `        Read the gate before treating it as one. If it scans ${dir}, the fix belongs there: declare the scan surface beside the`,
     `        roster (the subtree spelling, ${dir}/**), after which it is MATCHED here. If it really reads only those files, the silence is correct.`,
   ];
+}
+
+/**
+ * The artifact-roster families, as their own labelled block — printed on every
+ * run, never counted among the derived families (#14880).
+ *
+ * ## What this block is for, and what it deliberately does not say
+ *
+ * `artifactOnlyNote` above says all of this per family, but only under
+ * `--residue`, and only inside the silent listing a dev reading a dispatch
+ * brief is not told to ask for. Measured twice on this card: a dev derived the
+ * families for a diff, ran every one, and shipped a CI red carried by a gate
+ * whose declared literals are its own artifacts — `check:optional-error-sink`
+ * on PR #14866, then `check:error-code-provenance` on PR #14930, whose residue
+ * text names the remedy in its own words. Both are invisible to a `--commands`
+ * harvest by construction, for every card, not just theirs.
+ *
+ * So the block states the one thing that is true of every member and is not a
+ * guess about intent: this derivation scores them `silent` for EVERY card in
+ * the tree, so their silence is a fact about a LIST rather than a verdict about
+ * your paths.
+ *
+ * ⛔ It does NOT call them repo-wide scanners, and the refusal is the same one
+ * `artifactOnlyNote`'s docblock prices: whether a roster is a baseline sitting
+ * in a directory or a census taken OF that directory is exactly the intent this
+ * tool refuses to read out of the tree, and the two live side by side here
+ * (`check:where-matcher` names one baseline and walks `packages/**`;
+ * `check-entry-guard` named ten files under `scripts/` and walked all of it).
+ * A block asserting "these are scanners you must run" would be a fabricated
+ * lead over the members for which it is false — the expensive direction.
+ *
+ * ⛔ And it is NEVER merged into the derived list or into any count. The rows
+ * are `silent`, and `commandsFor`/`familyReconciliation` read only the matched,
+ * convention and always-runs rows, so the separation is structural rather than
+ * a filter someone has to remember. In `--commands` the block goes to STDERR
+ * for the reason every other accounting there does: stdout carries commands and
+ * nothing else, and a labelled block in that stream is prose for a harvest to
+ * pattern-match.
+ *
+ * The ⛔ subset is the correlation the card asks for by name — the rosters
+ * whose common directory contains one of THIS card's paths, where the silence
+ * is not evidence in either direction.
+ */
+export function artifactRosterLines(rosters = []) {
+  if (rosters.length === 0) return [];
+  const inverted = rosters.filter((r) => r.coversYourPath);
+  const lines = [
+    `Artifact rosters — ${rosters.length} famil(ies) whose \`silent\` verdict is a fact about a LIST, not about your paths:`,
+    '  Each declares only tracked FILES — a baseline, an allowlist of the members it already has. A list of the files that',
+    '  already exist can never contain one added tomorrow, so this derivation scores them silent for EVERY card in the tree,',
+    '  and no path you pass can move them. ⛔ They are NOT in the runnable total above and are NOT counted among the derived',
+    '  families. Run them, or read them — but ⛔ never read their silence as a clearance.',
+    '  ⇒ The fix is the gate\'s, not this tool\'s: declare the scan surface beside the roster (the subtree spelling), after',
+    '  which the family is MATCHED here and leaves this block.',
+  ];
+  if (inverted.length) {
+    lines.push(
+      `  ⛔ ${inverted.length} of them keep that roster in a directory one of YOUR paths is in (marked ⛔ below) — there the`,
+      '  silence is not evidence in EITHER direction. Read those gates before treating them as passed.',
+    );
+  } else {
+    lines.push('  None of their rosters sits in a directory your paths are in, so none of them is a lead about this card.');
+  }
+  for (const r of [...rosters].sort((a, b) => a.command.localeCompare(b.command))) {
+    lines.push(
+      `  - ${r.command}${r.coversYourPath ? `   ⛔ roster under ${r.dir}, which one of your paths is in` : ''}`,
+    );
+  }
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -9450,7 +9643,7 @@ export function runReconciliationLines(recon) {
  * That distinction is the card's own subject matter: what is left out of a list
  * must be visible in the list.
  */
-export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [] }) {
+export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [], rosters = [] }) {
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const { otherCommands, ...spelling } = spellingSplit(commands);
   return {
@@ -9469,6 +9662,15 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
     // (that would be a lead on every card) and must not have to infer it from
     // the commands list either (#14189).
     alwaysRunsPopulation: alwaysRunsRows,
+    // IN this document and ⛔ NOT in `commands`, for the reason
+    // `artifactRosterLines` states: these families are `silent`, so no path a
+    // caller passes can move them, and merging them into the runnable union
+    // would make every card's total a different number for a reason unrelated
+    // to the card. Their own key instead, so a machine consumer reads the same
+    // omission the human block names rather than inferring it (#14880).
+    artifactRosterSilences: rosters.map(({ check, command, workflows, artifacts, dir, coversYourPath }) => ({
+      check, command, workflows, artifacts, dir, coversYourPath,
+    })),
     pendingChangeset: {
       probePath: CHANGESET_PROBE_PATH,
       families: pending.map(({ check, entry }) => ({
@@ -9497,13 +9699,13 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
  * LOUD. A quiet omission is the defect this mode was added to fix, and adding a
  * new one inside the fix is how that defect reproduces itself one layer up.
  */
-function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [] }) {
+function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [], rosters = [] }) {
   const identity = repoIdentity();
   const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const split = spellingSplit(commands);
 
   if (mode === 'json') {
-    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows }), null, 2));
+    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows, rosters }), null, 2));
   } else {
     for (const command of commands) console.log(command);
   }
@@ -9542,6 +9744,12 @@ function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, 
         'they are derived against a path that does not exist yet. Write the changeset, then derive again.',
     );
   }
+  // The FOURTH thing stdout deliberately omits (#14880), on stderr for exactly
+  // the reason the three above are: the block is prose, and prose in the stream
+  // a consumer executes is the harvest hazard this mode exists to make
+  // unreachable. ⛔ Never merged into the command list — these families are
+  // `silent`, and no path a caller passes can move them.
+  for (const line of artifactRosterLines(rosters)) console.error(`  ${line}`);
   console.error(
     '  ⛔ Not a complete account of what CI runs on this PR: the always-runs tail (workflows with no path filter) is NOT here. Run without --commands/--json for it.',
   );
@@ -9584,7 +9792,17 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     else if (verdict === 'undetermined') undetermined.push([check, entry]);
     else silent.push([check, entry]);
   }
-  const rosters = silent.map(([, entry]) => artifactOnlySilence(entry, paths, tree)).filter(Boolean);
+  // The roster classification travels ON the row, for the same reason the
+  // matched provenance does: the human block, the `--commands` stderr
+  // accounting and the `--json` document are three readings of THESE rows, so
+  // none of them can name a different set than the residue summary counts
+  // (#14880).
+  const rosters = silent
+    .map(([check, entry]) => {
+      const roster = artifactOnlySilence(entry, paths, tree);
+      return roster ? { check, command: runnableInvocation(entry), workflows: [...entry.workflows], ...roster } : null;
+    })
+    .filter(Boolean);
 
   // ONE structured answer, rendered three ways below. The human block, the
   // `--commands` list and the `--json` document are readings of these same
@@ -9660,6 +9878,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       kindGroups,
       pending,
       alwaysRunsRows,
+      rosters,
       counts: {
         discovered: byCheck.size,
         workflows: workflows.length,
@@ -9754,6 +9973,19 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // Here it closes the runnable answer and the section boundary is the claim.
   console.log('');
   for (const line of familyReconciliationLines(recon)) console.log(line);
+
+  // Directly BELOW that total and above everything else it excludes (#14880).
+  // The placement IS the claim: the reconciliation line closes the runnable
+  // answer, and every section under it names something outside the answer. This
+  // one names the families no path can ever move — printed on every run, not
+  // only under `--residue`, because a dev reading a dispatch brief is never
+  // told to pass that flag and both measured CI reds on this card were carried
+  // by families of exactly this shape.
+  const rosterOut = artifactRosterLines(rosters);
+  if (rosterOut.length) {
+    console.log('');
+    for (const line of rosterOut) console.log(line);
+  }
 
   const pendingOut = pendingChangesetLines(pending);
   if (pendingOut.length) {
@@ -10671,20 +10903,155 @@ function selfTest() {
     '…while the second command, which really carries it, is discovered',
     stNames.includes('scripts/pm/git-history.mjs --self-test'),
   );
-  // The no-re-attribution property, held by construction rather than measured
-  // and hoped for: a `check-` basename is already a family under its BARE path
-  // key, and admitting it again under a flagged key would SPLIT it in two.
+  // The no-double-count property: ONE workflow invocation yields ONE family,
+  // whichever matcher admits it.
+  //
+  // ⚠️ This case was rewritten by #14880 and the rewrite is deliberate, so the
+  // two halves it used to assert together are separated here. Its COUNT half —
+  // one invocation, one family — is the invariant #11404 built the `check-`
+  // skip to protect, and it is untouched: the direct matcher admits this
+  // invocation and the self-test matcher skips it. Its KEY half asserted that
+  // the family lands under the BARE path key, and that half WAS the defect
+  // #14880 fixed: it is what collapsed CI's two invocations of one script into
+  // the plain one and left the failing `--self-test` invocation with no entry.
+  // The key now carries the argv (`renderableArgv`'s docblock has the
+  // measurement), so the expectation moves with it.
   const dualWf = [
     'jobs:',
     '  j:',
     '    steps:',
     '      - run: node scripts/check-adr-0087-registration.mjs --self-test',
   ].join('\n');
-  const dualNames = extractCheckInvocations(dualWf, 'x.yml').map((i) => i.check);
+  const dualInvs = extractCheckInvocations(dualWf, 'x.yml');
+  const dualNames = dualInvs.map((i) => i.check);
   t(
-    'a check- script invoked with the flag stays ONE family under its bare path key',
-    dualNames.length === 1 && dualNames[0] === 'scripts/check-adr-0087-registration.mjs',
+    'a check- script invoked with the flag is ONE family, not one per matcher',
+    dualNames.length === 1,
   );
+  t(
+    '⭐ …and its key carries the flag, so the invocation CI runs is the one derived (#14880)',
+    dualNames[0] === 'scripts/check-adr-0087-registration.mjs --self-test',
+  );
+  t(
+    '…resolving to the script FILE, never to the flagged key — the flag is not a path',
+    dualInvs[0]?.script === 'scripts/check-adr-0087-registration.mjs',
+  );
+  t(
+    '…and it is marked as a self-test invocation, which is what the follow narrowings read',
+    dualInvs[0]?.selfTest === true,
+  );
+
+  // ── The derivation KEY is (script, args) (#14880) ──────────────────────────
+  //
+  // The card's third mechanism, and the one no better output mode reaches: the
+  // derived list named the PLAIN invocation of a script CI also runs with a
+  // flag, and the flagged invocation was the red one. Both halves are pinned —
+  // the split, and the refusal that keeps a split from inventing an unrunnable
+  // command.
+  const keyWf = [
+    'jobs:',
+    '  gates:',
+    '    steps:',
+    '      - name: Both invocations, the shape lint.yml really uses',
+    '        run: |',
+    '          node scripts/check-tenant-audit-census.mjs --self-test',
+    '          node scripts/check-tenant-audit-census.mjs',
+    '      - name: An invocation whose tail carries a VALUE',
+    '        run: node scripts/check-empty-changeset.mjs --base "$MERGE_BASE"',
+    '      - name: An invocation CONTINUED onto the next line, where its values are',
+    '        run: |',
+    '          node scripts/check-shard-attestation.mjs --emit \\',
+    '            --job test --total 6 --out "$RUNNER_TEMP/att"',
+    '      - name: A complete flag run whose line ends in a REDIRECTION, not an argument',
+    '        run: node scripts/check-release-section-coverage.mjs --strict > "$RUNNER_TEMP/x.txt"',
+  ].join('\n');
+  const keyInvs = extractCheckInvocations(keyWf, 'lint.yml');
+  const keyNames = keyInvs.map((i) => i.check);
+  const censusKeys = keyNames.filter((n) => n.startsWith('scripts/check-tenant-audit-census.mjs'));
+  t(
+    '⭐ the two census invocations derive TWO entries, not one collapsed onto the plain run',
+    censusKeys.length === 2
+      && censusKeys.includes('scripts/check-tenant-audit-census.mjs --self-test')
+      && censusKeys.includes('scripts/check-tenant-audit-census.mjs'),
+  );
+  t(
+    'CONTROL: the plain census entry is still there — the fix ADDS the flagged invocation, it does not move the plain one',
+    keyNames.includes('scripts/check-tenant-audit-census.mjs'),
+  );
+  t(
+    '…and both print as commands a dev can paste, each reproducing the invocation CI runs',
+    keyInvs
+      .filter((i) => i.script === 'scripts/check-tenant-audit-census.mjs')
+      .map((i) => runnableInvocation(i))
+      .sort()
+      .join('|')
+      === 'node scripts/check-tenant-audit-census.mjs|node scripts/check-tenant-audit-census.mjs --self-test',
+  );
+  // ⛔ The refusal, and it is the half that keeps the split honest: a tail this
+  // tool cannot render runnably keeps the bare path key it has today. Keying on
+  // the truncated flag run would print `node scripts/check-empty-changeset.mjs
+  // --base`, which fails for a reason that has nothing to do with the tree.
+  t(
+    '⛔ an invocation whose tail carries a VALUE keeps the bare path key — a truncated argv is not a runnable command',
+    keyNames.includes('scripts/check-empty-changeset.mjs')
+      && !keyNames.some((n) => n.startsWith('scripts/check-empty-changeset.mjs ')),
+  );
+  // ⛔ The sharpest of the three, and the one a terminator at the backslash
+  // would have got wrong in the direction that LOOKS right: ` --emit ` reads as
+  // a complete flag run, and the invocation's real values are on the next line.
+  t(
+    '⛔ an invocation CONTINUED onto the next line keeps the bare key — its flag run only LOOKS complete',
+    keyNames.includes('scripts/check-shard-attestation.mjs')
+      && !keyNames.some((n) => n.startsWith('scripts/check-shard-attestation.mjs ')),
+  );
+  // ...while a REDIRECTION really does end the argv, so the flag run before it
+  // is complete and is keyed. The two cases differ by one character and by
+  // whether the shell hands the rest to this command or to itself.
+  t(
+    'a complete flag run followed by a redirection IS keyed — the redirection is the shell\'s, never this argv',
+    keyNames.includes('scripts/check-release-section-coverage.mjs --strict')
+      && !keyNames.includes('scripts/check-release-section-coverage.mjs'),
+  );
+  t(
+    'renderableArgv keeps a complete flag run and refuses everything else',
+    renderableArgv(' --self-test') === '--self-test'
+      && renderableArgv(' --emit --verify') === '--emit --verify'
+      && renderableArgv('') === null
+      && renderableArgv(' --base "$MERGE_BASE"') === null
+      && renderableArgv(' --days 90') === null
+      && renderableArgv(' --emit \\') === null
+      && renderableArgv(' "$RUNNER_TEMP/test-core.log"') === null,
+  );
+  // The LIVE half, and the count is READ from the workflow rather than typed —
+  // a number typed here would rot the first time lint.yml moved. The point of
+  // the reading is that the fixture above judges a real convention: if this
+  // ever fell to zero, every case in this block would be about a shape the tree
+  // no longer has. Measured when this landed: 28 in lint.yml, 41 across all
+  // workflow files, every one of them carrying a `check-` basename and so
+  // collapsed by the old key.
+  {
+    const lintText = readFileSync(nodePath.join(ROOT, '.github/workflows/lint.yml'), 'utf8');
+    const argvOfScript = new Map();
+    for (const inv of extractCheckInvocations(lintText, 'lint.yml')) {
+      if (!inv.direct) continue;
+      if (!argvOfScript.has(inv.script)) argvOfScript.set(inv.script, new Set());
+      argvOfScript.get(inv.script).add(inv.check);
+    }
+    const multi = [...argvOfScript.entries()].filter(([, keys]) => keys.size > 1);
+    t(
+      `lint.yml really invokes ${multi.length} script(s) more than once under different argv, so the cases above judge a live convention`,
+      multi.length > 0,
+    );
+    t(
+      '⭐ and the census pair CI runs on two lines derives as two families on the real workflow, not one',
+      (argvOfScript.get('scripts/check-tenant-audit-census.mjs')?.size ?? 0) === 2,
+    );
+    t(
+      'every derived key is either the bare script path or that path plus a complete flag run — never a truncated argv',
+      [...argvOfScript.entries()].every(([script, keys]) =>
+        [...keys].every((k) => k === script || renderableArgv(k.slice(script.length)) !== null)),
+    );
+  }
 
   // The live halves. Fixtures cannot prove the tree changed; these read it.
   const liveSelfTestFamilies = [...discoverFamilies().byCheck].filter(([, e]) => e.selfTest);
@@ -10765,7 +11132,23 @@ function selfTest() {
   // never earned, so nothing in the output would say so. Measured here: the
   // only newly-promoted module that declares a literal at all is pr-labels.mjs
   // (`.github/labeler.yml`), and no family imports it.
-  const promoted = liveSelfTestFamilies.flatMap(([, e]) => e.files ?? []);
+  // ⚠️ Narrowed by #14880, and the narrowing is what keeps this case measuring
+  // its own claim. A `check-`named script invoked with `--self-test` is now a
+  // self-test family too, but its file was ALREADY a gate file — CI also runs
+  // it plainly, or the direct matcher admits it under a `check-` basename
+  // either way — so counting it as "promoted BY the self-test admission" reads
+  // a refusal that predates that admission as a loss it caused. Measured: with
+  // the raw list, four families reported hints "lost" to modules
+  // (`check-adr-links.mjs`, `check-self-test-wired.mjs`) that were gate files
+  // on the base tree as well, and the follow had already been refusing them.
+  // What this case is about is the module a self-test family is the ONLY
+  // reason to treat as a gate file, so that is what it takes.
+  const namedByWorkFamilies = new Set(
+    [...discoverFamilies().byCheck.values()].filter((e) => !e.selfTest).flatMap((e) => e.files ?? []),
+  );
+  const promoted = liveSelfTestFamilies
+    .flatMap(([, e]) => e.files ?? [])
+    .filter((f) => !namedByWorkFamilies.has(f));
   const subtracted = [];
   for (const [check, entry] of discoverFamilies().byCheck) {
     if (entry.selfTest) continue;
@@ -12680,6 +13063,59 @@ function selfTest() {
     artifactOnlyNote(artifactOnlySilence(rosterFam(['scripts/a.mjs', 'scripts/b.mjs']), ['packages/spec/src/index.ts'], rosterTree))
       .join('\n')
       .includes('ordinary one'),
+  );
+
+  // ── The roster block, printed where a dev without --residue will see it (#14880)
+  //
+  // The note above is per family and prints only inside the silent listing,
+  // which is behind a flag no dispatch brief tells anyone to pass. Two measured
+  // CI reds on this card were carried by families of exactly this shape
+  // (`check:optional-error-sink`, `check:error-code-provenance`), invisible to
+  // a `--commands` harvest for EVERY card. The block states the standing fact
+  // and names the families — and its whole contract is that it is a block
+  // BESIDE the derived list, never a part of it.
+  const blockRows = [
+    { check: 'check:b', command: 'pnpm check:b', workflows: ['lint.yml'], artifacts: ['scripts/a.mjs'], dir: 'scripts', coversYourPath: true },
+    { check: 'check:a', command: 'pnpm check:a', workflows: ['lint.yml'], artifacts: ['docs/x.md'], dir: 'docs', coversYourPath: false },
+  ];
+  const blockOut = artifactRosterLines(blockRows);
+  t('no rosters, no block — an empty section is never printed', artifactRosterLines([]).length === 0);
+  t('the block sizes itself and names every family, sorted by the command a dev would run', blockOut[0].includes('2 famil(ies)')
+    && blockOut.filter((l) => l.startsWith('  - ')).join('|') === '  - pnpm check:a|  - pnpm check:b   ⛔ roster under scripts, which one of your paths is in');
+  t(
+    '⭐ it says out loud that these are OUTSIDE the derived total, which is the whole reason it is a separate block',
+    blockOut.some((l) => l.includes('NOT counted among the derived')) && blockOut.some((l) => l.includes('NOT in the runnable total')),
+  );
+  t(
+    'and it marks the correlated subset — the rosters sitting in a directory one of the card\'s paths is in',
+    blockOut.some((l) => l.includes('1 of them keep that roster in a directory one of YOUR paths is in')),
+  );
+  t(
+    'a card no roster touches gets the standing fact instead of a warning about none of them',
+    artifactRosterLines([{ ...blockRows[1] }]).some((l) => l.includes('None of their rosters sits in a directory your paths are in')),
+  );
+  // ⛔ The refusal, and it is the one that keeps this block from being the
+  // fabricated lead `artifactOnlyNote`'s docblock prices: whether a roster is a
+  // baseline in a directory or a census OF it is intent, and intent is not in
+  // the tree. The block must not call them scanners, and must not tell anyone
+  // the gate reads their file.
+  t(
+    '⛔ and it never calls them scanners or claims they read your file — the half the tree cannot answer',
+    !/scanner|reads your file|very likely reads/.test(blockOut.join('\n')),
+    blockOut.join('\n'),
+  );
+  t(
+    'it names the producer-side remedy the residue already carries, so the block points at a fix and not only at work',
+    blockOut.some((l) => l.includes('declare the scan surface beside the roster')),
+  );
+  // ⛔ STRUCTURAL, not a filter someone has to remember: `commandsFor` reads the
+  // matched, convention and always-runs rows only, and a roster family is
+  // `silent`. Asserted against the real union so a future edit that started
+  // feeding rosters into it reddens here rather than in a dev's harvest.
+  t(
+    '⛔ a roster command is not in the runnable union, whatever the block prints',
+    !commandsFor({ matchedRows: [{ check: 'check:m', command: 'pnpm check:m', ciOnly: null }], kindGroups: [], alwaysRunsRows: [] })
+      .some((c) => c === 'pnpm check:a' || c === 'pnpm check:b'),
   );
 
   // ── The classifier returned a plausible WRONG CATEGORY (#13520) ───────────
@@ -16871,9 +17307,23 @@ function selfTest() {
     const withOut = withChangeset.stdout ?? '';
     t('a run whose surface ALREADY carries a changeset answers at all', withChangeset.status === 0 && withOut.trim().length > 0);
     t('and prints no pending section — there is no temporal gap left to disclose', !/^Once a changeset exists,/m.test(withOut));
+    // ⚠️ Counted per COMMAND, not per substring (#14880). `check-empty-changeset`
+    // is invoked two ways by CI — `--self-test` beside a `--base` run — and
+    // since the derivation key became (script, args) those are two families,
+    // so a substring count of 2 is the tree being described correctly. The
+    // invariant this case protects is unchanged and is what is asserted: each
+    // family appears ONCE, in the matched list, and never also in the pending
+    // section whose heading makes a different claim about time.
+    const changesetCommands = withOut
+      .split('\n')
+      .filter((l) => l.startsWith('  - '))
+      .map((l) => l.slice(4).split('   ')[0].trim())
+      .filter((c) => c.includes('check-empty-changeset'));
     t(
       'because those families are in the MATCHED list instead, each one exactly once',
-      withOut.split('\n').filter((l) => l.startsWith('  - ') && l.includes('check-empty-changeset')).length === 1,
+      changesetCommands.length > 0
+        && new Set(changesetCommands).size === changesetCommands.length
+        && changesetCommands.filter((c) => c === 'node scripts/check-empty-changeset.mjs').length === 1,
     );
 
     // REACHED THROUGH A SYMLINK — the form a plain path equality gets wrong.
@@ -17466,6 +17916,25 @@ function selfTest() {
       'and that refusal names --tier AND --residue, so the dropped one is never left to be guessed',
       (tierResidueRun.stderr ?? '').includes('--tier') && (tierResidueRun.stderr ?? '').includes('--residue'),
     );
+    // ⭐ #15036 — the OTHER half of that refusal, and the half a refusal cannot
+    // carry: the usage line the tool prints when it cannot derive a change set
+    // presented the pair above as legal. `--residue` sat outside the
+    // alternation, which is this notation's way of saying it combines with
+    // every member. Pinned on the constant rather than on a run, because the
+    // print site is reached only where `changedPathsFromGit()` refuses.
+    t(
+      '⭐ the usage line no longer presents --residue as combinable with --tier (#15036)',
+      !USAGE_LINE.includes('[--residue] [--tier'),
+    );
+    t(
+      '…and it still offers --residue with the three modes it really does modify',
+      USAGE_LINE.includes('[--tier | [--residue] [--commands | --json | --ran <file>]]'),
+    );
+    t(
+      '…and every mode the argv chain accepts is still named in it, so the fix narrowed the grammar and dropped no flag',
+      ['--tier', '--residue', '--commands', '--json', '--ran', '--repo', '--changed', '--self-test']
+        .every((flag) => USAGE_LINE.includes(flag)),
+    );
   }
 
   // ── END TO END: the CI-measured family, on the card it was measured on (#14004)
@@ -17508,6 +17977,25 @@ function selfTest() {
       );
       t('and every command still on the list is one a dev can actually run here', cmdRows.length > 0 && cmdRows.every((l) => /^(pnpm|node) \S/.test(l)));
       t('the stderr accounting says the omission out loud, where it cannot corrupt the harvest', (cmdRun.stderr ?? '').includes('CI-MEASURED ONLY'));
+      // ⭐ #14880's block, on the same real run. Three claims, and the third is
+      // the one a unit case cannot make: the block exists, it is on STDERR, and
+      // not one of the families it names leaked into the stream a consumer
+      // executes. A block on stdout would be prose in the harvest — the exact
+      // hazard `--commands` exists to make unreachable.
+      const rosterBlockStart = (cmdRun.stderr ?? '').indexOf('Artifact rosters —');
+      t('⭐ the artifact-roster block is printed for a real card (#14880)', rosterBlockStart >= 0);
+      t('…on stderr, never in the stream a harvest executes', !(cmdRun.stdout ?? '').includes('Artifact rosters —'));
+      const rosterBlockCommands = (cmdRun.stderr ?? '')
+        .slice(rosterBlockStart < 0 ? 0 : rosterBlockStart)
+        .split('\n')
+        .filter((l) => /^\s+- (pnpm|node) /.test(l))
+        .map((l) => l.trim().slice(2).split('   ')[0].trim());
+      t('…and it really names families, so the two cases above judge something', rosterBlockCommands.length > 0);
+      t(
+        '⛔ and not one of them is in the runnable list — the block sits BESIDE the derivation, never inside it',
+        rosterBlockCommands.every((c) => !cmdRows.includes(c)),
+        rosterBlockCommands.filter((c) => cmdRows.includes(c)).join(', '),
+      );
     } finally {
       rmSync(harvestTmp, { recursive: true, force: true });
     }
@@ -17801,6 +18289,32 @@ export { invokedAs };
 const invokedDirectly = isEntrypoint(import.meta.url);
 
 /**
+ * The one usage line, printed on the derivation-failure path — and held to the
+ * refusals the argv chain below really enforces (#15036).
+ *
+ * `--residue` used to sit OUTSIDE the alternation, which is the notation's way
+ * of saying it combines with every member of it. Three of the four it really
+ * does modify; the fourth it does not: `--tier --residue` exits 2 since
+ * #14753, because `--tier` derives no gate family and so leaves `--residue`
+ * nothing to list. A usage line that advertises a refused pair as legal costs
+ * a reader a second's confusion at exactly the moment the tool has already
+ * failed once — so the modifier moves INSIDE, attached to the three modes it
+ * still modifies, and `--tier` stands alone as the alternative it is.
+ *
+ * ⛔ Deleting `[--residue]` instead would understate it — the flag really is
+ * legal with the other three, and with the plain human rendering.
+ *
+ * A CONSTANT rather than a literal at the print site, because the pin belongs
+ * beside the refusals it mirrors: reaching the print site needs a checkout
+ * where `changedPathsFromGit()` refuses, and a pin that cannot be run in the
+ * self-test is not a pin.
+ */
+const USAGE_LINE =
+  'usage: node scripts/pm/dispatch-gates.mjs'
+  + ' [--tier | [--residue] [--commands | --json | --ran <file>]]'
+  + ' [--repo owner/name] [<path> ...] | --changed | --self-test';
+
+/**
  * Executed only as a CLI. Importing this module must have NO side effect.
  *
  * Everything above this line is exported — the two re-export blocks with their
@@ -17987,7 +18501,7 @@ if (invokedDirectly) {
         derived = changedPathsFromGit();
       } catch (err) {
         console.error(`dispatch-gates: could not derive the change set — ${err.message}`);
-        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier | --commands | --json | --ran <file>] [--repo owner/name] [<path> ...] | --changed | --self-test');
+        console.error(USAGE_LINE);
         process.exit(2);
       }
       if (derived.paths.length === 0) {
