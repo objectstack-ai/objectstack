@@ -874,6 +874,38 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/spec/src/**': ['packages/qa/downstream-contract/test/source-resolution.pin.test.ts'],
     },
   },
+  '@objectstack/objectql': {
+    // src/action-owner-key-single-source.test.ts carries the #14878 TREE-scoped
+    // absence pin: `git grep` over `packages/` and `examples/` for the private
+    // `ObjectQLPlugin` member #14667 deleted, so that the PR which writes a new
+    // stale mention of it reddens at the moment it is written rather than
+    // surfacing as a follow-up card weeks later. The two `.ts` globs ARE that
+    // scan surface -- the pin spells the same two roots and the same extension
+    // in `SCANNED_ROOTS` / `SCANNED_EXTENSION`, and its own header says the two
+    // widen together or not at all.
+    //
+    // ⛔ `packages/` ONLY, and the `examples/` half is REFUSED rather than
+    // forgotten. An examples-wide `.ts` glob here would be inherited as a watch
+    // hint by every importer of this table -- `check-cross-package-test-inputs`
+    // included -- and `scripts/pm/dispatch-gates.mjs`'s self-test pins that no
+    // hint of that gate reaches a test file outside `packages/**`, which is the
+    // whole reason it is listed there as a change-KIND instead of a path
+    // derivation. Measured: all 41 tracked test files outside `packages/` are
+    // under `examples/`, so that glob does not shrink the residue class, it
+    // EMPTIES it, and the case cannot be re-pointed at another member. Widening
+    // needs that residue measurement redone first; the pins' own headers carry
+    // what it costs meanwhile.
+    //
+    // `cross-package-test-inputs.mjs` is NAMED in that pin's header (it is where
+    // the widening instruction points) and never read, the same shape as the
+    // `check-nul-bytes.mjs` mentions elsewhere in this table: the literal
+    // collector takes quoted paths out of comments, and declaring the file is
+    // cheaper than rewording prose to dodge the scanner.
+    globs: [
+      'packages/**/*.ts',
+      'scripts/cross-package-test-inputs.mjs',
+    ],
+  },
   '@objectstack/runtime': {
     // src/error-envelope.conformance.test.ts imports `stripComments` from
     // `js-comment-mask.mjs` to decide which text in the ten dispatcher modules
@@ -883,9 +915,38 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // it has to re-run this package's suite. The `.d.mts` sibling is declared
     // alongside it because it is what gives `stripComments` its type, so this
     // package's typecheck verdict is a function of it too.
+    //
+    // src/action-owner-key-single-source.test.ts also carries the #14878 TREE-scoped
+    // absence pin: `git grep` over `packages/` and `examples/` for the private
+    // `ObjectQLPlugin` member #14667 deleted, so that the PR which writes a new
+    // stale mention of it reddens at the moment it is written rather than
+    // surfacing as a follow-up card weeks later. The two `.ts` globs ARE that
+    // scan surface -- the pin spells the same two roots and the same extension
+    // in `SCANNED_ROOTS` / `SCANNED_EXTENSION`, and its own header says the two
+    // widen together or not at all.
+    //
+    // ⛔ `packages/` ONLY, and the `examples/` half is REFUSED rather than
+    // forgotten. An examples-wide `.ts` glob here would be inherited as a watch
+    // hint by every importer of this table -- `check-cross-package-test-inputs`
+    // included -- and `scripts/pm/dispatch-gates.mjs`'s self-test pins that no
+    // hint of that gate reaches a test file outside `packages/**`, which is the
+    // whole reason it is listed there as a change-KIND instead of a path
+    // derivation. Measured: all 41 tracked test files outside `packages/` are
+    // under `examples/`, so that glob does not shrink the residue class, it
+    // EMPTIES it, and the case cannot be re-pointed at another member. Widening
+    // needs that residue measurement redone first; the pins' own headers carry
+    // what it costs meanwhile.
+    //
+    // `cross-package-test-inputs.mjs` is NAMED in that pin's header (it is where
+    // the widening instruction points) and never read, the same shape as the
+    // `check-nul-bytes.mjs` mentions elsewhere in this table: the literal
+    // collector takes quoted paths out of comments, and declaring the file is
+    // cheaper than rewording prose to dodge the scanner.
     globs: [
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
+      'packages/**/*.ts',
+      'scripts/cross-package-test-inputs.mjs',
     ],
   },
   '@objectstack/driver-sql': {
