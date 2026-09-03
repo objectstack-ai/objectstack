@@ -500,7 +500,10 @@ function selfTest() {
 
 function main() {
   if (process.argv.includes('--self-test')) {
-    const { passed, lines } = selfTest();
+    // Read BEFORE destructuring: an early return yields `undefined`, and
+    // destructuring that throws a TypeError before the handshake is reached —
+    // an accidental non-zero exit is not a verdict handshake (#13798).
+    const selfTestResult = selfTest();
     if (!selfTestReachedVerdict) {
       console.error(
         '\n✗ check-osv-exemptions self-test: selfTest() returned without reaching its verdict,\n'
@@ -509,6 +512,7 @@ function main() {
       );
       process.exit(1);
     }
+    const { passed, lines } = selfTestResult;
     console.log('check-osv-exemptions self-test (both directions):');
     for (const line of lines) console.log(line);
     if (!passed) {
