@@ -51,15 +51,14 @@ export interface BusinessUnitGraphOptions {
  *   - {@link BusinessUnitGraphService.expandUnitMembers} — exactly that one
  *     unit's members (drives the `business_unit` recipient).
  *
- * Two DIFFERENT tenant screens live here too, and keeping THEM distinct is
- * the point of #14547 — an asymmetric pair, not an oversight:
+ * Two tenant screens live here, and BOTH are strict equalities:
  *   - {@link BusinessUnitGraphService.orgScope} screens `sys_business_unit`,
- *     the ANCHOR the rule names, with the platform's NULL-INCLUSIVE predicate
- *     (a seeded unit belongs to no organization and every tenant may see it);
+ *     the ANCHOR the rule names;
  *   - `memberScope` screens `sys_business_unit_member`, the SET BEING GRANTED,
- *     with a STRICT equality (a NULL organization there means unknown
+ *     added by #14949 and kept (a NULL organization there means unknown
  *     tenancy, and a grant fails closed on it).
- * Each method carries the measurement it rests on. ⛔ They are not one method.
+ * Each method carries the measurement it rests on. ⛔ They are not one method,
+ * and ⛔ neither one gets a NULL arm — see {@link BusinessUnitGraphService.orgScope}.
  *
  * Reuses {@link TeamGraphService.managerOf} for user-level manager
  * lookup so callers can use this single service in approval / sharing
@@ -284,76 +283,58 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
   }
 
   /**
-   * [#14547] The UNIT screen — the platform's own NULL-INCLUSIVE tenant
-   * predicate, not a strict equality.
+   * [ADR-0131 D8] The UNIT screen — STRICT equality, as 17.2.0 ships it.
    *
-   * `SqlDriver.applyTenantScope` — the platform's single chokepoint for
-   * read-side tenant isolation — emits `(organization_id = ? OR
-   * organization_id IS NULL)`, and its own comment names business units among
-   * the populations that arm depends on: a NULL organization marks a
-   * PLATFORM/seeded row that every tenant may see (#2734). This method used to
-   * AND a bare `organization_id = <rule org>` instead, dropping that NULL arm.
+   * ⛔ Do NOT re-add a NULL arm here. #14949 briefly made this `$or` the rule's
+   * own organization together with a second arm matching an unset
+   * `organization_id`, so that an org-stamped rule could name a seeded
+   * (org-less) `sys_business_unit` row — the shape
+   * `SqlDriver.applyTenantScope` writes. That was reverted before 17.3 was cut on
+   * the maintainer's ruling: it re-implements, a second time and in a second
+   * place, the very predicate `SqlDriver.applyTenantScope` already owns — the
+   * duplication ADR-0131 exists to retire (#10103 cause 1) — and it had not
+   * shipped, so reverting cost nothing while shipping it would have owed v18 a
+   * breaking change plus a migration.
    *
-   * A `sys_business_unit` row written by seed data carries no organization — a
-   * seed cannot know the id the runtime mints at boot — so an org-stamped rule
-   * naming a seeded unit matched nothing: {@link seedIsUsable} read the unit as
-   * "does not exist", both recipient widths returned zero users, and the rule
-   * stayed `active: true` having materialised no `sys_record_share` row and
-   * logged nothing. A silent under-grant whose only symptom is "the right
-   * people cannot see the record".
-   *
-   * The same predicate, for the same rows, is already written twice in this
-   * codebase: `SharingRuleService.adminOrgScope` (#7676) for the rule table,
-   * and `ApprovalService.businessUnitOrgScope` (#3807) for `sys_business_unit`
-   * itself. This file was the outlier, and `sharing-rule-service.ts` names the
-   * mistake in prose while this file made it.
-   *
-   * The spelling is `$or` rather than threading `context.tenantId` on purpose.
-   * A tenant on the context would hand the SQL driver the same predicate, but
-   * these reads are elevated ({@link SYSTEM_CTX}) precisely so they can see
-   * rows no recipient could; more decisively, `driver-memory` and
-   * `driver-mongodb` implement no `applyTenantScope` layer at all, so a screen
-   * that existed only inside the SQL family would be no screen. The predicate
-   * is written where the decision is, and it is the same one the driver writes.
-   *
-   * ⛔ This is NOT the screen the MEMBER rows get — see {@link memberScope},
-   * which is strict on purpose. The asymmetry is the whole point of #14547,
-   * and both halves are pinned (`business-unit-graph.test.ts`,
-   * `recipient-width.test.ts`).
+   * #14547 therefore REMAINS as in 17.2.0: an org-stamped rule naming a seeded
+   * unit expands to nobody. That is a real defect and it is not fixed here.
+   * Its root cause is the seed loader's `sys_` exemption plus first-boot
+   * ordering, and it is fixed STRUCTURALLY on the v18 line by ADR-0131 C1 —
+   * the Default Organization exists before application seed datasets load, and
+   * the seed loader stamps `sys_business_unit` seeds — so the row this screen
+   * reads carries an organization and no screen has to special-case it.
+   * `SharingRuleService.warnOnEmptyUnitExpansion` (#14949's other half, kept)
+   * is what keeps the 17.x symptom LOUD instead of silent.
    */
   private orgScope(filter: Record<string, unknown>): Record<string, unknown> {
-    if (!this.organizationId) return filter;
-    return {
-      ...filter,
-      $or: [{ organization_id: this.organizationId }, { organization_id: null }],
-    };
+    if (this.organizationId) return { ...filter, organization_id: this.organizationId };
+    return filter;
   }
 
   /**
-   * [#14547] The MEMBER screen — STRICT equality, deliberately not
-   * {@link orgScope}.
+   * [#14949, KEPT] The MEMBER screen — STRICT equality.
+   *
+   * ⚠️ This half is NOT part of the ADR-0131 D8 revert that restored
+   * {@link orgScope} to a strict equality. It is kept, and it is load-bearing
+   * on its own.
    *
    * ## Why the member rows are screened at all
    *
    * Both member reads used to carry no organization predicate whatever, under
    * a {@link SYSTEM_CTX} that carries no tenant either — so the query was
-   * completely unscoped by organization. That was survivable only because the
-   * strict equality {@link orgScope} used to apply kept an org-stamped rule
-   * from ever reaching a seeded unit. Widening the unit screen ALONE would
-   * therefore have converted a silent UNDER-grant into a silent CROSS-TENANT
-   * OVER-grant: a seeded unit id exists identically in every tenant, so tenant
-   * A's rule would expand to tenant B's members and materialise real
-   * `sys_record_share` rows for them. The bug was moonlighting as the tenant
-   * guard, and removing a screen from the only place it was being enforced is
-   * not a fix.
+   * completely unscoped by organization: any unit an org-stamped rule could
+   * see handed back EVERY tenant's membership rows hanging off it, and tenant
+   * A's rule materialised real `sys_record_share` rows for tenant B's users.
+   * A strict {@link orgScope} narrows which units are reachable but does not
+   * close that: `sys_business_unit_member` rows of another organization sit on
+   * org-stamped units too, and those units are exactly the visible ones. This
+   * screen is the only thing that answers there.
    *
-   * ## Why STRICT, when the unit screen is null-inclusive
+   * ## Why STRICT
    *
-   * The two rows answer different questions. The unit is the ANCHOR the rule's
-   * author named by id, and a NULL organization on it is the documented
-   * platform/seeded class the driver's NULL arm exists for. A member row is
-   * part of the SET BEING GRANTED — enumerated by the platform rather than
-   * named by anyone — and its organization is the only tenancy fact it carries.
+   * A member row is part of the SET BEING GRANTED — enumerated by the platform
+   * rather than named by anyone — and its organization is the only tenancy
+   * fact it carries.
    *
    * `sys_business_unit_member` rows are NOT organization-stamped on every write
    * path. Re-measured on this tree at `origin/main` for #14547:
@@ -383,8 +364,8 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
    * screens `sys_user_position`, both with a strict equality.
    *
    * ⚠️ The cost is declared, not hidden: a rule stamped with an organization
-   * whose unit AND memberships were both seeded still expands to nobody. That
-   * outcome is now LOUD — `SharingRuleService.expandRecipient` warns once per
+   * whose memberships were seeded expands to nobody even on a unit it can see.
+   * That outcome is LOUD — `SharingRuleService.expandRecipient` warns once per
    * rule, naming the rule and the unit — where before it was silent, and the
    * repair is to stamp the membership rows rather than to widen this screen.
    *
