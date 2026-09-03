@@ -76,7 +76,10 @@ function recordingEngine() {
     // ObjectQL itself about which write shapes it accepts
     // (`check:engine-double-contract`).
     async update(_o: string, _d: unknown, options: any) {
-      assertEngineUpdateDispatch(options);
+      // Both arguments: the address may ride the PAYLOAD (`update({ id, … })`,
+      // the shape a hook writes) or `options.where` — passing only the bag
+      // refuses a call the real engine accepts.
+      assertEngineUpdateDispatch(_d as any, options);
       seen.push({ method: 'update', context: options?.context });
       return { id: 'r1' };
     },
@@ -151,7 +154,7 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
     const ctx = makeCtx(OPERATOR, engine);
 
     const wrapped = wrapDeclarativeHook(hookOf('system'), async (c) => {
-      await (c.api as any).object('account').update({ current_grade: 'A' });
+      await (c.api as any).object('account').update({ id: 'acct_1', current_grade: 'A' });
     }, { logger: silentLogger });
     await wrapped(ctx);
 
@@ -175,7 +178,7 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
     const ctx = makeCtx(elevatedButAttributed, engine);
 
     const wrapped = wrapDeclarativeHook(hookOf('user'), async (c) => {
-      await (c.api as any).object('account').update({ current_grade: 'A' });
+      await (c.api as any).object('account').update({ id: 'acct_1', current_grade: 'A' });
     }, { logger: silentLogger });
     await wrapped(ctx);
 
@@ -191,9 +194,9 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
       let thrown: any;
 
       const wrapped = wrapDeclarativeHook(hookOf('user', { onError: 'abort' }), async (c) => {
-        await (c.api as any).object('account').update({ current_grade: 'A' });
+        await (c.api as any).object('account').update({ id: 'acct_1', current_grade: 'A' });
       }, { logger: silentLogger });
-      await wrapped(ctx).catch((e) => { thrown = e; });
+      try { await wrapped(ctx); } catch (e) { thrown = e; }
 
       // Envelope first: code AND status, per the standard clause. A bare
       // "it threw" would pass for a TypeError from a missing member, which is
@@ -217,7 +220,7 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
       const wrapped = wrapDeclarativeHook(hookOf('user'), async (c) => {
         await (c.api as any).transaction(async () => 'never');
       }, { logger: silentLogger });
-      await wrapped(ctx).catch((e) => { thrown = e; });
+      try { await wrapped(ctx); } catch (e) { thrown = e; }
 
       expect(thrown?.code).toBe(HOOK_UNSCOPED_DATA_ACCESS_CODE);
       expect(engine.seen).toEqual([]);
@@ -262,7 +265,7 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
 
       const wrapped = wrapDeclarativeHook(hookOf('system', { async: true }), async (c) => {
         await gate;
-        await (c.api as any).object('account').update({ current_grade: 'A' });
+        await (c.api as any).object('account').update({ id: 'acct_1', current_grade: 'A' });
         done();
       }, { logger: silentLogger });
 
