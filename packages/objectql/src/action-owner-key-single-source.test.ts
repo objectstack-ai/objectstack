@@ -122,20 +122,35 @@ describe('standalone-action owner key — one spelling in @objectstack/objectql 
  *
  * ── Scope, and where it stops ───────────────────────────────────────────────
  *
- * `.ts` under `packages/` and `examples/`. That is the whole measured
- * population: every mention this symbol has ever had outside the release record
- * was a `.ts` file in one of those two roots, and so were all five surviving
- * references. It is also the radius `@objectstack/core` and `@objectstack/types`
- * already declare for pins of this shape, so it costs one table entry and one
- * turbo task and no scheduler surgery.
+ * `.ts` under `packages/`, and that boundary is a MEASURED TRADE rather than a
+ * default — read this before widening it.
  *
- * ⚠️ Widening to `docs/`, `content/`, `skills/` or `apps/` is TWO edits, never
- * one: `SCANNED_ROOTS` here AND this package's globs in
- * `scripts/cross-package-test-inputs.mjs` — and a NEW top-level root needs a
- * matching ci.yml `crosspkg:` entry, which `check-ci-filter-parity.mjs` is the
- * gate for. Widening the scanner alone reads as coverage while turbo never
- * re-runs this suite for the files it now claims to judge, which is exactly the
- * blind spot `check:cross-package-test-inputs` exists to close.
+ * `examples/` was in the scan for one commit. It is the right radius on the
+ * evidence (one of the five surviving references lived there), and the repo's
+ * gate farm refused it: declaring an examples-wide `.ts` glob in
+ * `scripts/cross-package-test-inputs.mjs` makes that glob an inherited watch
+ * hint on every importer of that table, `check:cross-package-test-inputs`
+ * included — and `dispatch-gates.mjs`'s self-test pins that no hint of that gate
+ * reaches a test file outside `packages/**`, because the whole reason it is
+ * listed as a change-KIND rather than a path derivation is that the hint route
+ * cannot reach the population it judges. Measured on this tree: all 41 tracked
+ * test files outside `packages/` are under `examples/`, so that one glob does
+ * not shrink the residue class, it EMPTIES it, and the case cannot be
+ * re-pointed at another member because there is none.
+ *
+ * ⇒ Widening this pin to `examples/` is not a two-line change and ⛔ must not be
+ * done by editing that self-test case. It needs the residue measurement behind
+ * that case redone, which is a `scripts/pm/` decision owned by another lane.
+ * What it costs today, stated rather than discovered later: of this symbol's
+ * five surviving references, four were `packages/**` and one was a test under
+ * the showcase example — which this pin would not have caught.
+ *
+ * ⚠️ Any widening — `examples/`, `docs/`, `content/`, `skills/`, `apps/` — is
+ * TWO edits, never one: `SCANNED_ROOTS` here AND this package's globs in
+ * `scripts/cross-package-test-inputs.mjs` (a NEW top-level root needs a matching
+ * ci.yml `crosspkg:` entry too, which `check-ci-filter-parity.mjs` gates).
+ * Widening the scanner alone reads as coverage while turbo never re-runs this
+ * suite for the files it now claims to judge.
  */
 
 /**
@@ -231,8 +246,8 @@ const PACKAGE_ROOT = findUp((dir) => {
  */
 const REPO_ROOT = resolve(PACKAGE_ROOT, '../..');
 
-/** The trees this pin binds. See the scope note above before changing it. */
-const SCANNED_ROOTS: readonly string[] = ['packages', 'examples'];
+/** The tree this pin binds. See the scope note above before changing it. */
+const SCANNED_ROOTS: readonly string[] = ['packages'];
 
 /** Spelled once so the declared glob and the scan stay in correspondence. */
 const SCANNED_EXTENSION = '.ts';
@@ -344,14 +359,14 @@ describe('standalone-action owner key — the deleted member is dead TREE-WIDE (
             // That is the exact property the file-scoped pin lost.
             expect(filesMentioning(DELETED_PLUGIN_MEMBER)).toContain(PIN_FILES[0]);
 
-            // ...and it must leave this package. The live helper is the reach
-            // control because it is the one symbol the convergence guarantees in
-            // both scanned roots: `examples/app-showcase/test/actions.test.ts` is
-            // literally one of the five files that carried the dead name until it
-            // was repaired, so a scan that cannot see it is a scan that would not
-            // have caught the defect this pin exists for.
+            // ...and it must LEAVE this package, which is the half a file-scoped
+            // pin never had. The live helper is the reach control: it is the one
+            // symbol the convergence guarantees outside this package, and the CLI
+            // site below is one of the files that carried the DEAD name until it
+            // was repaired — so a scan that cannot see it is a scan that would
+            // not have caught the defect this pin exists for.
             const reached = filesMentioning(CANONICAL_HELPER);
-            expect(reached).toContain('examples/app-showcase/test/actions.test.ts');
+            expect(reached).toContain('packages/cli/src/commands/lint.ts');
             expect(reached).toContain('packages/runtime/src/action-execution.ts');
         },
         SCAN_TIMEOUT_MS,

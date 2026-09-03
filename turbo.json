@@ -224,7 +224,6 @@
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.d.mts",
         "$TURBO_ROOT$/packages/**/*.ts",
-        "$TURBO_ROOT$/examples/**/*.ts",
         "$TURBO_ROOT$/scripts/cross-package-test-inputs.mjs"
       ]
     },
@@ -237,7 +236,6 @@
         "!coverage/**",
         "!.turbo/**",
         "$TURBO_ROOT$/packages/**/*.ts",
-        "$TURBO_ROOT$/examples/**/*.ts",
         "$TURBO_ROOT$/scripts/cross-package-test-inputs.mjs"
       ]
     },

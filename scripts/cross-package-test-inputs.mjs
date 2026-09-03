@@ -858,9 +858,17 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // in `SCANNED_ROOTS` / `SCANNED_EXTENSION`, and its own header says the two
     // widen together or not at all.
     //
-    // The scan's paths come out of `git grep`, which this gate's collector
-    // cannot name, so the globs are held by the escaping test itself rather than
-    // by a path on the roster -- the `heldBy` shape below.
+    // ⛔ `packages/` ONLY, and the `examples/` half is REFUSED rather than
+    // forgotten. An examples-wide `.ts` glob here would be inherited as a watch
+    // hint by every importer of this table -- `check-cross-package-test-inputs`
+    // included -- and `scripts/pm/dispatch-gates.mjs`'s self-test pins that no
+    // hint of that gate reaches a test file outside `packages/**`, which is the
+    // whole reason it is listed there as a change-KIND instead of a path
+    // derivation. Measured: all 41 tracked test files outside `packages/` are
+    // under `examples/`, so that glob does not shrink the residue class, it
+    // EMPTIES it, and the case cannot be re-pointed at another member. Widening
+    // needs that residue measurement redone first; the pins' own headers carry
+    // what it costs meanwhile.
     //
     // `cross-package-test-inputs.mjs` is NAMED in that pin's header (it is where
     // the widening instruction points) and never read, the same shape as the
@@ -869,13 +877,8 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // cheaper than rewording prose to dodge the scanner.
     globs: [
       'packages/**/*.ts',
-      'examples/**/*.ts',
       'scripts/cross-package-test-inputs.mjs',
     ],
-    heldBy: {
-      'packages/**/*.ts': ['packages/objectql/src/action-owner-key-single-source.test.ts'],
-      'examples/**/*.ts': ['packages/objectql/src/action-owner-key-single-source.test.ts'],
-    },
   },
   '@objectstack/runtime': {
     // src/error-envelope.conformance.test.ts imports `stripComments` from
@@ -896,9 +899,17 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // in `SCANNED_ROOTS` / `SCANNED_EXTENSION`, and its own header says the two
     // widen together or not at all.
     //
-    // The scan's paths come out of `git grep`, which this gate's collector
-    // cannot name, so the globs are held by the escaping test itself rather than
-    // by a path on the roster -- the `heldBy` shape below.
+    // ⛔ `packages/` ONLY, and the `examples/` half is REFUSED rather than
+    // forgotten. An examples-wide `.ts` glob here would be inherited as a watch
+    // hint by every importer of this table -- `check-cross-package-test-inputs`
+    // included -- and `scripts/pm/dispatch-gates.mjs`'s self-test pins that no
+    // hint of that gate reaches a test file outside `packages/**`, which is the
+    // whole reason it is listed there as a change-KIND instead of a path
+    // derivation. Measured: all 41 tracked test files outside `packages/` are
+    // under `examples/`, so that glob does not shrink the residue class, it
+    // EMPTIES it, and the case cannot be re-pointed at another member. Widening
+    // needs that residue measurement redone first; the pins' own headers carry
+    // what it costs meanwhile.
     //
     // `cross-package-test-inputs.mjs` is NAMED in that pin's header (it is where
     // the widening instruction points) and never read, the same shape as the
@@ -909,13 +920,8 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
       'packages/**/*.ts',
-      'examples/**/*.ts',
       'scripts/cross-package-test-inputs.mjs',
     ],
-    heldBy: {
-      'packages/**/*.ts': ['packages/runtime/src/action-owner-key-single-source.test.ts'],
-      'examples/**/*.ts': ['packages/runtime/src/action-owner-key-single-source.test.ts'],
-    },
   },
   '@objectstack/driver-sql': {
     // src/live-dialect-matrix.isolation.test.ts imports `stripComments` from
