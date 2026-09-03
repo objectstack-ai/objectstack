@@ -40,8 +40,8 @@ What the incident actually was — established by reproducing it end-to-end agai
 
 Supporting facts (verified in source):
 
-- **Loose contract + coercion.** `ExpressionInputSchema` (`spec/shared/expression.zod.ts:84`) transforms any bare string into `{dialect:'cel', source}`; `flow.zod.ts` only *consumes* it. A `condition: string` is silently treated as CEL with no opportunity to reject a bad form.
-- **The spec teaches the bad form.** `automation/flow.zod.ts:212-214`'s own `FlowSchema` JSDoc example uses `condition: "{amount} < 500"` / `"{amount} >= 500"` — the **exact single-brace-in-CEL pattern that silently fails**. This is the concrete answer to *"why did the AI write it wrong"*: not a missing skill — an actively wrong authoritative example the model faithfully copied.
+- **Loose contract + coercion.** `ExpressionInputSchema` (`packages/spec/src/shared/expression.zod.ts#ExpressionInputSchema`) transforms any bare string into `{dialect:'cel', source}`; `flow.zod.ts` only *consumes* it. A `condition: string` is silently treated as CEL with no opportunity to reject a bad form.
+- **The spec teaches the bad form.** `packages/spec/src/automation/flow.zod.ts#FlowSchema`'s own `FlowSchema` JSDoc example uses `condition: "{amount} < 500"` / `"{amount} >= 500"` — the **exact single-brace-in-CEL pattern that silently fails**. This is the concrete answer to *"why did the AI write it wrong"*: not a missing skill — an actively wrong authoritative example the model faithfully copied.
 - **Three syntaxes coexist, at scale.** Across `../templates` (10 packages, 30 flows): only **6** flow `condition`s, but **191** single-brace `{…}` template usages and **40+** double-brace `{{…}}` (titleFormat/notification). So by volume the dominant expression surface is *interpolation*, not predicates — and the single-brace delimiter is the one that collides with CEL. (Date helpers also split: template `TODAY()`/`NOW()` vs CEL `today()`/`daysFromNow(int)`.)
 - **Inconsistent failure policy.** The same evaluation-failure decision is made five different ways: `seed-loader` (loud fail), hook-wrappers (warn + false), rule-validator (warn + skip → null), the engine's formula projection (silent null), flow `evaluateCondition` (silent false). No single declared policy.
 
@@ -81,7 +81,7 @@ Rationale (AI-first): the #1 LLM error is *mode over-generalization* — copying
 
 ### 4. Correctness is training data.
 
-- **Fix the canon first.** Remove every anti-pattern from the spec's own JSDoc (`flow.zod.ts:212-214`'s `{amount} < 500`), skills, and guides **before** shipping the contract — the model emits what it is shown.
+- **Fix the canon first.** Remove every anti-pattern from the spec's own JSDoc (`packages/spec/src/automation/flow.zod.ts`'s `{amount} < 500`), skills, and guides **before** shipping the contract — the model emits what it is shown.
 - **Ship a golden example set** per field role (predicate / template / computed value), copy-pasteable and correct, that authoring agents are pointed at.
 - **Make the contract self-describing** (Decision 1e) so the agent *discovers* the rule rather than inferring it from priors.
 
@@ -121,9 +121,9 @@ Out of scope (separate surfaces, intentionally **not** unified): query-filter op
 
 ## Sequencing (roadmap, ordered by AI-safety ROI)
 
-1. **Stop the silent failure + fix the canon (ship first, decisive).** One `EvalResult` policy: parse → build error, runtime fault → loud attributed failure; delete every `error→false/null` swallow (`evaluateCondition` + the other four). Simultaneously remove the anti-pattern examples from spec JSDoc/skills (`flow.zod.ts:212-214`). This alone kills the #1491/#1429 class.
+1. **Stop the silent failure + fix the canon (ship first, decisive).** One `EvalResult` policy: parse → build error, runtime fault → loud attributed failure; delete every `error→false/null` swallow (`evaluateCondition` + the other four). Simultaneously remove the anti-pattern examples from spec JSDoc/skills (`packages/spec/src/automation/flow.zod.ts`). This alone kills the #1491/#1429 class.
 2. **Build-time parse validation + error-message contract.** CLI/registration parses every expression; failures carry `file:line`, source, and the *corrective* message (1d).
-3. **Contract/types.** `spec`: expression fields become typed (`Predicate` / `Template` / `Expr<T>`); remove bare-string acceptance + the `shared/expression.zod.ts:84` coercion. Land `` cel`` `` / `` tpl`` `` builders. Two shapes, no single brace.
+3. **Contract/types.** `spec`: expression fields become typed (`Predicate` / `Template` / `Expr<T>`); remove bare-string acceptance + the `packages/spec/src/shared/expression.zod.ts#Predicate` coercion. Land `` cel`` `` / `` tpl`` `` builders. Two shapes, no single brace.
 4. **Schema-aware validation (v1)** — project resolved object schema into the CEL type env; field-existence + bool-return. (v2: full type inference.)
 5. **Agent tooling** — expose `validate_expression` + field-dialect/scope introspection; feed schema into the authoring context.
 6. **Template engine** — `{{ }}` holes (paths + formatter whitelist) with defined value→string semantics; delete the single-brace resolver; unify date helpers under CEL stdlib.

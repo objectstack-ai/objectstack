@@ -393,7 +393,7 @@ is a parse error carrying its migration
 
 ## Verify your work
 
-After authoring a `*.skill.ts` / `*.tool.ts` or a model-registry entry, run the
+After authoring a `*.skill.ts` / `*.tool.ts`, run the
 author-time gate before reporting done:
 
 ```bash
@@ -401,7 +401,7 @@ os validate     # Zod schema + CEL predicate validation + bindings (no artifact)
 # or: os build  # the same gates, plus emits dist/
 ```
 
-It confirms the skill / tool / model metadata conforms to the protocol. This
+It confirms the skill / tool metadata conforms to the protocol. This
 domain has no CEL site — a model-registry `promptTemplate.system` / `.user` is
 the `template` dialect (`{{var}}`); `ToolSchema` carries no expression field of
 any kind. In a scaffolded project the gate is `npm run validate`. See

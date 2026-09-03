@@ -1347,7 +1347,14 @@ export class AuthPlugin implements Plugin {
         // fields stay rejected. `managed-extension-fields.test.ts` proves the two
         // populations are disjoint at the pinned better-auth version.
         for (const [object, fields] of Object.entries(MANAGED_EXTENSION_EDITABLE_FIELDS)) {
-          if (object === SystemObjectName.USER) continue; // sys_user tiering above
+          // `sys_user` is registered ABOVE, from the tiered constant, and is
+          // skipped here rather than merged: this map has one tier and that
+          // table has two (form vs. admin bulk import). Its entry there is a
+          // declaration that must stay a SUBSET of what was registered above —
+          // pinned in `managed-extension-fields.test.ts`, because a name that
+          // reaches this map but never the whitelist is a write the platform
+          // advertises and the guard refuses (ADR-0049).
+          if (object === SystemObjectName.USER) continue;
           registerManagedUpdateWhitelist(object, fields);
         }
         // [#8317] Canonicalise `sys_member.role` on every ObjectQL write, at

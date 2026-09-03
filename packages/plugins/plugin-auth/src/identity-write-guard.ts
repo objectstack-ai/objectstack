@@ -23,8 +23,9 @@
  * The only opening is a per-object UPDATE whitelist
  * ({@link registerManagedUpdateWhitelist}); non-whitelisted keys are
  * stripped, and a payload that strips to nothing throws — a loud failure,
- * not a silent no-op. First (and currently only) registration:
- * `sys_user → SYS_USER_PROFILE_EDIT_FIELDS` (name, image).
+ * not a silent no-op. First registration:
+ * `sys_user → SYS_USER_PROFILE_EDIT_FIELDS` (name, image, locale — `locale`
+ * added by the maintainer ruling of 2026-09-03).
  *
  * Rejections use `code: 'PERMISSION_DENIED'` + `status: 403`, which the REST
  * layer's `mapDataError` / `sendError` already translate — same pattern as
@@ -121,6 +122,37 @@ const DEDICATED_SURFACE_HINT =
 const LIFECYCLE_PASSTHROUGH = new Set(['updated_at', 'updated_by']);
 
 /**
+ * [ADR-0092 D6] The `sys_user` columns whose values better-auth ALSO keeps in
+ * its cached `{session, user}` snapshots — and therefore the only ones the
+ * companion `afterUpdate` hook merges into those snapshots after a guarded
+ * edit.
+ *
+ * This used to be "whatever the update whitelist admits", which was true only
+ * while the whitelist and better-auth's user model happened to coincide
+ * (`name → name`, `image → image`). The 2026-09-03 ruling separated them: it
+ * added `locale`, a column better-auth is DELIBERATELY oblivious to — not one
+ * of its own fields and not an `additionalFields` entry, because declaring it
+ * there would make `getSession` SELECT a column an environment that has not
+ * run schema-sync does not have (the `ai_access` note in `auth-manager.ts`).
+ *
+ * So `locale` is excluded, and the exclusion is the CORRECT behaviour rather
+ * than a deferral. D6 exists to stop a cached snapshot going stale against the
+ * row; a column better-auth never reads into the snapshot has no stale copy to
+ * repair. Merging it anyway would do the opposite of D6's job — it would
+ * MANUFACTURE an incoherence, a `user.locale` key present on sessions that
+ * happen to be cached and absent on sessions that are not, appearing only
+ * after a profile edit and differing per session between two callers of the
+ * same endpoint.
+ *
+ * ⚠️ Widening the update whitelist does not widen this set. Add a column here
+ * only when better-auth actually carries it on its user model (its own field,
+ * or a declared `additionalFields` entry), and then only under the name
+ * better-auth uses — a snake_case ObjectStack column whose better-auth
+ * spelling is camelCase needs a translation, not an entry.
+ */
+const SESSION_SNAPSHOT_MIRRORED_FIELDS: ReadonlySet<string> = new Set(['name', 'image']);
+
+/**
  * Register the identity write guard on an ObjectQL engine. Idempotent per
  * package: callers re-binding after hot reload should first run
  * `engine.unregisterHooksByPackage(packageId)` (the engine's standard
@@ -204,10 +236,11 @@ export function registerIdentityWriteGuard(engine: any, opts: IdentityWriteGuard
   // storage, plus an `active-sessions-${userId}` index. Its OWN update paths
   // re-write those snapshots (internal-adapter `refreshUserSessions`); a
   // guarded engine write bypasses that, so we mirror it here for the fields
-  // the guard let through. sys_user Tier-1 columns map 1:1 onto better-auth
-  // user-model field names (name → name, image → image); anything that would
-  // need a snake_case → camelCase translation is not whitelisted today, and
-  // widening the whitelist must extend this mapping deliberately.
+  // better-auth actually caches — `SESSION_SNAPSHOT_MIRRORED_FIELDS` above,
+  // NOT the update whitelist. The two were the same set (name → name,
+  // image → image) until the 2026-09-03 ruling admitted `locale`, a column
+  // better-auth does not carry on its user model at all; see that constant for
+  // why mirroring it would manufacture an incoherence rather than repair one.
   const refreshSessionSnapshots = async (ctx: any) => {
     try {
       if (ctx.object !== 'sys_user' || !isUserContextWrite(ctx.session)) return;
@@ -218,7 +251,15 @@ export function registerIdentityWriteGuard(engine: any, opts: IdentityWriteGuard
       const whitelist = updateWhitelists.get('sys_user');
       const changed: Record<string, unknown> = {};
       for (const key of Object.keys(data)) {
-        if (key !== 'id' && whitelist?.has(key)) changed[key] = data[key];
+        // BOTH tests, and they are different questions: the whitelist answers
+        // "did the guard let this write through" (a key it stripped never
+        // reached the row, so mirroring it would cache a value the database
+        // does not hold), and the mirror set answers "does better-auth keep
+        // this column in the snapshot at all".
+        if (key === 'id') continue;
+        if (!whitelist?.has(key)) continue;
+        if (!SESSION_SNAPSHOT_MIRRORED_FIELDS.has(key)) continue;
+        changed[key] = data[key];
       }
       if (Object.keys(changed).length === 0) return;
 

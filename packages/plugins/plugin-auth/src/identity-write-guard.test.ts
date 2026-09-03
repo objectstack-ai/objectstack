@@ -129,7 +129,7 @@ describe('identity write guard — update whitelist (ADR-0092 D2)', () => {
     // The error names what IS editable so the caller can fix the payload.
     await expect(
       guardOn(engine, 'beforeUpdate')({ object: 'sys_user', session: USER_SESSION, input: { id: 'u1', data: { email: 'e@x' } } }),
-    ).rejects.toThrow(/Editable fields: name, image/);
+    ).rejects.toThrow(/Editable fields: name, image, locale/);
   });
 
   it('passes engine-stamped lifecycle columns through, but they never satisfy the whitelist alone', async () => {
@@ -178,8 +178,67 @@ describe('identity write guard — update whitelist (ADR-0092 D2)', () => {
   });
 
   it('exposes the registered whitelist for introspection', () => {
-    expect(getManagedUpdateWhitelist('sys_user')).toEqual(new Set(['name', 'image']));
+    // FLIPPED, not deleted (maintainer ruling 2026-09-03, option B — adopted
+    // 「同意」): this pin recorded `{name, image}` from ADR-0092 until the
+    // ruling grew the identity table's user-writable set to three fields. The
+    // old reading was a real decision that a later decision overturned, so it
+    // is reversed here with the reversal named rather than removed.
+    expect(getManagedUpdateWhitelist('sys_user')).toEqual(new Set(['name', 'image', 'locale']));
     expect(getManagedUpdateWhitelist('sys_session')).toBeUndefined();
+  });
+
+  // ── The security boundary the widening moved, pinned from both sides ──
+  //
+  // The first pin says the ruling shipped. The SECOND is the one that catches
+  // a widening that widened too far, and it is the reason this block exists:
+  // "the whitelist grew" and "the whitelist grew by exactly one name" are
+  // different claims, and only the second is what was ruled.
+
+  it('lets a user set their own locale — the write the 2026-09-03 ruling opened', async () => {
+    const data: any = { id: 'u1', locale: 'zh-CN' };
+    await guardOn(engine, 'beforeUpdate')({
+      object: 'sys_user',
+      session: USER_SESSION,
+      input: { id: 'u1', data },
+    });
+    // Survived the guard untouched — no strip, no throw.
+    expect(data).toEqual({ id: 'u1', locale: 'zh-CN' });
+  });
+
+  it('still refuses EVERY other sys_user column — the widening is one name wide', async () => {
+    // One entry per ADR-0092 D1 tier-2/tier-3 family, so a whitelist that
+    // widened past `locale` fails here rather than in production: authorization
+    // state, the sign-in identifier, the credential stamps, the org-structure
+    // projections, the AI seat, and the identity provenance.
+    const forbiddenColumns = [
+      'role', 'banned', 'ban_reason', 'ban_expires',
+      'email', 'email_verified', 'phone_number',
+      'must_change_password', 'password_changed_at',
+      'manager_id', 'primary_business_unit_id',
+      'ai_access', 'source', 'two_factor_enabled',
+    ];
+    for (const column of forbiddenColumns) {
+      // Alone: refused loudly, never a silent no-op.
+      await expect(
+        guardOn(engine, 'beforeUpdate')({
+          object: 'sys_user',
+          session: USER_SESSION,
+          input: { id: 'u1', data: { [column]: 'x' } },
+        }),
+        `${column} must not be user-writable`,
+      ).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      // Smuggled beside the one column that IS writable: stripped in place,
+      // and the legitimate half still commits. This is the shape a form
+      // round-trip actually produces, and the one a "the payload was accepted"
+      // check would miss.
+      const smuggled: any = { id: 'u1', locale: 'ja-JP', [column]: 'x' };
+      await guardOn(engine, 'beforeUpdate')({
+        object: 'sys_user',
+        session: USER_SESSION,
+        input: { id: 'u1', data: smuggled },
+      });
+      expect(smuggled, `${column} must be stripped, not committed`).toEqual({ id: 'u1', locale: 'ja-JP' });
+    }
   });
 });
 
@@ -242,6 +301,35 @@ describe('identity write guard — session snapshot refresh (ADR-0092 D6)', () =
     expect(storage.delete).not.toHaveBeenCalled();
   });
 
+  it('does NOT mirror `locale` into the snapshot — better-auth has no such user field', async () => {
+    // The whitelist grew on 2026-09-03; this mirror deliberately did not.
+    // better-auth neither reads nor writes `locale` (not on its user model, not
+    // an `additionalFields` entry), so there is no cached copy to keep
+    // coherent — and writing one would invent a `user.locale` that exists only
+    // on sessions that happen to be cached, only after a profile edit. That is
+    // the opposite of what D6 is for.
+    const storage = makeStorage('u1', ['tok-a']);
+    const engine = engineWithStorage(storage);
+    await guardOn(engine, 'afterUpdate')({
+      object: 'sys_user',
+      session: USER_SESSION,
+      input: { id: 'u1', data: { locale: 'zh-CN' } },
+    });
+    expect(storage.set).not.toHaveBeenCalled();
+    expect(JSON.parse(storage.store.get('tok-a')!).user).not.toHaveProperty('locale');
+
+    // …and a locale change riding along with a mirrored one refreshes ONLY the
+    // mirrored half, rather than dragging `locale` in behind it.
+    await guardOn(engine, 'afterUpdate')({
+      object: 'sys_user',
+      session: USER_SESSION,
+      input: { id: 'u1', data: { name: 'New Name', locale: 'ja-JP' } },
+    });
+    const entry = JSON.parse(storage.store.get('tok-a')!);
+    expect(entry.user).toMatchObject({ id: 'u1', name: 'New Name' });
+    expect(entry.user).not.toHaveProperty('locale');
+  });
+
   it('no-ops without secondary storage, without a whitelisted change, or for system writes', async () => {
     const storage = makeStorage('u1', ['tok-a']);
     // System write — better-auth's own paths already refresh.
@@ -299,5 +387,20 @@ describe('sys-user writable-field tiers (ADR-0092 D3)', () => {
     // The profile tier stays profile-only.
     expect(SYS_USER_PROFILE_EDIT_FIELDS.has('role')).toBe(false);
     expect(SYS_USER_PROFILE_EDIT_FIELDS.has('email')).toBe(false);
+  });
+
+  it('the profile tier is exactly {name, image, locale} (2026-09-03 ruling)', () => {
+    // The set literal, pinned as a whole rather than by membership probes: a
+    // `has()` pin per name cannot see a FOURTH name arriving, which is the
+    // direction a security-boundary widening drifts. The old two-name reading
+    // is not deleted — it is this assertion, reversed by the ruling that
+    // reversed the decision.
+    expect([...SYS_USER_PROFILE_EDIT_FIELDS].sort()).toEqual(['image', 'locale', 'name']);
+    // Import inherits the widening by construction (a spread, not a second
+    // list) and adds its own two — so this stays a strict superset of exactly
+    // five, and a hand-edit that de-linked the two lists shows up here.
+    expect([...SYS_USER_IMPORT_UPDATE_FIELDS].sort()).toEqual([
+      'image', 'locale', 'name', 'phone_number', 'role',
+    ]);
   });
 });

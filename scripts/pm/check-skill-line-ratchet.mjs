@@ -70,9 +70,69 @@
  *     of raising the roof.
  *   - The headroom between a file's count and its ceiling is the budget for
  *     ordinary rule edits between compressions; it is deliberately small.
+ *   - A same-PR CROSS-FILE MOVE is the one raise an author may take without a
+ *     per-instance ruling — under the three conditions in the section below, and
+ *     never as a way to grow the corpus.
  *
  * Missing file or empty read is RED, never a pass (#4690: a gate that cannot
  * find its input must fail, not skip).
+ *
+ * ## The one raise an author may take alone: a same-PR CROSS-FILE MOVE
+ *
+ * Maintainer ruling, 2026-09-03, adopting the measured option A of the skills
+ * optimization programme's third decision batch — verbatim and untranslated:
+ * 「同意」, and the adopted text in the ruling comment's own words, which every
+ * declaration below cites as {@link RULING_CITATION}:
+ *
+ *   the per-file line ratchet admits a cross-file move in one PR when the
+ *   destination's allowance rises by no more than the source's net decrease and
+ *   total lines do not increase, with the ruling cited in the ratchet comment
+ *
+ * The defect it repairs is structural rather than a hardship claim: a FACT can
+ * be in the wrong FILE. A per-repo gate reading written into one lane charter is
+ * read by that lane and missed by the other six, and its single source is
+ * `references/platform-readings.md`. Consolidating it there REDUCES the corpus —
+ * one copy, one reader path — yet under a shrink-only per-file ceiling it was
+ * impossible without a per-instance maintainer ruling, because the destination
+ * sits at headroom 0 like every other entry. The ratchet was pricing a move as
+ * though it were growth, and the file's own remedy sentence — move narrative out
+ * rather than raise the roof — was the very act it could not price.
+ *
+ * ⛔ It is NOT a general raise, and it is not a re-wrap: deletion at the source
+ * pays, restatement does not. Three conditions, all checked below against
+ * {@link CROSS_FILE_MOVES}:
+ *
+ *   (a) the destination's raise is at most the NET DECREASE of the sources that
+ *       move declares, per move;
+ *   (b) the sum of ceilings over the whole map does not increase;
+ *   (c) the raised entry declares the ruling that authorises it.
+ *
+ * ### What this gate can see, and what stays a reviewer's job
+ *
+ * The script reads the WORKING TREE and its own map. It never sees the PR diff,
+ * so it cannot know that a raise happened at all, still less that a decrease
+ * landed in the same PR. What it can do — and now does — is hold a DECLARED move
+ * to its own arithmetic: every participant records the ceiling it carried BEFORE
+ * the move, so the raise, the decreases and the map-wide total are computable
+ * from the tree alone. Deterministic, hermetic, and available in a shallow CI
+ * checkout — which is why the declaration is in-tree data and not a
+ * `git show origin/main:<this file>` baseline diff. A baseline mode would read a
+ * ref that a shallow clone need not have and that a sibling's fetch moves under
+ * the run, and it would answer nothing at all once the move had landed.
+ *
+ * What stays with the reviewer is COMPLETENESS: that each recorded `was` is the
+ * value on `origin/main`, and that no OTHER entry moved in the same PR. Both are
+ * one `git diff` away in the raising PR and neither is inferable from a tree. It
+ * is the bar this map has always used — every ceiling in it is an author's
+ * number, read at review against the diff — so a declaration weakens nothing: it
+ * is the first raise path here that a machine can check at all.
+ *
+ * ⚠️ (b) is belt and braces, not a second independent control. Over declarations
+ * whose participants are disjoint — which {@link crossFileMoveTotalVerdict}
+ * requires — it follows from (a) summed over the moves. It is written out
+ * because it is the ruling's own wording, and because it is the condition that
+ * would still be right if (a) were ever loosened.
+ *
  *
  * ## The max-line-length rule (#11106) — what makes a LINE a unit again
  *
@@ -343,7 +403,20 @@ export const CEILINGS = new Map([
   // operation channel mapping moved out to references/rest-channel.md below.
   // The two right-sized-reads rows the same ruling ordered were paid from that
   // saving in place, and three lines came back. Headroom 0 again.
-  ['.claude/skills/pm-dispatch/references/platform-readings.md', 314],
+  // 314 → 324 by the CROSS-FILE MOVE the 2026-09-03 ruling authorises —
+  // #14685 item 5 (comment 5520452691), declared in CROSS_FILE_MOVES below and
+  // re-derived there on every run. Three misplaced per-repo facts consolidate
+  // into the file that is their single source: the objectstack required-check
+  // set with its `in_progress` and advisory boundaries (lanes/cli.md, −4), the
+  // two aggregate-reading gate boundaries (lanes/services.md, −2), and the
+  // merge_group count-is-not-a-mechanism tombstone (rest-channel.md, −5, moved
+  // byte-identically). The per-job-conclusion rule the first of those carried
+  // was NOT copied: this file already states it in 队列成员资格 above, so the
+  // moved bullet points at it instead — a move that restated it would be paying
+  // for a second copy. +10 against a net source decrease of 11, so the map's
+  // total falls by one; that is the ruling's own condition and the reason this
+  // is a move rather than a raise. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/platform-readings.md', 324],
   // Per-operation REST/GraphQL/git channel mapping — which fleet operation has
   // a REST twin (each row executed in a real session, provenance date carried
   // per row), the handful that are GraphQL-only, and the queue-routing
@@ -373,7 +446,13 @@ export const CEILINGS = new Map([
   // by re-wrap: the file measures zero reclaimable lines under this gate's own
   // wrapLine, and re-wrap funding is refused per the 2026-08-17 rule in any
   // case. Landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/rest-channel.md', 93],
+  // Lowered 93 → 88 as a SOURCE of the cross-file move recorded on
+  // platform-readings.md above: the merge_group count-is-not-a-mechanism
+  // tombstone left this table for the readings file, byte-identically. This
+  // file's own header already routes the queue-section readings there and
+  // refuses to keep a second copy, so nothing is left behind but the rows that
+  // are channel mappings. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/rest-channel.md', 88],
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 84],
   ['.claude/skills/pm-dispatch/references/landing-operations.md', 80],
   // Release-aftercare duties — what a lane PM still owes AFTER a tagged release
@@ -419,8 +498,14 @@ export const CEILINGS = new Map([
   // lanes and now lives once in SKILL.md 执行座位职责, so every lane drops it.
   // cli.md pays −2 because it was carrying the map's last line of headroom.
   ['.claude/skills/pm-dispatch/references/lanes/engine.md', 40],
-  ['.claude/skills/pm-dispatch/references/lanes/services.md', 30],
-  ['.claude/skills/pm-dispatch/references/lanes/cli.md', 35],
+  // Lowered 30 → 28 and 35 → 31 as the other two SOURCES of the cross-file
+  // move recorded on platform-readings.md above. A per-repo gate reading in a
+  // lane charter is read by one lane and missed by the other six, which is the
+  // whole defect the move repairs: services.md gave up the two aggregate-
+  // reading boundaries, cli.md the required-check set with its `in_progress`
+  // and advisory clauses. Landed counts, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/lanes/services.md', 28],
+  ['.claude/skills/pm-dispatch/references/lanes/cli.md', 31],
   ['.claude/skills/pm-dispatch/references/lanes/devx.md', 39],
   ['.claude/skills/pm-dispatch/references/lanes/skills.md', 35],
   ['.claude/skills/pm-dispatch/references/lanes/spec.md', 46],
@@ -537,6 +622,60 @@ export const CEILINGS = new Map([
   // growth cheaply. Set at its line count on `origin/main` (headroom 0, same
   // convention as the entries above).
   ['CLAUDE.md', 86],
+]);
+
+/**
+ * The ruling that authorises a cross-file move, spelled once. Every declaration
+ * in {@link CROSS_FILE_MOVES} must name it; a raise that names nothing is a
+ * raise, not a move, and the header's escape hatch (a maintainer ruling quoted
+ * in the raising PR) is the only other way one lands.
+ */
+export const RULING_CITATION = '#14685 item 5 (comment 5520452691)';
+
+/**
+ * Declared same-PR CROSS-FILE MOVES — the raise path the header section above
+ * authorises. Keyed by DESTINATION (the entry whose ceiling rose); one
+ * declaration per destination, and no path appears twice across the map.
+ *
+ * Each declaration carries the ceilings its participants held BEFORE the move,
+ * which is what makes the whole arithmetic computable from this file alone:
+ *
+ *   ruling   the authorising ruling — must name {@link RULING_CITATION}
+ *   was      the destination's ceiling before the raise
+ *   sources  [path, ceiling-before-the-move] for every file that paid for it
+ *
+ * ⛔ NOT somewhere to record a raise no move paid for. A declaration is a CLAIM
+ * about an arithmetic, and {@link crossFileMoveVerdict} re-derives that
+ * arithmetic from the live map on every run rather than trusting the prose
+ * beside it.
+ *
+ * ⚠️ A declaration keeps working after its PR lands, and the two directions are
+ * deliberately asymmetric. Lowering the destination later is always legitimate,
+ * so a destination that has fallen back to or below its `was` reads as PAID
+ * DOWN and passes. Raising a SOURCE later is the loophole the move mechanism
+ * would otherwise open — the destination keeps the lines it was given while the
+ * files that paid for them grow back, and the corpus is up on net with the
+ * move's warrant silently spent — so the sum is re-checked against the sources'
+ * pre-move values for as long as the declaration stands. That red belongs to
+ * the later raise, not to this one, and its author is holding the ruling that
+ * has to account for it.
+ */
+export const CROSS_FILE_MOVES = new Map([
+  // The readings consolidation — the first move taken under the ruling, and the
+  // one it was ruled for. Sources' `was` values are their ceilings on
+  // `origin/main` at f3ae441fa2; the reviewer holds them against that diff.
+  [
+    '.claude/skills/pm-dispatch/references/platform-readings.md',
+    {
+      ruling: 'per-repo readings consolidation, authorised by #14685 item 5 (comment 5520452691)',
+      was: 314,
+      sources: [
+        ['.claude/skills/pm-dispatch/references/lanes/cli.md', 35],
+        ['.claude/skills/pm-dispatch/references/lanes/services.md', 30],
+        ['.claude/skills/pm-dispatch/references/rest-channel.md', 93],
+      ],
+    },
+  ],
 ]);
 
 /**
@@ -684,6 +823,82 @@ export function verdict(rel, lineCount, maxLines) {
 
 function countLines(text) {
   return text.length === 0 ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
+}
+
+/**
+ * One declared cross-file move, re-derived from the live ceiling map.
+ *
+ * Conditions (a) and (c) of the ruling; (b) is map-wide and lives in
+ * {@link crossFileMoveTotalVerdict}. Every failure names the arithmetic it read,
+ * because the author's next move is to correct one of those numbers and a
+ * verdict that hides them cannot be acted on.
+ *
+ * @param {string} dest destination path — a key of `ceilings`
+ * @param {{ruling?: string, was?: number, sources?: Array<[string, number]>}} move
+ * @param {Map<string, number>} ceilings
+ */
+export function crossFileMoveVerdict(dest, move, ceilings) {
+  const bad = (msg) => ({ ok: false, msg });
+  if (!ceilings.has(dest)) {
+    return bad(`cross-file move declares ${dest} as its destination, which carries no ceiling — red, not a skip (#4690). A move can only land between files this map covers.`);
+  }
+  if (!String(move?.ruling ?? '').includes(RULING_CITATION)) {
+    return bad(`cross-file move into ${dest} cites no authorising ruling — it must name "${RULING_CITATION}". An undeclared raise is a raise, and raising a ceiling otherwise requires a maintainer ruling quoted in the raising PR.`);
+  }
+  if (!Number.isInteger(move.was) || move.was <= 0) {
+    return bad(`cross-file move into ${dest} records no usable pre-move ceiling ("was"), so its raise cannot be measured — red, not a skip (#4690).`);
+  }
+  const sources = move.sources ?? [];
+  if (sources.length === 0) {
+    return bad(`cross-file move into ${dest} names no source file. The raise is paid by deletion somewhere else in this map, and a move with nothing to pay it is a raise.`);
+  }
+  for (const [src, wasSrc] of sources) {
+    if (src === dest) return bad(`cross-file move into ${dest} names itself as a source; a file cannot pay its own raise.`);
+    if (!ceilings.has(src)) return bad(`cross-file move into ${dest} names source ${src}, which carries no ceiling — red, not a skip (#4690).`);
+    if (!Number.isInteger(wasSrc) || wasSrc <= 0) return bad(`cross-file move into ${dest} records no usable pre-move ceiling for source ${src}.`);
+  }
+  const raise = ceilings.get(dest) - move.was;
+  const parts = sources.map(([src, wasSrc]) => `${src} ${wasSrc}→${ceilings.get(src)}`).join(', ');
+  if (raise <= 0) {
+    return { ok: true, msg: `cross-file move into ${dest} is paid down: its ceiling is ${ceilings.get(dest)}, at or below the ${move.was} it moved from (sources: ${parts}).` };
+  }
+  const decrease = sources.reduce((sum, [src, wasSrc]) => sum + (wasSrc - ceilings.get(src)), 0);
+  if (raise > decrease) {
+    return bad(`cross-file move into ${dest} raises its ceiling ${move.was}→${ceilings.get(dest)} (+${raise}) against a net source decrease of ${decrease} (${parts}). A move pays for itself by DELETION at the source; re-wrapping does not pay, and a raise the sources do not cover is an ordinary raise, which needs a maintainer ruling quoted in the raising PR.`);
+  }
+  return { ok: true, msg: `cross-file move into ${dest}: +${raise} (${move.was}→${ceilings.get(dest)}) against a net source decrease of ${decrease} (${parts}); authorised by ${RULING_CITATION}.` };
+}
+
+/**
+ * Condition (b): the sum of ceilings over the whole map does not increase.
+ *
+ * Computed as the map-wide sum with every declared participant restored to its
+ * pre-move value, minus the map-wide sum today — untouched entries cancel, so
+ * the difference is exactly the declared participants' net movement. Disjoint
+ * participants are REQUIRED, and that is what keeps the reduction honest: a
+ * source named by two declarations would have its single decrease counted twice
+ * by (a) and once here, and the two conditions would stop agreeing.
+ *
+ * @param {Map<string, {was?: number, sources?: Array<[string, number]>}>} moves
+ * @param {Map<string, number>} ceilings
+ */
+export function crossFileMoveTotalVerdict(moves, ceilings) {
+  const seen = new Map();
+  let net = 0;
+  for (const [dest, move] of moves) {
+    for (const [path, was] of [[dest, move.was], ...(move.sources ?? [])]) {
+      if (seen.has(path)) {
+        return { ok: false, msg: `${path} is a participant in two cross-file moves (${seen.get(path)} and ${dest}). Declarations must be disjoint: one file's single decrease cannot pay for two raises, and counting it twice is how a total that grew reads as a total that did not.` };
+      }
+      seen.set(path, dest);
+      if (!ceilings.has(path) || !Number.isInteger(was)) continue;
+      net += ceilings.get(path) - was;
+    }
+  }
+  if (net > 0) {
+    return { ok: false, msg: `the declared cross-file moves raise the map's total by ${net} line${net === 1 ? '' : 's'}. The ruling admits a move only while total lines do not increase: pay the difference by deleting more at a source, or take the raise the ordinary way — a maintainer ruling quoted in the raising PR.` };
+  }
+  return { ok: true, msg: `declared cross-file moves: ${moves.size}, total ceilings ${net === 0 ? 'unchanged' : `down ${-net} line${net === -1 ? '' : 's'}`}.` };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1046,6 +1261,22 @@ function run() {
     }
     console.log(`✓ check-skill-line-ratchet: ${v.msg}`);
   }
+  for (const [dest, move] of CROSS_FILE_MOVES) {
+    const mv = crossFileMoveVerdict(dest, move, CEILINGS);
+    if (!mv.ok) {
+      failed++;
+      console.error(`✗ check-skill-line-ratchet: ${mv.msg}`);
+    } else {
+      console.log(`✓ check-skill-line-ratchet: ${mv.msg}`);
+    }
+  }
+  const totals = crossFileMoveTotalVerdict(CROSS_FILE_MOVES, CEILINGS);
+  if (!totals.ok) {
+    failed++;
+    console.error(`✗ check-skill-line-ratchet: ${totals.msg}`);
+  } else {
+    console.log(`✓ check-skill-line-ratchet: ${totals.msg}`);
+  }
   if (failed) process.exit(1);
 }
 
@@ -1251,6 +1482,67 @@ function selfTest() {
         ['and the pin map names no file the ceiling map does not cover', [...MAX_TABLE_ROW_BYTES.keys()].every((k) => CEILINGS.has(k)), true],
         ['every pin is a non-negative integer', [...MAX_TABLE_ROW_BYTES.values()].every((n) => Number.isInteger(n) && n >= 0), true],
         ['the published skills/ catalog is uncovered here too', [...MAX_TABLE_ROW_BYTES.keys()].some((k) => k.startsWith('skills/')), false],
+      ];
+    })(),
+    // ── The cross-file move (the 2026-09-03 ruling) ─────────────────────────
+    // Every case is a PAIR or a near-twin of a legal declaration, because the
+    // failure mode of a loose implementation is a `move` that licenses an
+    // ordinary raise — which would run green forever and retire the ratchet.
+    ...(() => {
+      const ceil = (o) => new Map(Object.entries(o));
+      const cited = `moved from a.md + b.md — ${RULING_CITATION}`;
+      const decl = { ruling: cited, was: 100, sources: [['a.md', 30], ['b.md', 20]] };
+      // Paid: dest +5 against sources that shed 3 and 4.
+      const paid = ceil({ 'dest.md': 105, 'a.md': 27, 'b.md': 16 });
+      // Same declaration, sources untouched — the raise nobody paid for.
+      const unpaid = ceil({ 'dest.md': 105, 'a.md': 30, 'b.md': 20 });
+      // Paid in part only: +5 against a net decrease of 3.
+      const short = ceil({ 'dest.md': 105, 'a.md': 27, 'b.md': 20 });
+      // The destination lowered again after the move landed.
+      const paidDown = ceil({ 'dest.md': 98, 'a.md': 27, 'b.md': 16 });
+      // A source grown back after the move landed: the payment undone.
+      const regrown = ceil({ 'dest.md': 105, 'a.md': 33, 'b.md': 16 });
+      const uncited = { ...decl, ruling: 'moved from a.md + b.md' };
+      const mv = (map, d = decl) => crossFileMoveVerdict('dest.md', d, map);
+      const total = (map, moves) => crossFileMoveTotalVerdict(new Map(moves), map);
+      return [
+        ['the citation is the ruling this file was given', RULING_CITATION, '#14685 item 5 (comment 5520452691)'],
+        // (1) A legal move passes — the assertion the other three are read against.
+        ['cross-file move — a raise covered by its sources\' net decrease PASSES', mv(paid).ok, true],
+        ['...and the green verdict states the arithmetic it read', mv(paid).msg.includes('+5') && mv(paid).msg.includes('decrease of 7'), true],
+        // (2) A raise with no decrease behind it is an ordinary raise.
+        ['cross-file move — a raise whose sources did NOT shrink is RED (the whole defect: a `move` that licenses an ordinary raise would run green forever)', mv(unpaid).ok, false],
+        ['...and the RED verdict names the raise and the net decrease it fell short of', mv(unpaid).msg.includes('+5') && mv(unpaid).msg.includes('decrease of 0'), true],
+        ['...and sends the author to the ordinary path rather than to a bigger declaration', mv(unpaid).msg.includes('maintainer ruling quoted in the raising PR'), true],
+        // (3) Partly paid is not paid — the boundary case, one line short.
+        ['cross-file move — a raise EXCEEDING the net decrease is RED, even by one line', mv(short).ok, false],
+        ['...while a raise exactly equal to it is legal', crossFileMoveVerdict('dest.md', { ...decl, was: 98 }, ceil({ 'dest.md': 105, 'a.md': 27, 'b.md': 16 })).ok, true],
+        // (4) The citation. A raise that names no ruling is not a move at all.
+        ['cross-file move — a declaration citing no ruling is RED, however sound its arithmetic', mv(paid, uncited).ok, false],
+        ['...and the RED verdict spells the citation it wanted', mv(paid, uncited).msg.includes(RULING_CITATION), true],
+        // (5) Condition (b), map-wide. Stated separately because it is the
+        // ruling's own wording; over disjoint participants it follows from (a).
+        ['cross-file move — declarations whose net movement is 0 leave the map total unchanged', total(paid, [['dest.md', decl]]).ok, true],
+        ['cross-file move — a declaration whose participants net POSITIVE fails the total (+2 here)', total(short, [['dest.md', decl]]).ok, false],
+        ['...and the RED total names the lines it grew by', total(short, [['dest.md', decl]]).msg.includes('by 2 lines'), true],
+        ['...and a net-negative move reports the corpus shrinking', total(paidDown, [['dest.md', decl]]).msg.includes('down 9 lines'), true],
+        // (6) Disjointness — the one thing that makes (a) summed equal (b).
+        ['cross-file move — one source may not pay for two destinations', total(ceil({ 'dest.md': 105, 'other.md': 105, 'a.md': 27, 'b.md': 16 }), [['dest.md', decl], ['other.md', { ruling: RULING_CITATION, was: 100, sources: [['a.md', 30]] }]]).ok, false],
+        // (7) Lifecycle, both directions — asymmetric on purpose.
+        ['cross-file move — a destination lowered back to or below its pre-move ceiling reads as PAID DOWN, never as red (lowering is always legitimate)', mv(paidDown).ok, true],
+        ['...and says so rather than reporting an arithmetic it can no longer measure', mv(paidDown).msg.includes('paid down'), true],
+        ['cross-file move — a SOURCE grown back past what it paid re-opens the move (the loophole: the destination keeps the lines while the payers grow back)', mv(regrown).ok, false],
+        // (8) Participants must be files this map covers — a typo is RED, not a skip.
+        ['cross-file move — an unknown destination is RED, not a skip (#4690)', crossFileMoveVerdict('nope.md', decl, paid).ok, false],
+        ['cross-file move — an unknown source is RED, not a skip (#4690)', mv(paid, { ...decl, sources: [['nope.md', 30]] }).ok, false],
+        ['cross-file move — a file may not pay its own raise', mv(paid, { ...decl, sources: [['dest.md', 130]] }).ok, false],
+        ['cross-file move — a declaration naming no source at all is RED', mv(paid, { ...decl, sources: [] }).ok, false],
+        // (9) The live map. Enforcement covers the arithmetic; what it cannot
+        // cover is the shape of a declaration nobody has written yet, so the
+        // fields every declaration must carry are pinned here.
+        ['every live declaration cites the ruling', [...CROSS_FILE_MOVES.values()].every((m) => String(m.ruling ?? '').includes(RULING_CITATION)), true],
+        ['every live declaration names its destination\'s pre-move ceiling and at least one source', [...CROSS_FILE_MOVES.values()].every((m) => Number.isInteger(m.was) && Array.isArray(m.sources) && m.sources.length > 0), true],
+        ['every live participant is a file this map covers', [...CROSS_FILE_MOVES].every(([d, m]) => CEILINGS.has(d) && m.sources.every(([s]) => CEILINGS.has(s))), true],
       ];
     })(),
   ].map((c) => (Array.isArray(c[1]) || (c[1] && typeof c[1] === 'object') ? [c[0], JSON.stringify(c[1]), JSON.stringify(c[2])] : c));

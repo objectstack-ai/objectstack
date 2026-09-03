@@ -19,9 +19,8 @@ model: opus
 
 仓库根的 AGENTS.md 有约束力;第一次编辑前先读它。本文件只承载原则、查表数据、与钩子无
 法
-机械强制的条款;事故经验一律写成自含的教训 —— 不引用 issue 编号,维护者裁决保留日
-期 +
-原话。
+机械强制的条款;事故经验一律写成自含的教训 —— 不引用 issue 编号,维护者裁决保留日期
+(原话仅在引文本身即操作性判据处保留)。
 
 ## 六条基本规则
 
@@ -229,6 +228,7 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
   `origin/main` 是共享指针,别的 agent 一次 fetch 就推进它:`git reset --soft origin/main` 把你分支点
   之后**他人已合并的文件**整批 stage 成你的(实测一次四个 agent 的合并文件,commit 前才逮
   住)。「我从哪开始」的 reset/diff/log/rebase 一律锚基本规则 1 记录的 `"$BASE"`。
+- **`log -S/--follow/blame` 判日期或先后前**,先 `git rev-parse --is-shallow-repository`,true 就加深申报。
 - **要做反向验证(「回退修复,看诊断变化」)?先 commit 修复。** 已 commit,恢复只是
   `git checkout <your-branch> -- <path>`;对着未提交的编辑, `git checkout origin/main -- <path>` 不留任何恢
   复点 —— 工作树曾是唯一副本,而丢弃它是一次正常、无声、exit-0 的操作(恢复机制与字
@@ -300,7 +300,6 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
 - 实现满足 issue 的验收判据。
 - 测试:新增/更新覆盖;跑受影响包的 `pnpm test` / `pnpm typecheck`,为报告留真实输出 (范围
   按「本地验证范围」圈定)。
-- 用户可见的改动加 changeset。
 - 用 `git push -u origin claude/issue-<n>-<slug>` 推上去(网络失败退避重试)。
 - **Draft** PR 指向 `main`,正文首行 `Fixes #<n>` —— **合并不应关卡时用 `Part of #<n>`**(你只实现
   了可执行的那一半;说明留下的是哪一半)。⛔ 永不 `Fixes` 一张还在决策箱的卡 —— 合并
@@ -316,9 +315,8 @@ dispatch prompt 只携带每单增量(裁决引文、裁决 / PM-机制假设分
   sanitizer 纪律」)。
 - **触 `skills/**`(对外发布的技能包)的 diff:PR 正文报两个读数,并默认拒绝「小功能大扩
   写」。** 两个读数缺一不可 —— 被改文件的**整文件** before/after,与**整包** before/after
-  (发布目录下全部 SKILL.md 之和);行数为准,姊妹门禁定义 token 计数后同报 token。维护者
-  2026-08-21 裁决,原文不译:「对外发布的 skills 是整个平台的最大价值,尤其要整体考虑和评
-  估。」「……不能为了一个小功能扩写很多。」派发词给的净增预算装不下 ⇒ 停下按 `blocked` 报
+  (发布目录下全部 SKILL.md 之和);行数为准,姊妹门禁定义 token 计数后同报 token
+  （2026-08-21 裁定）。派发词给的净增预算装不下 ⇒ 停下按 `blocked` 报
   缺口,⛔ 不自行扩写、不自行抬预算 —— 预算是 PM 的,抬它是维护者裁决。
 - **付行数棘轮的唯一合法货币是删内容。** 维护者 2026-08-17 裁「⛔ re-wrap(折行合并)
   不得用作筹行 —— 棘轮治理的是内容体量,行数只是机读代理,新增以删减付账;密度优化仅随净减
