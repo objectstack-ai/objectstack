@@ -155,9 +155,13 @@ describe.skipIf(!sharedMongod)('MongoDBDriver', () => {
     it('should update a record and return updated data', async () => {
       await driver.create('task', { id: 'upd-1', title: 'Original', status: 'new' });
       const result = await driver.update('task', 'upd-1', { title: 'Updated', status: 'done' });
-      expect(result.title).toBe('Updated');
-      expect(result.status).toBe('done');
-      expect(result.id).toBe('upd-1');
+      // `update()` declares `Record<string, unknown> | null` (#14428): a miss
+      // answers `null`. This case is the FOUND arm, so pin that first and read
+      // the fields through it -- same idiom as `findOne` above.
+      expect(result).not.toBeNull();
+      expect(result!.title).toBe('Updated');
+      expect(result!.status).toBe('done');
+      expect(result!.id).toBe('upd-1');
       expect(result).not.toHaveProperty('_id');
     });
 
