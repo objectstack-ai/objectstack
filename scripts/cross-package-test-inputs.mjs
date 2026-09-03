@@ -412,6 +412,21 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // cli's whole suite on every driver commit.
       'packages/drivers/driver-sql/src/sql-driver.ts',
       'packages/drivers/driver-sql/src/schema-drift.ts',
+      // `field.zod.ts` is the third entry no test READS -- named in the header
+      // of src/commands/generate-field-type-vocabulary.pin.test.ts, which cites
+      // it as the file `git log -S` was run over to establish that the ghost
+      // field types that pin removes never existed on the spec side either.
+      // It appears here only now because #14828 gave that pin its first
+      // cross-package READ (the two driver files above), which is what brings a
+      // file into the scan at all; the flat literal collector then took the
+      // quoted path out of the prose exactly as it always has. Settled the same
+      // way as `translation.zod.ts` above -- declaring one file beats teaching
+      // the scanner to tell prose from code, and it costs nothing in practice
+      // for the same reason: `@objectstack/spec` is a real dependency of this
+      // package. It is also the honest declaration rather than a shrug, because
+      // that file DEFINES the `FieldType` enum the pin asserts totality over --
+      // a member added there is exactly the change that must re-run this suite.
+      'packages/spec/src/data/field.zod.ts',
     ],
   },
   '@objectstack/client': {

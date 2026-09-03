@@ -109,7 +109,8 @@
         "$TURBO_ROOT$/scripts/check-cross-package-test-inputs.mjs",
         "$TURBO_ROOT$/packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml",
         "$TURBO_ROOT$/packages/drivers/driver-sql/src/sql-driver.ts",
-        "$TURBO_ROOT$/packages/drivers/driver-sql/src/schema-drift.ts"
+        "$TURBO_ROOT$/packages/drivers/driver-sql/src/schema-drift.ts",
+        "$TURBO_ROOT$/packages/spec/src/data/field.zod.ts"
       ]
     },
     "@objectstack/client#test": {
