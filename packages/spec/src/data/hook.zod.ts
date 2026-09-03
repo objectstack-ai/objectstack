@@ -171,6 +171,24 @@ export const HookSchema = lazySchema(() => strictObject(
       active:
         '`active` is not a hook key — a hook has no on/off switch. Gate it with `condition`, '
         + 'or remove the hook.',
+      // [#14010] The elevation near-misses. A hook's ONLY declared elevation knob
+      // is `runAs`; `ctx.api.sudo()` is real on the in-process ScopedContext and
+      // a TypeError in the sandbox, so every spelling that reaches for it is
+      // pointed at the key that works on both surfaces.
+      sudo:
+        "`sudo` is not a hook key. Declare `runAs: 'system'` to run the hook's `ctx.api` "
+        + 'data operations elevated (bypassing RLS and field-level write checks); '
+        + "`runAs: 'user'` pins them to the triggering user; the default `'inherit'` keeps "
+        + 'the context of the write that fired the hook.',
+      elevate:
+        "`elevate` is not a hook key. Declare `runAs: 'system'` to run the hook's `ctx.api` "
+        + "data operations elevated, `runAs: 'user'` to pin them to the triggering user.",
+      elevated:
+        "`elevated` is not a hook key. Declare `runAs: 'system'` to run the hook's `ctx.api` "
+        + "data operations elevated, `runAs: 'user'` to pin them to the triggering user.",
+      issystem:
+        "`isSystem` is not a hook key — it is an ExecutionContext flag, not a declaration. "
+        + "Declare `runAs: 'system'` to run the hook's `ctx.api` data operations elevated.",
     },
     history: 'Until this shape was closed, these were dropped silently — the hook still registered and ran.',
   },
@@ -312,6 +330,51 @@ export const HookSchema = lazySchema(() => strictObject(
    * - log: Log error and continue
    */
   onError: z.enum(['abort', 'log']).default('abort').describe('Error handling strategy'),
+
+  /**
+   * Execution identity for the hook's `ctx.api` data operations (#14010;
+   * ruling 2026-09-01). The value semantics of `'system'` / `'user'` are
+   * FlowSchema's, word for word (`automation/flow.zod.ts` `runAs`): `system`
+   * elevates (a full-access, RLS-bypassing system principal — the security
+   * middleware short-circuits before every field-level and row-level gate, so
+   * a column the triggering persona may not edit is writable through the
+   * hook), `user` pins the operations to the triggering user, and a `user`
+   * hook whose trigger resolved NO user has nothing to scope to, so its
+   * `ctx.api` data operations are REFUSED (`HOOK_UNSCOPED_DATA_ACCESS`, the
+   * hook-side twin of the flow engine's #3760 refusal) rather than run
+   * unscoped.
+   *
+   * `'inherit'` is the hook-only third value and the default: the hook's
+   * `ctx.api` carries the context of the write that fired it — exactly the
+   * pre-`runAs` behaviour, so an existing hook changes nothing. A flow has no
+   * context to inherit, which is why FlowSchema has no such value and defaults
+   * to `'user'`; the default differs because the situations differ, not the
+   * word. ⛔ Do not add `'inherit'` to FlowSchema.
+   *
+   * Scope, first cut: `ctx.api` data operations ONLY. `condition` evaluation,
+   * the `readonly` strip on the hook's own `ctx.input` payload, `ctx.session`
+   * and the `async` semantics are untouched by this key — the triggering
+   * operation keeps its own context. Elevation is authorization, not
+   * anonymity: a `'system'` hook's writes still stamp `updated_by` with the
+   * triggering user (the engine's audit stamps read `session.userId`, never
+   * `isSystem`).
+   *
+   * Honoured on BOTH execution surfaces — the in-process `handler` and the
+   * sandboxed `body` — at the one place both are wrapped
+   * (`packages/objectql/src/hook-wrappers.ts` `wrapDeclarativeHook`).
+   */
+  runAs: z
+    .enum(['system', 'user', 'inherit'])
+    .default('inherit')
+    .describe(
+      "Execution identity for the hook's ctx.api data operations: system = elevated (bypasses RLS), " +
+        'user = the triggering user (RLS-respecting), inherit = the context of the write that fired the hook ' +
+        '(the pre-runAs behaviour; the default). ' +
+        'A hook with no trigger user has no identity to scope to, so under user its ctx.api data operations are REFUSED — ' +
+        'declare system to make the elevation explicit. This covers any hook fired by a write that carried no user ' +
+        '(an isSystem plugin/service write; a system-elevated flow node). ' +
+        'Scope: ctx.api only — condition evaluation, the readonly strip on ctx.input, ctx.session and async are unchanged.',
+    ),
 
   // ADR-0010 — runtime protection envelope (internal — set by the loader).
   // MISSING until the registered-type invariant test was written: `hook` closed
