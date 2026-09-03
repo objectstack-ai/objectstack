@@ -1259,6 +1259,35 @@ describe('[#14637] the route probe reads the standing policy before it answers f
     expectIndistinguishable(await resolve(link.token), await resolve(UNKNOWN_TOKEN));
   });
 
+  it("the 410 arm's OTHER half — an EXPIRED link falls through too, not just a revoked one", async () => {
+    const { driver, service, engine, schemas } = await boot(SHAREABLE);
+    const link = await service.createLink(
+      { object: 'article', recordId: 'a_ok', audience: 'public', permission: 'view' },
+      CALLER,
+    );
+    // Back-dated on the stored row, not minted: `createLink` refuses a past
+    // `expiresAt` outright (`422 EXPIRY_IN_PAST`), so this is the only way to
+    // reach an ALREADY-EXPIRED link — and it is exactly what the passage of
+    // time does to a live one. Same stamp the #13608 pins above use.
+    await driver.update('sys_share_link', link.id, {
+      expires_at: new Date(Date.now() - 60_000).toISOString(),
+    });
+    const resolve = mountResolveRoute(service, engine);
+
+    // `revoked_at` and `expires_at` are two predicates reaching ONE arm, so a
+    // pin on the revoked half alone leaves the expired half free to keep
+    // answering 410 on a switched-off object — the same oracle, reached by the
+    // other predicate.
+    //
+    // Reverse check: with the block ON, an expired link is still 410.
+    const on = await resolve(link.token);
+    expect(on.status).toBe(410);
+    expect(on.body?.error?.code).toBe('EXPIRED_OR_REVOKED');
+
+    switchOff(schemas);
+    expectIndistinguishable(await resolve(link.token), await resolve(UNKNOWN_TOKEN));
+  });
+
   it('fail-closed: an object whose schema the engine cannot answer for is refused, not probed', async () => {
     const { service, engine, schemas } = await boot(SHAREABLE);
     const link = await service.createLink(

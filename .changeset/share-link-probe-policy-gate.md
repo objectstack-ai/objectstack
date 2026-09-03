@@ -56,12 +56,24 @@ viewer still resolves the record. Mint-time behaviour is untouched, no
 `sys_share_link` row is written or read differently, and no error code is added
 or retired.
 
-**Consumer impact.** A viewer that renders its password prompt off
-`401 NEEDS_PASSWORD` shows "link invalid" instead, for links on a switched-off
-object only. That is the intended outcome and was accepted with the ruling: a
+**Consumer impact.** A viewer that branches on the refusal STATUS sees TWO
+changes, for links on a switched-off object only — and the measured consumer
+branches on status alone. On the objectui console at `67dadd6`,
+`apps/console/src/pages/SharedRecordPage.tsx` lines 70-85 dispatch on
+`res.status` and never on the body's error code, so:
+
+- all three 401 arms (`NEEDS_PASSWORD`, `WRONG_PASSWORD`, `SIGN_IN_REQUIRED`)
+  rendered the password prompt and now render the 404 copy, "This link is
+  invalid or no longer available.";
+- the 410 arm rendered "This link has expired or was revoked." and now renders
+  that same 404 copy.
+
+Both shifts are the intended outcome and were accepted with the ruling: a
 correct password on such a link yields nothing, so prompting for one teaches the
-holder to open a door that is bricked up. Links on objects whose block is on are
-unaffected, prompt included.
+holder to open a door that is bricked up, and "expired or revoked" is a claim
+about a token whose existence the caller must not be able to confirm. Links on
+objects whose block is on are unaffected — prompt, 410 copy and 200 render
+included.
 
 Maintainer ruling 2026-09-03 (decision batch #17, item 1), verbatim 「同意」,
 adopting option A over option B (keep the 401 and document the accepted oracle)

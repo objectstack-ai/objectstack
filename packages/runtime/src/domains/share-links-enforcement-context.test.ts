@@ -753,6 +753,8 @@ describe('[#14637] the dispatcher probe reads the standing policy before it answ
         forgetSchema(): void;
         mint(input: { audience?: 'link_only' | 'signed_in'; password?: string }): Promise<string>;
         revoke(token: string): Promise<void>;
+        /** Let the token's own clock run out — the OTHER half of the same 410 arm. */
+        expire(token: string): void;
     }
 
     async function harness(): Promise<Harness> {
@@ -783,6 +785,15 @@ describe('[#14637] the dispatcher probe reads the standing policy before it answ
                 return link.token;
             },
             revoke: async (token: string) => { await svc.revokeLink(token, { isSystem: true } as any); },
+            // Stamped on the row rather than minted: `createLink` refuses a past
+            // `expiresAt` outright (`422 EXPIRY_IN_PAST`), so back-dating the
+            // stored row is the only way to reach an ALREADY-EXPIRED link — which
+            // is exactly what the passage of time does to a live one.
+            expire: (token: string) => {
+                const row = (tables.sys_share_link ?? []).find((r) => r.token === token);
+                if (!row) throw new Error('expire(): no sys_share_link row for that token');
+                row.expires_at = new Date(Date.now() - 60_000).toISOString();
+            },
             resolve: async (token, opts = {}) => {
                 const res = await handleShareLinksRequest(
                     deps,
@@ -866,6 +877,26 @@ describe('[#14637] the dispatcher probe reads the standing policy before it answ
         await h.revoke(token);
 
         // Reverse check: with the block ON the revoked bucket is untouched.
+        const on = await h.resolve(token);
+        expect(on.status).toBe(410);
+        expect(on.body?.error?.code).toBe('EXPIRED_OR_REVOKED');
+
+        h.switchOff();
+        expectIndistinguishable(await h.resolve(token), await h.resolve(UNKNOWN_TOKEN));
+    });
+
+    it("the 410 arm's OTHER half — an EXPIRED link falls through too, not just a revoked one", async () => {
+        const h = await harness();
+        const token = await h.mint({});
+        h.expire(token);
+
+        // `revoked_at` and `expires_at` are two predicates reaching ONE arm
+        // (`share-links.ts`: `row.revoked_at || (row.expires_at && …)`), so a
+        // pin on the revoked half alone leaves the expired half free to keep
+        // answering 410 on a switched-off object — the same oracle, reached by
+        // the other predicate.
+        //
+        // Reverse check: with the block ON, an expired link is still 410.
         const on = await h.resolve(token);
         expect(on.status).toBe(410);
         expect(on.body?.error?.code).toBe('EXPIRED_OR_REVOKED');
