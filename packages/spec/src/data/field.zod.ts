@@ -279,9 +279,12 @@ export const SelectOptionSchema = lazySchema(() => strictObject({
    * author could legally write. The object-definition authoring form
    * (`object.form.ts` options repeater) has offered a `description` input all
    * along; this declaration is what makes that offer honest. Per the same
-   * inherited ruling, `dependsOn` is NOT declared here — the canonical
-   * spelling `depends_on` already exists at the field level, and a camelCase
-   * twin would be a second spelling for a declared concept.
+   * inherited ruling this option shape declares `description` and no cascade
+   * key of its own — `field-rows-option-description.test.ts` pins that
+   * refusal. The cascade key this package declares is the camelCase
+   * `dependsOn`, the `FieldSchema` member below; objectui mirrors that
+   * spelling on its own metadata type (maintainer ruling 2026-09-02 on
+   * objectui#6153).
    */
   description: z.string().optional().describe('Optional secondary/help text for this option. Lookup option search matches it in addition to the label; renderers may show it as supporting text.'),
   color: z.string().optional().describe('Color code for badges/charts'),
