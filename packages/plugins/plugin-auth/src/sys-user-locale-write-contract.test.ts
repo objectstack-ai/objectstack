@@ -196,9 +196,22 @@ describe('sys_user.locale — the guard and the shape check compose', () => {
     // guard asks "may this caller write this COLUMN" and says yes, so the
     // shape check is the only thing between a user's typo and a stored value
     // that would silently fall back to the deployment default forever.
-    const data: Record<string, unknown> = { id: 'u1', locale: 'Japanese' };
+    const data: Record<string, unknown> = { id: 'u1', locale: 'ja_JP' };
     await guardedUpdate(data);
-    expect(data, 'the guard must not strip a whitelisted column').toEqual({ id: 'u1', locale: 'Japanese' });
+    expect(data, 'the guard must not strip a whitelisted column').toEqual({ id: 'u1', locale: 'ja_JP' });
     expect(refusal(data, 'update')).toMatchObject({ code: 'VALIDATION_FAILED' });
+  });
+
+  it('the check is of SHAPE, not of membership — an 8-letter word is a legal tag', () => {
+    // Measured while writing this file, and worth a pin rather than a comment:
+    // `Japanese` is eight letters, so it satisfies the primary-subtag rule and
+    // the column accepts it. That is correct and deliberate — membership in a
+    // shipped template bundle is the bundle's business, and a tag nothing
+    // ships falls to the delivery ladder's floor (`en-US` in `sendTemplate`,
+    // `DEFAULT_LOCALE` in the store) rather than dead-lettering. The ruling's
+    // safety property is about malformed values, NOT unknown ones, and a
+    // reader who expects this rule to reject `Japanese` would "fix" it into a
+    // closed vocabulary the platform does not have.
+    expect(refusal({ locale: 'Japanese' }, 'update')).toBeNull();
   });
 });
