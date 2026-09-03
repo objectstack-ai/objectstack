@@ -310,6 +310,23 @@ export const UNREGISTERED_CODE_SITES: readonly UnregisteredCodeSite[] = [
 
     // ── foreign vocabularies: spelled `code`, not an ADR-0112 error.code ────
     {
+        code: 'TEXT',
+        file: 'packages/cli/src/commands/generate.ts',
+        shape: 'objlit',
+        door: 'none',
+        verdict: 'foreign-vocabulary',
+        why:
+            'Not a vocabulary of codes at all — it is the SQL column type for the `code` FIELD TYPE ' +
+            "(a code editor), one entry of `FIELD_TYPE_SQL_MAP`, whose keys are `FieldType` members and " +
+            'whose values are DDL types. The scan reaches it because the key is spelled `code` and the ' +
+            'value happens to be upper-case; its siblings (`signature: \'TEXT\'`, `qrcode: \'TEXT\'`) ' +
+            'are the same string and are invisible only because their keys are not `code`. Nothing here ' +
+            'is thrown, returned, or stamped on an envelope: the value is interpolated into generated ' +
+            "`CREATE TABLE` text by `os generate migration --format sql`. The twin entry in " +
+            '`FIELD_TYPE_MAP` reads `code: \'string\'` and is below the grammar for the same reason ' +
+            'this one is above it — case, not meaning.',
+    },
+    {
         code: 'MODULE_NOT_FOUND',
         file: 'packages/types/src/node.ts',
         shape: 'objlit',

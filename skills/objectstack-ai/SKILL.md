@@ -401,9 +401,9 @@ os validate     # Zod schema + CEL predicate validation + bindings (no artifact)
 # or: os build  # the same gates, plus emits dist/
 ```
 
-It confirms the skill / tool / model metadata conforms to the protocol and that
-any CEL predicate parses and resolves — in this domain that is a model-registry
-`promptTemplate.system` / `.user`; `ToolSchema` carries no expression field of
+It confirms the skill / tool / model metadata conforms to the protocol. This
+domain has no CEL site — a model-registry `promptTemplate.system` / `.user` is
+the `template` dialect (`{{var}}`); `ToolSchema` carries no expression field of
 any kind. In a scaffolded project the gate is `npm run validate`. See
 objectstack-platform → **Verify your work**.
 
