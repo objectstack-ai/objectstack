@@ -1,0 +1,129 @@
+{
+  "_comment": "Per-file tsc error debt of the @objectstack/runtime TEST layer (#5286). `tsconfig.test.json` compiles `src/**/*.test.ts` — which `tsconfig.json` excludes and therefore no gate ever read — and every file below still carries errors from before that gate existed. THIS FIELD IS GENERATED: every regeneration rewrites it from scripts/check-test-typecheck.mts, and the EXACT ratchet below requires a regeneration on every repair — so an edit made here is gone by the next one. Anything true of THIS package goes in the sibling `_note` field, which is authored, is preserved verbatim, and is never written by the generator (#12624). This comment states NO cause for the errors, deliberately: the classes differ per package and per file, they move as the debt is paid down, and a cause written here is rewritten verbatim into every ledger by every regeneration — so it outlives its own repair and cannot be corrected in the file where it is read. Measure instead, before repairing anything: `tsc --noEmit --pretty false -p tsconfig.test.json` in the package prints the real classes with their TS codes. Each entry maps a file to its per-SIGNATURE error counts, never to a bare total (#13470): a signature is the TS code plus the diagnostic message with structural type blobs collapsed, and it carries NO line or column — so the pin survives edits that move code around, and only stops matching when the error itself becomes a different error. EXACT ratchet, judged by re-running tsc: a file that gains errors is red, a file that loses them is red until its number is re-recorded, a file that reaches zero is red until its entry is deleted, a signature that ARRIVES or VANISHES is red even when the file total is unchanged, and a file NOT listed here may have no errors at all. Regenerate with: pnpm --filter @objectstack/runtime gen:test-typecheck-debt",
+  "_note": "SEEDED, NOT REPAIRED, and that was the card's own triage ruling rather than this author's convenience: 191 errors across 27 of this package's 214 test files, measured at 224f8ea4a0 with the workspace closure built first, on the PR that first put those files in front of tsc. Repairing them in the same change would have buried the gate under a 191-error cleanup, which is how an onboarding stops landing; the ratchet only has to shrink from here. WHERE THE 191 CAME FROM, both directions attributed: the same program under the build config's inherited NodeNext semantics reports 206, and 206 is exactly what `scripts/check-type-check-coverage.mjs` had recorded for this package in its per-PACKAGE `TEST_DEBT` ledger — so this file does not add debt, it holds the SAME population one level finer, per file and per signature, and that `TEST_DEBT` entry graduated in the same change. 19 of the 206 dissolve under this program's vitest-matching module semantics (TS2835 x13 extension-less relative imports, the TS7006 x4 above them, TS2550 x2 `Array.prototype.at`) and were about the CHECK rather than the code; collapsing that cascade EXPOSED 4 more (TS2322 x4 in src/seed-loader.test.ts, previously hidden behind an `any` from the unresolved import). 206 - 19 + 4 = 191, with no unexplained remainder. WHAT IS ALREADY GATED, and it is most of the package: 187 of the 214 test files carry no entry here at all, so any error any one of them gains is red on arrival. ⚠️ This layer holds ZERO `@ts-expect-error` directives — measured, not assumed — so unlike packages/spec and packages/client no pin was silently dead here and none reports TS2578 under this program. The cost of the gap was the 191 unreported errors and the fact that a type-level pin could not be written in this package at all; the second half is what this file makes possible. THE PILE IS CONCENTRATED, which is the useful thing for whoever pays it down: src/http-dispatcher.actions-type-dispatch.test.ts x30, src/http-dispatcher.test.ts x18, src/notifications.hono.integration.test.ts x16, src/http-dispatcher.actions-identity-addressing.test.ts x14 and src/action-body-identity.test.ts x14 are 92 of the 191, and TS18048 x91 (reads of a possibly-undefined optional) is very nearly half of the whole ledger on its own — the shape src/http-dispatcher.keys.test.ts already solved with a `responseOf()` narrowing helper. RECORDED EXACTLY, no bootstrap margin: this layer has never been gated, so the first new error in it should go red rather than be absorbed.",
+  "entries": {
+    "src/action-body-identity.test.ts": {
+      "TS18048: 'actionCtx' is possibly 'undefined'.": 8,
+      "TS2339: Property 'executionContext' does not exist on type 'never'.": 1,
+      "TS2493: Tuple type '…' of length '0' has no element at index '2'.": 5
+    },
+    "src/action-execution-calldata-query.test.ts": {
+      "TS2322: Type '…' is not assignable to type '…'.": 1
+    },
+    "src/auth-unknown-subpath.hono.integration.test.ts": {
+      "TS2353: Object literal may only specify known properties, and 'requireAuth' does not exist in type 'DispatcherPluginConfig'.": 1,
+      "TS2571: Object is of type 'unknown'.": 1
+    },
+    "src/dispatcher-plugin.anonymous-gate.integration.test.ts": {
+      "TS2339: Property 'data' does not exist on type '…'.": 1,
+      "TS2493: Tuple type '…' of length '0' has no element at index '1'.": 1
+    },
+    "src/dispatcher-plugin.ready.integration.test.ts": {
+      "TS18046: 'body' is of type 'unknown'.": 8
+    },
+    "src/domains/automation-descriptor-query-validation.test.ts": {
+      "TS2339: Property 'field' does not exist on type '…'.": 1
+    },
+    "src/domains/automation-write-capability-gate.test.ts": {
+      "TS2348: Value of type '…' is not callable. Did you mean to include 'new'?": 1
+    },
+    "src/domains/meta-item-envelope.test.ts": {
+      "TS18048: 'res.response' is possibly 'undefined'.": 9
+    },
+    "src/domains/meta-migrate-stored.test.ts": {
+      "TS18048: 'res.response' is possibly 'undefined'.": 6
+    },
+    "src/domains/meta-object-fls.test.ts": {
+      "TS18048: 'res.response' is possibly 'undefined'.": 4
+    },
+    "src/error-envelope.conformance.test.ts": {
+      "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 6
+    },
+    "src/http-dispatcher.actions-identity-addressing.test.ts": {
+      "TS18048: 'res.response' is possibly 'undefined'.": 14
+    },
+    "src/http-dispatcher.actions-type-dispatch.test.ts": {
+      "TS18048: 'res.response' is possibly 'undefined'.": 24,
+      "TS2493: Tuple type '…' of length '0' has no element at index '1'.": 6
+    },
+    "src/http-dispatcher.kernel-resolver.test.ts": {
+      "TS2352: Conversion of type 'undefined' to type 'HttpProtocolContext' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.": 1,
+      "TS2493: Tuple type '…' of length '0' has no element at index '0'.": 1,
+      "TS2493: Tuple type '…' of length '1' has no element at index '1'.": 1
+    },
+    "src/http-dispatcher.keys.test.ts": {
+      "TS18048: 'res.response' is possibly 'undefined'.": 9
+    },
+    "src/http-dispatcher.mcp.test.ts": {
+      "TS18048: 'res.response' is possibly 'undefined'.": 11
+    },
+    "src/http-dispatcher.test.ts": {
+      "TS18048: 'mint.response' is possibly 'undefined'.": 1,
+      "TS18048: 'res.response' is possibly 'undefined'.": 5,
+      "TS2339: Property 'chat' does not exist on type '…'.": 1,
+      "TS2339: Property 'execute' does not exist on type '…'.": 1,
+      "TS2339: Property 'getLocales' does not exist on type '…'.": 2,
+      "TS2339: Property 'listFlows' does not exist on type '…'.": 1,
+      "TS2339: Property 'listInbox' does not exist on type '…'.": 1,
+      "TS2339: Property 'provider' does not exist on type '…'.": 1,
+      "TS2339: Property 'registerFlow' does not exist on type '…'.": 1,
+      "TS2339: Property 'route' does not exist on type '…'.": 1,
+      "TS2339: Property 'trigger' does not exist on type '…'.": 1,
+      "TS2339: Property 'user' does not exist on type 'never'.": 1,
+      "TS2493: Tuple type '…' of length '0' has no element at index '2'.": 1
+    },
+    "src/notification-schema-conformance.integration.test.ts": {
+      "TS18046: 'body' is of type 'unknown'.": 1,
+      "TS2353: Object literal may only specify known properties, and 'requireAuth' does not exist in type 'DispatcherPluginConfig'.": 1
+    },
+    "src/notification-schema-conformance.test.ts": {
+      "TS18046: 'f' is of type 'unknown'.": 1
+    },
+    "src/notifications.hono.integration.test.ts": {
+      "TS18046: 'after' is of type 'unknown'.": 2,
+      "TS18046: 'afterOne' is of type 'unknown'.": 1,
+      "TS18046: 'before' is of type 'unknown'.": 2,
+      "TS18046: 'body' is of type 'unknown'.": 1,
+      "TS18046: 'cleared' is of type 'unknown'.": 2,
+      "TS18046: 'list' is of type 'unknown'.": 4,
+      "TS18046: 'readAll' is of type 'unknown'.": 1,
+      "TS2353: Object literal may only specify known properties, and 'requireAuth' does not exist in type 'DispatcherPluginConfig'.": 1,
+      "TS2571: Object is of type 'unknown'.": 2
+    },
+    "src/observability/error-reporter.test.ts": {
+      "TS2554: Expected 0 arguments, but got 2.": 1
+    },
+    "src/observability/metrics.test.ts": {
+      "TS2554: Expected 0 arguments, but got 1.": 1,
+      "TS2554: Expected 0 arguments, but got 2.": 2
+    },
+    "src/route-parity.integration.test.ts": {
+      "TS18046: 'disc' is of type 'unknown'.": 4,
+      "TS2339: Property 'data' does not exist on type '…'.": 1,
+      "TS2353: Object literal may only specify known properties, and 'requireAuth' does not exist in type 'DispatcherPluginConfig'.": 1
+    },
+    "src/runtime.test.ts": {
+      "TS6133: 'PluginContext' is declared but its value is never read.": 1,
+      "TS6133: 'beforeEach' is declared but its value is never read.": 1
+    },
+    "src/sandbox/quickjs-runner.test.ts": {
+      "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 4,
+      "TS6133: 'n' is declared but its value is never read.": 1
+    },
+    "src/security/resolve-execution-context.test.ts": {
+      "TS2322: Type '…' is not assignable to type 'never'.": 1,
+      "TS2339: Property '$in' does not exist on type 'object'.": 2,
+      "TS7006: Parameter 'object' implicitly has an 'any' type.": 1,
+      "TS7006: Parameter 'opts' implicitly has an 'any' type.": 1,
+      "TS7006: Parameter 'ql' implicitly has an 'any' type.": 1,
+      "TS7006: Parameter 'row' implicitly has an 'any' type.": 1,
+      "TS7053: Element implicitly has an 'any' type because expression of type 'any' can't be used to index type '{ sys_api_key: { id: string; key: string; revoked: boolean; user_id: string; active_organization_id: string; expires_at: string; }[]; sys_member: { user_id: string; organization_id: string; role: string; }[]; ... 4 more ...; sys_user_position: never[]; }'.": 1
+    },
+    "src/seed-loader.test.ts": {
+      "TS2322: Type '…' is not assignable to type '…'.": 4,
+      "TS6133: 'result' is declared but its value is never read.": 2,
+      "TS6133: 'type' is declared but its value is never read.": 1,
+      "TS6196: 'SeedLoaderRequest' is declared but never used.": 1
+    }
+  }
+}
