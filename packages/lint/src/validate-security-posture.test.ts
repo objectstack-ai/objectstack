@@ -28,6 +28,7 @@ import {
   SECURITY_GRANT_EXPIRED_AT_AUTHORING,
   SECURITY_DELEGATION_MISSING_REASON,
   SECURITY_CBP_NO_RELATION,
+  SECURITY_CBP_AMBIGUOUS_RELATION,
 } from './validate-security-posture.js';
 
 const rulesOf = (stack: Record<string, unknown>) =>
@@ -506,6 +507,205 @@ describe('validateSecurityPosture · controlled_by_parent with no relation (#750
   });
 });
 
+// ── Rule: security-controlled-by-parent-ambiguous-relation (#14747) ──
+//
+// The mirror image of the rule above: not ZERO candidates, but two or more in
+// the tier that WINS. The runtime picks with `find`, so the master is decided
+// by field declaration order and nothing says so.
+//
+// The accept bar has two halves, and the second is the one that makes this
+// rule worth having. It must FIRE on a tie in each of the three tiers, and it
+// must stay SILENT whenever the tie sits in a tier the `??` chain never
+// reaches — a masked tie is not a decision the platform makes, and reporting it
+// would send authors to edit fields that change nothing.
+describe('validateSecurityPosture · controlled_by_parent with an AMBIGUOUS master (#14747)', () => {
+  const ambiguousOnly = (stack: Record<string, unknown>) =>
+    validateSecurityPosture(stack).filter((f) => f.rule === SECURITY_CBP_AMBIGUOUS_RELATION);
+
+  /** A cbp object carrying exactly the fields under test, plus two masters. */
+  const cbpStack = (fields: unknown): Record<string, unknown> => ({
+    objects: [
+      { name: 'crm_account', label: 'Account', sharingModel: 'private', fields: { name: { name: 'name', label: 'Name' } } },
+      { name: 'crm_contact', label: 'Contact', sharingModel: 'private', fields: { name: { name: 'name', label: 'Name' } } },
+      { name: 'crm_contract', label: 'Contract', sharingModel: 'controlled_by_parent', fields },
+    ],
+  });
+
+  const REQ_ACCOUNT_LOOKUP = { name: 'account', type: 'lookup', reference: 'crm_account', required: true };
+  const REQ_CONTACT_LOOKUP = { name: 'contact', type: 'lookup', reference: 'crm_contact', required: true };
+
+  // ── POSITIVE CONTROLS — one tie per tier ────────────────────────
+  //
+  // The first is the shape measured on the card: HotCRM's `crm_contract`, two
+  // required lookups and no master_detail, where swapping the two field
+  // declarations moved the resolved master from `crm_account` to `crm_contact`.
+  it('errors on tier 3: two required lookups, naming both candidates and the winner', () => {
+    const findings = ambiguousOnly(cbpStack({ account: REQ_ACCOUNT_LOOKUP, contact: REQ_CONTACT_LOOKUP }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      severity: 'error',
+      rule: SECURITY_CBP_AMBIGUOUS_RELATION,
+      where: 'object "crm_contract"',
+      path: 'objects[2].fields',
+    });
+    // Every candidate is named — field, type and master — in DECLARATION order,
+    // which is the order that decides the winner. A message naming only the
+    // winner would describe the pick, not the ambiguity.
+    expect(findings[0].message).toContain('"account" (lookup -> "crm_account")');
+    expect(findings[0].message).toContain('"contact" (lookup -> "crm_contact")');
+    expect(findings[0].message.indexOf('"account" (lookup')).toBeLessThan(
+      findings[0].message.indexOf('"contact" (lookup'),
+    );
+    // The tier that was actually tested, and the winner it currently resolves.
+    expect(findings[0].message).toContain('required lookup tier');
+    expect(findings[0].message).toContain('Today "account" wins');
+    expect(findings[0].hint).toContain('master_detail');
+  });
+
+  it('names the OTHER field as the winner when the same two are declared the other way round', () => {
+    const findings = ambiguousOnly(cbpStack({ contact: REQ_CONTACT_LOOKUP, account: REQ_ACCOUNT_LOOKUP }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('Today "contact" wins');
+    expect(findings[0].message).toContain('derives from "crm_contact"');
+  });
+
+  it('errors on tier 1: two REQUIRED master_detail fields', () => {
+    const findings = ambiguousOnly(
+      cbpStack({
+        a: { name: 'a', type: 'master_detail', reference: 'crm_account', required: true },
+        b: { name: 'b', type: 'master_detail', reference: 'crm_contact', required: true },
+      }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('required master_detail tier');
+  });
+
+  it('errors on tier 2: two master_detail fields, NEITHER required', () => {
+    const findings = ambiguousOnly(
+      cbpStack({
+        a: { name: 'a', type: 'master_detail', reference: 'crm_account' },
+        b: { name: 'b', type: 'master_detail', reference: 'crm_contact' },
+      }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('any master_detail tier');
+  });
+
+  it('names all three when three candidates tie', () => {
+    const findings = ambiguousOnly(
+      cbpStack({
+        a: REQ_ACCOUNT_LOOKUP,
+        b: REQ_CONTACT_LOOKUP,
+        c: { name: 'c', type: 'lookup', reference: 'crm_account', required: true },
+      }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain('3 of its fields tie');
+  });
+
+  it('reports the array field form too', () => {
+    expect(ambiguousOnly(cbpStack([REQ_ACCOUNT_LOOKUP, REQ_CONTACT_LOOKUP]))).toHaveLength(1);
+  });
+
+  // ── NEGATIVE CONTROLS — a tie the runtime never reaches is NOT a defect ──
+  it('stays silent when a single required master_detail masks a tie in the lookup tier', () => {
+    expect(
+      ambiguousOnly(
+        cbpStack({
+          parent: { name: 'parent', type: 'master_detail', reference: 'crm_account', required: true },
+          account: REQ_ACCOUNT_LOOKUP,
+          contact: REQ_CONTACT_LOOKUP,
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('stays silent when tier 1 has ONE winner and tier 2 holds the rest', () => {
+    expect(
+      ambiguousOnly(
+        cbpStack({
+          parent: { name: 'parent', type: 'master_detail', reference: 'crm_account', required: true },
+          other: { name: 'other', type: 'master_detail', reference: 'crm_contact' },
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  it.each([
+    ['one required master_detail', { order: { name: 'order', type: 'master_detail', reference: 'crm_account', required: true } }],
+    ['one bare master_detail', { order: { name: 'order', type: 'master_detail', reference: 'crm_account' } }],
+    ['one required lookup', { order: REQ_ACCOUNT_LOOKUP }],
+  ])('stays silent on %s — one candidate in the winning tier is not a tie', (_label, fields) => {
+    expect(ambiguousOnly(cbpStack(fields))).toEqual([]);
+  });
+
+  // `pick` is `pred(f) && ref(f)` in both halves: a relation naming no target
+  // is not a candidate, so it cannot make a tie — nor can an OPTIONAL lookup,
+  // which is no resolution step at all.
+  it('stays silent when the second "candidate" names no reference target', () => {
+    expect(
+      ambiguousOnly(cbpStack({ account: REQ_ACCOUNT_LOOKUP, contact: { name: 'contact', type: 'lookup', required: true } })),
+    ).toEqual([]);
+  });
+
+  it('stays silent when the second lookup is OPTIONAL', () => {
+    expect(
+      ambiguousOnly(cbpStack({ account: REQ_ACCOUNT_LOOKUP, contact: { name: 'contact', type: 'lookup', reference: 'crm_contact' } })),
+    ).toEqual([]);
+  });
+
+  it.each(['private', 'public_read', 'public_read_write'])(
+    'stays silent for a two-candidate object whose sharingModel is %s — it derives nothing',
+    (model) => {
+      expect(
+        ambiguousOnly({
+          objects: [{ name: 'crm_contract', label: 'C', sharingModel: model, fields: { account: REQ_ACCOUNT_LOOKUP, contact: REQ_CONTACT_LOOKUP } }],
+        }),
+      ).toEqual([]);
+    },
+  );
+
+  // ── The two CBP rules partition the space; they never both fire ──────
+  it('is mutually exclusive with the no-relation rule', () => {
+    const cbpRules = (stack: Record<string, unknown>) =>
+      validateSecurityPosture(stack)
+        .map((f) => f.rule)
+        .filter((r) => r === SECURITY_CBP_NO_RELATION || r === SECURITY_CBP_AMBIGUOUS_RELATION);
+    expect(cbpRules(cbpStack({ note: { name: 'note', type: 'text', label: 'Note' } }))).toEqual([
+      SECURITY_CBP_NO_RELATION,
+    ]);
+    expect(cbpRules(cbpStack({ account: REQ_ACCOUNT_LOOKUP, contact: REQ_CONTACT_LOOKUP }))).toEqual([
+      SECURITY_CBP_AMBIGUOUS_RELATION,
+    ]);
+  });
+
+  // Same reasoning as the no-relation rule: the runtime's pick does not exempt
+  // system objects, and an order-dependent security boundary is a property of
+  // the document, not of who authored it.
+  it('reports system objects too', () => {
+    expect(
+      ambiguousOnly({
+        objects: [
+          { name: 'sys_thing_link', sharingModel: 'controlled_by_parent', fields: { a: REQ_ACCOUNT_LOOKUP, b: REQ_CONTACT_LOOKUP } },
+          { name: 'thing_internal', isSystem: true, sharingModel: 'controlled_by_parent', fields: { a: REQ_ACCOUNT_LOOKUP, b: REQ_CONTACT_LOOKUP } },
+        ],
+      }),
+    ).toHaveLength(2);
+  });
+
+  // The mirror's ONE deliberate divergence (#5017), restated from this rule's
+  // side: `reference_to` is a rejected alias, so a field carrying it is not a
+  // candidate here and cannot create a tie. Re-introducing the alias fallback
+  // would restore the inert branch #5017 removed.
+  it('does not count a `reference_to` field as a candidate', () => {
+    expect(
+      ambiguousOnly(
+        cbpStack({ account: REQ_ACCOUNT_LOOKUP, contact: { name: 'contact', type: 'lookup', reference_to: 'crm_contact', required: true } }),
+      ),
+    ).toEqual([]);
+  });
+});
+
 describe('validateSecurityPosture · book audience (ADR-0046 §6.7 / ADR-0090)', () => {
   it('flags the reserved word in book names and labels', () => {
     const findings = validateSecurityRoleWord({
@@ -722,6 +922,15 @@ function shapeKeysOf(schema: unknown, depth = 0): string[] {
 const NOT_SCHEMA_RECEIVERS: Record<string, string> = {
   rec: 'a seed RECORD — its keys are COLUMNS of `sys_user_position` / `sys_user_permission_set` (ADR-0091), not keys of a metadata schema.',
   md: "this file's own `firstMasterDetailField` return type, not an authored surface.",
+  // [#14747] `cbpMasterCandidates` folds each winning-tier field into a
+  // `CbpRelation` ({ field, type, master }) BEFORE the rule reads it, so these
+  // three receivers carry this file's own vocabulary, not FieldSchema's. The
+  // FieldSchema reads that produce them (`f.name` / `f.type` / `f.required`,
+  // plus `def.reference` in `refOf`) are still scanned, on `f` and `def` — the
+  // guard did not lose a surface when `found` went away, it moved one.
+  cbpTier: "this file's own `cbpMasterCandidates` return type ({ tier, candidates }), not an authored surface.",
+  winner: 'a `CbpRelation` — the winning-tier candidate this file already derived, not an authored surface.',
+  cand: 'a `CbpRelation` — the same derived shape, one per candidate named in the ambiguity message.',
 };
 
 const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: string; keys: () => string[] }> = [
@@ -751,8 +960,6 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
   // `required` joined this list with #7503: `resolveCbpRelation` mirrors the
   // runtime's three-step fallback, whose steps 1 and 3 are predicated on it.
   { receiver: 'f', expected: ['label', 'name', 'required', 'type'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
-  // [#7503] The field `resolveCbpRelation` settled on — a FieldSchema record.
-  { receiver: 'found', expected: ['name', 'type'], declaredBy: 'FieldSchema', keys: () => Object.keys(FieldSchema.shape) },
   {
     receiver: 'p',
     expected: ['allowCreate', 'allowDelete', 'allowEdit', 'allowRead', 'modifyAllRecords', 'readScope', 'viewAllRecords'],
@@ -840,6 +1047,7 @@ describe('validateSecurityPosture — reads only keys the spec declares (meta-te
       'findings', 'objects', 'permissionSets', 'privateObjects', 'grantedObjects', 'stackSetNames',
       'records', 'reason', 'until', 'setName', 'flsKey', 'opts', 'path', 'i', 'e', 'fields', 'crm_opportunity',
       'entries', // #7503: the rule's own field list — `.find`, a JS method.
+      'matched', // #14747: one tier's candidate list — `.length` / `.map`, JS methods.
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });
@@ -952,6 +1160,7 @@ const RULE_IDS: Record<string, string> = {
   SECURITY_GRANT_EXPIRED_AT_AUTHORING,
   SECURITY_DELEGATION_MISSING_REASON,
   SECURITY_CBP_NO_RELATION,
+  SECURITY_CBP_AMBIGUOUS_RELATION,
 };
 
 const TEXT_FIELD = { a: { type: 'text', label: 'A' } } as const;
@@ -1009,6 +1218,20 @@ const REACHABILITY_CORPUS: Array<{ label: string; stack: Record<string, unknown>
     },
   },
   {
+    label: 'cbp-ambiguous-relation',
+    stack: {
+      objects: [
+        objectFixture({
+          name: 'contract', sharingModel: 'controlled_by_parent',
+          fields: {
+            account: { type: 'lookup', label: 'Account', reference: 'account', required: true },
+            contact: { type: 'lookup', label: 'Contact', reference: 'contact', required: true },
+          },
+        }),
+      ],
+    },
+  },
+  {
     label: 'grant-expired-at-authoring',
     stack: { data: [{ object: 'sys_user_position', records: [{ user_id: 'u1', position: 'p', valid_until: '2020-01-01T00:00:00Z' }] }] },
   },
@@ -1028,7 +1251,7 @@ describe('validateSecurityPosture — every branch is reachable without an undec
   });
 
   it('maps every `findings.push` site in the source', () => {
-    expect(pushedRuleIds()).toHaveLength(16);
+    expect(pushedRuleIds()).toHaveLength(17);
   });
 
   it('reaches every `findings.push` site from that corpus', () => {
