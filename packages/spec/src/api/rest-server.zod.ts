@@ -237,7 +237,7 @@ export const CrudEndpointsConfigSchema = lazySchema(() => z.object({
    * path would make every one of them lie (Route & surface ownership §4).
    */
   patterns: retiredKey(
-    '`crud.patterns` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — '
+    '`crud.patterns` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
     + 'nothing ever read it: every CRUD route is mounted from the fixed method/path pairs in the REST '
     + "server's `registerCrudEndpoints`, so a custom pattern was validated and ignored. Delete the key. "
     + 'The mounted CRUD paths are the contract the client SDK, the discovery document and the served '
@@ -258,7 +258,7 @@ export const CrudEndpointsConfigSchema = lazySchema(() => z.object({
    * schema is not `.strict()` (see `patterns` above).
    */
   objectParamStyle: retiredKey(
-    '`crud.objectParamStyle` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — '
+    '`crud.objectParamStyle` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
     + 'nothing ever read it: every CRUD route takes the object name as a path segment, so '
     + "`'query'` was validated and mounted exactly what `'path'` mounts. Delete the key; the object "
     + 'name is always a path segment.',
@@ -308,7 +308,7 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
    * `.strict()`.
    */
   cacheTtl: retiredKey(
-    '`metadata.cacheTtl` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — '
+    '`metadata.cacheTtl` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
     + "nothing ever read it: `metadata.enableCache` selects the protocol's `getMetaItemCached` read "
     + 'path, which takes no TTL, and no Cache-Control / ETag header was ever built from this value. '
     + 'Delete the key; `metadata.enableCache` is the live switch, and a declarative `api` '
@@ -351,7 +351,7 @@ export const MetadataEndpointsConfigSchema = lazySchema(() => z.object({
      * `true` added nothing. Its three siblings each gate a real mount.
      */
     schema: retiredKey(
-      '`metadata.endpoints.schema` was removed in @objectstack/spec 17 (#14691, ADR-0049 '
+      '`metadata.endpoints.schema` was removed in @objectstack/spec 17 (ADR-0049 '
       + 'enforce-or-remove) — it gated a route that does not exist: the REST server mounts no '
       + '`GET /meta/:type/:name/schema`, so `false` removed nothing and `true` added nothing. Delete '
       + 'the key; `endpoints.types` / `items` / `item` are the switches that gate real mounts.',
@@ -408,7 +408,7 @@ export const BatchEndpointsConfigSchema = lazySchema(() => z.object({
      * batch endpoint (`BatchOperationType` `'upsert'`, `batch.zod.ts`).
      */
     upsertMany: retiredKey(
-      '`batch.operations.upsertMany` was removed in @objectstack/spec 17 (#14691, ADR-0049 '
+      '`batch.operations.upsertMany` was removed in @objectstack/spec 17 (ADR-0049 '
       + 'enforce-or-remove) — it gated a route that was never built: there is no '
       + '`POST /data/:object/upsertMany` and no protocol member behind it, so `false` disabled '
       + 'nothing. Delete the key. Upsert is an operation type of the generic `POST /data/:object/batch` '
@@ -427,7 +427,7 @@ export const BatchEndpointsConfigSchema = lazySchema(() => z.object({
    * Tombstoned, not deleted — the schema is not `.strict()`.
    */
   defaultAtomic: retiredKey(
-    '`batch.defaultAtomic` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — '
+    '`batch.defaultAtomic` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
     + 'no batch handler ever consulted it: atomicity is decided per request by `options.atomic` in the '
     + 'batch body (`BatchOptions`, ADR-0119 D4, opt-in), and a server-side default that flipped it '
     + 'silently would change the failure semantics of callers who send nothing. Delete the key; a '
@@ -464,27 +464,27 @@ export type BatchEndpointsConfigParsed = z.infer<typeof BatchEndpointsConfigSche
  */
 export const RouteGenerationConfigSchema = lazySchema(() => z.object({
   includeObjects: retiredKey(
-    '`routes.includeObjects` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — '
+    '`routes.includeObjects` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
     + 'nothing ever read it: route registration iterates every registered object, so an include list '
     + 'still mounted all of them. Delete the key. Per-object API exposure is declared on the object '
     + 'and enforced by the REST data surface: `enable.apiEnabled: false` hides the object (404) and '
     + '`enable.apiMethods` whitelists its operations (405 for the rest).',
   ),
   excludeObjects: retiredKey(
-    '`routes.excludeObjects` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — '
+    '`routes.excludeObjects` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
     + 'nothing ever read it: route registration iterates every registered object, so an excluded '
     + 'object was still mounted. Delete the key. Per-object API exposure is declared on the object '
     + 'and enforced by the REST data surface: `enable.apiEnabled: false` hides the object (404) and '
     + '`enable.apiMethods` whitelists its operations (405 for the rest).',
   ),
   nameTransform: retiredKey(
-    '`routes.nameTransform` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — '
+    '`routes.nameTransform` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
     + 'nothing ever read it: the enum was validated and every value mounted exactly what '
     + "`'none'` mounts. Delete the key; the object `name` is the canonical id on every surface, the "
     + 'REST path segment included, so there is no URL transform to configure.',
   ),
   overrides: retiredKey(
-    '`routes.overrides` was removed in @objectstack/spec 17 (#14691, ADR-0049 enforce-or-remove) — '
+    '`routes.overrides` was removed in @objectstack/spec 17 (ADR-0049 enforce-or-remove) — '
     + 'nothing ever read the per-object record: `enabled`, `basePath` and `operations` were validated '
     + 'and turned nothing on or off. Delete the key. Per-object exposure lives on the object '
     + '(`enable.apiEnabled` hides it, `enable.apiMethods` whitelists its operations — both enforced by '
