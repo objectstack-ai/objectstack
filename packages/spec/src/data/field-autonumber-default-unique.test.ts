@@ -45,11 +45,7 @@ import { ObjectSchema } from './object.zod';
 function minimalField(type: string): Record<string, unknown> {
   const input: Record<string, unknown> = { type };
   if (type === 'lookup' || type === 'master_detail' || type === 'tree') input.reference = 'account';
-  if (type === 'summary') {
-    input.summaryObject = 'line';
-    input.summaryField = 'amount';
-    input.summaryType = 'sum';
-  }
+  if (type === 'summary') input.summaryOperations = { object: 'line', field: 'amount', function: 'sum' };
   if (type === 'formula') input.expression = '1 + 1';
   return input;
 }
@@ -135,9 +131,15 @@ describe('#13894 — autonumber defaults to unique: organization', () => {
     // A single JSON-Schema `default` would be wrong for one of the two cases
     // (false on 48 types, 'organization' on autonumber), so the emitter must
     // not advertise one; the description is the machine-readable statement.
-    const schema = z.toJSONSchema(FieldSchema, { target: 'draft-2020-12' }) as {
-      properties: Record<string, { default?: unknown; description?: string }>;
-    };
+    // Same emitter call `scripts/build-schemas.ts` makes: output mode first,
+    // input mode when a transform elsewhere on the shape is unrepresentable.
+    type Emitted = { properties: Record<string, { default?: unknown; description?: string }> };
+    let schema: Emitted;
+    try {
+      schema = z.toJSONSchema(FieldSchema, { target: 'draft-2020-12' }) as Emitted;
+    } catch {
+      schema = z.toJSONSchema(FieldSchema, { target: 'draft-2020-12', io: 'input' }) as Emitted;
+    }
     expect(schema.properties.unique).toBeDefined();
     expect('default' in schema.properties.unique).toBe(false);
     expect(schema.properties.unique.description).toMatch(/autonumber/);
