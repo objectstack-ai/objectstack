@@ -80,7 +80,7 @@ Every captured line is stripped of ANSI SGR sequences and classified:
 
 ## The instrument writes to `process.stdout` directly — verified, not inferred
 
-`packages/core/src/logger.ts:349-394` (verified at `48d4422e3`):
+`packages/core/src/logger.ts:349-394` (verified at `0de50b83a`):
 
 ```ts
 const isErrorLevel = level === 'error' || level === 'fatal';
@@ -168,7 +168,7 @@ forward of something already being passed.
 bare `new ObjectKernel()` call in `harness.ts` is not an isolated case.
 Repo-wide, `new ObjectKernel(` appears **78 times across 55 files**
 (`grep -rn 'new ObjectKernel(' --include='*.ts' packages examples`; verified
-at `48d4422e3`, this branch merged with `origin/main` at `fddfc8db0` — re-run
+at `0de50b83a`, this branch merged with `origin/main` at `99b4deba4` — re-run
 the command to reproduce, since this file set moves), most of
 them test files constructing a kernel directly rather than through
 `packages/verify`'s harness — `packages/objectql/src/kernel-factory.ts:35`
@@ -206,7 +206,7 @@ see a level change before trusting that nothing else reads one:
 The function is demonstrably sensitive to its input, so the repo-wide grep is
 not a probe that happened to see nothing: `grep -rn 'OS_LOG_LEVEL\b'` across
 every `.ts`/`.mjs`/`.js` (excluding `dist/`) returns exactly one non-`cli`,
-non-test hit — `scripts/pm/dispatch-gates.mjs:14478` (verified at `48d4422e3`
+non-test hit — `scripts/pm/dispatch-gates.mjs:14478` (verified at `0de50b83a`
 — this file is edited often, re-check before reuse), a string literal inside
 that script's own self-test fixture, not a read. Every other match is
 `packages/cli/src/**` (the resolver plus the three commands that call it) or
