@@ -366,10 +366,10 @@ describe('#14547 — an org-stamped rule against a SEEDED business unit', () => 
    * do not assert a fix. (#14547 itself is CLOSED as completed, closed by
    * #14949 whose unit half this reverts; reopening it is the maintainer's
    * call. These tests assert the behaviour, which is 17.2.0's.) #14949 closed it by widening the unit screen with the
-   * platform's NULL arm; that was reverted before the 17.3 tag (ADR-0131 D8)
+   * platform's NULL arm; that was reverted before the 17.3 tag (the v18 org-ownership decision (PR #14976), D8)
    * because it re-implemented `SqlDriver.applyTenantScope`'s own predicate a
    * second time in a second place, and had not shipped. The structural fix is
-   * ADR-0131 C1 on the v18 line: the Default Organization exists before
+   * the v18 org-ownership decision (PR #14976), C1 on the v18 line: the Default Organization exists before
    * application seed datasets load and the seed loader stamps
    * `sys_business_unit` seeds.
    *
@@ -435,7 +435,7 @@ describe('#14547 — an org-stamped rule against a SEEDED business unit', () => 
   });
 
   /**
-   * [#14949, KEPT] The MEMBER screen — NOT part of the ADR-0131 D8 revert.
+   * [#14949, KEPT] The MEMBER screen — NOT part of the the v18 org-ownership decision (PR #14976), D8 revert.
    *
    * ⚠️ Anchored on an ORG-STAMPED unit on purpose. With the unit screen strict
    * again, an org-less unit is invisible to an org-stamped rule, so every
@@ -495,7 +495,7 @@ describe('#14547 — an org-stamped rule against a SEEDED business unit', () => 
     it('warns naming the rule, the object, the recipient kind, the unit and the org', async () => {
       // The unit is visible and the membership row is org-less, so the empty
       // expansion here is the MEMBER screen's — the residual case the warn
-      // exists for, and one ADR-0131 C1 does not remove. It used to be
+      // exists for, and one the v18 org-ownership decision (PR #14976), C1 does not remove. It used to be
       // completely silent.
       seedOrgStampedUnits();
       engine.seed('sys_business_unit_member', [
@@ -568,7 +568,7 @@ describe('#14547 — an org-stamped rule against a SEEDED business unit', () => 
   describe('the org-LESS rule — the dominant shape today — is unmoved', () => {
     it('still expands every member of the seeded tree, stamped or not', async () => {
       // A platform-global rule threads no organization, so BOTH screens are
-      // no-ops for it — unmoved by #14949 and unmoved by the ADR-0131 D8
+      // no-ops for it — unmoved by #14949 and unmoved by the the v18 org-ownership decision (PR #14976), D8
       // revert of its unit half. Pinned in both directions so neither change
       // can silently retire the declared cross-tenant behaviour of a
       // null-org rule.

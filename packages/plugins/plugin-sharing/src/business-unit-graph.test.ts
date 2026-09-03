@@ -23,9 +23,9 @@
  * organization, and the rule is accepted, stays active and materialises zero
  * `sys_record_share` rows. #14949 briefly closed it by giving the UNIT screen
  * the platform's NULL-inclusive `$or` arm. That was reverted before 17.3 was
- * cut (ADR-0131 D8): it re-implements the predicate
+ * cut (the v18 org-ownership decision (PR #14976), D8): it re-implements the predicate
  * `SqlDriver.applyTenantScope` already owns, a second time in a second place —
- * the duplication ADR-0131 exists to retire — and it had not shipped.
+ * the duplication the v18 org-ownership decision (PR #14976) exists to retire — and it had not shipped.
  *
  * So 17.3 behaves exactly as 17.2.0 does here, and the cases below name
  * **#14547** as the defect they reproduce. ⚠️ #14547 is CLOSED as completed —
@@ -33,7 +33,7 @@
  * longer matches the 17.x runtime. Whether it is reopened is the maintainer's
  * call, not this file's; what the tests assert is the behaviour, which is
  * 17.2.0's. It is fixed structurally on
- * the v18 line by ADR-0131 C1 (the Default Organization exists before
+ * the v18 line by the v18 org-ownership decision (PR #14976), C1 (the Default Organization exists before
  * application seed datasets load, and the seed loader stamps
  * `sys_business_unit` seeds), so the row this screen reads carries an
  * organization and no screen has to special-case it. What #14949 left behind —
@@ -208,7 +208,7 @@ describe('BusinessUnitGraphService — the two widths are actually two widths (#
     // seeded, so the strict UNIT screen hides the tree before the member read
     // is ever issued. Both widths therefore answer nobody, which is precisely
     // the 17.2.0 symptom: rule accepted, active, zero shares.
-    // Fixed structurally in v18 by ADR-0131 C1 (seed loader stamps
+    // Fixed structurally in v18 by the v18 org-ownership decision (PR #14976), C1 (seed loader stamps
     // `sys_business_unit`), NOT by widening this screen.
     const members: MemberRow[] = DIV_MEMBERS.map((m) => ({ ...m, organization_id: 'org_a' }));
     const g = new BusinessUnitGraphService({
@@ -297,15 +297,15 @@ describe('BusinessUnitGraphService — org scoping (#3807)', () => {
  * ⚠️ Every case in this block reproduces the defect **#14547** reports, which
  * 17.x still has. None of them asserts a fix. #14949 closed the defect by giving this screen the
  * platform's NULL-inclusive arm; that was reverted before the 17.3 tag
- * (ADR-0131 D8) because it wrote `SqlDriver.applyTenantScope`'s own predicate
+ * (the v18 org-ownership decision (PR #14976), D8) because it wrote `SqlDriver.applyTenantScope`'s own predicate
  * a second time, in a second place, and had not shipped. The structural fix is
- * ADR-0131 C1 on the v18 line: the Default Organization exists before
+ * the v18 org-ownership decision (PR #14976), C1 on the v18 line: the Default Organization exists before
  * application seed datasets load and the seed loader stamps
  * `sys_business_unit` seeds, so these rows arrive already carrying an
  * organization and this screen needs no NULL arm to find them.
  *
  * ⛔ If a future change makes any assertion here fail, that is a NULL arm
- * coming back — re-read ADR-0131 D8 before "fixing" the test.
+ * coming back — re-read the v18 org-ownership decision (PR #14976), D8 before "fixing" the test.
  */
 describe('BusinessUnitGraphService — the UNIT screen (#14547)', () => {
   const STAMPED_MEMBERS: MemberRow[] = SEEDED_MEMBERS.map((m) => ({
@@ -402,7 +402,7 @@ describe('BusinessUnitGraphService — the UNIT screen (#14547)', () => {
 /**
  * [#14949, KEPT] The MEMBER screen is STRICT.
  *
- * ⚠️ This is the SECURITY half of #14949 and it is NOT part of the ADR-0131 D8
+ * ⚠️ This is the SECURITY half of #14949 and it is NOT part of the the v18 org-ownership decision (PR #14976), D8
  * revert. Both `sys_business_unit_member` reads used to carry no organization
  * predicate whatever — completely unscoped by organization — so an org-stamped
  * rule reaching any visible unit collected every tenant's membership rows off
@@ -472,7 +472,7 @@ describe('BusinessUnitGraphService — the MEMBER screen (#14547)', () => {
 
   it('an org-LESS rule is unmoved — both screens stay no-ops', async () => {
     // The dominant shape today (declared rules bootstrap org-less). Neither
-    // #14949 nor the ADR-0131 D8 revert of its unit half may change what a
+    // #14949 nor the the v18 org-ownership decision (PR #14976), D8 revert of its unit half may change what a
     // platform-global rule expands to, in either direction.
     const g = new BusinessUnitGraphService({
       engine: makeEngine(SHARED_SEED_UNITS, TWO_TENANT_MEMBERS),

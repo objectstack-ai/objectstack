@@ -283,7 +283,7 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
   }
 
   /**
-   * [ADR-0131 D8] The UNIT screen — STRICT equality, as 17.2.0 ships it.
+   * [v18 org-ownership decision · PR #14976 · D8] The UNIT screen — STRICT equality, as 17.2.0 ships it.
    *
    * ⛔ Do NOT re-add a NULL arm here. #14949 briefly made this `$or` the rule's
    * own organization together with a second arm matching an unset
@@ -292,7 +292,7 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
    * `SqlDriver.applyTenantScope` writes. That was reverted before 17.3 was cut on
    * the maintainer's ruling: it re-implements, a second time and in a second
    * place, the very predicate `SqlDriver.applyTenantScope` already owns — the
-   * duplication ADR-0131 exists to retire (#10103 cause 1) — and it had not
+   * duplication the v18 org-ownership decision (PR #14976) exists to retire (#10103 cause 1) — and it had not
    * shipped, so reverting cost nothing while shipping it would have owed v18 a
    * breaking change plus a migration.
    *
@@ -302,7 +302,7 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
    * so its tracker state no longer matches the runtime; reopening it is the
    * maintainer's call.)
    * Its root cause is the seed loader's `sys_` exemption plus first-boot
-   * ordering, and it is fixed STRUCTURALLY on the v18 line by ADR-0131 C1 —
+   * ordering, and it is fixed STRUCTURALLY on the v18 line by the v18 org-ownership decision (PR #14976), C1 —
    * the Default Organization exists before application seed datasets load, and
    * the seed loader stamps `sys_business_unit` seeds — so the row this screen
    * reads carries an organization and no screen has to special-case it.
@@ -317,7 +317,7 @@ export class BusinessUnitGraphService implements IBusinessUnitGraphService {
   /**
    * [#14949, KEPT] The MEMBER screen — STRICT equality.
    *
-   * ⚠️ This half is NOT part of the ADR-0131 D8 revert that restored
+   * ⚠️ This half is NOT part of the the v18 org-ownership decision (PR #14976), D8 revert that restored
    * {@link orgScope} to a strict equality. It is kept, and it is load-bearing
    * on its own.
    *

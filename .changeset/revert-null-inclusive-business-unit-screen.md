@@ -5,7 +5,7 @@
 revert(plugin-sharing): drop the NULL-inclusive business-unit screen added after 17.2.0
 
 17.3 does not ship the NULL-inclusive business-unit screen added after 17.2.0;
-#14547 remains as in 17.2.0 and is fixed structurally in v18 (ADR-0131 C1: the
+#14547 remains as in 17.2.0 and is fixed structurally in v18 (the v18 org-ownership decision (PR #14976), C1: the
 Default Organization exists before application seed datasets load, and the seed
 loader stamps `sys_business_unit` seeds).
 
@@ -15,7 +15,7 @@ org-stamped sharing rule could name a seeded (org-less) `sys_business_unit`
 row. It is restored to the strict `organization_id = <rule org>` equality
 17.2.0 ships. That shape re-implemented, a second time and in a second place,
 the predicate `SqlDriver.applyTenantScope` already owns — the duplication
-ADR-0131 exists to retire (#10103 cause 1) — and it had not been released, so
+the v18 org-ownership decision (PR #14976) exists to retire (#10103 cause 1) — and it had not been released, so
 reverting costs nothing while shipping it would have owed v18 a breaking change
 and a migration.
 
