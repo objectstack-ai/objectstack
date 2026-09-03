@@ -508,10 +508,12 @@ describe("sharedWith.type: 'field' — the record-relative recipient (#14103)", 
     expect(issue).toBeDefined();
     expect(issue!.code).toBe('invalid_value');
     expect(issue!.path).toEqual(['sharedWith', 'type']);
-    // First sentence: the enum's own refusal, naming what IS authorable.
+    // First sentence: the enum's own refusal, listing what IS authorable. This
+    // pin stays deliberately independent of the accept set (it does not assert
+    // `"field"` is in the list — the positive control below does) so that
+    // ablating the `field` member reds the accept pins and leaves this one green.
     const firstSentence = issue!.message.split('. ')[0];
     expect(firstSentence).toMatch(/^Invalid option: expected one of /);
-    expect(firstSentence).toContain('"field"');
     expect(firstSentence).not.toContain('"manager"');
   });
 
