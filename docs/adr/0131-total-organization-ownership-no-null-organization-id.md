@@ -18,7 +18,8 @@ provenance rule for editing: 「可以先约定代码推送过来的元数据就
 the sealing ruling that fixes D6: 「你这么说还不如先完全封死。flow 也先不让改。然后软件包应该有两种安装方式，
 有一种是模版形式直接进库，那就是所有都可以修改。但是单库多租户禁止安装这种模版软件包；有一种是受管软件包，什么都以
 软件包中的为准，就是不让改。」; and the catalog ruling that fixes D3: 「角色、岗位、权限集，Setup 里组织自建的是组织级。
-这个说的是单库单租户吧，单库多租户我可以禁止他们创建。但是你要支持我绑定到人员。」
+这个说的是单库单租户吧，单库多租户我可以禁止他们创建。但是你要支持我绑定到人员。」; and, on the proposals this record
+carried as open questions and on the post-17.2 audit (§7), 「接受你的建议」(2026-09-04) — recorded per item below.
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (the metadata overlay — its
 environment layer is re-keyed by D6), [ADR-0049](./0049-no-unenforced-security-properties.md)
 (enforce or remove — the posture of D13), [ADR-0066](./0066-unified-authorization-model.md) D2
@@ -334,6 +335,10 @@ anchor retire with D13. No NULL grant row is ever produced.
 
 **Two install modes, and the mode is the whole customization story.**
 
+The package **declares** the modes it permits (`installModes`, default `['managed']`); the installer picks one at
+install time; a shared-DB multi-tenant deployment refuses `template` whatever the package permits (ruled
+2026-09-04).
+
 - **Managed** (default). The package is registered into the registry as code. Nothing in it is
   editable at runtime — not in Setup, not in Studio, not through the data or metadata API — and
   nothing in it can be switched off or cloned-with-linkage either: [ADR-0126](./0126-packaged-metadata-customization-model.md)'s
@@ -402,8 +407,9 @@ rows no writer attributes to an organization (`sys_job`, `sys_job_run`, `sys_job
 (`sys_audit_log`, whose rows may concern deployment-level actions — the organization an audit row is
 *about* becomes a plain attribution field under a name the tenant-field resolver does not claim, never
 the tenancy anchor; cloud's `tenant_id` rule already reads it this way), and deployment-level runtime
-settings — `sys_setting`'s global rung leaves the tenant-scoped table for configuration or a
-tenant-less object. Such objects are governed by object permission, not by the wall.
+settings — `sys_setting`'s global rung leaves the tenant-scoped table: infrastructure values go to
+configuration; a tenant-less object holds only values an operator must change without a restart (ruled
+2026-09-04). Such objects are governed by object permission, not by the wall.
 
 ⚠️ **Membership in this list is decided by the writer, not by the object's name.** The read-side ledger
 grouped `sys_http_delivery`, `sys_inbox_message`, `sys_notification*` and `sys_email` as "plumbing"; the
@@ -618,25 +624,34 @@ compatibility shims for a shape nobody has used yet.
 
 ## 6. Open questions for the maintainer's merge decision
 
-1. **Existing customized template rows** (D10): keep readable as the Default Organization's overrides
-   (builds the read half of the D6 door now), or accept the loss under the startup posture with a
-   release note? Depends on whether any deployment relies on the feature — this record cannot see that.
-2. **`single`-posture first-user promotion** (D5): grant row owned by the Default Organization
-   (proposed), or configuration only (`OS_PLATFORM_OWNER_EMAIL` becomes mandatory for self-hosters)?
-3. **Deployment-level settings** (D7): configuration file/environment, or a tenant-less
-   `sys_platform_setting` object? Proposed: configuration for infrastructure values, a tenant-less
-   object only for values an operator must change without a restart.
-4. **Who chooses the install mode** (D6): proposed — the package **declares** the modes it permits
-   (`installModes: ['managed'] | ['managed','template'] | ['template']`, default `['managed']`), the
-   installer picks one at install time, and a shared-DB multi-tenant deployment refuses `template`
-   whatever the package permits. Confirm, or name a different rule.
-5. **Retiring ADR-0005's per-organization overlay axis** (D6): it follows from the sealing ruling and
-   removes the need to split `sys_metadata`, but it switches off a live feature (org-scoped writes of
-   the five tier-A types, pinned by identity). Confirm.
+Four of the five questions this draft carried were **accepted as proposed** on 2026-09-04 (「接受你的建议」)
+and are now part of the decisions: the `single`-posture first-user grant row is owned by the Default
+Organization (D5); the package **declares** the install modes it permits (`installModes`, default
+`['managed']`), the installer picks one, and a shared-DB multi-tenant deployment refuses `template`
+whatever the package permits (D6); deployment-level settings go to configuration, with a tenant-less
+object only for values an operator must change without a restart (D7); ADR-0005's per-organization
+overlay axis is retired (D6). One remains:
 
----
+1. **Existing customized template rows** (D10): keep readable as the Default Organization's overrides
+   (builds the read half of a copy-on-write door now), or accept the loss under the startup posture
+   with a release note? Depends on whether any deployment relies on the feature — this record cannot
+   see that; the maintainer rules it when the C4 card is cut.
 
 ## 7. Verification notes
+
+**The post-17.2 audit (2026-09-04, maintainer: 「查 17.2 之后的修改就可以」).** Every merged change between the
+17.2.0 tag (2026-08-23) and `origin/main` touching organization ownership was read, with a mechanical
+scan of the unreleased diff for newly added NULL-tolerant reads (`organization_id: null`, `IS NULL`,
+`orWhereNull`, `$or … null`); the scan's positive control is that it found the ADR-0126 machinery.
+Verdicts: **revert before 17.3** — the ADR-0126 flow/action disable + clone machinery (#12185, #12190,
+#12296, #12348, #12419, framework half of #12491; card #15024) and the NULL-inclusive business-unit
+screen added by #14949 (its strict member screen stays; card #15030); **ship in 17.3, retire in v18 as
+machinery** — the #13491 ledger (#13635, #13584), per-organization catalog resolution (#13818),
+seed-ownership batching (#14718, #14687), ADR-0120 D3's COALESCE shadow (#13016), the capability lookup
+batching (#11537), the deployment platform-global declaration (#12704); **consistent, keep** — every
+stamp-and-backfill repair (#12929, #13180, #13527, #13572, #13565, #14726) and #14635, #13685, #14129;
+**closed unmerged** — PR #14923. Pre-17.2 behaviour (Choice 4A's NULL grant row, the legacy grant anchor,
+#10103 Option C, ADR-0005 overlays) is out of the audit's scope and moves in v18.
 
 - The issue body of #13564 cites the arm at `sql-driver.ts:7320`; on `origin/main` `2514d49f3` the
   arms are inside `applyTenantScope` (~12016–12066) and there are **two**. This record cites symbols.
