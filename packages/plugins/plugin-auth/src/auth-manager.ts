@@ -117,6 +117,17 @@ import {
   interpolatePhoneSms,
   loadPhoneSmsTemplateBody,
 } from './phone-sms-texts.js';
+// #14762 — the stored rung of the ruled locale ladder reuses the messaging
+// seam's normalizer rather than growing a second one. `normalizeRecipientLocale`
+// is the platform's ONE reader of a value at rest in `sys_user.locale`, and its
+// refusal of the stringified-nothing literals (`"undefined"`, `"null"`) is part
+// of its contract — hotcrm measured that literal dead-lettering every delivery
+// for every user without a preference row. A private copy here would be a
+// second place for that refusal to rot.
+import {
+  RECIPIENT_LOCALE_FIELD,
+  normalizeRecipientLocale,
+} from '@objectstack/service-messaging';
 import {
   AUTH_USER_CONFIG,
   AUTH_SESSION_CONFIG,
@@ -1461,10 +1472,17 @@ export class AuthManager {
           // background-task handling (see sendVerificationEmail) and the
           // forget-password route always returns {status:true}, so this never
           // leaks whether an address exists nor turns the request into a 500.
+          // #14762 — the ladder's stored rung. It matters most HERE: an
+          // admin-initiated reset (`admin-import-users.ts` calls
+          // `requestPasswordReset`) reaches this callback with the ADMIN's
+          // request, so without this rung the user's mail carries the admin's
+          // browser language. Best-effort; `undefined` leaves the #14319
+          // ladder exactly as it was.
+          const storedLocale = await this.storedRecipientLocale({ id: user.id });
           const result = await email.sendTemplate({
             template: 'auth.password_reset',
             to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
-            ...this.emailLocaleArg(request),
+            ...this.emailLocaleArg(request, storedLocale),
             data: {
               user: { name: user.name || user.email, email: user.email, id: user.id },
               resetUrl: url,
@@ -1519,10 +1537,14 @@ export class AuthManager {
             // template/loader errors, and returns status:'failed' on transport
             // errors — surface both so resend is honest and signup stays
             // resilient via better-auth's background-task error handling.
+            // #14762 — the stored rung, same ladder as the reset above. An
+            // admin re-triggering verification for a user is the same
+            // requester-is-not-the-recipient shape.
+            const storedLocale = await this.storedRecipientLocale({ id: user.id });
             const result = await email.sendTemplate({
               template: 'auth.verify_email',
               to: { address: user.email, ...(user.name ? { name: user.name } : {}) },
-              ...this.emailLocaleArg(request),
+              ...this.emailLocaleArg(request, storedLocale),
               data: {
                 user: { name: user.name || user.email, email: user.email, id: user.id },
                 verificationUrl: url,
@@ -4546,10 +4568,13 @@ export class AuthManager {
    * entirely and `EmailService`'s ladder resolves its documented `en-US`
    * default exactly as before.
    *
-   * Still NOT a per-recipient stored preference: `sys_user.locale` exists
-   * since #13881 (ruling 2026-09-01) but auth mail does not read it yet
-   * (#14762 for this send; #14641 for invitations). What is read is the
-   * language this request expressed, not a profile.
+   * #14762 layered the per-recipient stored preference on TOP of both rungs:
+   * `sys_user.locale` (#13881, ruling 2026-09-01) when the account holds one,
+   * then this request's `Accept-Language`, then the deployment default. The
+   * request rung did not lose its argument — it is still what answers for an
+   * account with no stored column — it lost the tie, per the #14788 option-D
+   * ruling of 2026-09-03. (Invitations remain #14641's: an invitee has no
+   * `sys_user` row to read.)
    */
   private async sendChangeEmailNotice(
     from: { email: string; name?: string; id?: string },
@@ -4565,10 +4590,14 @@ export class AuthManager {
       // address that would actually land.
       const target = newEmail.trim().toLowerCase();
       if (!target) return;
+      // #14762 — the stored rung on top of the #14319 ladder. The recipient is
+      // the account holder, so their own column outranks the header the
+      // request happened to carry.
+      const storedLocale = from.id ? await this.storedRecipientLocale({ id: from.id }) : undefined;
       await email.sendTemplate({
         template: 'auth.email_change_notice',
         to: { address: from.email, ...(from.name ? { name: from.name } : {}) },
-        ...this.emailLocaleArg(requestSource),
+        ...this.emailLocaleArg(requestSource, storedLocale),
         data: {
           user: { name: from.name || from.email, email: from.email, ...(from.id ? { id: from.id } : {}) },
           newEmail: target,
@@ -4677,15 +4706,37 @@ export class AuthManager {
     const otpCfg = this.config.phoneOtp ?? {};
     const minutes = Math.max(1, Math.round((otpCfg.expiresIn ?? 300) / 60));
     // #2815 — localised, tenant-customisable body: a sys_notification_template
-    // row for (auth.phone_otp, sms, deployment locale) wins; the built-in
+    // row for (auth.phone_otp, sms, resolved locale) wins; the built-in
     // bilingual text is the fallback. Purpose-neutral wording on purpose —
     // one provider template covers sign-in and reset, and the SMS reveals
     // nothing about what the code unlocks.
-    const body = await this.renderPhoneSmsBody(PHONE_SMS_TOPICS.otp, {
-      code,
-      appName: this.getAppName(),
-      minutes,
-    });
+    //
+    // #14762 — the recipient of an OTP IS the user, so the locale is theirs to
+    // name: `sys_user.locale` first, the deployment default underneath.
+    //
+    // ⚠️ The row is looked up here rather than taken from the callback: the
+    // card's suggested shape assumed `sendPhoneOtp` already held one, and it
+    // does not — better-auth's phone-number plugin calls both `sendOTP` and
+    // `sendPasswordResetOTP` with `{ phoneNumber, code }` and no user
+    // (measured in the installed 1.7.x `routes.mjs`; `request-password-reset`
+    // resolves the user for its own gate and does not pass it on). One
+    // projected read on the unique `phone_number` index is the cost, paid only
+    // once the send is going to happen, and swallowed on any failure.
+    //
+    // ⚠️ Matched EXACTLY, as better-auth matches it for its own user lookup on
+    // the same route — a caller that posts a differently formatted spelling of
+    // a stored number resolves no row and lands on the deployment default,
+    // which is the documented floor rather than a failure.
+    const storedLocale = await this.storedRecipientLocale({ phone_number: phone });
+    const body = await this.renderPhoneSmsBody(
+      PHONE_SMS_TOPICS.otp,
+      {
+        code,
+        appName: this.getAppName(),
+        minutes,
+      },
+      storedLocale,
+    );
     const result = await sms.send({
       to: phone,
       body,
@@ -4756,9 +4807,11 @@ export class AuthManager {
    * `kernel:ready` and on every settings change (same pattern as
    * {@link setAppName}). Unset ⇒ the built-in English text.
    *
-   * Per-user locale is not resolved here yet — `sys_user.locale` exists since
-   * #13881 (ruling 2026-09-01) and the messaging channels read it per
-   * recipient; auth SMS adopting it is #14762 (supersedes the #2815 note).
+   * #14762 — this is now the SECOND rung, not the whole answer. The OTP send
+   * reads the recipient's own `sys_user.locale` first (#13881, ruling
+   * 2026-09-01, the same column the messaging channels resolve per recipient)
+   * and falls here when the account holds none. The SMS invite path still
+   * names this rung alone — its recipient's column is #14641's.
    */
   setDefaultSmsLocale(locale: string | undefined): void {
     this.smsLocale = locale?.trim() || undefined;
@@ -4804,15 +4857,54 @@ export class AuthManager {
    *
    * Per-user locale EXISTS since #13881 (maintainer ruling 2026-09-01):
    * `sys_user.locale`, resolved per recipient by service-messaging for
-   * notification mail (`recipient-locale.ts`). Auth mail does NOT read it
-   * yet — this ladder stays request rung → deployment rung. Layering the
-   * user's own column on top as a third rung is #14641 (invitations) and
-   * its own card for the other sends; nothing here is wasted by that.
+   * notification mail (`recipient-locale.ts`). #14762 layered it on top of
+   * this ladder for the sends that hold a recipient row — reset, verification
+   * and the change-email notice — so the order is stored → request → this
+   * rung, per the #14788 option-D ruling of 2026-09-03. Nothing here changed:
+   * this is still what answers when neither rung above names a locale, which
+   * is every send to an account that never set one. The invitation send still
+   * reads this rung alone (#14641).
    */
   setDefaultEmailLocale(locale: string | undefined): void {
     this.emailLocale = normalizeAuthEmailLocale(locale);
   }
   private emailLocale?: string;
+
+  /**
+   * #14762 — the ladder's TOP rung: the recipient's own `sys_user.locale`,
+   * read best-effort off the identity row.
+   *
+   * Returns `undefined` for every shape that cannot name a language — no data
+   * engine, no matching row, an unset column, or a value
+   * {@link normalizeRecipientLocale} refuses. ⛔ It must never throw and must
+   * never be the reason a send fails: a language is a courtesy, delivery is
+   * not, and every caller below layers the remaining rungs underneath. That is
+   * the same posture `service-messaging`'s email channel takes on the
+   * notification path (`email-channel.ts` retries address-only and warns), and
+   * the ruling's item 3 — no path may dead-letter because of the locale read.
+   *
+   * The read is one row on an indexed predicate (`sys_user.id`, or the unique
+   * `phone_number`), projected to the single column, under a system context —
+   * the recipient's own language must resolve regardless of who triggered the
+   * send, which is exactly the admin-initiated case this card is about.
+   */
+  private async storedRecipientLocale(where: Record<string, unknown>): Promise<string | undefined> {
+    const engine = this.getDataEngine();
+    if (!engine || typeof engine.findOne !== 'function') return undefined;
+    try {
+      const row = await engine.findOne('sys_user', {
+        where,
+        fields: [RECIPIENT_LOCALE_FIELD],
+        context: { isSystem: true, positions: [], permissions: [] },
+      } as never);
+      return normalizeRecipientLocale((row as Record<string, unknown> | null | undefined)?.[RECIPIENT_LOCALE_FIELD]);
+    } catch {
+      // A `sys_user` shape without the column, a datasource outage, an engine
+      // that rejects the projection — all mean "no stored language", never
+      // "no mail".
+      return undefined;
+    }
+  }
 
   /**
    * The `locale` fragment spread into every auth `sendTemplate` call.
@@ -4821,12 +4913,33 @@ export class AuthManager {
    * and an absent key travel the same path today, but only the absent key is
    * what the ladder's "no locale means the DOCUMENTED default" contract is
    * written against.
+   *
+   * #14762 — three rungs now, in the order ruled for #14788 on 2026-09-03
+   * (option D): the recipient's own **stored** `sys_user.locale` → the
+   * **request**'s `Accept-Language` (#14319) → the **deployment** default
+   * (#8195). The recorded reasoning is that a value the user chose is stronger
+   * evidence of intent than the `Accept-Language` the browser just sent — and
+   * the case that forces the order is the send where the requester is NOT the
+   * recipient (an admin-initiated password reset), where the request rung
+   * carries the *admin's* browser language onto the *user's* mail.
+   *
+   * `storedLocale` arrives already through {@link normalizeRecipientLocale}
+   * (see {@link storedRecipientLocale}); {@link normalizeAuthEmailLocale} then
+   * maps it onto the row spelling, exactly as the deployment rung is mapped.
+   * Deliberately NOT the narrower `authEmailLocaleFromRequest` treatment, which
+   * requires a hit in `AUTH_EMAIL_TEMPLATE_LOCALES`: that narrowing exists
+   * because "a per-request header is a weaker claim than a deployment's
+   * declaration", and a column the user set for themselves is not the weak
+   * claim — a tenant overlaying `en-GB` rows must be able to ask for them.
+   *
+   * A caller with no recipient row in hand passes nothing and gets exactly the
+   * two-rung #14319 behaviour.
    */
-  private emailLocaleArg(requestSource?: unknown): { locale?: string } {
-    // #14319 — request rung first, deployment rung underneath. Callers that
-    // have no request (or whose recipient is not the requester) pass nothing
-    // and get exactly the pre-#14319 behaviour.
-    const locale = authEmailLocaleFromRequest(requestSource) ?? this.emailLocale;
+  private emailLocaleArg(requestSource?: unknown, storedLocale?: string): { locale?: string } {
+    const locale =
+      normalizeAuthEmailLocale(storedLocale) ??
+      authEmailLocaleFromRequest(requestSource) ??
+      this.emailLocale;
     return locale ? { locale } : {};
   }
 
@@ -4835,11 +4948,29 @@ export class AuthManager {
    * `sys_notification_template` row for `(topic, 'sms', locale chain)` when
    * one exists, else the built-in bilingual text. Template lookups are
    * best-effort — an outage must never block an OTP send.
+   *
+   * #14762 — `storedLocale` is the recipient's own `sys_user.locale` when the
+   * caller could resolve one ({@link storedRecipientLocale}); the deployment
+   * default stands underneath it. There is NO request rung on this surface:
+   * the ruled ladder's middle rung is the request's `Accept-Language`, and an
+   * SMS body is chosen at delivery time from a phone number — the send-OTP
+   * route hands the callback `{ phoneNumber, code }` and nothing else
+   * (measured against the installed better-auth 1.7.x, not assumed). So the
+   * ruled chain collapses here to stored → deployment, with the built-in `en`
+   * row as {@link phoneSmsLocaleChain}'s terminal floor exactly as before.
+   *
+   * A caller that passes nothing — the SMS invite path, whose rung is #14641's
+   * — gets exactly the pre-#14762 deployment-default behaviour.
    */
-  private async renderPhoneSmsBody(topic: string, data: Record<string, unknown>): Promise<string> {
+  private async renderPhoneSmsBody(
+    topic: string,
+    data: Record<string, unknown>,
+    storedLocale?: string,
+  ): Promise<string> {
+    const locale = storedLocale ?? this.smsLocale;
     const template =
-      (await loadPhoneSmsTemplateBody(this.getDataEngine(), topic, this.smsLocale)) ??
-      builtinPhoneSmsBody(topic, this.smsLocale);
+      (await loadPhoneSmsTemplateBody(this.getDataEngine(), topic, locale)) ??
+      builtinPhoneSmsBody(topic, locale);
     return interpolatePhoneSms(template, data);
   }
 

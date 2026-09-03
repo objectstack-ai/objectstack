@@ -1569,6 +1569,9 @@ importers:
       '@objectstack/rest':
         specifier: workspace:*
         version: link:../../rest
+      '@objectstack/service-messaging':
+        specifier: workspace:*
+        version: link:../../services/service-messaging
       '@objectstack/spec':
         specifier: workspace:*
         version: link:../../spec
