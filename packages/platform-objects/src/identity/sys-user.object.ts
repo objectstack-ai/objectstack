@@ -3,6 +3,35 @@
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 /**
+ * The BCP-47 shape `sys_user.locale` accepts — a 2–8 letter language subtag
+ * followed by any number of 1–8 alphanumeric subtags (`zh`, `zh-CN`,
+ * `zh-Hans-CN`, `es-419`). Shape only: membership in a shipped template bundle
+ * is the bundle's business, and the delivery-time ladders handle a
+ * shipped-nowhere tag by falling to their floor.
+ *
+ * A JS regex SOURCE string, because that is what a `format` validation rule
+ * carries (`new RegExp(rule.regex)` in objectql's rule validator) — anchored at
+ * both ends on purpose, since the rule compiles it unanchored.
+ *
+ * ## Why this is exported rather than inlined
+ *
+ * There are two readers of this shape and they live in different packages: the
+ * WRITE side is the `locale_bcp47_shape` rule below, and the READ side is
+ * `LOCALE_TAG_SHAPE` in `@objectstack/service-messaging`'s
+ * `recipient-locale.ts`, which refuses anything non-tag-shaped before it
+ * reaches a template lookup. The two must not drift — a write path that
+ * accepts what the read path discards would store values that silently fall
+ * back to the deployment default forever. service-messaging keeps its own
+ * compiled copy rather than importing this one (that module is documented as
+ * pure and total, and pulling the identity barrel into it for a regex would
+ * make a per-recipient normalizer pay a package barrel's load), so the
+ * agreement is held by a PIN instead of by a shared binding:
+ * `recipient-locale-shape-parity.test.ts` in service-messaging asserts the two
+ * spellings are byte-identical and names what breaks if they are not.
+ */
+export const SYS_USER_LOCALE_TAG_PATTERN = '^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$';
+
+/**
  * sys_user — System User Object
  *
  * Canonical user identity record for the ObjectStack platform.
@@ -23,7 +52,8 @@ export const SysUser = ObjectSchema.create({
   // ADR-0092 D4 — the ONE generic affordance opened on an identity table:
   // standard row editing. Safe because the plugin-auth identity write guard
   // (ADR-0092 D2) enforces the profile whitelist server-side — a user-context
-  // update may only touch SYS_USER_PROFILE_EDIT_FIELDS ({name, image});
+  // update may only touch SYS_USER_PROFILE_EDIT_FIELDS ({name, image, locale}
+  // since the 2026-09-03 ruling; see the `locale` field below);
   // everything else is stripped/rejected regardless of what a form submits.
   // The permission layer still decides WHO may edit (platform admins only by
   // default; member/org-admin sets keep allowEdit: false). create / import /
@@ -735,6 +765,61 @@ export const SysUser = ObjectSchema.create({
       group: 'Profile',
     }),
 
+    // #13881 — the user's own notification language, a first-class column
+    // (maintainer ruling 2026-09-01: 「`sys_user` 加 `locale` 一等列」; the
+    // preference-bag shape was rejected, so nothing falls back to
+    // sys_user_preference). BCP-47 tag (`zh-CN`, `ja-JP`). Read PER RECIPIENT
+    // by the messaging channels after fan-out (`service-messaging/src/
+    // recipient-locale.ts` — the one read point), with the deployment default
+    // (`II18nService.getDefaultLocale()`) underneath: absent / empty /
+    // malformed always falls back, never dead-letters a delivery.
+    //
+    // Owned by objectql, exactly like `ai_access`: better-auth is oblivious
+    // to this column, and it is DELIBERATELY not a better-auth
+    // `additionalFields` entry — better-auth SELECTs explicit columns, so
+    // declaring it there would make getSession query a column an env that has
+    // not yet run schema-sync does not have (the `ai_access` note in
+    // auth-manager.ts). Registered as an extension field in plugin-auth's
+    // MANAGED_EXTENSION_FIELDS, whose ADR-0105 D7 guard proves the name does
+    // not collide with better-auth's own user schema at the pinned version.
+    //
+    // WRITABLE, and `readonly` is deliberately absent (maintainer ruling
+    // 2026-09-03, option B — quoted verbatim and untranslated on the ruling
+    // card): 「同意」to widening the ADR-0092 D2 self-service whitelist from
+    // {name, image} to {name, image, locale}. The column landed `readonly`
+    // three weeks earlier because the whitelist did NOT carry it and a
+    // readonly-but-not-whitelisted column would have advertised a write the
+    // runtime strips; the ruling moved the whitelist, so the `readonly` that
+    // mirrored it goes with it. Option A (system-context writes only) was
+    // considered and rejected: it would make every application build its own
+    // stamping route for a first-class user attribute.
+    //
+    // ⚠️ `readonly` here is a UI/strip affordance, never the boundary — the
+    // boundary is plugin-auth's identity write guard (ADR-0092 D2), whose
+    // whitelist is `SYS_USER_PROFILE_EDIT_FIELDS`. Removing `readonly`
+    // without that entry would change nothing; adding that entry without
+    // removing `readonly` would strip the value before the guard ever saw it
+    // (`stripReadonlyFields` runs on the update path). The two move together
+    // or not at all, and `sys-user-locale-write-contract.test.ts` in
+    // plugin-auth is what says so out loud.
+    //
+    // A malformed tag is REFUSED, not stored and not silently dropped: the
+    // `locale_bcp47_shape` rule in `validations` below is evaluated
+    // server-side on insert, by-id update and bulk update, so the only value
+    // that can reach the column is one the delivery-time reader
+    // (`service-messaging/src/recipient-locale.ts`) recognises. An unset or
+    // cleared column keeps falling back to the deployment default.
+    locale: Field.text({
+      label: 'Locale',
+      required: false,
+      maxLength: 35,
+      group: 'Profile',
+      description:
+        'Preferred language for notifications, as a BCP-47 tag (e.g. zh-CN, ja-JP). ' +
+        'Read per recipient at delivery time; when unset the deployment default applies. ' +
+        'Owned by objectql (better-auth is oblivious to this column).',
+    }),
+
     // ── Organization ─────────────────────────────────────────────
     manager_id: Field.lookup('sys_user', {
       label: 'Manager',
@@ -814,7 +899,7 @@ export const SysUser = ObjectSchema.create({
     // (ADR-0092 D2) and owned by better-auth (Invite / Create User / admin
     // actions), so they are not exposed. `update` stays: it is the ONE
     // generic write opened on an identity table (ADR-0092 D4), server-side
-    // clamped to the profile-field whitelist ({name, image}) by the guard —
+    // clamped to the profile-field whitelist ({name, image, locale}) by the guard —
     // `userActions.edit: true` above declares the affordance. `bulk` grants the
     // updateMany surface (bulk ∧ update after #3391); paired with the sole
     // `update` write, only bulk-update is admitted (createMany/deleteMany still
@@ -826,4 +911,33 @@ export const SysUser = ObjectSchema.create({
   // managed user table). A declarative `unique` validation rule is intentionally
   // not used — uniqueness needs a DB lookup, not a synchronous validation, so it
   // is not one of the declarable validation-rule types.
+  //
+  // What IS declarable — and is the whole reason this array exists — is the
+  // shape of a column a user may now set for themselves.
+  validations: [
+    {
+      // The loud half of the 2026-09-03 ruling that made `locale` writable:
+      // "a malformed value is refused loudly … and never dead-letters a
+      // notification". Enforcement, not decoration — objectql's rule validator
+      // runs `validations` on insert, by-id update AND bulk update, so there is
+      // no write shape that reaches the column without passing here.
+      //
+      // Why a `format` rule and not a field-level flag: field-level `readonly`
+      // is a strip, `maxLength` bounds length only, and the field schema's
+      // `format` key is authoring metadata no write path reads. The object's
+      // `validations` array is the platform's one server-enforced channel for
+      // "this column's values must look like X" (ADR-0049 declared = enforced).
+      //
+      // An absent, null or empty value is NOT a violation (`checkFormat`
+      // returns early) — clearing the column is how a user goes back to the
+      // deployment default, which the ruling preserves as the fallback for an
+      // unset column.
+      type: 'format',
+      name: 'locale_bcp47_shape',
+      field: 'locale',
+      regex: SYS_USER_LOCALE_TAG_PATTERN,
+      severity: 'error',
+      message: 'Locale must be a BCP-47 language tag, such as zh-CN or ja-JP.',
+    },
+  ],
 });

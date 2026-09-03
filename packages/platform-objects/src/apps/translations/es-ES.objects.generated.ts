@@ -91,6 +91,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       image: {
         label: "Imagen de perfil"
       },
+      locale: {
+        label: "Idioma",
+        help: "Idioma preferido para las notificaciones, como etiqueta BCP-47 (p. ej. zh-CN, ja-JP). Se lee por destinatario en el momento de la entrega; si no está definido, se aplica el idioma predeterminado del despliegue. Propiedad de objectql (better-auth ignora esta columna)."
+      },
       manager_id: {
         label: "Gerente",
         help: "This user's direct manager. Forms the reporting chain the `own_and_reports` hierarchy scope walks (ADR-0057 / @objectstack/security-enterprise)."
@@ -299,6 +303,11 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
             backupCodes: "Códigos de respaldo"
           }
         }
+      }
+    },
+    _validations: {
+      locale_bcp47_shape: {
+        message: "El idioma debe ser una etiqueta de idioma BCP-47, por ejemplo zh-CN o ja-JP."
       }
     }
   },

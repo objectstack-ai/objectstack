@@ -43,23 +43,13 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { isEmailVerifiedUserRow } from '@objectstack/types';
 import { AuthManager } from './auth-manager.js';
+import { authIdentityObjects } from './manifest.js';
 import {
   isOperatorProvisionedCreation,
   shouldStampOwnerVerifiedAtCreation,
 } from './walled-owner-operator-stamp.js';
 import { probeWalledOwnerAccountState } from './walled-owner-verification-path.js';
 import { inviteForAudienceGate } from './audience-gate-test-support';
-import {
-  SysUser,
-  SysSession,
-  SysAccount,
-  SysVerification,
-  SysOrganization,
-  SysMember,
-  SysInvitation,
-  SysTeam,
-  SysTeamMember,
-} from '@objectstack/platform-objects';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -110,17 +100,12 @@ const OWNER_LIST = `${OWNER}, ${SECOND_OWNER}`;
 
 // ── the real-engine harness (the audience-bootstrap-seam shape) ─────────────
 
-const AUTH_OBJECTS = [
-  SysUser,
-  SysSession,
-  SysAccount,
-  SysVerification,
-  SysOrganization,
-  SysMember,
-  SysInvitation,
-  SysTeam,
-  SysTeamMember,
-];
+/**
+ * The objects a deployment that mounts plugin-auth registers, imported from the
+ * plugin's own manifest rather than re-spelled here, so this harness cannot
+ * drift from what `auth-plugin.ts` registers at runtime (#14615).
+ */
+const AUTH_OBJECTS = authIdentityObjects;
 
 const engines: ObjectQL[] = [];
 afterEach(async () => {

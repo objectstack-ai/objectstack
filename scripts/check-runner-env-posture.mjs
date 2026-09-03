@@ -78,6 +78,117 @@ import { fileURLToPath } from 'node:url';
 import { scanSource, blank } from './js-comment-mask.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// This self-test used to decide success by "no failure was recorded" and
+// nothing else, so "every case held" and "the cases never ran" printed the same
+// line. Closed the way PR #13487 validated on check-doc-authoring: what is
+// pinned is the registered NAMES, not a number. Every section opens with
+// `battery('<name>')`, every assertion is attributed to the battery most
+// recently opened, and the floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3 keeps
+// a total "right" the moment a sibling grows. A set difference says WHICH
+// battery stopped; a count says only that something did.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+//
+// The machinery lives HERE, at module scope, rather than inside the self-test:
+// this self-test's assertion sink is not a block-bodied helper in its body (it
+// is a concise arrow, or a module-scope function), so there is no in-body
+// helper to thread a per-run ledger through. Module scope is safe because the
+// self-test runs once per process, and it is what lets the existing sink route
+// through `registerCase()` with no case rewritten and no assertion changed.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'Detection: the spellings an author actually reaches for.': 13,
+  'The line number points at the real line, offsets preserved by the mask.': 1,
+  'NOT flagged: the deployment signal, which is the whole point.': 2,
+  'NOT flagged: prose and payloads. A gate that cannot tell them apart': 4,
+  'Longer identifiers must not be split by the word boundaries.': 3,
+  'Population.': 7,
+  'Wiring. Unwiring the gate must redden HERE rather than go quiet.': 3,
+  'The corpus itself, as a case rather than as the run\'s only evidence.': 1,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 8;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// ⚠️ None of these helpers is named with a self-test spelling, deliberately and
+// on the record: `check:pm-dispatch-gates` anchors on a top-level declaration
+// whose NAME spells self-test, and every such name owes a row in that gate's
+// COMPOUND_ANCHOR_LEDGER. These are the battery ROSTER's machinery -- they hold
+// no fixtures to mask and read no path literal -- so the accurate name is the
+// one that says `battery`, not the one that would owe a ledger row for a role
+// this code does not have.
+
+/** Cases registered per battery: `battery()` opens one, `registerCase()` files into it. */
+const batteryCases = new Map();
+let openBattery = null;
+
+/** Open a battery. Every assertion after this line is attributed to it. */
+function battery(name) {
+  openBattery = name;
+}
+
+/** Called by the self-test's own assertion sink, once per assertion. */
+function registerCase() {
+  const name = openBattery ?? UNATTRIBUTED_BATTERY;
+  batteryCases.set(name, (batteryCases.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Evaluated after every battery has had its chance and BEFORE the verdict, so
+ * the success line can only be printed by a run in which the set of batteries
+ * that registered assertions EQUALS the set declared.
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batteryCases) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batteryCases.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  return problems;
+}
+
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const ROOT = resolve(HERE, '..');
 
@@ -243,10 +354,14 @@ let selfTestReachedVerdict = false;
 
 export function selfTest() {
   const cases = [];
-  const t = (name, actual, expected) => cases.push([name, actual, expected]);
+  const t = (name, actual, expected) => {
+    registerCase();
+    return cases.push([name, actual, expected]);
+  };
   const tokens = (src) => findRunnerEnvReads(src).map((h) => h.token);
 
   // --- Detection: the spellings an author actually reaches for.
+  battery('Detection: the spellings an author actually reaches for.');
   t('member access', tokens('if (env.VITEST) return 1;'), ['VITEST']);
   t('process.env member', tokens('const x = process.env.VITEST;'), ['VITEST']);
   t('optional chain', tokens('const x = process?.env?.VITEST;'), ['VITEST']);
@@ -262,25 +377,30 @@ export function selfTest() {
   t('two reads on one line are both reported', tokens('env.VITEST || env.TEST;'), ['VITEST', 'TEST']);
 
   // --- The line number points at the real line, offsets preserved by the mask.
+  battery('The line number points at the real line, offsets preserved by the mask.');
   t('line number survives masking', findRunnerEnvReads('// x\n/* y */\nif (env.VITEST) {}').map((h) => h.line), [3]);
 
   // --- NOT flagged: the deployment signal, which is the whole point.
+  battery('NOT flagged: the deployment signal, which is the whole point.');
   t('NODE_ENV is not a runner variable', tokens("if (env.NODE_ENV === 'test') return 1;"), []);
   t("the string 'test' is not the token TEST", tokens("if (mode === 'test') return 1;"), []);
 
   // --- NOT flagged: prose and payloads. A gate that cannot tell them apart
   //     forces the explanation to be deleted, which is how this comes back.
+  battery('NOT flagged: prose and payloads. A gate that cannot tell them apart');
   t('a line comment quoting the banned line', tokens('// if (env.VITEST || x) return 1;'), []);
   t('a block comment quoting it', tokens('/**\n * if (env.VITEST) return 1;\n */\nconst a = 1;'), []);
   t('a string payload naming it', tokens("const s = 'VITEST';"), []);
   t('a template payload naming it', tokens('const s = `TEST=${x}`;'), []);
 
   // --- Longer identifiers must not be split by the word boundaries.
+  battery('Longer identifiers must not be split by the word boundaries.');
   t('MANIFEST is not TEST', tokens('const MANIFEST = 1;'), []);
   t('TEST_TIMEOUT is not TEST', tokens('const TEST_TIMEOUT = 1;'), []);
   t('LATEST is not TEST', tokens('const LATEST = 1;'), []);
 
   // --- Population.
+  battery('Population.');
   t('product source counts', isProductSource('packages/services/service-settings/src/local-crypto-provider.ts'), true);
   t('a unit test beside it does not', isProductSource('packages/services/service-settings/src/local-crypto-provider.test.ts'), false);
   t('an e2e in a test dir does not', isProductSource('packages/cli/test/helpers/serve-process.ts'), false);
@@ -290,6 +410,7 @@ export function selfTest() {
   t('a package script outside src/ does not', isProductSource('packages/spec/scripts/build-schemas.mjs'), false);
 
   // --- Wiring. Unwiring the gate must redden HERE rather than go quiet.
+  battery('Wiring. Unwiring the gate must redden HERE rather than go quiet.');
   const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
   t('a package.json alias invokes this script', /check-runner-env-posture\.mjs/.test(pkg.scripts?.['check:runner-env-posture'] ?? ''), true);
   t('...and runs the self-test with it', /--self-test/.test(pkg.scripts?.['check:runner-env-posture'] ?? ''), true);
@@ -297,7 +418,12 @@ export function selfTest() {
   t('a lint job runs the alias', lintYml.includes('pnpm check:runner-env-posture'), true);
 
   // --- The corpus itself, as a case rather than as the run's only evidence.
+  battery('The corpus itself, as a case rather than as the run\'s only evidence.');
   t('today\'s tree is clean', scanTree().length, 0);
+
+  // The floor runs BEFORE the verdict below, so a success line can only be
+  // printed by a run in which every declared battery registered its cases.
+  for (const message of batteryFloorFailures()) cases.push([message, false, true]);
 
   let failed = 0;
   for (const [name, actual, expected] of cases) {

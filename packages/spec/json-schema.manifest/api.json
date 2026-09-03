@@ -93,7 +93,6 @@
     "api/CrossObjectBatchOperation",
     "api/CrossObjectBatchRequest",
     "api/CrossObjectBatchResponse",
-    "api/CrudEndpointPattern",
     "api/CrudEndpointsConfig",
     "api/CrudOperation",
     "api/CursorMessage",

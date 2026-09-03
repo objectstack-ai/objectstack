@@ -144,18 +144,27 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       //     schema files it inventories, so the ledger IS an input to the ratchet.
       'content/docs/api/error-catalog.mdx',
       'docs/audits/2026-07-unknown-key-strictness-ledger.md',
-      // src/shared/retired-key-migrate-sentence.test.ts judges the ONE
-      // governed markdown file its population was widened by (#10848,
-      // maintainer-ruled): the retirement playbook that teaches authors the
-      // prescription sentence the pin holds. One file, not `.claude/**`.
+      // src/shared/retired-key-migrate-sentence.test.ts judges two corpora
+      // (#10848, maintainer-ruled): this ONE governed `.claude` markdown
+      // file — the retirement playbook that teaches authors the
+      // prescription sentence the pin holds — plus every `skills/**/*.md`
+      // file, declared separately below since that root has its own holder
+      // too. One file for THIS entry, not `.claude/**`.
       '.claude/skills/spec-property-retirement/SKILL.md',
-      // scripts/export-list.test.ts ends in a corpus gate over the PUBLISHED
-      // skill references — it enumerates `skills/` and reads every
-      // `<skill>/references/_index.md`, asserting none of their `Exports:` rows
-      // names a machine constant (#12201). The artifacts are what a customer
-      // agent actually loads, so they are the population that gate must judge;
-      // checking the generator's output in memory instead would re-assert the
-      // rule and see nothing about what is checked in.
+      // Two holders. scripts/export-list.test.ts ends in a corpus gate over
+      // the PUBLISHED skill references — it enumerates `skills/` and reads
+      // every `<skill>/references/_index.md`, asserting none of their
+      // `Exports:` rows names a machine constant (#12201). The artifacts are
+      // what a customer agent actually loads, so they are the population
+      // that gate must judge; checking the generator's output in memory
+      // instead would re-assert the rule and see nothing about what is
+      // checked in.
+      //
+      // src/shared/retired-key-migrate-sentence.test.ts also reads this
+      // root (`PUBLISHED_SKILLS_ROOT`, `:102`) as the second corpus for its
+      // widened population (#10848, see the `.claude` entry above) — "plus
+      // every `.md` file under `skills/`" (`:92`), emitted as
+      // `skills:`-prefixed entries (`:484-485`).
       //
       // The whole subtree rather than `skills/*/references/_index.md`: the test
       // reads the DIRECTORY too (a new skill dir changes its verdict), and a
@@ -382,6 +391,42 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // One file, not `packages/create-objectstack/**`: the test reads that
       // template and nothing else across the boundary.
       'packages/create-objectstack/src/templates/blank/pnpm-workspace.yaml',
+      // The two files that hold the COLUMN authority the CLI's migration
+      // generators mirror, READ by
+      // src/commands/generate-multiple-json-column.pin.test.ts (#14829). That
+      // pin asserts a `multiple: true` field gets a JSON column from both
+      // `os generate migration` formats because `SqlDriver.createColumn`
+      // short-circuits on the flag ABOVE its per-type switch, and
+      // `fieldHasColumn` mirrors that decision for the drift differ. Source-read
+      // rather than imported: `createColumn` is `protected` and needs a knex
+      // table builder, so driving it would mean a live driver and a built
+      // `dist`, while the SHAPE of its decision — flag first, type second — is
+      // exactly what has to stay true and is legible in the source.
+      //
+      // The declaration is the whole point of the pin, not paperwork around it:
+      // if the driver moves that rule and cli's suite does not re-run, the two
+      // sides drift again in silence, which is the #14829 defect returning by
+      // the cache. Two files rather than `packages/drivers/driver-sql/src/**`:
+      // the pin reads these two and nothing else across the boundary, and that
+      // package's `src` is edited often enough that the subtree glob would put
+      // cli's whole suite on every driver commit.
+      'packages/drivers/driver-sql/src/sql-driver.ts',
+      'packages/drivers/driver-sql/src/schema-drift.ts',
+      // `field.zod.ts` is the third entry no test READS -- named in the header
+      // of src/commands/generate-field-type-vocabulary.pin.test.ts, which cites
+      // it as the file `git log -S` was run over to establish that the ghost
+      // field types that pin removes never existed on the spec side either.
+      // It appears here only now because #14828 gave that pin its first
+      // cross-package READ (the two driver files above), which is what brings a
+      // file into the scan at all; the flat literal collector then took the
+      // quoted path out of the prose exactly as it always has. Settled the same
+      // way as `translation.zod.ts` above -- declaring one file beats teaching
+      // the scanner to tell prose from code, and it costs nothing in practice
+      // for the same reason: `@objectstack/spec` is a real dependency of this
+      // package. It is also the honest declaration rather than a shrug, because
+      // that file DEFINES the `FieldType` enum the pin asserts totality over --
+      // a member added there is exactly the change that must re-run this suite.
+      'packages/spec/src/data/field.zod.ts',
     ],
   },
   '@objectstack/client': {

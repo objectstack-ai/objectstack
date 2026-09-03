@@ -107,25 +107,43 @@ export const SCHEMAS: Record<string, SchemaInfo> = {
 
   flow: {
     name: 'Flow',
-    description: 'Visual logic orchestration for business processes. Flows can be auto-launched, screen-based, or scheduled.',
+    description: 'Visual logic orchestration for business processes. A flow is a GRAPH — `nodes` plus the `edges` that connect them — auto-launched, record-change, screen-based, scheduled, or API-invoked.',
     required: [
       { name: 'name', type: 'string (snake_case)', description: 'Machine name identifier' },
-      { name: 'type', type: '"autolaunched" | "screen" | "schedule"', description: 'Trigger type' },
+      { name: 'label', type: 'string', description: 'Display name' },
+      { name: 'type', type: '"autolaunched" | "record_change" | "schedule" | "screen" | "api"', description: 'Flow type' },
+      { name: 'nodes', type: 'FlowNode[]', description: 'Graph nodes, each { id, type, label, config? }. Per-node data lives under `config` — there are no top-level `field`/`value` keys.' },
+      { name: 'edges', type: 'FlowEdge[]', description: 'Graph connections, each { id, source, target, condition?, label? }. Bare CEL in `condition` — never {…} braces.' },
     ],
     optional: [
-      { name: 'label', type: 'string', description: 'Display name' },
       { name: 'description', type: 'string', description: 'Documentation for the flow' },
-      { name: 'trigger', type: 'TriggerConfig', description: 'Event that starts the flow' },
-      { name: 'steps', type: 'FlowStep[]', description: 'Sequence of actions' },
+      { name: 'status', type: '"draft" | "active" | "obsolete" | "invalid"', description: 'Deployment status (default "draft") — the engine arms flows from this' },
       { name: 'variables', type: 'Variable[]', description: 'Flow-scoped variables' },
+      { name: 'runAs', type: '"system" | "user"', description: 'Execution identity (default "user" — runs as the triggering user, respecting RLS)' },
     ],
     example: `{
   name: 'assign_on_create',
-  type: 'autolaunched',
+  type: 'record_change',
   label: 'Auto-Assign on Create',
-  trigger: { object: 'project_task', event: 'afterInsert' },
-  steps: [
-    { type: 'assignment', field: 'assigned_to', value: '$currentUser' },
+  status: 'active',
+  nodes: [
+    // A record-change flow binds its object on the START node's config,
+    // not at the flow top level.
+    { id: 'start', type: 'start', label: 'On Task Create',
+      config: { objectName: 'project_task', triggerType: 'record-after-create' } },
+    // Values interpolate with SINGLE braces. {$User.Id} is the acting user;
+    // {record.<field>} reads the triggering record.
+    { id: 'assign', type: 'update_record', label: 'Assign to Actor',
+      config: {
+        objectName: 'project_task',
+        filter: { id: '{record.id}' },
+        fields: { assigned_to: '{$User.Id}' },
+      } },
+    { id: 'done', type: 'end', label: 'Done' },
+  ],
+  edges: [
+    { id: 'e1', source: 'start', target: 'assign' },
+    { id: 'e2', source: 'assign', target: 'done' },
   ],
 }`,
     related: ['object', 'trigger', 'agent'],

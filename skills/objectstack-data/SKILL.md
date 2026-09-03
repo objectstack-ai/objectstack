@@ -282,12 +282,13 @@ export const Invoice = ObjectSchema.create({
 - Use `requiredWhen` for conditional requiredness; the ObjectQL validator
   enforces it on submit. The `conditionalRequired` alias was REMOVED in
   protocol 17 — emitting it is a parse error.
-- **Choose by intent — invariant or transition gate.** A fact that must hold for
-  *every stored record* is an invariant: express it in `validations[]`. A
-  condition on a *transition* ("required once the record reaches `paid`") is
-  `requiredWhen` / field bounds, which let already-stored rows through. A
-  transition gate written as an invariant bricks existing data; an invariant
-  written as a transition gate never enforces itself.
+- **Choose by intent — invariant or transition gate.** A fact true of *every
+  stored record* is an invariant: a `validations[]` `script` rule. A row that
+  violates it is refused on any edit until repaired. A *transition* condition
+  ("required once the record reaches `paid`") is `requiredWhen` / field bounds,
+  which judge the write, not the stored row. "Required when X" reads like an
+  invariant and is not one; an invariant written as a gate never enforces
+  itself.
 - For inline `master_detail` grids, predicates are evaluated row-by-row against
   the child row's `record`, so line-item rules should live on child fields.
 - For complex predicates, load **objectstack-formula** and emit CEL via
@@ -564,7 +565,6 @@ it, and `defineStack` errors unless the grant declares
 ## Metadata Protection (`protection`)
 
 Package authors can lock shipped metadata against Studio edits / overlays / deletes.
-See ADR-0010 for the full model.
 
 The `protection` block is **declared on the source schema** (`*.object.ts`,
 `*.app.ts`, `*.view.ts`, …) and stripped at load time — it never appears in
@@ -608,7 +608,7 @@ export const SysUserObject = ObjectSchema.create({
   sharingModel: 'public_read',
   protection: {
     lock: 'full',
-    reason: 'Core identity object — see ADR-0010.',
+    reason: 'Core identity object',
     docsUrl: 'https://objectstack.ai/docs/references/shared/protection',
   },
   fields: { username: { type: 'text', required: true } },

@@ -86,45 +86,75 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             }), expect.anything());
         });
 
+        // [#14770] Re-spelled from `app` to `view`, and its sibling below with
+        // it. The CLAIM is unchanged — an org row and an env-wide row of the
+        // same `(type, name)` both exist, and the org row is the one SERVED,
+        // whole, by precedence rather than a merge. It just has to be measured
+        // on a type that HAS an org partition to have precedence over.
+        //
+        // `getMetaItem` now resolves its own read scope through
+        // `organizationIdForMetaRead` — the read-side twin of the predicate
+        // `saveMetaItem` already gates on — so on `app`, which rolled back to
+        // `allowOrgOverride: false` in #6483, `organizationId` is gated to
+        // `undefined` and the org partition is never queried. On `app` this
+        // case was pinning the phantom read #14770 removes: a pre-#6190
+        // org-scoped row served INSTEAD OF the live env-wide document. `view`
+        // is the whitelisted specimen — the same re-spelling #6190 made one
+        // case up and #14683 made one case down.
         it('getMetaItem returns org-specific overlay when both org and env-wide rows exist', async () => {
             // findOverlay calls: first attempts org=org_alpha (returns row),
             // env-wide fallback should be skipped.
             mockEngine.findOne.mockImplementation((_table: string, opts: any) => {
                 if (opts?.where?.organization_id === 'org_alpha') {
                     return Promise.resolve({
-                        type: 'app', name: 'test_app', state: 'active',
-                        metadata: JSON.stringify({ ...sampleApp, label: 'Org Alpha' }),
+                        type: 'view', name: 'test_grid', state: 'active',
+                        metadata: JSON.stringify({ ...sampleView, label: 'Org Alpha' }),
                     });
                 }
                 if (opts?.where?.organization_id === null) {
                     return Promise.resolve({
-                        type: 'app', name: 'test_app', state: 'active',
-                        metadata: JSON.stringify({ ...sampleApp, label: 'Env Default' }),
+                        type: 'view', name: 'test_grid', state: 'active',
+                        metadata: JSON.stringify({ ...sampleView, label: 'Env Default' }),
                     });
                 }
                 return Promise.resolve(null);
             });
 
             const result = await protocol.getMetaItem({
-                type: 'app', name: 'test_app', organizationId: 'org_alpha',
+                type: 'view', name: 'test_grid', organizationId: 'org_alpha',
             });
             expect((result.item as any).label).toBe('Org Alpha');
+            // ADR-0005 resolution order: overlay WINS, it does not merge. The
+            // env-wide partition is never reached once the org row answers —
+            // the assertion the prose above used to make in a comment only.
+            expect(mockEngine.findOne).not.toHaveBeenCalledWith('sys_metadata', {
+                where: { type: 'view', name: 'test_grid', state: 'active', organization_id: null },
+            });
         });
 
         it('getMetaItem falls through to env-wide overlay when no org-specific row exists', async () => {
             mockEngine.findOne.mockImplementation((_table: string, opts: any) => {
                 if (opts?.where?.organization_id === null) {
                     return Promise.resolve({
-                        type: 'app', name: 'test_app', state: 'active',
-                        metadata: JSON.stringify({ ...sampleApp, label: 'Env Default' }),
+                        type: 'view', name: 'test_grid', state: 'active',
+                        metadata: JSON.stringify({ ...sampleView, label: 'Env Default' }),
                     });
                 }
                 return Promise.resolve(null);
             });
             const result = await protocol.getMetaItem({
-                type: 'app', name: 'test_app', organizationId: 'org_alpha',
+                type: 'view', name: 'test_grid', organizationId: 'org_alpha',
             });
             expect((result.item as any).label).toBe('Env Default');
+            // ⚠️ NON-VACUITY, and the reason this case had to move too. A
+            // fall-through only states something if the org partition was
+            // actually read FIRST. Left on `app` this case kept passing after
+            // #14770 while measuring nothing at all: the gate resolves `app` to
+            // `undefined`, so the only read ever issued was the env-wide one and
+            // the assertion could no longer fail.
+            expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
+                where: { type: 'view', name: 'test_grid', state: 'active', organization_id: 'org_alpha' },
+            });
         });
 
         // [#14683] Re-spelled from `app` to `view`, the READ-side twin of the
@@ -142,11 +172,16 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // and org rows union, org winning on collision. It just has to be
         // measured on a type that has an org partition to union.
         //
-        // ⚠️ Its two `getMetaItem` (SINGULAR) siblings above keep `app`
-        // deliberately: that verb is untouched here. It takes one type per
-        // request, so a caller CAN be right about its scope, and its REST door
-        // already gates before calling. Only the LIST verb, which callers
-        // sweep across many types with one organization, moved.
+        // ⚠️ SUPERSEDED, 2026-09-03 (#14770). This paragraph used to read "Its
+        // two `getMetaItem` (SINGULAR) siblings above keep `app` deliberately:
+        // that verb is untouched here." That was true when #14683 landed and is
+        // the sentence #14770 falsified: the singular verb now gates too, so
+        // both siblings moved to `view` in the same edit. The reasoning it gave
+        // — a singular caller CAN be right about its scope, and its REST door
+        // already gates — held for the DOOR and not for the VERB: `#14770`
+        // measured four runtime callers that reach the verb with a raw active
+        // organization, and on a `??` precedence read an ungated organization
+        // does not merely ADD a row, it SUBSTITUTES the served document.
         it('getMetaItems unions env-wide and org-specific rows (org wins on collision)', async () => {
             mockEngine.find.mockImplementation((_table: string, opts: any) => {
                 if (opts?.where?.organization_id === 'org_alpha') {

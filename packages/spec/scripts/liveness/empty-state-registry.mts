@@ -148,13 +148,10 @@ export const EMPTY_STATE_REGISTRY: EmptyStateEntry[] = [
     semantics: 'scope',
     rationale: 'Replay filter for a dead-letter/replay operation. Selects work to redo; grants nothing.',
   },
-  {
-    file: 'packages/spec/src/api/rest-server.zod.ts',
-    property: 'includeObjects',
-    semantics: 'scope',
-    rationale:
-      'Which objects get generated REST routes. Route existence is not authorization — the generated routes still run the full permission stack, so a wider set is not a wider grant.',
-  },
+  // `packages/spec/src/api/rest-server.zod.ts` `includeObjects` used to sit here
+  // as `scope`. Retired in #14691 (ADR-0049 enforce-or-remove — nothing ever read
+  // it), so its "(empty = all)" statement is gone and the entry went with it;
+  // the tombstone's prescription carries no permissive empty-state claim.
   {
     file: 'packages/spec/src/data/object.zod.ts',
     property: 'stageField',

@@ -66,6 +66,23 @@ export interface AnalyticsResult {
          * by it instead of guessing from the value (objectui#3136).
          */
         percentScale?: PercentScale;
+        /**
+         * #14492 — the closed aggregate discriminator for a measure column whose
+         * display name is the SERVER's built-in default rather than an author's
+         * text. Present exactly when the dataset measure behind the column
+         * declares an `aggregate` and NO `label`: the producer then has nothing
+         * but the aggregate to name the column by, so it says which aggregate
+         * that is (`count` for the seeded / auto-derived `count` measure) and a
+         * renderer may substitute its own localized name for it — objectui keys
+         * a locale lookup on this value (its `report.aggregate.*` family) and
+         * falls back to `label`, then `name`. Absent whenever the author declared
+         * a label (a plain string OR an inline locale map, even one with no entry
+         * for the request locale — an author's text is never re-labelled by a
+         * consumer), and absent on dimension columns and derived measures.
+         * Reuses `AggregationFunction` (data/query.zod.ts), the one closed
+         * aggregate vocabulary; no second spelling.
+         */
+        builtinAggregate?: AggregationFunction;
     }>;
     /** Generated SQL (if available) */
     sql?: string;

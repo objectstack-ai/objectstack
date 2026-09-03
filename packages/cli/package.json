@@ -22,7 +22,9 @@
     "build": "if [ -n \"$OS_SKIP_DTS\" ]; then tsc -p tsconfig.build.json --noCheck --declaration false --declarationMap false; else tsc -p tsconfig.build.json; fi",
     "dev": "tsc -p tsconfig.build.json --watch",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && pnpm check:test-typecheck",
+    "check:test-typecheck": "tsx ../../scripts/check-test-typecheck.mts --self-test && tsx ../../scripts/check-test-typecheck.mts --package packages/cli --project tsconfig.test.json",
+    "gen:test-typecheck-debt": "tsx ../../scripts/check-test-typecheck.mts --update --package packages/cli --project tsconfig.test.json",
     "check:app-nav-i18n": "node scripts/check-app-nav-i18n.mjs --self-test && node scripts/check-app-nav-i18n.mjs"
   },
   "keywords": [

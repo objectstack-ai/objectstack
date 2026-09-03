@@ -219,8 +219,6 @@
     "CrossObjectBatchRequestSchema (const)",
     "CrossObjectBatchResponse (type)",
     "CrossObjectBatchResponseSchema (const)",
-    "CrudEndpointPattern (type)",
-    "CrudEndpointPatternSchema (const)",
     "CrudEndpointsConfig (type)",
     "CrudEndpointsConfigParsed (type)",
     "CrudEndpointsConfigSchema (const)",

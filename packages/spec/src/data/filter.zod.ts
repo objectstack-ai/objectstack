@@ -1025,14 +1025,24 @@ export function likePatternToGlobPattern(pattern: string): string {
  */
 export const SpecialOperatorSchema = lazySchema(() => z.object({
   /** Is null check - SQL: IS NULL (true) / IS NOT NULL (false) | MongoDB: field: null */
-  $null: z.boolean().optional(),
+  $null: z.boolean().optional().describe(
+    'Is-null check. `true` matches rows where the field is null, `false` matches rows '
+    + 'where it is not null. Lowered to `IS NULL` (true) / `IS NOT NULL` (false) on the '
+    + 'SQL family and to `{ field: null }` (true) / `{ $ne: null }` (false) on MongoDB.'
+  ),
   
   /**
    * Field HAS A VALUE (`!= null`) — the inverse of `$null`, never key presence.
    * Lowered to `IS NOT NULL` (true) / `IS NULL` (false) on SQL and to
    * `{$ne: null}` / `{$eq: null}` on MongoDB.
    */
-  $exists: z.boolean().optional(),
+  $exists: z.boolean().optional().describe(
+    'Has-a-value check — the exact inverse of `$null`. `true` matches rows where the '
+    + 'field holds a value (`!= null`), `false` matches rows where it holds none. '
+    + 'Portable across every backend the platform ships: lowered to `IS NOT NULL` (true) / '
+    + '`IS NULL` (false) on the SQL family and to `{ $ne: null }` (true) / '
+    + '`{ $eq: null }` (false) on MongoDB.'
+  ),
 }));
 
 // ============================================================================

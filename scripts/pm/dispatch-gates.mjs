@@ -360,7 +360,7 @@ import {
   symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, dirname, relative, resolve } from 'node:path';
+import * as nodePath from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
@@ -1176,7 +1176,7 @@ export function extractCheckInvocations(workflowText, workflowFile) {
     for (const m of cmd.matchAll(SELF_TEST_INVOCATION)) {
       const script = m[1];
       // Already admitted above, under its bare path key. See the docblock.
-      if (basename(script).includes('check-')) continue;
+      if (nodePath.basename(script).includes('check-')) continue;
       out.push({
         // The flag is part of the KEY because it is part of the runnable
         // command: `node scripts/pm/bare-root-worklist.mjs` on its own prints
@@ -1509,6 +1509,202 @@ const NO_PATH_POPULATION_MARKER =
 export function declaredNoPathPopulation(scriptSource) {
   const m = NO_PATH_POPULATION_MARKER.exec(String(scriptSource));
   return m ? m[1].trim() : null;
+}
+
+/**
+ * A GATE SCRIPT's own declaration that its population is the WHOLE TREE — a
+ * whole-line comment anywhere in the script's source:
+ *
+ *   // dispatch-gates: whole-tree-population -- <reason>
+ *   #  dispatch-gates: whole-tree-population -- <reason>      (shell gates)
+ *
+ * Read it as the exact INVERSE of `no-path-population` above — which is why
+ * the two are spelled to read as opposites, tolerate the same two comment
+ * forms, and are parsed by sibling regexes. That one says "this gate reads NO
+ * file, and here is why". This one says "this gate reads EVERY file; every
+ * card implicates me; do not try to narrow me."
+ *
+ * ## The defect (#14189, filed out of #13519's measured M bucket)
+ *
+ * #13519 repaired four gates by having each declare, in its own module body,
+ * the population it really reads (the `ROOT_DIR_WATCH_HINTS` idiom). Three
+ * could not be repaired that way, and the reason was the same for all three:
+ * their population is the whole repository. `check:nul-bytes` sweeps
+ * `git ls-files` PLUS the untracked-not-ignored listing;
+ * `check-comment-mask-corpus` walks every authored source file from the repo
+ * root; `check:refd-timer-probe` reads the same tracked-plus-untracked tree.
+ *
+ * A TRUTHFUL declaration for any of them is "every file", and this file's own
+ * header prices that direction and refuses it: "22 leads is the same as none".
+ * A gate named on every card is a gate named on no card, and MATCHED is the
+ * one column whose entire value is precision. ⛔ So the remedy is NOT a
+ * whole-tree literal in the gate's declaration — not `**`, not `.`, not the
+ * bare root: `scripts/workspace-enumerator.mjs`'s header prices the
+ * workspace-wide version of exactly that move at +41725 (gate, file) pairs,
+ * every one of them a fabricated lead.
+ *
+ * What did not exist is a third thing for such a gate to BE — neither a lead
+ * nor a silence. `check:nul-bytes` is the specimen the card was filed on: a
+ * gate every dev is told to run on ANY edit, whose declared population is two
+ * files. A dev deriving the family for a card that adds a file with a raw
+ * control byte in it was not told about the one gate that judges exactly that,
+ * and the report they hand back — "I ran the gates the tool named" — is true
+ * and incomplete at the same time.
+ *
+ * ## What the declaration DOES to the derivation
+ *
+ * A declaring family is placed BY ITS DECLARATION and leaves the three
+ * verdicts entirely (`placeFamily` below is the one seam that does it): never
+ * `matched`, because that would be a lead on every card; never `silent`,
+ * because its silence would be a lie; never `undetermined`, because its
+ * population is not unknown — it has been READ. It is rendered under its own
+ * always-runs heading, identical for every card, and its command IS inside the
+ * runnable union `--commands` prints and `--ran` reconciles against, because a
+ * gate every card implicates is a gate this card owes.
+ *
+ * The lead columns are untouched by construction: nothing enters or leaves
+ * `matched`/`silent`/`undetermined` for any NON-declaring family because of
+ * this channel — `placeFamily` delegates to `classifyEntry` unchanged, and a
+ * self-test case holds that byte-identity over probe paths.
+ *
+ * ⚠️ Unlike `no-path-population`, this declaration does NOT contradict a gate
+ * that names paths. A whole-tree gate still spells its own baseline artifacts
+ * and its own conveniences, and those literals stay in `entry.hints`, where
+ * the unreachable sweep and the per-hint residue annotations still grade them.
+ * The declaration supersedes them for PLACEMENT only — the one question those
+ * literals were answering wrongly. What it DOES contradict is
+ * `no-path-population`: "every file" and "no file" cannot both be true of one
+ * gate, and `wholeTreePopulationRefusal` refuses the pair.
+ *
+ * The reason is REQUIRED, for the same reason it is required on both markers
+ * above: an opt-out with no reason reads exactly like a placeholder nobody
+ * will revisit, and is the one shape a reviewer cannot tell from a gate whose
+ * population was never examined.
+ */
+const WHOLE_TREE_POPULATION_MARKER =
+  /^[ \t]*(?:\/\/|#)[ \t]*dispatch-gates:[ \t]*whole-tree-population[ \t]*--[ \t]*(\S.*)$/m;
+
+export function declaredWholeTreePopulation(scriptSource) {
+  const m = WHOLE_TREE_POPULATION_MARKER.exec(String(scriptSource));
+  return m ? m[1].trim() : null;
+}
+
+/**
+ * The recognised spellings of a REPO-ROOT WALK — the liveness half of the
+ * declaration above, and PUBLISHED here rather than left inside the
+ * implementation.
+ *
+ * ## Why a liveness predicate at all
+ *
+ * `check:declared-population-live` (#13519) exists because a declared
+ * population that reaches NOTHING is the quietest failure this family has: the
+ * gate keeps declaring, the derivation keeps placing it, and every count still
+ * prints. This channel has the same exposure pointed the other way — a gate
+ * that declares the whole tree and does not walk it would be advertised on
+ * EVERY card forever, and a wrong row on every card is this file's own
+ * definition of a fabricated lead. So the declaration is checkable, and this
+ * is what it is checked against.
+ *
+ * ## What the predicate is, and the direction it is allowed to fail in
+ *
+ * It is a claim about the gate's own SOURCE TEXT, comments and `--self-test`
+ * bodies masked (the same normalization `payloadEnvDependence` applies, for
+ * the same reason: what a gate SAYS is not what it READS — a fixture tree
+ * built inside a self-test is not the gate's population, and every one of
+ * these gates builds one).
+ *
+ * It is deliberately a NECESSARY condition and not a sufficient one. A gate
+ * that seeds a root walk and then filters it to a subtree passes this and is
+ * still mis-declared; nothing textual can settle that, and the declaration's
+ * REASON is where the human answer lives, judged by a reader — the same
+ * contract `unreachableLines` states for its own listing. What the predicate
+ * does buy is the failure direction that is silent: a declaration with no walk
+ * behind it at all cannot pass. Its own failure mode is the loud one — a gate
+ * that really does sweep the tree in a spelling not listed here is REFUSED,
+ * which is a missing declaration somebody has to fix, never a wrong row on
+ * every card.
+ *
+ * ## Why the list is published instead of hidden
+ *
+ * Same rule AGENTS.md states for `check:cross-package-test-inputs`: a source
+ * scan sees only the spellings it knows, and an unrecognised one produces no
+ * flag — silently. So the recognised set is written where the author of the
+ * next whole-tree gate reads it, the refusal text prints it, and the remedy
+ * for a new spelling is to EXTEND this list with a self-test case beside it,
+ * never to route around the check.
+ *
+ * Measured over the six candidate gates #14189 and #14325 nominated: limbs A/B
+ * select five, and `check-self-test-workflow-commands.mjs` — whose walk is
+ * seeded at `scripts/`, a bounded subtree — is selected by none of them, which
+ * is the reading of its source, not a coincidence. That gate's remedy is the
+ * ordinary subtree declaration, not this channel.
+ */
+export const REPO_ROOT_WALK_SPELLINGS = [
+  {
+    label: 'a `git ls-files` enumeration of the tracked corpus',
+    // The subcommand as the gate spells it: an argv element, never the joined
+    // command line, because that is how `execFileSync` takes it here.
+    re: /['"`]ls-files['"`]/,
+  },
+  {
+    // The root is the WHOLE argument list, deliberately. Written to allow a
+    // trailing comma-argument this limb accepts `join(REPO_ROOT, 'scripts')`
+    // and `resolve(REPO_ROOT, maskerPath)` — path BUILDS, not walks — which
+    // was measured on the candidates and made the limb near-vacuous: it
+    // selected `check-comment-mask-corpus` on a `resolve` call while the walk
+    // it really performs is reached through limb C.
+    label: 'a walk CALLED on the repo-root binding as its whole argument',
+    re: /\b[A-Za-z_$][\w$]*\(\s*(?:REPO_ROOT|REPO_ROOT_DIR|ROOT_DIR)\s*\)/,
+  },
+  {
+    label: 'a walk whose DEFAULT PARAMETER is the repo-root binding',
+    re: /[({,]\s*[A-Za-z_$][\w$]*\s*=\s*(?:REPO_ROOT|REPO_ROOT_DIR|ROOT_DIR)\s*[,)}]/,
+  },
+];
+
+/**
+ * The first recognised repo-root walk spelling in this gate's own source, or
+ * null. The LABEL is returned rather than a boolean, because it is printed
+ * beside the declaration it vouches for: a reader deciding whether to trust
+ * the row is being told which reading produced it, exactly as the matched
+ * column's `via` says which key produced a lead.
+ */
+export function repoRootWalkSpelling(scriptSource) {
+  const body = maskedModuleBody(String(scriptSource));
+  for (const { label, re } of REPO_ROOT_WALK_SPELLINGS) if (re.test(body)) return label;
+  return null;
+}
+
+/**
+ * Why this family's whole-tree declaration must be refused, or null when it
+ * stands. Pure, and reading only what the discovery already put on the entry,
+ * so the live half of the self-test and any future caller cannot disagree
+ * about what a bad declaration is.
+ *
+ * Two refusals, and each one is a contradiction the derivation cannot resolve
+ * on the gate's behalf:
+ *
+ *   BOTH markers   "every file" and "no file" are not both true of one gate.
+ *                  Silently preferring either one would place the family by a
+ *                  coin toss and print a confident row for it.
+ *   NO WALK        the declaration is the only evidence for a row that appears
+ *                  on every card, and nothing in the gate's source backs it.
+ */
+export function wholeTreePopulationRefusal(entry) {
+  const reason = entry?.wholeTreeReason ?? null;
+  if (!reason) return null;
+  if (entry?.noPopulationReason) {
+    return 'declares BOTH whole-tree-population and no-path-population — "my population is every file" and "my population '
+      + 'is no file" cannot both be true of one gate. Delete the one that is not true; a derivation that picked either '
+      + 'would be placing the family by a coin toss.';
+  }
+  if (!entry?.rootWalk) {
+    return 'declares whole-tree-population and its own source carries no recognised repo-root walk. Recognised spellings: '
+      + `${REPO_ROOT_WALK_SPELLINGS.map((s) => s.label).join('; ')}. A declaration with no walk behind it puts a row on `
+      + 'EVERY card on no evidence. If the walk is real and spelled some other way, EXTEND REPO_ROOT_WALK_SPELLINGS in '
+      + 'scripts/pm/dispatch-gates.mjs with a self-test case beside it — never route around this refusal.';
+  }
+  return null;
 }
 
 /**
@@ -1903,7 +2099,7 @@ export function resolveCheckToFiles(checkName, scriptsMap, { dir = '' } = {}) {
   // cannot both be returned.
   const out = new Set();
   for (const m of cmd.matchAll(/((?:\.\.\/)*scripts\/[\w./-]+\.(?:mjs|cjs|js|sh|ts|mts|cts))(?![\w-])/g)) {
-    const tracked = join(dir, m[1]);
+    const tracked = nodePath.join(dir, m[1]);
     // Climbed clear of the repo root: unnameable as a tracked path, so it is
     // not a lead at all.
     if (tracked === '..' || tracked.startsWith('../')) continue;
@@ -2603,7 +2799,7 @@ export function isNonPathNamespace(literal) {
  * `hintCovers` as the sole predicate.
  */
 export function resolveModuleRelativeHint(literal, scriptPath, { root = ROOT } = {}) {
-  const rel = relative(root, resolve(join(root, dirname(scriptPath)), literal));
+  const rel = nodePath.relative(root, nodePath.resolve(nodePath.join(root, nodePath.dirname(scriptPath)), literal));
   if (!rel || rel === '..' || rel.startsWith('../')) return null;
   return rel;
 }
@@ -3244,16 +3440,16 @@ export function firstPartyImportTargets(scriptPath, source, { root = ROOT } = {}
   const specifiers = new Set();
   for (const m of body.matchAll(IMPORT_FROM_SPECIFIER)) specifiers.add(m[2]);
   for (const m of body.matchAll(SIDE_EFFECT_IMPORT)) specifiers.add(m[2]);
-  const here = dirname(join(root, scriptPath));
+  const here = nodePath.dirname(nodePath.join(root, scriptPath));
   const targets = new Set();
   for (const specifier of specifiers) {
     if (!specifier.startsWith('./') && !specifier.startsWith('../')) continue;
-    const rel = relative(root, resolve(here, specifier));
+    const rel = nodePath.relative(root, nodePath.resolve(here, specifier));
     // One test, three refusals: a path that escapes the repo, one that lands
     // at the root, and one in any other tree all fail to start with scripts/.
     if (!rel.startsWith('scripts/')) continue;
     if (rel.split('/').includes('node_modules')) continue;
-    const abs = join(root, rel);
+    const abs = nodePath.join(root, rel);
     // A specifier that resolves to nothing is a specifier, not a module: the
     // extension-less spellings ESM does not resolve, and the ../<rel> shapes a
     // module body carries as illustration, both land here.
@@ -4546,6 +4742,34 @@ export function classifyEntry(entry, paths) {
   return { verdict: (entry.hints ?? []).length === 0 ? 'undetermined' : 'silent', hits };
 }
 
+/**
+ * Place one family, declaration FIRST (#14189). The one seam through which the
+ * whole-tree channel touches placement, and it is deliberately the whole of
+ * it: everything below this line is `classifyEntry`, unchanged, so a family
+ * that declares nothing is classified byte-for-byte as it was before this
+ * channel existed. A self-test case pins that identity over probe paths, and
+ * removing the two lines above the delegation is the mutation that reddens the
+ * placement pins — which is what makes them discriminating rather than
+ * decorative.
+ *
+ * Why the declaration is consulted BEFORE the matchers rather than after: a
+ * whole-tree gate would `match` a card that edits its own script (the identity
+ * key) and score `silent` for every other card, so an "after" ordering would
+ * hand the same gate two different placements depending on the card — the one
+ * shape this channel exists to retire. Its population does not vary by card,
+ * so neither does its placement.
+ *
+ * `always-runs` is a FOURTH verdict, not a fourth flavour of the three: it is
+ * outside `matched`/`silent`/`undetermined` everywhere they are counted, and
+ * `residueLines` accounts for it as its own term rather than folding it into
+ * the partition (a fold would silently shrink the residue, which is the exact
+ * failure that function's own throw exists to catch).
+ */
+export function placeFamily(entry, paths) {
+  if (entry?.wholeTreeReason) return { verdict: 'always-runs', hits: [] };
+  return classifyEntry(entry, paths);
+}
+
 // ---------------------------------------------------------------------------
 // Telling a WEAK silence from an INVERTED one (#10784)
 // ---------------------------------------------------------------------------
@@ -5804,7 +6028,7 @@ export function inTreeScratchDirs({ cwd = ROOT, files = null } = {}) {
   for (const rel of list) {
     let source;
     try {
-      source = readFileSync(join(cwd, rel), 'utf8');
+      source = readFileSync(nodePath.join(cwd, rel), 'utf8');
     } catch {
       continue;
     }
@@ -6686,7 +6910,7 @@ const CODE_CONSTANT_BINDING =
 /** The file's text, or null when there is nothing on disk to read. */
 function readTrackedSource(path) {
   try {
-    return readFileSync(join(ROOT, path), 'utf8');
+    return readFileSync(nodePath.join(ROOT, path), 'utf8');
   } catch {
     return null;
   }
@@ -6804,7 +7028,7 @@ export function findI18nBundlePackages(configs) {
  */
 let i18nConfigs = null;
 function i18nExtractConfigs() {
-  i18nConfigs ??= findExtractConfigs(join(ROOT, 'packages'), 'packages');
+  i18nConfigs ??= findExtractConfigs(nodePath.join(ROOT, 'packages'), 'packages');
   return i18nConfigs;
 }
 
@@ -6820,7 +7044,7 @@ export function i18nBundlePackageDirs() {
  */
 let formModules = null;
 export function metadataFormModulePaths() {
-  formModules ??= findMetadataFormModules(join(ROOT, 'packages'), 'packages');
+  formModules ??= findMetadataFormModules(nodePath.join(ROOT, 'packages'), 'packages');
   return formModules;
 }
 
@@ -6850,7 +7074,7 @@ export function metadataFormsSurfaceIsExtracted() {
  * turns the throw into a non-zero exit.
  */
 export function rootTsconfigExcludeEntries() {
-  const raw = readFileSync(join(ROOT, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  const raw = readFileSync(nodePath.join(ROOT, 'tsconfig.json'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
   let parsed;
   try {
     parsed = JSON.parse(raw);
@@ -7830,18 +8054,72 @@ export function alwaysRunLines(rows, counts) {
   return lines;
 }
 
+/**
+ * The whole-tree channel, rendered (#14189) — its own heading, identical on
+ * every card, printed ABOVE the reconciliation because its commands are inside
+ * that total.
+ *
+ * ⛔ Not folded into the matched block. A row that appears on every card is not
+ * a lead, and pasting these into the matched block would put them under a
+ * caption that promises "these families name YOUR paths" — the fabricated-lead
+ * shape this file's header prices and refuses. The heading is the claim: these
+ * are placed by declaration.
+ *
+ * Each row carries the gate's own REASON and the liveness spelling that vouches
+ * for it, for the same reason the matched column carries `via`: a reader
+ * deciding whether to trust a row is being told what produced it. A refused
+ * declaration prints as a REFUSED row rather than vanishing — a family dropped
+ * from every rendering because its declaration was malformed is the silent
+ * direction, and this file's contract is that an omission is stated where the
+ * omission happens.
+ */
+export function alwaysRunsPopulationLines(rows) {
+  if (rows.length === 0) return [];
+  const lines = [
+    `Always runs (declared population) — ${rows.length} famil(ies) DECLARE that their population is the WHOLE TREE, so every card` +
+      ' implicates them. ⛔ Not the always-runs STEP tail further down: that one is about workflow steps this derivation names no family for.',
+  ];
+  for (const row of rows) {
+    if (row.refused) {
+      lines.push(`  - ⚠ ${row.check}: REFUSED — ${row.refused}`);
+      continue;
+    }
+    lines.push(`  - ${row.command}   [${row.workflows.join(', ')}]   declared whole-tree population — ${row.reason}`);
+    lines.push(
+      `      ↳ liveness: its own source carries ${row.rootWalk}` +
+        `${row.ciOnly ? ' · CI-MEASURED ONLY — no local run of it can produce a verdict, so it is NOT in --commands' : ''}`,
+    );
+  }
+  lines.push(
+    '  ⇒ Placed by DECLARATION, not by your paths: every card gets these same rows, which is the honest shape for a gate that reads every' +
+      ' file. They are NOT leads — nothing enters or leaves the matched column because of them — and they ARE in the runnable total below.',
+  );
+  return lines;
+}
+
 export function residueLines(
   {
     discovered, matched, undetermined, silent, unfiltered, unreachable, swept,
-    artifactRosters, invertedRosters, documentedNoPopulation,
+    artifactRosters, invertedRosters, documentedNoPopulation, alwaysRuns = 0,
   },
   kinds = CHANGE_KIND_GATES,
 ) {
-  const placed = matched + undetermined + silent;
+  // FOUR verdicts now (#14189). The whole-tree channel is a term of the
+  // partition rather than a subset of one, and it is added HERE because the
+  // throw below is the thing that would otherwise absorb it silently: a fourth
+  // placement wired into the derivation and not into this sum shrinks the
+  // residue by exactly the families it placed, and every count still prints.
+  const placed = matched + undetermined + silent + alwaysRuns;
   if (placed !== discovered) {
     throw new Error(
       `residue accounting is short: ${placed} famil(ies) placed of ${discovered} discovered ` +
-        '(matched + undetermined + silent must cover every discovered family)',
+        '(matched + undetermined + silent + always-runs must cover every discovered family)',
+    );
+  }
+  if (!Number.isInteger(alwaysRuns) || alwaysRuns < 0 || alwaysRuns > discovered) {
+    throw new Error(
+      `declared-whole-tree count is not derivable: got ${String(alwaysRuns)} of ${discovered} discovered ` +
+        "(it is read from each gate's own marker — never omitted; a missing count would print as a missing line)",
     );
   }
   if (!Number.isInteger(unfiltered) || unfiltered < 0 || unfiltered > discovered) {
@@ -7896,7 +8174,13 @@ export function residueLines(
   return [
     `Residue — all ${discovered} discovered famil(ies) placed, derived at runtime:`,
     `  ${matched} matched above · ${undetermined} undetermined (their sources name no path at all — NOT known irrelevant)` +
-      ` · ${silent} silent (their sources name paths, none of which cover yours).`,
+      ` · ${silent} silent (their sources name paths, none of which cover yours)` +
+      ` · ${alwaysRuns} always-runs (they DECLARE a whole-tree population, so they are placed by declaration and not by your paths).`,
+    `  Those ${alwaysRuns} are not leads and not silences: a gate that reads EVERY file is named on every card, so naming it in the matched` +
+      ' column would be a fabricated lead and leaving it silent would be a false clearance. It declares the fact in its own source' +
+      ' (dispatch-gates: whole-tree-population -- REASON, the inverse of the no-path-population marker above), the declaration is checked' +
+      " against a repo-root walk in that same source, and the family is listed under its own always-runs heading with its commands INSIDE" +
+      ' this card\'s runnable total.',
     `  ${documentedNoPopulation} of those ${undetermined} undetermined famil(ies) DECLARE that they have no path population, each with its own` +
       ' reason, read from a marker in the gate\'s source and printed against it under --residue. Those have been examined; the rest of the bucket' +
       ' has not, and the two used to read alike. A declaration is not an escape from having a population: a gate that walks a subtree declares it' +
@@ -8223,10 +8507,10 @@ export function tierLines(result) {
  * the only other caller, and it calls THIS.
  */
 export function discoverFamilies({ tree = watchHintTree() } = {}) {
-  const wfDir = join(ROOT, '.github/workflows');
+  const wfDir = nodePath.join(ROOT, '.github/workflows');
   const workflows = readdirSync(wfDir).filter((f) => /\.ya?ml$/.test(f));
   if (workflows.length === 0) throw new Error('no workflow files found under .github/workflows');
-  const rootScripts = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
+  const rootScripts = JSON.parse(readFileSync(nodePath.join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
 
   const invocations = [];
   // The `paths:` each workflow declares, read from the SAME text the check
@@ -8245,7 +8529,7 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
   // states what the family list does not cover.
   const workflowEntries = [];
   for (const wf of workflows) {
-    const text = readFileSync(join(wfDir, wf), 'utf8');
+    const text = readFileSync(nodePath.join(wfDir, wf), 'utf8');
     workflowEntries.push({ file: wf, text });
     invocations.push(...extractCheckInvocations(text, wf));
     triggerPathsByWorkflow.set(wf, extractTriggerPaths(text));
@@ -8290,7 +8574,7 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
       // package-scoped check: resolve through that package's manifest when findable
       const pkgDirGuess = entry.filter.replace(/^@objectstack\//, '');
       for (const base of ['packages', 'packages/plugins', 'packages/drivers', 'packages/services']) {
-        const p = join(ROOT, base, pkgDirGuess, 'package.json');
+        const p = nodePath.join(ROOT, base, pkgDirGuess, 'package.json');
         if (existsSync(p)) {
           const pkgScripts = JSON.parse(readFileSync(p, 'utf8')).scripts ?? {};
           // The manifest's own directory goes IN, and tracked paths come back
@@ -8299,7 +8583,7 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
           // was measured to misattribute exactly that spelling to the package
           // (#12107; resolveCheckToFiles' docblock carries the measurement).
           files = files.concat(
-            resolveCheckToFiles(entry.check, pkgScripts, { dir: join(base, pkgDirGuess) }),
+            resolveCheckToFiles(entry.check, pkgScripts, { dir: nodePath.join(base, pkgDirGuess) }),
           );
         }
       }
@@ -8329,7 +8613,7 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
       // revisions of a file, the same discipline the trigger paths take above.
       // A module that declares nothing contributes everything it spells, which
       // is the behaviour every followed module had before the marker existed.
-      const source = readFileSync(join(ROOT, rel), 'utf8');
+      const source = readFileSync(nodePath.join(ROOT, rel), 'utf8');
       const spelled = extractWatchHints(source, rel, { tree });
       const declared = declaredInheritedPopulation(source, spelled);
       moduleHints.set(rel, declared ? declared.population : spelled);
@@ -8349,7 +8633,7 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
       let population = [];
       const dir = rel.slice(0, Math.max(0, rel.length - 'package.json'.length - 1));
       try {
-        const manifest = JSON.parse(readFileSync(join(ROOT, rel), 'utf8'));
+        const manifest = JSON.parse(readFileSync(nodePath.join(ROOT, rel), 'utf8'));
         const exportsMap = manifest?.exports;
         if (dir && exportsMap && typeof exportsMap === 'object' && Object.keys(exportsMap).length > 0) {
           const src = `${dir}/src`;
@@ -8388,7 +8672,7 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     entry.hintOrigin = new Map();
     entry.hintEdge = new Map();
     for (const f of entry.files) {
-      const abs = join(ROOT, f);
+      const abs = nodePath.join(ROOT, f);
       if (!existsSync(abs)) continue;
       // ONE read, FOUR answers now — the hints, the gate's own no-population
       // declaration, the first-party modules it imports, and the program files
@@ -8410,6 +8694,12 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
         entry.readOrigin.set(target, f);
       }
       entry.noPopulationReason ??= declaredNoPathPopulation(source);
+      // ONE read, and the SEVENTH and EIGHTH answers off it (#14189). The
+      // declaration and the walk that vouches for it are read from the same
+      // source text as the six above, so the liveness check can never grade a
+      // different revision of the gate than the declaration it is grading.
+      entry.wholeTreeReason ??= declaredWholeTreePopulation(source);
+      entry.rootWalk ??= repoRootWalkSpelling(source);
       // ONE read, SIX answers now (#14004). The payload dependence is read off
       // the SAME source text as the five above, so this classification cannot
       // describe a different revision of the gate than the hints printed beside
@@ -8514,6 +8804,13 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
     // the marker while inheriting a population is a contradiction the live
     // half of the self-test catches, which is the direction that costs.
     entry.noPopulationReason ??= null;
+    // Read from the gate's own files only, for the same reason as the
+    // declaration above it: a followed module cannot declare on its caller's
+    // behalf that the CALLER sweeps the whole tree, and it cannot withdraw the
+    // claim either. The liveness half is anchored the same way — the walk that
+    // vouches for the declaration has to be in the source that carries it.
+    entry.wholeTreeReason ??= null;
+    entry.rootWalk ??= null;
     // Read from the gate's own files only, exactly like the declaration above
     // it: a followed module cannot make its caller CI-only, and a family that
     // reached no file at all reaches no classification either.
@@ -8549,11 +8846,17 @@ export function discoverFamilies({ tree = watchHintTree() } = {}) {
  * subtract them. One expression, so `--commands` and the reconciliation cannot
  * disagree about which commands are omitted.
  */
-export function ciOnlyCommandSet(matchedRows = []) {
-  return new Set(matchedRows.filter((row) => row.ciOnly).map((row) => row.command));
+export function ciOnlyCommandSet(matchedRows = [], alwaysRunsRows = []) {
+  // Both row sets, because the subtraction follows the COMMAND and not the
+  // section it was reached through — the rule `commandsFor` already states for
+  // the convention block, applied unchanged to the whole-tree channel (#14189).
+  // Empty on this tree today (no declaring family reads the payload) and kept
+  // for the same reason that exclusion is kept there: a rule that held in one
+  // section and not another is the two-renderings drift this file keeps closing.
+  return new Set([...matchedRows, ...alwaysRunsRows].filter((row) => row.ciOnly).map((row) => row.command));
 }
 
-export function commandsFor({ matchedRows = [], kindGroups = [] } = {}) {
+export function commandsFor({ matchedRows = [], kindGroups = [], alwaysRunsRows = [] } = {}) {
   const commands = new Set();
   // A CI-MEASURED-ONLY family contributes NOTHING here (#14004). This list's
   // caption promises one RUNNABLE command per line, and a command whose only
@@ -8564,8 +8867,14 @@ export function commandsFor({ matchedRows = [], kindGroups = [] } = {}) {
   // `ciOnly` on its row in `--json`. ⛔ Not silence — omission stated where the
   // omission happens is this file's own rule for the pending-changeset
   // families, and it applies here unchanged.
-  const ciOnly = ciOnlyCommandSet(matchedRows);
+  const ciOnly = ciOnlyCommandSet(matchedRows, alwaysRunsRows);
   for (const row of matchedRows) if (!row.ciOnly) commands.add(row.command);
+  // The whole-tree channel is IN the union, on every card (#14189). It is not
+  // a lead — nothing about `matched` moves — but it is a gate the card owes,
+  // and this list's whole contract is that it is the complete runnable answer
+  // for the paths it was given. A declaring family left out of it would be the
+  // very omission the card was filed about, reproduced inside its own fix.
+  for (const row of alwaysRunsRows) if (!row.ciOnly) commands.add(row.command);
   for (const group of kindGroups) {
     // The exclusion follows the COMMAND, not the section it was reached
     // through: a family named by change KIND as well as by path is one family,
@@ -8636,8 +8945,8 @@ export function commandsFor({ matchedRows = [], kindGroups = [] } = {}) {
  * explanation — a STALE row prints and contributes no command, and one family
  * hit by two kinds prints twice. Both are stated in the rendering.
  */
-export function familyReconciliation({ matchedRows = [], kindGroups = [] } = {}) {
-  const commands = commandsFor({ matchedRows, kindGroups });
+export function familyReconciliation({ matchedRows = [], kindGroups = [], alwaysRunsRows = [] } = {}) {
+  const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   // The SAME expression commandsFor uses for its matched half. Written as a
   // second traversal it would be a second answer to a question this file
   // already answers once.
@@ -8648,7 +8957,12 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [] } = {})
   // a CI-measured family is outside it by construction. Kept as its own term so
   // the omission is a number the reader gets rather than a difference they have
   // to notice (#14004).
-  const ciOnlyCommands = ciOnlyCommandSet(matchedRows);
+  const ciOnlyCommands = ciOnlyCommandSet(matchedRows, alwaysRunsRows);
+  // The SAME expression `commandsFor` unions for the whole-tree channel, for
+  // the reason this function's header gives for the other two terms: a count
+  // built by a second traversal can drift from the section it claims to
+  // reconcile, and this one is asserted against the union below.
+  const alwaysRunsCommands = new Set(alwaysRunsRows.filter((row) => !row.ciOnly).map((row) => row.command));
   const conventionCommands = new Set();
   let conventionRows = 0;
   let staleRows = 0;
@@ -8670,8 +8984,18 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [] } = {})
     }
   }
   const both = [...conventionCommands].filter((command) => matchedCommands.has(command)).length;
+  // The set-algebra term: |M u C u A| = |M| + |C| - |M n C| + |A \ (M u C)|.
+  // Counted as the REMAINDER rather than as the whole of A, so a declaring
+  // family that some card also reaches by path or by kind is counted once,
+  // exactly like `both` one term over.
+  const alwaysRunsOnly = [...alwaysRunsCommands].filter(
+    (command) => !matchedCommands.has(command) && !conventionCommands.has(command),
+  ).length;
   const recon = {
     total: commands.length,
+    alwaysRuns: alwaysRunsCommands.size,
+    alwaysRunsOnly,
+    alwaysRunsRows: alwaysRunsRows.length,
     matched: matchedCommands.size,
     matchedRows: runnableRows.length,
     ciOnly: ciOnlyCommands.size,
@@ -8683,10 +9007,11 @@ export function familyReconciliation({ matchedRows = [], kindGroups = [] } = {})
     staleRows,
     ciOnlyConventionRows,
   };
-  if (recon.matched + recon.convention - recon.both !== recon.total) {
+  if (recon.matched + recon.convention - recon.both + recon.alwaysRunsOnly !== recon.total) {
     throw new Error(
       'dispatch-gates: the family reconciliation does not close — ' +
-        `${recon.matched} matched + ${recon.convention} convention − ${recon.both} both ≠ ${recon.total} distinct. ` +
+        `${recon.matched} matched + ${recon.convention} convention − ${recon.both} both + ${recon.alwaysRunsOnly} declared ` +
+        `whole-tree (reached no other way) ≠ ${recon.total} distinct. ` +
         'The parts and the union came from different structures, which is the drift this line exists to detect. ' +
         'Refusing rather than printing a total that cannot be trusted (#4690).',
     );
@@ -8732,6 +9057,7 @@ export function familyReconciliationLines(recon) {
   const lines = [
     `Reconciliation — ${recon.total} famil(ies): this card's WHOLE runnable answer, and the number to assert a harvest against.`,
     `  ${recon.matched} named by PATH (the matched block) + ${recon.convention} named by change KIND (the convention block)` +
+      `${recon.alwaysRunsOnly ? ` + ${recon.alwaysRunsOnly} DECLARED whole-tree (the always-runs block)` : ''}` +
       `${recon.both ? `, ${recon.both} of them the same family reached both ways` : ''} ⇒ ${recon.total} distinct.`,
   ];
   if (recon.conventionOnly > 0) {
@@ -8742,6 +9068,14 @@ export function familyReconciliationLines(recon) {
     );
   }
   if (ciOnlyLine) lines.push(ciOnlyLine);
+  if (recon.alwaysRuns > 0) {
+    lines.push(
+      `  + ${recon.alwaysRuns} of the ${recon.total} DECLARE that their population is the WHOLE TREE` +
+        `${recon.alwaysRunsOnly !== recon.alwaysRuns ? `, ${recon.alwaysRuns - recon.alwaysRunsOnly} of them also reached by path or kind` : ''}` +
+        ' — placed by their own declaration, never by your paths, and named under their own heading above. They are INSIDE this total' +
+        ' (a gate every card implicates is a gate this card owes) and outside the matched column (a row on every card is not a lead).',
+    );
+  }
   lines.push(
     `  ⇒ Skip the arithmetic: --commands prints exactly these ${recon.total}, one runnable command per line, nothing else on stdout.` +
       ' It cannot drop a section or a spelling; this line exists so a harvest of the PROSE can be caught when it does.',
@@ -9116,8 +9450,8 @@ export function runReconciliationLines(recon) {
  * That distinction is the card's own subject matter: what is left out of a list
  * must be visible in the list.
  */
-export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity }) {
-  const commands = commandsFor({ matchedRows, kindGroups });
+export function derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows = [] }) {
+  const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const { otherCommands, ...spelling } = spellingSplit(commands);
   return {
     tool: 'dispatch-gates',
@@ -9128,6 +9462,13 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
     spelling: otherCommands.length ? { ...spelling, otherCommands } : spelling,
     matched: matchedRows,
     convention: kindGroups,
+    // IN this document and IN `commands`, unlike `pendingChangeset` below: a
+    // declaring family is runnable today and owed by this card, and the whole
+    // reason it has its own key is that it is placed by declaration rather
+    // than by `paths` — a consumer reading `matched` must not find it there
+    // (that would be a lead on every card) and must not have to infer it from
+    // the commands list either (#14189).
+    alwaysRunsPopulation: alwaysRunsRows,
     pendingChangeset: {
       probePath: CHANGESET_PROBE_PATH,
       families: pending.map(({ check, entry }) => ({
@@ -9156,23 +9497,36 @@ export function derivationJson({ paths, matchedRows, kindGroups, pending, counts
  * LOUD. A quiet omission is the defect this mode was added to fix, and adding a
  * new one inside the fix is how that defect reproduces itself one layer up.
  */
-function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts }) {
+function machineReadableOutput(mode, { paths, matchedRows, kindGroups, pending, counts, alwaysRunsRows = [] }) {
   const identity = repoIdentity();
-  const commands = commandsFor({ matchedRows, kindGroups });
+  const commands = commandsFor({ matchedRows, kindGroups, alwaysRunsRows });
   const split = spellingSplit(commands);
 
   if (mode === 'json') {
-    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity }), null, 2));
+    console.log(JSON.stringify(derivationJson({ paths, matchedRows, kindGroups, pending, counts, identity, alwaysRunsRows }), null, 2));
   } else {
     for (const command of commands) console.log(command);
   }
 
   const conventionCount = kindGroups.reduce((n, g) => n + g.gates.filter((x) => x.command).length, 0);
   const ciOnlyRows = matchedRows.filter((row) => row.ciOnly);
+  const alwaysRunsRunnable = alwaysRunsRows.filter((row) => !row.ciOnly && !row.refused);
   console.error(
     `dispatch-gates --${mode}: ${commands.length} command(s) — ${split.pnpm} pnpm, ${split.node} direct node` +
-      `${split.other ? `, ${split.other} neither` : ''} (${matchedRows.length - ciOnlyRows.length} matched by path, ${conventionCount} by change KIND).`,
+      `${split.other ? `, ${split.other} neither` : ''} (${matchedRows.length - ciOnlyRows.length} matched by path, ${conventionCount} by change KIND` +
+      `${alwaysRunsRunnable.length ? `, ${alwaysRunsRunnable.length} declared WHOLE-TREE and named on every card` : ''}).`,
   );
+  // Stated on stderr where every other provenance is stated, and stated even
+  // though these commands ARE on stdout: a consumer counting "matched by path"
+  // against the stdout line count would otherwise find a surplus with no
+  // explanation, which is the arithmetic-with-no-story shape this mode's own
+  // accounting exists to prevent (#14189).
+  if (alwaysRunsRunnable.length) {
+    console.error(
+      `  + those ${alwaysRunsRunnable.length} are placed by their own whole-tree-population declaration, not by these paths — identical on every` +
+        ' card, and outside the matched/silent/undetermined verdicts entirely. Run without --commands/--json to see each one with its reason.',
+    );
+  }
   // The THIRD thing stdout deliberately omits, omitted OUT LOUD for the reason
   // this function's header gives for the other two: a quiet omission is the
   // defect this mode exists to fix (#14004).
@@ -9218,9 +9572,15 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   const matched = new Map();
   const undetermined = [];
   const silent = [];
+  // The fourth bucket (#14189): families placed by their own whole-tree
+  // declaration. `placeFamily` is the ONLY thing that decides which bucket a
+  // family lands in, so a family that declares nothing reaches exactly the
+  // classifier it always reached.
+  const alwaysRuns = [];
   for (const [check, entry] of byCheck) {
-    const { verdict, hits } = classifyEntry(entry, paths);
-    if (verdict === 'matched') matched.set(check, { entry, hits });
+    const { verdict, hits } = placeFamily(entry, paths);
+    if (verdict === 'always-runs') alwaysRuns.push([check, entry]);
+    else if (verdict === 'matched') matched.set(check, { entry, hits });
     else if (verdict === 'undetermined') undetermined.push([check, entry]);
     else silent.push([check, entry]);
   }
@@ -9248,6 +9608,21 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     // (#14004).
     ciOnly: entry.ciOnly ?? null,
   }));
+  // Built the same way `matchedRows` is, and for the same reason: every
+  // rendering below is a reading of these rows, so the human block, the
+  // `--commands` union and the `--json` document cannot disagree about which
+  // families declared a whole-tree population or why (#14189).
+  const alwaysRunsRows = [...alwaysRuns].sort().map(([check, entry]) => ({
+    check,
+    command: runnableInvocation(entry),
+    workflows: [...entry.workflows],
+    reason: entry.wholeTreeReason,
+    // The liveness reading travels ON the row for the same reason the matched
+    // provenance does: the row is a claim, and the reader is owed what backs it.
+    rootWalk: entry.rootWalk ?? null,
+    refused: wholeTreePopulationRefusal(entry),
+    ciOnly: entry.ciOnly ?? null,
+  }));
   const kindGroups = changeKindGates(paths, resolveInvocation);
   // The pending-changeset section is derived in BOTH input modes and is gated
   // on nothing but the answer itself: the PM's paths are a hypothesis with no
@@ -9265,8 +9640,12 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     // answers once — and it would be the answer the reconciliation is judged
     // against, which is the worst possible place to keep a duplicate.
     const recon = runReconciliation({
-      derived: commandsFor({ matchedRows, kindGroups }),
-      ciOnlyCommands: ciOnlyCommandSet(matchedRows),
+      // The whole-tree channel is DERIVED work, so `--ran` holds the runner to
+      // it exactly as it holds them to a matched family: a declaring gate this
+      // card never ran comes back UNRUN, which is the half of the channel that
+      // makes it a contract rather than a note (#14189).
+      derived: commandsFor({ matchedRows, kindGroups, alwaysRunsRows }),
+      ciOnlyCommands: ciOnlyCommandSet(matchedRows, alwaysRunsRows),
       pendingCommands: new Set(pending.map(({ entry }) => runnableInvocation(entry))),
       record: runRecord,
     });
@@ -9280,12 +9659,14 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
       matchedRows,
       kindGroups,
       pending,
+      alwaysRunsRows,
       counts: {
         discovered: byCheck.size,
         workflows: workflows.length,
         matched: matched.size,
         undetermined: undetermined.length,
         silent: silent.length,
+        alwaysRuns: alwaysRuns.length,
         unreachable: unreachable.length,
         swept: swept.length,
       },
@@ -9298,7 +9679,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   // the block it counts) and the reconciliation line below. Recomputing it in
   // either place would be two readings of one derivation, which is the drift
   // this card is about.
-  const recon = familyReconciliation({ matchedRows, kindGroups });
+  const recon = familyReconciliation({ matchedRows, kindGroups, alwaysRunsRows });
 
   console.log(`dispatch-gates: ${byCheck.size} check famil(ies) discovered across ${workflows.length} workflow file(s) — derived at runtime, nothing listed in this script.\n`);
   // The tier verdict prints on EVERY run, hit or not. Printing it only on a hit
@@ -9354,6 +9735,16 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
   if (kindLines.length) {
     console.log('\nConvention-triggered gates (this change KIND moves them; no path derivation can name them):');
     for (const line of kindLines) console.log(line);
+  }
+
+  // ABOVE the reconciliation and BELOW the two per-card sections, because its
+  // commands are inside that total and its rows are not about this card's
+  // paths. Its own heading is the whole point: the same rows on every card,
+  // said to be the same rows on every card (#14189).
+  const alwaysRunsOut = alwaysRunsPopulationLines(alwaysRunsRows);
+  if (alwaysRunsOut.length) {
+    console.log('');
+    for (const line of alwaysRunsOut) console.log(line);
   }
 
   // Directly BELOW the last section that feeds it, and above everything the
@@ -9427,6 +9818,7 @@ function derive(paths, { showResidue = false, mode = 'human', runRecord = [] } =
     matched: matched.size,
     undetermined: undetermined.length,
     silent: silent.length,
+    alwaysRuns: alwaysRuns.length,
     // Neither declaration reaches them: no workflow `paths:` trigger AND no job
     // `if:` that resolves to a paths-filter population (#12956). Counting only
     // the first would keep printing 'no path derivation can narrow them' about
@@ -10100,7 +10492,7 @@ export function bannerLines({ identity, paths = [], drift = null }) {
     `  Families are a property of THAT repo. A card landing in another repo derives nothing here — assert with ${REPO_FLAG} to make this checkable.`,
   ];
   lines.push(...driftLines(drift));
-  const missing = paths.filter((p) => !p.includes('*') && !existsSync(join(identity?.root ?? ROOT, p)));
+  const missing = paths.filter((p) => !p.includes('*') && !existsSync(nodePath.join(identity?.root ?? ROOT, p)));
   if (missing.length > 0) {
     lines.push(
       `  ${missing.length} of ${paths.length} path(s) are absent from this tree: ${missing.slice(0, 6).join(' ')}${missing.length > 6 ? ' …' : ''}`,
@@ -10121,6 +10513,23 @@ export function bannerLines({ identity, paths = [], drift = null }) {
 // derivation, containment) are pinned offline, and the walk is pinned against
 // the tree, in both directions.
 // ---------------------------------------------------------------------------
+
+/**
+ * Returned by `selfTest()` only after its verdict line is printed, and compared
+ * at the dispatch: a `return` that leaves the function above that line prints
+ * NOTHING and still exits 0, because the dispatch discarded the result. Measured
+ * on this file before this guard existed: an early return took the run from
+ * "1288 cases pass" to zero bytes of output and exit 0 — a self-test that never
+ * finished, reported as one that passed.
+ *
+ * The mechanical probe in `scripts/measure-self-test-floor.mjs` cannot read this
+ * file (its anchor matches the first `function selfTest() {` in the source, which
+ * here is a FIXTURE STRING, so the injection lands inside a template literal and
+ * only ever produces a SyntaxError). That is a limit of the instrument, not a
+ * property of this file, and it is why the entry is hand-read there. Anchoring an
+ * early return on the real definition below measures it in one run.
+ */
+const SELF_TEST_VERDICT = 'dispatch-gates self-test reached its verdict';
 
 function selfTest() {
   const cases = [];
@@ -10291,7 +10700,7 @@ function selfTest() {
     '…and it resolves to a file that EXISTS, which is what a flagged key would have broken',
     liveSelfTestFamilies
       .filter(([c]) => c === 'scripts/pm/bare-root-worklist.mjs --self-test')
-      .every(([, e]) => (e.files ?? []).length === 1 && existsSync(join(ROOT, e.files[0]))),
+      .every(([, e]) => (e.files ?? []).length === 1 && existsSync(nodePath.join(ROOT, e.files[0]))),
   );
   // The import narrowing, proven NON-VACUOUS: the module this gate imports
   // really does declare literals, and they really would have reached the tree.
@@ -10300,10 +10709,10 @@ function selfTest() {
   const bareRootEntry = liveSelfTestFamilies.find(([c]) => c === 'scripts/pm/bare-root-worklist.mjs --self-test')?.[1];
   const importedByBareRoot = firstPartyImportTargets(
     'scripts/pm/bare-root-worklist.mjs',
-    readFileSync(join(ROOT, 'scripts/pm/bare-root-worklist.mjs'), 'utf8'),
+    readFileSync(nodePath.join(ROOT, 'scripts/pm/bare-root-worklist.mjs'), 'utf8'),
   );
   const wouldHaveInherited = importedByBareRoot.flatMap((m) =>
-    extractWatchHints(readFileSync(join(ROOT, m), 'utf8'), m),
+    extractWatchHints(readFileSync(nodePath.join(ROOT, m), 'utf8'), m),
   );
   t(
     `the refused inheritance is real — the modules this gate imports declare ${wouldHaveInherited.length} literal(s)`,
@@ -10321,7 +10730,7 @@ function selfTest() {
   // and this measures it through the follow's rule rather than through the raw
   // extractor the case above uses.
   const inheritableFromImports = importedByBareRoot.flatMap((m) => {
-    const src = readFileSync(join(ROOT, m), 'utf8');
+    const src = readFileSync(nodePath.join(ROOT, m), 'utf8');
     const spelled = extractWatchHints(src, m);
     return declaredInheritedPopulation(src, spelled)?.population ?? spelled;
   });
@@ -10361,11 +10770,11 @@ function selfTest() {
   for (const [check, entry] of discoverFamilies().byCheck) {
     if (entry.selfTest) continue;
     for (const f of entry.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
-      const src = readFileSync(join(ROOT, f), 'utf8');
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
+      const src = readFileSync(nodePath.join(ROOT, f), 'utf8');
       for (const mod of firstPartyImportTargets(f, src)) {
         if (!promoted.includes(mod)) continue;
-        const lost = extractWatchHints(readFileSync(join(ROOT, mod), 'utf8'), mod);
+        const lost = extractWatchHints(readFileSync(nodePath.join(ROOT, mod), 'utf8'), mod);
         if (lost.length > 0) subtracted.push(`${check} <- ${mod} (${lost.join(', ')})`);
       }
     }
@@ -10388,8 +10797,8 @@ function selfTest() {
   for (const [check, e] of importClassFamilies) {
     const edges = new Set();
     for (const f of e.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
-      for (const mod of firstPartyImportTargets(f, readFileSync(join(ROOT, f), 'utf8'))) {
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
+      for (const mod of firstPartyImportTargets(f, readFileSync(nodePath.join(ROOT, f), 'utf8'))) {
         if ((e.files ?? []).includes(mod)) continue;
         edges.add(mod);
       }
@@ -10458,8 +10867,8 @@ function selfTest() {
   // the sizes. A red here re-prices the paragraph; it does not fault the
   // derivation.
   const everyPRWorkflow = new Map();
-  for (const wf of readdirSync(join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) {
-    const wfText = readFileSync(join(ROOT, '.github/workflows', wf), 'utf8');
+  for (const wf of readdirSync(nodePath.join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) {
+    const wfText = readFileSync(nodePath.join(ROOT, '.github/workflows', wf), 'utf8');
     // No `paths:` on a workflow that declares `pull_request` is the same
     // reading `discoverFamilies` makes when it drops such a workflow from
     // `triggers` — an unfiltered workflow discriminates nothing, which is
@@ -10514,7 +10923,7 @@ function selfTest() {
   //    match while `existsSync` kept the file closed and the family kept
   //    reading zero hints. Measured on this tree at the fix: 0 phantoms.
   const phantomGateFiles = tsLiveFamilies.flatMap(([check, e]) =>
-    (e.files ?? []).filter((f) => !existsSync(join(ROOT, f))).map((f) => `${check} -> ${f}`),
+    (e.files ?? []).filter((f) => !existsSync(nodePath.join(ROOT, f))).map((f) => `${check} -> ${f}`),
   );
   t(
     `every gate file the derivation names exists on disk${phantomGateFiles.length ? ` — PHANTOM: ${phantomGateFiles.join(' · ')}` : ''}`,
@@ -10541,7 +10950,7 @@ function selfTest() {
   //    zero-file family is one of those composites — never that the count is
   //    zero, which would mean this fix had absorbed a family it cannot honestly
   //    resolve.
-  const rootScriptsMap = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
+  const rootScriptsMap = JSON.parse(readFileSync(nodePath.join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
   const zeroFile = tsLiveFamilies.filter(([, e]) => (e.files ?? []).length === 0);
   const unexplained = zeroFile
     .map(([check]) => [check, rootScriptsMap[check] ?? ''])
@@ -10569,10 +10978,10 @@ function selfTest() {
     if (entry.selfTest) continue;
     for (const f of entry.files ?? []) {
       if (/\.(?:ts|mts|cts)$/.test(f)) continue;
-      if (!existsSync(join(ROOT, f))) continue;
-      for (const mod of firstPartyImportTargets(f, readFileSync(join(ROOT, f), 'utf8'))) {
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
+      for (const mod of firstPartyImportTargets(f, readFileSync(nodePath.join(ROOT, f), 'utf8'))) {
         if (!admittedTs.includes(mod)) continue;
-        const lost = extractWatchHints(readFileSync(join(ROOT, mod), 'utf8'), mod);
+        const lost = extractWatchHints(readFileSync(nodePath.join(ROOT, mod), 'utf8'), mod);
         if (lost.length > 0) tsSubtracted.push(`${check} <- ${mod} (${lost.join(', ')})`);
       }
     }
@@ -10906,7 +11315,7 @@ function selfTest() {
       if (!ANCHOR_CENSUS_EXTENSIONS.test(rel)) continue;
       let text;
       try {
-        text = readFileSync(join(ROOT, rel), 'utf8');
+        text = readFileSync(nodePath.join(ROOT, rel), 'utf8');
       } catch {
         continue;
       }
@@ -10928,7 +11337,7 @@ function selfTest() {
       const rel = census.get(key);
       if (!rel) continue;
       const name = key.slice(rel.length + 2);
-      const src = readFileSync(join(ROOT, rel), 'utf8');
+      const src = readFileSync(nodePath.join(ROOT, rel), 'utf8');
       const alt = withoutAnchor(src, name);
       if (alt === null || compoundAnchorDecls(alt).length !== compoundAnchorDecls(src).length - 1) {
         costly.push(`${key} (the counterfactual rename did not land — this row was NOT measured)`);
@@ -10958,7 +11367,7 @@ function selfTest() {
   // rename that "fixes" either one has to move the ledger row rather than the
   // problem.
   {
-    const selfCensus = compoundAnchorDecls(readFileSync(join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8'));
+    const selfCensus = compoundAnchorDecls(readFileSync(nodePath.join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8'));
     const names = selfCensus.map((d) => d.name);
     t("this module's own masker is in the anchor's population", names.includes('maskSelfTests'));
     t('…and so is the reachability helper beside it', names.includes('selfTestOnlyCallables'));
@@ -11006,7 +11415,7 @@ function selfTest() {
   // directions, so a future edit that deletes the file or empties its
   // declaration cannot leave this green by vacuity.
   const rehearsalPath = 'scripts/pm/release-rehearsal-clone.mjs';
-  const rehearsalAbs = join(ROOT, rehearsalPath);
+  const rehearsalAbs = nodePath.join(ROOT, rehearsalPath);
   t('the fixture-in-helper specimen is still on the tree', existsSync(rehearsalAbs));
   if (existsSync(rehearsalAbs)) {
     const rehearsalHints = extractWatchHints(readFileSync(rehearsalAbs, 'utf8'), rehearsalPath);
@@ -11227,7 +11636,7 @@ function selfTest() {
     'the live spec gate binds the package root the card names',
     packageRootBinding(
       'packages/spec/scripts/check-generated.ts',
-      readFileSync(join(ROOT, 'packages/spec/scripts/check-generated.ts'), 'utf8'),
+      readFileSync(nodePath.join(ROOT, 'packages/spec/scripts/check-generated.ts'), 'utf8'),
       hintTree,
     ) === 'packages/spec',
   );
@@ -11311,7 +11720,7 @@ function selfTest() {
   // LIVE, on this tree: the specimen the card was filed for, driven through
   // `hintCovers` — never through `collapseHint` and never re-implemented.
   const liveSchemaHints = extractWatchHints(
-    readFileSync(join(ROOT, 'packages/spec/scripts/build-schemas.ts'), 'utf8'),
+    readFileSync(nodePath.join(ROOT, 'packages/spec/scripts/build-schemas.ts'), 'utf8'),
     'packages/spec/scripts/build-schemas.ts',
   );
   t(
@@ -11689,19 +12098,19 @@ function selfTest() {
   // gates stops declaring its root, re-point the case at whatever gate then
   // does". Left pointing at the gate it would have gone green over an empty
   // hint list, which is the vacuous-pass shape these cases exist to refuse.
-  const crossPkgHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/cross-package-test-inputs.mjs'), 'utf8'), 'scripts/cross-package-test-inputs.mjs');
+  const crossPkgHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/cross-package-test-inputs.mjs'), 'utf8'), 'scripts/cross-package-test-inputs.mjs');
   // NOT `scripts/check-nul-bytes.mjs`: that gate names that file explicitly
   // too, so the case would pass with the declaration still refused — measured,
   // it survived the ablation. Pick a scripts path reachable ONLY through the
   // declared subtree, or the case pins nothing.
   t('the cross-package declaration table reaches the root scripts dir it declares', crossPkgHints.some((h) => hintCovers(h, 'scripts/pm/dispatch-gates.mjs')));
   t('and the content tree it declares', crossPkgHints.some((h) => hintCovers(h, 'content/docs/getting-started/index.mdx')));
-  const governedHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-governed-merges.mjs'), 'utf8'), 'scripts/pm/check-governed-merges.mjs');
+  const governedHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/pm/check-governed-merges.mjs'), 'utf8'), 'scripts/pm/check-governed-merges.mjs');
   t('the governed-merge gate reaches the published skills catalog it declares', governedHints.some((h) => hintCovers(h, 'skills/objectstack-upgrade/SKILL.md')));
 
   // The card this landed for: the ONLY fragment coverage in the repo, which
   // scored `silent` for every content card while being REQUIRED in lint.yml.
-  const anchorHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'), 'scripts/check-doc-anchors.mjs');
+  const anchorHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'), 'scripts/check-doc-anchors.mjs');
   t('the doc-anchors gate reaches the content page population it declares', anchorHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
   t('and does not thereby claim a path outside that population', !anchorHints.some((h) => hintCovers(h, 'packages/spec/src/index.ts')));
 
@@ -11713,7 +12122,7 @@ function selfTest() {
   // populated `names:` column, which reads as "declared, just not relevant to
   // you" rather than as a blind spot — the reason it survived five same-class
   // fixes without being noticed.
-  const docAuthoringHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-authoring.mjs'), 'utf8'), 'scripts/check-doc-authoring.mjs');
+  const docAuthoringHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/check-doc-authoring.mjs'), 'utf8'), 'scripts/check-doc-authoring.mjs');
   // One case per declared root, because a single one passes for a declaration
   // that dropped the other three — which is the exact shape being fixed. Each
   // path is reachable ONLY through its root's subtree spelling, never through a
@@ -11763,7 +12172,7 @@ function selfTest() {
   // lint.yml — twice at the cost of a p0's CI round (#9391, PR #9695). It now
   // declares the subtree it lints. Read from the real gate, not a fixture: what
   // is being pinned is that the tree still HAS the declaration.
-  const slotHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-slot-lookup-ratchet.mjs'), 'utf8'), 'scripts/check-slot-lookup-ratchet.mjs');
+  const slotHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/check-slot-lookup-ratchet.mjs'), 'utf8'), 'scripts/check-slot-lookup-ratchet.mjs');
   t('the slot-lookup ratchet reaches the package source population it declares', slotHints.some((h) => hintCovers(h, 'packages/services/service-datasource/src/admin-routes.ts')));
   // The negative half is the load-bearing one for a declaration this broad: a
   // gate named on EVERY card is the louder version of naming none. `packages/**`
@@ -11781,7 +12190,7 @@ function selfTest() {
   // zero gates, on the largest ceiling in that map at headroom 0. It declares
   // the subtree spelling instead. Read from the real gate, not a fixture: what
   // is pinned is that the tree still HAS the declaration.
-  const lineRatchetHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-skill-line-ratchet.mjs'), 'utf8'), 'scripts/pm/check-skill-line-ratchet.mjs');
+  const lineRatchetHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/pm/check-skill-line-ratchet.mjs'), 'utf8'), 'scripts/pm/check-skill-line-ratchet.mjs');
   t('the pm line ratchet reaches the repo-root instruction file it declares', lineRatchetHints.some((h) => hintCovers(h, 'AGENTS.md')));
   // The negative half, and the reason this is a DECLARATION rather than an
   // extractor change. Widening the extractor to admit bare top-level `*.md`
@@ -11817,7 +12226,7 @@ function selfTest() {
     ['the doc-anchors gate (ARCHITECTURE.md half)', 'scripts/check-doc-anchors.mjs', 'ARCHITECTURE.md'],
   ];
   for (const [what, gate, rootFile] of rootFileDeclarations) {
-    const gateHints = extractWatchHints(readFileSync(join(ROOT, gate), 'utf8'), gate);
+    const gateHints = extractWatchHints(readFileSync(nodePath.join(ROOT, gate), 'utf8'), gate);
     t(`${what} reaches the repo-root file it declares (${rootFile})`, gateHints.some((h) => hintCovers(h, rootFile)));
     // The negative half, and the reason each of these is a DECLARATION rather
     // than an extractor change: a declaration must buy its own file and NOT the
@@ -11829,9 +12238,9 @@ function selfTest() {
   // …and the root files stay separated from each other: the governed-merge
   // register is the only one of the six that declares two, and nothing here may
   // reach a root file its gate does not read.
-  const proseHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/pm/check-governed-prose.mjs'), 'utf8'), 'scripts/pm/check-governed-prose.mjs');
+  const proseHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/pm/check-governed-prose.mjs'), 'utf8'), 'scripts/pm/check-governed-prose.mjs');
   t('a one-root declaration does not reach the other root file', !proseHints.some((h) => hintCovers(h, 'CLAUDE.md')));
-  const anchorRootHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'), 'scripts/check-doc-anchors.mjs');
+  const anchorRootHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/check-doc-anchors.mjs'), 'utf8'), 'scripts/check-doc-anchors.mjs');
   t('and the doc-anchors pair claims neither instruction file', !anchorRootHints.some((h) => hintCovers(h, 'AGENTS.md') || hintCovers(h, 'CLAUDE.md')));
 
   // A THIRD shape of the same class, and the one with the worst failure
@@ -11855,7 +12264,7 @@ function selfTest() {
   // delete the case together with the literal — never keep it green by
   // re-pointing it at a tree the gate never reads.
   const llmsHints = extractWatchHints(
-    readFileSync(join(ROOT, 'packages/spec/scripts/check-llms-txt.ts'), 'utf8'),
+    readFileSync(nodePath.join(ROOT, 'packages/spec/scripts/check-llms-txt.ts'), 'utf8'),
     'packages/spec/scripts/check-llms-txt.ts',
   );
   const llmsReaches = (f) => llmsHints.some((h) => hintCovers(h, f));
@@ -11899,7 +12308,7 @@ function selfTest() {
   // still HAS the declaration. If this gate stops walking that root, delete the
   // declaration and these cases together — never keep them green by re-pointing
   // at a gate that never read it.
-  const roleWordHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-role-word.mjs'), 'utf8'), 'scripts/check-role-word.mjs');
+  const roleWordHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/check-role-word.mjs'), 'utf8'), 'scripts/check-role-word.mjs');
   t('the role-word ratchet reaches the published skills catalog it declares', roleWordHints.some((h) => hintCovers(h, 'skills/objectstack-platform/SKILL.md')));
   t('and still reaches the content half it always named', roleWordHints.some((h) => hintCovers(h, 'content/docs/deployment/cli.mdx')));
   // The negative halves, and the reason this is a DECLARATION and not an
@@ -11937,7 +12346,7 @@ function selfTest() {
   //
   // Read from the real gate, not a fixture: what is pinned is that the tree
   // still HAS the declaration.
-  const docFormulaHints = extractWatchHints(readFileSync(join(ROOT, 'packages/lint/scripts/check-doc-formula-expressions.mjs'), 'utf8'), 'packages/lint/scripts/check-doc-formula-expressions.mjs');
+  const docFormulaHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'packages/lint/scripts/check-doc-formula-expressions.mjs'), 'utf8'), 'packages/lint/scripts/check-doc-formula-expressions.mjs');
   // One case per declared root, because a single one passes for a declaration
   // that dropped the other two. Each path is reachable ONLY through its root's
   // subtree spelling, never through a SKIP_PATHS literal.
@@ -12808,7 +13217,7 @@ function selfTest() {
   // case still passes (it asserts discovery, not the YAML style); if the gate
   // moves out of pr-automation.yml, re-point the case at its new home rather
   // than deleting it.
-  const liveWf = readFileSync(join(ROOT, '.github/workflows/pr-automation.yml'), 'utf8');
+  const liveWf = readFileSync(nodePath.join(ROOT, '.github/workflows/pr-automation.yml'), 'utf8');
   const liveInvs = extractCheckInvocations(liveWf, 'pr-automation.yml').map((i) => i.check);
   t('the live Check Changeset job discovers its ADR-0087 gate', liveInvs.includes('scripts/check-adr-0087-registration.mjs'));
   t('the live Check Changeset job discovers its empty-changeset gate', liveInvs.includes('scripts/check-empty-changeset.mjs'));
@@ -12817,7 +13226,7 @@ function selfTest() {
   // gate through the ordinary watch-hint match. That gate names `.changeset` in
   // its own source, so this asserts the whole chain (discover -> resolve ->
   // hint -> cover) rather than the parser alone.
-  const adrHints = extractWatchHints(readFileSync(join(ROOT, 'scripts/check-adr-0087-registration.mjs'), 'utf8'), 'scripts/check-adr-0087-registration.mjs');
+  const adrHints = extractWatchHints(readFileSync(nodePath.join(ROOT, 'scripts/check-adr-0087-registration.mjs'), 'utf8'), 'scripts/check-adr-0087-registration.mjs');
   t('a .changeset path is covered by the ADR-0087 gate own hints', adrHints.some((h) => hintCovers(h, '.changeset/some-breaking-change.md')));
 
   // ── The measured population (#8478), against the REAL scripts ─────────────
@@ -12833,7 +13242,7 @@ function selfTest() {
   // check-adr-0087-registration 34 -> 6, check-skill-id-lint 2 -> 2 (already
   // clean, the control). Across all 66 discoverable gate scripts: 1144 hints ->
   // 473, with no hint gained that any repo path can reach.
-  const readHints = (rel) => extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'), rel);
+  const readHints = (rel) => extractWatchHints(readFileSync(nodePath.join(ROOT, rel), 'utf8'), rel);
   const covers = (hs, p) => hs.some((h) => hintCovers(h, p));
 
   t(
@@ -12944,7 +13353,7 @@ function selfTest() {
   );
   // The shared module is a real file, so the two claims above are live rather
   // than a pair of matching strings.
-  t('the declared shared module exists', existsSync(join(ROOT, SHARED)));
+  t('the declared shared module exists', existsSync(nodePath.join(ROOT, SHARED)));
 
   // The same coupling once more, for the frame-sync gate whose COPIES table
   // the 2026-08-20 clause-① narrowing made a DEFINING input of the tier
@@ -12957,7 +13366,7 @@ function selfTest() {
     'the dispatch-gates gate declares the frame-sync module the tier mandate is defined against',
     covers(readHints('scripts/pm/check-dispatch-gates.mjs'), FRAME),
   );
-  t('the declared frame-sync module exists', existsSync(join(ROOT, FRAME)));
+  t('the declared frame-sync module exists', existsSync(nodePath.join(ROOT, FRAME)));
 
   // The same shape again, for the TYPE-registry edge of walkMetadataForms
   // (#9144) — two specific, known files rather than a runtime-enumerated
@@ -12982,8 +13391,8 @@ function selfTest() {
   );
   // Both declared paths are real files, so the four claims above are live
   // rather than a pair of matching strings.
-  t('the declared type registry module exists', existsSync(join(ROOT, TYPE_REGISTRY)));
-  t('the declared form registry module exists', existsSync(join(ROOT, FORM_REGISTRY)));
+  t('the declared type registry module exists', existsSync(nodePath.join(ROOT, TYPE_REGISTRY)));
+  t('the declared form registry module exists', existsSync(nodePath.join(ROOT, FORM_REGISTRY)));
 
   // ── A family's OWN script files as match keys (#8509) ─────────────────────
   //
@@ -13018,7 +13427,7 @@ function selfTest() {
   // gate whose entire job is running that script's self-test names the script
   // there and nowhere in the script's source, which is why the identity key is
   // the only thing that can reach it.
-  const liveRootScripts = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
+  const liveRootScripts = JSON.parse(readFileSync(nodePath.join(ROOT, 'package.json'), 'utf8')).scripts ?? {};
   const selfTestGateFiles = resolveCheckToFiles('check:changeset-gate-self-tests', liveRootScripts);
   t('the changeset self-test gate really resolves to the script the card named', selfTestGateFiles.includes('scripts/check-empty-changeset.mjs'));
   t(
@@ -13249,7 +13658,7 @@ function selfTest() {
   // different answer from the LIVE one. If the console job is renamed or its
   // filter re-spelled, re-point these cases — do not delete them: they are the
   // measured statement that a pin bump derives its own gates.
-  const liveCiPops = jobPathPopulations(readFileSync(join(ROOT, '.github/workflows/ci.yml'), 'utf8'), 'ci.yml');
+  const liveCiPops = jobPathPopulations(readFileSync(nodePath.join(ROOT, '.github/workflows/ci.yml'), 'utf8'), 'ci.yml');
   const livePinJob = liveCiPops.find((p) => p.checks.includes('check:console-sha'));
   t('the live console job is found by the gate it runs', Boolean(livePinJob));
   t('and it is named Console Pin Gate — the name branch protection and the Checks tab use', livePinJob?.name === 'Console Pin Gate');
@@ -13323,7 +13732,7 @@ function selfTest() {
   // this (a `packages/objectql/**` path, which is NOT in the list at all — the
   // job ran because that PR also touched a path that is). If this workflow is
   // renamed or its gates move, re-point these cases; do not delete them.
-  const livenessWf = readFileSync(join(ROOT, '.github/workflows/spec-liveness-check.yml'), 'utf8');
+  const livenessWf = readFileSync(nodePath.join(ROOT, '.github/workflows/spec-liveness-check.yml'), 'utf8');
   const livenessTriggers = extractTriggerPaths(livenessWf);
   t('the liveness workflow really declares a path filter', livenessTriggers.length > 0);
   const livenessFamilies = extractCheckInvocations(livenessWf, 'spec-liveness-check.yml').map((i) => i.check);
@@ -13372,8 +13781,8 @@ function selfTest() {
   // "every name in the table is a family the workflows really run", and it needs
   // the live population to mean anything.
   const liveFamilies = new Set();
-  for (const wf of readdirSync(join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) {
-    for (const i of extractCheckInvocations(readFileSync(join(ROOT, '.github/workflows', wf), 'utf8'), wf)) {
+  for (const wf of readdirSync(nodePath.join(ROOT, '.github/workflows')).filter((f) => /\.ya?ml$/.test(f))) {
+    for (const i of extractCheckInvocations(readFileSync(nodePath.join(ROOT, '.github/workflows', wf), 'utf8'), wf)) {
       liveFamilies.add(i.check);
     }
   }
@@ -13422,7 +13831,7 @@ function selfTest() {
   const APPS_TEST = 'apps/docs/src/x.test.ts';                      // no tracked member today
   t('the gate is discovered with hints at all, so these cases are not vacuous', (xpkgEntry?.hints ?? []).length > 0);
   t('both residue specimens are real tracked files, so the negatives are live rather than a pair of matching strings',
-    existsSync(join(ROOT, OUTSIDE_PACKAGES)) && existsSync(join(ROOT, TSX_TEST)));
+    existsSync(nodePath.join(ROOT, OUTSIDE_PACKAGES)) && existsSync(nodePath.join(ROOT, TSX_TEST)));
   t('the hint route really does reach an ordinary packages test file — the redundancy #12300 recovered is real',
     covers(xpkgEntry.hints, 'packages/spec/src/x.test.ts'));
   t('but no hint of this gate reaches a test file outside packages/**', !covers(xpkgEntry.hints, OUTSIDE_PACKAGES));
@@ -13492,11 +13901,11 @@ function selfTest() {
   const REF = ['origin', 'main'].join('/');
   const refSpellers = [ratchetEntries.get(QOE), ratchetEntries.get(WM)]
     .flatMap((e) => e.files ?? [])
-    .filter((f) => existsSync(join(ROOT, f)) && readFileSync(join(ROOT, f), 'utf8').includes(`'${REF}'`));
+    .filter((f) => existsSync(nodePath.join(ROOT, f)) && readFileSync(nodePath.join(ROOT, f), 'utf8').includes(`'${REF}'`));
   t(`both ratchet sources still spell ${REF} (${refSpellers.length}), so the next case is about the extractor and not a missing literal`,
     refSpellers.length === 2);
   t(`…and not one of them yields it as a hint, which is why no row here may name it`,
-    refSpellers.every((f) => !extractWatchHints(readFileSync(join(ROOT, f), 'utf8'), f).includes(REF)));
+    refSpellers.every((f) => !extractWatchHints(readFileSync(nodePath.join(ROOT, f), 'utf8'), f).includes(REF)));
 
   // ── The check-family coverage guard (#9187) ───────────────────────────────
   //
@@ -13612,6 +14021,208 @@ function selfTest() {
     declaredNoPathPopulation('// see the dispatch-gates: no-path-population -- marker for how to opt out\n') === null,
   );
 
+  // ── The gate-level WHOLE-TREE declaration (#14189) ────────────────────────
+  //
+  // The marker above says "this gate names no path". This one says the exact
+  // opposite — "this gate reads every path" — and it exists because a gate
+  // whose population is the whole tree had no truthful thing to say: the
+  // honest literal is "every file", which this file's header prices as 22
+  // leads and refuses. Every pin below is paired with the failure it catches;
+  // the placement pins are the discriminating ones, and the mutation that
+  // reddens them is deleting the declaration branch from `placeFamily`.
+  t(
+    'a whole-tree declaration reads its reason back',
+    declaredWholeTreePopulation('// dispatch-gates: whole-tree-population -- it sweeps git ls-files\n')
+      === 'it sweeps git ls-files',
+  );
+  t(
+    'the shell comment spelling is read too (the two markers tolerate the same comment forms, deliberately)',
+    declaredWholeTreePopulation('#!/usr/bin/env bash\n# dispatch-gates: whole-tree-population -- a shell gate reason\n')
+      === 'a shell gate reason',
+  );
+  t('no marker present reads as no declared whole-tree population', declaredWholeTreePopulation('// just a comment\n') === null);
+  t(
+    'the marker with no reason text does not count as declared (the same refusal both other markers make, and for the same reason)',
+    declaredWholeTreePopulation('// dispatch-gates: whole-tree-population\n') === null,
+  );
+  t(
+    'the marker must be its OWN line — prose ABOUT the convention is not a declaration under it',
+    declaredWholeTreePopulation('// see the dispatch-gates: whole-tree-population -- marker for the inverse case\n') === null,
+  );
+  // The two markers are OPPOSITE claims and must never read as each other. A
+  // shared prefix and a sibling regex is exactly the shape where one parser
+  // quietly answers for both.
+  t(
+    'a no-path-population declaration does NOT read as a whole-tree one',
+    declaredWholeTreePopulation('// dispatch-gates: no-path-population -- CI runs the self-test only\n') === null,
+  );
+  t(
+    'and a whole-tree declaration does NOT read as a no-path one',
+    declaredNoPathPopulation('// dispatch-gates: whole-tree-population -- it sweeps git ls-files\n') === null,
+  );
+
+  // The liveness half. Each published spelling is pinned to the shape it was
+  // written for, and each pin names the gate it was read off.
+  t(
+    'limb A reads the git enumeration of the tracked corpus (check-nul-bytes, check-refd-timer-probe, check-closing-keyword-parity)',
+    repoRootWalkSpelling("const out = execFileSync('git', ['ls-files', '-z'], { cwd: root });")
+      === REPO_ROOT_WALK_SPELLINGS[0].label,
+  );
+  t(
+    'limb B reads a walk CALLED on the repo-root binding (check-watch-hint-literal)',
+    repoRootWalkSpelling('const { rows } = audit(walk(REPO_ROOT));') === REPO_ROOT_WALK_SPELLINGS[1].label,
+  );
+  t(
+    'limb C reads a walk whose DEFAULT PARAMETER is the repo-root binding (check-comment-mask-corpus, check-refd-timer-probe)',
+    repoRootWalkSpelling('export function collectSources(root = REPO_ROOT) { return walk(root); }')
+      === REPO_ROOT_WALK_SPELLINGS[2].label,
+  );
+  // The measured tightening. Written to accept a trailing argument, limb B
+  // selected `resolve(REPO_ROOT, maskerPath)` — a path BUILD — and would have
+  // vouched for practically any gate holding a REPO_ROOT constant, which is a
+  // liveness check that cannot fail.
+  t(
+    'a path BUILD off the repo root is not a walk — the root must be the WHOLE argument',
+    repoRootWalkSpelling("const target = resolve(REPO_ROOT, maskerPath);\nconst dir = join(REPO_ROOT, 'scripts');") === null,
+  );
+  // What a gate SAYS is not what it READS — the same normalization
+  // `payloadEnvDependence` applies, and the same two ways to fail it.
+  t(
+    'a gate that only DESCRIBES a whole-tree walk in prose does not pass liveness',
+    repoRootWalkSpelling("// this gate used to run git ls-files over walk(REPO_ROOT)\nconst x = 1;\n") === null,
+  );
+  t(
+    "nor does one whose --self-test body stages a fixture tree (the self-test is not the gate's work)",
+    repoRootWalkSpelling("function selfTest() {\n  execFileSync('git', ['ls-files', '-z'], { cwd: tmp });\n}\n") === null,
+  );
+  // The live specimen for the NEGATIVE direction: a walk seeded at a bounded
+  // subtree. check-self-test-workflow-commands.mjs is exactly this shape, and
+  // it is why #14325's census of six is a census of five here.
+  t(
+    'a walk seeded at a bounded subtree is not a repo-root walk',
+    repoRootWalkSpelling("const scriptsDir = join(ROOT, 'scripts');\nconst files = walkScripts(scriptsDir);") === null,
+  );
+
+  // The refusals — the two contradictions the derivation must not resolve on
+  // the gate's behalf.
+  const wtLive = { wholeTreeReason: 'sweeps the tree', rootWalk: REPO_ROOT_WALK_SPELLINGS[0].label, noPopulationReason: null };
+  t('a family declaring nothing is refused nothing', wholeTreePopulationRefusal({ wholeTreeReason: null }) === null);
+  t('a declaration backed by a root walk stands', wholeTreePopulationRefusal(wtLive) === null);
+  t(
+    'a declaration with NO root walk behind it is refused, and the refusal publishes the recognised spellings',
+    (() => {
+      const why = wholeTreePopulationRefusal({ ...wtLive, rootWalk: null });
+      return typeof why === 'string'
+        && REPO_ROOT_WALK_SPELLINGS.every((sp) => why.includes(sp.label))
+        && why.includes('EVERY card');
+    })(),
+  );
+  t(
+    'declaring BOTH whole-tree and no-path population is a contradiction, refused rather than resolved by a coin toss',
+    (wholeTreePopulationRefusal({ ...wtLive, noPopulationReason: 'CI runs the self-test only' }) ?? '')
+      .includes('BOTH whole-tree-population and no-path-population'),
+  );
+
+  // Placement. These are the pins the mutation reddens: delete the
+  // `wholeTreeReason` branch from `placeFamily` and every one of them fails.
+  const wtEntry = { files: ['scripts/check-nul-bytes.mjs'], hints: ['scripts/check-nul-bytes.mjs'], wholeTreeReason: 'sweeps the tree' };
+  t('a declaring family is placed as always-runs', placeFamily(wtEntry, ['packages/rest/src/server.ts']).verdict === 'always-runs');
+  t(
+    'and its placement does not vary by card — that is the whole claim',
+    ['docs/adr/0001-x.md', 'content/docs/index.mdx', 'scripts/check-nul-bytes.mjs', 'pnpm-workspace.yaml']
+      .every((p) => placeFamily(wtEntry, [p]).verdict === 'always-runs'),
+  );
+  t(
+    'NOT matched even for a card editing the gate\'s own script, where the identity key would otherwise hit',
+    classifyEntry(wtEntry, ['scripts/check-nul-bytes.mjs']).verdict === 'matched'
+      && placeFamily(wtEntry, ['scripts/check-nul-bytes.mjs']).verdict !== 'matched',
+  );
+  t(
+    'NOT silent and NOT undetermined either — the two buckets it used to fall into by accident',
+    !['silent', 'undetermined'].includes(placeFamily(wtEntry, ['packages/rest/src/server.ts']).verdict),
+  );
+  t('a declaring family carries no hits, so no rendering can print a lead for it', placeFamily(wtEntry, ['scripts/check-nul-bytes.mjs']).hits.length === 0);
+  // The byte-identity half, and it is the constraint the card carries: this
+  // channel must not move a single NON-declaring family. `placeFamily`
+  // delegates unchanged, and this pin is what holds it to that.
+  t(
+    'a family that declares nothing is placed byte-for-byte as classifyEntry places it',
+    [
+      { files: ['scripts/check-silent.mjs'], hints: ['packages/spec/src'] },
+      { files: ['scripts/check-empty.mjs'], hints: [] },
+      { files: ['scripts/check-hit.mjs'], hints: ['packages/rest'] },
+    ].every((e) => ['packages/rest/src/server.ts', 'docs/adr/0001-x.md', 'scripts/check-hit.mjs', 'packages/spec/src/index.ts']
+      .every((p) => JSON.stringify(placeFamily(e, [p])) === JSON.stringify(classifyEntry(e, [p])))),
+  );
+
+  // The union and the reconciliation.
+  const wtRow = { check: 'check:nul-bytes', command: 'pnpm check:nul-bytes', workflows: ['lint.yml'], reason: 'sweeps the tree', rootWalk: REPO_ROOT_WALK_SPELLINGS[0].label, refused: null, ciOnly: null };
+  t(
+    'a declaring family IS in the runnable union --commands prints, on a card whose paths reach nothing else',
+    commandsFor({ matchedRows: [], kindGroups: [], alwaysRunsRows: [wtRow] }).includes('pnpm check:nul-bytes'),
+  );
+  t(
+    'a CI-MEASURED declaring family contributes NO command — the exclusion follows the command, not the section',
+    commandsFor({ matchedRows: [], kindGroups: [], alwaysRunsRows: [{ ...wtRow, ciOnly: { env: 'GITHUB_EVENT_PATH' } }] }).length === 0,
+  );
+  const wtRecon = familyReconciliation({
+    matchedRows: [{ check: 'check:x', command: 'pnpm check:x', workflows: [], via: [], ciOnly: null }],
+    kindGroups: [],
+    alwaysRunsRows: [wtRow],
+  });
+  t('the reconciliation counts the whole-tree channel as its own term and still closes', wtRecon.total === 2 && wtRecon.alwaysRuns === 1 && wtRecon.alwaysRunsOnly === 1);
+  t(
+    'and counts a command reached BOTH ways ONCE — the same dedupe the `both` term makes one column over',
+    (() => {
+      const r = familyReconciliation({
+        matchedRows: [{ check: 'check:nul-bytes', command: 'pnpm check:nul-bytes', workflows: [], via: [], ciOnly: null }],
+        kindGroups: [],
+        alwaysRunsRows: [wtRow],
+      });
+      return r.total === 1 && r.alwaysRuns === 1 && r.alwaysRunsOnly === 0;
+    })(),
+  );
+  t(
+    'the reconciliation lines STATE the third term rather than leaving the arithmetic unexplained',
+    familyReconciliationLines(wtRecon).some((l) => l.includes('DECLARED whole-tree (the always-runs block)'))
+      && familyReconciliationLines(wtRecon).some((l) => l.includes('DECLARE that their population is the WHOLE TREE')),
+  );
+
+  // The rendering.
+  const wtLines = alwaysRunsPopulationLines([wtRow]);
+  t('the always-runs section names the gate, its reason and the liveness spelling that vouches for it', wtLines.some((l) => l.includes('pnpm check:nul-bytes') && l.includes('sweeps the tree')) && wtLines.some((l) => l.includes(REPO_ROOT_WALK_SPELLINGS[0].label)));
+  t('and says out loud that these are NOT leads', wtLines.some((l) => l.includes('NOT leads')));
+  t(
+    'its heading cannot be confused with the always-runs STEP tail, which opens on the same three words',
+    wtLines[0].includes('Always runs (declared population)') && wtLines[0].includes('Not the always-runs STEP tail'),
+  );
+  t(
+    'a REFUSED declaration prints as refused rather than vanishing from every rendering',
+    alwaysRunsPopulationLines([{ ...wtRow, refused: 'declares whole-tree-population and its own source carries no recognised repo-root walk' }])
+      .some((l) => l.includes('REFUSED')),
+  );
+  t('no declaring family, no section', alwaysRunsPopulationLines([]).length === 0);
+
+  // The residue partition. A fourth placement wired into the derivation and
+  // not into this sum shrinks the residue silently, which is the exact failure
+  // residueLines' own throw exists to catch.
+  const wtResidue = residueLines({
+    discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 50, alwaysRuns: 5,
+    unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1,
+  });
+  t('the residue accounts for the whole-tree bucket as a fourth term', wtResidue.some((l) => l.includes('5 always-runs')));
+  t(
+    'and REFUSES a derivation that placed families it did not count',
+    (() => {
+      try {
+        residueLines({ discovered: 98, documentedNoPopulation: 0, matched: 8, undetermined: 35, silent: 50, alwaysRuns: 0, unfiltered: 80, unreachable: 5, swept: 6000, artifactRosters: 4, invertedRosters: 1 });
+        return false;
+      } catch (err) {
+        return /residue accounting is short/.test(err.message) && /always-runs/.test(err.message);
+      }
+    })(),
+  );
+
   // ── The followed-module inherited-population declaration (#11556) ─────────
   //
   // The two markers above are a GATE's declarations about itself. This one is a
@@ -13701,7 +14312,7 @@ function selfTest() {
   // that it holds for THIS module — the one measured specimen. Delete the
   // marker line and these cases redden instead of 2632 fabricated pairs coming
   // back silently for the next gate that imports the tool.
-  const ownToolSource = readFileSync(join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8');
+  const ownToolSource = readFileSync(nodePath.join(ROOT, 'scripts/pm/dispatch-gates.mjs'), 'utf8');
   const ownDeclared = declaredInheritedPopulation(ownToolSource);
   // Read through `?.` on purpose: deleting the marker line must render as a
   // NAMED failing case, not as a TypeError that aborts the run and takes every
@@ -13751,7 +14362,7 @@ function selfTest() {
     .filter((f) => f.startsWith('scripts/') && /\.(mjs|mts|js|sh)$/.test(f))
     // Read from the MODULE BODY, so the fixture markers above — which live
     // inside this very self-test — are not counted as live declarations.
-    .filter((f) => INHERITED_POPULATION_MARKER.test(maskSelfTests(readFileSync(join(ROOT, f), 'utf8'))))
+    .filter((f) => INHERITED_POPULATION_MARKER.test(maskSelfTests(readFileSync(nodePath.join(ROOT, f), 'utf8'))))
     .sort();
   t(
     `exactly the two priced modules in the scripts tree carry the declaration (${declaringModules.join(' · ') || 'none'})`,
@@ -13818,6 +14429,36 @@ function selfTest() {
     declaredEmpty.every(([, e]) => typeof e.noPopulationReason === 'string' && e.noPopulationReason.length > 0),
   );
 
+  // The live half of the WHOLE-TREE channel (#14189), held to the same
+  // standard and for the same reason: a declaration is a claim about a gate,
+  // so it is graded against the real tree. The direction that costs here is a
+  // declaration that rots into a lie — the gate stops sweeping the tree, keeps
+  // the marker, and a wrong row goes out on every card forever.
+  const declaredWholeTree = [...liveDiscovery.byCheck].filter(([, e]) => e.wholeTreeReason);
+  t(
+    `the live tree carries at least one whole-tree declaration (the guard is not vacuous; found ${declaredWholeTree.length})`,
+    declaredWholeTree.length > 0,
+  );
+  t(
+    'every live whole-tree declaration carries a non-empty reason',
+    declaredWholeTree.every(([, e]) => typeof e.wholeTreeReason === 'string' && e.wholeTreeReason.length > 0),
+  );
+  const wtRefused = declaredWholeTree
+    .map(([c, e]) => [c, wholeTreePopulationRefusal(e)])
+    .filter(([, why]) => why);
+  t(
+    `every live whole-tree declaration is BACKED by a repo-root walk in its own source and contradicts no other marker (refused: ${wtRefused.map(([c]) => c).join(', ') || 'none'})`,
+    wtRefused.length === 0,
+  );
+  // The placement claim, live: whatever card is being derived, a declaring
+  // family is out of all three verdicts. Two unrelated probe surfaces, because
+  // the claim is precisely that the answer does not depend on the card.
+  t(
+    'no live declaring family lands in matched, silent or undetermined for any card',
+    ['packages/rest/src/server.ts', 'docs/adr/0112-x.md', 'scripts/check-nul-bytes.mjs'].every((p) =>
+      declaredWholeTree.every(([, e]) => placeFamily(e, [p]).verdict === 'always-runs')),
+  );
+
   // ── The CI-MEASURED-ONLY shape (#14004) ───────────────────────────────────
   //
   // The two markers above are DECLARATIONS a gate carries. This one is the
@@ -13840,7 +14481,7 @@ function selfTest() {
   // way, and the whole classification is about THAT file.
   t(
     'LIVE: the queue guard\'s own source still carries the payload dependence this reads',
-    payloadEnvDependence(readFileSync(join(ROOT, 'scripts/pm/check-governed-queue-guard.mjs'), 'utf8')) === 'GITHUB_EVENT_PATH',
+    payloadEnvDependence(readFileSync(nodePath.join(ROOT, 'scripts/pm/check-governed-queue-guard.mjs'), 'utf8')) === 'GITHUB_EVENT_PATH',
   );
 
   // limb 2, both directions. It selects 43 families on this tree ALONE, so
@@ -13946,7 +14587,7 @@ function selfTest() {
   // A pin whose specimen is chosen by iteration order can be true of the tree
   // and silent about the rule.
   const liveGateFiles = new Set([...liveDiscovery.byCheck.values()].flatMap((e) => e.files ?? []));
-  const liveSource = (rel) => readFileSync(join(ROOT, rel), 'utf8');
+  const liveSource = (rel) => readFileSync(nodePath.join(ROOT, rel), 'utf8');
   // A followed module's hints AS A FOLLOWER RECEIVES THEM. `discoverFamilies`
   // reads `declaredInheritedPopulation` at this seam (`hintsOfModule`), so a
   // reconstruction that re-scanned the raw literals instead would redden for
@@ -14019,7 +14660,7 @@ function selfTest() {
     const direct = [];
     const manifests = [];
     for (const f of entry.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
       const source = liveSource(f);
       own.push(...extractWatchHints(source, f, { tree: liveTree }));
       for (const mod of firstPartyImportTargets(f, source)) {
@@ -14087,7 +14728,7 @@ function selfTest() {
   const gateModuleEdges = [];
   for (const [check, entry] of liveDiscovery.byCheck) {
     for (const f of entry.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
       for (const mod of liveTargets(f)) {
         if (liveGateFiles.has(mod) && !(entry.files ?? []).includes(mod)) gateModuleEdges.push([check, mod]);
       }
@@ -14210,7 +14851,7 @@ function selfTest() {
   for (const [check, entry] of liveDiscovery.byCheck) {
     const expected = [];
     for (const f of entry.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
       for (const r of readProgramTargetsInSource(f, liveSource(f), (x) => liveTree.files.has(x))) {
         if (!expected.includes(r)) expected.push(r);
       }
@@ -14253,7 +14894,7 @@ function selfTest() {
   const dataReads = [];
   for (const [check, entry] of liveDiscovery.byCheck) {
     for (const f of entry.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
       for (const r of anchoredReadTargets(f, liveSource(f), (x) => liveTree.files.has(x))) {
         if (!PROGRAM_TEXT_TARGET.test(r)) dataReads.push(`${check} <- ${r}`);
       }
@@ -14396,7 +15037,7 @@ function selfTest() {
     const expected = [];
     if (!entry.selfTest) {
       for (const f of entry.files ?? []) {
-        if (!existsSync(join(ROOT, f))) continue;
+        if (!existsSync(nodePath.join(ROOT, f))) continue;
         for (const r of spawnedProgramTargets(f, liveSource(f), (x) => liveTree.files.has(x))) {
           if (!liveGateFiles.has(r) && !expected.includes(r)) expected.push(r);
         }
@@ -14417,7 +15058,7 @@ function selfTest() {
   const runGateEdges = [];
   for (const [check, entry] of liveDiscovery.byCheck) {
     for (const f of entry.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
       for (const r of spawnedProgramTargets(f, liveSource(f), (x) => liveTree.files.has(x))) {
         if (liveGateFiles.has(r) && !(entry.files ?? []).includes(r)) runGateEdges.push([check, r]);
       }
@@ -14633,7 +15274,7 @@ function selfTest() {
     const expected = [];
     if (!entry.selfTest) {
       for (const f of entry.files ?? []) {
-        if (!existsSync(join(ROOT, f))) continue;
+        if (!existsSync(nodePath.join(ROOT, f))) continue;
         for (const p of packageManifestTargets(f, liveSource(f), (x) => liveTree.files.has(x))) {
           if (!expected.includes(p)) expected.push(p);
         }
@@ -14654,7 +15295,7 @@ function selfTest() {
   const manifestNonReaders = [];
   for (const [check, entry] of liveDiscovery.byCheck) {
     for (const f of entry.files ?? []) {
-      if (!existsSync(join(ROOT, f))) continue;
+      if (!existsSync(nodePath.join(ROOT, f))) continue;
       const source = liveSource(f);
       const bare = anchoredReadTargets(f, maskSelfTests(source), (x) => liveTree.files.has(x)).filter((x) =>
         /(?:^|\/)package\.json$/.test(x),
@@ -14768,7 +15409,7 @@ function selfTest() {
   const CLI_TEST_SPECIMEN = 'packages/cli/test/authoring-rule-command-parity.test.ts';
   t(
     'both CLI specimens are real tracked files, so the two directions below are live',
-    existsSync(join(ROOT, CLI_SRC_SPECIMEN)) && existsSync(join(ROOT, CLI_TEST_SPECIMEN)),
+    existsSync(nodePath.join(ROOT, CLI_SRC_SPECIMEN)) && existsSync(nodePath.join(ROOT, CLI_TEST_SPECIMEN)),
   );
   for (const check of ['check:i18n', 'check:i18n-coverage']) {
     const cliEntry = liveDiscovery.byCheck.get(check);
@@ -14786,10 +15427,10 @@ function selfTest() {
   // family or declares why not. This is what actually fails CI the day a new
   // paths-filtered workflow adds an undiscoverable verification step and
   // forgets both halves of the fix.
-  const liveWfDir = join(ROOT, '.github/workflows');
+  const liveWfDir = nodePath.join(ROOT, '.github/workflows');
   const liveWorkflowEntries = readdirSync(liveWfDir)
     .filter((f) => /\.ya?ml$/.test(f))
-    .map((file) => ({ file, text: readFileSync(join(liveWfDir, file), 'utf8') }));
+    .map((file) => ({ file, text: readFileSync(nodePath.join(liveWfDir, file), 'utf8') }));
   t('the live tree has at least one paths-filtered workflow (the guard is not vacuous)', liveWorkflowEntries.some((e) => extractTriggerPaths(e.text).length > 0));
   const liveGaps = checkFamilyCoverageGaps(liveWorkflowEntries);
   t(`every real paths-filtered workflow discovers a check family or declares why not (gaps: ${liveGaps.join(', ') || 'none'})`, liveGaps.length === 0);
@@ -15049,7 +15690,7 @@ function selfTest() {
   // be gone from the file the derivation actually reads.
   const misparsedFamilySources = ['scripts/release-github-releases.mjs', 'scripts/check-skill-frame-freshness.mjs'];
   for (const rel of misparsedFamilySources) {
-    const famHints = extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'), rel);
+    const famHints = extractWatchHints(readFileSync(nodePath.join(ROOT, rel), 'utf8'), rel);
     t(`${rel} no longer declares a phantom population`, !famHints.some(isNonPathNamespace));
   }
   // The live pin that the repair CHANGED the verdict: neither family may sit in
@@ -15058,7 +15699,7 @@ function selfTest() {
   // `undetermined` ("names no path at all"), which is the honest bucket.
   const liveSweepEntries = [];
   for (const rel of misparsedFamilySources) {
-    liveSweepEntries.push([rel, fam(extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'), rel))]);
+    liveSweepEntries.push([rel, fam(extractWatchHints(readFileSync(nodePath.join(ROOT, rel), 'utf8'), rel))]);
   }
   t('the repaired families declare no population at all, so the sweep skips them', unreachableFamilies([...liveSweepEntries, ['check:anchor', fam(['packages/spec/src'])]], liveCorpus).length === 0);
   // The same live pin for the @-scope refusal (#13312): the two families whose
@@ -15068,7 +15709,7 @@ function selfTest() {
   const packageLedgerFamilySources = ['scripts/check-driver-memory-census.mjs', 'scripts/check-test-completeness.mjs'];
   const ledgerSweepEntries = [];
   for (const rel of packageLedgerFamilySources) {
-    const famHints = extractWatchHints(readFileSync(join(ROOT, rel), 'utf8'), rel);
+    const famHints = extractWatchHints(readFileSync(nodePath.join(ROOT, rel), 'utf8'), rel);
     t(`${rel} no longer declares a phantom package-name population`, !famHints.some((h) => h.startsWith('@')));
     ledgerSweepEntries.push([rel, fam(famHints)]);
   }
@@ -15274,7 +15915,7 @@ function selfTest() {
   t('a family naming only the pre-mode file is NOT pending — a new changeset is not that file', !pendingNames.includes('check:invented-pre-mode-gate'));
   t('a family naming an unrelated tree is NOT pending', !pendingNames.includes('check:invented-unrelated-gate'));
   t('nor is one whose source names no path at all — undetermined is not pending', !pendingNames.includes('check:invented-undetermined-gate'));
-  t('and the probe path itself is the hypothetical one, never a file on disk', !existsSync(join(ROOT, CHANGESET_PROBE_PATH)));
+  t('and the probe path itself is the hypothetical one, never a file on disk', !existsSync(nodePath.join(ROOT, CHANGESET_PROBE_PATH)));
   // The subtraction: when the input really carries a changeset these families
   // are in the matched list already, and printing them twice would make two
   // sections claim different things about the same lead.
@@ -15368,11 +16009,11 @@ function selfTest() {
   // mandates nothing while reading as protection — the incident class itself.
   t('the mandatory table is not empty (the guard below is not vacuous)', MANDATORY_TIER_GLOBS.length > 0);
   const deadGlobs = MANDATORY_TIER_GLOBS.filter(
-    (g) => !existsSync(join(ROOT, g.glob.replace(/\*\*?/g, '').replace(/\/+$/, ''))),
+    (g) => !existsSync(nodePath.join(ROOT, g.glob.replace(/\*\*?/g, '').replace(/\/+$/, ''))),
   );
   t(`every declared mandatory glob names a path this tree really has (dead: ${deadGlobs.map((g) => g.glob).join(', ') || 'none'})`, deadGlobs.length === 0);
   t('every declared glob carries the tier it mandates and a reason', MANDATORY_TIER_GLOBS.every((g) => g.glob && g.tier && g.why));
-  t('the incident file is a real file, so the references NON-mandate is a live claim and not a fixture', existsSync(join(ROOT, '.claude/skills/pm-dispatch/references/review-checklist.md')));
+  t('the incident file is a real file, so the references NON-mandate is a live claim and not a fixture', existsSync(nodePath.join(ROOT, '.claude/skills/pm-dispatch/references/review-checklist.md')));
   // The frame-copy half of the mandate is DEFINED by check:skill-frame-sync's
   // COPIES table (the 2026-08-20 ruling's own wording), so the coupling is
   // pinned mechanically: a copy added to that gate without a matching mandate
@@ -15384,7 +16025,7 @@ function selfTest() {
     [
       '--input-type=module',
       '-e',
-      `const m = await import(${JSON.stringify(pathToFileURL(join(ROOT, 'scripts/check-skill-frame-sync.mjs')).href)}); console.log(JSON.stringify([...new Set(m.COPIES.map((c) => c.file))]));`,
+      `const m = await import(${JSON.stringify(pathToFileURL(nodePath.join(ROOT, 'scripts/check-skill-frame-sync.mjs')).href)}); console.log(JSON.stringify([...new Set(m.COPIES.map((c) => c.file))]));`,
     ],
     { encoding: 'utf8', cwd: ROOT },
   );
@@ -15421,7 +16062,7 @@ function selfTest() {
   // Same liveness guards as the mandatory table: dead data reading as
   // protection is the incident class itself.
   const deadSuspects = SUSPECT_TIER_GLOBS.filter(
-    (g) => !existsSync(join(ROOT, g.glob.replace(/\*\*?/g, '').replace(/\/+$/, ''))),
+    (g) => !existsSync(nodePath.join(ROOT, g.glob.replace(/\*\*?/g, '').replace(/\/+$/, ''))),
   );
   t(`every declared suspect glob names a path this tree really has (dead: ${deadSuspects.map((g) => g.glob).join(', ') || 'none'})`, deadSuspects.length === 0);
   t('the suspect table is not empty and every entry carries its reason', SUSPECT_TIER_GLOBS.length > 0 && SUSPECT_TIER_GLOBS.every((g) => g.glob && g.why));
@@ -15474,13 +16115,13 @@ function selfTest() {
       const stack = [root];
       while (stack.length > 0) {
         const rel = stack.pop();
-        const abs = join(base, rel);
+        const abs = nodePath.join(base, rel);
         if (!existsSync(abs)) {
           sites.push(`${rel} (MISSING)`);
           continue;
         }
         if (statSync(abs).isDirectory()) {
-          for (const name of readdirSync(abs)) stack.push(join(rel, name));
+          for (const name of readdirSync(abs)) stack.push(nodePath.join(rel, name));
           continue;
         }
         scanned += 1;
@@ -15512,8 +16153,8 @@ function selfTest() {
       .split('\n')
       .findIndex((l) => l.includes('CONTRACT_REVIEW_TIER') && l.includes(CONTRACT_REVIEW_TIER)) + 1;
   const tierRoots = [
-    dirname(MANDATORY_TIER_GLOBS.find((g) => g.glob === '.claude/skills/pm-dispatch/SKILL.md')?.glob ?? ''),
-    dirname(tierOwnRel),
+    nodePath.dirname(MANDATORY_TIER_GLOBS.find((g) => g.glob === '.claude/skills/pm-dispatch/SKILL.md')?.glob ?? ''),
+    nodePath.dirname(tierOwnRel),
   ];
   const tierScan = tierValueSites(ROOT, tierRoots, CONTRACT_REVIEW_TIER);
   t(
@@ -15538,7 +16179,7 @@ function selfTest() {
   // file is absent from the derived set would pass just as happily against a
   // fixture that never reproduced the incident — so the same tree is diffed the
   // WRONG way in the same breath, and the sibling has to show up there.
-  const gitTmp = mkdtempSync(join(tmpdir(), 'dispatch-gates-git-'));
+  const gitTmp = mkdtempSync(nodePath.join(tmpdir(), 'dispatch-gates-git-'));
   try {
     const g = (args, cwd) => {
       const r = spawnSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], {
@@ -15549,8 +16190,8 @@ function selfTest() {
       return (r.stdout ?? '').trim();
     };
     const write = (repo, rel, text) => {
-      mkdirSync(dirname(join(repo, rel)), { recursive: true });
-      writeFileSync(join(repo, rel), text);
+      mkdirSync(nodePath.dirname(nodePath.join(repo, rel)), { recursive: true });
+      writeFileSync(nodePath.join(repo, rel), text);
     };
     const commit = (repo, rel, msg) => {
       write(repo, rel, `${msg}\n`);
@@ -15559,7 +16200,7 @@ function selfTest() {
     };
 
     // Scenario: branch cut, THEN a sibling PR lands on the base branch.
-    const up = join(gitTmp, 'up');
+    const up = nodePath.join(gitTmp, 'up');
     mkdirSync(up, { recursive: true });
     g(['init', '--initial-branch=main', '.'], up);
     commit(up, 'packages/spec/base.ts', 'root');
@@ -15602,7 +16243,7 @@ function selfTest() {
 
     // A branch that changes nothing derives an EMPTY set rather than the
     // base branch history — the CLI turns that into a refusal, not "no gates".
-    const onBase = join(gitTmp, 'on-base');
+    const onBase = nodePath.join(gitTmp, 'on-base');
     mkdirSync(onBase, { recursive: true });
     g(['init', '--initial-branch=main', '.'], onBase);
     commit(onBase, 'packages/spec/only.ts', 'root');
@@ -15613,10 +16254,10 @@ function selfTest() {
     // graft, merge-base exits 1 EMPTY and the three-dot diff exits 128, while
     // the two-dot form exits 0 with the inflated list. So the derivation must
     // refuse — and must not quietly become the two-dot form it replaced.
-    const shallow = join(gitTmp, 'shallow');
+    const shallow = nodePath.join(gitTmp, 'shallow');
     spawnSync('git', ['clone', '--quiet', '--no-single-branch', '--depth', '1', `file://${up}`, shallow], { encoding: 'utf8' });
     let shallowErr = null;
-    if (existsSync(join(shallow, '.git'))) {
+    if (existsSync(nodePath.join(shallow, '.git'))) {
       g(['checkout', '-B', 'feature', 'origin/feature'], shallow);
       t('the shallow fixture really is a shallow checkout', g(['rev-parse', '--is-shallow-repository'], shallow) === 'true');
       try {
@@ -15673,10 +16314,10 @@ function selfTest() {
     //
     // The repo's REAL `.gitignore` is copied in rather than an excerpt written
     // here: an excerpt would pin the excerpt.
-    const ignoreRepo = join(gitTmp, 'ignore-coverage');
+    const ignoreRepo = nodePath.join(gitTmp, 'ignore-coverage');
     mkdirSync(ignoreRepo, { recursive: true });
     g(['init', '--initial-branch=main', '.'], ignoreRepo);
-    write(ignoreRepo, '.gitignore', readFileSync(join(ROOT, '.gitignore'), 'utf8'));
+    write(ignoreRepo, '.gitignore', readFileSync(nodePath.join(ROOT, '.gitignore'), 'utf8'));
     g(['add', '-A'], ignoreRepo);
     g(['commit', '-m', 'the real ignore rules'], ignoreRepo);
     g(['update-ref', 'refs/remotes/origin/main', g(['rev-parse', 'main'], ignoreRepo)], ignoreRepo);
@@ -15685,7 +16326,7 @@ function selfTest() {
     const leftoverAtUncoveredRoot = 'packages/cli/test/tmp-node-env-default-selftest/objectstack.config.ts';
     for (const rel of [leftoverAtCoveredRoot, leftoverAtUncoveredRoot]) {
       write(ignoreRepo, rel, "import { AuthPlugin } from '@objectstack/plugin-auth';\n");
-      write(ignoreRepo, join(dirname(rel), 'package.json'), '{ "private": true, "type": "module" }\n');
+      write(ignoreRepo, nodePath.join(nodePath.dirname(rel), 'package.json'), '{ "private": true, "type": "module" }\n');
     }
     const leftovers = changedPathsFromGit({ cwd: ignoreRepo });
 
@@ -15703,7 +16344,7 @@ function selfTest() {
     );
     t(
       'and it is the repo-wide tmp/ rule doing it, with no bespoke entry for the fixture former root',
-      !readFileSync(join(ROOT, '.gitignore'), 'utf8').includes('packages/cli/test/tmp-node-env-default'),
+      !readFileSync(nodePath.join(ROOT, '.gitignore'), 'utf8').includes('packages/cli/test/tmp-node-env-default'),
     );
     // ── The CLASS the pin above does not hold (#12749) ──────────────────────
     //
@@ -15775,10 +16416,10 @@ function selfTest() {
     // at a covered root and one at an uncovered one, and the uncovered one has
     // to come back EXPOSED. Without this arm every live-tree case below passes
     // just as happily against a verdict function that returns an empty list.
-    const classRepo = join(gitTmp, 'fixture-root-class');
+    const classRepo = nodePath.join(gitTmp, 'fixture-root-class');
     mkdirSync(classRepo, { recursive: true });
     g(['init', '--initial-branch=main', '.'], classRepo);
-    const realIgnoreRules = readFileSync(join(ROOT, '.gitignore'), 'utf8');
+    const realIgnoreRules = readFileSync(nodePath.join(ROOT, '.gitignore'), 'utf8');
     write(classRepo, '.gitignore', realIgnoreRules);
     const fixtureSourceRootedAt = (rel) =>
       [
@@ -16001,15 +16642,15 @@ function selfTest() {
   t('drift reaches the banner, and stays behind the repo line that must come first', bannerLines({ identity: hereIdentity, paths: [], drift: { base: 'aaaaaaa', behind: 9, changed: ['scripts/x.mjs'] } })[0].includes('gate list derived from the tree of'));
   t('and a banner given no drift is byte-identical to before the flag existed', bannerLines({ identity: hereIdentity, paths: [], drift: null }).join('\n') === bannerLines({ identity: hereIdentity, paths: [] }).join('\n'));
 
-  const driftTmp = mkdtempSync(join(tmpdir(), 'dispatch-gates-drift-'));
+  const driftTmp = mkdtempSync(nodePath.join(tmpdir(), 'dispatch-gates-drift-'));
   try {
     const gd = (args, cwd) => spawnSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
-    const up = join(driftTmp, 'upstream');
+    const up = nodePath.join(driftTmp, 'upstream');
     mkdirSync(up, { recursive: true });
     gd(['init', '-q', '-b', DEFAULT_BASE_BRANCH], up);
-    writeFileSync(join(up, 'seed.txt'), 'seed\n');
+    writeFileSync(nodePath.join(up, 'seed.txt'), 'seed\n');
     gd(['add', '-A'], up); gd(['commit', '-qm', 'seed'], up);
-    const clone = join(driftTmp, 'clone');
+    const clone = nodePath.join(driftTmp, 'clone');
     gd(['clone', '-q', up, clone], driftTmp);
     // Positive control: a clone level with its base must read zero, or a
     // non-zero reading below proves nothing.
@@ -16029,7 +16670,7 @@ function selfTest() {
     // `rev-list --count HEAD..<ref>` cannot answer. The literals above describe
     // that state; only a repo shows it is reachable, which is the whole reason
     // this fixture exists beside them.
-    const unborn = join(driftTmp, 'unborn');
+    const unborn = nodePath.join(driftTmp, 'unborn');
     mkdirSync(unborn, { recursive: true });
     gd(['init', '-q', '-b', DEFAULT_BASE_BRANCH], unborn);
     gd(['remote', 'add', DEFAULT_BASE_REMOTE, up], unborn);
@@ -16053,7 +16694,7 @@ function selfTest() {
     t('and the banner a reader actually sees carries it, from that real reading',
       bannerLines({ identity: hereIdentity, paths: [], drift: unbornRepo }).join('\n').includes('STALENESS NOT MEASURED'));
     // Upstream moves in a file the answer is NOT derived from.
-    writeFileSync(join(up, 'seed.txt'), 'seed2\n');
+    writeFileSync(nodePath.join(up, 'seed.txt'), 'seed2\n');
     gd(['add', '-A'], up); gd(['commit', '-qm', 'unrelated'], up);
     gd(['fetch', '-q', DEFAULT_BASE_REMOTE], clone);
     const offSurface = baseDrift({ cwd: clone });
@@ -16061,8 +16702,8 @@ function selfTest() {
     t('and a commit outside the derivation surface stays off the loud list — and the quiet render says what it can see',
       offSurface.changed.length === 0 && driftLines(offSurface).length === 2 && driftLines(offSurface)[0].includes('can SEE'));
     // Now upstream moves a file the answer IS derived from — the measured shape.
-    mkdirSync(join(up, 'scripts'), { recursive: true });
-    writeFileSync(join(up, 'scripts', 'check-thing.mjs'), 'export const a = 1;\n');
+    mkdirSync(nodePath.join(up, 'scripts'), { recursive: true });
+    writeFileSync(nodePath.join(up, 'scripts', 'check-thing.mjs'), 'export const a = 1;\n');
     gd(['add', '-A'], up); gd(['commit', '-qm', 'change a check script'], up);
     gd(['fetch', '-q', DEFAULT_BASE_REMOTE], clone);
     const onSurface = baseDrift({ cwd: clone });
@@ -16090,11 +16731,11 @@ function selfTest() {
     // clear sentence from a FAILED read — so the last assertion here is the
     // required red: it fails if a reassurance can ever again be manufactured
     // without an established reading.
-    const shallow = join(driftTmp, 'shallow');
+    const shallow = nodePath.join(driftTmp, 'shallow');
     gd(['clone', '-q', '--depth', '1', `file://${up}`, shallow], driftTmp);
     t('a fresh shallow clone still counts a distance fine — shallowness alone breaks nothing (positive control)',
       baseDrift({ cwd: shallow }).behind === 0);
-    writeFileSync(join(up, 'scripts', 'check-thing.mjs'), 'export const a = 3;\n');
+    writeFileSync(nodePath.join(up, 'scripts', 'check-thing.mjs'), 'export const a = 3;\n');
     gd(['add', '-A'], up); gd(['commit', '-qm', 'move a check script beyond the shallow boundary'], up);
     gd(['fetch', '-q', '--depth', '1', DEFAULT_BASE_REMOTE], shallow);
     const shallowRepo = baseDrift({ cwd: shallow });
@@ -16109,16 +16750,16 @@ function selfTest() {
     rmSync(driftTmp, { recursive: true, force: true });
   }
 
-  const idTmp = mkdtempSync(join(tmpdir(), 'dispatch-gates-id-'));
+  const idTmp = mkdtempSync(nodePath.join(tmpdir(), 'dispatch-gates-id-'));
   try {
     const gi = (args, cwd) => spawnSync('git', ['-c', 'user.email=t@t.t', '-c', 'user.name=t', ...args], { cwd, encoding: 'utf8' });
     gi(['init', '-q', '-b', 'main', 'named'], idTmp);
-    const named = join(idTmp, 'named');
+    const named = nodePath.join(idTmp, 'named');
     gi(['remote', 'add', DEFAULT_BASE_REMOTE, 'https://github.com/an-owner/a-repo.git'], named);
     const namedIdentity = repoIdentity({ cwd: named });
     t('a checkout with a readable remote identifies itself from git, never from a constant', namedIdentity.slug === 'an-owner/a-repo');
     gi(['init', '-q', '-b', 'main', 'anonymous'], idTmp);
-    const anonymous = repoIdentity({ cwd: join(idTmp, 'anonymous') });
+    const anonymous = repoIdentity({ cwd: nodePath.join(idTmp, 'anonymous') });
     t('a checkout with no such remote degrades to unverified and still names its tree', anonymous.slug === null && !!anonymous.root);
   } finally {
     rmSync(idTmp, { recursive: true, force: true });
@@ -16162,11 +16803,11 @@ function selfTest() {
   // child process can.
   const SELF = fileURLToPath(import.meta.url);
   t('the entry predicate answers true for this module named by its own path', invokedAs(SELF, SELF));
-  t('and for the same file named relatively from the repo root, as the gate spells it', invokedAs(join(ROOT, 'scripts/pm/dispatch-gates.mjs'), SELF));
-  t('a different file in the same directory is not this module', !invokedAs(join(ROOT, 'scripts/pm/check-dispatch-gates.mjs'), SELF));
+  t('and for the same file named relatively from the repo root, as the gate spells it', invokedAs(nodePath.join(ROOT, 'scripts/pm/dispatch-gates.mjs'), SELF));
+  t('a different file in the same directory is not this module', !invokedAs(nodePath.join(ROOT, 'scripts/pm/check-dispatch-gates.mjs'), SELF));
   t('an absent argv[1] is not this module — the `node --eval` importer', !invokedAs(undefined, SELF) && !invokedAs('', SELF));
 
-  const entryTmp = mkdtempSync(join(tmpdir(), 'dispatch-gates-entry-'));
+  const entryTmp = mkdtempSync(nodePath.join(tmpdir(), 'dispatch-gates-entry-'));
   try {
     // RUN DIRECTLY the modes must all still reach their branches. `--tier`
     // stands in for every one of them: the guard is a SINGLE site wrapping the
@@ -16240,7 +16881,7 @@ function selfTest() {
     // the real file while argv[1] names the link. Under the precedent's
     // one-comparison spelling this run goes inert, exit 0, no output: the
     // false-green the gate cannot see.
-    const link = join(entryTmp, 'linked-dispatch-gates.mjs');
+    const link = nodePath.join(entryTmp, 'linked-dispatch-gates.mjs');
     symlinkSync(SELF, link);
     const viaLink = spawnSync(process.execPath, [link, '--tier', 'packages/spec/src/data/filter.zod.ts'], {
       encoding: 'utf8',
@@ -16255,7 +16896,7 @@ function selfTest() {
     // IMPORTED the module must do nothing at all. The importer's argv carries
     // this tool's own flags on purpose: that is the shape that fired an
     // unrelated file's assertions inside the importer's self-test.
-    const consumer = join(entryTmp, 'consumer.mjs');
+    const consumer = nodePath.join(entryTmp, 'consumer.mjs');
     const REACHED = 'CONSUMER-REACHED function function function';
     writeFileSync(
       consumer,
@@ -16392,9 +17033,9 @@ function selfTest() {
   // would go stale with nothing failing — which is the defect this whole file
   // is about.
   const liveTail = alwaysRunSteps(
-    readdirSync(join(ROOT, '.github/workflows'))
+    readdirSync(nodePath.join(ROOT, '.github/workflows'))
       .filter((f) => /\.ya?ml$/.test(f))
-      .map((f) => ({ file: f, text: readFileSync(join(ROOT, '.github/workflows', f), 'utf8') })),
+      .map((f) => ({ file: f, text: readFileSync(nodePath.join(ROOT, '.github/workflows', f), 'utf8') })),
   );
   const liveCommands = liveTail.rows.flatMap((r) => r.commands);
   t('the live tail is not empty — an empty one would mean the walk broke, not that CI runs nothing', liveTail.rows.length > 0);
@@ -16426,7 +17067,7 @@ function selfTest() {
   t(
     'every live row really sits in a workflow CI cannot narrow by path',
     liveTail.rows.every((r) => {
-      const text = readFileSync(join(ROOT, '.github/workflows', r.workflow), 'utf8');
+      const text = readFileSync(nodePath.join(ROOT, '.github/workflows', r.workflow), 'utf8');
       return declaresPullRequestTrigger(text) && extractTriggerPaths(text).length === 0;
     }),
   );
@@ -16592,6 +17233,16 @@ function selfTest() {
     t('and a STALE name still renders its warning through the shared shape', changeKindLines(['a.ts'], () => null, kinds).some((l) => l.includes('STALE')));
   }
 
+  // The whole-tree channel is in `--commands` and NOT in the matched block
+  // the published snippet harvests, so the two agree only once it is
+  // subtracted (#14189). Read off the REAL rendering, like everything else
+  // in this block: a hardcoded count here would be a second copy of a fact
+  // the tool derives, drifting the day a gate declares or stops declaring.
+  const declaredWholeTreeCommands = (humanText) => (humanText ?? '')
+    .split('\n')
+    .filter((l) => l.includes('   declared whole-tree population — '))
+    .map((l) => l.replace(/^ {2}- (.*?) {3}\[.*$/, '$1'));
+
   // ── END TO END, on the real CLI and the real tree ─────────────────────────
   //
   // Everything above drives the pure halves, and all of it stays green if the
@@ -16626,9 +17277,9 @@ function selfTest() {
     // with the real awk and sed, because a reimplementation in JS would be
     // pinning this file's idea of the snippet rather than the snippet.
     // The snippet reads `gates.txt`; feed it the same bytes under that name.
-    const harvestTmp = mkdtempSync(join(tmpdir(), 'dg-harvest-'));
+    const harvestTmp = mkdtempSync(nodePath.join(tmpdir(), 'dg-harvest-'));
     try {
-      writeFileSync(join(harvestTmp, 'gates.txt'), humanOut);
+      writeFileSync(nodePath.join(harvestTmp, 'gates.txt'), humanOut);
       const real = spawnSync('bash', ['-c', HARVEST_SNIPPET.join('\n')], { encoding: 'utf8', cwd: harvestTmp });
       const harvestedRows = (real.stdout ?? '').split('\n').filter(Boolean);
       t('the published snippet still runs against a real rendering', real.status === 0 && harvestedRows.length > 0);
@@ -16641,7 +17292,25 @@ function selfTest() {
       const cmdRows = (cmdRun.stdout ?? '').split('\n').filter(Boolean);
       t('--commands answers', cmdRun.status === 0 && cmdRows.length > 0);
       t('and stdout is commands and NOTHING else — no heading, no annotation, no blank-line block to parse', cmdRows.every((l) => /^(pnpm|node) \S/.test(l)));
-      t('and it agrees exactly with the published snippet on this card', [...cmdRows].sort().join('\n') === [...harvestedRows].sort().join('\n'));
+      // The declaring families are the ONE documented difference between the
+      // two lists on a card no convention kind hits: they are in the union
+      // because every card owes them, and out of the matched block because a
+      // row on every card is not a lead. Subtracted here, and the subtraction
+      // is pinned as NON-EMPTY below so this cannot quietly become a no-op.
+      const seamAlwaysRuns = declaredWholeTreeCommands(humanOut);
+      t(
+        'the whole-tree channel really is on this card, so the subtraction below is not vacuous',
+        seamAlwaysRuns.length > 0 && seamAlwaysRuns.every((c) => cmdRows.includes(c)),
+      );
+      t(
+        'and none of them is in the matched block the snippet harvests — placed by declaration, never as a lead',
+        seamAlwaysRuns.every((c) => !harvestedRows.includes(c)),
+      );
+      const cmdRowsNoAlwaysRuns = cmdRows.filter((l) => !seamAlwaysRuns.includes(l));
+      t(
+        'and it agrees exactly with the published snippet on this card, once the declared whole-tree families are subtracted',
+        [...cmdRowsNoAlwaysRuns].sort().join('\n') === [...harvestedRows].sort().join('\n'),
+      );
       // ⭐ CONTROL 1 and CONTROL 2 as ONE assertion pair, on ONE input. A new
       // mode returning the full list proves nothing on its own if the old
       // harvest would have too — the defect has to still be there for the
@@ -16649,7 +17318,10 @@ function selfTest() {
       const blockRows = harvestedRows.length;
       const oldHarvest = harvestedRows.filter((l) => l.startsWith('pnpm check:')).length;
       t('CONTROL: the OLD one-spelling harvest is still SHORT on this input — the defect is real and untouched', oldHarvest < blockRows);
-      t('CONTROL: and --commands returns the FULL list on that same input', cmdRows.length === blockRows);
+      t(
+        'CONTROL: and --commands returns the FULL list on that same input — the block, plus the whole-tree families the block cannot carry',
+        cmdRows.length === blockRows + seamAlwaysRuns.length,
+      );
       t('and the rows the old harvest drops are exactly the ones spelled the other way', blockRows - oldHarvest === harvestedRows.filter((l) => l.startsWith('node ')).length);
     } finally {
       rmSync(harvestTmp, { recursive: true, force: true });
@@ -16752,6 +17424,48 @@ function selfTest() {
     // Two answers to "what shape is stdout" is no answer.
     const bothRun = runCli(['--commands', '--json', seamCard]);
     t('passing both stdout spellings refuses instead of silently preferring one', bothRun.status === 2 && (bothRun.stdout ?? '').trim() === '');
+    // ⭐ The THIRD stdout shape (#14294). The pair above was enforced and this
+    // one was not: `mode` was computed and then discarded, so these two exited
+    // 0 with tier prose sitting in the file a consumer had redirected because
+    // `--commands` promises commands and nothing else. Driven on the real CLI
+    // for the same reason the pair above is — the defect was in the argv chain,
+    // which no pure half reaches. Both halves of the refusal are asserted: the
+    // STATUS, and the stdout a redirecting consumer would have kept, because a
+    // refusal that still prints an answer is the bug wearing an exit code.
+    const tierCmdRun = runCli(['--tier', '--commands', seamCard]);
+    t('⭐ --tier against --commands refuses instead of silently preferring the tier', tierCmdRun.status === 2 && (tierCmdRun.stdout ?? '').trim() === '');
+    t('and its refusal names BOTH flags, so the dropped one is never left to be guessed', (tierCmdRun.stderr ?? '').includes('--tier') && (tierCmdRun.stderr ?? '').includes('--commands'));
+    const tierJsonRun = runCli(['--tier', '--json', seamCard]);
+    t('⭐ --tier against --json refuses the same way, on the other machine-readable shape', tierJsonRun.status === 2 && (tierJsonRun.stdout ?? '').trim() === '');
+    t('and that refusal names --json, never the flag this run is not about', (tierJsonRun.stderr ?? '').includes('--json') && !(tierJsonRun.stderr ?? '').includes('--commands'));
+    // CONTROL: green before this fix and after it. The new branch is ordered
+    // after the pair, so all three flags together still answer with the pair's
+    // own message — the fix adds a refusal and rewords none.
+    const allThreeRun = runCli(['--tier', '--commands', '--json', seamCard]);
+    t('CONTROL: all three together keep the pair rule that was already enforced', allThreeRun.status === 2 && (allThreeRun.stderr ?? '').includes('--commands and --json'));
+    // ⭐ The MODIFIER axis (#14753), which neither pair above reaches: --residue
+    // is read only by the `derive` call the --tier branch never makes, so the
+    // flag was evaluated nowhere at exit 0.
+    //
+    // ⛔ The CONTROL is not optional and must not be dropped as redundant: under
+    // --tier the two runs are byte-IDENTICAL, and byte-identical is
+    // indistinguishable from "the flag had nothing to add here" unless the same
+    // flag is first shown to change the answer when the derivation does run.
+    // The plain side of that control is `humanOut` above — the identical
+    // invocation, already spawned; a second run of it would be a full
+    // derivation of this tree to re-measure what that one measured, and two
+    // runs could disagree.
+    const residueRun = runCli(['--residue', seamCard]);
+    t(
+      'CONTROL: --residue changes the derivation output when the derivation runs',
+      residueRun.status === 0 && (residueRun.stdout ?? '').length > 0 && (residueRun.stdout ?? '') !== humanOut,
+    );
+    const tierResidueRun = runCli(['--tier', '--residue', seamCard]);
+    t('⭐ --tier against --residue refuses instead of dropping the modifier in silence', tierResidueRun.status === 2 && (tierResidueRun.stdout ?? '').trim() === '');
+    t(
+      'and that refusal names --tier AND --residue, so the dropped one is never left to be guessed',
+      (tierResidueRun.stderr ?? '').includes('--tier') && (tierResidueRun.stderr ?? '').includes('--residue'),
+    );
   }
 
   // ── END TO END: the CI-measured family, on the card it was measured on (#14004)
@@ -16778,15 +17492,20 @@ function selfTest() {
     // for a second reading would be a minute of fleet compute to answer a
     // question this run already answered — and two runs could disagree.
     const cmdRun = runCli(['--commands', guardCard]);
-    const harvestTmp = mkdtempSync(join(tmpdir(), 'dg-cionly-'));
+    const harvestTmp = mkdtempSync(nodePath.join(tmpdir(), 'dg-cionly-'));
     try {
-      writeFileSync(join(harvestTmp, 'gates.txt'), out);
+      writeFileSync(nodePath.join(harvestTmp, 'gates.txt'), out);
       const harvested = (spawnSync('bash', ['-c', HARVEST_SNIPPET.join('\n')], { encoding: 'utf8', cwd: harvestTmp }).stdout ?? '')
         .split('\n')
         .filter(Boolean);
       t('the published harvest of the pasted block no longer yields the CI-measured command', harvested.length > 0 && !harvested.includes(guardCommand));
       const cmdRows = (cmdRun.stdout ?? '').split('\n').filter(Boolean);
-      t('--commands omits it too, and the two renderings still agree exactly', !cmdRows.includes(guardCommand) && [...cmdRows].sort().join('\n') === [...harvested].sort().join('\n'));
+      t(
+        '--commands omits it too, and the two renderings still agree exactly once the declared whole-tree families are subtracted',
+        !cmdRows.includes(guardCommand)
+          && [...cmdRows.filter((l) => !declaredWholeTreeCommands(out).includes(l))].sort().join('\n')
+            === [...harvested].sort().join('\n'),
+      );
       t('and every command still on the list is one a dev can actually run here', cmdRows.length > 0 && cmdRows.every((l) => /^(pnpm|node) \S/.test(l)));
       t('the stderr accounting says the omission out loud, where it cannot corrupt the harvest', (cmdRun.stderr ?? '').includes('CI-MEASURED ONLY'));
     } finally {
@@ -17004,13 +17723,13 @@ function selfTest() {
   // without a normaliser, which is the condition triage attached to this shape.
   {
     const ranCard = 'scripts/measure-durability-swallow-family.mjs';
-    const ranTmp = mkdtempSync(join(tmpdir(), 'dg-ran-'));
+    const ranTmp = mkdtempSync(nodePath.join(tmpdir(), 'dg-ran-'));
     try {
       const cmdRun = runCli(['--commands', ranCard]);
       const rows = (cmdRun.stdout ?? '').split('\n').filter(Boolean);
       t('CONTROL: the card derives a runnable union at all', cmdRun.status === 0 && rows.length >= 2);
 
-      const completePath = join(ranTmp, 'ran-complete.list');
+      const completePath = nodePath.join(ranTmp, 'ran-complete.list');
       writeFileSync(completePath, `${rows.join('\n')}\n`);
       const green = runCli([RAN_FLAG, completePath, ranCard]);
       const greenOut = green.stdout ?? '';
@@ -17021,7 +17740,7 @@ function selfTest() {
       t('and it needed no normalisation to do it — the two lists are the same strings', greenOut.includes(`${rows.length} derived, ${rows.length} run`));
 
       const dropped = rows[rows.length - 1];
-      const shortPath = join(ranTmp, 'ran-short.list');
+      const shortPath = nodePath.join(ranTmp, 'ran-short.list');
       writeFileSync(shortPath, `${rows.slice(0, -1).join('\n')}\n`);
       const red = runCli([RAN_FLAG, shortPath, ranCard]);
       const redOut = red.stdout ?? '';
@@ -17036,7 +17755,7 @@ function selfTest() {
           && runCli([RAN_FLAG, completePath, '--json', ranCard]).status === 2,
       );
       t('and so is asking for a tier verdict there is nothing to reconcile against', runCli([RAN_FLAG, completePath, '--tier', ranCard]).status === 2);
-      const missing = runCli([RAN_FLAG, join(ranTmp, 'no-such-record.list'), ranCard]);
+      const missing = runCli([RAN_FLAG, nodePath.join(ranTmp, 'no-such-record.list'), ranCard]);
       t('an unreadable record REFUSES rather than reconciling against nothing (#4690)', missing.status === 2 && (missing.stdout ?? '').trim() === '');
       t('and the refusal names the file it could not read', (missing.stderr ?? '').includes('no-such-record.list'));
       const valueless = runCli([RAN_FLAG]);
@@ -17058,6 +17777,8 @@ function selfTest() {
     process.exit(1);
   }
   console.log(`✓ dispatch-gates self-test: ${cases.length} cases pass.`);
+
+  return SELF_TEST_VERDICT;
 }
 
 // ── CLI ─────────────────────────────────────────────────────────────────────
@@ -17112,7 +17833,14 @@ if (invokedDirectly) {
   const argvPaths = argv.paths;
   const wantsChanged = process.argv.includes('--changed');
   if (process.argv.includes('--self-test')) {
-    selfTest();
+    if (selfTest() !== SELF_TEST_VERDICT) {
+      console.error(
+        '\n✗ dispatch-gates self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
   } else if (argv.malformed) {
     console.error(`dispatch-gates: ${argv.malformed}.`);
     process.exit(2);
@@ -17132,8 +17860,65 @@ if (invokedDirectly) {
     // Two answers to "what shape is stdout" is no answer. Blending them — or
     // silently preferring one — is the class of failure this whole file is
     // about, and it would be a poor place to commit it: these two flags exist
-    // because a consumer could not tell what it was reading.
+    // because a consumer could not tell what it was reading. The rule is about
+    // how many answers the stream carries, not about which two flags happened
+    // to be named when it was written: `--tier` is a THIRD shape of that same
+    // stdout, and it is refused against each of these two in the branch below.
     console.error('dispatch-gates: --commands and --json are two spellings of stdout — pass one.');
+    process.exit(2);
+  } else if (process.argv.includes('--tier') && (process.argv.includes('--commands') || process.argv.includes('--json'))) {
+    // The third shape, and the one the pair above did not reach: `mode` was
+    // computed from --commands/--json and then DISCARDED by the `--tier` branch
+    // at the bottom of this block, so the tier PROSE landed in a stream whose
+    // caption promises one runnable command per line, or one JSON document —
+    // at exit 0, with nothing on either stream saying the flag had been
+    // dropped. That is the silent preference the rule above forbids, committed
+    // one flag over from where it is enforced.
+    //
+    // REFUSED, not re-routed. Sending the tier verdict to stderr whenever a
+    // machine-readable mode is asked for is defensible — `--tier` answers a
+    // different question and reads no tree — but it changes what `--tier`
+    // MEANS when combined, and that is a design call for this file's owner,
+    // not a repair to a silent-drop bug. Same shape as the two refusals above
+    // it and the `--ran --tier` refusal above them: one line, exit 2, both
+    // flags named so the caller never has to guess which one was dropped.
+    //
+    // Ordered AFTER the pair deliberately: `--tier --commands --json` keeps
+    // the message it already had, so this branch adds a refusal and changes
+    // none.
+    console.error(
+      `dispatch-gates: --tier and ${process.argv.includes('--commands') ? '--commands' : '--json'} are two spellings of stdout — pass one.`,
+    );
+    process.exit(2);
+  } else if (process.argv.includes('--tier') && process.argv.includes('--residue')) {
+    // The other axis, and the one neither pair above reaches: --residue is not
+    // a spelling of stdout, it is a MODIFIER of the derivation — and it is read
+    // in exactly ONE place, the `derive(...)` call at the bottom of this block.
+    // The `--tier` branch beside that call never makes it, so under --tier the
+    // flag was evaluated nowhere: exit 0, the tier verdict printed, and nothing
+    // on either stream saying the flag had been dropped. Measured byte-identical
+    // stdout with and without it — a reading that means nothing on its own, and
+    // means this only because the CONTROL beside it shows the same flag growing
+    // the derivation's own output by more than a factor of three when the
+    // derivation actually runs.
+    //
+    // The ground is the `--ran --tier` refusal's, one flag over: --tier reads no
+    // workflow and no check script, so it derives no gate family — the same
+    // sentence that leaves a run record nothing to reconcile against leaves
+    // --residue no residue to list.
+    //
+    // REFUSED, not re-routed, as the pairs above are. Nothing here is
+    // load-bearing for a machine: --residue only ever ADDS accounting to a
+    // human-read stream, so a dropped one costs a reader information, never a
+    // parse. What it costs is a caller who typed a flag, got exit 0, and has no
+    // way to learn the flag did nothing — the same information loss the
+    // refusals above prevent, and refusing is the only remedy that does not
+    // change what --tier MEANS when combined.
+    //
+    // Ordered AFTER the stdout-shape pair for the reason that branch states
+    // about itself: `--tier --commands --residue` keeps the message it already
+    // had, so this branch adds a refusal and rewords none.
+    console.error('dispatch-gates: --tier derives no gate family, so --residue would have nothing to list. Pass one.');
     process.exit(2);
   } else if (wantsChanged && argvPaths.length > 0) {
     // The two input modes answer different questions and must never be blended:
@@ -17179,7 +17964,7 @@ if (invokedDirectly) {
     let runRecord = [];
     if (argv.runRecord !== null) {
       try {
-        runRecord = parseRunRecord(readFileSync(resolve(argv.runRecord), 'utf8'));
+        runRecord = parseRunRecord(readFileSync(nodePath.resolve(argv.runRecord), 'utf8'));
       } catch (err) {
         console.error(`dispatch-gates: could not read the run record '${argv.runRecord}' — ${err.message}`);
         console.error(
@@ -17202,7 +17987,7 @@ if (invokedDirectly) {
         derived = changedPathsFromGit();
       } catch (err) {
         console.error(`dispatch-gates: could not derive the change set — ${err.message}`);
-        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier] [--commands | --json | --ran <file>] [--repo owner/name] [<path> ...] | --changed | --self-test');
+        console.error('usage: node scripts/pm/dispatch-gates.mjs [--residue] [--tier | --commands | --json | --ran <file>] [--repo owner/name] [<path> ...] | --changed | --self-test');
         process.exit(2);
       }
       if (derived.paths.length === 0) {

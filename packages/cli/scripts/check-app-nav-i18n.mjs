@@ -105,6 +105,10 @@
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+// The exit-code contract for a refusal, from the frame that owns it —
+// imported rather than re-picked, the shape `packages/lint/scripts/*` already
+// use to reach repo-root gate infrastructure from inside a package.
+import { EXIT_FINDINGS, EXIT_PREREQUISITE_NOT_MET } from '../../../scripts/import-prerequisite.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = join(HERE, '..');
@@ -605,6 +609,25 @@ if (process.argv.includes('--self-test')) {
  * Answered once, before anything is imported — a missing build must cost one
  * stated verdict, never a node stack pointing at whichever package happened to
  * be imported first (the #5862 lesson on the neighbouring i18n gates).
+ *
+ * Exits `EXIT_PREREQUISITE_NOT_MET`, and the printed advisory says the same
+ * number: nothing was measured, so this is NOT a finding.
+ *
+ * ⛔ The closing paragraph is the frame's, verbatim apart from this gate's own
+ * command, and it is NOT a place to improvise. The wording it replaced was true
+ * but prescribed `echo "EXIT=$?"` without saying WHERE, so a reader who did the
+ * natural thing — `... | tail -4; echo "EXIT=$?"` — read `tail`'s status rather
+ * than this gate's, which is the exact false green the prescription exists to
+ * prevent. The one true half ("capture it BEFORE any pipe") had existed in
+ * `scripts/check-test-completeness.mjs` all along and simply never reached here.
+ *
+ * ⛔ That older phrasing is also the CENSUS-NEGATIVE string: the instrument for
+ * this advisory family is `git grep -n "no pipe shape repairs it"`, and the
+ * acceptance criterion is that no copy of the pre-convergence sentence survives
+ * anywhere under `scripts/**` or `packages/**`. So do not reintroduce it here —
+ * not even inside a comment, quoting it to explain what was wrong. (Measured:
+ * the first draft of THIS comment did exactly that, and put the criterion back
+ * into the red while the code beside it was already correct.)
  */
 function checkBuildPrerequisite() {
   const probe = join(CLI_ROOT, 'node_modules', '@objectstack', 'setup', 'dist', 'index.mjs');
@@ -617,9 +640,15 @@ function checkBuildPrerequisite() {
       `  Fix:  pnpm build   (or: pnpm --filter '@objectstack/cli^...' build)\n\n` +
       `  Nothing was measured: no app was merged and no locale was compared, so this\n` +
       `  result says NOTHING about whether any nav label went untranslated.\n` +
-      `  (Exit code 1 — but piping this gate reports the PIPE's status. Use \`echo "EXIT=$?"\`.)`,
+      `  (Exit code ${EXIT_PREREQUISITE_NOT_MET}, distinct from a finding's ${EXIT_FINDINGS} — capture it BEFORE any pipe:\n` +
+      `  \`node packages/cli/scripts/check-app-nav-i18n.mjs > /tmp/check-app-nav-i18n.log 2>&1; echo "EXIT=$?"\`.\n` +
+      `  Piped, \`$?\` is the LAST command's status, and \`head\`/\`tail\` essentially never fail — that\n` +
+      `  is the false green, and no pipe shape repairs it. \`\${PIPESTATUS[0]}\`/\`pipefail\` do recover\n` +
+      `  this gate's own code: \`| tail\` reads to EOF and forwards it, while \`| head -N\` closes the\n` +
+      `  read end early — the gate takes EPIPE, its verdict text is TRUNCATED, and a producer that\n` +
+      `  dies on SIGPIPE reports 141 rather than what it meant to say.)`,
   );
-  process.exit(1);
+  process.exit(EXIT_PREREQUISITE_NOT_MET);
 }
 
 checkBuildPrerequisite();

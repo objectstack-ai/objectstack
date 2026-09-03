@@ -238,6 +238,47 @@ import { join } from 'node:path';
 
 import { ANCHORS_DIR, assembleAnchors, loadAnchors, shardNameFor } from './adr-anchors.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'the base directory audit — collisions, allowlists and unparseable names': 14,
+  'A tombstone resolves citations but is not anchorable (#7329)': 15,
+  'Cited numbers resolve (#6634)': 15,
+  'Cited decision LETTERS resolve (#9592)': 26,
+  // ⛔ NOT today's count. This battery runs one case per `KNOWN_NUMBER_COLLISIONS`
+  // row (3 today) on top of 20 structural cases, and entries only ever LEAVE that
+  // list: a resolved collision is meant to be deleted, and the gate already fails
+  // a stale entry. A floor at 23 would redden every legitimate removal and train
+  // the next author to edit the floor, which is the one habit these floors exist
+  // to prevent. Pinned instead is the part that does not move with the list: the
+  // 20 structural cases ran AND at least one row was actually audited.
+  'Live tree: green as shipped, red under ablation': 21,
+  'the sharded registry\'s assembly (#6957)': 13,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 6;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 const ROOT = process.cwd();
 /** Where the registry lives. One shard per anchor — see `scripts/adr-anchors.mjs`. */
 const MAP_PATH = ANCHORS_DIR;
@@ -1130,13 +1171,28 @@ if (ambiguous.length) {
  * has failed at its one job.
  */
 function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const seen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    seen.set(b, (seen.get(b) ?? 0) + 1);
+  };
   const failures = [];
   let checked = 0;
   /** @param {string} name @param {boolean} cond @param {string} detail */
   const assert = (name, cond, detail) => {
+    registerCase();
     checked++;
     if (!cond) failures.push(`${name} — ${detail}`);
   };
+  battery('the base directory audit — collisions, allowlists and unparseable names');
   const audit = (files, allowlist = []) => auditAdrDirectory(files, allowlist);
   const joined = (errs) => errs.join('\n');
 
@@ -1236,6 +1292,7 @@ function selfTest() {
     // exactly why one `records` set was not enough — so both are pinned, and a
     // test of only the red half would pass on an implementation that broke the
     // citation resolution the tombstone exists for.
+    battery('A tombstone resolves citations but is not anchorable (#7329)');
     {
       const TOMB = [...BASE, '0003-withdrawn-something.md'];
       const { errors: e, records, nonDecisions } = audit(TOMB);
@@ -1335,6 +1392,7 @@ function selfTest() {
     // the tracked tree the real scan reads, so a literal `ADR-` + four digits in
     // a fixture would be collected as a genuine citation and fail the gate it is
     // testing. `id('0202')` keeps the token out of the source.
+    battery('Cited numbers resolve (#6634)');
     {
       const id = (n) => 'ADR-' + n;
       const RECORDS = new Set(['0090', '0107']);
@@ -1446,6 +1504,7 @@ function selfTest() {
     // citations (measured: without the sub-decision rule, ADR-0120's lettered
     // gates and ADR-0020's numbered steps — 20 live citations — read as bad
     // letters); one too loose passes anything. Both halves are asserted.
+    battery('Cited decision LETTERS resolve (#9592)');
     {
       const id = (n) => 'ADR-' + n;
       const idx = decisionIndexFor;
@@ -1613,6 +1672,7 @@ function selfTest() {
     }
 
     // ── Live tree: green as shipped, red under ablation ──────────────────────
+    battery('Live tree: green as shipped, red under ablation');
     let liveFiles = null;
     try {
       liveFiles = readdirSync(join(ROOT, ADR_DIR));
@@ -1825,6 +1885,7 @@ function selfTest() {
     // Two of these are the properties the split was adopted for, and they pull in
     // OPPOSITE directions — so testing only the happy one would leave a layout
     // that merges everything cleanly, including the two edits that must not.
+    battery('the sharded registry\'s assembly (#6957)');
     {
       const shard = (file) => [shardNameFor(file), JSON.stringify({ file, adrs: ['ADR-0001'], invariant: 'x' })];
       const from = (pairs) => {
@@ -1917,6 +1978,51 @@ function selfTest() {
     failures.push(`self-test threw before finishing — ${e && e.stack ? e.stack : e}`);
   }
 
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of seen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = seen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
+  }
   if (failures.length) {
     console.error(`✗ check-adr-anchors --self-test — ${failures.length} failure(s) of ${checked} assertion(s)\n`);
     for (const f of failures) console.error('  • ' + f + '\n');

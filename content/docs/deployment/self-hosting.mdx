@@ -402,6 +402,15 @@ decrypt each other's secrets. All replicas must share the same
 `OS_SECRET_KEY`, `OS_AUTH_SECRET`, and database. See
 [Cluster](/docs/kernel/cluster).
 
+**Scheduled jobs' leader election has a window, not a deadline.** `cron` /
+`interval` / `once` schedules dedupe across replicas by holding a lock for
+the duration of each fire — the mutual-exclusion window is the handler's
+runtime, not the scheduling deadline. Exactly-once per deadline holds only
+when replica clocks agree to within that window, which an NTP-synced
+deployment gives you. A replica whose clock lags past the window finds the
+lock already released and reruns the job; `once` schedules are the sharpest
+case, since a one-shot has no later tick to self-correct on.
+
 ## First boot: create the admin
 
 How the first administrator is created depends on the deployment's

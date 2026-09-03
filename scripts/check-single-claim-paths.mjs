@@ -148,6 +148,116 @@ import { join } from 'node:path';
 import process from 'node:process';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// This self-test used to decide success by "no failure was recorded" and
+// nothing else, so "every case held" and "the cases never ran" printed the same
+// line. Closed the way PR #13487 validated on check-doc-authoring: what is
+// pinned is the registered NAMES, not a number. Every section opens with
+// `battery('<name>')`, every assertion is attributed to the battery most
+// recently opened, and the floor requires the OPENED set to equal the DECLARED
+// set with each battery at or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3 keeps
+// a total "right" the moment a sibling grows. A set difference says WHICH
+// battery stopped; a count says only that something did.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+//
+// The machinery lives HERE, at module scope, rather than inside the self-test:
+// this self-test's assertion sink is not a block-bodied helper in its body (it
+// is a concise arrow, or a module-scope function), so there is no in-body
+// helper to thread a per-run ledger through. Module scope is safe because the
+// self-test runs once per process, and it is what lets the existing sink route
+// through `registerCase()` with no case rewritten and no assertion changed.
+const SELF_TEST_BATTERIES = Object.freeze({
+  'The declared list\'s own invariants. The list is the whole key, so a': 6,
+  'The common path: a PR touching nothing declared is clean and SAYS it': 2,
+  'First come, first served. Both arms, because failing the wrong one is': 11,
+  'The failure has to carry the remedy, not just the verdict.': 3,
+  'UNDETERMINED is its own answer. It must never read as clean, and it': 5,
+  'Wiring absent: never clean, never an accusation.': 5,
+  'The short-circuit. This is the property that makes the gate affordable,': 22,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 7;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
+// ⚠️ None of these helpers is named with a self-test spelling, deliberately and
+// on the record: `check:pm-dispatch-gates` anchors on a top-level declaration
+// whose NAME spells self-test, and every such name owes a row in that gate's
+// COMPOUND_ANCHOR_LEDGER. These are the battery ROSTER's machinery -- they hold
+// no fixtures to mask and read no path literal -- so the accurate name is the
+// one that says `battery`, not the one that would owe a ledger row for a role
+// this code does not have.
+
+/** Cases registered per battery: `battery()` opens one, `registerCase()` files into it. */
+const batteryCases = new Map();
+let openBattery = null;
+
+/** Open a battery. Every assertion after this line is attributed to it. */
+function battery(name) {
+  openBattery = name;
+}
+
+/** Called by the self-test's own assertion sink, once per assertion. */
+function registerCase() {
+  const name = openBattery ?? UNATTRIBUTED_BATTERY;
+  batteryCases.set(name, (batteryCases.get(name) ?? 0) + 1);
+}
+
+/**
+ * The floor: every declared battery RAN, and ran its cases (#13489).
+ *
+ * Evaluated after every battery has had its chance and BEFORE the verdict, so
+ * the success line can only be printed by a run in which the set of batteries
+ * that registered assertions EQUALS the set declared.
+ */
+function batteryFloorFailures() {
+  const declared = Object.keys(SELF_TEST_BATTERIES);
+  const problems = [];
+  if (declared.length < SELF_TEST_BATTERY_FLOOR) {
+    problems.push(
+      `SELF_TEST_BATTERIES declares ${declared.length} batteries, below the pinned `
+        + `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batteryCases) {
+    if (declared.includes(name)) continue;
+    problems.push(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in `
+        + 'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declared) {
+    const count = batteryCases.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    problems.push(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. `
+          + 'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of `
+          + `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (problems.length) {
+    problems.push(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the '
+        + 'number. Find what stopped registering (an early return, a deleted block, a guard that now '
+        + 'skips) and restore it.',
+    );
+  }
+  return problems;
+}
+
 const ROOT = new URL('..', import.meta.url).pathname;
 
 /** The wiring that gives this gate a PR to judge. */
@@ -386,7 +496,10 @@ let selfTestReachedVerdict = false;
 
 function selfTest() {
   const cases = [];
-  const t = (name, actual, expected) => cases.push([name, actual, expected]);
+  const t = (name, actual, expected) => {
+    registerCase();
+    return cases.push([name, actual, expected]);
+  };
 
   const other = (number, extra = {}) => ({
     number,
@@ -400,6 +513,7 @@ function selfTest() {
 
   // --- The declared list's own invariants. The list is the whole key, so a
   // careless edit to it is the realistic way this gate becomes noise.
+  battery('The declared list\'s own invariants. The list is the whole key, so a');
   t('every declared entry names a path', SINGLE_CLAIM_PATHS.every((e) => typeof e.path === 'string' && e.path.length > 0), true);
   t('every declared entry carries a reason', SINGLE_CLAIM_PATHS.every((e) => typeof e.reason === 'string' && e.reason.trim().length > 0), true);
   t('the declared list holds no duplicates', new Set(declaredPaths()).size, declaredPaths().length);
@@ -416,12 +530,14 @@ function selfTest() {
 
   // --- The common path: a PR touching nothing declared is clean and SAYS it
   // judged, so a green here is never confused with a run that did no work.
+  battery('The common path: a PR touching nothing declared is clean and SAYS it');
   const untouched = verdict({ claimed: [] });
   t('a PR touching no declared path is clean', untouched.exit, EXIT_CLEAN);
   t('the clean verdict says what it checked', untouched.lines.join('\n').includes('declared at-most-one-writer path'), true);
 
   // --- First come, first served. Both arms, because failing the wrong one is
   // the failure mode that would make this gate worse than nothing.
+  battery('First come, first served. Both arms, because failing the wrong one is');
   const later = verdict({ claimed: ['.objectui-sha'], others: [other(100)] });
   t('an EARLIER open PR on a declared path fails THIS PR', later.exit, EXIT_CONFLICT);
   t('the failure names the earlier PR by number', later.lines.join('\n').includes('#100'), true);
@@ -451,6 +567,7 @@ function selfTest() {
   );
 
   // --- The failure has to carry the remedy, not just the verdict.
+  battery('The failure has to carry the remedy, not just the verdict.');
   const failed = later.lines.join('\n');
   t('the failure says the card-keyed gate cannot see this', failed.includes('Duplicate Fix Guard'), true);
   t('the failure tells the reader to close one PR', failed.includes('close it'), true);
@@ -458,6 +575,7 @@ function selfTest() {
 
   // --- UNDETERMINED is its own answer. It must never read as clean, and it
   // must never turn an author red for a pagination limit.
+  battery('UNDETERMINED is its own answer. It must never read as clean, and it');
   const undet = verdict({ claimed: ['.objectui-sha'], others: [], undetermined: [{ number: 777 }] });
   t('an unwalkable file list does not turn this PR red', undet.exit, EXIT_CLEAN);
   t('an unwalkable file list is reported as UNDETERMINED', undet.lines.join('\n').includes('UNDETERMINED'), true);
@@ -466,6 +584,7 @@ function selfTest() {
   t('a clean run with nothing undetermined emits no warning', earlier.lines.join('\n').includes('::warning::'), false);
 
   // --- Wiring absent: never clean, never an accusation.
+  battery('Wiring absent: never clean, never an accusation.');
   const unwired = judge(readPrContext({}));
   t('no PR context at all exits NOT WIRED', unwired.exit, EXIT_NOT_WIRED);
   t('NOT WIRED says it judged nothing', unwired.lines.join('\n').includes('judged nothing'), true);
@@ -476,6 +595,7 @@ function selfTest() {
   // --- The short-circuit. This is the property that makes the gate affordable,
   // and it is invisible in the verdict layer, so it is pinned here against a
   // recording fake API. Fixture paths name a tree that exists in no repo.
+  battery('The short-circuit. This is the property that makes the gate affordable,');
   const calls = [];
   const fakeApi = (files) => async (path) => {
     calls.push(path);
@@ -538,6 +658,10 @@ function selfTest() {
     const sibling = existsSync(siblingPath) ? readFileSync(siblingPath, 'utf8') : '';
     t('the card-keyed duplicate gate still exists', sibling !== '', true);
     t('...and still asks its own question', sibling.includes('No other open PR may claim the same issue'), true);
+
+    // The floor runs BEFORE the verdict below, so a success line can only be
+    // printed by a run in which every declared battery registered its cases.
+    for (const message of batteryFloorFailures()) cases.push([message, false, true]);
 
     let failedCount = 0;
     for (const [name, actual, expected] of cases) {

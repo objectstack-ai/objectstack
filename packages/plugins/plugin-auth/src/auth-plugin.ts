@@ -78,6 +78,10 @@ import {
   warnIfWalledOwnerCannotVerify,
   type WalledOwnerAccountState,
 } from './walled-owner-verification-path.js';
+import {
+  probeSignInReachability,
+  reportIfNoSignInAccountExists,
+} from './boot-sign-in-reachability.js';
 import { judgePlatformAdmin, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   runAdminBanUser,
@@ -719,6 +723,240 @@ export class AuthPlugin implements Plugin {
     // the package that defines them; auth-plugin no longer piggy-backs on
     // its kernel:ready hook for this.
 
+    // Bind the auth manager's live SERVICE COMPOSITION on `kernel:ready`: the
+    // outbound mail transport, the SMS transport, the deployment email locale,
+    // the brand name and the SMS locale.
+    //
+    // Registered independently of `registerRoutes`, the shape the sibling
+    // hooks below already use and already name ("Registered independently of
+    // `registerRoutes` so an embedding that serves no auth routes still gets
+    // the diagnosis"). `registerRoutes` answers "should this plugin mount its
+    // own `/api/v1/auth/*` routes on the kernel's `http-server`" — a
+    // TRANSPORT-MOUNTING question. Everything bound here is SERVICE
+    // COMPOSITION, true of an embedding regardless of who serves the routes.
+    //
+    // Gating the two together left every routes-less embedding with no mail
+    // transport, no locale on either channel and no brand binding — and
+    // silently, because the `logger.info` lines that would have reported the
+    // wiring sat inside the same skipped block. The population is not an edge
+    // case: every cloud tenant environment kernel constructs this plugin with
+    // `registerRoutes: false` by design, since the per-env kernel has no
+    // `http-server` and the host worker proxies the auth routes to it. The
+    // consequence was that the `localization.locale` precedence rung below
+    // could not reach a tenant environment at all — not degraded, absent.
+    //
+    // Registered BEFORE the route hook so that, when routes ARE mounted, the
+    // composition still completes ahead of them: the ordering the single
+    // combined hook used to give for free.
+    ctx.hook('kernel:ready', async () => {
+      // Inject the email service if available so better-auth callbacks
+      // (sendResetPassword / sendVerificationEmail / sendInvitationEmail
+      // / sendMagicLink) can actually deliver mail. Resolved here on
+      // kernel:ready so EmailServicePlugin has had a chance to register.
+      if (this.authManager) {
+        await this.ensureAuthSettingsBound(ctx);
+
+        let emailSvc: IEmailService | undefined;
+        try { emailSvc = ctx.getService<IEmailService>('email'); } catch { emailSvc = undefined; }
+        if (emailSvc) {
+          this.authManager.setEmailService(emailSvc);
+          ctx.logger.info('Auth: email service wired (transactional mail enabled)');
+        } else {
+          // No email service. The verification / password-reset callbacks now
+          // THROW when invoked without a transport (so an explicit resend
+          // reports a real error rather than faking success). If verification
+          // is REQUIRED, that means every signup would be stuck — surface the
+          // misconfiguration loudly at boot instead of one failure per signup.
+          const requiresEmail = !!this.authManager.getPublicConfig?.()?.emailPassword?.requireEmailVerification;
+          if (requiresEmail) {
+            ctx.logger.error(
+              'Auth: email verification is REQUIRED but NO email service is registered — '
+              + 'verification & password-reset emails will FAIL and new users will be locked '
+              + 'out at sign-in. Register an email service (e.g. EmailServicePlugin + OS_EMAIL_*) '
+              + 'or disable verification (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false).',
+            );
+          } else {
+            ctx.logger.info('Auth: no email service registered — transactional mail disabled');
+          }
+        }
+
+        // #2780 — inject the SMS service so the phoneNumber plugin's OTP
+        // callbacks (send-otp / password-reset OTP) and the import
+        // SMS-invite path can deliver. Same lazy-resolution contract as
+        // the email service: absent ⇒ OTP endpoints keep failing loudly
+        // (NOT_SUPPORTED) while phone+password sign-in still works.
+        let smsSvc: ISmsService | undefined;
+        try { smsSvc = ctx.getService<ISmsService>('sms'); } catch { smsSvc = undefined; }
+        if (smsSvc) {
+          this.authManager.setSmsService(smsSvc);
+          if (this.authManager.isPhoneNumberEnabled()) {
+            ctx.logger.info(
+              this.authManager.isPhoneOtpDeliverable()
+                ? 'Auth: sms service wired (phone-number OTP sign-in / reset enabled)'
+                : 'Auth: sms service present but NOT configured with a real provider — phone-number OTP stays disabled in production',
+            );
+          }
+        } else if (this.authManager.isPhoneNumberEnabled()) {
+          ctx.logger.info('Auth: no sms service registered — phone-number OTP disabled (password sign-in only)');
+        }
+
+        // #8195 / #14319 — the locale named on every auth EMAIL, so the
+        // localized `sys_email_template` rows are reachable through the
+        // platform's own send path instead of sitting dormant.
+        //
+        // This binds the DEPLOYMENT rung, resolved here at the plugin
+        // layer. Since the 2026-09-02 ruling (#14319) it is the SECOND rung:
+        // a request-triggered send whose recipient IS the requester takes
+        // that caller's own `Accept-Language` first, resolved at send time in
+        // `AuthManager` (`authEmailLocaleFromRequest`, which carries the
+        // ruling text). What is bound here answers when the request named no
+        // locale this platform ships a row for, or when there is no request
+        // at all — invitations, scheduled and admin-initiated mail.
+        //
+        // ⚠️ The superseded 2026-08-13 ruling made this rung the WHOLE answer
+        // and rejected `Accept-Language` outright. Do not restore that
+        // reading here; the single place the history is recorded is
+        // `AuthManager.setDefaultEmailLocale`.
+        //
+        // #14319 measured that "the deployment default" has TWO producers,
+        // and that auth email was reading the weaker one:
+        //
+        //  - `II18nService.getDefaultLocale()` is the app artifact's
+        //    BUILD-TIME `i18n.defaultLocale` (`AppPlugin` pushes it through
+        //    `setDefaultLocale`; the CLI passes `config.i18n.defaultLocale`),
+        //    and is the bare `en` when the app declares nothing.
+        //  - `localization.locale` (ADR-0053) is the workspace's RUNTIME
+        //    language — Setup, Localization, tenant-scoped — whose four
+        //    options are exactly `AUTH_EMAIL_TEMPLATE_LOCALES`. It is
+        //    already the authority for auth SMS (#2815) and for audit
+        //    activity summaries (framework#3039).
+        //
+        // A workspace that declared Chinese therefore received Chinese SMS
+        // and ENGLISH mail. The workspace setting now outranks the
+        // build-time default, and only when it is EXPLICIT
+        // (`source !== 'default'`) — the same precedence the `appName`
+        // binding below uses, because `get` answers the manifest default
+        // (`en-US`) for an untouched workspace and taking it unconditionally
+        // would demote every deployment that declared `i18n.defaultLocale`.
+        //
+        // Both i18n hops are probed rather than assumed: `getService` THROWS
+        // for an unregistered service (i18n is not a required dependency of
+        // auth) and `getDefaultLocale` is OPTIONAL on the contract. Nothing
+        // resolvable ⇒ nothing is named, which is precisely the pre-#8195
+        // behaviour — `EmailService` resolves its documented `en-US` default.
+        let i18nDefaultEmailLocale: string | undefined;
+        try {
+          const i18n = ctx.getService<II18nService>('i18n');
+          const locale =
+            typeof i18n?.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
+          i18nDefaultEmailLocale = typeof locale === 'string' ? locale : undefined;
+        } catch {
+          // i18n service is optional — leave the build-time default unset.
+        }
+        const applyEmailLocale = (workspaceLocale: string | undefined): void => {
+          this.authManager?.setDefaultEmailLocale(workspaceLocale ?? i18nDefaultEmailLocale);
+        };
+        // Baseline = the build-time default. Superseded below when a settings
+        // service answers with an explicit workspace language, and left
+        // standing when there is no settings service or its read fails.
+        applyEmailLocale(undefined);
+        if (typeof i18nDefaultEmailLocale === 'string' && i18nDefaultEmailLocale.trim()) {
+          ctx.logger.info(
+            `Auth: bound auth email locale to i18n default=${i18nDefaultEmailLocale}`,
+          );
+        }
+
+        // Bind the email brand name (`{{appName}}`) to the live
+        // `branding.workspace_name` setting so the admin UI can rename the
+        // product without a redeploy. Only an *explicitly set* value
+        // overrides the configured `appName` — when the operator hasn't
+        // customised it (resolver returns the manifest default), we clear
+        // the override so the deployment's `appName` (e.g. `OS_APP_NAME`)
+        // keeps precedence. Mirrors EmailServicePlugin's settings binding.
+        try {
+          const settings = ctx.getService<SettingsReadSurface>('settings');
+          if (settings && typeof settings.get === 'function') {
+            const applyBrand = async () => {
+              try {
+                const resolved = await settings.get('branding', 'workspace_name', {});
+                const explicit = resolved && resolved.source !== 'default'
+                  ? resolved.value
+                  : undefined;
+                this.authManager?.setAppName(
+                  typeof explicit === 'string' ? explicit : undefined,
+                );
+              } catch (err: any) {
+                ctx.logger.warn(
+                  'Auth: failed to apply branding.workspace_name: ' + (err?.message ?? err),
+                );
+              }
+            };
+            await applyBrand();
+            if (typeof settings.subscribe === 'function') {
+              settings.subscribe('branding', () => {
+                void applyBrand();
+              });
+              ctx.logger.info('Auth: bound appName to settings namespace=branding');
+            }
+
+            // #2815 — bind the auth SMS locale to the deployment default
+            // (`localization.locale`) so OTP/invitation texts render in the
+            // workspace language. #14319 binds the auth EMAIL locale from
+            // the very same read, so the two auth channels can no longer
+            // disagree about what language this workspace speaks.
+            // Live-rebinds on settings changes.
+            const applyLocalizationLocale = async () => {
+              try {
+                const resolved = await settings.get('localization', 'locale', {});
+                const value = resolved?.value;
+                this.authManager?.setDefaultSmsLocale(
+                  typeof value === 'string' ? value : undefined,
+                );
+                // Email takes the workspace language only when it was
+                // EXPLICITLY set; a manifest default leaves the app's
+                // build-time `i18n.defaultLocale` standing (block above).
+                const explicit =
+                  resolved && resolved.source !== 'default' && typeof value === 'string'
+                    ? value
+                    : undefined;
+                applyEmailLocale(explicit);
+                if (explicit) {
+                  ctx.logger.info(
+                    `Auth: bound auth email locale to localization.locale=${explicit}`,
+                  );
+                }
+              } catch (err: any) {
+                ctx.logger.warn(
+                  'Auth: failed to apply localization.locale: ' + (err?.message ?? err),
+                );
+              }
+            };
+            await applyLocalizationLocale();
+            if (typeof settings.subscribe === 'function') {
+              settings.subscribe('localization', () => {
+                void applyLocalizationLocale();
+              });
+            }
+          }
+        } catch {
+          // settings service is optional — keep the configured appName.
+        }
+
+        // #2815 — seed the built-in bilingual auth SMS templates into
+        // sys_notification_template (insert-if-missing; tenant edits are
+        // never overwritten). Only meaningful when phone sign-in is on;
+        // the table may not exist yet on a fresh env (messaging provisions
+        // it at kernel:ready), so failures log-and-continue.
+        if (this.authManager.isPhoneNumberEnabled()) {
+          const engine = this.authManager.getDataEngine();
+          if (engine) {
+            const { seedPhoneSmsTemplates } = await import('./phone-sms-texts.js');
+            await seedPhoneSmsTemplates(engine, ctx.logger);
+          }
+        }
+      }
+    });
+
     // Defer HTTP route registration to kernel:ready hook.
     // This ensures all plugins (including HonoServerPlugin) have completed
     // their init and start phases before we attempt to look up the
@@ -726,213 +964,6 @@ export class AuthPlugin implements Plugin {
     // loading order.
     if (this.options.registerRoutes) {
       ctx.hook('kernel:ready', async () => {
-        // Inject the email service if available so better-auth callbacks
-        // (sendResetPassword / sendVerificationEmail / sendInvitationEmail
-        // / sendMagicLink) can actually deliver mail. Resolved here on
-        // kernel:ready so EmailServicePlugin has had a chance to register.
-        if (this.authManager) {
-          await this.ensureAuthSettingsBound(ctx);
-
-          let emailSvc: IEmailService | undefined;
-          try { emailSvc = ctx.getService<IEmailService>('email'); } catch { emailSvc = undefined; }
-          if (emailSvc) {
-            this.authManager.setEmailService(emailSvc);
-            ctx.logger.info('Auth: email service wired (transactional mail enabled)');
-          } else {
-            // No email service. The verification / password-reset callbacks now
-            // THROW when invoked without a transport (so an explicit resend
-            // reports a real error rather than faking success). If verification
-            // is REQUIRED, that means every signup would be stuck — surface the
-            // misconfiguration loudly at boot instead of one failure per signup.
-            const requiresEmail = !!this.authManager.getPublicConfig?.()?.emailPassword?.requireEmailVerification;
-            if (requiresEmail) {
-              ctx.logger.error(
-                'Auth: email verification is REQUIRED but NO email service is registered — '
-                + 'verification & password-reset emails will FAIL and new users will be locked '
-                + 'out at sign-in. Register an email service (e.g. EmailServicePlugin + OS_EMAIL_*) '
-                + 'or disable verification (OS_AUTH_REQUIRE_EMAIL_VERIFICATION=false).',
-              );
-            } else {
-              ctx.logger.info('Auth: no email service registered — transactional mail disabled');
-            }
-          }
-
-          // #2780 — inject the SMS service so the phoneNumber plugin's OTP
-          // callbacks (send-otp / password-reset OTP) and the import
-          // SMS-invite path can deliver. Same lazy-resolution contract as
-          // the email service: absent ⇒ OTP endpoints keep failing loudly
-          // (NOT_SUPPORTED) while phone+password sign-in still works.
-          let smsSvc: ISmsService | undefined;
-          try { smsSvc = ctx.getService<ISmsService>('sms'); } catch { smsSvc = undefined; }
-          if (smsSvc) {
-            this.authManager.setSmsService(smsSvc);
-            if (this.authManager.isPhoneNumberEnabled()) {
-              ctx.logger.info(
-                this.authManager.isPhoneOtpDeliverable()
-                  ? 'Auth: sms service wired (phone-number OTP sign-in / reset enabled)'
-                  : 'Auth: sms service present but NOT configured with a real provider — phone-number OTP stays disabled in production',
-              );
-            }
-          } else if (this.authManager.isPhoneNumberEnabled()) {
-            ctx.logger.info('Auth: no sms service registered — phone-number OTP disabled (password sign-in only)');
-          }
-
-          // #8195 / #14319 — the locale named on every auth EMAIL, so the
-          // localized `sys_email_template` rows are reachable through the
-          // platform's own send path instead of sitting dormant.
-          //
-          // This binds the DEPLOYMENT rung, resolved here at the plugin
-          // layer. Since the 2026-09-02 ruling (#14319) it is the SECOND rung:
-          // a request-triggered send whose recipient IS the requester takes
-          // that caller's own `Accept-Language` first, resolved at send time in
-          // `AuthManager` (`authEmailLocaleFromRequest`, which carries the
-          // ruling text). What is bound here answers when the request named no
-          // locale this platform ships a row for, or when there is no request
-          // at all — invitations, scheduled and admin-initiated mail.
-          //
-          // ⚠️ The superseded 2026-08-13 ruling made this rung the WHOLE answer
-          // and rejected `Accept-Language` outright. Do not restore that
-          // reading here; the single place the history is recorded is
-          // `AuthManager.setDefaultEmailLocale`.
-          //
-          // #14319 measured that "the deployment default" has TWO producers,
-          // and that auth email was reading the weaker one:
-          //
-          //  - `II18nService.getDefaultLocale()` is the app artifact's
-          //    BUILD-TIME `i18n.defaultLocale` (`AppPlugin` pushes it through
-          //    `setDefaultLocale`; the CLI passes `config.i18n.defaultLocale`),
-          //    and is the bare `en` when the app declares nothing.
-          //  - `localization.locale` (ADR-0053) is the workspace's RUNTIME
-          //    language — Setup, Localization, tenant-scoped — whose four
-          //    options are exactly `AUTH_EMAIL_TEMPLATE_LOCALES`. It is
-          //    already the authority for auth SMS (#2815) and for audit
-          //    activity summaries (framework#3039).
-          //
-          // A workspace that declared Chinese therefore received Chinese SMS
-          // and ENGLISH mail. The workspace setting now outranks the
-          // build-time default, and only when it is EXPLICIT
-          // (`source !== 'default'`) — the same precedence the `appName`
-          // binding below uses, because `get` answers the manifest default
-          // (`en-US`) for an untouched workspace and taking it unconditionally
-          // would demote every deployment that declared `i18n.defaultLocale`.
-          //
-          // Both i18n hops are probed rather than assumed: `getService` THROWS
-          // for an unregistered service (i18n is not a required dependency of
-          // auth) and `getDefaultLocale` is OPTIONAL on the contract. Nothing
-          // resolvable ⇒ nothing is named, which is precisely the pre-#8195
-          // behaviour — `EmailService` resolves its documented `en-US` default.
-          let i18nDefaultEmailLocale: string | undefined;
-          try {
-            const i18n = ctx.getService<II18nService>('i18n');
-            const locale =
-              typeof i18n?.getDefaultLocale === 'function' ? i18n.getDefaultLocale() : undefined;
-            i18nDefaultEmailLocale = typeof locale === 'string' ? locale : undefined;
-          } catch {
-            // i18n service is optional — leave the build-time default unset.
-          }
-          const applyEmailLocale = (workspaceLocale: string | undefined): void => {
-            this.authManager?.setDefaultEmailLocale(workspaceLocale ?? i18nDefaultEmailLocale);
-          };
-          // Baseline = the build-time default. Superseded below when a settings
-          // service answers with an explicit workspace language, and left
-          // standing when there is no settings service or its read fails.
-          applyEmailLocale(undefined);
-          if (typeof i18nDefaultEmailLocale === 'string' && i18nDefaultEmailLocale.trim()) {
-            ctx.logger.info(
-              `Auth: bound auth email locale to i18n default=${i18nDefaultEmailLocale}`,
-            );
-          }
-
-          // Bind the email brand name (`{{appName}}`) to the live
-          // `branding.workspace_name` setting so the admin UI can rename the
-          // product without a redeploy. Only an *explicitly set* value
-          // overrides the configured `appName` — when the operator hasn't
-          // customised it (resolver returns the manifest default), we clear
-          // the override so the deployment's `appName` (e.g. `OS_APP_NAME`)
-          // keeps precedence. Mirrors EmailServicePlugin's settings binding.
-          try {
-            const settings = ctx.getService<SettingsReadSurface>('settings');
-            if (settings && typeof settings.get === 'function') {
-              const applyBrand = async () => {
-                try {
-                  const resolved = await settings.get('branding', 'workspace_name', {});
-                  const explicit = resolved && resolved.source !== 'default'
-                    ? resolved.value
-                    : undefined;
-                  this.authManager?.setAppName(
-                    typeof explicit === 'string' ? explicit : undefined,
-                  );
-                } catch (err: any) {
-                  ctx.logger.warn(
-                    'Auth: failed to apply branding.workspace_name: ' + (err?.message ?? err),
-                  );
-                }
-              };
-              await applyBrand();
-              if (typeof settings.subscribe === 'function') {
-                settings.subscribe('branding', () => {
-                  void applyBrand();
-                });
-                ctx.logger.info('Auth: bound appName to settings namespace=branding');
-              }
-
-              // #2815 — bind the auth SMS locale to the deployment default
-              // (`localization.locale`) so OTP/invitation texts render in the
-              // workspace language. #14319 binds the auth EMAIL locale from
-              // the very same read, so the two auth channels can no longer
-              // disagree about what language this workspace speaks.
-              // Live-rebinds on settings changes.
-              const applyLocalizationLocale = async () => {
-                try {
-                  const resolved = await settings.get('localization', 'locale', {});
-                  const value = resolved?.value;
-                  this.authManager?.setDefaultSmsLocale(
-                    typeof value === 'string' ? value : undefined,
-                  );
-                  // Email takes the workspace language only when it was
-                  // EXPLICITLY set; a manifest default leaves the app's
-                  // build-time `i18n.defaultLocale` standing (block above).
-                  const explicit =
-                    resolved && resolved.source !== 'default' && typeof value === 'string'
-                      ? value
-                      : undefined;
-                  applyEmailLocale(explicit);
-                  if (explicit) {
-                    ctx.logger.info(
-                      `Auth: bound auth email locale to localization.locale=${explicit}`,
-                    );
-                  }
-                } catch (err: any) {
-                  ctx.logger.warn(
-                    'Auth: failed to apply localization.locale: ' + (err?.message ?? err),
-                  );
-                }
-              };
-              await applyLocalizationLocale();
-              if (typeof settings.subscribe === 'function') {
-                settings.subscribe('localization', () => {
-                  void applyLocalizationLocale();
-                });
-              }
-            }
-          } catch {
-            // settings service is optional — keep the configured appName.
-          }
-
-          // #2815 — seed the built-in bilingual auth SMS templates into
-          // sys_notification_template (insert-if-missing; tenant edits are
-          // never overwritten). Only meaningful when phone sign-in is on;
-          // the table may not exist yet on a fresh env (messaging provisions
-          // it at kernel:ready), so failures log-and-continue.
-          if (this.authManager.isPhoneNumberEnabled()) {
-            const engine = this.authManager.getDataEngine();
-            if (engine) {
-              const { seedPhoneSmsTemplates } = await import('./phone-sms-texts.js');
-              await seedPhoneSmsTemplates(engine, ctx.logger);
-            }
-          }
-        }
-
         let httpServer: IHttpServer | null = null;
         try {
           httpServer = ctx.getService<IHttpServer>('http-server');
@@ -1009,6 +1040,19 @@ export class AuthPlugin implements Plugin {
       // hook below (registration order), so the probe reads the pre-seed
       // store — the predicate's dev-seed clauses are written for exactly
       // that reading.
+      let ql: IDataEngine | undefined;
+      try { ql = ctx.getService<IDataEngine>('objectql'); } catch { ql = undefined; }
+
+      // [#14353] "Can ANYONE sign in?" — asked UNCONDITIONALLY, because it is
+      // independent of all four preconditions below: a deployment that is
+      // unwalled, or declares no owner, or wires an email transport is just as
+      // unrecoverable when it has human rows and no `sys_account` row. This is
+      // the family's ONE store read: the human-population page is paged here
+      // and the answer handed to the walled-owner probe, so no boot pages
+      // `sys_user` twice. Cost on a fresh store is a single bounded page.
+      const reachability = await probeSignInReachability(ql);
+      const deadEnd = reportIfNoSignInAccountExists(reachability, ctx.logger);
+
       let ownerAccountState: WalledOwnerAccountState = 'unknown';
       if (
         !hasEmailTransport &&
@@ -1016,14 +1060,22 @@ export class AuthPlugin implements Plugin {
         postureEnforcesWall(resolveTenancyPosture()) &&
         resolvePlatformOwnerEmail()
       ) {
-        let ql: IDataEngine | undefined;
-        try { ql = ctx.getService<IDataEngine>('objectql'); } catch { ql = undefined; }
-        ownerAccountState = await probeWalledOwnerAccountState(ql);
+        ownerAccountState = await probeWalledOwnerAccountState(ql, {
+          humanUsers: reachability.humanUsers,
+        });
       }
-      warnIfWalledOwnerCannotVerify(
-        { hasEmailTransport, hasFederatedSignIn, ownerAccountState },
-        ctx.logger,
-      );
+      // [#14353] ONE report per boot. A deployment can match both shapes at
+      // once (no accounts AND a declared owner that cannot verify); the
+      // no-sign-in error strictly subsumes the walled-owner warning there —
+      // an owner who cannot reach platform-admin standing is moot when nobody
+      // can sign in at all — so the warning is suppressed rather than stacked
+      // on top of it. When the error did not fire, the warning is untouched.
+      if (!deadEnd) {
+        warnIfWalledOwnerCannotVerify(
+          { hasEmailTransport, hasFederatedSignIn, ownerAccountState },
+          ctx.logger,
+        );
+      }
     });
 
     // Dev-only: provision a known, loginable platform admin on an empty DB.
@@ -1295,7 +1347,14 @@ export class AuthPlugin implements Plugin {
         // fields stay rejected. `managed-extension-fields.test.ts` proves the two
         // populations are disjoint at the pinned better-auth version.
         for (const [object, fields] of Object.entries(MANAGED_EXTENSION_EDITABLE_FIELDS)) {
-          if (object === SystemObjectName.USER) continue; // sys_user tiering above
+          // `sys_user` is registered ABOVE, from the tiered constant, and is
+          // skipped here rather than merged: this map has one tier and that
+          // table has two (form vs. admin bulk import). Its entry there is a
+          // declaration that must stay a SUBSET of what was registered above —
+          // pinned in `managed-extension-fields.test.ts`, because a name that
+          // reaches this map but never the whitelist is a write the platform
+          // advertises and the guard refuses (ADR-0049).
+          if (object === SystemObjectName.USER) continue;
           registerManagedUpdateWhitelist(object, fields);
         }
         // [#8317] Canonicalise `sys_member.role` on every ObjectQL write, at

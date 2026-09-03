@@ -400,7 +400,34 @@ export class MongoDBDriver implements IDataDriver {
     return result;
   }
 
-  async update(object: string, id: string | number, data: Record<string, unknown>, options?: DriverOptions): Promise<Record<string, unknown>> {
+  /**
+   * [#14428] A miss answers `null` — the arm `IDataDriver.update()` declares
+   * (#13878) and the one `InMemoryDriver`, `SqlDriver`, `SqliteWasmDriver` and
+   * `TursoDriver`'s local face already return.
+   *
+   * This door used to answer a missing id with a row ASSEMBLED from the
+   * caller's own payload plus the `updated_at` it had just stamped:
+   *
+   *   return (updated as Record[string, unknown]) || withoutUndefinedOwnKeys({ id: String(id), ...updateData });
+   *
+   * `updateOne` matched nothing, `findOne` came back `null`, and the caller was
+   * handed a record for an id that names no document. The reason that was ever
+   * written — "the declaration does not permit `null`, so something has to come
+   * back" — was removed by #13878; the posture outlived it. The maintainer
+   * ruled it out on 2026-09-03 (「同意」, decision batch #15 item 1, posture A).
+   *
+   * Why the fabricated row is the expensive direction, not merely the wrong
+   * one: it says SUCCEEDED where the truth is NOT FOUND, and it says so in a
+   * shape that carries the caller's own fields back, so nothing about it looks
+   * wrong. A caller — human or agent — reads it as a landed write and does not
+   * retry, alert or roll back. Through the engine's by-id door
+   * (`engine.ts` → `driver.update`) it surfaced as a REST/SDK/MCP `200` with a
+   * record that does not exist, on this driver and Turso's remote face only.
+   *
+   * ⚠️ `upsert()` is deliberately untouched: an upsert never answers
+   * "not found" (it inserts instead), so it has no not-found arm to declare.
+   */
+  async update(object: string, id: string | number, data: Record<string, unknown>, options?: DriverOptions): Promise<Record<string, unknown> | null> {
     const collection = this.getCollection(object);
     const session = this.getSession(options);
 
@@ -419,7 +446,7 @@ export class MongoDBDriver implements IDataDriver {
       { session, projection: { _id: 0 } },
     );
 
-    return (updated as Record<string, unknown>) || withoutUndefinedOwnKeys({ id: String(id), ...updateData });
+    return (updated as Record<string, unknown> | null) ?? null;
   }
 
   async upsert(object: string, data: Record<string, unknown>, conflictKeys?: string[], options?: DriverOptions): Promise<Record<string, unknown>> {

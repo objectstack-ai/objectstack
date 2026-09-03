@@ -105,11 +105,13 @@
  * comment on the card.
  *
  * ⭐ C4 is the ONE thing this file reads out of a verdict comment, and it is not
- * the verdict: the `Implemented-by:` / `Reviewed-by:` session-ID pair the
- * verdict declares about its own AUTHORSHIP. No PASS or FAIL token is read to
- * reach it, so the boundary above is narrowed by exactly one fact and not
- * crossed — a self-issued verdict is refused on WHO wrote it, never on what it
- * concluded, and the row is report-only like every other one here.
+ * the verdict: the `Implemented-by:` / `Reviewed-by:` identity pair the verdict
+ * declares about its own AUTHORSHIP (a session id on both, or a `mode:subagent`
+ * dev's BRANCH on the left — the grammar note beside AUTHORSHIP_KEYS). No PASS
+ * or FAIL token is read to reach it, so the boundary above is narrowed by
+ * exactly one fact and not crossed — a self-issued verdict is refused on WHO
+ * wrote it, never on what it concluded, and the row is report-only like every
+ * other one here.
  *
  * ## How a COMPLETED review is told from a gate that never ran (#14155)
  *
@@ -720,11 +722,12 @@ const VERDICT_MARKER = /^[ \t]*(?:>[ \t]*)?(?:[-*][ \t]+)?(?:\*\*)?`?VERDICT`?(?
  * The two lines a verdict carries about its own authorship, in the ONE spelling
  * that counts (maintainer 2026-09-01, verbatim and untranslated: 「同意 A」).
  *
- * `Implemented-by:` names the session that produced the diff — read from the
- * implementation claim, not invented — and `Reviewed-by:` names the session
- * rendering the verdict. Case-sensitive, exactly like the `Clause-②` key one
- * section up: this file has one convention for machine spellings and a second
- * one would be the drift it exists against.
+ * `Implemented-by:` names the IDENTITY that produced the diff — read from the
+ * implementation claim, not invented; a `mode:remote` dev's session id, a
+ * `mode:subagent` dev's branch (maintainer 2026-09-02, reading a) — and
+ * `Reviewed-by:` names the session rendering the verdict. Case-sensitive,
+ * exactly like the `Clause-②` key one section up: this file has one convention
+ * for machine spellings and a second one would be the drift it exists against.
  */
 export const AUTHORSHIP_KEYS = Object.freeze(['Implemented-by', 'Reviewed-by']);
 
@@ -736,18 +739,62 @@ const AUTHORSHIP_KEY_LINES = new Map(
 );
 
 /**
- * The value token — a session ID, read immediately after the colon.
+ * The value token — an IDENTITY, read immediately after the colon.
  *
  * The same calibration `readValueToken` states for `Clause-②`: the token must be
  * the FIRST thing after the colon, and what a seat writes after it is their
  * argument, which this file does not read. Real verdicts wrap the ID in
  * backticks, so the same decoration is tolerated and nothing else is.
+ *
+ * ⭐ TWO grammars, and which key admits which is the whole of the 2026-09-02
+ * ruling's reading a (verbatim and untranslated: 「同意」). A `mode:subagent` dev
+ * has no session of its own — under that backend the dev IS a subagent of the
+ * dispatching seat, so a seat-session token on `Implemented-by:` would name the
+ * REVIEWER by construction and make every subagent-dispatched card read as a
+ * self-review, which is the false positive this reading forecloses. Its identity
+ * bit is the one the claim protocol already gives it: its BRANCH, carried on the
+ * implementation claim's own `Branch:` line, so a reader can cross-check the
+ * token rather than take the verdict's word for it. `Implemented-by:` therefore
+ * admits a branch as a first-class value beside a session id (a `mode:remote`
+ * dev keeps its session), while `Reviewed-by:` admits a SESSION ONLY — a verdict
+ * is rendered by a seat, and a seat always has one.
+ *
+ * ⭐ The two grammars are DISJOINT, which is what keeps the comparison the
+ * ruling's own: `claude/…` can never equal `session_…`, so equality on the pair
+ * still means exactly what the ruling says it means — the SAME SESSION on both
+ * lines — and a branch on the left is silent without a second rule to say so.
  */
+const SESSION_TOKEN = /^(?:\*\*)?(?:`)?[ \t]*(session_[A-Za-z0-9]+)(?![A-Za-z0-9_])/;
+
+/**
+ * A `mode:subagent` dev's identity: the branch the claim protocol names it by.
+ * Anchored on the `claude/` prefix every dispatched branch carries and closed on
+ * an alphanumeric, so the seat's reasoning may follow the token — a trailing
+ * `,` or `.` belongs to the prose, never to the branch.
+ */
+const BRANCH_TOKEN = /^(?:\*\*)?(?:`)?[ \t]*(claude\/[A-Za-z0-9._/-]*[A-Za-z0-9])/;
+
 function readSessionToken(raw) {
-  const rest = String(raw ?? '').replace(/^[ \t]+/, '');
-  const m = /^(?:\*\*)?(?:`)?[ \t]*(session_[A-Za-z0-9]+)(?![A-Za-z0-9_])/.exec(rest);
+  const m = SESSION_TOKEN.exec(String(raw ?? '').replace(/^[ \t]+/, ''));
   return m ? m[1] : null;
 }
+
+/** The `Implemented-by:` value — a session id, or a dev branch. */
+function readImplementerToken(raw) {
+  const rest = String(raw ?? '').replace(/^[ \t]+/, '');
+  const m = SESSION_TOKEN.exec(rest) ?? BRANCH_TOKEN.exec(rest);
+  return m ? m[1] : null;
+}
+
+/**
+ * What each key admits, and what it is called when it admits nothing. Per KEY,
+ * because the two identities are not interchangeable: a reviewer is a seat and
+ * has a session, an implementer may be a subagent and has only its branch.
+ */
+const AUTHORSHIP_KEY_VALUES = new Map([
+  ['Implemented-by', { read: readImplementerToken, noun: 'identity — neither a session id nor a `claude/…` dev branch' }],
+  ['Reviewed-by', { read: readSessionToken, noun: 'session ID' }],
+]);
 
 /**
  * The authorship pair declared by ONE comment.
@@ -773,7 +820,7 @@ export function readVerdictAuthorship(text) {
     for (const [key, re] of AUTHORSHIP_KEY_LINES) {
       if (seen.has(key)) continue;
       const m = re.exec(line);
-      if (m) seen.set(key, { token: readSessionToken(m[1]), line: quoteLine(line) });
+      if (m) seen.set(key, { token: AUTHORSHIP_KEY_VALUES.get(key).read(m[1]), line: quoteLine(line) });
     }
   }
   if (seen.size === 0) return { kind: 'legacy' };
@@ -783,7 +830,7 @@ export function readVerdictAuthorship(text) {
   if (missing.length > 0 || unreadable.length > 0) {
     const parts = [];
     for (const key of missing) parts.push(`no \`${key}:\` line`);
-    for (const key of unreadable) parts.push(`\`${key}:\` carries no readable session ID (${JSON.stringify(seen.get(key).line)})`);
+    for (const key of unreadable) parts.push(`\`${key}:\` carries no readable ${AUTHORSHIP_KEY_VALUES.get(key).noun} (${JSON.stringify(seen.get(key).line)})`);
     return { kind: 'malformed', detail: parts.join('; ') };
   }
   return {
@@ -836,6 +883,12 @@ export function cardVerdictAuthorship(commentRows) {
     return { state: 'malformed', at: governing.at, detail: governing.read.detail };
   }
   const { implementedBy, reviewedBy } = governing.read;
+  // ⭐ Equality IS the same-session test, and needs no second rule to be one:
+  // the two identity grammars are disjoint, so a `mode:subagent` dev's branch on
+  // the left can never equal the reviewing seat's session on the right. That is
+  // reading a of the 2026-09-02 ruling, mechanized — a subagent-dispatched card
+  // reads INDEPENDENT, and only a seat that coded in-session and passed its own
+  // diff reads self-review.
   if (implementedBy !== reviewedBy) return { state: 'independent', implementedBy, reviewedBy };
   return { state: 'self-review', session: implementedBy, at: governing.at, detail: governing.read.line };
 }
@@ -863,9 +916,11 @@ export function c4VerdictSelfReview(pair) {
 
   const head = `card #${pair?.card} (delivering open PR #${pair?.pr}${pair?.draft ? ' (draft)' : ''})`;
   const fixed =
-    'the fixed spelling is `Implemented-by: session_…` (the session that produced the diff, read ' +
-    'from the implementation claim) and `Reviewed-by: session_…` (the session rendering this ' +
-    'verdict), each token immediately after its colon, the seat\'s reasoning free to follow it';
+    'the fixed spelling names the identity that produced the diff, read from the implementation ' +
+    'claim — `Implemented-by: session_…` for a `mode:remote` dev, `Implemented-by: claude/…` (its ' +
+    'BRANCH) for a `mode:subagent` dev, which has no session of its own — and `Reviewed-by: ' +
+    'session_…` for the session rendering this verdict, which is a seat and always has one; each ' +
+    'token immediately after its colon, the seat\'s reasoning free to follow it';
   const legacyIsSilent =
     '⚠️ A verdict carrying NEITHER line is a LEGACY verdict and is silent here — it predates the ' +
     'carrier and ⛔ is never turned red by its absence.';
@@ -1234,6 +1289,13 @@ const CLAIM = (extra) => ({
   body: `Claim: PM loop round R1\nBranch: \`claude/issue-13476-unresolvable-engine-403\`\n${extra ?? ''}`,
 });
 
+// Set by `selfTest()` only after its verdict is printed, and read at the
+// dispatch: a `return` that leaves the function above that line prints nothing
+// and still exits 0 — a self-test that never finished, reported as one that
+// passed (#13798). The self-test's own exit code stays load-bearing, so the
+// handshake is a flag rather than a returned sentinel.
+let selfTestReachedVerdict = false;
+
 export function selfTest() {
   const cases = [];
   const t = (name, ok, detail) => cases.push({ name, ok: Boolean(ok), detail });
@@ -1441,7 +1503,8 @@ export function selfTest() {
   t('ONE line alone is MALFORMED — half a pair compares to nothing', readVerdictAuthorship(VERDICT([`Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.kind === 'malformed');
   t('…and the row can say WHICH line is missing', says(readVerdictAuthorship(VERDICT([`Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.detail, 'Implemented-by'));
   t('a key with no readable session ID is MALFORMED, not a reading', readVerdictAuthorship(VERDICT(['Implemented-by: the dispatching seat', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.kind === 'malformed');
-  t('…and says so rather than blaming the absent line', says(readVerdictAuthorship(VERDICT(['Implemented-by: the dispatching seat', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.detail, 'no readable session ID'));
+  t('…and says so rather than blaming the absent line', says(readVerdictAuthorship(VERDICT(['Implemented-by: the dispatching seat', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.detail, 'no readable identity'));
+  t('…naming BOTH identities that key admits, so the remedy is executable for either dev backend', says(readVerdictAuthorship(VERDICT(['Implemented-by: the dispatching seat', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.detail, 'session id') && says(readVerdictAuthorship(VERDICT(['Implemented-by: the dispatching seat', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.detail, 'claude/'));
 
   // the spelling, mirroring the Clause-② reader exactly
   t('the token may be followed by the seat\'s reasoning — the same calibration Clause-② uses', readVerdictAuthorship(VERDICT([`Implemented-by: ${IMPL_SESSION} (implementation claim, 09:24Z)`, `Reviewed-by: ${REVIEW_SESSION}`]).body)?.implementedBy === IMPL_SESSION);
@@ -1464,8 +1527,26 @@ export function selfTest() {
   const halfRow4 = c4VerdictSelfReview(reviewed([VERDICT([`Reviewed-by: \`${REVIEW_SESSION}\``])]));
   t('⭐ a ONE-LINE-only verdict is its own reportable malformed state', typeof halfRow4 === 'string' && says(halfRow4, 'HALF'));
   t('…and quotes the fixed spelling so the remedy is executable', says(halfRow4, 'Implemented-by: session_') && says(halfRow4, 'Reviewed-by: session_'));
+  t('…including the subagent BRANCH form, the half a session-only spelling could not express', says(halfRow4, 'Implemented-by: claude/'));
   t('…and says in the same breath that a legacy verdict is NOT this state', says(halfRow4, 'LEGACY') && says(halfRow4, 'never turned red'));
   t('C4 never prescribes a write from this script either', says(halfRow4, '自查放行'));
+
+  // the SUBAGENT identity — reading a (maintainer 2026-09-02, verbatim 「同意」)
+  // A `mode:subagent` dev has no session of its own, so the implementation claim
+  // names it by its BRANCH; a session token on that line would name the
+  // dispatching seat and make every subagent-dispatched card a false self-review.
+  const DEV_BRANCH = 'claude/issue-14209-review-template-half';
+  const SUBAGENT_PAIR = [`Implemented-by: \`${DEV_BRANCH}\``, `Reviewed-by: \`${REVIEW_SESSION}\``];
+  t('⭐ a `mode:subagent` dev is named by its BRANCH, and that reads as a first-class pair', readVerdictAuthorship(VERDICT(SUBAGENT_PAIR).body)?.kind === 'pair' && readVerdictAuthorship(VERDICT(SUBAGENT_PAIR).body)?.implementedBy === DEV_BRANCH);
+  t('⭐ …so a subagent-dispatched card is SILENT — the reviewing seat did not write the diff', c4VerdictSelfReview(reviewed([VERDICT(SUBAGENT_PAIR)])) === null);
+  t('…and it reads INDEPENDENT rather than unjudged — silence here is a reading, not a gap', cardVerdictAuthorship([VERDICT(SUBAGENT_PAIR)]).state === 'independent' && pairUnjudged(reviewed([VERDICT(SUBAGENT_PAIR)])) === null);
+  t('⭐ …while the same-session pair still FIRES: widening the grammar did not disarm the row', typeof c4VerdictSelfReview(reviewed([VERDICT(SELF_PAIR)])) === 'string');
+  t('the branch token ends at the branch — the seat\'s reasoning may follow it', readVerdictAuthorship(VERDICT([`Implemented-by: ${DEV_BRANCH} (implementation claim, 16:29Z)`, `Reviewed-by: ${REVIEW_SESSION}`]).body)?.implementedBy === DEV_BRANCH);
+  t('…and a trailing sentence mark belongs to the prose, never to the branch', readVerdictAuthorship(VERDICT([`Implemented-by: ${DEV_BRANCH}.`, `Reviewed-by: ${REVIEW_SESSION}`]).body)?.implementedBy === DEV_BRANCH);
+  t('⛔ `Reviewed-by:` admits a session ONLY — a verdict is rendered by a seat, and a seat has one', readVerdictAuthorship(VERDICT([`Implemented-by: \`${DEV_BRANCH}\``, `Reviewed-by: \`${DEV_BRANCH}\``]).body)?.kind === 'malformed');
+  t('…and says WHICH key refused the token, not the other one', says(readVerdictAuthorship(VERDICT([`Implemented-by: \`${DEV_BRANCH}\``, `Reviewed-by: \`${DEV_BRANCH}\``]).body)?.detail, 'Reviewed-by') && !says(readVerdictAuthorship(VERDICT([`Implemented-by: \`${DEV_BRANCH}\``, `Reviewed-by: \`${DEV_BRANCH}\``]).body)?.detail, '`Implemented-by:` carries'));
+  t('⛔ a bare `claude` with no branch path is not an identity', readVerdictAuthorship(VERDICT(['Implemented-by: claude', `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.kind === 'malformed');
+  t('⛔ nor is a branch that merely appears LATER in the line — the token is first after the colon', readVerdictAuthorship(VERDICT([`Implemented-by: the dev on ${DEV_BRANCH}`, `Reviewed-by: \`${REVIEW_SESSION}\``]).body)?.kind === 'malformed');
 
   // the governing verdict — why the newest one carrying the pair decides
   t('⭐ a self-review followed by an INDEPENDENT re-review reads clean — the remedy clears the row', c4VerdictSelfReview(reviewed([VERDICT(SELF_PAIR, '2026-09-01T11:21:18Z'), VERDICT(INDEPENDENT_PAIR, '2026-09-01T12:56:27Z')])) === null);
@@ -1514,13 +1595,26 @@ export function selfTest() {
       'replayed from the 2026-09-01 clear, the verdict-authorship pair and its legacy silence, ' +
       'and the exit register).',
   );
+
+  selfTestReachedVerdict = true;
   return 0;
 }
 
 // ---------------------------------------------------------------------------
 
 async function main(argv) {
-  if (argv.includes('--self-test')) return selfTest();
+  if (argv.includes('--self-test')) {
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-clause2-carriers self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    return selfTestCode;
+  }
 
   const repoRes = resolveSweepRepo(process.env);
   if (!repoRes.valid) {
@@ -1577,7 +1671,16 @@ async function main(argv) {
 
 if (isEntrypoint(import.meta.url)) {
   if (process.argv.includes('--self-test')) {
-    process.exit(selfTest());
+    const selfTestCode = selfTest();
+    if (!selfTestReachedVerdict) {
+      console.error(
+        '\n✗ check-clause2-carriers self-test: selfTest() returned without reaching its verdict,\n'
+          + 'so no success line was printed. Exiting 0 here would report a self-test\n'
+          + 'that never finished as a self-test that passed.\n',
+      );
+      process.exit(1);
+    }
+    process.exit(selfTestCode);
   } else {
     const rearmed = rearmThroughProxy(process.argv.slice(2));
     if (rearmed !== null) process.exit(rearmed);

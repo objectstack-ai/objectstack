@@ -720,7 +720,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 export interface Plugin {
   name: string;               // Unique identifier (reverse domain recommended)
   version?: string;           // Semantic version
-  type?: string;              // standard|ui|driver|server|app|theme|agent|objectql
+  type?: PluginType;          // closed set exported by @objectstack/core
   dependencies?: string[];    // Plugins that must init before this one
 
   // Phase 1: Register services

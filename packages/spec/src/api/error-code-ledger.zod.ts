@@ -535,6 +535,13 @@ export const ERROR_CODE_LEDGER = {
     // been written (`TransactionUnsupportedError`, `transaction-errors.ts`;
     // ADR-0119 D1/D4 fail-closed posture). Same #8087-gate family.
     'ERR_TRANSACTION_UNSUPPORTED',
+    // [#14010] a hook declared `runAs: 'user'` and its trigger resolved NO user
+    // (an `isSystem` plugin/service write, a system-elevated flow node), so its
+    // `ctx.api` data operation has no identity to scope to and is REFUSED
+    // rather than run unscoped — the hook-side twin of service-automation's
+    // `AUTOMATION_UNSCOPED_RUN_DATA_ACCESS` (#3760), registered under the
+    // package that throws it. `HookUnscopedDataAccessError`, `hook-run-as.ts`.
+    'HOOK_UNSCOPED_DATA_ACCESS',
     // [#14099] a `multi: true` update whose per-row `beforeUpdate` dispatches
     // assigned DIFFERENT sets of payload keys — a transition stamp
     // (`completed_at` on the move into `done`) is the measured shape. One `SET`

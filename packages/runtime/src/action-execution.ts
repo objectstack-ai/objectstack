@@ -638,7 +638,16 @@ export function seedFlowActionParams(_deps: ActionExecutionDeps,
 
     if (rowId != null) {
         const keys = new Set<string>(['recordId']);
-        if (objectName && objectName !== 'global') {
+        // [#14864] ONE predicate for "object-less", the same one
+        // `dispatchFlowAction` asks three lines from here before it decides
+        // whether to hand the automation service an `object` at all. This used
+        // to be a second, narrower comparison (`objectName !==
+        // GLOBAL_ACTION_OBJECT_KEY`), and the two parted on exactly one input:
+        // a route resolved at the legacy `'*'` was object-less to the envelope
+        // and object-BOUND here, so the bag grew a nonsense `'*Id'` alias. The
+        // empty-string leg was never the divergence — the `objectName &&`
+        // truthiness test this replaces already covered it.
+        if (!isObjectLessActionKey(objectName)) {
             keys.add(`${objectName.replace(/_([a-z])/g, (_m: string, c: string) => c.toUpperCase())}Id`);
         }
         if (typeof action?.recordIdParam === 'string' && action.recordIdParam) {
@@ -1013,7 +1022,7 @@ export function enforceActionParams(deps: ActionExecutionDeps,
     if (!laxActionParams()) {
         return `Invalid action params: ${summary}`;
     }
-    const key = `${where.objectName ?? 'global'}/${where.actionName ?? action?.name ?? 'action'}`;
+    const key = `${where.objectName ?? GLOBAL_ACTION_OBJECT_KEY}/${where.actionName ?? action?.name ?? 'action'}`;
     warnActionParamsOnce(
         key,
         `[action-params] ${key}: ${summary} — accepted because ` +
@@ -1487,7 +1496,7 @@ export async function resolveActionByName(deps: ActionExecutionDeps,
  *     engine executes since #2608 (`resyncAuthoredActions`) but that never
  *     appear inside any object definition. Their owning object follows the
  *     same convention as the engine registration key (`objectName` field,
- *     legacy `object` field, else the `'global'` wildcard).
+ *     legacy `object` field, else the object-less `GLOBAL_ACTION_OBJECT_KEY`).
  *
  * On a key clash (`objectName:name`) the object-embedded declaration wins,
  * mirroring the execution layer's artifact-wins rule — `resyncAuthoredActions`

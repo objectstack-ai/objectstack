@@ -531,3 +531,81 @@ describe('AnalyticsService.queryDataset', () => {
     expect(result.rows).toEqual([{ account: 'name-acc1', revenue: 1000 }]);
   });
 });
+
+// ── #14492 — built-in aggregate discriminator ──────────────────────────────
+// `fields[].label` is only ever written from the DATASET MEASURE's own `label`
+// (the enrichment block in `queryDataset`), so the question "is this header the
+// server's default or the author's text?" is answerable from the measure alone:
+// no `label` + an `aggregate` ⇒ built-in default ⇒ the column says which
+// aggregate, and an i18n-aware renderer substitutes its own name for it.
+describe('AnalyticsService.queryDataset — fields[].builtinAggregate (#14492)', () => {
+  const svcFor = (rows: Array<Record<string, unknown>>) => new AnalyticsService({
+    queryCapabilities: () => ({ nativeSql: true, objectqlAggregate: false, inMemory: false }),
+    executeRawSql: async () => rows,
+    getReadScope: (_o, ctx?: ExecutionContext) => (ctx?.tenantId ? { organization_id: ctx.tenantId } : undefined),
+  });
+  const ds = (measures: Array<Record<string, unknown>>) => DatasetSchema.parse({
+    name: 'customers', label: 'Customers', object: 'customer', include: [],
+    dimensions: [{ name: 'status', field: 'status', type: 'string' }],
+    measures,
+  });
+  const run = async (measures: Array<Record<string, unknown>>, names: string[], rows: Array<Record<string, unknown>>) => {
+    const r = await svcFor(rows).queryDataset(ds(measures), { dimensions: ['status'], measures: names }, { tenantId: 'org_A' } as ExecutionContext);
+    return Object.fromEntries((r.fields ?? []).map((f) => [f.name, f]));
+  };
+
+  it('a label-less built-in `count` measure carries builtinAggregate: "count" and no label', async () => {
+    const fields = await run([{ name: 'count', aggregate: 'count' }], ['count'], [{ status: 'active', count: 3 }]);
+    expect(fields.count?.builtinAggregate).toBe('count');
+    expect(fields.count?.label).toBeUndefined();
+    // A dimension column is never a built-in aggregate.
+    expect(fields.status?.builtinAggregate).toBeUndefined();
+  });
+
+  it('an author-labelled measure ("Tasks") keeps its text and carries NO builtinAggregate', async () => {
+    const fields = await run([{ name: 'task_count', aggregate: 'count', label: 'Tasks' }], ['task_count'], [{ status: 'open', task_count: 7 }]);
+    expect(fields.task_count?.label).toBe('Tasks');
+    expect(fields.task_count?.builtinAggregate).toBeUndefined();
+  });
+
+  it('an inline locale-map label with no entry for the request locale is STILL an authored label — no discriminator', async () => {
+    const r = await svcFor([{ status: 'open', task_count: 7 }]).queryDataset(
+      ds([{ name: 'task_count', aggregate: 'count', label: { en: 'Tasks' } }]),
+      { dimensions: ['status'], measures: ['task_count'] },
+      { tenantId: 'org_A', locale: 'fr' } as ExecutionContext,
+    );
+    const f = (r.fields ?? []).find((x) => x.name === 'task_count');
+    expect(f).toBeDefined();
+    expect(f?.builtinAggregate).toBeUndefined();
+  });
+
+  it('every aggregate in the closed vocabulary is carried verbatim when the measure is label-less', async () => {
+    const fields = await run(
+      [
+        { name: 'total', aggregate: 'sum', field: 'amount' },
+        { name: 'mean', aggregate: 'avg', field: 'amount' },
+        { name: 'owners', aggregate: 'count_distinct', field: 'owner' },
+      ],
+      ['total', 'mean', 'owners'],
+      [{ status: 'open', total: 10, mean: 5, owners: 2 }],
+    );
+    expect(fields.total?.builtinAggregate).toBe('sum');
+    expect(fields.mean?.builtinAggregate).toBe('avg');
+    expect(fields.owners?.builtinAggregate).toBe('count_distinct');
+  });
+
+  it('a derived measure has no aggregate and therefore no discriminator, while its label-less inputs keep theirs', async () => {
+    const fields = await run(
+      [
+        { name: 'base', aggregate: 'count' },
+        { name: 'met', aggregate: 'count', field: 'met' },
+        { name: 'rate', derived: { op: 'ratio', of: ['met', 'base'] } },
+      ],
+      ['base', 'met', 'rate'],
+      [{ status: 'open', base: 4, met: 2 }],
+    );
+    expect(fields.base?.builtinAggregate).toBe('count');
+    expect(fields.met?.builtinAggregate).toBe('count');
+    expect(fields.rate?.builtinAggregate).toBeUndefined();
+  });
+});

@@ -204,6 +204,44 @@ import { maskComments } from './js-comment-mask.mjs';
 import { commandWords, shellCommands } from './check-shard-attestation.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
 
+// ── The self-test's own battery roster and floor (#13489) ──────────────────
+//
+// `failures.length === 0` used to be this self-test's ONLY success condition, so
+// "every case held" and "the cases never ran" printed the same line. Closed the
+// way PR #13487 validated on check-doc-authoring: what is pinned is the
+// registered NAMES, not a number. Every section opens with `battery('<name>')`,
+// every assertion is attributed to the battery most recently opened, and the
+// floor requires the OPENED set to equal the DECLARED set with each battery at
+// or above its own count.
+//
+// ⛔ A pinned TOTAL is not the repair: a battery dropping from 9 cases to 3
+// keeps a total "right" the moment a sibling grows.
+//
+// The counts are a FLOOR, not an equality — adding cases is ordinary work and
+// must not red. A battery BELOW its floor means cases stopped running; the
+// remedy is to find what stopped registering.
+const SELF_TEST_BATTERIES = Object.freeze({
+  '1. The shape the repo ships: W=10 C=20 T=30, slack exactly one window ─': 4,
+  '2. TIER 1: a cap at or above the budget is a guaranteed no-op': 3,
+  '3. TIER 2: the two one-line edits the card named': 5,
+  '4. An explicit cap is honoured, and it can RESCUE a short job': 2,
+  '5. The defaults are READ from the guard, not hardcoded here': 6,
+  '6. Budget resolution: step-level, missing, and unusable': 7,
+  '7. The selector: what must NOT count as a site': 7,
+  '8. Line numbers: attached when they can be trusted, never guessed': 1,
+  '9. Siblings on one job clock: what the census must and must NOT say': 13,
+  '10. The real repository -- the direction the fixtures cannot prove': 13,
+});
+
+// DELETING an entry silences that battery's floor exactly as effectively as
+// zeroing it, so the roster's own size is pinned too.
+const SELF_TEST_BATTERY_FLOOR = 10;
+
+// The key an assertion is filed under when no battery is open. It is not a
+// declared battery, so it reds by the same set difference rather than silently
+// inflating whichever battery happened to run last.
+const UNATTRIBUTED_BATTERY = '(no battery open)';
+
 /** Refusal to measure, kept distinct from a finding (see check-agent-test-spelling). */
 export const EXIT_REFUSED = 2;
 
@@ -656,10 +694,25 @@ export function run(root, parseYaml, io = {}) {
 let selfTestReachedVerdict = false;
 
 export async function selfTest() {
+  // The battery ledger this self-test's floor is evaluated against (#13489).
+  // `battery()` opens a battery; every assertion below is attributed to the one
+  // most recently opened, so a section that stops running stops registering and
+  // names ITSELF at the floor rather than going quiet.
+  const batterySeen = new Map();
+  let openBattery = null;
+  const battery = (name) => {
+    openBattery = name;
+  };
+  const registerCase = () => {
+    const b = openBattery ?? UNATTRIBUTED_BATTERY;
+    batterySeen.set(b, (batterySeen.get(b) ?? 0) + 1);
+  };
+
   const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
   const failures = [];
   let checked = 0;
   const assert = (name, ok, detail) => {
+    registerCase();
     checked += 1;
     if (!ok) failures.push(detail ? `${name} -- ${detail}` : name);
   };
@@ -729,6 +782,7 @@ export async function selfTest() {
 
   try {
     // ── 1. The shape the repo ships: W=10 C=20 T=30, slack exactly one window ─
+    battery('1. The shape the repo ships: W=10 C=20 T=30, slack exactly one window ─');
     const green = fixture({ 'a.yml': workflow({ jobTimeout: 30, command: GUARDED }) });
     const greenRun = drive(green);
     assert('the ci.yml shape (W=10, C=20, T=30) passes', greenRun.code === 0, greenRun.out);
@@ -741,6 +795,7 @@ export async function selfTest() {
     assert('...with the cap DERIVED, not read from the command line', greenScan.sites[0].cap === 20 && greenScan.sites[0].capSource.includes('DEFAULT_CAP_MULTIPLE'), JSON.stringify(greenScan.sites[0]));
 
     // ── 2. TIER 1: a cap at or above the budget is a guaranteed no-op ────────
+    battery('2. TIER 1: a cap at or above the budget is a guaranteed no-op');
     const over = fixture({
       'a.yml': workflow({ jobTimeout: 30, command: 'node scripts/run-with-stall-guard.mjs --log x --stall-minutes 10 --stall-cap-minutes 40 -- pnpm test' }),
     });
@@ -754,6 +809,7 @@ export async function selfTest() {
     assert('a cap EQUAL to the job budget is red (the boundary is not below)', drive(equal).code === 1);
 
     // ── 3. TIER 2: the two one-line edits the card named ─────────────────────
+    battery('3. TIER 2: the two one-line edits the card named');
     const tightened = fixture({ 'a.yml': workflow({ jobTimeout: 25, command: GUARDED }) });
     const tightenedRun = drive(tightened);
     assert('lowering the JOB timeout 30 -> 25 under an unchanged guard is red', tightenedRun.code === 1, tightenedRun.out);
@@ -769,6 +825,7 @@ export async function selfTest() {
     assert('a guard-wrapped step added to a SHORT job is red', drive(shortJob).code === 1);
 
     // ── 4. An explicit cap is honoured, and it can RESCUE a short job ────────
+    battery('4. An explicit cap is honoured, and it can RESCUE a short job');
     const explicit = fixture({
       'a.yml': workflow({ jobTimeout: 25, command: 'node scripts/run-with-stall-guard.mjs --log x --stall-minutes 10 --stall-cap-minutes 12 -- pnpm test' }),
     });
@@ -781,6 +838,7 @@ export async function selfTest() {
     // Same workflow as case 1 -- green under the repo's real DEFAULT_CAP_MULTIPLE
     // of 2, red under a guard declaring 3. A gate carrying its own copy of `2`
     // passes both, which is the drift this gate must not commit.
+    battery('5. The defaults are READ from the guard, not hardcoded here');
     const otherMultiple = fixture({ 'a.yml': workflow({ jobTimeout: 30, command: GUARDED }) }, { capMultiple: 3 });
     const otherRun = drive(otherMultiple);
     assert('the cap multiple is read from the guard: multiple 3 turns the same workflow red', otherRun.code === 1, otherRun.out);
@@ -802,6 +860,7 @@ export async function selfTest() {
     assert('...and both missing declarations are named', /DEFAULT_CAP_MULTIPLE/.test(renamedRun.out) && /stallMinutes/.test(renamedRun.out), renamedRun.out);
 
     // ── 6. Budget resolution: step-level, missing, and unusable ──────────────
+    battery('6. Budget resolution: step-level, missing, and unusable');
     const stepBound = fixture({ 'a.yml': workflow({ jobTimeout: 120, stepTimeout: 25, command: GUARDED }) });
     const stepBoundRun = drive(stepBound);
     assert('a step-level timeout-minutes BINDS when it is tighter than the job\'s', stepBoundRun.code === 1, stepBoundRun.out);
@@ -830,6 +889,7 @@ export async function selfTest() {
     assert('a window that is not a number REFUSES instead of guessing', unresolvableRun.code === EXIT_REFUSED, unresolvableRun.out);
 
     // ── 7. The selector: what must NOT count as a site ───────────────────────
+    battery('7. The selector: what must NOT count as a site');
     const commented = fixture({
       'a.yml':
         `name: fixture\non: push\njobs:\n  probe:\n    timeout-minutes: 5\n    runs-on: ubuntu-latest\n    steps:\n` +
@@ -862,6 +922,7 @@ export async function selfTest() {
     assert('a missing guard script REFUSES', drive(noGuardFile).code === EXIT_REFUSED);
 
     // ── 8. Line numbers: attached when they can be trusted, never guessed ────
+    battery('8. Line numbers: attached when they can be trusted, never guessed');
     assert('a site carries the line its command sits on', greenScan.sites[0].line === 10, JSON.stringify(greenScan.sites[0]));
 
     // ── 9. Siblings on one job clock: what the census must and must NOT say ──
@@ -871,6 +932,7 @@ export async function selfTest() {
     // importantly, pin the two ways of deriving it that are WRONG. Both wrong
     // ways are green against a single-sibling tree, so only fixtures shaped
     // like the mistake can hold them.
+    battery('9. Siblings on one job clock: what the census must and must NOT say');
 
     // The positive case: two guarded steps, one job, one clock.
     const pair = fixture({
@@ -948,6 +1010,7 @@ export async function selfTest() {
     assert('...and the middle one is 2 of 3', /\(2 of 3 guarded steps in this job/.test(trioCensus[1]), trioCensus[1]);
 
     // ── 10. The real repository -- the direction the fixtures cannot prove ───
+    battery('10. The real repository -- the direction the fixtures cannot prove');
     const realDefaults = guardDefaults(repoRoot());
     assert('the real guard still declares both defaults', Boolean(realDefaults.defaults), JSON.stringify(realDefaults.problems));
     if (realDefaults.defaults) {
@@ -996,6 +1059,52 @@ export async function selfTest() {
     }
   } finally {
     for (const dir of roots) rmSync(dir, { recursive: true, force: true });
+  }
+
+  // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
+  //
+  // Evaluated after every battery has had its chance and BEFORE the verdict, so
+  // the success line below can only be printed by a run in which the set of
+  // batteries that registered assertions EQUALS the set declared. A set
+  // difference names WHICH battery stopped; a count says only that something did.
+  const floorFailure = (message) => {
+    failures.push(message);
+  };
+  const declaredBatteries = Object.keys(SELF_TEST_BATTERIES);
+  let floorBreached = false;
+  if (declaredBatteries.length < SELF_TEST_BATTERY_FLOOR) {
+    floorBreached = true;
+    floorFailure(
+      `SELF_TEST_BATTERIES declares ${declaredBatteries.length} batteries, below the pinned ` +
+        `${SELF_TEST_BATTERY_FLOOR} — a battery deleted from the roster takes its own floor with it.`,
+    );
+  }
+  for (const [name, count] of batterySeen) {
+    if (declaredBatteries.includes(name)) continue;
+    floorBreached = true;
+    floorFailure(
+      `self-test battery "${name}" registered ${count} case(s) but is not declared in ` +
+        'SELF_TEST_BATTERIES — an assertion attributed to no declared battery is one nothing floors.',
+    );
+  }
+  for (const name of declaredBatteries) {
+    const count = batterySeen.get(name) ?? 0;
+    if (count >= SELF_TEST_BATTERIES[name]) continue;
+    floorBreached = true;
+    floorFailure(
+      count === 0
+        ? `self-test battery "${name}" DID NOT RUN — 0 cases registered, ${SELF_TEST_BATTERIES[name]} pinned. ` +
+          'The verdict below would have claimed those cases hold.'
+        : `self-test battery "${name}" registered ${count} case(s), below its pinned floor of ` +
+          `${SELF_TEST_BATTERIES[name]} — cases that used to run no longer do.`,
+    );
+  }
+  if (floorBreached) {
+    floorFailure(
+      'A battery at or below its floor means cases STOPPED RUNNING — the battery is the bug, not the ' +
+        'number. Find what stopped registering (an early return, a deleted block, a guard that now ' +
+        'skips) and restore it.',
+    );
   }
 
   if (failures.length) {

@@ -6,6 +6,7 @@ import {
   EnvironmentArtifactSchema,
   Sha256DigestSchema,
 } from './environment-artifact.zod';
+import { PluginPermissionsSchema } from '../kernel/manifest.zod';
 
 import {
   EXPORT_ENTRY_POINTS,
@@ -243,6 +244,151 @@ describe('EnvironmentArtifactSchema (wire shape)', () => {
       // NB `manifest` may legitimately appear INSIDE metadata (the stack
       // manifest) — the tombstone governs the envelope level only.
       expect(Object.keys(parsed)).not.toContain('manifest');
+    });
+  });
+});
+
+// ─── grantedPermissions (#14865) ────────────────────────────────────────────
+//
+// The artifact-contract half of #11333 option A / the #13457 batch ruling: the
+// consented four-class permission set `{ services, hooks, network, fs }` rides
+// the envelope — written by the cloud control plane at consent-compile time,
+// read by the loader at materialize time. Before this key was declared,
+// `EnvironmentArtifactSchema` (a plain `z.object`) STRIPPED it at the artifact
+// door with no error — so the first pin is "the declared key survives", and its
+// positive control is "an unknown sibling is still stripped": the door must not
+// have gone passthrough to admit this key. Every pin here is a schema-reachable
+// parse, not a type-level assertion.
+
+describe('grantedPermissions — install-time granted set per plugin manifest `id` (#14865)', () => {
+  const granted = {
+    '@acme/plugin-crm': {
+      services: ['object', 'http'],
+      hooks: ['record.beforeInsert'],
+      network: ['api.acme.com'],
+      fs: [],
+    },
+    '@acme/plugin-reports': {},
+  };
+
+  it('the declared key survives parse and round-trips the exact map', () => {
+    const parsed = EnvironmentArtifactSchema.parse({ ...wireMinimal, grantedPermissions: granted });
+    expect(parsed).toHaveProperty('grantedPermissions');
+    expect(parsed.grantedPermissions).toEqual(granted);
+    expect(Object.keys(parsed.grantedPermissions ?? {})).toEqual(['@acme/plugin-crm', '@acme/plugin-reports']);
+  });
+
+  it('pure control: with no grantedPermissions present at all, an unknown top-level sibling is stripped (green before and after this key; red only if the door goes passthrough)', () => {
+    const parsed = EnvironmentArtifactSchema.parse({ ...wireMinimal, notAnEnvelopeKey: { anything: 1 } });
+    expect(parsed).not.toHaveProperty('notAnEnvelopeKey');
+    expect(Object.keys(parsed).sort()).toEqual(['checksum', 'commitId', 'environmentId', 'metadata', 'schemaVersion']);
+  });
+
+  it('positive control: an unknown top-level sibling is STILL stripped — the door admits the declared key, not everything', () => {
+    const parsed = EnvironmentArtifactSchema.parse({
+      ...wireMinimal,
+      grantedPermissions: granted,
+      grantedPermissionz: granted, // near-miss spelling
+      notAnEnvelopeKey: { anything: 1 },
+    });
+    expect(parsed.grantedPermissions).toEqual(granted);
+    expect(parsed).not.toHaveProperty('grantedPermissionz');
+    expect(parsed).not.toHaveProperty('notAnEnvelopeKey');
+    expect(Object.keys(parsed).sort()).toEqual(
+      ['checksum', 'commitId', 'environmentId', 'grantedPermissions', 'metadata', 'schemaVersion'],
+    );
+  });
+
+  describe('absent ≠ `{}` — never collapsed (there is no `.default({})`, and there must not be)', () => {
+    it('absent stays absent: no consent record', () => {
+      const parsed = EnvironmentArtifactSchema.parse(wireMinimal);
+      expect(Object.keys(parsed)).not.toContain('grantedPermissions');
+      expect(parsed.grantedPermissions).toBeUndefined();
+    });
+
+    it('`{}` stays `{}`: consent-bearing, consented to nothing', () => {
+      const parsed = EnvironmentArtifactSchema.parse({ ...wireMinimal, grantedPermissions: {} });
+      expect(Object.keys(parsed)).toContain('grantedPermissions');
+      expect(parsed.grantedPermissions).toEqual({});
+    });
+
+    it('a per-plugin `{}` entry stays `{}`: that plugin consented to nothing', () => {
+      const parsed = EnvironmentArtifactSchema.parse({
+        ...wireMinimal,
+        grantedPermissions: { '@acme/plugin-reports': {} },
+      });
+      expect(parsed.grantedPermissions).toEqual({ '@acme/plugin-reports': {} });
+    });
+
+    it('the two readings stay distinguishable on the PARSED value, not only on the input', () => {
+      const absent = EnvironmentArtifactSchema.parse(wireMinimal);
+      const empty = EnvironmentArtifactSchema.parse({ ...wireMinimal, grantedPermissions: {} });
+      expect('grantedPermissions' in absent).toBe(false);
+      expect('grantedPermissions' in empty).toBe(true);
+    });
+  });
+
+  describe('value shape = the strict PluginPermissionsSchema (kernel/manifest.zod.ts)', () => {
+    it('is the SAME declaration as the manifest requested set — identity, not a lookalike', () => {
+      const record = EnvironmentArtifactSchema.shape.grantedPermissions.unwrap();
+      expect(record.valueType).toBe(PluginPermissionsSchema);
+    });
+
+    it('refuses an unknown permission CLASS with `unrecognized_keys` at the plugin path, rather than granting it silently', () => {
+      const result = EnvironmentArtifactSchema.safeParse({
+        ...wireMinimal,
+        grantedPermissions: { '@acme/plugin-crm': { services: ['object'], shell: ['*'] } },
+      });
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      const issue = result.error.issues.find((i) => i.code === 'unrecognized_keys');
+      expect(issue?.path).toEqual(['grantedPermissions', '@acme/plugin-crm']);
+      expect((issue as { keys?: string[] } | undefined)?.keys).toEqual(['shell']);
+    });
+
+    it('refuses a non-object per-plugin value and a non-record map', () => {
+      for (const bad of [
+        { '@acme/plugin-crm': ['object'] },
+        { '@acme/plugin-crm': 'object' },
+        { '@acme/plugin-crm': null },
+        ['object'],
+        'object',
+      ]) {
+        expect(
+          EnvironmentArtifactSchema.safeParse({ ...wireMinimal, grantedPermissions: bad }).success,
+          `must refuse ${JSON.stringify(bad)}`,
+        ).toBe(false);
+      }
+    });
+
+    it('accepts all four consented classes exactly as the manifest declaration spells them', () => {
+      const full = { services: ['object'], hooks: ['record.beforeInsert'], network: ['api.acme.com'], fs: ['/tmp'] };
+      const parsed = EnvironmentArtifactSchema.parse({ ...wireMinimal, grantedPermissions: { '@acme/plugin-crm': full } });
+      expect(parsed.grantedPermissions?.['@acme/plugin-crm']).toEqual(full);
+    });
+  });
+
+  describe('key = the plugin manifest `id` — the documented assumption, with the residual risk pinned on the contract text', () => {
+    // The schema cannot distinguish a manifest `id` from a control-plane
+    // `package_id` (both are strings), so this is a pin on the CONTRACT TEXT a
+    // producer reads: the key's own description must name the manifest `id` as
+    // the key, name `package_id` as what it is not, and state absent vs `{}`.
+    // If the description stops saying so, the assumption is no longer
+    // documented on the surface that carries it.
+    it('the key description names the manifest `id` as the key, rules out `package_id`, and states absent vs `{}`', () => {
+      const description = EnvironmentArtifactSchema.shape.grantedPermissions.description ?? '';
+      expect(description).toMatch(/keyed by the plugin manifest `id`/);
+      expect(description).toMatch(/not the control-plane `package_id`/);
+      expect(description).toMatch(/Absent = no consent record/);
+      expect(description).toMatch(/`\{\}` = consent-bearing and consented to nothing/);
+    });
+
+    it('any string key parses — which IS the residual risk: a `package_id`-shaped key is accepted and would simply never be looked up', () => {
+      const parsed = EnvironmentArtifactSchema.parse({
+        ...wireMinimal,
+        grantedPermissions: { pkg_01HABCDE: { services: ['object'] } },
+      });
+      expect(parsed.grantedPermissions).toEqual({ pkg_01HABCDE: { services: ['object'] } });
     });
   });
 });

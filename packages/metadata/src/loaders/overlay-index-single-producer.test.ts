@@ -43,7 +43,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { DatabaseLoader } from './database-loader';
+import { DatabaseLoader } from './database-loader.js';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 const INDEX = 'idx_sys_metadata_overlay_active';
