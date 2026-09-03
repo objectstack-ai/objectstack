@@ -513,6 +513,18 @@ export const ERROR_CODE_LEDGER = {
     // `hook-target-rebind-errors.ts`), during a write the dispatcher is
     // serving. Same #8087-gate family.
     'ERR_HOOK_TARGET_REBIND',
+    // [#13636] A write carried an `orgLessWrite` declaration the platform
+    // tenancy ledger does not admit — an object it has not classified
+    // `conditional`, a reason that object does not admit, a malformed value, or
+    // an object other than the one being written
+    // (`OrgLessWriteDeclarationRefusedError`, `tenancy/orgless-write-declaration.ts`).
+    // Registered for the same reason its sibling
+    // `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` below is: it carries `status` 500
+    // and the REST layer forwards a string `code` on any `status >= 500`, so it
+    // is WIRE vocabulary whether or not a route means it to be. Not a synonym of
+    // any standard member — the fault is server-side code making a claim it is
+    // not entitled to make, not a client's bad input.
+    'ERR_ORGLESS_WRITE_DECLARATION_REFUSED',
     // [#5320] Third EMITTER of the code (metadata-protocol and plugin-security
     // already register it) — the registration loop's `views:` tighten refuses a
     // non-container entry, and the `viewItems:` channel refuses an entry the

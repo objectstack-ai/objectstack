@@ -9981,7 +9981,21 @@ export class ObjectQL implements IObjectQLEngine {
         // resolver — the one reader it exists to inform — ever saw it. Widening
         // `PLATFORM_PROVISIONED_COLUMNS` is closed off by that door's own ⛔, and
         // rightly: a declaration is not a column.
-        readOrgLessWriteDeclaration(rowHookContexts[0]?.input.options),
+        //
+        // The row context is the source for every non-empty write, because a
+        // `beforeInsert` hook may legitimately have replaced `input.options`.
+        // ⚠️ An EMPTY BATCH builds no row contexts at all, so that read comes
+        // back `undefined` and a bogus declaration would be the ONE spelling of
+        // this option that is silently ignored. Nothing is written on that path,
+        // so the gap costs no rows — it costs the PROPERTY, and the property is
+        // the whole of what separates a declaration from a renamed bypass flag
+        // (the ruling's 「静默可选标记不合格」). So the empty batch falls back to
+        // the caller's own options, which is where the declaration was spelled.
+        // ⛔ Not a general `??` fallback: on a non-empty batch the hooks' options
+        // stay the only source, so nothing about the measured path moves.
+        readOrgLessWriteDeclaration(
+          rowHookContexts.length > 0 ? rowHookContexts[0]?.input.options : opCtx.options,
+        ),
       );
       const optionsBase = rowHookContexts[0]?.input.options as any;
       const driverOptions = this.buildDriverOptions(

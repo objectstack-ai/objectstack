@@ -265,17 +265,25 @@ export const PLATFORM_OBJECT_TENANCY: Readonly<Record<string, PlatformObjectTena
       "The env-level write declares itself ('env-level-metadata'); an undeclared org-less write on this " +
       'object is a missing stamp and is refused.',
   },
-  // #13636 specimen 2; the enumeration is the writer's own
+  // #13636 specimen 2; the enumeration is the writer's own, and this entry
+  // states CASE 1 of it only — `audit-writers.ts` declares exactly when
+  // `organizationFieldFor(subject) === null` and deliberately leaves case 2
+  // (column present, value NULL) to the refusal. ⛔ Do not widen this prose to
+  // the writer's whole enumeration: `evidence` is a runtime string, so it would
+  // tell an operator the platform blesses a population no writer declares.
   sys_audit_log: {
     tenancy: 'conditional',
     orgLessReasons: ['audit-of-untenanted-record'],
     evidence:
       'Holds both populations, and its writer enumerates the org-less one in its own source: an audit row ' +
       'inherits the organization of the RECORD it describes, falling back to the acting session ' +
-      "(`audit-writers.ts`), and neither answers for a record on an object with no organization column at " +
-      'all (single-tenant stacks and ADR-0066 platform-global objects) or a record whose own column is ' +
-      "NULL. Those rows declare themselves ('audit-of-untenanted-record'); an undeclared org-less audit " +
-      'row is the invisible-audit-row defect that writer already guards against, and is refused.',
+      "(`audit-writers.ts`), and neither answers for a record whose object resolves no organization column " +
+      'at all — single-tenant stacks, ADR-0066 platform-global objects, the better-auth identity tables, ' +
+      "and the installation-level subjects that behave the same way. Exactly those rows declare themselves " +
+      "('audit-of-untenanted-record'). A record whose column is PRESENT and NULL is deliberately NOT " +
+      'declared by any writer: at the call site it cannot be told apart from a missing stamp, so it keeps ' +
+      'meeting the refusal, as does every other undeclared org-less audit row — the invisible-audit-row ' +
+      'defect that writer already guards against.',
   },
 
   // ── global ───────────────────────────────────────────────────────────────

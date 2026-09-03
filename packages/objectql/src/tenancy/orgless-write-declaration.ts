@@ -94,11 +94,27 @@ export type OrgLessWriteReason =
    */
   | 'env-level-metadata'
   /**
-   * An audit record whose SUBJECT has no organization to inherit — a row on an
-   * object with no organization column at all (single-tenant stacks and
-   * ADR-0066 platform-global objects), or one whose organization column is
-   * itself NULL. The enumeration is the audit writer's own
-   * (`plugin-audit/src/audit-writers.ts`); this names it.
+   * An audit record whose SUBJECT resolves NO organization column at all, so
+   * there is no organization for the audit row to inherit: a record on an
+   * object with no tenant field (single-tenant stacks, ADR-0066 platform-global
+   * objects, the better-auth identity tables), or an installation-level subject
+   * that behaves the same way — a `global`-scope setting, an import run. That
+   * is case 1 of the audit writer's own enumeration
+   * (`plugin-audit/src/audit-writers.ts`); this names it, and names ONLY it.
+   *
+   * ⛔ Case 2 — the subject HAS an organization column and its value is NULL —
+   * is deliberately OUTSIDE this reason. At the writing call site it is
+   * indistinguishable from the missing-stamp defect the control exists to find,
+   * so no writer declares it: `audit-writers.ts` declares only when
+   * `organizationFieldFor(subject) === null`, `read-audit.ts` only when every
+   * subject in the batch does, and the three fixed-subject writers only because
+   * their one subject does. Those rows keep meeting the refusal.
+   *
+   * ⚠️ This text is not commentary — the vocabulary and the ledger `evidence`
+   * beside it are runtime strings that reach operators, so a reason describing
+   * a population no writer produces would read as a claim the platform makes.
+   * If a writer is ever taught to declare case 2, that is a ruling, and this
+   * paragraph is what has to change with it.
    */
   | 'audit-of-untenanted-record';
 

@@ -96,9 +96,44 @@ const DECLARATION_SITES = {
     'a tenant id is a missing stamp and keeps meeting the refusal.',
 };
 
-/** Files this scan never reads: tests state their own fixtures, including bad ones. */
+/**
+ * Files this scan never reads.
+ *
+ * Both exclusions are about a file STATING a declaration rather than making
+ * one: a test states its own fixtures, including deliberately bad ones, and the
+ * repo's own tooling tree states them too — this gate's `--self-test` corpus
+ * carries the literal spelling as data, and a sibling gate or codemod written
+ * in `.mts` would carry it the same way.
+ *
+ * ⚠️ The tooling half is an anchored REGEX, and that is load-bearing rather
+ * than stylistic (#10705). `extractWatchHints` in `scripts/pm/dispatch-gates.mjs`
+ * reads any quoted span carrying a separator as this gate DECLARING that
+ * population, so the quoted literal this used to be — `file.startsWith(…)` over
+ * the repo tooling root — announced that root as a tree this gate READS. It
+ * does the exact opposite: the literal's whole job is to keep that tree OUT.
+ * The false announcement then collapsed to a bare top-level word `hintCovers`
+ * refuses as too generic, so the gate scored `silent` for every card in the
+ * tree while appearing to name a root it never opens, and
+ * `check:pm-dispatch-gates` reds on precisely that — the escapable-literal
+ * ledger, which is SHRINK-ONLY, so a new line in it is not a remedy.
+ *
+ * Two things not to do here, both of which look like the fix and are not:
+ *   - ⛔ do NOT restore the quoted form. `check:pm-dispatch-gates` decides with
+ *     the derivation's OWN extractor rather than a copy of it, so the row comes
+ *     straight back;
+ *   - ⛔ do NOT reach for the `ROOT_DIR_WATCH_HINTS` escape (the subtree
+ *     spelling, as `check-parse-guard` and `check-role-word` legitimately use).
+ *     For THIS gate that declaration would be false in the strongest way
+ *     available — it would name the gate for every repo-root tooling edit as a
+ *     tree it reads, when the predicate exists to exclude that tree. A
+ *     fabricated lead costs more than a missing one (+139084, measured in
+ *     `hintCovers`' docblock).
+ *
+ * The population this gate really reads is announced by {@link LEDGER_PATH} and
+ * the {@link DECLARATION_SITES} keys above — both already hints, both true.
+ */
 const isScannable = (file) =>
-  /\.(ts|mts|tsx)$/.test(file) && !/\.(test|spec)\.[cm]?tsx?$/.test(file) && !file.startsWith('scripts/');
+  /\.(ts|mts|tsx)$/.test(file) && !/\.(test|spec)\.[cm]?tsx?$/.test(file) && !/^scripts\//.test(file);
 
 /** Every tracked source file, from git rather than a walk (untracked ≠ shipped). */
 export function trackedSources(cwd = process.cwd()) {

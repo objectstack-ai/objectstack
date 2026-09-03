@@ -286,6 +286,35 @@ describe('#13636 the declaration is not a bypass — every unadmitted spelling T
     );
   });
 
+  it('refuses an unadmitted declaration on an EMPTY BATCH — the absolute has no asterisk', async () => {
+    // ⭐ The one spelling that used to be silent. An empty batch builds NO row
+    // hook contexts, so the declaration — read off `rowHookContexts[0]` — came
+    // back `undefined` and the write returned `[]` without a word. Nothing is
+    // written, so there was no security consequence; the cost was to the
+    // PROPERTY, which is the whole of what separates this option from a renamed
+    // bypass. "Every unadmitted spelling throws" has to hold with no asterisk,
+    // or the next reader learns to expect asterisks and stops checking.
+    const { engine } = await makeEngine({ posture: 'single' });
+    await expectRefusal(
+      engine.insert('sys_file', [], {
+        context: SYSTEM_CTX,
+        orgLessWrite: { object: 'sys_file', reason: 'env-level-metadata' },
+      } as any),
+      'ERR_ORGLESS_WRITE_DECLARATION_REFUSED',
+    );
+  });
+
+  it('and an ADMITTED declaration on an empty batch still writes nothing, quietly', async () => {
+    // The other half: reading the caller's options on an empty batch must not
+    // turn a LEGAL declaration into a refusal. A batch with no rows is a no-op
+    // on every other axis and stays one here.
+    const { engine, observed } = await makeEngine({ posture: 'isolated' });
+    await expect(
+      engine.insert('sys_metadata', [], { context: SYSTEM_CTX, ...ENV_METADATA } as any),
+    ).resolves.toEqual([]);
+    expect(lastWrite(observed, 'sys_metadata')).toBeUndefined();
+  });
+
   it.each([
     ['a bare boolean', true],
     ['a string', 'env-level-metadata'],
