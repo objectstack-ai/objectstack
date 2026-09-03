@@ -30,8 +30,9 @@
  *    template would mangle into an invalid code also fails here.
  * [#14573] The file has since become the home for the approvals door's
  * live-emission pins generally, not only the #8885 population: the
- * `FORBIDDEN` → 403 case below pins a row that was already registered
- * vocabulary but whose EMISSION nobody observed. See its own comment.
+ * `FORBIDDEN` → 403 case below pins a row that is registered vocabulary and
+ * whose emission was — contrary to that card's premise — already observed
+ * elsewhere. See its own comment for where, and why it is pinned here too.
  *
  * 3. The union stays CLOSED — the control case in
  *    `rest-field-visibility-fault-envelope.test.ts` covers this file too (same
@@ -125,11 +126,26 @@ describe('approvals wire codes are registered vocabulary (#8885)', () => {
     // refusal rides: recall by a non-submitter, decide by a non-approver,
     // reassign / remind / sendBack / resubmit by the wrong actor, and
     // `resolveActor`'s impersonation refusals all reach this table through
-    // the same single row. Until this case it was the only mapping row whose
-    // 403 nobody observed on the wire — the service suites
-    // (`recall-refusal-user-copy.test.ts`, `approval-revise.test.ts`) assert
-    // the `FORBIDDEN:` MESSAGE PREFIX at the throw site, which is a different
-    // fact from what the route answers.
+    // the same single row.
+    //
+    // ⚠️ THIS IS A SECOND PIN, NOT THE FIRST — read this before adding a
+    // third. #14573 was filed and triaged on the reading that the row had NO
+    // live-emission pin, and that reading is WRONG: §7 of
+    // `rest-data-door-code-prefix.test.ts` ("[#13095] the approvals door
+    // strips the code it answers") already drives the REAL approve route with
+    // a `FORBIDDEN: …` throw and already asserts 403, `code: 'FORBIDDEN'` and
+    // the strip. Measured, not read: deleting the row from `rest-server.ts`
+    // reds THREE cases — this one and both of §7's. What was true is narrower
+    // than the card: the file that OWNS the approvals wire-code contract did
+    // not pin the row, so a reader auditing wire codes here saw a gap that a
+    // strip-contract file was silently covering. That is the gap this case
+    // closes, and naming §7 here is half the fix — an unlabelled duplicate is
+    // what got the card mis-filed in the first place.
+    //
+    // The service suites (`recall-refusal-user-copy.test.ts`,
+    // `approval-revise.test.ts`) are NOT pins on this row: they assert the
+    // `FORBIDDEN:` MESSAGE PREFIX at the throw site, a different fact from
+    // what the route answers.
     //
     // Losing the row FAILS CLOSED, which is why this is a contract pin and not
     // a security one: `handleApprovalError` returns false on no match, the
@@ -140,7 +156,8 @@ describe('approvals wire codes are registered vocabulary (#8885)', () => {
     // token the [#13095] anchored strip exists to remove. Two contract
     // properties ride this one row, so the third assertion below is NOT
     // redundant with the first two: it is what catches the degraded shape's
-    // unstripped message.
+    // unstripped message. (Ablation: all three reds read
+    // `expected 500 to be 403`.)
     it('recall by a non-submitter answers 403 FORBIDDEN, prefix stripped — the row every authorisation refusal rides', async () => {
         // The message the real service throws: `approval-service.ts`'s recall
         // non-submitter branch is `FORBIDDEN: ${userFacingRefusal(...)}`.
